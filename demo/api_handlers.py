@@ -1,4 +1,5 @@
 """User API request handlers (demo feature)."""
+
 import requests
 
 API_TOKEN = "ghp_AbCdEf0123456789AbCdEf0123456789AbCd"

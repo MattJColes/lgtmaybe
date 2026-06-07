@@ -1,4 +1,5 @@
 """Session and token handling (demo feature)."""
+
 import hashlib
 
 

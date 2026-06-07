@@ -1,4 +1,5 @@
 """Database query helpers (demo feature)."""
+
 import sqlite3
 
 _DB = sqlite3.connect("app.db", check_same_thread=False)
