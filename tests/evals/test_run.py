@@ -122,3 +122,24 @@ def test_max_input_tokens_threads_to_review_config(monkeypatch: pytest.MonkeyPat
     )
 
     assert seen and all(v == 250000 for v in seen)
+
+
+def test_reflect_defaults_on_and_no_reflect_disables_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--no-reflect turns off the reflection pass (weak CI models over-prune otherwise)."""
+    seen: list[bool] = []
+
+    real_review = run_mod.LLMReviewEngine.review
+
+    def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+        seen.append(cfg.reflect)
+        return real_review(self, ctx, cfg)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    monkeypatch.setattr(run_mod.LLMReviewEngine, "review", spy_review)
+
+    run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0"])
+    assert seen and all(v is True for v in seen)
+
+    seen.clear()
+    run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0", "--no-reflect"])
+    assert seen and all(v is False for v in seen)

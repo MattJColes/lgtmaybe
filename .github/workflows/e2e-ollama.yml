@@ -29,11 +29,13 @@ concurrency:
 jobs:
   ollama:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
-      # Tiny local model — the point is to prove the plumbing on a large diff, not
-      # to grade model quality. The factory already sets think=False for qwen3.
-      OLLAMA_MODEL: qwen3:0.6b
+      # Small but capable local model — big enough to actually catch the planted
+      # bugs (so the recall bar is a real signal), still CPU-friendly for CI. It's
+      # a qwen3 thinking model, so the factory's tested think=False handling applies
+      # (a 0.6b model parsed the diff fine but caught nothing, failing the bar).
+      OLLAMA_MODEL: qwen3:1.7b
     steps:
       - uses: actions/checkout@v6
 
@@ -67,7 +69,9 @@ jobs:
 
       # Review every fixture (incl. the large multi-file one) with a long timeout
       # and a big context window. min-recall 0.2: the parse must succeed AND the
-      # tiny model must catch at least a fifth of the planted bugs.
+      # model must catch at least a fifth of the planted bugs. Reflection is off:
+      # on a small local model the self-reflection pass over-prunes its own valid
+      # findings (CLAUDE.md notes --no-reflect for weaker models).
       - name: End-to-end review via ollama
         run: |
           uv run python -m evals.run \
@@ -75,5 +79,6 @@ jobs:
             --model "$OLLAMA_MODEL" \
             --api-base http://localhost:11434 \
             --min-recall 0.2 \
-            --timeout 600 \
-            --num-ctx 32768
+            --timeout 900 \
+            --num-ctx 32768 \
+            --no-reflect

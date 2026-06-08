@@ -42,6 +42,7 @@ def _review(
     timeout: int | None = None,
     num_ctx: int | None = None,
     max_input_tokens: int | None = None,
+    reflect: bool = True,
 ):
     ctx = PRContext(
         diff=diff,
@@ -53,7 +54,12 @@ def _review(
     )
     cfg_overrides = {"max_input_tokens": max_input_tokens} if max_input_tokens is not None else {}
     cfg = ReviewConfig(
-        provider=provider, model=model, api_base=api_base, timeout=timeout, **cfg_overrides
+        provider=provider,
+        model=model,
+        api_base=api_base,
+        timeout=timeout,
+        reflect=reflect,
+        **cfg_overrides,
     )
     # num_ctx is ollama's context window — litellm rejects it for hosted providers,
     # so only forward it on the ollama path.
@@ -103,6 +109,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="token budget per model call before the diff is split into batches",
     )
+    ap.add_argument(
+        "--no-reflect",
+        dest="reflect",
+        action="store_false",
+        help="skip the self-reflection pass (weak local models over-prune their own findings)",
+    )
     args = ap.parse_args(argv)
 
     provider = Provider(args.provider)
@@ -116,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             num_ctx=args.num_ctx,
             max_input_tokens=args.max_input_tokens,
+            reflect=args.reflect,
         )
         for diff, m in _load_fixtures()
     ]

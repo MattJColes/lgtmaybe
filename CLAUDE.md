@@ -262,10 +262,11 @@ Split by whether it can be deterministic, because that decides where it lives:
   `--max-input-tokens` tune it for a big diff on a slow local model). Its plumbing
   is unit-tested in `tests/evals/`. The **hosted** providers stay out of the pytest
   gate, but a real **local ollama** run *is* wired into CI as its own workflow —
-  `.github/workflows/e2e-ollama.yml` pulls a tiny model (`qwen3:0.6b`) and runs the
+  `.github/workflows/e2e-ollama.yml` pulls a small model (`qwen3:1.7b`) and runs the
   eval over the fixtures (incl. the large multi-file `vibe-multifile` one) on every
-  PR with a long timeout + big `num_ctx`, proving the pipeline survives a real
-  local model on a large "vibe-coded" diff. Real-spend hosted-provider e2e remains
-  label-gated in `action-e2e.yml`.
+  PR with a long timeout + big `num_ctx` and `--no-reflect` (the reflection pass
+  over-prunes on a small model), proving the pipeline survives a real local model
+  on a large "vibe-coded" diff and still catches the planted bugs (`--min-recall
+  0.2`). Real-spend hosted-provider e2e remains label-gated in `action-e2e.yml`.
 
 [litellm]: https://github.com/BerriAI/litellm
