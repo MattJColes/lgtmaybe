@@ -134,9 +134,34 @@ For a **large diff** this can mean the prompt plus the findings don't fit in
 ollama's context window and the output gets truncated. lgtmaybe runs ollama with
 a generous context (`num_ctx` of 16384) and **structured JSON output** (it also
 disables "thinking" so reasoning models like qwen3.x emit the findings directly),
-which covers most reviews. If a very large diff still truncates, narrow it with
-`include_paths` / `exclude_paths` or a lower `max_files` in `.lgtmaybe.yml`, or run
-a model with a bigger context window.
+which covers most reviews.
+
+For a big multi-file change ("vibe-coded" commits across many files), raise the
+context window with `--num-ctx` so the whole diff and the findings fit — this is
+**ollama-only** (hosted providers manage their context window server-side and
+ignore it):
+
+```bash
+# A large multi-file diff on a local model — more time and more context:
+lgtmaybe review --provider ollama --model qwen3.6:35b \
+  --api-base http://localhost:11434 --timeout 900 --num-ctx 32768
+```
+
+```yaml
+# or in .lgtmaybe.yml (also how the GitHub Action picks it up):
+provider: ollama
+model: qwen3.6:35b
+timeout: 900
+num_ctx: 32768
+```
+
+`--num-ctx` needs enough RAM/VRAM on the ollama host — a bigger window costs
+memory, so size it to your machine. The token budget that decides when lgtmaybe
+splits a diff into separate model calls is `--max-input-tokens` (default 100000),
+which applies to **any** provider — raise it to send a large diff in fewer calls,
+lower it for a small-context model. If a very large diff still truncates, narrow
+it with `include_paths` / `exclude_paths` or a lower `max_files` in `.lgtmaybe.yml`,
+or run a model with a bigger context window.
 
 **Review is empty or truncated** — the diff may exceed the model's context
 window. Add a path filter in `.lgtmaybe.yml` to reduce diff size, or set

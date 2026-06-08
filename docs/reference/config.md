@@ -21,6 +21,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `info` |  |
 | `model` | string | Yes | — | Model |
+| `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openrouter` / `vertex` | Yes | — |  |
 | `reflect` | boolean | No | `True` | Reflect |
 | `structured_output` | boolean | No | `True` | Structured Output |
@@ -206,6 +207,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "model": {
       "title": "Model",
       "type": "string"
+    },
+    "num_ctx": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Num Ctx"
     },
     "provider": {
       "$ref": "#/$defs/Provider"

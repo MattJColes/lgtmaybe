@@ -60,6 +60,20 @@ from lgtmaybe.config.loader import load_config
 )
 @click.option("--max-files", default=None, type=int, help="Maximum number of files to review")
 @click.option(
+    "--max-input-tokens",
+    default=None,
+    type=int,
+    help="Token budget per model call before the diff is split into batches "
+    "(any provider; raise it to send a big diff in fewer calls)",
+)
+@click.option(
+    "--num-ctx",
+    default=None,
+    type=int,
+    help="ollama context window (ollama only; ignored for hosted providers). "
+    "Raise it so a large multi-file diff isn't truncated; default 16384",
+)
+@click.option(
     "--base",
     default=None,
     help="Base ref to diff the current branch against "
@@ -125,6 +139,8 @@ def review(
     api_base: str | None,
     min_severity: str | None,
     max_files: int | None,
+    max_input_tokens: int | None,
+    num_ctx: int | None,
     base: str | None,
     working: bool,
     output_format: str | None,
@@ -143,6 +159,8 @@ def review(
         model=model,
         min_severity=min_severity,
         max_files=max_files,
+        max_input_tokens=max_input_tokens,
+        num_ctx=num_ctx,
         context_lines=context_lines,
         timeout=timeout,
         temperature=temperature,
@@ -197,6 +215,8 @@ def action() -> None:
         model=inputs["model"],
         timeout=inputs["timeout"],
         temperature=inputs["temperature"],
+        num_ctx=inputs["num_ctx"],
+        max_input_tokens=inputs["max_input_tokens"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

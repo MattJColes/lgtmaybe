@@ -1,0 +1,56 @@
+{
+  "name": "vibe-multifile",
+  "changed_file": "src/api/handlers.py",
+  "expected": [
+    {
+      "label": "hardcoded API token in handlers.py (API_TOKEN)",
+      "line": 6,
+      "keywords": ["secret", "token", "hardcoded", "credential", "api key", "api_token"],
+      "severity_at_least": "low"
+    },
+    {
+      "label": "insecure HTTP request without timeout / SSRF in get_user",
+      "line": 12,
+      "keywords": ["http", "timeout", "insecure", "ssrf", "tls", "verify"]
+    },
+    {
+      "label": "SQL injection via string concatenation in find_user",
+      "line": 9,
+      "keywords": ["sql", "injection", "parameter", "concatenat", "sanitiz"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "off-by-one slice rows[1:limit] skips the first row in top_scores",
+      "line": 16,
+      "keywords": ["off-by-one", "slice", "index", "first", "boundary", "range"]
+    },
+    {
+      "label": "command injection via shell=True in run_report",
+      "line": 8,
+      "keywords": ["injection", "shell", "command", "subprocess"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "weak hash (MD5) used to derive a token in make_token",
+      "line": 7,
+      "keywords": ["md5", "weak", "crypto", "hash", "insecure"]
+    },
+    {
+      "label": "eval() on untrusted input in parse_roles",
+      "line": 16,
+      "keywords": ["eval", "injection", "untrusted", "code execution", "rce", "arbitrary"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "hardcoded database password in settings.py",
+      "line": 5,
+      "keywords": ["password", "hardcoded", "secret", "credential"],
+      "severity_at_least": "low"
+    },
+    {
+      "label": "off-by-one in paginate(): 1-indexed page should subtract one",
+      "line": 6,
+      "keywords": ["off-by-one", "index", "page", "start", "boundary", "1-indexed"]
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+# Real end-to-end review against a LOCAL ollama model.
+#
+# Unlike action-e2e.yml (hosted providers, real spend, label-gated), this runs a
+# genuinely local model on the runner — free, no secrets — so it can run on every
+# PR. It pulls a tiny model (qwen3:0.6b) and reviews the eval fixtures through the
+# full pipeline (redact → batch → per-category fan-out → parse → reflect), with a
+# generous timeout and a large ollama context window so a big multi-file diff
+# ("vibe-coded" commit) isn't truncated.
+#
+# This is the proof the ollama path actually works on a large change without
+# hand-holding — the pytest suite only ever mocks ollama. The eval runner exits
+# non-zero if any fixture fails to parse or falls below --min-recall, so a broken
+# pipeline (timeout, truncated context, unparseable output) fails the job.
+#
+# Kept out of the ci.yml pytest gate on purpose (it needs a live model), but it
+# IS a per-PR check here.
+name: e2e-ollama
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-ollama-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ollama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Tiny local model — the point is to prove the plumbing on a large diff, not
+      # to grade model quality. The factory already sets think=False for qwen3.
+      OLLAMA_MODEL: qwen3:0.6b
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync (with dev deps)
+        run: uv sync --dev
+
+      - name: Install ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start ollama and wait until ready
+        run: |
+          ollama serve &
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:11434/api/tags >/dev/null; then
+              echo "ollama is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ollama did not become ready in time" >&2
+          exit 1
+
+      - name: Pull the tiny model
+        run: ollama pull "$OLLAMA_MODEL"
+
+      # Review every fixture (incl. the large multi-file one) with a long timeout
+      # and a big context window. min-recall 0.2: the parse must succeed AND the
+      # tiny model must catch at least a fifth of the planted bugs.
+      - name: End-to-end review via ollama
+        run: |
+          uv run python -m evals.run \
+            --provider ollama \
+            --model "$OLLAMA_MODEL" \
+            --api-base http://localhost:11434 \
+            --min-recall 0.2 \
+            --timeout 600 \
+            --num-ctx 32768

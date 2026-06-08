@@ -148,3 +148,49 @@ def test_ollama_call_carries_api_base(captured_completion: list[dict[str, Any]])
 
     assert result.exit_code == 0, result.output
     assert captured_completion[0].get("api_base")
+
+
+def test_num_ctx_flag_reaches_litellm_for_ollama(
+    captured_completion: list[dict[str, Any]],
+) -> None:
+    """--num-ctx raises ollama's context window so big diffs aren't truncated."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "ollama",
+            "--model",
+            "llama3",
+            "--no-reflect",
+            "--num-ctx",
+            "32768",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("num_ctx") == 32768
+
+
+def test_num_ctx_flag_is_ignored_for_hosted_provider(
+    captured_completion: list[dict[str, Any]],
+) -> None:
+    """num_ctx is ollama-only — a hosted provider must never receive it (litellm rejects it)."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+            "--num-ctx",
+            "32768",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "num_ctx" not in captured_completion[0]

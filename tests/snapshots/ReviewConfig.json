@@ -109,6 +109,18 @@
       "title": "Model",
       "type": "string"
     },
+    "num_ctx": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Num Ctx"
+    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },

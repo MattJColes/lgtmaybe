@@ -154,6 +154,35 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert captured == {"timeout": 900, "temperature": 0.2}
 
+    def test_num_ctx_and_max_input_tokens_inputs_reach_config(self, tmp_path, monkeypatch):
+        """INPUT_NUM_CTX / INPUT_MAX_INPUT_TOKENS tune a big-diff run from the Action."""
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["num_ctx"] = cfg.num_ctx
+            captured["max_input_tokens"] = cfg.max_input_tokens
+            return FakeGitHub(), FakeEngine(FakeProvider())
+
+        monkeypatch.setattr(cli_module, "build_adapters", fake_build)
+
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        monkeypatch.setenv("INPUT_NUM_CTX", "32768")
+        monkeypatch.setenv("INPUT_MAX_INPUT_TOKENS", "250000")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"num_ctx": 32768, "max_input_tokens": 250000}
+
     def test_azure_api_base_input_reaches_runtime(self, tmp_path, monkeypatch):
         """INPUT_API_BASE carries the azure resource endpoint into the run."""
         captured: dict[str, object] = {}

@@ -1,0 +1,119 @@
+diff --git a/src/api/handlers.py b/src/api/handlers.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/api/handlers.py
+@@ -0,0 +1,17 @@
++"""User API request handlers (new feature)."""
++import requests
++
++from src.db.queries import find_user
++
++API_TOKEN = "ghp_AbCdEf0123456789AbCdEf0123456789AbCd"
++
++
++def get_user(user_id):
++    # Fetch a user record from the internal service.
++    url = "http://internal.example.com/users/" + user_id
++    resp = requests.get(url, headers={"Authorization": "Bearer " + API_TOKEN})
++    return resp.json()
++
++
++def find(username):
++    return find_user(username)
+diff --git a/src/db/queries.py b/src/db/queries.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/src/db/queries.py
+@@ -0,0 +1,16 @@
++"""Database query helpers."""
++import sqlite3
++
++_DB = sqlite3.connect("app.db", check_same_thread=False)
++
++
++def find_user(username):
++    # Look up a user by name.
++    query = "SELECT * FROM users WHERE name = '" + username + "'"
++    cur = _DB.execute(query)
++    return cur.fetchone()
++
++
++def top_scores(limit):
++    rows = _DB.execute("SELECT score FROM scores ORDER BY score DESC").fetchall()
++    return [r[0] for r in rows[1:limit]]
+diff --git a/src/utils/shell.py b/src/utils/shell.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/src/utils/shell.py
+@@ -0,0 +1,12 @@
++"""Shell command helpers."""
++import subprocess
++
++
++def run_report(name):
++    # Generate a report by name.
++    cmd = "generate-report --name " + name
++    return subprocess.run(cmd, shell=True, capture_output=True)
++
++
++def archive(path):
++    subprocess.run("tar czf backup.tgz " + path, shell=True)
+diff --git a/src/auth/session.py b/src/auth/session.py
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/src/auth/session.py
+@@ -0,0 +1,17 @@
++"""Session and token handling."""
++import hashlib
++
++
++def make_token(user_id, secret):
++    raw = str(user_id) + secret
++    return hashlib.md5(raw.encode()).hexdigest()
++
++
++def verify(token, expected):
++    # Compare the provided token with the expected one.
++    return token == expected
++
++
++def parse_roles(raw):
++    roles = eval(raw)
++    return [r.strip() for r in roles]
+diff --git a/config/settings.py b/config/settings.py
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/config/settings.py
+@@ -0,0 +1,9 @@
++"""Application settings."""
++
++DEBUG = True
++
++DATABASE_PASSWORD = "sup3rs3cr3t-pa55word"
++
++ALLOWED_HOSTS = ["*"]
++
++SESSION_TIMEOUT = 0
+diff --git a/src/api/pagination.py b/src/api/pagination.py
+new file mode 100644
+index 0000000..6666666
+--- /dev/null
++++ b/src/api/pagination.py
+@@ -0,0 +1,12 @@
++"""Pagination helpers."""
++
++
++def paginate(items, page, per_page):
++    # Return the slice of items for the given 1-indexed page.
++    start = page * per_page
++    end = start + per_page
++    return items[start:end]
++
++
++def page_count(total, per_page):
++    return total // per_page

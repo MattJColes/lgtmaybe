@@ -32,7 +32,17 @@ def _load_fixtures() -> list[tuple[str, Fixture]]:
     return out
 
 
-def _review(diff: str, manifest: Fixture, provider: Provider, model: str, api_base: str | None):
+def _review(
+    diff: str,
+    manifest: Fixture,
+    provider: Provider,
+    model: str,
+    api_base: str | None,
+    *,
+    timeout: int | None = None,
+    num_ctx: int | None = None,
+    max_input_tokens: int | None = None,
+):
     ctx = PRContext(
         diff=diff,
         changed_files=[manifest.changed_file],
@@ -41,8 +51,16 @@ def _review(diff: str, manifest: Fixture, provider: Provider, model: str, api_ba
         repo="eval/eval",
         pr_number=0,
     )
-    cfg = ReviewConfig(provider=provider, model=model, api_base=api_base)
-    engine = LLMReviewEngine(build_provider(provider, model, api_base=api_base))
+    cfg_overrides = {"max_input_tokens": max_input_tokens} if max_input_tokens is not None else {}
+    cfg = ReviewConfig(
+        provider=provider, model=model, api_base=api_base, timeout=timeout, **cfg_overrides
+    )
+    # num_ctx is ollama's context window — litellm rejects it for hosted providers,
+    # so only forward it on the ollama path.
+    extra = {"num_ctx": num_ctx} if (num_ctx is not None and provider is Provider.ollama) else {}
+    engine = LLMReviewEngine(
+        build_provider(provider, model, api_base=api_base, timeout=timeout, **extra)
+    )
     try:
         findings, _summary = engine.review(ctx, cfg)
         return score_fixture(manifest.name, findings, manifest.expected, parsed_ok=True)
@@ -67,10 +85,40 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--api-base", default=None)
     ap.add_argument("--min-recall", type=float, default=0.6, help="fail below this recall")
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="per-request timeout (seconds); raise for slow local models on big diffs",
+    )
+    ap.add_argument(
+        "--num-ctx",
+        type=int,
+        default=None,
+        help="ollama context window; raise so a large multi-file diff isn't truncated",
+    )
+    ap.add_argument(
+        "--max-input-tokens",
+        type=int,
+        default=None,
+        help="token budget per model call before the diff is split into batches",
+    )
     args = ap.parse_args(argv)
 
     provider = Provider(args.provider)
-    scores = [_review(diff, m, provider, args.model, args.api_base) for diff, m in _load_fixtures()]
+    scores = [
+        _review(
+            diff,
+            m,
+            provider,
+            args.model,
+            args.api_base,
+            timeout=args.timeout,
+            num_ctx=args.num_ctx,
+            max_input_tokens=args.max_input_tokens,
+        )
+        for diff, m in _load_fixtures()
+    ]
     for score in scores:
         _print(score)
 

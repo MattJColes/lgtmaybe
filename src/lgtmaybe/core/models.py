@@ -146,6 +146,11 @@ class ReviewConfig(_Strict):
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50
     max_input_tokens: int = 100_000
+    # Ollama's context window (num_ctx). Ollama only — hosted providers manage
+    # their own context window server-side and litellm won't forward this, so it
+    # is ignored for them. None keeps the factory default (16384); raise it so a
+    # large multi-file diff plus the emitted findings isn't truncated.
+    num_ctx: int | None = None
     # Ceiling on surrounding context lines added around each hunk. The engine
     # uses min(context_lines, what the token budget allows); 0 disables it.
     context_lines: int = 20

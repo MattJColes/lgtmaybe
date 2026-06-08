@@ -22,7 +22,7 @@ import click
 
 from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
-from lgtmaybe.core.models import ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import Provider, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.github import RestGitHubGateway
@@ -62,6 +62,11 @@ def build_provider_engine(
         api_key=runtime.api_key,
         api_base=runtime.api_base or cfg.api_base,
     )
+    # num_ctx is ollama's context window — hosted providers manage theirs
+    # server-side and litellm rejects the option, so only forward it for ollama.
+    extra: dict[str, Any] = {}
+    if cfg.provider is Provider.ollama and cfg.num_ctx is not None:
+        extra["num_ctx"] = cfg.num_ctx
     provider = build_provider(
         cfg.provider,
         cfg.model,
@@ -71,6 +76,7 @@ def build_provider_engine(
         fallback_model=runtime.fallback_model,
         timeout=cfg.timeout,
         temperature=cfg.temperature,
+        **extra,
     )
     return LLMReviewEngine(provider), provider
 
@@ -260,6 +266,8 @@ def action_inputs() -> dict[str, str | None]:
         "api_base": get("API_BASE"),
         "timeout": get("TIMEOUT"),
         "temperature": get("TEMPERATURE"),
+        "num_ctx": get("NUM_CTX"),
+        "max_input_tokens": get("MAX_INPUT_TOKENS"),
         "config_path": os.environ.get("INPUT_CONFIG_PATH") or ".lgtmaybe.yml",
     }
 

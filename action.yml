@@ -34,6 +34,14 @@ inputs:
     description: "Sampling temperature (default 0.0 for deterministic reviews)."
     required: false
     default: ""
+  num_ctx:
+    description: "Ollama context window (ollama only; ignored for hosted providers). Raise it so a large multi-file diff isn't truncated. Leave empty for the default (16384)."
+    required: false
+    default: ""
+  max_input_tokens:
+    description: "Token budget per model call before the diff is split into batches (any provider). Leave empty for the default (100000)."
+    required: false
+    default: ""
   aws_role_arn:
     description: "IAM role ARN to assume via GitHub OIDC for bedrock. No static AWS key is ever stored."
     required: false
@@ -122,6 +130,8 @@ runs:
         INPUT_API_BASE: ${{ inputs.api_base }}
         INPUT_TIMEOUT: ${{ inputs.timeout }}
         INPUT_TEMPERATURE: ${{ inputs.temperature }}
+        INPUT_NUM_CTX: ${{ inputs.num_ctx }}
+        INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         LGTMAYBE_IMAGE: ${{ inputs.image }}
       run: |
@@ -133,6 +143,7 @@ runs:
           -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_FALLBACK_MODEL \
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
           -e INPUT_TIMEOUT -e INPUT_TEMPERATURE \
+          -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS \
           -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
           -e AWS_REGION -e AWS_DEFAULT_REGION \
           -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

@@ -45,3 +45,80 @@ def test_runner_fails_when_review_incomplete(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _Unparseable())
     assert run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0"]) == 1
+
+
+def _capture_build_provider(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Patch build_provider to record its kwargs and serve the catch-one provider."""
+    calls: list[dict[str, object]] = []
+
+    def fake_build(*_args: object, **kwargs: object) -> _ShellInjectionProvider:
+        calls.append(kwargs)
+        return _ShellInjectionProvider()
+
+    monkeypatch.setattr(run_mod, "build_provider", fake_build)
+    return calls
+
+
+def test_timeout_and_num_ctx_thread_to_build_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--timeout and --num-ctx reach build_provider so big ollama diffs get more room."""
+    calls = _capture_build_provider(monkeypatch)
+
+    run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--timeout",
+            "600",
+            "--num-ctx",
+            "32768",
+        ]
+    )
+
+    assert calls, "build_provider was never called"
+    assert calls[0]["timeout"] == 600
+    assert calls[0]["num_ctx"] == 32768
+
+
+def test_num_ctx_is_omitted_for_hosted_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """num_ctx is ollama-only — litellm rejects it for hosted providers, so don't send it."""
+    calls = _capture_build_provider(monkeypatch)
+
+    run_mod.main(
+        ["--provider", "openai", "--model", "x", "--min-recall", "0.0", "--num-ctx", "9000"]
+    )
+
+    assert calls
+    assert "num_ctx" not in calls[0]
+
+
+def test_max_input_tokens_threads_to_review_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--max-input-tokens reaches the ReviewConfig the engine batches against."""
+    seen: list[int] = []
+
+    real_review = run_mod.LLMReviewEngine.review
+
+    def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+        seen.append(cfg.max_input_tokens)
+        return real_review(self, ctx, cfg)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    monkeypatch.setattr(run_mod.LLMReviewEngine, "review", spy_review)
+
+    run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--max-input-tokens",
+            "250000",
+        ]
+    )
+
+    assert seen and all(v == 250000 for v in seen)

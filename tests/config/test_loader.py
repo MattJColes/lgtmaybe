@@ -77,6 +77,23 @@ def test_context_lines_defaults_and_overrides():
     assert overridden.context_lines == 0
 
 
+def test_max_input_tokens_and_num_ctx_defaults_and_overrides():
+    """max_input_tokens (any provider) and num_ctx (ollama) load from file and CLI."""
+    import io
+
+    base = load_config(config_stream=io.StringIO("provider: ollama\nmodel: llama3\n"))
+    assert base.max_input_tokens == 100_000
+    assert base.num_ctx is None
+
+    overridden = load_config(
+        config_stream=io.StringIO("provider: ollama\nmodel: llama3\n"),
+        max_input_tokens=250_000,
+        num_ctx=32768,
+    )
+    assert overridden.max_input_tokens == 250_000
+    assert overridden.num_ctx == 32768
+
+
 def test_cli_input_overrides_provider():
     """A CLI --provider overrides the file's provider."""
     import io
