@@ -44,6 +44,36 @@ def test_prompt_contains_json_contract() -> None:
         assert field in prompt, f"JSON field '{field}' missing from system prompt"
 
 
+def test_contract_requires_suggestion_to_be_replacement_code() -> None:
+    """`suggestion` is rendered in a committable code fence, so it must be literal
+    replacement code (or null) — never prose. Explanation belongs in `body`."""
+    prompt = build_system_prompt().lower()
+    assert "suggestion" in prompt
+    # The contract must tie the field to committable replacement code...
+    assert "replacement code" in prompt or "replacement source code" in prompt
+    # ...and explicitly steer prose into the body, not the suggestion.
+    assert "prose" in prompt
+
+
+def test_worked_example_suggestions_are_code_not_prose() -> None:
+    """Every non-null worked-example suggestion must read as code, not an English
+    instruction — the model copies these verbatim."""
+    prose_starts = ("use ", "consider ", "prefer ", "avoid ", "you should ", "add ")
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category)
+        for line in prompt.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith('"suggestion":'):
+                continue
+            value = stripped.split(":", 1)[1].strip().rstrip(",")
+            if value == "null":
+                continue
+            lowered = value.strip('"').lower()
+            assert not lowered.startswith(prose_starts), (
+                f"{category} example suggestion looks like prose: {value}"
+            )
+
+
 def test_prompt_asks_for_findings_envelope() -> None:
     """Structured output expects {"findings": [...]}, not a bare array."""
     prompt = build_system_prompt()
