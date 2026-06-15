@@ -33,10 +33,16 @@ _PREFIXES: dict[Provider, str] = {
 }
 
 # Default per-request timeout (seconds) when the caller doesn't set one. Local
-# models on ollama are slow — and the per-category fan-out runs them serially —
-# so ollama gets a generous default; cloud providers respond fast.
-_OLLAMA_TIMEOUT = 300
+# models are slow — and the per-category fan-out runs them serially — so the
+# providers that can front a local server (ollama, and openai-compatible pointing
+# at llama.cpp / LM Studio / vLLM) get a generous default; cloud providers respond
+# fast. An explicit --timeout always wins, so a fast cloud openai-compatible
+# endpoint (e.g. DeepSeek) can dial it down.
+_LOCAL_TIMEOUT = 300
 _CLOUD_TIMEOUT = 60
+
+# Providers whose endpoint may be a slow, locally hosted model.
+_LOCAL_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible})
 
 # Ollama context window. Big enough to hold a real review prompt + diff + the
 # emitted findings; ollama's own default (~4k) truncates the output to a stub.
@@ -47,7 +53,7 @@ _OLLAMA_NUM_CTX = 32768
 
 def default_timeout_for(provider: Provider) -> int:
     """The auto timeout (seconds) for a provider when none is given explicitly."""
-    return _OLLAMA_TIMEOUT if provider is Provider.ollama else _CLOUD_TIMEOUT
+    return _LOCAL_TIMEOUT if provider in _LOCAL_CAPABLE else _CLOUD_TIMEOUT
 
 
 def litellm_model_string(provider: Provider, model: str) -> str:

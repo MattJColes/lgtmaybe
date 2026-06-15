@@ -27,7 +27,7 @@ inputs:
     required: false
     default: ""
   timeout:
-    description: "Per-request timeout in seconds for each model call. Leave empty for the provider default (ollama 300, cloud 60)."
+    description: "Per-request timeout in seconds for each model call. Leave empty for the provider default (ollama and openai-compatible 300, cloud 60)."
     required: false
     default: ""
   temperature:

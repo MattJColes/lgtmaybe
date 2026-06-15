@@ -23,6 +23,10 @@ your requests to the `--api-base` you give instead of `api.openai.com`. The
 The API key, when you do supply one, is read from the environment or `--api-key`
 and is **never persisted** to config.
 
+Because the endpoint might be a slow local model, `openai-compatible` defaults to
+the same generous **300s** per-call timeout as ollama. For a fast hosted endpoint
+like DeepSeek you can dial it down with `--timeout` (or `timeout:` in config).
+
 ## DeepSeek (hosted, keyed)
 
 ```bash
