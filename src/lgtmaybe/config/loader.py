@@ -50,7 +50,40 @@ def load_config(
         if value is not None:
             merged[key] = value
 
+    # `lens_paths` is a loader directive, not a ReviewConfig field: resolve the
+    # referenced skill files into extra_lenses, then drop the key (the strict
+    # ReviewConfig would otherwise reject it).
+    lens_paths = merged.pop("lens_paths", None)
+    if lens_paths:
+        loaded = _load_lens_files(lens_paths)
+        merged["extra_lenses"] = list(merged.get("extra_lenses") or []) + loaded
+
     return ReviewConfig.model_validate(merged)
+
+
+def _load_lens_files(lens_paths: Any) -> list[dict[str, Any]]:
+    """Load custom-lens definitions from skill files / directories.
+
+    Each path is a YAML file (one lens, or a list of lenses) or a directory of
+    ``*.yml`` / ``*.yaml`` lens files. Returns plain dicts — pydantic validates
+    them as ``CustomLens`` when the ReviewConfig is built. Lens files are trusted
+    config (committed to the repo), never PR-author content.
+    """
+    paths = [lens_paths] if isinstance(lens_paths, str) else list(lens_paths)
+    lenses: list[dict[str, Any]] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if path.is_dir():
+            files = sorted(p for ext in ("*.yml", "*.yaml") for p in path.glob(ext))
+        else:
+            files = [path]
+        for file in files:
+            parsed = yaml.safe_load(file.read_text())
+            if isinstance(parsed, list):
+                lenses.extend(item for item in parsed if isinstance(item, dict))
+            elif isinstance(parsed, dict):
+                lenses.append(parsed)
+    return lenses
 
 
 def _load_file(

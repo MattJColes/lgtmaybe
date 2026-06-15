@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from lgtmaybe.core.models import ReviewCategory
+from lgtmaybe.core.models import CustomLens, ReviewCategory
 
 _SHARED_HEADER = """\
 You are an expert code reviewer. Review a pull-request diff and report real, actionable \
@@ -467,4 +467,20 @@ def build_system_prompt(category: ReviewCategory | None = None) -> str:
     else:
         example = _CATEGORY_EXAMPLES[category]
         body = _CATEGORY_SECTIONS[category]
+    return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+
+
+def build_lens_prompt(lens: CustomLens) -> str:
+    """Return the system message for a user-defined ("BYO") lens.
+
+    Same scaffold as a built-in category — shared header, one worked example, the
+    lens section, shared rules — so a custom lens behaves like any other in the
+    fan-out. The example is the lens's own when supplied, else the generic one.
+    """
+    if lens.example_diff is not None and lens.example_finding is not None:
+        example = _example_block(lens.example_diff, lens.example_finding.model_dump(mode="json"))
+    else:
+        example = _GENERIC_EXAMPLE
+    heading = lens.title.strip() or lens.id
+    body = f"## {heading}\n\n{lens.instructions.strip()}"
     return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"

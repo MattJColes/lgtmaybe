@@ -16,6 +16,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
+| `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
@@ -102,6 +103,54 @@ The canonical machine-readable schemas. These are the source of truth for provid
 ```json
 {
   "$defs": {
+    "CustomLens": {
+      "additionalProperties": false,
+      "description": "A user-defined review lens \u2014 a \"skill file\" run alongside the built-ins.\n\nThe engine fans it out as its own focused LLM call (same pipeline as a\nbuilt-in ``ReviewCategory``) and merges its findings with the rest. A lens is\ndeclared in **trusted** config (``.lgtmaybe.yml`` or a file referenced by\n``lens_paths``), never from PR-author content, so its text is safe to put in\nthe system prompt. Supplying a worked example (``example_diff`` +\n``example_finding``) is optional but sharply improves a small model's output.",
+      "properties": {
+        "example_diff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Example Diff"
+        },
+        "example_finding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewFinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "instructions": {
+          "title": "Instructions",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "instructions"
+      ],
+      "title": "CustomLens",
+      "type": "object"
+    },
     "Provider": {
       "description": "The backend selected by the `--provider` flag.",
       "enum": [
@@ -130,6 +179,61 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "title": "ReviewCategory",
       "type": "string"
+    },
+    "ReviewFinding": {
+      "additionalProperties": false,
+      "description": "A single inline review comment the model wants to post.",
+      "properties": {
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "side": {
+          "default": "RIGHT",
+          "enum": [
+            "LEFT",
+            "RIGHT"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggestion"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "severity",
+        "title",
+        "body"
+      ],
+      "title": "ReviewFinding",
+      "type": "object"
     },
     "Severity": {
       "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
@@ -186,6 +290,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "type": "string"
       },
       "title": "Exclude Paths",
+      "type": "array"
+    },
+    "extra_lenses": {
+      "items": {
+        "$ref": "#/$defs/CustomLens"
+      },
+      "title": "Extra Lenses",
       "type": "array"
     },
     "include_paths": {

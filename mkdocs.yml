@@ -67,6 +67,7 @@ nav:
       - Review with Azure OpenAI: how-to/review-with-azure.md
       - Use as a GitHub Action: how-to/use-as-github-action.md
       - Configure .lgtmaybe.yml: how-to/configure-lgtmaybe-yml.md
+      - Add a custom review lens: how-to/add-a-custom-lens.md
       - Releasing (maintainers): how-to/releasing.md
   - Reference:
       - Configuration: reference/config.md

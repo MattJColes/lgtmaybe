@@ -167,6 +167,63 @@ structured_output: false   # only if your model rejects JSON-schema mode
 
 Default: `true`.
 
+### extra_lenses
+
+Define your own review lenses ("BYO skills") that run **alongside** the built-in
+`categories`. Each one fans out as its own focused model call and its findings
+merge into the same review. A lens needs an `id` (unique, and not one of the
+built-in category names) and `instructions` describing what to look for; a
+`title`, plus a worked example (`example_diff` + `example_finding`, supplied
+together) are optional but sharply improve a small model's output.
+
+```yaml
+extra_lenses:
+  - id: simplify
+    title: Simplify or delete
+    instructions: |
+      Flag code that should not exist at all. The best code is the code you never
+      wrote: prefer the standard library, an existing dependency, or one line over
+      a new abstraction. Call out needless wrappers, premature generality, and
+      "just in case" code with no caller.
+    example_diff: |
+      --- a/util.py
+      +++ b/util.py
+      @@ -4,1 +4,3 @@
+       def get_name(user):
+      +    name = user.name
+      +    return name
+    example_finding:
+      path: util.py
+      line: 5
+      severity: low
+      title: Needless local variable
+      body: The temporary adds nothing; return user.name directly.
+      suggestion: "    return user.name"
+```
+
+Lens definitions are **trusted config**: they go into the system prompt, so only
+define them in files you control (committed `.lgtmaybe.yml` or repo skill files),
+never from PR-author content. See
+[Add a custom review lens](add-a-custom-lens.md) for a full walk-through.
+
+Default: none.
+
+### lens_paths
+
+Load `extra_lenses` from separate **skill files** instead of inlining them — handy
+for sharing a lens across repos or wiring lgtmaybe into an agent harness. Each
+entry is a YAML file (one lens, or a list of lenses) or a directory of `*.yml` /
+`*.yaml` lens files. Paths are resolved relative to where lgtmaybe runs (your repo
+root). Lenses loaded this way are appended to any inline `extra_lenses`.
+
+```yaml
+lens_paths:
+  - .lgtmaybe/skills            # a directory of one-lens-per-file skill files
+  - team-lenses/house-style.yml # or a single file
+```
+
+Default: none.
+
 ## CLI flag overrides
 
 Every config field can be overridden at the command line:

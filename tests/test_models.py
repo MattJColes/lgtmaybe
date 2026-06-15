@@ -6,9 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from lgtmaybe.core.models import (
+    CustomLens,
     PRContext,
     Provider,
     ProviderResult,
@@ -103,6 +104,64 @@ def test_review_config_temperature_defaults_to_zero() -> None:
 def test_review_config_accepts_temperature() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", temperature=0.7)
     assert cfg.temperature == 0.7
+
+
+def test_custom_lens_minimal_fields() -> None:
+    lens = CustomLens(id="simplify", instructions="Flag needless code.")
+    assert lens.id == "simplify"
+    assert lens.title == ""
+    assert lens.example_diff is None and lens.example_finding is None
+
+
+def test_custom_lens_id_must_not_collide_with_builtin() -> None:
+    with pytest.raises(ValidationError):
+        CustomLens(id="security", instructions="x")
+
+
+def test_custom_lens_id_must_be_non_empty() -> None:
+    with pytest.raises(ValidationError):
+        CustomLens(id="   ", instructions="x")
+
+
+def test_custom_lens_example_diff_and_finding_must_be_paired() -> None:
+    finding = ReviewFinding(path="x.py", line=1, severity=Severity.low, title="t", body="b")
+    with pytest.raises(ValidationError):
+        CustomLens(id="simplify", instructions="x", example_diff="@@ -1 +1 @@\n+x\n")
+    with pytest.raises(ValidationError):
+        CustomLens(id="simplify", instructions="x", example_finding=finding)
+    # Both together is valid.
+    lens = CustomLens(
+        id="simplify", instructions="x", example_diff="@@ -1 +1 @@\n+x\n", example_finding=finding
+    )
+    assert lens.example_finding is not None
+
+
+def test_review_config_accepts_extra_lenses() -> None:
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        extra_lenses=[{"id": "simplify", "instructions": "Flag needless code."}],
+    )
+    assert cfg.extra_lenses[0].id == "simplify"
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.extra_lenses[0].id == "simplify"
+
+
+def test_review_config_extra_lens_ids_must_be_unique() -> None:
+    with pytest.raises(ValidationError):
+        ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            extra_lenses=[
+                {"id": "simplify", "instructions": "a"},
+                {"id": "simplify", "instructions": "b"},
+            ],
+        )
+
+
+def test_review_config_extra_lenses_defaults_empty() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.extra_lenses == []
 
 
 def test_review_config_reflect_defaults_to_true() -> None:

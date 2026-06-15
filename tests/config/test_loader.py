@@ -162,3 +162,50 @@ def test_none_cli_inputs_do_not_override():
 
     assert cfg.provider == "openai"
     assert cfg.min_severity == "high"
+
+
+def test_inline_extra_lenses_load_from_yml(tmp_path):
+    """`extra_lenses` defined inline in .lgtmaybe.yml reach the ReviewConfig."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "provider: ollama\n"
+        "model: qwen3.6:27b\n"
+        "extra_lenses:\n"
+        "  - id: simplify\n"
+        "    title: Simplify or delete\n"
+        "    instructions: Flag needless code.\n"
+    )
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert [lens.id for lens in cfg.extra_lenses] == ["simplify"]
+
+
+def test_lens_paths_load_skill_files_from_dir(tmp_path):
+    """`lens_paths` pointing at a directory loads every *.yml lens file in it,
+    and the directive itself is consumed (never reaches the strict ReviewConfig)."""
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    (skills / "simplify.yml").write_text(
+        "id: simplify\ntitle: Simplify or delete\ninstructions: Flag needless code.\n"
+    )
+    (skills / "house.yml").write_text("id: house-style\ninstructions: Enforce house style.\n")
+
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(f"provider: ollama\nmodel: m\nlens_paths:\n  - {skills}\n")
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert sorted(lens.id for lens in cfg.extra_lenses) == ["house-style", "simplify"]
+
+
+def test_lens_paths_accept_a_list_of_lenses_in_one_file(tmp_path):
+    """A single lens file may hold a YAML list of lenses."""
+    lens_file = tmp_path / "lenses.yml"
+    lens_file.write_text("- id: a\n  instructions: first\n- id: b\n  instructions: second\n")
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(f"provider: ollama\nmodel: m\nlens_paths:\n  - {lens_file}\n")
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert sorted(lens.id for lens in cfg.extra_lenses) == ["a", "b"]

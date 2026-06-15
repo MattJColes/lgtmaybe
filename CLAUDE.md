@@ -140,6 +140,18 @@ pattern, event bus, plugin framework.
      cloud, serial for ollama), then **merges and de-dupes** the findings
      (`engine._dedupe`, keyed on path/line/side/title) before reflection.
      `ReviewConfig.categories` selects the lenses (default: all eight).
+   - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
+     their own lenses via `ReviewConfig.extra_lenses` (a `CustomLens`: `id` +
+     `instructions`, optional `title` and a worked `example_diff`/`example_finding`)
+     — defined inline in `.lgtmaybe.yml` or in skill files loaded by the config
+     loader's `lens_paths` directive. The engine builds a uniform `_Lens` per
+     built-in category **and** per custom lens (`engine._build_lenses`,
+     `prompt.build_lens_prompt`) and fans them all out identically through the same
+     merge/dedupe/reflect pipeline. Lens text enters the system prompt, so it is
+     **trusted config only** — never sourced from PR-author content (on
+     `pull_request_target` config comes from the base, not the PR head). Covered by
+     `tests/engine/test_prompt.py`, `tests/engine/test_engine.py`,
+     `tests/config/test_loader.py`, and `tests/test_models.py`.
    - **Intent lens:** "does the PR do what it says?" — `PRContext` carries the
      stated intent (`title`, `description`, `commit_messages`): PR title/body +
      commit names via the REST gateway, or `git log` commit names from the local

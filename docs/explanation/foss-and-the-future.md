@@ -108,6 +108,11 @@ built to steer an agent that is *writing* code; lgtmaybe only ever *reads* a dif
 and never checks out or executes PR code. We can borrow the judgement, not the
 build loop.
 
+!!! tip "This is now supported"
+    You don't have to wait for a built-in: **custom lenses** let you add a
+    Ponytail-style "simplify or delete" lens (or any house rule) yourself, in
+    config. See [Add a custom review lens](../how-to/add-a-custom-lens.md).
+
 ## How could this integrate with Superpowers / ECC / OmO / other harnesses?
 
 There's a fast-growing ecosystem of agent harnesses and skill marketplaces —
@@ -128,11 +133,14 @@ effort:
    agent, and the agent fixes them. This is the highest-leverage integration and
    needs essentially no new code in lgtmaybe — see
    [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
-2. **As the review gate in a build pipeline.** Harnesses like OmO already pick a
-   model per task by cost; lgtmaybe is the natural "now review what you just
-   wrote" step, and because it's provider-agnostic it can review using whatever
-   model the harness already has credentials for. Structured JSON output
-   (`--json`) is the contract.
+2. **As the review gate in a build pipeline, with the harness's own lenses.**
+   Harnesses like OmO already pick a model per task by cost; lgtmaybe is the
+   natural "now review what you just wrote" step, and because it's
+   provider-agnostic it can review using whatever model the harness already has
+   credentials for. Structured JSON output (`--json`) is the contract — and a
+   harness can drop in its *own* review rules as
+   [custom lens files](../how-to/add-a-custom-lens.md) (`lens_paths`) without any
+   change to lgtmaybe.
 3. **Consuming their model routing.** The most speculative: harnesses that route
    by cost (cheap model for bulk, expensive model for hard problems) solve the
    same problem the RLM question above raises. There's room to let lgtmaybe's
