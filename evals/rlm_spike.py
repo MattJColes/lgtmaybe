@@ -1,8 +1,8 @@
 """RLM-style recursive hunk-walking review — an on-demand research spike.
 
-Roadmap question (docs/explanation/foss-and-the-future.md): can a cheap model
-*walk* a large diff hunk-by-hunk and beat today's "truncate to a token budget"
-behaviour on cost and recall? When a diff exceeds ``max_input_tokens`` the engine
+The question: can a cheap model *walk* a large diff hunk-by-hunk and beat today's
+"truncate to a token budget" behaviour on cost and recall? When a diff exceeds
+``max_input_tokens`` the engine
 drops the tail; an RLM-style loop instead reviews each hunk in its own small call,
 so nothing is dropped and every sub-call's context stays small (where token cost
 and small-model accuracy both live).

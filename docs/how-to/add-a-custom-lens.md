@@ -109,4 +109,3 @@ your lenses.
 
 - [Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md#extra_lenses) — the field reference.
 - [What gets reviewed](../explanation/what-gets-reviewed.md) — the built-in lenses.
-- [FOSS and the future](../explanation/foss-and-the-future.md) — where BYO lenses fit the roadmap.
