@@ -105,9 +105,14 @@ Default: `100000`.
 Which review lenses to run. The reviewer asks for each category in its own
 concurrent model call and merges the findings, so a focused prompt concentrates
 on one concern at a time. One or more of `security`, `correctness`,
-`deprecation`, `tests`, `documentation`, `performance`, `complexity`, `intent`.
-Narrowing the list trades thoroughness for fewer model calls (and lower token
-usage).
+`deprecation`, `tests`, `documentation`, `performance`, `complexity`, `intent`,
+`ponytail`. Narrowing the list trades thoroughness for fewer model calls (and
+lower token usage).
+
+The `ponytail` lens is the "lazy senior dev" check — *the best code is the code
+you never wrote* — flagging code that needn't exist at all (YAGNI, reach for the
+standard library, do it in fewer lines). See
+[What gets reviewed](../explanation/what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room).
 
 The `intent` lens checks the diff against the PR's stated intent — title,
 description, and commit names on GitHub; your `git log` commit names on the
@@ -123,7 +128,7 @@ categories:
   - correctness
 ```
 
-Default: all eight categories.
+Default: all nine categories.
 
 ### context_lines
 

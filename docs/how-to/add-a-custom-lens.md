@@ -1,11 +1,11 @@
 # Add a custom review lens (BYO skills)
 
-lgtmaybe ships eight built-in review lenses (security, correctness, deprecation,
-tests, documentation, performance, complexity, intent). A **custom lens** lets you
-add your own — a "skill file" that runs alongside the built-ins, fans out as its
-own focused model call, and merges its findings into the same review. Use it to
-bake in a house style, a senior-dev instinct, or a team convention the built-in
-lenses don't cover.
+lgtmaybe ships nine built-in review lenses (security, correctness, deprecation,
+tests, documentation, performance, complexity, intent, and `ponytail` — the
+"lazy senior dev" / write-less-code lens). A **custom lens** lets you add your
+own — a "skill file" that runs alongside the built-ins, fans out as its own
+focused model call, and merges its findings into the same review. Use it to bake
+in a house style or a team convention the built-in lenses don't cover.
 
 ## How a lens works
 
@@ -28,32 +28,33 @@ The quickest way — define the lens directly in your repo config:
 provider: ollama
 model: qwen3.6:27b
 extra_lenses:
-  - id: simplify
-    title: Simplify or delete
+  - id: house-style
+    title: House style
     instructions: |
-      Channel the laziest senior dev in the room: the best code is the code you
-      never wrote. Before accepting new code, ask whether it needs to exist at
-      all. Flag needless wrappers, premature abstraction, re-implementing the
-      standard library, and "just in case" code with no caller. Prefer one line
-      over ten.
+      Enforce our team conventions on changed code. Flag new public functions
+      that return bare dicts instead of a typed dataclass, and any logging at
+      WARNING or above that doesn't include a correlation id.
     example_diff: |
-      --- a/util.py
-      +++ b/util.py
-      @@ -4,1 +4,3 @@
-       def get_name(user):
-      +    name = user.name
-      +    return name
+      --- a/api.py
+      +++ b/api.py
+      @@ -10,1 +10,2 @@
+       def make_user(name):
+      +    return {"name": name, "active": True}
     example_finding:
-      path: util.py
-      line: 5
+      path: api.py
+      line: 11
       severity: low
-      title: Needless local variable
-      body: The temporary adds nothing; return user.name directly.
-      suggestion: "    return user.name"
+      title: Public function returns a bare dict
+      body: House style returns a typed dataclass from public functions, not a dict.
+      suggestion: "    return User(name=name, active=True)"
 ```
 
-That single lens is the spirit of [Ponytail](https://github.com/DietrichGebert/ponytail)
-expressed as an lgtmaybe lens.
+!!! note "The Ponytail lens is built in"
+    The "lazy senior dev / write less code" instinct from
+    [Ponytail](https://github.com/DietrichGebert/ponytail) ships as the built-in
+    `ponytail` lens — you don't need a custom lens for it. Reach for `extra_lenses`
+    when you want something the nine built-ins don't already cover, like the
+    house-style rule above.
 
 ## As reusable skill files
 
@@ -69,12 +70,12 @@ lens_paths:
 ```
 
 ```yaml
-# .lgtmaybe/skills/simplify.yml
-id: simplify
-title: Simplify or delete
+# .lgtmaybe/skills/house-style.yml
+id: house-style
+title: House style
 instructions: |
-  The best code is the code you never wrote. Flag needless wrappers, premature
-  abstraction, and code with no caller.
+  Flag new public functions that return bare dicts instead of a typed dataclass,
+  and WARNING+ logging without a correlation id.
 ```
 
 A skill file may hold one lens (a mapping) or several (a list). Lenses loaded from

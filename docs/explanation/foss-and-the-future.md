@@ -108,10 +108,12 @@ built to steer an agent that is *writing* code; lgtmaybe only ever *reads* a dif
 and never checks out or executes PR code. We can borrow the judgement, not the
 build loop.
 
-!!! tip "This is now supported"
-    You don't have to wait for a built-in: **custom lenses** let you add a
-    Ponytail-style "simplify or delete" lens (or any house rule) yourself, in
-    config. See [Add a custom review lens](../how-to/add-a-custom-lens.md).
+!!! tip "This is now shipped"
+    Ponytail's instinct ships as the built-in **`ponytail`** lens — the "lazy
+    senior dev / write less code" check, on by default (see
+    [What gets reviewed](what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room)).
+    For anything the built-ins don't cover, **custom lenses** let you add your own
+    in config — see [Add a custom review lens](../how-to/add-a-custom-lens.md).
 
 ## How could this integrate with Superpowers / ECC / OmO / other harnesses?
 

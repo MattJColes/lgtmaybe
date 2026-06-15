@@ -246,6 +246,24 @@ neutralised delimiters, and the model is told never to follow instructions
 inside it. Only the intent lens's model call ever carries it. When a PR states
 no intent at all, the lens is skipped instead of burning a model call.
 
+## Ponytail — the laziest senior dev in the room
+
+The best code is the code you never wrote. Inspired by the
+[Ponytail](https://github.com/DietrichGebert/ponytail) skill, this lens reviews
+new code with a senior engineer's reflex to **not** add code, flagging what
+needn't exist at all (graded `info` to `medium`, and deliberately restrained):
+
+- **Needless code (YAGNI)** — speculative generality, "just in case" parameters,
+  an abstraction with a single caller, or scaffolding for a future that isn't here.
+- **Reinventing the standard library** — hand-rolled code a built-in, the standard
+  library, or an already-imported dependency does directly.
+- **Could be far shorter** — several lines doing what one clear expression would.
+- **Premature configurability** — flags, hooks, or options no caller uses yet.
+
+It prefers deleting or collapsing code over adding to it and puts the smaller
+replacement in the suggestion. It is distinct from the complexity lens (which asks
+"is this code hard to follow?"); Ponytail asks "should this code exist at all?"
+
 ## How the scope is bounded
 
 Every run is bounded so a large PR can't run away on latency. All of these are
@@ -256,7 +274,7 @@ configurable in `.lgtmaybe.yml` (see
 |---|---|---|
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
-| `categories` | all eight | Which review lenses to run; each runs as its own model call. Narrowing the list means fewer calls. |
+| `categories` | all nine | Which review lenses to run; each runs as its own model call. Narrowing the list means fewer calls. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
 | `min_severity` | `info` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`). |
 | `include_paths` / `exclude_paths` | — | Glob filters to focus the review. |

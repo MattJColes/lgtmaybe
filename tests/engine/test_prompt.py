@@ -18,6 +18,7 @@ _SIGNATURE = {
     ReviewCategory.performance: "n+1",
     ReviewCategory.complexity: "cyclomatic",
     ReviewCategory.intent: "stated intent",
+    ReviewCategory.ponytail: "yagni",
 }
 
 
@@ -194,6 +195,14 @@ def test_prompt_asks_for_complexity_review() -> None:
     assert "cyclomatic" in prompt
     assert "nest" in prompt  # deep nesting
     assert "duplicat" in prompt  # duplicated logic to extract
+
+
+def test_prompt_asks_for_ponytail_review() -> None:
+    """The 'lazy senior dev' lens: flag code that needn't exist (YAGNI, use stdlib)."""
+    prompt = build_system_prompt().lower()
+    assert "yagni" in prompt
+    assert "never wrote" in prompt  # the best code is the code you never wrote
+    assert "standard library" in prompt
 
 
 # ---------------------------------------------------------------------------

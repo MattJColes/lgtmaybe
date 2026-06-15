@@ -49,6 +49,9 @@ class ReviewCategory(StrEnum):
 
     ``intent`` checks the diff against the PR's stated intent (title, description,
     commit messages); it only runs when the context carries some stated intent.
+    ``ponytail`` is the "lazy senior dev" lens — the best code is the code you
+    never wrote — flagging code that needn't exist at all (YAGNI, reach for the
+    standard library, do it in fewer lines).
     """
 
     security = "security"
@@ -59,6 +62,7 @@ class ReviewCategory(StrEnum):
     performance = "performance"
     complexity = "complexity"
     intent = "intent"
+    ponytail = "ponytail"
 
 
 class Provider(StrEnum):

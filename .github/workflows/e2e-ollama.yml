@@ -7,7 +7,7 @@
 #
 # Speed: a single ollama instance serves one model serially, and a GitHub runner
 # is CPU-only, so wall-clock scales with the number of model calls (fixtures ×
-# review lenses). A 9B model running all seven lenses took ~25 min and timed out,
+# review lenses). A 9B model running the full lens set took ~25 min and timed out,
 # so this is a deliberately CUT-DOWN smoke — it proves the live ollama path picks
 # up critical issues, not that a small model is thorough. To keep it fast we:
 #   - use a small (qwen3.5:2b) model with THINKING OFF (the factory forces

@@ -13,7 +13,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `api_base` | string / null | No | `null` | Api Base |
-| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent']` | Categories |
+| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
@@ -166,7 +166,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "string"
     },
     "ReviewCategory": {
-      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.",
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).",
       "enum": [
         "security",
         "correctness",
@@ -175,7 +175,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "documentation",
         "performance",
         "complexity",
-        "intent"
+        "intent",
+        "ponytail"
       ],
       "title": "ReviewCategory",
       "type": "string"
@@ -272,7 +273,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "documentation",
         "performance",
         "complexity",
-        "intent"
+        "intent",
+        "ponytail"
       ],
       "items": {
         "$ref": "#/$defs/ReviewCategory"
