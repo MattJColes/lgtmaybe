@@ -46,6 +46,42 @@ class TestRetry:
                 provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
 
+class TestTemperatureRejection:
+    def test_retries_without_temperature_when_model_rejects_the_value(self) -> None:
+        """Models like gpt-5.5 accept the temperature param but only the default
+        value; on that rejection the provider retries without temperature."""
+        good = _fake_response("ok without temperature")
+        seen_temperatures: list[Any] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen_temperatures.append(kwargs.get("temperature", "absent"))
+            if "temperature" in kwargs:
+                raise RuntimeError(
+                    "litellm.BadRequestError: OpenAIException - Unsupported value: "
+                    "'temperature' does not support 0 with this model. Only the "
+                    "default (1) value is supported."
+                )
+            return good
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "openai/gpt-5.5", temperature=0.0
+            )
+
+        assert result.text == "ok without temperature"
+        assert seen_temperatures == [0.0, "absent"]
+
+    def test_unrelated_bad_request_is_not_swallowed(self) -> None:
+        """A non-temperature error must still propagate, not be retried bare."""
+        with patch("litellm.completion", side_effect=RuntimeError("invalid api key")):
+            provider = LiteLLMProvider()
+            with pytest.raises(RuntimeError, match="invalid api key"):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "openai/gpt-5.5", temperature=0.0
+                )
+
+
 class TestFallback:
     def test_primary_fails_hard_fallback_model_is_used(self) -> None:
         """After primary exhausts retries, fallback model is tried."""
