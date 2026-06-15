@@ -24,6 +24,31 @@ List available models:
 ollama list
 ```
 
+## Which model, and will it fit?
+
+For a local reviewer the recommendation as of mid-2026 is **Qwen3.6-27B**
+(`qwen3.6:27b`) — a dense 27B model that is the best *smallish* local option for
+this job. It lands near frontier API models on coding benchmarks (SWE-bench
+Verified ~77%) while being small enough to run on a workstation or a well-specced
+laptop, so it clears lgtmaybe's bar across all the review lenses without a
+data-center GPU. Smaller models work, but accuracy falls off — you'll miss
+subtler findings and may need `--no-reflect` because the reflection pass
+over-prunes on a weak model.
+
+**Hardware, quantised (the usual way to run it locally):**
+
+| You have | What to expect |
+|---|---|
+| **< 32 GB** RAM/VRAM | Drop to a smaller model (`gemma4:e4b`) or route to a hosted provider — 27B at a usable quant won't leave room for the diff. |
+| **32 GB** RAM/VRAM | The practical floor. Run `qwen3.6:27b` at a 4-bit quant (≈16–18 GB of weights) with a modest context window. Keep `num_ctx` conservative so the model plus the diff and findings fit. |
+| **48 GB+** RAM/VRAM (preferred) | Comfortable. Room for the weights plus a generous `--num-ctx` (32k) for big multi-file diffs, with headroom for the KV cache. |
+
+This applies to both discrete VRAM and Apple-Silicon unified memory. A bigger
+context window costs memory on top of the weights, so if you bump `--num-ctx` for
+a large diff (see [Slow models and timeouts](#slow-models-and-timeouts)), size it
+to the table above. On a hosted provider none of this matters — the model runs on
+the provider's hardware.
+
 ## Run the review
 
 From inside the repo, on the branch you want reviewed:
