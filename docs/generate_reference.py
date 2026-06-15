@@ -136,7 +136,10 @@ def generate() -> str:
             "LLM backend selected by `--provider`. "
             "Cloud providers (`bedrock`, `vertex`, `azure`) use ambient "
             "credentials — `azure` also needs the resource endpoint "
-            "(`--api-base`) and accepts a key as an alternative.",
+            "(`--api-base`) and accepts a key as an alternative. "
+            "`openai-compatible` points at any server speaking the OpenAI `/v1` "
+            "wire format (DeepSeek, llama.cpp, LM Studio, vLLM) via `--api-base`; "
+            "the key is optional so keyless local servers work.",
         )
     )
     sections.append(

@@ -71,6 +71,9 @@ class Provider(StrEnum):
     vertex = "vertex"
     azure = "azure"
     ollama = "ollama"
+    # Any server speaking the OpenAI /v1 wire format, reached via --api-base:
+    # DeepSeek's API, llama.cpp, LM Studio, vLLM, and other proxies. Key optional.
+    openai_compatible = "openai-compatible"
 
 
 class _Strict(BaseModel):

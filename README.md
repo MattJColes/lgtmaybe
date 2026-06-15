@@ -4,9 +4,9 @@
 
 # lgtmaybe
 
-Provider-agnostic PR reviewer. Six hosted providers plus local ollama, one
-flag, no static keys for cloud providers. Posts inline review comments and a
-summary.
+Provider-agnostic PR reviewer. Six hosted providers, local ollama, and any
+OpenAI-compatible endpoint — one flag, no static keys for cloud providers. Posts
+inline review comments and a summary.
 
 📖 **Full documentation:** <https://mattjcoles.github.io/lgtmaybe/>
 
@@ -110,6 +110,7 @@ up the [GitHub Action](#use-as-a-github-action). See
 | `vertex` | Ambient GCP creds — Workload Identity Federation, no key |
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
 | `ollama` | None — local only, zero cost |
+| `openai-compatible` | Any OpenAI `/v1` endpoint via `--api-base` (DeepSeek, llama.cpp, LM Studio, vLLM). Key optional — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for local servers |
 
 ## Documentation
 
@@ -123,6 +124,7 @@ Markdown sources below.
 **How-to guides** — task recipes
 
 - [Run locally with ollama](docs/how-to/run-locally-with-ollama.md)
+- [Use a custom OpenAI-compatible endpoint](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
 - [Review with Bedrock OIDC](docs/how-to/review-with-bedrock-oidc.md)
 - [Review with Vertex WIF](docs/how-to/review-with-vertex-wif.md)
 - [Review with Azure OpenAI](docs/how-to/review-with-azure.md)

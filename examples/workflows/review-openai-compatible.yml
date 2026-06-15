@@ -1,0 +1,44 @@
+# Copy into your repo at .github/workflows/lgtmaybe.yml
+#
+# OpenAI-compatible endpoint — any server speaking the OpenAI /v1 wire format
+# (DeepSeek's API, a self-hosted vLLM, an OpenAI-compatible proxy). Set api_base
+# to the endpoint. Add a key secret for hosted endpoints; leave api_key empty for
+# keyless self-hosted servers.
+name: lgtmaybe (openai-compatible)
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+# pull_request_target runs against the BASE repo (secrets available); the action
+# only ever reads the diff via the API and never checks out PR code.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Only trusted authors (repo owner / org member / collaborator) can trigger a
+    # review, so fork PRs and drive-by /ask or /review comments from strangers
+    # cannot spend your provider budget. A maintainer can still opt-in to an
+    # external PR by commenting /review on it. (Comments not on a PR are skipped.)
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6 # base repo only — for .lgtmaybe.yml config
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: openai-compatible
+          model: deepseek-chat
+          api_base: https://api.deepseek.com/v1
+          # Hosted endpoints need a key; omit api_key for keyless self-hosted servers.
+          api_key: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}

@@ -40,6 +40,14 @@ class TestLiteLLMModelString:
     def test_azure_prefix(self) -> None:
         assert litellm_model_string(Provider.azure, "gpt-4o") == "azure/gpt-4o"
 
+    def test_openai_compatible_uses_openai_prefix(self) -> None:
+        # litellm routes any OpenAI-compatible server through the openai prefix +
+        # a custom api_base (DeepSeek, llama.cpp, LM Studio, vLLM).
+        assert (
+            litellm_model_string(Provider.openai_compatible, "deepseek-chat")
+            == "openai/deepseek-chat"
+        )
+
 
 class TestBuildProvider:
     def test_build_provider_returns_litellm_provider(self) -> None:
@@ -89,6 +97,41 @@ class TestBuildProvider:
         assert provider.default_opts.get("azure_ad_token") == "ad-token-xyz"
         assert provider.default_opts.get("api_base") == "https://my-resource.openai.azure.com"
         assert "api_key" not in provider.default_opts
+
+    def test_build_provider_openai_compatible_carries_key_and_base(self) -> None:
+        from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+        provider = build_provider(
+            Provider.openai_compatible,
+            "deepseek-chat",
+            api_key="sk-deepseek",
+            api_base="https://api.deepseek.com/v1",
+        )
+        assert isinstance(provider, LiteLLMProvider)
+        assert provider.default_opts.get("api_key") == "sk-deepseek"
+        assert provider.default_opts.get("api_base") == "https://api.deepseek.com/v1"
+        assert provider.model == "openai/deepseek-chat"
+
+    def test_build_provider_openai_compatible_gets_the_long_local_timeout(self) -> None:
+        # The endpoint may be a slow local server (llama.cpp / LM Studio / vLLM),
+        # so default to the generous timeout — overridable for fast cloud endpoints.
+        provider = build_provider(
+            Provider.openai_compatible,
+            "deepseek-chat",
+            api_key="sk-x",
+            api_base="https://api.deepseek.com/v1",
+        )
+        assert provider.default_opts.get("timeout") == 300
+
+    def test_openai_compatible_timeout_is_overridable(self) -> None:
+        provider = build_provider(
+            Provider.openai_compatible,
+            "deepseek-chat",
+            api_key="sk-x",
+            api_base="https://api.deepseek.com/v1",
+            timeout=30,
+        )
+        assert provider.default_opts.get("timeout") == 30
 
     def test_build_provider_stores_resolved_model_string(self) -> None:
         provider = build_provider(Provider.bedrock, "anthropic.claude-3-haiku-20240307-v1:0")
@@ -145,6 +188,14 @@ class TestDefaultTimeout:
         from lgtmaybe.providers.factory import default_timeout_for
 
         assert default_timeout_for(Provider.ollama) > default_timeout_for(Provider.openai)
+
+    def test_openai_compatible_default_matches_ollama(self) -> None:
+        # Both can front a slow local model, so they share the generous default.
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        assert default_timeout_for(Provider.openai_compatible) == default_timeout_for(
+            Provider.ollama
+        )
 
     def test_build_provider_threads_temperature_into_default_opts(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", temperature=0.0)

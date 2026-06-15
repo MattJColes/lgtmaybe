@@ -6,9 +6,9 @@
 
 </div>
 
-Provider-agnostic PR reviewer. Six hosted providers plus local ollama, one
-flag, and no static keys for cloud providers. It posts inline comments and a
-summary straight onto the pull request.
+Provider-agnostic PR reviewer. Six hosted providers, local ollama, and any
+OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
+posts inline comments and a summary straight onto the pull request.
 
 lgtmaybe reviews the lines a change touches, and it runs in two places: as a
 GitHub Action on a pull request, or locally from the command line against your
