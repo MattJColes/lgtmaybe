@@ -132,6 +132,18 @@ class LLMReviewEngine(ReviewEngine):
 
         batches = batch_files(file_patches, max_tokens=cfg.max_input_tokens)
 
+        # Announce the queued work before any model call returns, so a long run
+        # on a slow provider shows up immediately in the Action log instead of
+        # looking stuck until the first review comment lands.
+        _log.info(
+            "review starting",
+            extra={
+                "reviewable_files": len(file_patches),
+                "batches": len(batches),
+                "lenses": len(lenses),
+            },
+        )
+
         all_findings: list[ReviewFinding] = []
         total_calls = 0
         failed_calls = 0
@@ -144,12 +156,17 @@ class LLMReviewEngine(ReviewEngine):
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None
-        for batch in batches:
+        for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
             review_one = partial(
                 self._review_lens, wrapped, intent_block, cfg.model, response_format
             )
+            if len(batches) > 1:
+                _log.info(
+                    "reviewing batch",
+                    extra={"batch": batch_num, "batches": len(batches)},
+                )
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 for findings, error in pool.map(review_one, lenses):
                     total_calls += 1
@@ -177,6 +194,7 @@ class LLMReviewEngine(ReviewEngine):
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
         if cfg.reflect and all_findings:
+            _log.info("reflecting on findings", extra={"findings": len(all_findings)})
             reviewed_diff = "\n".join(patch for _, patch in file_patches)
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
             all_findings = reflect_findings(all_findings, clean_ctx, cfg, self._provider)
@@ -237,6 +255,9 @@ class LLMReviewEngine(ReviewEngine):
             {"role": "user", "content": user_content},
         ]
         opts = {"response_format": response_format} if response_format is not None else {}
+        # Heartbeat: log the call going out and coming back so the Action shows
+        # steady per-lens progress while the model runs, not a silent gap.
+        _log.info("reviewing lens", extra={"lens": lens.id})
         try:
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
@@ -248,10 +269,12 @@ class LLMReviewEngine(ReviewEngine):
             )
             return [], reason
         try:
-            return parse_findings(result.text), None
+            findings = parse_findings(result.text)
         except ParseError:
             _log.warning("unparseable model output", extra={"lens": lens.id})
             return [], "unparseable model output"
+        _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
+        return findings, None
 
 
 def _intent_text(ctx: PRContext) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -678,6 +679,68 @@ def test_partial_failure_notice_names_the_provider_error() -> None:
 # ---------------------------------------------------------------------------
 # Custom ("BYO") lenses
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# progress logging: a long Action run must show it's working, not stuck
+# ---------------------------------------------------------------------------
+
+
+class _ListHandler(logging.Handler):
+    """Collects emitted LogRecords for assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def engine_logs():
+    """Capture the engine's INFO logs (its logger does not propagate to root)."""
+    from lgtmaybe.engine import engine as engine_mod
+
+    handler = _ListHandler()
+    logger = engine_mod._log
+    prev_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev_level)
+
+
+def test_review_logs_an_upfront_work_summary(engine_logs) -> None:
+    """Before any model call returns, the engine announces how much work it queued
+    (files, batches, lenses) — the first 'it's running' signal in the Action log."""
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    engine.review(_CTX, cfg)
+
+    starting = [r for r in engine_logs if "review starting" in r.getMessage()]
+    assert starting, "expected an up-front 'review starting' log"
+    assert getattr(starting[0], "lenses", None) == len(cfg.categories) - 1  # intent skipped
+
+
+def test_review_logs_a_heartbeat_as_each_lens_runs(engine_logs) -> None:
+    """Each lens emits a log when dispatched and when it completes, so a slow
+    provider shows steady progress instead of silence until the first finding."""
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    engine.review(_CTX, cfg)
+
+    completed = [r for r in engine_logs if "lens reviewed" in r.getMessage()]
+    # One completion heartbeat per review call (intent skipped: _CTX states none).
+    assert len(completed) == len(_review_calls(provider))
+    assert all(getattr(r, "lens", None) for r in completed)
 
 
 def test_custom_lens_runs_as_an_extra_review_call() -> None:
