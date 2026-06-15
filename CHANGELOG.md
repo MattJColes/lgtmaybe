@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.7...lgtmaybe-v0.1.8) (2026-06-15)
+
+
+### Bug Fixes
+
+* **deps:** bump aiohttp to 3.14.1 for CVE fixes ([#86](https://github.com/MattJColes/lgtmaybe/issues/86)) ([542525e](https://github.com/MattJColes/lgtmaybe/commit/542525e7e91bb9fbbac1b7127232e0bb9d219d4f))
+* retry without temperature when a model rejects the value ([#84](https://github.com/MattJColes/lgtmaybe/issues/84)) ([a79e91c](https://github.com/MattJColes/lgtmaybe/commit/a79e91cb5dd20e5e3e08acdfc7efec5e4ee88220))
+
 ## [0.1.7](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.6...lgtmaybe-v0.1.7) (2026-06-15)
 
 
