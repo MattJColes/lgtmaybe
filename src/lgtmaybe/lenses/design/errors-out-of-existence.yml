@@ -1,0 +1,31 @@
+id: errors-out-of-existence
+title: Define errors out of existence
+instructions: |
+  Flag APIs added in the diff that push a special case onto every caller when the
+  design could make the error simply not arise (grade info to low). Look for: an
+  operation that raises on the empty or absent case where a harmless no-op or
+  empty result would do; a function returning null/a sentinel that forces a guard
+  at every call site; and "delete/remove" treated as an error when the thing is
+  already gone. Distinct from the correctness lens, which flags errors left
+  *unhandled* — this flags errors that shouldn't need handling at all. Suggest the
+  no-op / absorbing form.
+example_diff: |
+  --- a/cache.py
+  +++ b/cache.py
+  @@ -5,1 +5,5 @@
+   class Cache:
+  +    def remove(self, key):
+  +        if key not in self._d:
+  +            raise KeyError(key)
+  +        del self._d[key]
+example_finding:
+  path: cache.py
+  line: 6
+  side: RIGHT
+  severity: low
+  title: remove() raises on a missing key — every caller must now guard
+  body: >-
+    Removing an absent key is a harmless no-op in most callers' minds; raising
+    forces a try/except at each call site. Define the error out of existence by
+    making absence a no-op.
+  suggestion: "    def remove(self, key):\n        self._d.pop(key, None)"

@@ -1,0 +1,29 @@
+id: idempotency
+title: Idempotency & retry safety
+instructions: |
+  Flag side-effecting operations that are unsafe to run more than once on a path
+  that can be retried (grade medium to high). Look for: a payment, email, charge,
+  or external API call with observable side effects issued without an idempotency
+  key or a dedupe guard; a webhook, queue, or job handler that assumes
+  exactly-once delivery and double-applies on redelivery; a "create" that should
+  be an upsert / get-or-create; and a non-atomic check-then-insert that
+  double-counts under retry or concurrency. Network and queue delivery are
+  at-least-once — assume the handler runs twice. Suggest the idempotency key or
+  dedupe check.
+example_diff: |
+  --- a/billing.py
+  +++ b/billing.py
+  @@ -12,1 +12,2 @@
+   def on_payment_webhook(event):
+  +    stripe.Charge.create(amount=event.amount, customer=event.customer)
+example_finding:
+  path: billing.py
+  line: 13
+  side: RIGHT
+  severity: high
+  title: Webhook charge is not idempotent on redelivery
+  body: >-
+    Webhooks are delivered at-least-once, so a redelivered event charges the
+    customer twice. Pass an idempotency key derived from the event id so the
+    retry is a no-op.
+  suggestion: "    stripe.Charge.create(amount=event.amount, customer=event.customer, idempotency_key=event.id)"

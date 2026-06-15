@@ -1,0 +1,29 @@
+id: api-design
+title: API design & backward compatibility
+instructions: |
+  Review changes to public / exported API surfaces for backward-compatibility
+  breaks and poor ergonomics (grade medium, or high when callers outside the diff
+  will break). Flag: a renamed or removed public function/method/constant; a
+  changed, reordered, or newly-required parameter; a narrowed return type or a
+  changed default; and a changed serialization / wire / response shape (renamed
+  JSON field, changed enum value). Also flag new public signatures that are hard
+  to call well — boolean flag arguments, long positional lists — where a clearer
+  shape exists. Only raise on exported surfaces (public names, documented
+  endpoints, published schemas); private helpers are free to change.
+example_diff: |
+  --- a/client.py
+  +++ b/client.py
+  @@ -10,1 +10,1 @@
+  -def get_user(user_id, *, include_email=True):
+  +def get_user(user_id, include_email):
+example_finding:
+  path: client.py
+  line: 10
+  side: RIGHT
+  severity: high
+  title: Breaking change to public get_user signature
+  body: >-
+    include_email went from a keyword-only argument with a default to a required
+    positional one, so every existing caller of this public function breaks. Keep
+    it keyword-only with a default to stay backward compatible.
+  suggestion: "def get_user(user_id, *, include_email=True):"

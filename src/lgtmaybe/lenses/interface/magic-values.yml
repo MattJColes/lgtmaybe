@@ -1,0 +1,27 @@
+id: magic-values
+title: Magic numbers & hardcoded values
+instructions: |
+  Flag unexplained literal values introduced in the diff that should be named
+  constants or configuration (grade info to low, medium for a security- or
+  money-sensitive constant). Look for: bare numbers with non-obvious meaning
+  (timeouts, limits, retry counts, buffer sizes, tax or discount rates); repeated
+  literal strings that encode a key or status; and hardcoded URLs, file paths,
+  ports, or credentials-shaped values that belong in config or an environment
+  variable. Trivial, self-evident literals (0, 1, -1, "", small indexes) are fine
+  — do not nag about them. Put the named-constant extraction in the suggestion.
+example_diff: |
+  --- a/http.py
+  +++ b/http.py
+  @@ -7,1 +7,2 @@
+   def fetch(url):
+  +    return requests.get(url, timeout=86400)
+example_finding:
+  path: http.py
+  line: 8
+  side: RIGHT
+  severity: low
+  title: Magic number 86400 as a request timeout
+  body: >-
+    86400 (one day) as a literal request timeout reads as noise and is almost
+    certainly a mistake. Name it so the intent — and the unit — is explicit.
+  suggestion: "    return requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)"

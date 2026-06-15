@@ -1,0 +1,32 @@
+id: information-leakage
+title: Information leakage — one decision known in two places
+instructions: |
+  Flag a single design decision (a file/wire format, an encoding detail, a magic
+  constant, a status-code mapping, a retry policy) duplicated across two or more
+  modules in the diff, so that changing it forces coordinated edits in both. This
+  is leakage of knowledge, not duplication of code — the lines may look nothing
+  alike. Grade low to medium. Watch especially across a producer/parser pair or a
+  client/server boundary. The fix is to centralise the knowledge behind one owner;
+  recommend that rather than a specific line edit.
+example_diff: |
+  --- a/writer.py
+  +++ b/writer.py
+  @@ -4,1 +4,2 @@
+   def write_frame(f, payload):
+  +    f.write(struct.pack(">I", len(payload)))   # 4-byte big-endian length prefix
+  --- a/reader.py
+  +++ b/reader.py
+  @@ -4,1 +4,2 @@
+   def read_frame(f):
+  +    n = struct.unpack(">I", f.read(4))[0]      # assumes 4-byte big-endian prefix
+example_finding:
+  path: reader.py
+  line: 5
+  side: RIGHT
+  severity: medium
+  title: Frame format (4-byte BE length) duplicated in writer and reader
+  body: >-
+    Both sides independently hardcode the length-prefix format; changing it means
+    editing writer and reader in lockstep, and a mismatch corrupts every frame.
+    Move the framing into one shared module so the decision lives in one place.
+  suggestion: null

@@ -1,0 +1,31 @@
+id: bounded
+title: Bound everything — no unbounded growth or work
+instructions: |
+  Flag unbounded growth or work introduced in the diff (grade low to medium, high
+  when the bound is attacker-controlled). Look for: a loop, queue, buffer, retry,
+  or pagination crawl with no explicit upper bound; recursion on attacker- or
+  data-controlled depth; and an in-memory accumulator that grows with an external
+  input. This is the routine "fetch all pages", "retry forever", "recurse on
+  nested JSON" that isn't a security finding but is an operational time bomb — it
+  overlaps the security lens's ReDoS/DoS note only at the edges. Suggest a cap, a
+  stream, or batched processing.
+example_diff: |
+  --- a/sync.py
+  +++ b/sync.py
+  @@ -4,1 +4,5 @@
+   def sync(api, resp):
+  +    results = []
+  +    while resp.next_cursor:
+  +        resp = api.list(cursor=resp.next_cursor)
+  +        results.extend(resp.items)
+example_finding:
+  path: sync.py
+  line: 6
+  side: RIGHT
+  severity: medium
+  title: Unbounded pagination crawl accumulates the whole dataset in memory
+  body: >-
+    The loop has no page cap and results grows without limit, so a large or
+    adversarial dataset exhausts memory. Bound the crawl with a page/size cap and
+    stream or process each page instead of accumulating everything.
+  suggestion: null

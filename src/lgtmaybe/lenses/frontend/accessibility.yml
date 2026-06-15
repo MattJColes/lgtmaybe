@@ -1,0 +1,27 @@
+id: accessibility
+title: Accessibility (a11y)
+instructions: |
+  Review user-facing UI changes (HTML / JSX / templates / components) against
+  WCAG basics (grade low to medium). Flag: images or icons without alt text (or
+  non-decorative images given empty alt); form inputs with no associated label;
+  interactive behaviour on non-interactive tags (a clickable div with no role or
+  keyboard handler); buttons and links with no accessible name; information
+  conveyed by colour alone; missing or wrong ARIA; and controls that can't be
+  reached or operated by keyboard. Suggest the accessible markup. Skip this lens
+  for non-UI code.
+example_diff: |
+  --- a/components/Avatar.jsx
+  +++ b/components/Avatar.jsx
+  @@ -3,1 +3,2 @@
+   function Avatar({ user }) {
+  +  return <img src={user.photo} />
+example_finding:
+  path: components/Avatar.jsx
+  line: 4
+  side: RIGHT
+  severity: medium
+  title: Image has no alt text
+  body: >-
+    A screen reader announces nothing for this avatar. Add an alt describing the
+    user, or alt="" if the image is purely decorative.
+  suggestion: "  return <img src={user.photo} alt={`${user.name}'s avatar`} />"

@@ -1,0 +1,30 @@
+id: hidden-state
+title: Hidden state — make touched state explicit
+instructions: |
+  Flag functions added in the diff that read or mutate hidden global, module-level,
+  singleton, or instance state not evident from the signature (grade info to
+  medium). The worst case is a pure-looking helper that quietly mutates a shared
+  structure, or behaviour that silently depends on call order. Such invisible
+  coupling through shared mutable state is order-dependent and rarely thread-safe.
+  Prefer passing state in as parameters and returning new values. Distinct from
+  complexity (shape of code) and correctness (a concrete bug) — this targets the
+  hidden coupling before it becomes one. Recommend the explicit form.
+example_diff: |
+  --- a/parser.py
+  +++ b/parser.py
+  @@ -2,1 +2,4 @@
+   _SEEN = {}
+  +def normalize(token):
+  +    _SEEN[token] = _SEEN.get(token, 0) + 1
+  +    return token.strip().lower()
+example_finding:
+  path: parser.py
+  line: 3
+  side: RIGHT
+  severity: low
+  title: normalize() secretly mutates module-global _SEEN
+  body: >-
+    The signature implies a pure transform, but the function mutates shared module
+    state as a side effect — order-dependent and not thread-safe. Make the counter
+    an explicit argument or return it alongside the result.
+  suggestion: null

@@ -1,0 +1,29 @@
+id: naming
+title: Naming clarity
+instructions: |
+  Flag names introduced in the diff that obscure rather than reveal intent (grade
+  info to low, medium when a misleading name will cause real bugs). Look for:
+  names whose meaning contradicts the value or behaviour (a `count` that holds a
+  list, an `is_valid` that mutates); cryptic abbreviations outside a tiny loop
+  scope; inconsistent terminology for the same concept across the change; names
+  that encode the type instead of the role; and booleans phrased so True/False is
+  ambiguous. Put a concrete better name in the suggestion. Do not nag about
+  well-named code or established domain abbreviations — only raise a finding when
+  a reader would genuinely be misled or slowed.
+example_diff: |
+  --- a/cart.py
+  +++ b/cart.py
+  @@ -4,1 +4,2 @@
+   def checkout(cart):
+  +    flag = cart.total > 0 and cart.items
+example_finding:
+  path: cart.py
+  line: 5
+  side: RIGHT
+  severity: low
+  title: Vague name 'flag' hides what it means
+  body: >-
+    `flag` says nothing about the condition it holds. A name like
+    has_payable_items states the predicate, so the branch that uses it reads as a
+    sentence.
+  suggestion: "    has_payable_items = cart.total > 0 and cart.items"

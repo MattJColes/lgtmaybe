@@ -1,0 +1,29 @@
+id: i18n
+title: Internationalization & localization
+instructions: |
+  Flag changes that will not localize cleanly (grade info to medium). Look for:
+  user-facing strings hardcoded inline instead of going through the translation
+  layer; sentences built by concatenating translated fragments (word order
+  differs by language); numbers, dates, currency, or times formatted with
+  hardcoded patterns or the wrong locale; pluralization done with a naive
+  `if n == 1`; assumptions that text is left-to-right or fits a fixed width; and
+  byte-based string slicing that breaks multi-byte characters. Leave logs, error
+  codes, and developer-facing strings alone — only user-visible copy. Suggest the
+  localized form.
+example_diff: |
+  --- a/views.py
+  +++ b/views.py
+  @@ -9,1 +9,2 @@
+   def greeting(user):
+  +    return "Welcome back, " + user.name + "!"
+example_finding:
+  path: views.py
+  line: 10
+  side: RIGHT
+  severity: low
+  title: Hardcoded user-facing string bypasses i18n
+  body: >-
+    This greeting is built by concatenation and never reaches the translation
+    layer, so it can't be localized and its word order is fixed to English. Use
+    the translation function with an interpolated name.
+  suggestion: '    return _("Welcome back, {name}!").format(name=user.name)'
