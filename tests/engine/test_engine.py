@@ -560,14 +560,15 @@ def test_ollama_fans_out_serially() -> None:
     from lgtmaybe.engine.engine import _worker_count
 
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert _worker_count(cfg) == 1  # one ollama instance serves serially
+    assert _worker_count(cfg, len(cfg.categories)) == 1  # one ollama instance serves serially
 
 
 def test_cloud_fans_out_concurrently() -> None:
     from lgtmaybe.engine.engine import _worker_count
 
     cfg = ReviewConfig(provider=Provider.openai, model="gpt-4o")
-    assert _worker_count(cfg) == len(cfg.categories)
+    # Capped at the worker ceiling, but covers the full lens count when small.
+    assert _worker_count(cfg, 5) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -672,3 +673,35 @@ def test_partial_failure_notice_names_the_provider_error() -> None:
     _, summary = engine.review(_CTX, cfg)
 
     assert "insufficient_quota" in summary
+
+
+# ---------------------------------------------------------------------------
+# Custom ("BYO") lenses
+# ---------------------------------------------------------------------------
+
+
+def test_custom_lens_runs_as_an_extra_review_call() -> None:
+    """A configured extra lens fans out as its own focused review call, and its
+    findings flow through the same merge/dedupe/reflect pipeline."""
+    provider = _provider_for([_HIGH])
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="m",
+        extra_lenses=[
+            {
+                "id": "simplify",
+                "title": "Simplify or delete",
+                "instructions": "Flag needless code — YAGNI.",
+            }
+        ],
+    )
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    review_calls = _review_calls(provider)
+    # _CTX states no intent, so the intent lens is skipped; the custom lens adds one.
+    n_builtin = len([c for c in cfg.categories if c is not ReviewCategory.intent])
+    assert len(review_calls) == n_builtin + 1
+    assert any("Simplify or delete" in c["messages"][0]["content"] for c in review_calls)
+    assert findings  # the custom lens's finding survived the pipeline

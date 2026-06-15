@@ -39,7 +39,9 @@ complexity, over-long functions, duplicated logic). An **intent lens** checks
 that the PR does what it says: it reads the PR title, description, and commit
 names (or your `git log` commit names on the CLI) and flags out-of-scope hunks,
 code that contradicts the stated intent, and promised behaviour the diff never
-implements. Generated and non-reviewable files (lockfiles, minified bundles,
+implements. A **ponytail lens** — the "lazy senior dev" (the best code is the
+code you never wrote) — flags code that needn't exist at all: YAGNI, reach for
+the standard library, do it in fewer lines. Generated and non-reviewable files (lockfiles, minified bundles,
 vendored directories, binaries) are skipped automatically, and secrets are
 redacted from the diff before it is sent to the model.
 
@@ -55,7 +57,7 @@ latency:
 
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
-- `categories` (default all eight) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
+- `categories` (default all nine) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
 - `min_severity` (default `info`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.

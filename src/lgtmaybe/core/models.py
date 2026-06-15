@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Side of the diff a comment attaches to, matching the GitHub review API.
 Side = Literal["LEFT", "RIGHT"]
@@ -49,6 +49,9 @@ class ReviewCategory(StrEnum):
 
     ``intent`` checks the diff against the PR's stated intent (title, description,
     commit messages); it only runs when the context carries some stated intent.
+    ``ponytail`` is the "lazy senior dev" lens — the best code is the code you
+    never wrote — flagging code that needn't exist at all (YAGNI, reach for the
+    standard library, do it in fewer lines).
     """
 
     security = "security"
@@ -59,6 +62,7 @@ class ReviewCategory(StrEnum):
     performance = "performance"
     complexity = "complexity"
     intent = "intent"
+    ponytail = "ponytail"
 
 
 class Provider(StrEnum):
@@ -90,6 +94,43 @@ class ReviewFinding(_Strict):
     title: str
     body: str
     suggestion: str | None = None
+
+
+_BUILTIN_LENS_IDS: frozenset[str] = frozenset(c.value for c in ReviewCategory)
+
+
+class CustomLens(_Strict):
+    """A user-defined review lens — a "skill file" run alongside the built-ins.
+
+    The engine fans it out as its own focused LLM call (same pipeline as a
+    built-in ``ReviewCategory``) and merges its findings with the rest. A lens is
+    declared in **trusted** config (``.lgtmaybe.yml`` or a file referenced by
+    ``lens_paths``), never from PR-author content, so its text is safe to put in
+    the system prompt. Supplying a worked example (``example_diff`` +
+    ``example_finding``) is optional but sharply improves a small model's output.
+    """
+
+    id: str
+    instructions: str
+    title: str = ""
+    example_diff: str | None = None
+    example_finding: ReviewFinding | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _id_is_valid(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("custom lens id must be a non-empty string")
+        if cleaned in _BUILTIN_LENS_IDS:
+            raise ValueError(f"custom lens id {cleaned!r} collides with a built-in category")
+        return cleaned
+
+    @model_validator(mode="after")
+    def _example_is_paired(self) -> CustomLens:
+        if (self.example_diff is None) != (self.example_finding is None):
+            raise ValueError("example_diff and example_finding must be provided together")
+        return self
 
 
 class ReviewResult(_Strict):
@@ -186,8 +227,19 @@ class ReviewConfig(_Strict):
     # pydantic copies it per instance, and only a plain default reaches the JSON
     # schema that docs/generate_reference.py renders.
     categories: list[ReviewCategory] = Field(default=list(ReviewCategory))
+    # User-defined ("BYO") lenses run alongside the built-in categories — each
+    # fans out as its own focused call and merges into the same findings. Loaded
+    # from .lgtmaybe.yml (inline) or skill files via the loader's `lens_paths`.
+    extra_lenses: list[CustomLens] = Field(default_factory=list)
     # Constrain model output to the findings JSON schema via litellm
     # response_format (provider-native JSON mode). Keeps models from returning
     # prose/reasoning instead of findings. Disable for a model/provider that
     # doesn't support it (the lenient parser is the fallback).
     structured_output: bool = True
+
+    @model_validator(mode="after")
+    def _lens_ids_are_unique(self) -> ReviewConfig:
+        ids = [lens.id for lens in self.extra_lenses]
+        if len(ids) != len(set(ids)):
+            raise ValueError("extra_lenses ids must be unique")
+        return self

@@ -157,7 +157,7 @@ to the same engine/provider.
 
 ## Features
 
-**Review intelligence** — per-category fan-out across eight lenses (each its own
+**Review intelligence** — per-category fan-out across nine lenses (each its own
 concurrent model call with a lens-matched worked example, merged & de-duped):
 - **Security** — OWASP-aligned checklist: injection, XSS, CSRF/open redirect,
   hardcoded secrets, broken authn/authz (incl. JWT pitfalls), path traversal,
@@ -183,6 +183,16 @@ concurrent model call with a lens-matched worked example, merged & de-duped):
   impact).
 - **Complexity** — high cyclomatic complexity / deep nesting, over-long
   functions, duplicated logic, dead code (restrained, `info`/`medium`).
+- **Ponytail** — the "lazy senior dev" lens (the best code is the code you never
+  wrote): needless code (YAGNI), reinventing the standard library, code that could
+  be far shorter, premature configurability (restrained, `info`/`medium`).
+
+**Custom lenses (BYO)** — beyond the nine built-ins, users define their own
+lenses in trusted config (`extra_lenses` inline, or skill files via the loader's
+`lens_paths`). Each `CustomLens` (`id` + `instructions`, optional `title` and a
+worked `example_diff`/`example_finding`) is fanned out as its own focused call
+through the same merge/dedupe/reflect pipeline. Lens text goes into the system
+prompt, so it must come from config you control, never PR-author content.
 
 **Output & posting** — structured findings (path, line, severity, title, body,
 optional suggestion). On GitHub: inline comments on the exact changed line + one

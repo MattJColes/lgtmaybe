@@ -8,6 +8,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import partial
 
 from lgtmaybe.core.diffparse import split_by_file
@@ -26,7 +27,7 @@ from lgtmaybe.github import is_reviewable
 from .compress import batch_files, context_lines_for_budget, count_tokens, expand_hunks
 from .injection import wrap_diff, wrap_intent
 from .parse import ParseError, parse_findings
-from .prompt import build_system_prompt
+from .prompt import build_lens_prompt, build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
 
@@ -37,6 +38,37 @@ _log = get_logger(__name__)
 _MAX_WORKERS = 8
 
 
+@dataclass(frozen=True)
+class _Lens:
+    """One review lens in the fan-out: a built-in category or a user-defined lens.
+
+    Holds the prebuilt system prompt so the fan-out is uniform — the engine no
+    longer cares whether a lens came from ``ReviewCategory`` or ``extra_lenses``.
+    ``carries_intent`` is true only for the built-in intent lens, the one call
+    that receives the stated-intent block.
+    """
+
+    id: str
+    system_prompt: str
+    carries_intent: bool = False
+
+
+def _build_lenses(cfg: ReviewConfig) -> list[_Lens]:
+    """All lenses to run: built-in categories first, then user-defined lenses."""
+    lenses = [
+        _Lens(
+            id=category.value,
+            system_prompt=build_system_prompt(category),
+            carries_intent=category is ReviewCategory.intent,
+        )
+        for category in cfg.categories
+    ]
+    lenses += [
+        _Lens(id=lens.id, system_prompt=build_lens_prompt(lens)) for lens in cfg.extra_lenses
+    ]
+    return lenses
+
+
 class ReviewIncompleteError(Exception):
     """Every review call failed (timeout or unparseable output) — no usable result.
 
@@ -45,11 +77,11 @@ class ReviewIncompleteError(Exception):
     """
 
 
-def _worker_count(cfg: ReviewConfig) -> int:
-    """How many category calls to run at once: 1 for ollama (serial backend)."""
+def _worker_count(cfg: ReviewConfig, lens_count: int) -> int:
+    """How many lens calls to run at once: 1 for ollama (serial backend)."""
     if cfg.provider is Provider.ollama:
         return 1
-    return min(len(cfg.categories), _MAX_WORKERS) or 1
+    return min(lens_count, _MAX_WORKERS) or 1
 
 
 class LLMReviewEngine(ReviewEngine):
@@ -69,9 +101,9 @@ class LLMReviewEngine(ReviewEngine):
         #     rather than burn a model call judging the diff against nothing.
         intent_text = _intent_text(ctx)
         intent_block = wrap_intent(redact(intent_text)) if intent_text else None
-        categories = list(cfg.categories)
-        if ReviewCategory.intent in categories and intent_block is None:
-            categories.remove(ReviewCategory.intent)
+        lenses = _build_lenses(cfg)
+        if intent_block is None and any(lens.carries_intent for lens in lenses):
+            lenses = [lens for lens in lenses if not lens.carries_intent]
             _log.info("intent lens skipped — no stated intent (title/description/commits)")
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise.
@@ -108,7 +140,7 @@ class LLMReviewEngine(ReviewEngine):
         # 5. For each batch, fan out one call per review category. Each category
         #    gets a focused prompt; their findings are merged. Concurrency is
         #    provider-aware — serial for ollama so calls don't queue and time out.
-        workers = _worker_count(cfg)
+        workers = _worker_count(cfg, len(lenses))
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None
@@ -116,10 +148,10 @@ class LLMReviewEngine(ReviewEngine):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
             review_one = partial(
-                self._review_category, wrapped, intent_block, cfg.model, response_format
+                self._review_lens, wrapped, intent_block, cfg.model, response_format
             )
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                for findings, error in pool.map(review_one, categories):
+                for findings, error in pool.map(review_one, lenses):
                     total_calls += 1
                     if error is not None:
                         failed_calls += 1
@@ -180,28 +212,28 @@ class LLMReviewEngine(ReviewEngine):
             return filtered, f"👍 LGTM!\n\n{summary_line}"
         return filtered, summary_line
 
-    def _review_category(
+    def _review_lens(
         self,
         wrapped: str,
         intent_block: str | None,
         model: str,
         response_format: type[ReviewResult] | None,
-        category: ReviewCategory,
+        lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
-        """Run one focused review call for a single category.
+        """Run one focused review call for a single lens (built-in or user-defined).
 
         Returns ``(findings, error)``. ``error`` is None on success, else a concise
         reason — the provider exception (e.g. a 429 quota error) or unparseable
         output — that the engine surfaces so a failure names its real cause instead
-        of a generic "timeout". A failing category never aborts the others.
+        of a generic "timeout". A failing lens never aborts the others.
         """
         user_content = wrapped
-        if category is ReviewCategory.intent and intent_block is not None:
+        if lens.carries_intent and intent_block is not None:
             # Only the intent lens pays the intent-block tokens (and its
             # injection surface); the other lenses never see PR-authored prose.
             user_content = f"{intent_block}\n\n{wrapped}"
         messages: list[Message] = [
-            {"role": "system", "content": build_system_prompt(category)},
+            {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},
         ]
         opts = {"response_format": response_format} if response_format is not None else {}
@@ -211,14 +243,14 @@ class LLMReviewEngine(ReviewEngine):
             reason = _error_reason(exc)
             _log.warning(
                 "review call failed",
-                extra={"category": category.value, "reason": reason},
+                extra={"lens": lens.id, "reason": reason},
                 exc_info=True,
             )
             return [], reason
         try:
             return parse_findings(result.text), None
         except ParseError:
-            _log.warning("unparseable model output", extra={"category": category.value})
+            _log.warning("unparseable model output", extra={"lens": lens.id})
             return [], "unparseable model output"
 
 

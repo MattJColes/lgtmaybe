@@ -105,9 +105,14 @@ Default: `100000`.
 Which review lenses to run. The reviewer asks for each category in its own
 concurrent model call and merges the findings, so a focused prompt concentrates
 on one concern at a time. One or more of `security`, `correctness`,
-`deprecation`, `tests`, `documentation`, `performance`, `complexity`, `intent`.
-Narrowing the list trades thoroughness for fewer model calls (and lower token
-usage).
+`deprecation`, `tests`, `documentation`, `performance`, `complexity`, `intent`,
+`ponytail`. Narrowing the list trades thoroughness for fewer model calls (and
+lower token usage).
+
+The `ponytail` lens is the "lazy senior dev" check — *the best code is the code
+you never wrote* — flagging code that needn't exist at all (YAGNI, reach for the
+standard library, do it in fewer lines). See
+[What gets reviewed](../explanation/what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room).
 
 The `intent` lens checks the diff against the PR's stated intent — title,
 description, and commit names on GitHub; your `git log` commit names on the
@@ -123,7 +128,7 @@ categories:
   - correctness
 ```
 
-Default: all eight categories.
+Default: all nine categories.
 
 ### context_lines
 
@@ -166,6 +171,63 @@ structured_output: false   # only if your model rejects JSON-schema mode
 ```
 
 Default: `true`.
+
+### extra_lenses
+
+Define your own review lenses ("BYO skills") that run **alongside** the built-in
+`categories`. Each one fans out as its own focused model call and its findings
+merge into the same review. A lens needs an `id` (unique, and not one of the
+built-in category names) and `instructions` describing what to look for; a
+`title`, plus a worked example (`example_diff` + `example_finding`, supplied
+together) are optional but sharply improve a small model's output.
+
+```yaml
+extra_lenses:
+  - id: simplify
+    title: Simplify or delete
+    instructions: |
+      Flag code that should not exist at all. The best code is the code you never
+      wrote: prefer the standard library, an existing dependency, or one line over
+      a new abstraction. Call out needless wrappers, premature generality, and
+      "just in case" code with no caller.
+    example_diff: |
+      --- a/util.py
+      +++ b/util.py
+      @@ -4,1 +4,3 @@
+       def get_name(user):
+      +    name = user.name
+      +    return name
+    example_finding:
+      path: util.py
+      line: 5
+      severity: low
+      title: Needless local variable
+      body: The temporary adds nothing; return user.name directly.
+      suggestion: "    return user.name"
+```
+
+Lens definitions are **trusted config**: they go into the system prompt, so only
+define them in files you control (committed `.lgtmaybe.yml` or repo skill files),
+never from PR-author content. See
+[Add a custom review lens](add-a-custom-lens.md) for a full walk-through.
+
+Default: none.
+
+### lens_paths
+
+Load `extra_lenses` from separate **skill files** instead of inlining them — handy
+for sharing a lens across repos or wiring lgtmaybe into an agent harness. Each
+entry is a YAML file (one lens, or a list of lenses) or a directory of `*.yml` /
+`*.yaml` lens files. Paths are resolved relative to where lgtmaybe runs (your repo
+root). Lenses loaded this way are appended to any inline `extra_lenses`.
+
+```yaml
+lens_paths:
+  - .lgtmaybe/skills            # a directory of one-lens-per-file skill files
+  - team-lenses/house-style.yml # or a single file
+```
+
+Default: none.
 
 ## CLI flag overrides
 

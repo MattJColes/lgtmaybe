@@ -21,6 +21,10 @@ def repo(tmp_path: Path) -> Path:
     _git(tmp_path, "init", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@example.com")
     _git(tmp_path, "config", "user.name", "Test")
+    # Never sign commits in a throwaway test repo — inheriting a global
+    # commit.gpgsign would otherwise fail the fixture in environments that
+    # force signing (e.g. a signing server that rejects scratch repos).
+    _git(tmp_path, "config", "commit.gpgsign", "false")
     (tmp_path / "app.py").write_text("def f():\n    return 1\n")
     _git(tmp_path, "add", "app.py")
     _git(tmp_path, "commit", "-m", "base")

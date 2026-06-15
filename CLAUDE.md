@@ -138,13 +138,25 @@ pattern, event bus, plugin framework.
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`
      (security, correctness, deprecation, tests, documentation, performance,
-     complexity, intent; `engine/prompt.py`) — each lens gets its **own worked
-     example** (with a real hunk header, teaching the line-number arithmetic) —
+     complexity, intent, ponytail; `engine/prompt.py`) — each lens gets its **own
+     worked example** (with a real hunk header, teaching the line-number arithmetic) —
      and the engine runs each category as its own **concurrent** `provider.complete`
      call per batch (a `ThreadPoolExecutor` over the sync port — concurrent for
      cloud, serial for ollama), then **merges and de-dupes** the findings
      (`engine._dedupe`, keyed on path/line/side/title) before reflection.
-     `ReviewConfig.categories` selects the lenses (default: all eight).
+     `ReviewConfig.categories` selects the lenses (default: all nine).
+   - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
+     their own lenses via `ReviewConfig.extra_lenses` (a `CustomLens`: `id` +
+     `instructions`, optional `title` and a worked `example_diff`/`example_finding`)
+     — defined inline in `.lgtmaybe.yml` or in skill files loaded by the config
+     loader's `lens_paths` directive. The engine builds a uniform `_Lens` per
+     built-in category **and** per custom lens (`engine._build_lenses`,
+     `prompt.build_lens_prompt`) and fans them all out identically through the same
+     merge/dedupe/reflect pipeline. Lens text enters the system prompt, so it is
+     **trusted config only** — never sourced from PR-author content (on
+     `pull_request_target` config comes from the base, not the PR head). Covered by
+     `tests/engine/test_prompt.py`, `tests/engine/test_engine.py`,
+     `tests/config/test_loader.py`, and `tests/test_models.py`.
    - **Intent lens:** "does the PR do what it says?" — `PRContext` carries the
      stated intent (`title`, `description`, `commit_messages`): PR title/body +
      commit names via the REST gateway, or `git log` commit names from the local
@@ -152,6 +164,14 @@ pattern, event bus, plugin framework.
      redacts the intent text, wraps it via `injection.wrap_intent` (its own
      neutralised `INTENT_START`/`INTENT_END` block), and sends it **only on the
      intent call**; with no stated intent the lens is skipped (logged, no notice).
+   - **Ponytail lens:** the "lazy senior dev" lens (`ReviewCategory.ponytail`),
+     inspired by the Ponytail skill — *the best code is the code you never wrote*.
+     Flags code that needn't exist at all (YAGNI / speculative generality,
+     reinventing the stdlib, code that could be far shorter, premature
+     configurability), restrained at `info`/`medium`. Distinct from `complexity`
+     ("is this hard to follow?"): ponytail asks "should this exist at all?".
+     Default-on like the other built-ins; asserted by
+     `test_prompt.py::test_prompt_asks_for_ponytail_review`.
    - **Self-reflection:** after merge/dedupe, `engine/reflect.py` asks the
      provider to audit its own findings for false positives and drops the ones it
      marks low-confidence. The verdict is structured (`ReflectionResult` —
@@ -245,8 +265,11 @@ Two distinct concerns, kept separate:
   impact up to `high`; "Performance" section), needless **complexity** (deep
   nesting / high cyclomatic complexity, over-long low-cohesion functions,
   duplicated logic, dead code; `info`/`medium`, restrained; "Complexity"
-  section), and **intent mismatches** (out-of-scope hunks, contradictions,
-  unfulfilled claims vs the stated intent; `medium`/`high`; "Intent" section).
+  section), **intent mismatches** (out-of-scope hunks, contradictions,
+  unfulfilled claims vs the stated intent; `medium`/`high`; "Intent" section),
+  and **needless code** (YAGNI / speculative generality, reinventing the stdlib,
+  code that could be far shorter, premature configurability; `info`/`medium`,
+  restrained; the Ponytail "lazy senior dev" lens, "Ponytail" section).
 
 Both are covered by tests in `tests/engine/` (`test_redact.py`, `test_injection.py`,
 `test_prompt.py`, `test_parse.py`, `test_engine.py`) and `tests/github/test_diff.py`.
@@ -260,6 +283,7 @@ health"; covered by `test_prompt.py`). Every scan category is asserted in
 `test_prompt_asks_for_test_coverage`, `test_prompt_asks_for_documentation_review`,
 `test_prompt_names_pii_and_secrets_in_logs`, `test_prompt_asks_for_performance_review`,
 `test_prompt_asks_for_complexity_review`, `test_prompt_asks_for_intent_review`,
+`test_prompt_asks_for_ponytail_review`,
 plus the topic-coverage block: concurrency/races, numeric/datetime, CSRF /
 redirect / XXE / mass assignment, CI/IaC, weak tests, stale docs, leaks,
 typosquats) — extend those when you change the prompt's checklist. Prompt
@@ -310,9 +334,11 @@ Split by whether it can be deterministic, because that decides where it lives:
   and the large multi-file `vibe-multifile` fixture stay in-repo for on-demand
   `python -m evals.run` runs: the fixtures plant security + correctness bugs **and**
   blatant performance (N+1 / quadratic) + complexity (deep nesting / duplication)
-  issues so a full run exercises all seven code lenses, with the per-lens coverage
-  guarded in `tests/evals/test_fixtures.py`. (The eighth lens, intent, needs a
-  stated intent the fixtures don't carry, so the engine skips it there by design.)
+  issues so a full run exercises those code lenses, with the per-lens coverage
+  guarded in `tests/evals/test_fixtures.py`. (Two lenses aren't scored there: the
+  intent lens needs a stated intent the fixtures don't carry, and the ponytail
+  lens looks for needless code the fixtures don't plant — the engine still runs
+  ponytail, but there's no planted finding for it to match.)
   Real-spend hosted-provider e2e remains label-gated in `action-e2e.yml`.
 
 [litellm]: https://github.com/BerriAI/litellm

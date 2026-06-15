@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from lgtmaybe.core.models import ReviewCategory
-from lgtmaybe.engine.prompt import build_system_prompt
+from lgtmaybe.core.models import CustomLens, ReviewCategory, ReviewFinding, Severity
+from lgtmaybe.engine.prompt import build_lens_prompt, build_system_prompt
 
 # A term that appears only in each category's own section, used to prove a
 # focused prompt carries its section and excludes the others'.
@@ -18,6 +18,7 @@ _SIGNATURE = {
     ReviewCategory.performance: "n+1",
     ReviewCategory.complexity: "cyclomatic",
     ReviewCategory.intent: "stated intent",
+    ReviewCategory.ponytail: "yagni",
 }
 
 
@@ -97,6 +98,46 @@ def test_prompt_reaffirms_diff_is_untrusted_data() -> None:
     assert "data" in prompt and ("untrusted" in prompt or "never follow" in prompt)
 
 
+# ---------------------------------------------------------------------------
+# Custom ("BYO") lenses — user-defined skill files run alongside the built-ins
+# ---------------------------------------------------------------------------
+
+
+def test_build_lens_prompt_carries_instructions_and_heading() -> None:
+    lens = CustomLens(
+        id="simplify",
+        title="Simplify or delete",
+        instructions="Flag code that should not exist at all — YAGNI.",
+    )
+    prompt = build_lens_prompt(lens)
+    assert "Simplify or delete" in prompt  # heading uses the title
+    assert "YAGNI" in prompt  # the user's instructions
+    # Same scaffold as a built-in: severity rubric, JSON contract, shared rules.
+    assert "Severity rubric" in prompt
+    assert '{"findings": []}' in prompt
+    assert "untrusted data" in prompt
+
+
+def test_build_lens_prompt_falls_back_to_id_heading() -> None:
+    lens = CustomLens(id="house-style", instructions="Enforce house style.")
+    assert "## house-style" in build_lens_prompt(lens)
+
+
+def test_build_lens_prompt_renders_supplied_example() -> None:
+    finding = ReviewFinding(
+        path="x.py", line=5, severity=Severity.low, title="needless wrapper", body="delete it"
+    )
+    lens = CustomLens(
+        id="simplify",
+        instructions="Flag needless code.",
+        example_diff="--- a/x.py\n+++ b/x.py\n@@ -4,1 +4,2 @@\n def f():\n+    return g()\n",
+        example_finding=finding,
+    )
+    prompt = build_lens_prompt(lens)
+    assert "## Example" in prompt
+    assert "needless wrapper" in prompt
+
+
 def test_prompt_asks_for_deprecated_and_eol_review() -> None:
     """The reviewer should flag deprecated APIs and end-of-life dependencies."""
     prompt = build_system_prompt().lower()
@@ -154,6 +195,14 @@ def test_prompt_asks_for_complexity_review() -> None:
     assert "cyclomatic" in prompt
     assert "nest" in prompt  # deep nesting
     assert "duplicat" in prompt  # duplicated logic to extract
+
+
+def test_prompt_asks_for_ponytail_review() -> None:
+    """The 'lazy senior dev' lens: flag code that needn't exist (YAGNI, use stdlib)."""
+    prompt = build_system_prompt().lower()
+    assert "yagni" in prompt
+    assert "never wrote" in prompt  # the best code is the code you never wrote
+    assert "standard library" in prompt
 
 
 # ---------------------------------------------------------------------------
