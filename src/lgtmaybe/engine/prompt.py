@@ -40,6 +40,18 @@ the levels above), title (string ≤ 80 chars), body (string), suggestion (strin
 
 Report each distinct issue as its own finding — several findings may share a line.
 
+### How to fill `body` and `suggestion`
+
+`body` holds your explanation — what is wrong and why it matters, in prose.
+
+`suggestion` is rendered as a one-click committable change, so it must be the \
+**literal replacement code** for the flagged line(s): the exact source that should \
+replace them, indented to match, and nothing else. It is not a place for prose — no \
+"Consider…", "Use…", or "you should…". If the fix needs explaining, explain it in \
+`body`; the `suggestion` shows only the corrected code. When there is no concrete \
+drop-in code change (the fix is structural, spans code you cannot see, or is a \
+judgement call), set `suggestion` to null and make the recommendation in `body`.
+
 ### How to fill `line` and `side`
 
 `line` is a real file line number, not a position within the diff. Compute it from the
@@ -84,8 +96,9 @@ _SECURITY_EXAMPLE = _example_block(
         "side": "RIGHT",
         "severity": "high",
         "title": "Unsafe deserialization via pickle.loads",
-        "body": "pickle.loads executes arbitrary code when the input is attacker-controlled.",
-        "suggestion": "Use a safe format such as json.loads instead of pickle.",
+        "body": "pickle.loads executes arbitrary code when the input is attacker-controlled. "
+        "Use a safe format such as json.loads instead.",
+        "suggestion": '    return json.loads(open(path, "rb").read())',
     },
 )
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.10](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.9...lgtmaybe-v0.1.10) (2026-06-15)
+
+
+### Features
+
+* **engine:** log per-lens progress so a running Action shows it's not stuck ([#87](https://github.com/MattJColes/lgtmaybe/issues/87)) ([8f821e2](https://github.com/MattJColes/lgtmaybe/commit/8f821e20a1a93ae73b92fb3b24e69ce856fe2cda))
+
+## [0.1.9](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.8...lgtmaybe-v0.1.9) (2026-06-15)
+
+
+### Bug Fixes
+
+* make the model emit code in `suggestion`, prose in `body` ([#83](https://github.com/MattJColes/lgtmaybe/issues/83)) ([f2c5697](https://github.com/MattJColes/lgtmaybe/commit/f2c5697a5e2b93c91c31399048a1ec36847d74a9))
+
 ## [0.1.8](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.7...lgtmaybe-v0.1.8) (2026-06-15)
 
 

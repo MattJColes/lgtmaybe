@@ -1,6 +1,6 @@
 [project]
 name = "lgtmaybe"
-version = "0.1.8"
+version = "0.1.10"
 description = "Provider-agnostic PR reviewer — six hosted providers, ollama, and any OpenAI-compatible endpoint, one flag, no keys in secrets for cloud."
 readme = "README.md"
 license = { text = "MIT" }
