@@ -1,5 +1,5 @@
 name: lgtmaybe
-description: Provider-agnostic PR reviewer — six providers, one flag, no static keys for cloud.
+description: Provider-agnostic PR reviewer — six hosted providers plus ollama and any OpenAI-compatible endpoint, one flag, no static keys for cloud.
 author: Matt Coles
 branding:
   icon: check-circle
@@ -7,7 +7,7 @@ branding:
 
 inputs:
   provider:
-    description: "LLM provider: openai, anthropic, openrouter, bedrock, vertex, azure, or ollama."
+    description: "LLM provider: openai, anthropic, openrouter, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
     required: false
     default: ""
   model:
@@ -19,11 +19,11 @@ inputs:
     required: false
     default: ""
   api_key:
-    description: "API key for key-based providers (openai/anthropic/openrouter/azure). Leave empty for bedrock/vertex/ollama."
+    description: "API key for key-based providers (openai/anthropic/openrouter/azure, and openai-compatible hosted endpoints like DeepSeek). Leave empty for bedrock/vertex/ollama and keyless local openai-compatible servers."
     required: false
     default: ""
   api_base:
-    description: "Resource endpoint for azure (https://<resource>.openai.azure.com), or a custom base URL for other providers."
+    description: "Resource endpoint for azure (https://<resource>.openai.azure.com), the OpenAI /v1 base for openai-compatible (e.g. https://api.deepseek.com/v1), or a custom base URL for other providers."
     required: false
     default: ""
   timeout:

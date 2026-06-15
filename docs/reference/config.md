@@ -22,7 +22,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `info` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
-| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openrouter` / `vertex` | Yes | — |  |
+| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` | Yes | — |  |
 | `reflect` | boolean | No | `True` | Reflect |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `temperature` | number | No | `0.0` | Temperature |
@@ -32,13 +32,14 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 
 ### Provider
 
-LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azure`) use ambient credentials — `azure` also needs the resource endpoint (`--api-base`) and accepts a key as an alternative.
+LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azure`) use ambient credentials — `azure` also needs the resource endpoint (`--api-base`) and accepts a key as an alternative. `openai-compatible` points at any server speaking the OpenAI `/v1` wire format (DeepSeek, llama.cpp, LM Studio, vLLM) via `--api-base`; the key is optional so keyless local servers work.
 
 - `anthropic`
 - `azure`
 - `bedrock`
 - `ollama`
 - `openai`
+- `openai-compatible`
 - `openrouter`
 - `vertex`
 
@@ -111,7 +112,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "bedrock",
         "vertex",
         "azure",
-        "ollama"
+        "ollama",
+        "openai-compatible"
       ],
       "title": "Provider",
       "type": "string"

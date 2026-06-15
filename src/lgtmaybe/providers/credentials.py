@@ -13,7 +13,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from lgtmaybe.core.models import Provider
-from lgtmaybe.providers.constants import DEFAULT_OLLAMA_BASE
+from lgtmaybe.providers.constants import (
+    DEFAULT_OLLAMA_BASE,
+    OPENAI_COMPATIBLE_PLACEHOLDER_KEY,
+)
 
 
 @dataclass(frozen=True)
@@ -179,6 +182,26 @@ def resolve_credentials(
 
     if provider is Provider.ollama:
         return AuthConfig(api_base=api_base or DEFAULT_OLLAMA_BASE)
+
+    if provider is Provider.openai_compatible:
+        import os
+
+        base = api_base or os.environ.get("OPENAI_COMPATIBLE_API_BASE")
+        if not base:
+            raise ValueError(
+                "openai-compatible requires a base URL. Pass --api-base "
+                "(e.g. http://localhost:8000/v1 for llama.cpp / LM Studio / vLLM, "
+                "or https://api.deepseek.com/v1) or set OPENAI_COMPATIBLE_API_BASE."
+            )
+        # Key is optional: hosted endpoints (DeepSeek) need one, local servers
+        # don't. When absent we still send a placeholder — the OpenAI client
+        # litellm uses rejects an empty key.
+        key = (
+            api_key
+            or os.environ.get("OPENAI_COMPATIBLE_API_KEY")
+            or OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+        )
+        return AuthConfig(api_key=key, api_base=base)
 
     # API-key providers: openai, anthropic, openrouter
     _ENV_VAR: dict[Provider, str] = {

@@ -8,6 +8,7 @@ litellm model-string conventions:
   vertex     → vertex_ai/<model>
   azure      → azure/<model>   (+ api_base = resource endpoint)
   ollama     → ollama/<model>  (+ api_base)
+  openai-compatible → openai/<model>  (+ api_base = custom endpoint)
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ _PREFIXES: dict[Provider, str] = {
     Provider.vertex: "vertex_ai",
     Provider.azure: "azure",
     Provider.ollama: "ollama",
+    # OpenAI-compatible servers (DeepSeek, llama.cpp, LM Studio, vLLM) ride the
+    # openai route; the custom endpoint comes through api_base.
+    Provider.openai_compatible: "openai",
 }
 
 # Default per-request timeout (seconds) when the caller doesn't set one. Local
