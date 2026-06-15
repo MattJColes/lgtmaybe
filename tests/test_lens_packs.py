@@ -64,8 +64,6 @@ def test_each_pack_loads_through_the_real_loader(pack: str) -> None:
     from lgtmaybe.config.loader import load_config
 
     cfg = load_config(
-        config_stream=io.StringIO(
-            f"provider: ollama\nmodel: m\nlens_paths:\n  - pack:{pack}\n"
-        )
+        config_stream=io.StringIO(f"provider: ollama\nmodel: m\nlens_paths:\n  - pack:{pack}\n")
     )
     assert cfg.extra_lenses, f"pack {pack!r} loaded no lenses"
