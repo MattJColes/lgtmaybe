@@ -46,6 +46,7 @@ def finding_fingerprint(path: str, title: str) -> str:
     digest = hashlib.sha256(f"{path}\n{title.strip().lower()}".encode())
     return digest.hexdigest()[:12]
 
+
 # Concurrency for the per-file head-content fetch. The contents are independent
 # GETs, so fetching them serially is pure round-trip latency on a many-file PR.
 _CONTENT_FETCH_WORKERS = 8
