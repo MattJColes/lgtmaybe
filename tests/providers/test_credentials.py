@@ -178,6 +178,51 @@ class TestAzure:
         assert "OIDC" in msg or "keyless" in msg.lower()
 
 
+class TestOpenAICompatible:
+    """Custom OpenAI-compatible endpoints: DeepSeek, llama.cpp, LM Studio, vLLM."""
+
+    def test_requires_a_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OPENAI_COMPATIBLE_API_BASE", raising=False)
+        with pytest.raises(ValueError, match="openai-compatible") as exc_info:
+            resolve_credentials(Provider.openai_compatible)
+        assert "api-base" in str(exc_info.value) or "base URL" in str(exc_info.value)
+
+    def test_with_api_key_and_base_resolves(self) -> None:
+        config = resolve_credentials(
+            Provider.openai_compatible,
+            api_key="sk-deepseek",
+            api_base="https://api.deepseek.com/v1",
+        )
+        assert config.api_key == "sk-deepseek"
+        assert config.api_base == "https://api.deepseek.com/v1"
+
+    def test_reads_key_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-env")
+        config = resolve_credentials(
+            Provider.openai_compatible,
+            api_base="https://api.deepseek.com/v1",
+        )
+        assert config.api_key == "sk-env"
+
+    def test_reads_base_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENAI_COMPATIBLE_API_BASE", "http://localhost:8000/v1")
+        config = resolve_credentials(Provider.openai_compatible, api_key="sk-x")
+        assert config.api_base == "http://localhost:8000/v1"
+
+    def test_keyless_local_server_uses_placeholder(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """llama.cpp / LM Studio / vLLM need no key — but the OpenAI client demands
+        a non-empty one, so a harmless placeholder is sent and the base preserved."""
+        from lgtmaybe.providers.constants import OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+
+        monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
+        config = resolve_credentials(
+            Provider.openai_compatible,
+            api_base="http://localhost:8000/v1",
+        )
+        assert config.api_key == OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+        assert config.api_base == "http://localhost:8000/v1"
+
+
 class TestOllama:
     def test_ollama_resolves_with_no_key_or_creds(self) -> None:
         config = resolve_credentials(Provider.ollama)

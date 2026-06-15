@@ -1,5 +1,5 @@
 site_name: lgtmaybe
-site_description: Provider-agnostic PR reviewer — six providers, one flag, no keys in secrets for cloud.
+site_description: Provider-agnostic PR reviewer — six hosted providers, ollama, and any OpenAI-compatible endpoint, one flag, no keys in secrets for cloud.
 site_url: https://mattjcoles.github.io/lgtmaybe/
 repo_url: https://github.com/MattJColes/lgtmaybe
 repo_name: MattJColes/lgtmaybe
@@ -61,6 +61,7 @@ nav:
       - Getting started: tutorial/getting-started.md
   - How-to:
       - Run locally with ollama: how-to/run-locally-with-ollama.md
+      - Use a custom OpenAI-compatible endpoint: how-to/use-a-custom-openai-compatible-endpoint.md
       - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
       - Review with Bedrock OIDC: how-to/review-with-bedrock-oidc.md
       - Review with Vertex WIF: how-to/review-with-vertex-wif.md

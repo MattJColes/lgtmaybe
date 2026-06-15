@@ -1,11 +1,13 @@
 # Auth Model
 
-lgtmaybe supports six hosted providers plus local ollama. The design principle is **no static cloud
-credentials**: cloud providers use ambient, short-lived tokens; key-based SaaS
-providers (openai, anthropic, openrouter) require an API key that stays in
-secrets rather than being committed to config. Azure straddles both — it prefers
-ambient Azure AD (Entra) credentials but accepts a resource key — and always
-needs the resource endpoint (`AZURE_API_BASE`), since each Azure OpenAI
+lgtmaybe supports six hosted providers plus local ollama, and an
+`openai-compatible` escape hatch for any server speaking the OpenAI `/v1` wire
+format (DeepSeek's API, llama.cpp, LM Studio, vLLM). The design principle is **no
+static cloud credentials**: cloud providers use ambient, short-lived tokens;
+key-based SaaS providers (openai, anthropic, openrouter) require an API key that
+stays in secrets rather than being committed to config. Azure straddles both — it
+prefers ambient Azure AD (Entra) credentials but accepts a resource key — and
+always needs the resource endpoint (`AZURE_API_BASE`), since each Azure OpenAI
 deployment lives at its own URL.
 
 ## Why keyless for cloud
@@ -50,6 +52,12 @@ chain:
    available, lgtmaybe fails with a message naming both options.
 5. **None** — ollama requires no credentials. Only `--api-base` is needed
    to reach the local or remote server.
+6. **openai-compatible** — always needs the endpoint (`--api-base` or
+   `OPENAI_COMPATIBLE_API_BASE`), since the whole point is to choose your own.
+   The key is **optional**: hosted endpoints like DeepSeek take one
+   (`--api-key` / `OPENAI_COMPATIBLE_API_KEY`), while local servers (llama.cpp,
+   LM Studio, vLLM) need none — lgtmaybe sends a harmless placeholder key when
+   you supply none, because the underlying OpenAI client rejects an empty one.
 
 ## Provider auth summary
 
@@ -62,6 +70,7 @@ chain:
 | vertex | Ambient GCP creds | GitHub WIF or local ADC (`gcloud auth application-default login`) |
 | azure | Ambient Azure AD creds (keyless) or API key, + endpoint | GitHub OIDC → Entra federated credential, or local `az login` / managed identity; or `AZURE_API_KEY`. Always with `AZURE_API_BASE` / `--api-base` |
 | ollama | None | `--api-base` pointing to the local or remote server |
+| openai-compatible | Optional key, + endpoint | `--api-base` / `OPENAI_COMPATIBLE_API_BASE` (e.g. `https://api.deepseek.com/v1` or `http://localhost:8000/v1`); key via `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for keyless local servers |
 
 ## Least-privilege IAM
 

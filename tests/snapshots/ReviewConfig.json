@@ -57,7 +57,8 @@
         "bedrock",
         "vertex",
         "azure",
-        "ollama"
+        "ollama",
+        "openai-compatible"
       ],
       "title": "Provider",
       "type": "string"

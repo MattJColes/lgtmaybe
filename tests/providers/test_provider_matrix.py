@@ -30,6 +30,8 @@ EXPECTED_PREFIX: dict[Provider, str] = {
     Provider.vertex: "vertex_ai/",
     Provider.azure: "azure/",
     Provider.ollama: "ollama/",
+    # OpenAI-compatible servers ride the openai route with a custom api_base.
+    Provider.openai_compatible: "openai/",
 }
 
 # Providers that authenticate with an API key, and the env var that supplies it.
@@ -44,6 +46,9 @@ CLOUD_PROVIDERS = (Provider.bedrock, Provider.vertex)
 NO_AUTH_PROVIDERS = (Provider.ollama,)
 # Hybrid: always needs an endpoint, then EITHER a key OR an ambient AD token.
 HYBRID_PROVIDERS = (Provider.azure,)
+# Custom endpoint: always needs an api_base; the key is optional (placeholder
+# sent for keyless local servers).
+ENDPOINT_PROVIDERS = (Provider.openai_compatible,)
 
 
 def test_every_provider_is_classified_exactly_once() -> None:
@@ -58,6 +63,7 @@ def test_every_provider_is_classified_exactly_once() -> None:
         set(CLOUD_PROVIDERS),
         set(NO_AUTH_PROVIDERS),
         set(HYBRID_PROVIDERS),
+        set(ENDPOINT_PROVIDERS),
     ]
     union = set().union(*auth_classes)
     assert union == set(Provider)
@@ -155,3 +161,36 @@ class TestHybridProviderCredentials:
     def test_build_provider_threads_the_endpoint(self, provider: Provider) -> None:
         built = build_provider(provider, "gpt-4o", api_key="k", api_base=_AZURE_BASE)
         assert built.default_opts.get("api_base") == _AZURE_BASE
+
+
+_CUSTOM_BASE = "https://api.deepseek.com/v1"
+
+
+@pytest.mark.parametrize("provider", ENDPOINT_PROVIDERS)
+class TestEndpointProviderCredentials:
+    """openai-compatible: always needs an api_base; the key is optional.
+
+    Hosted endpoints (DeepSeek) take a key; local servers (llama.cpp / LM Studio /
+    vLLM) take none — and lgtmaybe supplies a placeholder so the OpenAI client,
+    which rejects an empty key, still works.
+    """
+
+    def test_requires_an_endpoint(self, provider: Provider) -> None:
+        with pytest.raises(ValueError, match=provider.value):
+            resolve_credentials(provider, api_key="k")
+
+    def test_explicit_key_and_base_resolve(self, provider: Provider) -> None:
+        cfg = resolve_credentials(provider, api_key="sk-x", api_base=_CUSTOM_BASE)
+        assert cfg.api_key == "sk-x"
+        assert cfg.api_base == _CUSTOM_BASE
+
+    def test_keyless_base_resolves_with_a_placeholder(self, provider: Provider) -> None:
+        from lgtmaybe.providers.constants import OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+
+        cfg = resolve_credentials(provider, api_base=_CUSTOM_BASE)
+        assert cfg.api_key == OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+        assert cfg.api_base == _CUSTOM_BASE
+
+    def test_build_provider_threads_the_endpoint(self, provider: Provider) -> None:
+        built = build_provider(provider, "deepseek-chat", api_key="k", api_base=_CUSTOM_BASE)
+        assert built.default_opts.get("api_base") == _CUSTOM_BASE

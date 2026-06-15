@@ -32,7 +32,8 @@ from lgtmaybe.config.loader import load_config
 @click.option(
     "--provider",
     default=None,
-    help="LLM provider (openai, anthropic, bedrock, vertex, azure, ollama, openrouter)",
+    help="LLM provider (openai, anthropic, bedrock, vertex, azure, ollama, "
+    "openrouter, openai-compatible)",
 )
 @click.option("--model", default=None, help="Model name understood by the chosen provider")
 @click.option(
@@ -50,7 +51,9 @@ from lgtmaybe.config.loader import load_config
     "--api-base",
     default=None,
     help="API base URL (ollama: http://localhost:11434; "
-    "azure: https://<resource>.openai.azure.com)",
+    "azure: https://<resource>.openai.azure.com; "
+    "openai-compatible: any OpenAI /v1 endpoint, e.g. https://api.deepseek.com/v1 "
+    "or http://localhost:8000/v1)",
 )
 @click.option(
     "--min-severity",

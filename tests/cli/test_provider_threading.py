@@ -102,6 +102,15 @@ CASES = [
         True,
     ),
     ("ollama", "ollama", "llama3", [], {}, "ollama/llama3", False),
+    (
+        "openai-compatible",
+        "openai-compatible",
+        "deepseek-chat",
+        ["--api-key", "sk-x", "--api-base", "https://api.deepseek.com/v1"],
+        {},
+        "openai/deepseek-chat",
+        True,
+    ),
 ]
 
 
@@ -148,6 +157,56 @@ def test_ollama_call_carries_api_base(captured_completion: list[dict[str, Any]])
 
     assert result.exit_code == 0, result.output
     assert captured_completion[0].get("api_base")
+
+
+def test_openai_compatible_call_carries_custom_base(
+    captured_completion: list[dict[str, Any]],
+) -> None:
+    """A custom OpenAI-compatible endpoint must reach litellm with its api_base."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openai-compatible",
+            "--model",
+            "deepseek-chat",
+            "--api-base",
+            "https://api.deepseek.com/v1",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("api_base") == "https://api.deepseek.com/v1"
+
+
+def test_openai_compatible_keyless_local_server_sends_base_and_placeholder(
+    captured_completion: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A local llama.cpp / LM Studio / vLLM server needs no key — the base reaches
+    litellm and a placeholder key is supplied (the OpenAI client demands one)."""
+    monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openai-compatible",
+            "--model",
+            "local-model",
+            "--api-base",
+            "http://localhost:8000/v1",
+            "--no-reflect",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("api_base") == "http://localhost:8000/v1"
+    assert captured_completion[0].get("api_key")
 
 
 def test_num_ctx_flag_reaches_litellm_for_ollama(

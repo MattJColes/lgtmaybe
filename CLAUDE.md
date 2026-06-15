@@ -16,7 +16,10 @@ variants:
 
 **The wedge:** first-class **Bedrock + Vertex + Azure with keyless OIDC/WIF**.
 Six hosted providers (plus local ollama), one flag, no keys in secrets for
-cloud. We win on auth + simplicity.
+cloud. We win on auth + simplicity. An `openai-compatible` provider is the escape
+hatch for anything else that speaks the OpenAI `/v1` wire format (DeepSeek's API,
+llama.cpp, LM Studio, vLLM) — you bring the `--api-base`, the key is optional —
+so the provider list is never a cage.
 
 ## Non-negotiables
 
@@ -52,10 +55,12 @@ cloud. We win on auth + simplicity.
 | vertex                 | ambient GCP creds (WIF, or local ADC)                            |
 | azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) → else `AZURE_API_KEY` / `--api-key` |
 | ollama                 | none — just an `api_base` (localhost, host.docker.internal, tailscale host); fully local, zero cost |
+| openai-compatible      | requires the endpoint (`--api-base` / `OPENAI_COMPATIBLE_API_BASE`); key **optional** — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, else a placeholder for keyless local servers (llama.cpp / LM Studio / vLLM). litellm `openai/` route to a custom base |
 
 Resolver order: chosen provider → try ambient cloud creds if that's its native
-mode → else API key → ollama needs neither → else **fail with a clear "how to
-auth this provider" message**.
+mode → else API key → ollama needs neither → openai-compatible needs an
+`api_base` (key optional, placeholder when absent) → else **fail with a clear
+"how to auth this provider" message**.
 
 ## Architecture — ports & adapters (hexagonal)
 
