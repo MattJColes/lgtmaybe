@@ -9,13 +9,50 @@ from __future__ import annotations
 from typing import Any
 
 import litellm
-from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from lgtmaybe.core.models import ProviderResult
 from lgtmaybe.core.ports import Message, ProviderClient
 
 _DEFAULT_TIMEOUT = 60  # seconds
 _MAX_ATTEMPTS = 4
+
+# Errors that retrying cannot fix: bad credentials, a malformed/unsupported
+# request, an unknown model, a denied permission, and a content-policy block
+# (ContentPolicyViolationError subclasses BadRequestError, so it's covered).
+# Retrying these just burns the backoff budget — and, stacked across every lens,
+# turns an instant failure into many minutes of wasted runner time (the gpt-5.5
+# quota failure that ran ~13 min before surfacing). Fail fast instead.
+_PERMANENT_ERROR_TYPES: tuple[type[Exception], ...] = (
+    litellm.AuthenticationError,
+    litellm.BadRequestError,
+    litellm.NotFoundError,
+    litellm.PermissionDeniedError,
+)
+
+# A 429 is overloaded: a *capacity* rate-limit is transient (back off and retry),
+# but a *quota/billing* rate-limit is permanent (out of credit — retrying never
+# recovers). Both arrive as RateLimitError, so we tell them apart by message.
+_QUOTA_MARKERS = (
+    "insufficient_quota",
+    "exceeded your current quota",
+    "check your plan and billing",
+)
+
+
+def _is_quota_rate_limit(exc: BaseException) -> bool:
+    """True for a quota/billing 429 (permanent), False for a capacity 429."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _QUOTA_MARKERS)
+
+
+def _is_permanent(exc: BaseException) -> bool:
+    """True when retrying *exc* cannot plausibly succeed, so we should not."""
+    if isinstance(exc, _PERMANENT_ERROR_TYPES):
+        return True
+    if isinstance(exc, litellm.RateLimitError):
+        return _is_quota_rate_limit(exc)
+    return False
 
 
 def _rejects_temperature(exc: Exception) -> bool:
@@ -57,6 +94,10 @@ class LiteLLMProvider(ProviderClient):
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
         merged.setdefault("timeout", _DEFAULT_TIMEOUT)
+        # We own retries (tenacity, below). Disable litellm's own retry loop so a
+        # failure isn't ground through two stacked backoff layers — the doubling
+        # that helped a quota error run ~13 min before it surfaced.
+        merged.setdefault("num_retries", 0)
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
         effective_model = self.model or model
@@ -71,6 +112,7 @@ class LiteLLMProvider(ProviderClient):
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> ProviderResult:
         @retry(
+            retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
             stop=stop_after_attempt(_MAX_ATTEMPTS),
             wait=wait_exponential_jitter(initial=0.1, max=5),
             reraise=True,

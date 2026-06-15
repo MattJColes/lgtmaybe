@@ -35,7 +35,11 @@ _log = get_logger(__name__)
 
 # A single ollama instance serves a model serially, so concurrent calls only
 # queue up and time out; every other provider parallelises across categories.
-_MAX_WORKERS = 8
+# The ceiling is kept modest so the per-batch fan-out doesn't burst the whole
+# lens set at a provider at once and trip a capacity rate-limit (429) on
+# lower-tier accounts — the lenses just run in a couple of waves instead, and
+# per-call latency dominates so the wall-clock cost is small.
+_MAX_WORKERS = 4
 
 
 @dataclass(frozen=True)
