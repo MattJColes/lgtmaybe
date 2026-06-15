@@ -244,6 +244,11 @@
       "title": "Reflect",
       "type": "boolean"
     },
+    "resolve_fixed": {
+      "default": true,
+      "title": "Resolve Fixed",
+      "type": "boolean"
+    },
     "structured_output": {
       "default": true,
       "title": "Structured Output",

@@ -10,19 +10,41 @@ All network calls carry an explicit timeout.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx
 
+from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway
 
 from .diff import PositionMap, build_position_map, is_reviewable
 
+_log = get_logger(__name__)
+
 _TIMEOUT = httpx.Timeout(30.0)
 _MARKER = "<!-- lgtmaybe -->"
+_GRAPHQL_URL = "https://api.github.com/graphql"
+
+# Hidden marker stamped into every inline comment so a later run can match an
+# existing review conversation back to the finding that opened it. The capture
+# group is the finding fingerprint.
+_FINDING_MARKER = re.compile(r"<!-- lgtmaybe-finding:([0-9a-f]+) -->")
+
+
+def finding_fingerprint(path: str, title: str) -> str:
+    """Stable short id for a finding's identity (its file and what it flags).
+
+    Used to recognise the same finding across review runs: if a fingerprint that
+    opened a conversation is no longer produced, that conversation is a candidate
+    to auto-resolve. Only the path and title feed the hash (never model prose),
+    so the marker is safe to embed in a comment body verbatim.
+    """
+    digest = hashlib.sha256(f"{path}\n{title.strip().lower()}".encode())
+    return digest.hexdigest()[:12]
 
 # Concurrency for the per-file head-content fetch. The contents are independent
 # GETs, so fetching them serially is pure round-trip latency on a many-file PR.
@@ -65,6 +87,7 @@ class RestGitHubGateway(GitHubGateway):
         token: str,
         client: httpx.Client | None = None,
         marker_key: str | None = None,
+        resolve_fixed: bool = True,
     ) -> None:
         self._repo = repo
         self._pr_number = pr_number
@@ -77,6 +100,7 @@ class RestGitHubGateway(GitHubGateway):
         # from different backends on one PR update their own comment instead of
         # clobbering each other. Unkeyed gateways keep the legacy marker.
         self._marker = f"<!-- lgtmaybe:{marker_key} -->" if marker_key else _MARKER
+        self._resolve_fixed = resolve_fixed
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -165,6 +189,11 @@ class RestGitHubGateway(GitHubGateway):
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
+            # A re-run: any of our prior conversations whose finding is now gone
+            # (and whose code changed) is fixed — collapse it. Best-effort, so a
+            # GraphQL hiccup never fails an otherwise-successful review.
+            if self._resolve_fixed:
+                self._resolve_fixed_threads(findings)
         else:
             payload: dict[str, Any] = {
                 "body": body,
@@ -302,6 +331,106 @@ class RestGitHubGateway(GitHubGateway):
             url = self._next_link(resp)
         return None
 
+    # ------------------------------------------------------------------
+    # Auto-resolve fixed conversations (GraphQL — the REST review API can't
+    # resolve a review thread).
+    # ------------------------------------------------------------------
+
+    def _resolve_fixed_threads(self, findings: list[ReviewFinding]) -> None:
+        """Resolve our prior conversations whose finding is gone and code changed.
+
+        A thread is "fixed" when its hidden fingerprint is no longer produced by
+        this run AND GitHub marks it outdated (the lines it anchored to changed).
+        Each fixed thread gets a short reply for the audit trail, then collapses.
+
+        Entirely best-effort: any failure is logged and swallowed so an
+        auto-resolve hiccup can never fail an otherwise-successful review.
+        """
+        try:
+            current = {finding_fingerprint(f.path, f.title) for f in findings}
+            for thread_id in self._fixed_thread_ids(current):
+                self._reply_and_resolve(thread_id)
+        except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
+            _log.warning("auto-resolve of fixed conversations failed: %s", exc)
+
+    def _fixed_thread_ids(self, current: set[str]) -> list[str]:
+        """Thread ids of our unresolved, outdated conversations whose finding is gone."""
+        query = """
+        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){
+            pullRequest(number:$number){
+              reviewThreads(first:100, after:$cursor){
+                pageInfo{ hasNextPage endCursor }
+                nodes{
+                  id
+                  isResolved
+                  isOutdated
+                  comments(first:1){ nodes{ body } }
+                }
+              }
+            }
+          }
+        }
+        """
+        owner, _, name = self._repo.partition("/")
+        fixed: list[str] = []
+        cursor: str | None = None
+        while True:
+            data = self._graphql(
+                query,
+                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
+            )
+            conn = data["repository"]["pullRequest"]["reviewThreads"]
+            for node in conn["nodes"]:
+                if node.get("isResolved"):
+                    continue
+                if not node.get("isOutdated"):
+                    continue
+                comments = node.get("comments", {}).get("nodes", [])
+                first_body = comments[0].get("body", "") if comments else ""
+                match = _FINDING_MARKER.search(first_body)
+                if match is None:
+                    continue  # not one of ours
+                if match.group(1) in current:
+                    continue  # still flagged this run — leave it open
+                fixed.append(node["id"])
+            page = conn.get("pageInfo", {})
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+        return fixed
+
+    def _reply_and_resolve(self, thread_id: str) -> None:
+        """Post a short reply on a thread, then mark it resolved."""
+        reply = """
+        mutation($threadId:ID!,$body:String!){
+          addPullRequestReviewThreadReply(
+            input:{pullRequestReviewThreadId:$threadId, body:$body}
+          ){ comment{ id } }
+        }
+        """
+        self._graphql(reply, {"threadId": thread_id, "body": "✅ Looks resolved."})
+        resolve = """
+        mutation($threadId:ID!){
+          resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
+        }
+        """
+        self._graphql(resolve, {"threadId": thread_id})
+
+    def _graphql(self, query: str, variables: dict[str, Any]) -> Any:
+        """Run one GraphQL operation and return its ``data`` (raising on errors)."""
+        resp = self._client.post(
+            _GRAPHQL_URL,
+            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            json={"query": query, "variables": variables},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if payload.get("errors"):
+            raise RuntimeError(f"GraphQL error: {payload['errors']}")
+        return payload["data"]
+
     @staticmethod
     def _build_comments(
         findings: list[ReviewFinding],
@@ -320,5 +449,9 @@ class RestGitHubGateway(GitHubGateway):
             }
             if f.suggestion is not None:
                 comment["body"] += f"\n\n```suggestion\n{_defang_fences(f.suggestion)}\n```"
+            # Stamp a hidden fingerprint so a later run can recognise this
+            # conversation and auto-resolve it once the finding is gone.
+            fp = finding_fingerprint(f.path, f.title)
+            comment["body"] += f"\n\n<!-- lgtmaybe-finding:{fp} -->"
             comments.append(comment)
         return comments

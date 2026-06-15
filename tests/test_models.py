@@ -174,6 +174,16 @@ def test_review_config_accepts_reflect_false() -> None:
     assert cfg.reflect is False
 
 
+def test_review_config_resolve_fixed_defaults_to_true() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.resolve_fixed is True
+
+
+def test_review_config_accepts_resolve_fixed_false() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", resolve_fixed=False)
+    assert cfg.resolve_fixed is False
+
+
 def test_pr_context_intent_fields_default_empty() -> None:
     """Stated-intent fields (title/description/commit messages) are optional so
     existing gateways and fixtures keep working; empty intent skips the lens."""
