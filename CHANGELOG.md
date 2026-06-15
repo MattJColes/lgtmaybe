@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.8...lgtmaybe-v0.1.9) (2026-06-15)
+
+
+### Bug Fixes
+
+* make the model emit code in `suggestion`, prose in `body` ([#83](https://github.com/MattJColes/lgtmaybe/issues/83)) ([f2c5697](https://github.com/MattJColes/lgtmaybe/commit/f2c5697a5e2b93c91c31399048a1ec36847d74a9))
+
 ## [0.1.8](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.7...lgtmaybe-v0.1.8) (2026-06-15)
 
 
