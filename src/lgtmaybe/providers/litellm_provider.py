@@ -17,6 +17,18 @@ from lgtmaybe.core.ports import Message, ProviderClient
 _DEFAULT_TIMEOUT = 60  # seconds
 _MAX_ATTEMPTS = 4
 
+
+def _rejects_temperature(exc: Exception) -> bool:
+    """True when an API error means the model accepts the ``temperature`` param
+    but not the value we sent (e.g. OpenAI's gpt-5.x: "'temperature' does not
+    support 0 ... Only the default (1) value is supported"). ``drop_params`` does
+    not catch this — the param is supported, only the value is rejected."""
+    msg = str(exc).lower()
+    return "temperature" in msg and (
+        "does not support" in msg or "unsupported value" in msg or "only the default" in msg
+    )
+
+
 # We always send ``temperature`` (for determinism) and ``response_format`` (for
 # structured JSON output), but not every model accepts them: some bedrock-hosted
 # models (e.g. ``openai.gpt-5.5``) reject both and litellm raises
@@ -64,7 +76,15 @@ class LiteLLMProvider(ProviderClient):
             reraise=True,
         )
         def _call() -> ProviderResult:
-            response = litellm.completion(model=model, messages=messages, **kwargs)
+            try:
+                response = litellm.completion(model=model, messages=messages, **kwargs)
+            except Exception as exc:
+                if "temperature" not in kwargs or not _rejects_temperature(exc):
+                    raise
+                # Drop temperature for this and every subsequent retry, letting the
+                # model use its only supported value (its default).
+                kwargs.pop("temperature")
+                response = litellm.completion(model=model, messages=messages, **kwargs)
             return self._map_response(response, model)
 
         return _call()
