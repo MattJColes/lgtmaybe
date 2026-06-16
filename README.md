@@ -57,10 +57,21 @@ latency:
 
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
+- `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
 - `categories` (default all nine) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
 - `min_severity` (default `info`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.
+
+**Big files, small models.** When a single file's diff is too large for one
+model call, lgtmaybe walks it **hunk-by-hunk** (an RLM-style recursive review) so
+nothing is dropped and each call stays small and focused, then merges the
+findings — on by default, `--no-recursive` to review files whole instead. This
+helps smaller local models most: in our A/B benchmark a local **qwen3.5:4b**
+caught **all 6** planted bugs reviewing recursively versus **4/6** reviewing each
+file whole (the two it missed whole were both in the file's tail). One
+non-deterministic run on one fixture, so directional rather than a guarantee —
+see [the benchmark](DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
 
 **What you get back.** Each finding is structured data — file, line, severity, a
 title, an explanation, and an optional suggested fix — so it renders the same

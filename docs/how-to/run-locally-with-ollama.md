@@ -66,6 +66,40 @@ uncommitted edits) against that same base, `--uncommitted` to review only your
 uncommitted edits against HEAD, or `--base <ref>` to diff against a different
 base.
 
+## Reviewing large files (recursive walk)
+
+When a single file's diff is larger than the per-call token budget
+(`--max-input-tokens`, default 100000), lgtmaybe **walks it hunk-by-hunk** —
+each hunk reviewed in its own focused call — instead of sending the whole file at
+once and letting the tail drop out of the model's attention. The findings are
+merged back together, and inline-comment positions still bind to the real diff.
+This **RLM-style recursive review is on by default** (`recursive: true`); files
+that already fit the budget are still reviewed whole, so nothing changes for small
+diffs.
+
+It helps **small local models the most**, because a smaller, focused prompt is
+easier to review thoroughly. In our A/B benchmark a local **qwen3.5:4b** caught
+**all 6** planted bugs reviewing recursively versus **4/6** reviewing each file
+whole — the two it missed whole were both in the file's *tail*, even though the
+diff fit the context window (so the gain is focus, not just avoiding truncation).
+It's a single non-deterministic run on one fixture, so treat it as directional;
+the harness behind it is in
+[DEVELOPMENT.md](https://github.com/MattJColes/lgtmaybe/blob/main/DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
+
+To use the **original whole-file method** instead — one call per file, which keeps
+all of a file's hunks in view together but tends to miss more on big files with
+small models — pass `--no-recursive`:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.5:4b \
+  --api-base http://localhost:11434 --no-recursive
+```
+
+```yaml
+# or in .lgtmaybe.yml (also how the GitHub Action picks it up):
+recursive: false
+```
+
 ## Use a remote ollama instance
 
 If ollama runs on another machine (e.g. a Tailscale peer):

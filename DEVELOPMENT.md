@@ -317,6 +317,23 @@ Use it to confirm the walk helps on your model before trusting the default. Its
 plumbing (usage accounting, the comparison record) is unit-tested in
 `tests/evals/test_rlm.py`; only the A/B runner needs a live model.
 
+The `.github/workflows/rlm-bench.yml` workflow runs this A/B as two separate
+matrix tasks (`whole` vs `recursive`) against a live ollama model and publishes
+each leg's recall to the run summary — on demand (`workflow_dispatch`) or when the
+RLM code/fixture changes.
+
+**Recorded result** (qwen3.5:4b, `rlm-bigfile`, `--max-input-tokens 300`,
+`--categories security,correctness,performance`, single run, temperature 0.6):
+
+| strategy | recall | notes |
+|---|---|---|
+| `whole` (original) | 67% (4/6) | missed both bugs in the file's tail hunk |
+| `recursive` (RLM)  | 100% (6/6) | caught the tail bugs the whole-file pass dropped |
+
+The diff (~600 tokens) fit the 16k context window, so the gap is the *focus*
+effect, not truncation. One non-deterministic run on one fixture — directional,
+not a guarantee; re-run to confirm on your own model.
+
 ## Testing in GitHub Actions
 
 Two distinct CI workflows cover two different things.
