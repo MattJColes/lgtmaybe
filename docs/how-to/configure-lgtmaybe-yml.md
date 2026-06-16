@@ -172,6 +172,26 @@ structured_output: false   # only if your model rejects JSON-schema mode
 
 Default: `true`.
 
+### resolve_fixed
+
+Auto-resolve a review conversation once its finding is fixed. On a re-run, when a
+finding lgtmaybe raised is no longer produced **and** GitHub marks that thread
+outdated (the code under it changed), lgtmaybe posts a short `✅ Looks resolved.`
+reply and resolves the conversation. Both conditions must hold, so a thread is
+never collapsed just because nearby lines shifted. Set it to `false` to leave
+conversations for manual resolution.
+
+GitHub posting only — the local CLI review has no conversations to resolve, so it
+ignores this. Resolving a thread uses GitHub's GraphQL API; the default
+`GITHUB_TOKEN` (`pull-requests: write`, already needed to post the review) is
+sufficient.
+
+```yaml
+resolve_fixed: false   # leave fixed conversations open for manual resolution
+```
+
+Default: `true`.
+
 ### extra_lenses
 
 Define your own review lenses ("BYO skills") that run **alongside** the built-in

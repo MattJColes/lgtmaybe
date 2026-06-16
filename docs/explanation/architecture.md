@@ -74,7 +74,12 @@ fetch → compress → prompt → parse → post
 
 5. **post** — findings are batched into a single GitHub review request.
    The summary comment is updated idempotently using a hidden marker, so
-   re-running lgtmaybe on the same PR does not create duplicate comments.
+   re-running lgtmaybe on the same PR does not create duplicate comments. Each
+   inline comment is stamped with a hidden per-finding fingerprint; on a re-run,
+   conversations whose finding is gone and whose thread GitHub marks outdated are
+   replied to and resolved (`resolve_fixed`, default on). Resolving a review
+   thread is the one operation the REST review API can't do, so this step uses
+   GitHub's GraphQL API — best-effort, so a failure never blocks the review.
 
 ## Provider strategy and factory
 

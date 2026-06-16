@@ -42,6 +42,19 @@ def test_file_values_are_applied():
     assert cfg.min_severity == "medium"
 
 
+def test_resolve_fixed_round_trips_from_file():
+    """resolve_fixed can be disabled in .lgtmaybe.yml (default stays on)."""
+    import io
+
+    cfg = load_config(config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\n"))
+    assert cfg.resolve_fixed is True
+
+    cfg = load_config(
+        config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\nresolve_fixed: false\n")
+    )
+    assert cfg.resolve_fixed is False
+
+
 def test_cli_input_overrides_file_value():
     """An explicit CLI input takes precedence over the file's value."""
     import io

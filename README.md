@@ -66,7 +66,7 @@ See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every k
 title, an explanation, and an optional suggested fix — so it renders the same
 everywhere:
 
-- **On a GitHub PR** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the same comments instead of duplicating them, and a clean PR gets a 👍 **LGTM!**.
+- **On a GitHub PR** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the same comments instead of duplicating them, auto-resolves a conversation once its finding is fixed, and a clean PR gets a 👍 **LGTM!**.
 - **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted to GitHub.
 
 <p align="center">
