@@ -329,7 +329,7 @@ Split by whether it can be deterministic, because that decides where it lives:
   is unit-tested in `tests/evals/`. The **hosted** providers stay out of the pytest
   gate, but a real **local ollama** run *is* wired into CI as its own workflow —
   `.github/workflows/e2e-ollama.yml` is a deliberately **cut-down smoke**: it pulls
-  a small model (`qwen3.5:2b`, thinking forced off) and reviews the single small
+  a small model (`qwen3.5:4b`, thinking forced off) and reviews the single small
   `badcode` fixture through only the two **critical** lenses (`--categories
   security,correctness`) on every PR with `--no-reflect` (the reflection pass
   over-prunes on a small model) and qwen3.x's recommended non-thinking sampling
