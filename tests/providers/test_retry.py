@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import litellm
 import pytest
 
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
@@ -80,6 +81,136 @@ class TestTemperatureRejection:
                 provider.complete(
                     [{"role": "user", "content": "hi"}], "openai/gpt-5.5", temperature=0.0
                 )
+
+
+class TestFailFastOnPermanentErrors:
+    """Retrying a permanent error can't fix it — and stacked backoff over every
+    lens turns an instant "out of credit" into many minutes of burned runner
+    time (the gpt-5.5 quota failure that took ~13 min). Permanent errors must
+    fail fast; only genuinely transient ones get the exponential backoff."""
+
+    def test_quota_rate_limit_is_not_retried(self) -> None:
+        """OpenAI's insufficient_quota 429 ("exceeded your current quota") is a
+        billing dead-end — one attempt, then raise."""
+        calls = 0
+
+        def quota(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.RateLimitError(
+                message=(
+                    "litellm.RateLimitError: OpenAIException - You exceeded your "
+                    "current quota, please check your plan and billing details."
+                ),
+                model="gpt-5.5",
+                llm_provider="openai",
+            )
+
+        with patch("litellm.completion", side_effect=quota):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.RateLimitError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-5.5")
+
+        assert calls == 1
+
+    def test_transient_rate_limit_is_still_retried(self) -> None:
+        """A plain capacity rate-limit (not quota) is transient — keep the
+        exponential backoff and retry it."""
+        good = _fake_response("ok after backoff")
+        calls = 0
+
+        def flaky(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise litellm.RateLimitError(
+                    message="RateLimitError: OpenAIException - Rate limit reached for gpt-4o",
+                    model="gpt-4o",
+                    llm_provider="openai",
+                )
+            return good
+
+        with patch("litellm.completion", side_effect=flaky):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert result.text == "ok after backoff"
+        assert calls == 2
+
+    def test_authentication_error_is_not_retried(self) -> None:
+        """A bad key won't become good on a retry — fail fast."""
+        calls = 0
+
+        def bad_auth(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.AuthenticationError(
+                message="AuthenticationError: invalid api key",
+                model="gpt-4o",
+                llm_provider="openai",
+            )
+
+        with patch("litellm.completion", side_effect=bad_auth):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.AuthenticationError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls == 1
+
+    def test_quota_error_does_not_storm_the_fallback_either(self) -> None:
+        """Fail-fast applies to the fallback leg too: each model is tried once,
+        no per-model retry storm."""
+        calls = 0
+
+        def quota(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.RateLimitError(
+                message="OpenAIException - You exceeded your current quota",
+                model="m",
+                llm_provider="openai",
+            )
+
+        with patch("litellm.completion", side_effect=quota):
+            provider = LiteLLMProvider(fallback_model="openai/gpt-4o-mini")
+            with pytest.raises(litellm.RateLimitError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-5.5")
+
+        assert calls == 2  # primary once + fallback once
+
+    def test_ollama_connection_error_is_retried(self) -> None:
+        """ollama gets the same treatment: a transient connection error (the
+        local server still warming up) is retried, not failed fast."""
+        good = _fake_response("ok")
+        calls = 0
+
+        def flaky(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise litellm.APIConnectionError(
+                    message="Connection refused",
+                    model="ollama/qwen3",
+                    llm_provider="ollama",
+                )
+            return good
+
+        with patch("litellm.completion", side_effect=flaky):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "ollama/qwen3")
+
+        assert result.text == "ok"
+        assert calls == 2
+
+    def test_litellm_internal_retries_are_disabled(self) -> None:
+        """We own retries via tenacity; litellm's own retry loop is switched off
+        so a failure isn't ground through two stacked backoff layers."""
+        response = _fake_response()
+        with patch("litellm.completion", return_value=response) as mock_completion:
+            provider = LiteLLMProvider()
+            provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert mock_completion.call_args.kwargs.get("num_retries") == 0
 
 
 class TestFallback:

@@ -568,8 +568,11 @@ def test_cloud_fans_out_concurrently() -> None:
     from lgtmaybe.engine.engine import _worker_count
 
     cfg = ReviewConfig(provider=Provider.openai, model="gpt-4o")
-    # Capped at the worker ceiling, but covers the full lens count when small.
-    assert _worker_count(cfg, 5) == 5
+    # A small lens count runs fully concurrently...
+    assert _worker_count(cfg, 3) == 3
+    # ...but the fan-out is capped to bound the per-batch request burst, so the
+    # full nine-lens set doesn't hit the provider all at once (capacity 429s).
+    assert _worker_count(cfg, 9) == 4
 
 
 # ---------------------------------------------------------------------------

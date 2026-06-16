@@ -30,10 +30,15 @@ jobs:
       (github.event.issue.pull_request &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
+    # A healthy full review runs in a handful of minutes; cap it so a wedged
+    # model call can't sit on the runner for GitHub's 6-hour default. Fail-fast on
+    # permanent provider errors (quota/auth) means this only ever trips on a real
+    # hang, not on an out-of-credit key.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6 # base repo only — for action.yml + .lgtmaybe.yml config
       - uses: ./
         with:
           provider: openai
-          model: gpt-5.5
+          model: gpt-5.4
           api_key: ${{ secrets.OPENAI_API_KEY }}
