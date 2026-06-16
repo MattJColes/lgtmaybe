@@ -23,7 +23,8 @@ GRAPHQL_URL = f"{BASE_URL}/graphql"
 
 MARKER = "<!-- lgtmaybe -->"
 
-# A minimal diff that puts src/app.py line 2 at diff position 2.
+# A minimal diff in which src/app.py new-file line 2 ("+import sys") is an
+# added line, so a RIGHT-side finding on line 2 anchors there.
 SAMPLE_DIFF = """\
 diff --git a/src/app.py b/src/app.py
 index 0000001..0000002 100644
@@ -81,7 +82,9 @@ def test_post_review_creates_review_with_marker_and_batched_comments() -> None:
     comments = review_body.get("comments", [])
     assert len(comments) == 1
     assert comments[0]["path"] == "src/app.py"
-    assert comments[0]["position"] == 2
+    assert comments[0]["line"] == 2
+    assert comments[0]["side"] == "RIGHT"
+    assert "position" not in comments[0]
 
 
 @respx.mock
@@ -185,7 +188,7 @@ def test_post_issue_comment_posts_to_issues_endpoint() -> None:
 
 @respx.mock
 def test_post_review_skips_findings_outside_diff() -> None:
-    """Findings whose line has no diff position are omitted from the review comments."""
+    """Findings whose line is not in the diff are omitted from the review comments."""
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
 
     out_of_diff_findings = [
@@ -221,9 +224,9 @@ def test_post_review_skips_findings_outside_diff() -> None:
 def test_post_review_drops_finding_on_expanded_context_line() -> None:
     """A finding on a surrounding-context line (not in the real diff) is never posted.
 
-    The engine pads hunks with extra lines for the model, but the position map is
-    built from the real diff — so a finding landing on an expanded-only line maps
-    to nothing and is dropped, never producing a bogus inline comment.
+    The engine pads hunks with extra lines for the model, but the commentable-line
+    index is built from the real diff — so a finding landing on an expanded-only
+    line has no anchor and is dropped, never producing a bogus inline comment.
     """
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
 

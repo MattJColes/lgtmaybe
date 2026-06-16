@@ -69,7 +69,7 @@ lgtmaybe/
 │   │
 │   ├── github/              # GitHub adapter (the GitHubGateway side)
 │   │   ├── rest_gateway.py  #   fetch PR context · post review · in-thread replies
-│   │   └── diff.py          #   diff→position map · is_reviewable() skip filter
+│   │   └── diff.py          #   commentable-line index · is_reviewable() skip filter
 │   │
 │   ├── local/               # local-mode adapter: build a PRContext from `git`
 │   ├── config/              # layered config: defaults < user file < repo file < flags
@@ -140,8 +140,9 @@ long one, cloud short).
 **GitHub adapter (`github/`)** — `RestGitHubGateway` reads PR context (diff,
 files, head-revision file text — all read-only API, never a checkout) and posts a
 single batched review, updated idempotently via a hidden per-provider marker
-comment. `diff.py` builds the line→position map and the `is_reviewable` skip
-filter (lockfiles, minified, vendored, generated, binary).
+comment. `diff.py` builds the commentable-line index (the `line`+`side` anchors a
+review comment can attach to) and the `is_reviewable` skip filter (lockfiles,
+minified, vendored, generated, binary).
 
 **Local adapter (`local/`)** — builds a `PRContext` by shelling out to `git`, so
 `lgtmaybe review` works on a branch or working tree with no GitHub at all.

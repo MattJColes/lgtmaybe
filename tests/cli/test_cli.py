@@ -80,7 +80,7 @@ class TestRunReview:
 
     def test_non_dry_run_passes_fetched_diff_to_post_review(self):
         """post_review must receive the already-fetched diff so it doesn't
-        re-fetch the entire PR context just to rebuild the position map."""
+        re-fetch the entire PR context just to rebuild the commentable-line index."""
         github = FakeGitHub()
         engine = FakeEngine(FakeProvider())
         cfg = _default_cfg()

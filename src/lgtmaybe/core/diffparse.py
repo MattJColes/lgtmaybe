@@ -2,7 +2,7 @@
 
 One home for the regexes and helpers that read a ``git diff``: splitting a diff
 into per-file patches and parsing hunk headers. Shared by the engine (batching,
-hunk expansion) and the github adapter (position map) so the patterns and their
+hunk expansion) and the github adapter (commentable-line index) so the patterns and their
 off-by-one rules live in exactly one place.
 """
 
