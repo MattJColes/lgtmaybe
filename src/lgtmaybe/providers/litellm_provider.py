@@ -9,6 +9,17 @@ from __future__ import annotations
 from typing import Any
 
 import litellm
+
+# litellm re-exports the openai exception types but doesn't list them in __all__,
+# so mypy rejects litellm.AuthenticationError etc. as un-exported — import them
+# from litellm.exceptions, where they're defined directly.
+from litellm.exceptions import (
+    AuthenticationError,
+    BadRequestError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 from lgtmaybe.core.models import ProviderResult
@@ -24,10 +35,10 @@ _MAX_ATTEMPTS = 4
 # turns an instant failure into many minutes of wasted runner time (the gpt-5.5
 # quota failure that ran ~13 min before surfacing). Fail fast instead.
 _PERMANENT_ERROR_TYPES: tuple[type[Exception], ...] = (
-    litellm.AuthenticationError,
-    litellm.BadRequestError,
-    litellm.NotFoundError,
-    litellm.PermissionDeniedError,
+    AuthenticationError,
+    BadRequestError,
+    NotFoundError,
+    PermissionDeniedError,
 )
 
 # A 429 is overloaded: a *capacity* rate-limit is transient (back off and retry),
@@ -50,7 +61,7 @@ def _is_permanent(exc: BaseException) -> bool:
     """True when retrying *exc* cannot plausibly succeed, so we should not."""
     if isinstance(exc, _PERMANENT_ERROR_TYPES):
         return True
-    if isinstance(exc, litellm.RateLimitError):
+    if isinstance(exc, RateLimitError):
         return _is_quota_rate_limit(exc)
     return False
 
