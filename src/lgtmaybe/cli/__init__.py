@@ -108,6 +108,7 @@ def build_review_context(
         pr_number=pr_number,
         token=token,
         marker_key=f"{cfg.provider}/{cfg.model}",
+        resolve_fixed=cfg.resolve_fixed,
     )
     return github, engine, provider
 
@@ -274,6 +275,7 @@ def action_inputs() -> dict[str, str | None]:
         "temperature": get("TEMPERATURE"),
         "num_ctx": get("NUM_CTX"),
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
+        "resolve_fixed": get("RESOLVE_FIXED"),
         "config_path": get("CONFIG_PATH"),
     }
 

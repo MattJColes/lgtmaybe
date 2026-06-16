@@ -324,9 +324,28 @@ can commit straight from the PR:
 ![An inline lgtmaybe review comment flagging a [CRITICAL] command injection vulnerability in an archive function using subprocess with shell=True, with a suggested fix that avoids the shell](../assets/review-command-injection.png){ width="660" }
 
 The summary carries a hidden marker (`<!-- lgtmaybe -->`), so re-running on the
-same PR **updates** the existing review instead of creating duplicates. When a
-PR is clean (no findings, and every file was within the caps), the summary is a
-simple:
+same PR **updates** the existing review instead of creating duplicates.
+
+### Resolving conversations once they're fixed
+
+Each inline comment also carries a hidden per-finding fingerprint. When you push
+a fix and lgtmaybe runs again, it looks at its own open conversations: if a
+finding it raised is **no longer produced** *and* GitHub marks that thread
+**outdated** (the code under it changed), lgtmaybe treats it as fixed — it posts
+a short `✅ Looks resolved.` reply and resolves the conversation. Both conditions
+must hold, so a thread is never collapsed just because the lines around it
+shifted, or because a single run happened not to re-flag it without the code
+changing.
+
+This is on by default. To leave conversations for manual resolution, set
+`resolve_fixed: false` in `.lgtmaybe.yml` (or the Action's `resolve_fixed` input).
+Resolving a thread uses GitHub's GraphQL API; the workflow's default
+`GITHUB_TOKEN` (with `pull-requests: write`, already needed to post the review)
+is sufficient. The step is best-effort — if it can't run, the review itself still
+posts normally.
+
+When a PR is clean (no findings, and every file was within the caps), the summary
+is a simple:
 
 ```
 👍 LGTM!

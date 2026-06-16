@@ -231,6 +231,7 @@ def action() -> None:
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],
+        resolve_fixed=inputs["resolve_fixed"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

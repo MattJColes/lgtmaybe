@@ -44,7 +44,13 @@ so the provider list is never a cage.
   top adds retries / fallback.
 - **License:** MIT (already in `LICENSE`).
 - **Posting:** REST review API — batched inline comments + one summary.
-  Idempotent updates via a hidden marker comment.
+  Idempotent updates via a hidden marker comment. Each inline comment also carries
+  a hidden per-finding fingerprint (`finding_fingerprint(path, title)`); on a
+  re-run, conversations whose finding is gone **and** whose thread GitHub marks
+  outdated are replied to and resolved (`ReviewConfig.resolve_fixed`, default on).
+  Resolving a thread is the one op the REST review API can't do, so it uses the
+  GraphQL API (`resolveReviewThread` / `addPullRequestReviewThreadReply`) —
+  best-effort, never fails the review.
 
 ### Auth model — resolved by provider (chain of responsibility)
 
