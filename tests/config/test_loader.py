@@ -259,3 +259,14 @@ def test_lens_paths_unknown_pack_fails_clearly(tmp_path):
 
     with pytest.raises(ValueError, match="nope|pack"):
         load_config(config_path=cfg_file)
+
+
+@pytest.mark.parametrize("evil", ["pack:../secrets", "pack:../../etc", "pack:/etc", "pack:.."])
+def test_lens_paths_pack_cannot_escape_bundled_dir(tmp_path, evil):
+    """A `pack:` name with a path separator or '..' is rejected, never resolved
+    to a directory outside the bundled lenses dir (path-traversal guard)."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(f"provider: ollama\nmodel: m\nlens_paths:\n  - {evil}\n")
+
+    with pytest.raises(ValueError, match="lens pack"):
+        load_config(config_path=cfg_file)

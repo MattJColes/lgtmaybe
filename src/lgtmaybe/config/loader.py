@@ -105,7 +105,11 @@ def _resolve_lens_path(raw_path: Any) -> Path:
         return Path(text)
     name = text[len(_PACK_SCHEME) :].strip()
     pack_dir = _BUNDLED_LENSES_DIR / name
-    if not name or not pack_dir.is_dir():
+    # A pack name must be a single safe directory segment that stays inside the
+    # bundled-lenses dir: reject empty, "." / "..", and anything carrying a path
+    # separator (e.g. `pack:../secrets` or `pack:/etc`) so the scheme can only
+    # ever load one of the curated bundled packs, never arbitrary YAML on disk.
+    if not name or name in {".", ".."} or name != Path(name).name or not pack_dir.is_dir():
         available = sorted(p.name for p in _BUNDLED_LENSES_DIR.glob("*") if p.is_dir())
         raise ValueError(
             f"unknown lens pack {name!r}; bundled packs are: {', '.join(available) or 'none'}"
