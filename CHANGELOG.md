@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.10...lgtmaybe-v0.1.11) (2026-06-16)
+
+
+### Bug Fixes
+
+* fail fast on permanent provider errors and bound the lens fan-out ([#92](https://github.com/MattJColes/lgtmaybe/issues/92)) ([0da9be0](https://github.com/MattJColes/lgtmaybe/commit/0da9be063f6fc4a49662b60c34490f5b4f8b00c8))
+
 ## [0.1.10](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.1.9...lgtmaybe-v0.1.10) (2026-06-15)
 
 

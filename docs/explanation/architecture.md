@@ -74,7 +74,12 @@ fetch → compress → prompt → parse → post
 
 5. **post** — findings are batched into a single GitHub review request.
    The summary comment is updated idempotently using a hidden marker, so
-   re-running lgtmaybe on the same PR does not create duplicate comments.
+   re-running lgtmaybe on the same PR does not create duplicate comments. Each
+   inline comment is stamped with a hidden per-finding fingerprint; on a re-run,
+   conversations whose finding is gone and whose thread GitHub marks outdated are
+   replied to and resolved (`resolve_fixed`, default on). Resolving a review
+   thread is the one operation the REST review API can't do, so this step uses
+   GitHub's GraphQL API — best-effort, so a failure never blocks the review.
 
 ## Provider strategy and factory
 
@@ -86,6 +91,41 @@ engine is provider-agnostic.
 Credential resolution uses a **chain of responsibility**: each provider knows
 how to locate its own credentials (ambient cloud creds, env var API key, or
 none for ollama). lgtmaybe never stores or logs credentials.
+
+## Reliability: retries, timeouts, and concurrency
+
+The provider wrapper (`LiteLLMProvider`) and the engine cooperate so a flaky
+network recovers but a dead-end failure surfaces fast:
+
+- **Retries are classified, not blanket.** Transient failures — capacity rate
+  limits (`429 rate_limit_exceeded`), timeouts, connection errors (e.g. an
+  ollama server still warming up), 5xx — are retried with **exponential backoff
+  and jitter** (up to four attempts). **Permanent** failures are *not* retried:
+  bad credentials (`AuthenticationError`), malformed/unsupported requests
+  (`BadRequestError`, including content-policy blocks), unknown models
+  (`NotFoundError`), denied permissions, and **quota/billing** rate limits
+  (`429 insufficient_quota` — "you exceeded your current quota"). Retrying a
+  quota error can never succeed; stacked across every lens it only turns an
+  instant "out of credit" into many minutes of wasted runner time, so lgtmaybe
+  raises it immediately. An optional `fallback_model` is still tried once.
+
+- **One retry layer.** litellm's own internal retry loop is disabled
+  (`num_retries=0`) so failures aren't ground through two stacked backoff layers
+  — lgtmaybe owns the retry policy in one place.
+
+- **Per-request timeout.** Every model call carries a timeout: 60s for hosted
+  providers, 300s for local ones (ollama, openai-compatible), overridable via
+  `timeout` / `--timeout`. The posting workflows additionally set a job-level
+  `timeout-minutes` so a wedged run can't hold a runner for GitHub's six-hour
+  default.
+
+- **Bounded fan-out.** The per-category lenses run concurrently for hosted
+  providers, but the pool is **capped (4 workers)** so a single batch doesn't
+  burst the whole lens set at the provider at once and trip a capacity 429 on a
+  lower-tier account — the lenses run in a couple of waves instead, and per-call
+  latency dominates so the wall-clock cost is small. ollama runs **serially**
+  (one worker): a single local instance serves a model one request at a time, so
+  concurrent calls would only queue up and time out.
 
 ## Dependency injection
 

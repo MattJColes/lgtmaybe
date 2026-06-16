@@ -221,6 +221,12 @@ class ReviewConfig(_Strict):
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True
+    # Auto-resolve a previously-posted review conversation once its finding is
+    # fixed: on a re-run, when a finding lgtmaybe flagged is no longer produced
+    # and GitHub marks the thread outdated (the code under it changed), lgtmaybe
+    # replies and resolves the conversation. GitHub posting only — ignored by the
+    # local CLI review, which has no conversations to resolve.
+    resolve_fixed: bool = True
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them; narrow it to trade
     # thoroughness for fewer calls. `default=` (not default_factory) on purpose:

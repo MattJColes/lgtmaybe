@@ -42,6 +42,10 @@ inputs:
     description: "Token budget per model call before the diff is split into batches (any provider). Leave empty for the default (100000)."
     required: false
     default: ""
+  resolve_fixed:
+    description: "Auto-resolve a review conversation once its finding is fixed: on a re-run, when a flagged finding is no longer produced and the thread is outdated, lgtmaybe replies and resolves it. Set to false to leave conversations for manual resolution."
+    required: false
+    default: ""
   aws_role_arn:
     description: "IAM role ARN to assume via GitHub OIDC for bedrock. No static AWS key is ever stored."
     required: false
@@ -132,6 +136,7 @@ runs:
         INPUT_TEMPERATURE: ${{ inputs.temperature }}
         INPUT_NUM_CTX: ${{ inputs.num_ctx }}
         INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
+        INPUT_RESOLVE_FIXED: ${{ inputs.resolve_fixed }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         LGTMAYBE_IMAGE: ${{ inputs.image }}
       run: |
@@ -143,7 +148,7 @@ runs:
           -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_FALLBACK_MODEL \
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
           -e INPUT_TIMEOUT -e INPUT_TEMPERATURE \
-          -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS \
+          -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS -e INPUT_RESOLVE_FIXED \
           -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
           -e AWS_REGION -e AWS_DEFAULT_REGION \
           -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \
