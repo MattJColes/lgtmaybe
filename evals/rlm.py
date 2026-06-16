@@ -1,48 +1,44 @@
-"""RLM A/B benchmark — does the recursive hunk-walk beat reviewing a file whole?
+"""RLM A/B benchmark — run via ``python -m evals.rlm`` against a local model.
 
-This measures the shipped ``ReviewConfig.recursive`` feature (engine default on):
-when a file's diff exceeds ``max_input_tokens`` the engine can either review the
-whole file in one call or walk it hunk-by-hunk (each hunk its own focused call).
-Two effects are in play — a *focus* gain (a small model attends better to one
-hunk at a time) on any over-budget file, and *truncation-avoidance* when the file
-genuinely exceeds the model's context window, where the whole-file call drops the
-tail while the walk reviews every hunk. This harness runs both on a fixture
-against a **live** model and reports recall + token usage (a cost proxy) for each,
-so the "it helps performance" claim can be checked on real numbers, not a hunch:
+Compares the **recursive hunk-walk** against the original **whole-file** method
+through the real ``LLMReviewEngine`` — they differ only by ``ReviewConfig.recursive``
+— over one or more fixtures, repeated ``--repeats`` times so the spread is visible
+(the model samples at temperature > 0, so a single run is noisy). Reports each
+strategy's recall mean / min / max plus mean token cost, and a verdict.
 
-  - ``whole``     — ``recursive=False``: the over-budget file in one call.
-  - ``recursive`` — ``recursive=True``:  the RLM walk, each hunk its own call.
-
-Both strategies run through the **real** ``LLMReviewEngine`` (same redaction,
-injection wrapping, fan-out, dedupe) — they differ only by the one config flag,
-so the comparison is honest. It needs a live model, so it is **not** in the
-pytest gate; the pure plumbing (usage accounting, the comparison record) is
-unit-tested in ``tests/evals/test_rlm.py``.
+This is the common way to check the RLM walk locally with ollama:
 
     python -m evals.rlm --provider ollama --model qwen3.5:4b \
-        --api-base http://localhost:11434 --fixture rlm-bigfile --budget 300
+        --api-base http://localhost:11434 --repeats 8
+
+It needs a live model, so it is **not** in the pytest gate; the pure aggregation
+(stats, the per-strategy report, the verdict) is unit-tested in
+``tests/evals/test_rlm.py``. The same hardening as a real review still applies —
+both strategies run the full engine, so redaction + injection wrapping run on
+every call.
 """
 
 from __future__ import annotations
 
 import argparse
+import statistics
 import sys
 from typing import Any
 
 from pydantic import BaseModel
 
-from lgtmaybe.core.models import (
-    PRContext,
-    Provider,
-    ProviderResult,
-    ReviewConfig,
-)
+from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig
 from lgtmaybe.core.ports import Message, ProviderClient
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.providers.factory import build_provider
 
-from .run import _load_fixtures, _select_fixtures
-from .scorer import Fixture, FixtureScore, score_fixture
+from .run import _load_fixtures, _parse_categories, _select_fixtures
+from .scorer import Fixture, score_fixture
+
+# The fixtures purpose-built for this benchmark: each is a single multi-hunk file
+# big enough that a low --budget forces the over-budget split.
+_DEFAULT_FIXTURES = ["rlm-bigfile", "rlm-pipeline"]
+
 
 # ---------------------------------------------------------------------------
 # Pure plumbing — no model, no I/O; unit-tested.
@@ -50,11 +46,7 @@ from .scorer import Fixture, FixtureScore, score_fixture
 
 
 class _UsageTrackingProvider(ProviderClient):
-    """Wraps a real provider and accumulates token usage + call count.
-
-    Lets the benchmark compare the two strategies on the same cost proxy (tokens),
-    fairly — both run through the same wrapped backend.
-    """
+    """Wraps a real provider and accumulates token usage + call count per run."""
 
     def __init__(self, inner: ProviderClient) -> None:
         self._inner = inner
@@ -70,54 +62,75 @@ class _UsageTrackingProvider(ProviderClient):
         return result
 
 
-class StrategyResult(BaseModel):
-    """One strategy's outcome on a fixture: quality (score) + cost (tokens)."""
+class RunSample(BaseModel):
+    """One run of one strategy over all fixtures: pooled recall + that run's cost."""
 
-    name: str
-    score: FixtureScore
+    recall: float
     input_tokens: int
     output_tokens: int
     calls: int
+    parsed_ok: bool
 
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
 
 
-class ComparisonResult(BaseModel):
-    """Side-by-side of the whole-file baseline and the recursive walk."""
+class StrategyReport(BaseModel):
+    """A strategy's outcome aggregated across repeats: recall spread + mean cost."""
 
-    whole: StrategyResult
-    recursive: StrategyResult
-
-    @property
-    def recall_delta(self) -> float:
-        """Recursive recall minus whole recall (positive = recursive caught more)."""
-        return self.recursive.score.recall - self.whole.score.recall
+    name: str
+    samples: list[RunSample]
 
     @property
-    def token_ratio(self) -> float:
-        """Recursive total tokens / whole total tokens (>1 = recursive costs more)."""
-        if self.whole.total_tokens == 0:
-            return 1.0
-        return self.recursive.total_tokens / self.whole.total_tokens
+    def recalls(self) -> list[float]:
+        return [s.recall for s in self.samples]
 
     @property
-    def verdict(self) -> str:
-        """A one-line read: did walking the diff pay for itself here?"""
-        better = self.recall_delta > 0
-        cheaper = self.token_ratio < 1.0
-        if better and cheaper:
-            return "recursive wins — higher recall AND cheaper"
-        if better:
-            return f"recursive recall +{self.recall_delta:.0%} at {self.token_ratio:.1f}x tokens"
-        if cheaper:
-            return f"recursive cheaper ({self.token_ratio:.1f}x tokens), recall not worse"
-        return "whole-file holds — recursive cost more without catching more"
+    def mean_recall(self) -> float:
+        return statistics.fmean(self.recalls) if self.samples else 0.0
+
+    @property
+    def min_recall(self) -> float:
+        return min(self.recalls) if self.samples else 0.0
+
+    @property
+    def max_recall(self) -> float:
+        return max(self.recalls) if self.samples else 0.0
+
+    @property
+    def spread(self) -> float:
+        """max − min recall: how much the result moves between runs (noise)."""
+        return self.max_recall - self.min_recall if self.samples else 0.0
+
+    @property
+    def mean_total_tokens(self) -> float:
+        return statistics.fmean([s.total_tokens for s in self.samples]) if self.samples else 0.0
+
+    @property
+    def all_parsed(self) -> bool:
+        return all(s.parsed_ok for s in self.samples)
+
+
+def verdict(whole: StrategyReport, recursive: StrategyReport) -> str:
+    """A one-line read comparing mean recall and mean token cost of the two."""
+    delta = recursive.mean_recall - whole.mean_recall  # fraction
+    ratio = (
+        recursive.mean_total_tokens / whole.mean_total_tokens if whole.mean_total_tokens else 1.0
+    )
+    better = delta > 0
+    cheaper = ratio < 1.0
+    if better and cheaper:
+        return "recursive wins — higher mean recall AND cheaper"
+    if better:
+        return f"recursive recall +{delta:.0%} (mean) at {ratio:.1f}x tokens"
+    if cheaper:
+        return f"recursive cheaper ({ratio:.1f}x tokens), mean recall not worse"
+    return "whole-file holds — recursive cost more without catching more"
 
 
 # ---------------------------------------------------------------------------
-# Live runners — need a model.
+# Live runner — needs a model.
 # ---------------------------------------------------------------------------
 
 
@@ -132,48 +145,55 @@ def _ctx(diff: str, manifest: Fixture) -> PRContext:
     )
 
 
-def _run(
-    diff: str,
-    manifest: Fixture,
-    provider: _UsageTrackingProvider,
+def _run_strategy_once(
+    fixtures: list[tuple[str, Fixture]],
+    make_provider: Any,
+    provider: Provider,
     model: str,
     *,
-    name: str,
     recursive: bool,
-    budget: int,
+    budget: int | None,
     reflect: bool,
-) -> StrategyResult:
-    """Review *diff* through the real engine with ``recursive`` on or off."""
-    cfg = ReviewConfig(
-        provider=Provider.ollama,  # provider value is unused once a client is injected
-        model=model,
-        max_input_tokens=budget,
-        recursive=recursive,
-        reflect=reflect,
-    )
-    engine = LLMReviewEngine(provider)
-    try:
-        findings, _ = engine.review(_ctx(diff, manifest), cfg)
-        score = score_fixture(manifest.name, findings, manifest.expected, parsed_ok=True)
-    except ReviewIncompleteError:
-        score = score_fixture(manifest.name, [], manifest.expected, parsed_ok=False)
-    return StrategyResult(
-        name=name,
-        score=score,
-        input_tokens=provider.input_tokens,
-        output_tokens=provider.output_tokens,
-        calls=provider.calls,
+    categories: Any,
+) -> RunSample:
+    """Review every fixture once under one strategy; pool recall across them."""
+    tracker = _UsageTrackingProvider(make_provider())
+    engine = LLMReviewEngine(tracker)
+    matched = expected = 0
+    parsed_all = True
+    overrides: dict[str, Any] = {"recursive": recursive, "reflect": reflect}
+    if budget is not None:
+        overrides["max_input_tokens"] = budget
+    if categories is not None:
+        overrides["categories"] = categories
+    for diff, manifest in fixtures:
+        cfg = ReviewConfig(provider=provider, model=model, **overrides)
+        try:
+            findings, _ = engine.review(_ctx(diff, manifest), cfg)
+            score = score_fixture(manifest.name, findings, manifest.expected, parsed_ok=True)
+        except ReviewIncompleteError:
+            score = score_fixture(manifest.name, [], manifest.expected, parsed_ok=False)
+            parsed_all = False
+        matched += score.matched_count
+        expected += score.expected_count
+    recall = matched / expected if expected else 1.0
+    return RunSample(
+        recall=recall,
+        input_tokens=tracker.input_tokens,
+        output_tokens=tracker.output_tokens,
+        calls=tracker.calls,
+        parsed_ok=parsed_all,
     )
 
 
-def _print(result: StrategyResult) -> None:
-    status = "ok" if result.score.parsed_ok else "PARSE-FAIL"
+def _print(report: StrategyReport) -> None:
+    parsed = "ok" if report.all_parsed else "PARSE-FAIL"
     print(
-        f"{result.name:10} parsed={status:10} "
-        f"recall={result.score.recall:5.0%} "
-        f"({result.score.matched_count}/{result.score.expected_count}) "
-        f"calls={result.calls:3} tokens={result.total_tokens:6} "
-        f"(in {result.input_tokens} / out {result.output_tokens})"
+        f"{report.name:10} parsed={parsed:10} "
+        f"recall mean {report.mean_recall:4.0%} "
+        f"(min {report.min_recall:.0%}, max {report.max_recall:.0%}, "
+        f"spread {report.spread:.0%}) "
+        f"tokens ~{report.mean_total_tokens:.0f}  over {len(report.samples)} runs"
     )
 
 
@@ -185,64 +205,90 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--api-base", default=None)
     ap.add_argument("--timeout", type=int, default=None)
+    ap.add_argument("--num-ctx", type=int, default=None, help="ollama context window")
     ap.add_argument(
         "--budget",
         type=int,
         default=300,
-        help="max_input_tokens per call — set it below a file's diff size (but above "
-        "a single hunk) so the over-budget file splits and the comparison is meaningful",
+        help="--max-input-tokens per call — set below a fixture's diff size (but above "
+        "a single hunk) so the over-budget file splits and the strategies diverge",
+    )
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="runs per strategy; raise it for a wide, low-noise sweep (the model "
+        "samples at temperature > 0, so one run is noisy)",
+    )
+    ap.add_argument(
+        "--only",
+        choices=["whole", "recursive", "both"],
+        default="both",
+        help="run just one strategy (lets a CI matrix parallelise the two legs)",
     )
     ap.add_argument("--no-reflect", dest="reflect", action="store_false")
+    ap.add_argument("--temperature", type=float, default=None)
+    ap.add_argument("--top-p", type=float, default=None)
+    ap.add_argument("--top-k", type=int, default=None)
+    ap.add_argument("--categories", default=None, help="comma-separated review lenses")
     ap.add_argument(
         "--fixture",
         action="append",
         dest="fixtures",
         metavar="NAME",
-        help="fixture(s) to compare on; repeatable. Default: all.",
+        help=f"fixture(s) to benchmark; repeatable. Default: {', '.join(_DEFAULT_FIXTURES)}.",
     )
     args = ap.parse_args(argv)
 
     provider = Provider(args.provider)
-    fixtures = _select_fixtures(_load_fixtures(), args.fixtures)
+    categories = _parse_categories(args.categories)
+    fixtures = _select_fixtures(_load_fixtures(), args.fixtures or _DEFAULT_FIXTURES)
 
-    exit_code = 0
-    for diff, manifest in fixtures:
-        print(f"\n=== {manifest.name} (budget {args.budget} tokens/call) ===")
-        whole_tracker = _UsageTrackingProvider(
-            build_provider(provider, args.model, api_base=args.api_base, timeout=args.timeout)
+    # Sampling + ollama context reach the model via build_provider → litellm.
+    extra: dict[str, Any] = {}
+    if args.num_ctx is not None and provider is Provider.ollama:
+        extra["num_ctx"] = args.num_ctx
+    if args.temperature is not None:
+        extra["temperature"] = args.temperature
+    if args.top_p is not None:
+        extra["top_p"] = args.top_p
+    if args.top_k is not None:
+        extra["top_k"] = args.top_k
+
+    def make_provider() -> ProviderClient:
+        return build_provider(
+            provider, args.model, api_base=args.api_base, timeout=args.timeout, **extra
         )
-        rec_tracker = _UsageTrackingProvider(
-            build_provider(provider, args.model, api_base=args.api_base, timeout=args.timeout)
-        )
-        comparison = ComparisonResult(
-            whole=_run(
-                diff,
-                manifest,
-                whole_tracker,
+
+    names = ", ".join(m.name for _, m in fixtures)
+    print(f"\n=== RLM benchmark (model {args.model}, {args.repeats}x, fixtures: {names}) ===")
+
+    reports: dict[str, StrategyReport] = {}
+    for name, recursive in (("whole", False), ("recursive", True)):
+        if args.only != "both" and args.only != name:
+            continue
+        samples = [
+            _run_strategy_once(
+                fixtures,
+                make_provider,
+                provider,
                 args.model,
-                name="whole",
-                recursive=False,
+                recursive=recursive,
                 budget=args.budget,
                 reflect=args.reflect,
-            ),
-            recursive=_run(
-                diff,
-                manifest,
-                rec_tracker,
-                args.model,
-                name="recursive",
-                recursive=True,
-                budget=args.budget,
-                reflect=args.reflect,
-            ),
-        )
-        _print(comparison.whole)
-        _print(comparison.recursive)
-        print(f"  → {comparison.verdict}")
-        if not comparison.recursive.score.parsed_ok:
-            exit_code = 1
+                categories=categories,
+            )
+            for _ in range(args.repeats)
+        ]
+        reports[name] = StrategyReport(name=name, samples=samples)
+        _print(reports[name])
 
-    return exit_code
+    if "whole" in reports and "recursive" in reports:
+        print(f"  → {verdict(reports['whole'], reports['recursive'])}")
+
+    # Non-zero only on a real pipeline break (a strategy that never parsed), so the
+    # benchmark reports numbers rather than gating on model recall.
+    return 0 if all(r.all_parsed for r in reports.values()) else 1
 
 
 if __name__ == "__main__":

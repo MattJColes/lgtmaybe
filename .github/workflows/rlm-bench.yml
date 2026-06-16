@@ -1,17 +1,35 @@
 # RLM A/B benchmark — recursive hunk-walk vs the original whole-file method, on a
 # real local ollama model. Two matrix legs run as SEPARATE tasks (whole /
-# recursive); each reviews the rlm-bigfile fixture with one strategy and reports
-# recall, so the run summary shows who wins on real numbers — not a hunch.
+# recursive); each reviews the RLM fixtures with one strategy `repeats` times and
+# reports recall mean / min / max, so the run summary shows who wins on real
+# numbers AND how noisy the result is (the model samples at temperature > 0).
 #
-# This is a BENCHMARK, not a gate: --min-recall 0.0 means neither leg can fail
-# the run, and it only triggers on demand or when the RLM code/fixture changes.
-# The recursive walk only differs from whole-file when a single file's diff
-# exceeds the token budget, so --max-input-tokens 300 (below rlm-bigfile's ~600
-# tokens, above any single hunk) forces the over-budget file to split.
+# This is a BENCHMARK, not a gate: --min-recall 0.0 means neither leg can fail.
+# On a pull_request it runs a single quick pass (repeats=1) when the RLM
+# code/fixtures change; for the wide sweep, dispatch it manually with a larger
+# `repeats`. --max-input-tokens 300 (below each fixture's ~600 tokens, above a
+# single hunk) forces the over-budget file to split so the strategies diverge.
 name: rlm-bench
 
 on:
   workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Runs per strategy (raise for a wide, low-noise sweep)"
+        required: false
+        default: "8"
+      model:
+        description: "ollama model tag"
+        required: false
+        default: "qwen3.5:4b"
+      categories:
+        description: "Comma-separated review lenses"
+        required: false
+        default: "security,correctness,performance"
+      budget:
+        description: "--max-input-tokens (set below a fixture's size to force the split)"
+        required: false
+        default: "300"
   pull_request:
     paths:
       - "src/lgtmaybe/engine/compress.py"
@@ -19,6 +37,7 @@ on:
       - "evals/rlm.py"
       - "evals/run.py"
       - "evals/fixtures/rlm-bigfile/**"
+      - "evals/fixtures/rlm-pipeline/**"
       - ".github/workflows/rlm-bench.yml"
 
 concurrency:
@@ -28,14 +47,19 @@ concurrency:
 jobs:
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 340
     strategy:
       fail-fast: false
       matrix:
         # whole = the original method (file sent whole); recursive = the RLM walk.
         method: [whole, recursive]
     env:
-      OLLAMA_MODEL: qwen3.5:4b
+      # Inputs only exist on workflow_dispatch; fall back to a fast single pass on
+      # a pull_request so an unrelated PR doesn't burn a multi-hour sweep.
+      OLLAMA_MODEL: ${{ github.event.inputs.model || 'qwen3.5:4b' }}
+      REPEATS: ${{ github.event.inputs.repeats || '1' }}
+      CATEGORIES: ${{ github.event.inputs.categories || 'security,correctness,performance' }}
+      BUDGET: ${{ github.event.inputs.budget || '300' }}
       OLLAMA_MODELS: /home/runner/.ollama/models
     steps:
       - uses: actions/checkout@v6
@@ -74,39 +98,33 @@ jobs:
       - name: Pull the model
         run: ollama pull "$OLLAMA_MODEL"
 
-      # One strategy per matrix leg. --no-recursive pins the original whole-file
-      # method; --recursive is the RLM walk. Same model, fixture, budget, lenses,
-      # and sampling either side, so the only variable is the strategy. The diff's
-      # planted bugs span security + correctness + performance, so review through
-      # exactly those three lenses. --min-recall 0.0 keeps it a report, not a gate.
-      - name: "Benchmark: ${{ matrix.method }}"
+      # One strategy per matrix leg (--only), repeated REPEATS times over both RLM
+      # fixtures. The benchmark itself (evals/rlm.py) owns the repeat loop and the
+      # mean/min/max — the same command a developer runs locally — so CI and local
+      # runs can never drift. --max-input-tokens forces the over-budget split.
+      - name: "Benchmark: ${{ matrix.method }} (x${{ env.REPEATS }})"
         run: |
-          flag=--recursive
-          [ "${{ matrix.method }}" = "whole" ] && flag=--no-recursive
-          uv run python -m evals.run \
+          uv run python -m evals.rlm \
             --provider ollama \
             --model "$OLLAMA_MODEL" \
             --api-base http://localhost:11434 \
-            --fixture rlm-bigfile \
-            --categories security,correctness,performance \
-            --max-input-tokens 300 \
-            --min-recall 0.0 \
-            --timeout 900 \
+            --only "${{ matrix.method }}" \
+            --repeats "$REPEATS" \
+            --categories "$CATEGORIES" \
+            --budget "$BUDGET" \
             --num-ctx 16384 \
+            --timeout 900 \
             --temperature 0.6 \
             --top-p 0.8 \
             --top-k 20 \
-            $flag \
             --no-reflect | tee result.txt
 
-      # Surface each leg's recall in the run summary so the two tasks can be read
-      # side by side without opening the logs.
       - name: Publish result to the run summary
         if: always()
         run: |
           {
-            echo "### RLM bench — ${{ matrix.method }} (model $OLLAMA_MODEL)"
+            echo "### RLM bench — ${{ matrix.method }} (model $OLLAMA_MODEL, lenses $CATEGORIES)"
             echo '```'
-            grep -E "recall=|aggregate recall" result.txt || echo "(no result captured)"
+            grep -E "recall mean" result.txt || echo "(no result captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

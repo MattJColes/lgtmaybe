@@ -8,6 +8,8 @@ ollama e2e run.
 
 from __future__ import annotations
 
+import pytest
+
 from evals import run as run_mod
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.github import is_reviewable
@@ -61,18 +63,19 @@ def test_vibe_multifile_has_high_signal_and_subtle_findings() -> None:
     assert "off-by-one" in labels
 
 
-def test_rlm_bigfile_is_one_multi_hunk_file() -> None:
-    """The RLM benchmark fixture must be a single file with several hunks — that's
+@pytest.mark.parametrize("name", ["rlm-bigfile", "rlm-pipeline"])
+def test_rlm_fixture_is_one_multi_hunk_file(name: str) -> None:
+    """Each RLM benchmark fixture must be a single file with several hunks — that's
     the shape that exercises the recursive walk (an over-budget file split into
-    per-hunk calls). Guards against an edit that flattens it to one hunk and
+    per-hunk calls). Guards against an edit that flattens one to a single hunk and
     silently makes the benchmark a no-op."""
     from lgtmaybe.engine.compress import split_patch_into_hunks
 
-    diff, manifest = _fixture("rlm-bigfile")
+    diff, manifest = _fixture(name)
     parts = split_by_file(diff, [manifest.changed_file])
-    assert len(parts) == 1, "rlm-bigfile must be a single file"
+    assert len(parts) == 1, f"{name} must be a single file"
     _path, patch = parts[0]
-    assert len(split_patch_into_hunks(patch)) >= 3, "rlm-bigfile needs several hunks"
+    assert len(split_patch_into_hunks(patch)) >= 3, f"{name} needs several hunks"
 
 
 def test_fixtures_cover_performance_and_complexity_lenses() -> None:

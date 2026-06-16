@@ -289,14 +289,22 @@ one flag — and reports recall + token usage for each, so "does walking the dif
 actually raise recall?" gets a real number instead of a hunch:
 
 ```bash
-# rlm-bigfile is one 5-hunk file (~600 tokens); --budget below that (but above a
-# single hunk) forces the over-budget file to split. Needs a live model.
+# Defaults to both RLM fixtures (rlm-bigfile, rlm-pipeline) — each a single
+# multi-hunk file ~600 tokens; --budget below that (but above a single hunk)
+# forces the over-budget split. --repeats samples the spread. Needs a live model.
 uv run python -m evals.rlm --provider ollama --model qwen3.5:4b \
-  --api-base http://localhost:11434 --fixture rlm-bigfile --budget 300
+  --api-base http://localhost:11434 --repeats 8
 ```
 
-It prints, per fixture, each strategy's recall and token cost plus a one-line
-verdict (e.g. *"recursive recall +25% at 1.4x tokens"*).
+It runs both strategies through the real engine `--repeats` times (recall pooled
+across the fixtures per run) and prints each strategy's recall **mean / min / max
+/ spread** plus mean token cost and a one-line verdict (e.g. *"recursive recall
++25% (mean) at 1.4x tokens"*). The spread is the point — at temperature > 0 a
+single run is noisy, so a wide `--repeats` tells you whether the gap is real or
+sampling luck. `--only whole|recursive` runs one strategy (the CI matrix uses it
+to parallelise the two legs); `--categories` / `--budget` / `--num-ctx` /
+`--temperature` tune it. This is the **same command** the `rlm-bench` workflow
+runs, so a local run and CI can't drift.
 
 Two distinct effects are in play, and the benchmark separates them by fixture
 size:

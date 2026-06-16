@@ -1,20 +1,16 @@
-"""Unit tests for the RLM benchmark's pure plumbing (no model, no I/O).
+"""Unit tests for the RLM benchmark's pure aggregation (no model, no I/O).
 
-The hunk-splitting the benchmark relies on now lives in the engine
+The hunk-splitting the benchmark relies on lives in the engine
 (``compress.split_patch_into_hunks``, covered in ``tests/engine/test_compress.py``);
-these tests cover the benchmark's own accounting + comparison record.
+these cover the benchmark's own accounting, the recall spread across repeats, and
+the verdict.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from evals.rlm import (
-    ComparisonResult,
-    StrategyResult,
-    _UsageTrackingProvider,
-)
-from evals.scorer import FixtureScore
+from evals.rlm import RunSample, StrategyReport, _UsageTrackingProvider, verdict
 from lgtmaybe.core.models import ProviderResult
 from lgtmaybe.core.ports import Message, ProviderClient
 
@@ -33,45 +29,39 @@ def test_usage_tracking_provider_accumulates_tokens_and_calls() -> None:
     assert tracker.output_tokens == 6
 
 
-def _score(recall_fraction: tuple[int, int], parsed: bool = True) -> FixtureScore:
-    matched, expected = recall_fraction
-    return FixtureScore(
-        name="f",
-        parsed_ok=parsed,
-        expected_count=expected,
-        matched_count=matched,
-        findings_count=matched,
-        missed=[],
+def _sample(recall: float, tokens: int = 100, parsed_ok: bool = True) -> RunSample:
+    return RunSample(
+        recall=recall, input_tokens=tokens, output_tokens=0, calls=1, parsed_ok=parsed_ok
     )
 
 
-def _strategy(name: str, recall: tuple[int, int], tokens: int) -> StrategyResult:
-    return StrategyResult(
-        name=name, score=_score(recall), input_tokens=tokens, output_tokens=0, calls=1
-    )
+def test_report_aggregates_recall_spread_across_repeats() -> None:
+    report = StrategyReport(name="recursive", samples=[_sample(0.5), _sample(1.0), _sample(0.75)])
+    assert report.mean_recall == 0.75
+    assert report.min_recall == 0.5
+    assert report.max_recall == 1.0
+    assert report.spread == 0.5  # max − min: how noisy the result is
+    assert report.all_parsed
 
 
-def test_comparison_metrics() -> None:
-    cmp = ComparisonResult(
-        whole=_strategy("whole", (1, 4), tokens=100),
-        recursive=_strategy("recursive", (3, 4), tokens=150),
-    )
-    assert cmp.recall_delta == 0.5  # 75% - 25%
-    assert cmp.token_ratio == 1.5
-    assert "recall +50%" in cmp.verdict
+def test_report_flags_a_parse_failure() -> None:
+    report = StrategyReport(name="whole", samples=[_sample(0.6), _sample(0.0, parsed_ok=False)])
+    assert not report.all_parsed
 
 
-def test_comparison_verdict_when_recursive_wins_outright() -> None:
-    cmp = ComparisonResult(
-        whole=_strategy("whole", (1, 4), tokens=200),
-        recursive=_strategy("recursive", (4, 4), tokens=120),
-    )
-    assert "recursive wins" in cmp.verdict
+def test_verdict_recursive_wins_on_higher_mean_recall() -> None:
+    whole = StrategyReport(name="whole", samples=[_sample(0.5, tokens=200)])
+    recursive = StrategyReport(name="recursive", samples=[_sample(0.9, tokens=200)])
+    assert "recursive recall +40%" in verdict(whole, recursive)
 
 
-def test_comparison_verdict_when_whole_holds() -> None:
-    cmp = ComparisonResult(
-        whole=_strategy("whole", (3, 4), tokens=100),
-        recursive=_strategy("recursive", (3, 4), tokens=180),
-    )
-    assert "whole-file holds" in cmp.verdict
+def test_verdict_recursive_wins_outright_when_also_cheaper() -> None:
+    whole = StrategyReport(name="whole", samples=[_sample(0.5, tokens=300)])
+    recursive = StrategyReport(name="recursive", samples=[_sample(0.9, tokens=120)])
+    assert "recursive wins" in verdict(whole, recursive)
+
+
+def test_verdict_whole_holds_when_recursive_costs_more_for_nothing() -> None:
+    whole = StrategyReport(name="whole", samples=[_sample(0.75, tokens=100)])
+    recursive = StrategyReport(name="recursive", samples=[_sample(0.75, tokens=180)])
+    assert "whole-file holds" in verdict(whole, recursive)
