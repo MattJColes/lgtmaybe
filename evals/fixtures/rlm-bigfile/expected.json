@@ -1,0 +1,41 @@
+{
+  "name": "rlm-bigfile",
+  "changed_file": "service.py",
+  "expected": [
+    {
+      "label": "hardcoded GitHub token in load_config (hunk 1)",
+      "line": 17,
+      "keywords": ["secret", "token", "hardcoded", "credential", "api key"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "SQL injection in find_by_email (hunk 2)",
+      "line": 54,
+      "keywords": ["sql injection", "injection", "interpolat", "parameter", "f-string", "format string"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "off-by-one / divide-by-zero in summarize (hunk 3)",
+      "line": 106,
+      "keywords": ["off-by-one", "first element", "range", "skip", "divide by zero", "zerodivision", "boundary"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "command injection via shell=True in ReportRunner.run (hunk 4 — tail)",
+      "line": 157,
+      "keywords": ["injection", "shell", "command", "shell=true"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "accidentally quadratic / N+1 in enrich (hunk 5 — tail)",
+      "line": 209,
+      "keywords": ["quadratic", "o(n^2)", "o(n*m)", "n+1", "nested loop", "performance", "inefficient"]
+    },
+    {
+      "label": "unhandled None summed in enrich (hunk 5 — tail)",
+      "line": 213,
+      "keywords": ["none", "null", "typeerror", "unhandled", "nonetype"],
+      "severity_at_least": "medium"
+    }
+  ]
+}

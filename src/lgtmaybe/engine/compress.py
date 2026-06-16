@@ -49,21 +49,69 @@ def count_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def split_patch_into_hunks(patch: str) -> list[str]:
+    """Split one file's patch into standalone single-hunk mini-diffs.
+
+    Each returned string carries the file header (the ``diff --git`` / ``---`` /
+    ``+++`` lines) followed by exactly one ``@@`` hunk, so it is a valid diff that
+    can be reviewed on its own — the unit an RLM-style walk recurses over. A patch
+    with no ``@@`` hunk (a pure rename/mode change) is returned whole. The original
+    hunk headers (and therefore line numbers) are preserved, so a finding's
+    line/side still binds to the real diff when comments are posted.
+    """
+    lines = patch.splitlines(keepends=True)
+    first_hunk = next((i for i, ln in enumerate(lines) if ln.startswith("@@")), None)
+    if first_hunk is None:
+        return [patch]
+
+    header = lines[:first_hunk]
+    units: list[str] = []
+    current: list[str] = []
+    for line in lines[first_hunk:]:
+        if line.startswith("@@") and current:
+            units.append("".join(header + current))
+            current = []
+        current.append(line)
+    if current:
+        units.append("".join(header + current))
+    return units
+
+
 def batch_files(
     files: list[tuple[str, str]],
     max_tokens: int,
+    *,
+    recursive: bool = False,
 ) -> list[list[tuple[str, str]]]:
     """Partition *files* into batches where each batch's combined patch fits under *max_tokens*.
 
     Args:
         files: List of (path, patch) pairs.
         max_tokens: Token budget per batch.
+        recursive: When True, a single file that exceeds the budget is walked
+            hunk-by-hunk (RLM-style) — split into per-hunk units that are then
+            batched normally — instead of being sent whole (where the model's
+            context would drop the tail). Files that already fit are untouched.
 
     Returns:
         A list of batches; each batch is a list of (path, patch) pairs.
     """
     if not files:
         return []
+
+    # RLM walk: decompose any over-budget file into per-hunk units up front, so a
+    # large file becomes several small calls that each fit instead of one
+    # oversized call. Files within budget pass through whole (context preserved).
+    if recursive:
+        units: list[tuple[str, str]] = []
+        for path, patch in files:
+            if count_tokens(patch) >= max_tokens:
+                hunks = split_patch_into_hunks(patch)
+                if len(hunks) > 1:
+                    units.extend((path, hunk) for hunk in hunks)
+                    continue
+            units.append((path, patch))
+        files = units
 
     batches: list[list[tuple[str, str]]] = []
     current_batch: list[tuple[str, str]] = []

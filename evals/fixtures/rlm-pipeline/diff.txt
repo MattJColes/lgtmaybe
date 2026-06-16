@@ -1,0 +1,76 @@
+diff --git a/pipeline.py b/pipeline.py
+--- a/pipeline.py
++++ b/pipeline.py
+@@ -12,7 +12,11 @@ from .db import session
+
+
+ def build_filter(raw):
+-    return {"status": raw.get("status", "active")}
++    # Bug: eval() on caller-supplied input — arbitrary code execution.
++    expr = raw.get("expr", "True")
++    allowed = eval(expr)
++    return {"status": raw.get("status", "active"), "allowed": allowed}
+
+
+ def normalize(record):
+@@ -48,9 +52,12 @@ class OrderStore:
+     def __init__(self, conn):
+         self.conn = conn
+
+-    def by_customer(self, customer_id):
+-        rows = self.conn.execute(BY_CUSTOMER, (customer_id,)).fetchall()
+-        return rows
++    def by_customer(self, customer_id):
++        # Bug: SQL injection — customer_id formatted straight into the query.
++        sql = f"SELECT * FROM orders WHERE customer_id = {customer_id}"
++        rows = self.conn.execute(sql).fetchall()
++        return rows
+
+     def totals(self):
+         return self.conn.execute(TOTALS).fetchall()
+@@ -96,8 +103,12 @@ def paginate(items, page, size):
+     if size <= 0:
+         return []
+
+-    start = (page - 1) * size
+-    return items[start : start + size]
++    # Bug: off-by-one — page is treated as 0-based here but 1-based above, so
++    # page 1 skips the first `size` items and an empty page slices wrong.
++    start = page * size
++    end = start + size
++    return items[start:end]
+
+
+ def summarize_pages(items, size):
+@@ -150,9 +161,13 @@ class Enricher:
+     def __init__(self, repo):
+         self.repo = repo
+
+-    def attach_profiles(self, orders):
+-        ids = [o.customer_id for o in orders]
+-        return self.repo.profiles_for(ids)
++    def attach_profiles(self, orders):
++        # Bug: N+1 — a separate DB round-trip per order instead of one batched
++        # query, so this is O(n) queries on a hot path.
++        out = {}
++        for o in orders:
++            out[o.customer_id] = self.repo.profile_for(o.customer_id)
++        return out
+
+     def clear(self):
+         self.repo.cache.clear()
+@@ -198,8 +213,12 @@ def merge_totals(daily):
+
+
+ def report(daily):
+-    merged = merge_totals(daily)
+-    return merged["grand_total"]
++    # Bug: unhandled KeyError — merge_totals returns {} for empty input, and
++    # "grand_total" is read unconditionally, so an empty day crashes the report.
++    merged = merge_totals(daily)
++    total = merged["grand_total"]
++    average = total / len(daily)
++    return {"total": total, "average": average}
+
+
+ def shutdown():

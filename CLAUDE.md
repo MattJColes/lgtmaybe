@@ -140,6 +140,17 @@ pattern, event bus, plugin framework.
      `ReviewConfig.context_lines` (default 20, `0` disables), redacted like the
      diff. Inline positions stay bound to the **real** diff, so a finding on a
      context-only line maps to nothing and is dropped — never mis-posted.
+   - **Recursive walk (RLM):** when a single file's diff exceeds
+     `max_input_tokens`, the engine **walks it hunk-by-hunk** instead of sending it
+     whole (where the model's context drops the tail) — `compress.split_patch_into_hunks`
+     decomposes the over-budget file into per-hunk mini-diffs (each carrying its
+     file header, so finding line/side still bind to the real diff) that
+     `batch_files(recursive=True)` then batches normally. Nothing is dropped and
+     each call's context stays small — better recall on big files, especially for
+     smaller models. Files within budget are reviewed whole (context preserved).
+     `ReviewConfig.recursive` (default **on**; CLI `--recursive/--no-recursive`,
+     Action input `recursive`); the on-demand A/B benchmark `python -m evals.rlm`
+     measures recall + token cost of the walk vs sending whole against a live model.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`
@@ -329,7 +340,7 @@ Split by whether it can be deterministic, because that decides where it lives:
   is unit-tested in `tests/evals/`. The **hosted** providers stay out of the pytest
   gate, but a real **local ollama** run *is* wired into CI as its own workflow —
   `.github/workflows/e2e-ollama.yml` is a deliberately **cut-down smoke**: it pulls
-  a small model (`qwen3.5:2b`, thinking forced off) and reviews the single small
+  a small model (`qwen3.5:4b`, thinking forced off) and reviews the single small
   `badcode` fixture through only the two **critical** lenses (`--categories
   security,correctness`) on every PR with `--no-reflect` (the reflection pass
   over-prunes on a small model) and qwen3.x's recommended non-thinking sampling

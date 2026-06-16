@@ -1,0 +1,130 @@
+# RLM A/B benchmark — recursive hunk-walk vs the original whole-file method, on a
+# real local ollama model. Two matrix legs run as SEPARATE tasks (whole /
+# recursive); each reviews the RLM fixtures with one strategy `repeats` times and
+# reports recall mean / min / max, so the run summary shows who wins on real
+# numbers AND how noisy the result is (the model samples at temperature > 0).
+#
+# This is a BENCHMARK, not a gate: --min-recall 0.0 means neither leg can fail.
+# On a pull_request it runs a single quick pass (repeats=1) when the RLM
+# code/fixtures change; for the wide sweep, dispatch it manually with a larger
+# `repeats`. --max-input-tokens 300 (below each fixture's ~600 tokens, above a
+# single hunk) forces the over-budget file to split so the strategies diverge.
+name: rlm-bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Runs per strategy (raise for a wide, low-noise sweep)"
+        required: false
+        default: "8"
+      model:
+        description: "ollama model tag"
+        required: false
+        default: "qwen3.5:4b"
+      categories:
+        description: "Comma-separated review lenses"
+        required: false
+        default: "security,correctness,performance"
+      budget:
+        description: "--max-input-tokens (set below a fixture's size to force the split)"
+        required: false
+        default: "300"
+  pull_request:
+    paths:
+      - "src/lgtmaybe/engine/compress.py"
+      - "src/lgtmaybe/engine/engine.py"
+      - "evals/rlm.py"
+      - "evals/run.py"
+      - "evals/fixtures/rlm-bigfile/**"
+      - "evals/fixtures/rlm-pipeline/**"
+      - ".github/workflows/rlm-bench.yml"
+
+concurrency:
+  group: rlm-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        # whole = the original method (file sent whole); recursive = the RLM walk.
+        method: [whole, recursive]
+    env:
+      # Inputs only exist on workflow_dispatch; fall back to a fast single pass on
+      # a pull_request so an unrelated PR doesn't burn a multi-hour sweep.
+      OLLAMA_MODEL: ${{ github.event.inputs.model || 'qwen3.5:4b' }}
+      REPEATS: ${{ github.event.inputs.repeats || '1' }}
+      CATEGORIES: ${{ github.event.inputs.categories || 'security,correctness,performance' }}
+      BUDGET: ${{ github.event.inputs.budget || '300' }}
+      OLLAMA_MODELS: /home/runner/.ollama/models
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync (with dev deps)
+        run: uv sync --dev
+
+      - name: Install ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Cache ollama model
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}
+
+      - name: Start ollama and wait until ready
+        run: |
+          ollama serve &
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:11434/api/tags >/dev/null; then
+              echo "ollama is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ollama did not become ready in time" >&2
+          exit 1
+
+      - name: Pull the model
+        run: ollama pull "$OLLAMA_MODEL"
+
+      # One strategy per matrix leg (--only), repeated REPEATS times over both RLM
+      # fixtures. The benchmark itself (evals/rlm.py) owns the repeat loop and the
+      # mean/min/max — the same command a developer runs locally — so CI and local
+      # runs can never drift. --max-input-tokens forces the over-budget split.
+      - name: "Benchmark: ${{ matrix.method }} (x${{ env.REPEATS }})"
+        run: |
+          uv run python -m evals.rlm \
+            --provider ollama \
+            --model "$OLLAMA_MODEL" \
+            --api-base http://localhost:11434 \
+            --only "${{ matrix.method }}" \
+            --repeats "$REPEATS" \
+            --categories "$CATEGORIES" \
+            --budget "$BUDGET" \
+            --num-ctx 16384 \
+            --timeout 900 \
+            --temperature 0.6 \
+            --top-p 0.8 \
+            --top-k 20 \
+            --no-reflect | tee result.txt
+
+      - name: Publish result to the run summary
+        if: always()
+        run: |
+          {
+            echo "### RLM bench — ${{ matrix.method }} (model $OLLAMA_MODEL, lenses $CATEGORIES)"
+            echo '```'
+            grep -E "recall mean" result.txt || echo "(no result captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

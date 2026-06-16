@@ -91,6 +91,17 @@ def test_review_config_accepts_timeout() -> None:
     assert cfg.timeout == 600
 
 
+def test_review_config_recursive_defaults_true() -> None:
+    # RLM-style hunk walk for over-budget files is active by default.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.recursive is True
+
+
+def test_review_config_accepts_recursive_false() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", recursive=False)
+    assert cfg.recursive is False
+
+
 def test_review_config_structured_output_defaults_true() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     assert cfg.structured_output is True

@@ -136,6 +136,12 @@ from lgtmaybe.config.loader import load_config
     "(--no-reflect keeps them all; useful for weaker models)",
 )
 @click.option(
+    "--recursive/--no-recursive",
+    default=None,
+    help="Walk a file whose diff exceeds the token budget hunk-by-hunk (RLM-style) "
+    "instead of sending it whole and dropping the tail (--no-recursive disables)",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -161,6 +167,7 @@ def review(
     timeout: int | None,
     temperature: float | None,
     reflect: bool | None,
+    recursive: bool | None,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -179,6 +186,7 @@ def review(
         timeout=timeout,
         temperature=temperature,
         reflect=reflect,
+        recursive=recursive,
     )
 
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
@@ -232,6 +240,7 @@ def action() -> None:
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],
         resolve_fixed=inputs["resolve_fixed"],
+        recursive=inputs["recursive"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

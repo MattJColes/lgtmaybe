@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from lgtmaybe.engine.compress import _token_encoder, batch_files, count_tokens, expand_hunks
+from lgtmaybe.engine.compress import (
+    _token_encoder,
+    batch_files,
+    count_tokens,
+    expand_hunks,
+    split_patch_into_hunks,
+)
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -76,6 +82,80 @@ def test_oversize_pr_is_bounded() -> None:
     batches = batch_files(files, max_tokens=budget)
     # number of batches must be bounded (≤ number of files in worst case)
     assert len(batches) <= len(files)
+
+
+# ---------------------------------------------------------------------------
+# split_patch_into_hunks: the RLM-style per-hunk decomposition
+# ---------------------------------------------------------------------------
+
+
+def _multi_hunk_file(path: str, n_hunks: int, lines_per_hunk: int) -> str:
+    """A single-file patch with ``n_hunks`` hunks, each adding ``lines_per_hunk`` lines."""
+    header = f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+    body = ""
+    for h in range(n_hunks):
+        start = h * 100 + 1
+        body += f"@@ -{start},1 +{start},{lines_per_hunk} @@\n"
+        body += "".join(f"+line {h}-{j}\n" for j in range(lines_per_hunk))
+    return header + body
+
+
+def test_split_patch_into_hunks_yields_one_unit_per_hunk() -> None:
+    patch = _multi_hunk_file("big.py", n_hunks=3, lines_per_hunk=2)
+    units = split_patch_into_hunks(patch)
+    assert len(units) == 3
+    # Each unit is a standalone mini-diff: it carries the file header and exactly
+    # one @@ hunk, so it can be reviewed on its own.
+    for unit in units:
+        assert unit.startswith("diff --git a/big.py b/big.py\n")
+        assert "+++ b/big.py\n" in unit
+        assert unit.count("@@ -") == 1
+
+
+def test_split_patch_into_hunks_single_hunk_is_unchanged() -> None:
+    patch = "diff --git a/f.py b/f.py\n@@ -1,1 +1,2 @@\n a\n+b\n"
+    assert split_patch_into_hunks(patch) == [patch]
+
+
+def test_split_patch_into_hunks_no_hunk_returns_whole() -> None:
+    # A pure rename/mode change with no @@ hunk is returned intact.
+    patch = "diff --git a/old.py b/new.py\nrename from old.py\nrename to new.py\n"
+    assert split_patch_into_hunks(patch) == [patch]
+
+
+# ---------------------------------------------------------------------------
+# batch_files recursive=True: walk an over-budget file hunk-by-hunk (RLM)
+# ---------------------------------------------------------------------------
+
+
+def test_recursive_splits_oversize_file_into_hunk_batches() -> None:
+    patch = _multi_hunk_file("big.py", n_hunks=6, lines_per_hunk=100)
+    files = [("big.py", patch)]
+    budget = count_tokens(patch) // 3  # the whole file is ~3× the budget
+
+    # Default (non-recursive): the oversize file is sent WHOLE in its own batch —
+    # over budget, so the model's context truncates the tail.
+    whole = batch_files(files, max_tokens=budget)
+    assert len(whole) == 1
+    assert count_tokens(whole[0][0][1]) > budget
+
+    # Recursive: split into per-hunk units so every batch fits the budget and
+    # nothing is dropped. Each unit still carries the file's path.
+    walked = batch_files(files, max_tokens=budget, recursive=True)
+    assert len(walked) > 1
+    for batch in walked:
+        combined = "\n".join(p for _, p in batch)
+        assert count_tokens(combined) <= budget
+    assert all(path == "big.py" for batch in walked for path, _ in batch)
+
+
+def test_recursive_leaves_within_budget_file_whole() -> None:
+    # A file that already fits the budget is not split, even with recursive on —
+    # the whole-file context is preserved when it costs nothing to keep.
+    files = _make_diff(1, lines_per_file=3)
+    batches = batch_files(files, max_tokens=10_000, recursive=True)
+    assert len(batches) == 1
+    assert len(batches[0]) == 1
 
 
 # ---------------------------------------------------------------------------

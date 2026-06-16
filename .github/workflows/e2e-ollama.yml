@@ -10,7 +10,7 @@
 # review lenses). A 9B model running the full lens set took ~25 min and timed out,
 # so this is a deliberately CUT-DOWN smoke — it proves the live ollama path picks
 # up critical issues, not that a small model is thorough. To keep it fast we:
-#   - use a small (qwen3.5:2b) model with THINKING OFF (the factory forces
+#   - use a small (qwen3.5:4b) model with THINKING OFF (the factory forces
 #     think=False for ollama) — no reasoning tokens to grind through on CPU;
 #   - run ONE fixture (badcode, small diff) through only the two CRITICAL lenses
 #     (security + correctness) instead of the full seven-lens fan-out — fewer
@@ -43,11 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      # One small local model for the smoke. qwen3.5:2b is CPU-friendly and, with
+      # One small local model for the smoke. qwen3.5:4b is CPU-friendly and, with
       # thinking off + the fan-out cut to two lenses, finishes in minutes instead
       # of the ~25 min a 9B all-lens run took. It's a qwen3.x thinking model, so the
       # factory's tested think=False handling applies (no reasoning tokens on CPU).
-      OLLAMA_MODEL: qwen3.5:2b
+      OLLAMA_MODEL: qwen3.5:4b
       # Pin the model store to a known path so the pull, the cache, and `ollama
       # serve` all agree on where blobs live.
       OLLAMA_MODELS: /home/runner/.ollama/models
@@ -93,7 +93,7 @@ jobs:
 
       # Review the single small fixture through only the security + correctness
       # lenses. min-recall 0.2: it must PARSE and the model must catch at least ~a
-      # fifth of the planted critical bugs — a low bar on purpose, since a 2B model
+      # fifth of the planted critical bugs — a low bar on purpose, since a 4B model
       # on CPU isn't bit-reproducible and the point is "the path works", not depth.
       # Sampling: qwen3.x's recommended non-thinking settings (temp 0.6, top_p 0.8,
       # top_k 20); thinking itself is forced off by the factory. num_ctx is sized to

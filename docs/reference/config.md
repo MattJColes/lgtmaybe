@@ -24,6 +24,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` | Yes | — |  |
+| `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
 | `structured_output` | boolean | No | `True` | Structured Output |
@@ -343,6 +344,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "provider": {
       "$ref": "#/$defs/Provider"
+    },
+    "recursive": {
+      "default": true,
+      "title": "Recursive",
+      "type": "boolean"
     },
     "reflect": {
       "default": true,

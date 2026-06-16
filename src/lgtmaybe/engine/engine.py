@@ -134,7 +134,9 @@ class LLMReviewEngine(ReviewEngine):
                 for path, patch in file_patches
             ]
 
-        batches = batch_files(file_patches, max_tokens=cfg.max_input_tokens)
+        batches = batch_files(
+            file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
+        )
 
         # Announce the queued work before any model call returns, so a long run
         # on a slow provider shows up immediately in the Action log instead of

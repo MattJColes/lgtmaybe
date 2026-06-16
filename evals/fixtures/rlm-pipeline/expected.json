@@ -1,0 +1,35 @@
+{
+  "name": "rlm-pipeline",
+  "changed_file": "pipeline.py",
+  "expected": [
+    {
+      "label": "eval() on caller input in build_filter (hunk 1)",
+      "line": 17,
+      "keywords": ["eval", "arbitrary code", "code execution", "injection", "untrusted"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "SQL injection in OrderStore.by_customer (hunk 2)",
+      "line": 57,
+      "keywords": ["sql injection", "injection", "f-string", "format", "interpolat", "parameter"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "off-by-one paging in paginate (hunk 3)",
+      "line": 108,
+      "keywords": ["off-by-one", "0-based", "1-based", "page", "skips", "boundary", "index"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "N+1 query in Enricher.attach_profiles (hunk 4 — tail)",
+      "line": 169,
+      "keywords": ["n+1", "per order", "round-trip", "loop", "batch", "performance", "query per"]
+    },
+    {
+      "label": "unhandled KeyError / divide-by-zero in report (hunk 5 — tail)",
+      "line": 219,
+      "keywords": ["keyerror", "unhandled", "empty", "grand_total", "divide by zero", "zerodivision", "crash"],
+      "severity_at_least": "medium"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+diff --git a/service.py b/service.py
+--- a/service.py
++++ b/service.py
+@@ -10,7 +10,12 @@ import subprocess
+
+
+ def load_config():
+-    return {"region": "us-east-1", "retries": 3}
++    # Bug: hardcoded credential committed straight into source.
++    return {
++        "region": "us-east-1",
++        "retries": 3,
++        "api_token": "ghp_AbCdEf0123456789AbCdEf0123456789AbCd",
++    }
+
+
+ def healthcheck():
+@@ -44,9 +49,12 @@ class UserRepo:
+     def __init__(self, conn):
+         self.conn = conn
+
+-    def find_by_email(self, email):
+-        row = self.conn.execute(SELECT_USER, (email,)).fetchone()
+-        return row
++    def find_by_email(self, email):
++        # Bug: SQL injection — user input interpolated into the query string.
++        query = "SELECT * FROM users WHERE email = '%s'" % email
++        row = self.conn.execute(query).fetchone()
++        return row
+
+     def all_admins(self):
+         return self.conn.execute(SELECT_ADMINS).fetchall()
+@@ -92,8 +100,11 @@ def summarize(values):
+     if not values:
+         return 0.0
+
+-    total = sum(values)
+-    return total / len(values)
++    # Bug: off-by-one — skips the first element, so the average is wrong and
++    # a single-element list divides by zero.
++    total = 0.0
++    for i in range(1, len(values)):
++        total += values[i]
++    return total / (len(values) - 1)
+
+
+ def percentile(values, p):
+@@ -140,8 +151,11 @@ class ReportRunner:
+     def __init__(self, workspace):
+         self.workspace = workspace
+
+-    def run(self, name):
+-        return subprocess.run(["report", name], capture_output=True)
++    def run(self, name):
++        # Bug: command injection — untrusted name run through a shell.
++        cmd = "report --name " + name
++        return subprocess.run(cmd, shell=True, capture_output=True)
+
+     def cleanup(self):
+         self.workspace.purge()
+@@ -188,9 +202,16 @@ def shared_tags(users, posts):
+
+
+ def enrich(users, posts):
+-    tags = shared_tags(users, posts)
+-    return tags
++    # Bug: accidentally quadratic — re-queries every post for every user
++    # inside the loop (N+1 / O(n*m)) instead of indexing once.
++    enriched = []
++    for user in users:
++        for post in posts:
++            if post.author_id == user.id:
++                enriched.append((user, lookup_score(post)))
++    # Bug: unhandled None — lookup_score can return None and is summed below.
++    return sum(score for _user, score in enriched)
+
+
+ def shutdown():

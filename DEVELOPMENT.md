@@ -279,6 +279,73 @@ The scorer (`evals/scorer.py`) is pure and unit-tested (`tests/evals/`); only th
 runner needs a live model. To add a fixture, drop a `diff.txt` and an
 `expected.json` (matching the `Fixture` schema) under `evals/fixtures/<name>/`.
 
+### Benchmarking the recursive (RLM) walk
+
+`ReviewConfig.recursive` (default on) decides what happens when a single file's
+diff exceeds `max_input_tokens`: walk it hunk-by-hunk (each hunk its own focused
+call) or send the whole file in one call. `evals/rlm.py` is an on-demand A/B
+benchmark that runs both through the **real** engine — they differ only by that
+one flag — and reports recall + token usage for each, so "does walking the diff
+actually raise recall?" gets a real number instead of a hunch:
+
+```bash
+# Defaults to both RLM fixtures (rlm-bigfile, rlm-pipeline) — each a single
+# multi-hunk file ~600 tokens; --budget below that (but above a single hunk)
+# forces the over-budget split. --repeats samples the spread. Needs a live model.
+uv run python -m evals.rlm --provider ollama --model qwen3.5:4b \
+  --api-base http://localhost:11434 --repeats 8
+```
+
+It runs both strategies through the real engine `--repeats` times (recall pooled
+across the fixtures per run) and prints each strategy's recall **mean / min / max
+/ spread** plus mean token cost and a one-line verdict (e.g. *"recursive recall
++25% (mean) at 1.4x tokens"*). The spread is the point — at temperature > 0 a
+single run is noisy, so a wide `--repeats` tells you whether the gap is real or
+sampling luck. `--only whole|recursive` runs one strategy (the CI matrix uses it
+to parallelise the two legs); `--categories` / `--budget` / `--num-ctx` /
+`--temperature` tune it. This is the **same command** the `rlm-bench` workflow
+runs, so a local run and CI can't drift.
+
+Two distinct effects are in play, and the benchmark separates them by fixture
+size:
+
+- **Focus** (every fixture): even when the whole file fits the model's context,
+  splitting gives each hunk its own focused per-lens call. On small local models
+  this tends to lift recall — fewer regions to attend to per call — at the cost
+  of more calls and lost cross-hunk context. `rlm-bigfile` (small, fits any
+  context window) isolates this effect.
+- **Truncation-avoidance** (large files only): when a file's diff genuinely
+  exceeds the model's context window (`num_ctx` on ollama), the whole-file call
+  drops the tail entirely while the walk reviews every hunk. To exercise this you
+  need a diff larger than the context window — the planted bugs in `rlm-bigfile`'s
+  *tail* hunks (`shell=True`, N+1, the unhandled `None`) are what a truncating
+  whole-file pass would miss.
+
+Use it to confirm the walk helps on your model before trusting the default. Its
+plumbing (usage accounting, the comparison record) is unit-tested in
+`tests/evals/test_rlm.py`; only the A/B runner needs a live model.
+
+The `.github/workflows/rlm-bench.yml` workflow runs this A/B as two separate
+matrix tasks (`whole` vs `recursive`) against a live ollama model and publishes
+each leg's recall to the run summary — on demand (`workflow_dispatch`) or when the
+RLM code/fixture changes.
+
+**Recorded result** (qwen3.5:4b, fixtures `rlm-bigfile` + `rlm-pipeline` pooled,
+`--budget 300`, `--categories security,correctness,performance`, `--repeats 8`,
+temperature 0.6):
+
+| strategy | mean recall | range | spread | tokens |
+|---|---|---|---|---|
+| `whole` (original) | 61% | 45–82% | 36 pts | ~17.0k |
+| `recursive` (RLM)  | 88% | 82–100% | 18 pts | ~40.4k |
+
+Recursive averaged **+27 points** of recall, and its *worst* run (82%) matched the
+whole-file method's *best* — a real effect, not run-to-run noise — while also being
+more stable (smaller spread). The diffs (~600 tokens) fit the 16k context window,
+so this is the *focus* / "lost-in-the-middle" effect, **not** truncation
+avoidance. Cost is ~2.4× the tokens (and wall-time). Measured on a small model,
+where the focus effect is largest; expect a smaller gap on a frontier hosted model.
+
 ## Testing in GitHub Actions
 
 Two distinct CI workflows cover two different things.

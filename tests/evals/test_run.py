@@ -162,6 +162,49 @@ def test_max_input_tokens_threads_to_review_config(monkeypatch: pytest.MonkeyPat
     assert seen and all(v == 250000 for v in seen)
 
 
+def _capture_recursive(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> list[bool]:
+    """Run main with *argv* and return the cfg.recursive seen by the engine."""
+    seen: list[bool] = []
+    real_review = run_mod.LLMReviewEngine.review
+
+    def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+        seen.append(cfg.recursive)
+        return real_review(self, ctx, cfg)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    monkeypatch.setattr(run_mod.LLMReviewEngine, "review", spy_review)
+    run_mod.main(argv)
+    return seen
+
+
+def test_recursive_defaults_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the flag the runner matches the engine default (recursive on)."""
+    seen = _capture_recursive(
+        monkeypatch,
+        ["--provider", "ollama", "--model", "x", "--min-recall", "0.0", "--fixture", "rlm-bigfile"],
+    )
+    assert seen and all(v is True for v in seen)
+
+
+def test_no_recursive_flag_pins_the_whole_file_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--no-recursive pins the original whole-file method so a run can A/B it."""
+    seen = _capture_recursive(
+        monkeypatch,
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "rlm-bigfile",
+            "--no-recursive",
+        ],
+    )
+    assert seen and all(v is False for v in seen)
+
+
 def test_fixture_flag_selects_only_the_named_fixtures(monkeypatch: pytest.MonkeyPatch) -> None:
     """--fixture scopes the run to the named fixture(s) so CI can run a fast subset."""
     seen: list[str] = []
@@ -189,7 +232,7 @@ def test_no_fixture_flag_runs_every_fixture(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(run_mod, "_review", fake_review)
 
     run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0"])
-    assert set(seen) == {"badcode", "vibe-multifile"}
+    assert set(seen) == {"badcode", "vibe-multifile", "rlm-bigfile", "rlm-pipeline"}
 
 
 def test_unknown_fixture_name_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:

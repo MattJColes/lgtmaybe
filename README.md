@@ -57,10 +57,20 @@ latency:
 
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
+- `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
 - `categories` (default all nine) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
 - `min_severity` (default `info`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.
+
+**Big files, small models.** When one file's diff is too big for a single model
+call, lgtmaybe reviews it **hunk-by-hunk** rather than whole, so the model never
+loses the tail of a large file. On by default; `--no-recursive` turns it off.
+Smaller local models gain the most — across 8 runs on two fixtures, a local
+**qwen3.5:4b** averaged **88% recall** reviewing hunk-by-hunk versus **61%**
+reviewing files whole, with its *worst* run matching the whole-file method's
+*best* (a real effect, not noise), at ~2.4× the tokens. See
+[the benchmark](DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
 
 **What you get back.** Each finding is structured data — file, line, severity, a
 title, an explanation, and an optional suggested fix — so it renders the same
@@ -100,6 +110,11 @@ No GitHub token and no pull request needed — `lgtmaybe review` reads your loca
 `git` diff and prints the findings. To post reviews on real pull requests, wire
 up the [GitHub Action](#use-as-a-github-action). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
+
+> **Picking a model:** use a **coding** model, and **bigger/newer is more
+> accurate**. Our benchmark numbers are for a small `qwen3.5:4b`; a larger,
+> current coding model catches more. See
+> [Which model?](docs/how-to/run-locally-with-ollama.md#which-model-and-will-it-fit).
 
 ## Providers
 

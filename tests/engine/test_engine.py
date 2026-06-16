@@ -18,6 +18,7 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
+from lgtmaybe.engine.compress import count_tokens
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.fakes import FakeProvider
 
@@ -85,6 +86,90 @@ def _provider_for(findings: list[ReviewFinding], reflection_keeps_all: bool = Tr
             return ProviderResult(text=findings_text, input_tokens=10, output_tokens=20)
 
     return _Provider()
+
+
+# ---------------------------------------------------------------------------
+# recursive (RLM) walk: an over-budget file is reviewed hunk-by-hunk
+# ---------------------------------------------------------------------------
+
+
+def _multi_hunk_diff(path: str, n_hunks: int, lines_per_hunk: int) -> str:
+    header = f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+    body = ""
+    for h in range(n_hunks):
+        start = h * 100 + 1
+        body += f"@@ -{start},1 +{start},{lines_per_hunk} @@\n"
+        body += "".join(f"+marker_{h}_line_{j}\n" for j in range(lines_per_hunk))
+    return header + body
+
+
+class _PerHunkProvider(FakeProvider):
+    """Records each review call's user content; returns no findings."""
+
+    def complete(self, messages, model, **opts):  # type: ignore[override]
+        self.calls.append({"messages": messages, "model": model, "opts": opts})
+        return ProviderResult(text="[]", input_tokens=10, output_tokens=20)
+
+
+def test_recursive_reviews_an_oversize_file_hunk_by_hunk() -> None:
+    diff = _multi_hunk_diff("big.py", n_hunks=6, lines_per_hunk=80)
+    ctx = PRContext(
+        diff=diff,
+        changed_files=["big.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    # Budget below the whole file but above a single hunk, so the walk splits it.
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.security],
+        max_input_tokens=count_tokens(diff) // 3,
+        reflect=False,
+        recursive=True,
+    )
+
+    provider = _PerHunkProvider()
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    # More than one review call (one lens, so the extra calls are the hunk walk),
+    # and together they cover every hunk — nothing is dropped on the floor.
+    review_calls = _review_calls(provider)
+    assert len(review_calls) > 1
+    all_content = "\n".join(c["messages"][1]["content"] for c in review_calls)
+    for h in range(6):
+        assert f"marker_{h}_line_0" in all_content
+
+
+def test_recursive_off_sends_the_oversize_file_whole() -> None:
+    diff = _multi_hunk_diff("big.py", n_hunks=6, lines_per_hunk=80)
+    ctx = PRContext(
+        diff=diff,
+        changed_files=["big.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.security],
+        max_input_tokens=count_tokens(diff) // 3,
+        reflect=False,
+        recursive=False,
+    )
+
+    provider = _PerHunkProvider()
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    review_calls = _review_calls(provider)
+    assert len(review_calls) == 1  # one lens, one (oversized) batch
+    content = review_calls[0]["messages"][1]["content"]
+    for h in range(6):
+        assert f"marker_{h}_line_0" in content
 
 
 # ---------------------------------------------------------------------------
