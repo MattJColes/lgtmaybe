@@ -239,6 +239,11 @@
     "provider": {
       "$ref": "#/$defs/Provider"
     },
+    "recursive": {
+      "default": true,
+      "title": "Recursive",
+      "type": "boolean"
+    },
     "reflect": {
       "default": true,
       "title": "Reflect",

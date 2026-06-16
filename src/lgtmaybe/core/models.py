@@ -202,6 +202,12 @@ class ReviewConfig(_Strict):
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50
     max_input_tokens: int = 100_000
+    # RLM-style recursive walk: when a single file's diff exceeds
+    # max_input_tokens, split it into per-hunk review calls instead of sending it
+    # whole (where the model's context drops the tail). Nothing is dropped and
+    # each call's context stays small — better recall on big files, especially for
+    # smaller models. Files within budget are reviewed whole (context preserved).
+    recursive: bool = True
     # Ollama's context window (num_ctx). Ollama only — hosted providers manage
     # their own context window server-side and litellm won't forward this, so it
     # is ignored for them. None keeps the factory default (32768); raise it so a
