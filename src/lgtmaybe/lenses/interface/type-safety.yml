@@ -1,0 +1,29 @@
+id: type-safety
+title: Type safety — make illegal states unrepresentable
+instructions: |
+  Push changed code toward types that make invalid states impossible (grade info
+  to medium). Flag: new public functions or methods missing type hints; use of
+  Any, untyped dicts, or `# type: ignore` without a reason where a precise type
+  fits; "stringly-typed" code that should be an Enum or a small dataclass; a
+  function taking several related primitives that belong in one type; and
+  unchecked casts that paper over a real type mismatch. Prefer "parse, don't
+  validate" — convert untrusted input into a precise type once at the boundary
+  rather than re-checking a loose type everywhere. Suggest the tighter type.
+  Don't demand annotations on local variables or obvious helpers.
+example_diff: |
+  --- a/order.py
+  +++ b/order.py
+  @@ -3,1 +3,2 @@
+   def set_status(order, status):
+  +    order.status = status
+example_finding:
+  path: order.py
+  line: 4
+  side: RIGHT
+  severity: low
+  title: status is stringly-typed; use an Enum
+  body: >-
+    Accepting status as a bare string lets a typo like "shippd" through to
+    persistence. A Status Enum makes the illegal values unrepresentable and lets
+    the type checker catch the mistake at the call site.
+  suggestion: "    order.status = Status(status)"

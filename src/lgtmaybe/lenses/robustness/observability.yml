@@ -1,0 +1,30 @@
+id: observability
+title: Observability — logs, metrics, and actionable errors
+instructions: |
+  Flag changes that will be hard to debug or operate in production (grade info to
+  medium). Look for: a new failure path or caught exception swallowed with no log
+  or metric; a raised or logged error that omits the context needed to act on it
+  (which id, which input, what was expected); logging at the wrong level (an
+  expected event at ERROR, a real failure at DEBUG); and a significant new code
+  path or background job with no logging, metric, or trace span at all. Prefer
+  structured key/value context over string interpolation. Suggest the log or
+  metric line to add. (Leave secret/PII-in-logs grading to the security lens.)
+example_diff: |
+  --- a/worker.py
+  +++ b/worker.py
+  @@ -8,2 +8,4 @@
+       try:
+           process(job)
+  +    except Exception:
+  +        pass
+example_finding:
+  path: worker.py
+  line: 10
+  side: RIGHT
+  severity: medium
+  title: Exception swallowed silently with no log
+  body: >-
+    A bare except/pass hides every failure of process(job): the job disappears
+    with no signal to operators. At minimum, log the job id and the exception so
+    the failure is observable.
+  suggestion: "    except Exception:\n        log.exception(\"job failed\", extra={\"job_id\": job.id})"

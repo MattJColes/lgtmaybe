@@ -1,0 +1,30 @@
+id: migrations
+title: Safe database migrations
+instructions: |
+  Review database schema/data migrations for safety on a live system (grade
+  medium to high). Flag: a migration not backward compatible with the
+  currently-running code (dropping or renaming a column/table the old version
+  still reads during a rolling deploy); an operation that takes a long lock on a
+  large table (a non-concurrent index, a table rewrite, a NOT NULL column with a
+  default on older engines); a destructive or irreversible step with no
+  down-migration or backup; a new foreign key or large-table query with no
+  supporting index; and unbounded data backfills run inside the schema migration.
+  Prefer the expand/contract (multi-step) pattern; suggest the safe form.
+example_diff: |
+  --- a/migrations/0007_drop_legacy.py
+  +++ b/migrations/0007_drop_legacy.py
+  @@ -5,1 +5,2 @@
+   def upgrade():
+  +    op.drop_column("users", "legacy_email")
+example_finding:
+  path: migrations/0007_drop_legacy.py
+  line: 6
+  side: RIGHT
+  severity: high
+  title: Dropping a column breaks the running release
+  body: >-
+    Dropping users.legacy_email in one step breaks any still-running old code
+    that selects it during a rolling deploy, and the data is gone with no
+    down-migration. Stop reading the column in code and ship that first, then
+    drop it in a later release (expand/contract).
+  suggestion: null

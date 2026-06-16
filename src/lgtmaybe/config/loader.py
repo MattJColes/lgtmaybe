@@ -22,6 +22,12 @@ _DEFAULTS: dict[str, Any] = {
     "model": "llama3",
 }
 
+# Curated lens packs shipped inside the package (src/lgtmaybe/lenses/<name>/).
+# Referenced from `lens_paths` as `pack:<name>` so a pip-installed user can
+# enable one by name — they have no repo-relative path to point at.
+_BUNDLED_LENSES_DIR = Path(__file__).resolve().parent.parent / "lenses"
+_PACK_SCHEME = "pack:"
+
 
 def load_config(
     *,
@@ -72,7 +78,7 @@ def _load_lens_files(lens_paths: Any) -> list[dict[str, Any]]:
     paths = [lens_paths] if isinstance(lens_paths, str) else list(lens_paths)
     lenses: list[dict[str, Any]] = []
     for raw_path in paths:
-        path = Path(raw_path)
+        path = _resolve_lens_path(raw_path)
         if path.is_dir():
             files = sorted(p for ext in ("*.yml", "*.yaml") for p in path.glob(ext))
         else:
@@ -84,6 +90,31 @@ def _load_lens_files(lens_paths: Any) -> list[dict[str, Any]]:
             elif isinstance(parsed, dict):
                 lenses.append(parsed)
     return lenses
+
+
+def _resolve_lens_path(raw_path: Any) -> Path:
+    """Resolve one `lens_paths` entry to a filesystem path.
+
+    A `pack:<name>` entry names a curated pack bundled in the package; any other
+    string is a plain path (file or directory) on disk. An unknown pack name
+    fails loudly, naming the packs that do exist, rather than silently loading
+    nothing.
+    """
+    text = str(raw_path)
+    if not text.startswith(_PACK_SCHEME):
+        return Path(text)
+    name = text[len(_PACK_SCHEME) :].strip()
+    pack_dir = _BUNDLED_LENSES_DIR / name
+    # A pack name must be a single safe directory segment that stays inside the
+    # bundled-lenses dir: reject empty, "." / "..", and anything carrying a path
+    # separator (e.g. `pack:../secrets` or `pack:/etc`) so the scheme can only
+    # ever load one of the curated bundled packs, never arbitrary YAML on disk.
+    if not name or name in {".", ".."} or name != Path(name).name or not pack_dir.is_dir():
+        available = sorted(p.name for p in _BUNDLED_LENSES_DIR.glob("*") if p.is_dir())
+        raise ValueError(
+            f"unknown lens pack {name!r}; bundled packs are: {', '.join(available) or 'none'}"
+        )
+    return pack_dir
 
 
 def _load_file(

@@ -1,0 +1,30 @@
+id: assertions
+title: Defensive assertions & checked returns
+instructions: |
+  Flag new non-trivial functions that make no assertions about their inputs,
+  invariants, or results, and call sites that ignore a meaningful return value (a
+  status code, an `ok` flag, a write count). Encourage asserting the negative
+  space — what must never happen — at trust boundaries and before/after
+  persistence, not only the happy path. Grade info to low, restrained to logic
+  that carries a real invariant (skip trivial getters and obvious helpers).
+  Distinct from the tests lens (external tests) and correctness (an actual bug):
+  this is about executable invariants in the code itself. Put the assertion in the
+  suggestion.
+example_diff: |
+  --- a/ledger.py
+  +++ b/ledger.py
+  @@ -8,1 +8,3 @@
+   def apply(self, delta):
+  +    self.balance += delta
+  +    return self.balance
+example_finding:
+  path: ledger.py
+  line: 9
+  side: RIGHT
+  severity: low
+  title: Invariant unchecked — balance can silently go negative
+  body: >-
+    apply mutates balance with no invariant, so a bad delta drives it negative and
+    propagates undetected. Assert the negative space — a balance that must never
+    drop below zero — so a bad input fails fast where it happens.
+  suggestion: "    self.balance += delta\n    assert self.balance >= 0, self.balance\n    return self.balance"

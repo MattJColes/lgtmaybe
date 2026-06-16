@@ -1,0 +1,28 @@
+id: comment-why
+title: Comments explain why, not what
+instructions: |
+  Narrow and distinct from the documentation lens (missing/stale docstrings on
+  public surfaces). Flag two opposite smells in comments added in the diff (grade
+  info to low, very restrained — comment noise is itself unwelcome): a redundant
+  comment that just restates the code (`i += 1  # increment i`); and the inverse,
+  a surprising or non-obvious line — a magic constant, a workaround, an
+  intentional deviation — left with no rationale comment. The valuable comment
+  explains the why a future reader can't recover from the code, not the what.
+  Suggest deleting the noise or adding the missing rationale.
+example_diff: |
+  --- a/retry.py
+  +++ b/retry.py
+  @@ -3,1 +3,1 @@
+  -    time.sleep(backoff)
+  +    time.sleep(backoff * 1.7)  # multiply backoff by 1.7
+example_finding:
+  path: retry.py
+  line: 3
+  side: RIGHT
+  severity: info
+  title: Comment restates the code; the real question (why 1.7?) is unexplained
+  body: >-
+    The comment just narrates the multiplication. Delete it and instead explain
+    why 1.7 — the magic factor is the part a future reader cannot recover from the
+    code.
+  suggestion: "    time.sleep(backoff * JITTER)  # 1.7 spreads retries to avoid a thundering herd"

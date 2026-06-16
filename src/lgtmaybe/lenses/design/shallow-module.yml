@@ -1,0 +1,30 @@
+id: shallow-module
+title: Shallow module — interface costs as much as it hides
+instructions: |
+  Flag a new class, function, or module whose interface is nearly as complex as
+  the work it hides (grade info to low, restrained). Look for: a thin wrapper that
+  forwards its arguments unchanged; a pass-through method that only calls another
+  method with the same signature; and a module split by execution order (temporal
+  decomposition) rather than by knowledge, so callers must touch several pieces to
+  do one thing. Deep modules hide a lot behind a simple interface; shallow ones add
+  surface area without hiding complexity. Distinct from complexity ("is this hard
+  to follow?") and ponytail ("should this exist?") — this asks "does this interface
+  pay for itself?"
+example_diff: |
+  --- a/store.py
+  +++ b/store.py
+  @@ -10,1 +10,3 @@
+   class Store:
+  +    def get_user_by_id(self, user_id):
+  +        return self.db.get_user_by_id(user_id)
+example_finding:
+  path: store.py
+  line: 11
+  side: RIGHT
+  severity: info
+  title: Pass-through method adds interface with no value
+  body: >-
+    get_user_by_id only forwards to self.db.get_user_by_id with the same
+    signature, so callers could use self.db directly. A pass-through method widens
+    the interface without hiding anything.
+  suggestion: null

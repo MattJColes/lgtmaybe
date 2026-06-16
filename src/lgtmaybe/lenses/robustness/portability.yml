@@ -1,0 +1,28 @@
+id: portability
+title: Cross-platform portability
+instructions: |
+  Flag code introduced in the diff that silently assumes one platform or
+  environment (grade info to low, medium when it will break CI or other
+  developers). Look for: hardcoded path separators or absolute paths ("/tmp/...",
+  "C:\\...") instead of pathlib / os.path / a temp-dir API; shelling out to a
+  command that isn't on every target OS; assumptions about line endings or
+  filesystem case-sensitivity; hardcoded ports or hostnames that collide in other
+  environments; and reliance on an environment variable or locale being set with
+  no fallback. Suggest the portable form. Skip this when the project explicitly
+  targets a single platform.
+example_diff: |
+  --- a/cache.py
+  +++ b/cache.py
+  @@ -2,1 +2,2 @@
+   def cache_path(name):
+  +    return "/tmp/" + name + ".cache"
+example_finding:
+  path: cache.py
+  line: 3
+  side: RIGHT
+  severity: low
+  title: Hardcoded /tmp path is not portable
+  body: >-
+    "/tmp" does not exist on Windows and may be unwritable or shared in CI. Use
+    the standard temp-directory API so the path is correct everywhere.
+  suggestion: '    return str(Path(tempfile.gettempdir()) / f"{name}.cache")'

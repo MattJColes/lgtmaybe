@@ -82,6 +82,38 @@ A skill file may hold one lens (a mapping) or several (a list). Lenses loaded fr
 `lens_paths` are appended to any inline `extra_lenses`; `id`s must be unique across
 the whole set.
 
+## Bundled lens packs (`pack:<name>`)
+
+lgtmaybe ships a curated, **opt-in** library of extra lenses — distilled from the
+wider engineering-review ecosystem (Ousterhout, Metz, Carmack, the NASA Power of
+Ten / TigerStyle, Google's eng-practices, and several skill/rule collections; see
+[ATTRIBUTION.md](https://github.com/MattJColes/lgtmaybe/blob/main/ATTRIBUTION.md)).
+They are **off by default** — they are more opinionated than the nine built-ins,
+and every lens you enable is another model call per review. Enable a pack by name
+with the `pack:` scheme in `lens_paths` (this works for a `pip install`, with no
+repo-relative path to point at):
+
+```yaml
+# .lgtmaybe.yml
+provider: ollama
+model: qwen3.6:27b
+lens_paths:
+  - pack:design       # combine as many as you like
+  - pack:robustness
+```
+
+| Pack | Lenses | Use it when |
+|---|---|---|
+| `pack:design` | `wrong-abstraction`, `shallow-module`, `information-leakage`, `errors-out-of-existence`, `hidden-state`, `naming` | You want taste/structure review (the "right abstraction", deep modules, explicit state). |
+| `pack:robustness` | `assertions`, `bounded`, `idempotency`, `migrations`, `portability`, `observability` | Operational safety: defensive invariants, bounded work, retry-safe side effects, safe migrations. |
+| `pack:interface` | `api-design`, `type-safety`, `magic-values`, `comment-why` | Contracts & clarity: backward compatibility, tight types, named constants, why-not-what comments. |
+| `pack:frontend` | `accessibility`, `i18n` | The diff touches UI / user-facing copy. |
+
+Each pack is a directory of skill files under the package, so you can also browse
+or copy any single lens from
+[`src/lgtmaybe/lenses/`](https://github.com/MattJColes/lgtmaybe/tree/main/src/lgtmaybe/lenses).
+An unknown `pack:` name fails loudly, listing the packs that exist.
+
 ## Run it
 
 Custom lenses run automatically on every review — CLI or GitHub Action — once they

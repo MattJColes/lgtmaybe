@@ -222,3 +222,51 @@ def test_lens_paths_accept_a_list_of_lenses_in_one_file(tmp_path):
     cfg = load_config(config_path=cfg_file)
 
     assert sorted(lens.id for lens in cfg.extra_lenses) == ["a", "b"]
+
+
+def test_lens_paths_pack_scheme_loads_a_bundled_pack(tmp_path):
+    """`lens_paths: [pack:<name>]` resolves to a curated pack shipped in the package,
+    so pip-installed users enable it by name (no repo-relative path exists for them)."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: ollama\nmodel: m\nlens_paths:\n  - pack:design\n")
+
+    cfg = load_config(config_path=cfg_file)
+
+    # The bundled "design" pack ships several curated lenses; each must be valid.
+    assert len(cfg.extra_lenses) >= 5
+    assert len({lens.id for lens in cfg.extra_lenses}) == len(cfg.extra_lenses)
+
+
+def test_lens_paths_can_combine_several_bundled_packs(tmp_path):
+    """Several `pack:` entries compose into one lens set with unique ids."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "provider: ollama\nmodel: m\nlens_paths:\n  - pack:design\n  - pack:robustness\n"
+    )
+
+    cfg = load_config(config_path=cfg_file)
+
+    ids = [lens.id for lens in cfg.extra_lenses]
+    assert "wrong-abstraction" in ids  # from design
+    assert "bounded" in ids  # from robustness
+    assert len(ids) == len(set(ids))
+
+
+def test_lens_paths_unknown_pack_fails_clearly(tmp_path):
+    """An unknown bundled pack name fails loudly, naming the packs that do exist."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: ollama\nmodel: m\nlens_paths:\n  - pack:nope\n")
+
+    with pytest.raises(ValueError, match="nope|pack"):
+        load_config(config_path=cfg_file)
+
+
+@pytest.mark.parametrize("evil", ["pack:../secrets", "pack:../../etc", "pack:/etc", "pack:.."])
+def test_lens_paths_pack_cannot_escape_bundled_dir(tmp_path, evil):
+    """A `pack:` name with a path separator or '..' is rejected, never resolved
+    to a directory outside the bundled lenses dir (path-traversal guard)."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(f"provider: ollama\nmodel: m\nlens_paths:\n  - {evil}\n")
+
+    with pytest.raises(ValueError, match="lens pack"):
+        load_config(config_path=cfg_file)

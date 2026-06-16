@@ -1,0 +1,34 @@
+id: wrong-abstraction
+title: The wrong abstraction (counter-DRY)
+instructions: |
+  The opposite of the usual "you duplicated this, extract a helper" note. Flag a
+  shared function or class that callers only fit by passing a flag or adding a
+  branch keyed on caller identity — a `mode` / `is_x` boolean that splits the body
+  into near-disjoint paths is the signature of a premature or wrong abstraction.
+  Duplication is far cheaper than the wrong abstraction: recommend re-inlining the
+  shared code back into each caller and deleting the unused branch, and name the
+  sunk-cost trap. Grade info to medium, restrained — genuine shared logic with
+  uniform callers is fine. NEVER nag about plain duplication here; that belongs to
+  the complexity lens.
+example_diff: |
+  --- a/notify.py
+  +++ b/notify.py
+  @@ -3,2 +3,5 @@
+  -def send(user, msg):
+  -    smtp.send(user.email, msg)
+  +def send(user, msg, sms=False):
+  +    if sms:
+  +        twilio.text(user.phone, msg)
+  +    else:
+  +        smtp.send(user.email, msg)
+example_finding:
+  path: notify.py
+  line: 3
+  side: RIGHT
+  severity: low
+  title: Flag argument 'sms' splits send() into two unrelated paths
+  body: >-
+    The sms branch shares no logic with the email branch — the boolean just
+    re-separates two operations that were merged. Duplication is cheaper than the
+    wrong abstraction; give SMS its own function and delete the flag.
+  suggestion: null
