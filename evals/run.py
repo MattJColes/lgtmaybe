@@ -84,6 +84,7 @@ def _review(
     num_ctx: int | None = None,
     max_input_tokens: int | None = None,
     reflect: bool = True,
+    recursive: bool = True,
     temperature: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
@@ -108,6 +109,7 @@ def _review(
         api_base=api_base,
         timeout=timeout,
         reflect=reflect,
+        recursive=recursive,
         **cfg_overrides,
     )
     # num_ctx is ollama's context window — litellm rejects it for hosted providers,
@@ -202,6 +204,14 @@ def main(argv: list[str] | None = None) -> int:
         help="skip the self-reflection pass (weak local models over-prune their own findings)",
     )
     ap.add_argument(
+        "--recursive",
+        dest="recursive",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="walk an over-budget file hunk-by-hunk (RLM, default on); --no-recursive "
+        "pins the original whole-file method so a run can A/B the two strategies",
+    )
+    ap.add_argument(
         "--temperature",
         type=float,
         default=None,
@@ -249,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             num_ctx=args.num_ctx,
             max_input_tokens=args.max_input_tokens,
             reflect=args.reflect,
+            recursive=args.recursive,
             temperature=args.temperature,
             top_p=args.top_p,
             top_k=args.top_k,

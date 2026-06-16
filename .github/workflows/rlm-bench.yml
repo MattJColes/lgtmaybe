@@ -1,0 +1,112 @@
+# RLM A/B benchmark — recursive hunk-walk vs the original whole-file method, on a
+# real local ollama model. Two matrix legs run as SEPARATE tasks (whole /
+# recursive); each reviews the rlm-bigfile fixture with one strategy and reports
+# recall, so the run summary shows who wins on real numbers — not a hunch.
+#
+# This is a BENCHMARK, not a gate: --min-recall 0.0 means neither leg can fail
+# the run, and it only triggers on demand or when the RLM code/fixture changes.
+# The recursive walk only differs from whole-file when a single file's diff
+# exceeds the token budget, so --max-input-tokens 300 (below rlm-bigfile's ~600
+# tokens, above any single hunk) forces the over-budget file to split.
+name: rlm-bench
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/lgtmaybe/engine/compress.py"
+      - "src/lgtmaybe/engine/engine.py"
+      - "evals/rlm.py"
+      - "evals/run.py"
+      - "evals/fixtures/rlm-bigfile/**"
+      - ".github/workflows/rlm-bench.yml"
+
+concurrency:
+  group: rlm-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # whole = the original method (file sent whole); recursive = the RLM walk.
+        method: [whole, recursive]
+    env:
+      OLLAMA_MODEL: qwen3.5:4b
+      OLLAMA_MODELS: /home/runner/.ollama/models
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync (with dev deps)
+        run: uv sync --dev
+
+      - name: Install ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Cache ollama model
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}
+
+      - name: Start ollama and wait until ready
+        run: |
+          ollama serve &
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:11434/api/tags >/dev/null; then
+              echo "ollama is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ollama did not become ready in time" >&2
+          exit 1
+
+      - name: Pull the model
+        run: ollama pull "$OLLAMA_MODEL"
+
+      # One strategy per matrix leg. --no-recursive pins the original whole-file
+      # method; --recursive is the RLM walk. Same model, fixture, budget, lenses,
+      # and sampling either side, so the only variable is the strategy. The diff's
+      # planted bugs span security + correctness + performance, so review through
+      # exactly those three lenses. --min-recall 0.0 keeps it a report, not a gate.
+      - name: "Benchmark: ${{ matrix.method }}"
+        run: |
+          flag=--recursive
+          [ "${{ matrix.method }}" = "whole" ] && flag=--no-recursive
+          uv run python -m evals.run \
+            --provider ollama \
+            --model "$OLLAMA_MODEL" \
+            --api-base http://localhost:11434 \
+            --fixture rlm-bigfile \
+            --categories security,correctness,performance \
+            --max-input-tokens 300 \
+            --min-recall 0.0 \
+            --timeout 900 \
+            --num-ctx 16384 \
+            --temperature 0.6 \
+            --top-p 0.8 \
+            --top-k 20 \
+            $flag \
+            --no-reflect | tee result.txt
+
+      # Surface each leg's recall in the run summary so the two tasks can be read
+      # side by side without opening the logs.
+      - name: Publish result to the run summary
+        if: always()
+        run: |
+          {
+            echo "### RLM bench — ${{ matrix.method }} (model $OLLAMA_MODEL)"
+            echo '```'
+            grep -E "recall=|aggregate recall" result.txt || echo "(no result captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
