@@ -26,14 +26,23 @@ ollama list
 
 ## Which model, and will it fit?
 
-For a local reviewer the recommendation as of mid-2026 is **Qwen3.6-27B**
-(`qwen3.6:27b`) — a dense 27B model that is the best *smallish* local option for
-this job. It lands near frontier API models on coding benchmarks (SWE-bench
-Verified ~77%) while being small enough to run on a workstation or a well-specced
-laptop, so it clears lgtmaybe's bar across all the review lenses without a
-data-center GPU. Smaller models work, but accuracy falls off — you'll miss
-subtler findings and may need `--no-reflect` because the reflection pass
-over-prunes on a weak model.
+Two simple rules:
+
+1. **Pick a coding model.** Reviewing a PR is a coding task, so use a model built
+   for code (e.g. the Qwen3 coder line), not a general chat model. Models are
+   tuned for different jobs — match the model to the use case.
+2. **Bigger and newer is more accurate.** Use the largest, most recent coding
+   model your hardware can run. Our accuracy numbers are for a *small* model —
+   we benchmarked **qwen3.5:4b**, and it did well, but only *with recursive
+   review on* (88% vs 61% recall). A larger, newer model catches more across the
+   board and leans on that trick less.
+
+A solid mid-2026 default is **Qwen3.6-27B** (`qwen3.6:27b`): near frontier API
+models on coding benchmarks (SWE-bench Verified ~77%) yet small enough to run on a
+workstation or a well-specced laptop, so it clears lgtmaybe's bar across all the
+review lenses without a data-center GPU. Smaller models work too — accuracy just
+falls off (you'll miss subtler findings and may need `--no-reflect`, because the
+reflection pass over-prunes on a weak model).
 
 **Hardware, quantised (the usual way to run it locally):**
 

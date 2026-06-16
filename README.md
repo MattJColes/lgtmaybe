@@ -111,6 +111,11 @@ No GitHub token and no pull request needed — `lgtmaybe review` reads your loca
 up the [GitHub Action](#use-as-a-github-action). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
 
+> **Picking a model:** use a **coding** model, and **bigger/newer is more
+> accurate**. Our benchmark numbers are for a small `qwen3.5:4b`; a larger,
+> current coding model catches more. See
+> [Which model?](docs/how-to/run-locally-with-ollama.md#which-model-and-will-it-fit).
+
 ## Providers
 
 | Provider | Auth |
