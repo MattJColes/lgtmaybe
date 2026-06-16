@@ -35,7 +35,7 @@ PR_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}"
 FILES_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/files"
 REVIEWS_URL = f"{PR_URL}/reviews"
 
-# src/app.py line 2 ("+import sys") sits at diff position 2.
+# src/app.py new-file line 2 ("+import sys") is an added line (RIGHT side).
 SAMPLE_DIFF = """\
 diff --git a/src/app.py b/src/app.py
 index 0000001..0000002 100644
@@ -123,7 +123,8 @@ def test_e2e_posts_inline_comment_at_correct_position_and_summary() -> None:
     comments = body["comments"]
     assert len(comments) == 1
     assert comments[0]["path"] == "src/app.py"
-    assert comments[0]["position"] == 2  # correct diff position
+    assert comments[0]["line"] == 2  # anchored by new-file line + side
+    assert comments[0]["side"] == "RIGHT"
 
     # The review body carries the summary + the idempotency marker.
     assert "<!-- lgtmaybe -->" in str(body["body"])

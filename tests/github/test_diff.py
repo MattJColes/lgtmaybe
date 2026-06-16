@@ -1,11 +1,11 @@
-"""Tests for diff position map and skip filter."""
+"""Tests for the diff commentable-line index and skip filter."""
 
 from __future__ import annotations
 
-from lgtmaybe.github import build_position_map, is_reviewable
+from lgtmaybe.github import build_commentable_lines, is_reviewable
 
 # ---------------------------------------------------------------------------
-# Diff position map
+# Commentable-line index
 # ---------------------------------------------------------------------------
 
 SAMPLE_DIFF = """\
@@ -33,51 +33,52 @@ index 0000003..0000004 100644
 """
 
 
-def test_position_map_context_line() -> None:
-    """A context line (unchanged) maps to a position within the hunk."""
-    pos_map = build_position_map(SAMPLE_DIFF)
-    # Line 1 of src/app.py is "import os" — a context line at new-file line 1.
-    # It is diff position 1 within the first file's hunk.
-    assert pos_map.get(("src/app.py", 1)) == 1
+def test_added_line_is_commentable_on_right() -> None:
+    """An added line is commentable on RIGHT at its new-file line number."""
+    index = build_commentable_lines(SAMPLE_DIFF)
+    # "+import sys" is the first added line in src/app.py, at new-file line 2.
+    assert ("src/app.py", 2, "RIGHT") in index
+    # "+    print(...)" / "+    return 0" land at new-file lines 5 and 6.
+    assert ("src/app.py", 5, "RIGHT") in index
+    assert ("src/app.py", 6, "RIGHT") in index
 
 
-def test_position_map_added_line() -> None:
-    """An added line maps to its correct 1-based diff position."""
-    pos_map = build_position_map(SAMPLE_DIFF)
-    # "import sys" is the first added line in src/app.py, at new-file line 2.
-    # Hunk header is position 0 (not counted); context "import os" is pos 1;
-    # "+import sys" is pos 2.
-    assert pos_map.get(("src/app.py", 2)) == 2
+def test_context_line_is_commentable_on_both_sides() -> None:
+    """A context line is commentable on RIGHT (new line) and LEFT (old line)."""
+    index = build_commentable_lines(SAMPLE_DIFF)
+    # "import os" is context at new-file line 1 / old-file line 1.
+    assert ("src/app.py", 1, "RIGHT") in index
+    assert ("src/app.py", 1, "LEFT") in index
 
 
-def test_position_map_line_not_in_diff_returns_none() -> None:
-    """A line number outside any hunk maps to None."""
-    pos_map = build_position_map(SAMPLE_DIFF)
-    assert pos_map.get(("src/app.py", 999)) is None
+def test_deleted_line_is_commentable_on_left() -> None:
+    """A deleted line is commentable on LEFT at its old-file line number."""
+    index = build_commentable_lines(SAMPLE_DIFF)
+    # "-    pass" was old-file line 4 (context "import os", blank, "def main():"
+    # are old lines 1-3); it is anchored on the LEFT side only.
+    assert ("src/app.py", 4, "LEFT") in index
 
 
-def test_position_map_unknown_file_returns_none() -> None:
-    """A file not present in the diff maps to None for any line."""
-    pos_map = build_position_map(SAMPLE_DIFF)
-    assert pos_map.get(("totally_absent.py", 1)) is None
+def test_line_not_in_diff_is_absent() -> None:
+    """A line number outside any hunk is not commentable on either side."""
+    index = build_commentable_lines(SAMPLE_DIFF)
+    assert ("src/app.py", 999, "RIGHT") not in index
+    assert ("src/app.py", 999, "LEFT") not in index
 
 
-def test_position_map_second_file() -> None:
-    """Position counting resets per file, not globally."""
-    pos_map = build_position_map(SAMPLE_DIFF)
-    # src/utils.py: hunk @@ -10,3 +10,4 @@
-    # new-file line 10 → "    x = 1" → diff position 1 (first line after hunk header)
-    assert pos_map.get(("src/utils.py", 10)) == 1
+def test_unknown_file_is_absent() -> None:
+    """A file not present in the diff is never commentable."""
+    index = build_commentable_lines(SAMPLE_DIFF)
+    assert ("totally_absent.py", 1, "RIGHT") not in index
 
 
-def test_position_map_deleted_line_not_in_new_file() -> None:
-    """Deleted lines do not advance the new-file line counter, so they have no position."""
-    pos_map = build_position_map(SAMPLE_DIFF)
-    # src/app.py original line 4 was "    pass" (deleted).
-    # After deletion the new file jumps from line 3 to line 4 being "    print(...)".
-    # There is no new-file line corresponding to the deleted line itself.
-    # The test just verifies the map contains known good entries and not junk.
-    assert ("src/app.py", 5) in pos_map or ("src/app.py", 4) in pos_map  # either is fine
+def test_line_counting_resets_per_file() -> None:
+    """Line tracking resets per file, not globally."""
+    index = build_commentable_lines(SAMPLE_DIFF)
+    # src/utils.py: hunk @@ -10,3 +10,4 @@ → "    x = 1" is new-file line 10.
+    assert ("src/utils.py", 10, "RIGHT") in index
+    # The trailing "+    # comment added" is the added line at new-file line 13.
+    assert ("src/utils.py", 13, "RIGHT") in index
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +175,7 @@ def test_is_reviewable_accepts_dotfiles_and_configs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Position map — multi-hunk and add-after-delete anchoring
+# Commentable lines — multi-hunk and add-after-delete anchoring
 # ---------------------------------------------------------------------------
 
 _MULTI_HUNK_DIFF = """\
@@ -193,20 +194,27 @@ index 0000001..0000002 100644
 """
 
 
-def test_position_counts_continue_across_hunks_within_a_file() -> None:
-    """diff_position keeps counting across a file's hunks; new-line resets per hunk."""
-    pos_map = build_position_map(_MULTI_HUNK_DIFF)
-    # Second hunk starts at new-file line 21 ("    run()" is context, position 6:
-    # hunk1 has context(1) + del(2) + add(3) + add(4) = 4 positions, then hunk2
-    # context "    run()" is position 5, "+    cleanup()" is position 6.
-    assert pos_map.get(("src/svc.py", 21)) == 5
-    assert pos_map.get(("src/svc.py", 22)) == 6
+def test_second_hunk_line_anchors_to_its_real_new_file_line() -> None:
+    """Findings in the 2nd hunk anchor to their true new-file line, not an
+    off-by-N diff position.
+
+    Regression for the multi-hunk bug: the old `position` math did not count the
+    intervening "@@" hunk header, so a finding on the 2nd hunk's "+    cleanup()"
+    (new-file line 22) was posted one line too high. With line+side the anchor is
+    simply the new-file line, independent of any earlier hunk.
+    """
+    index = build_commentable_lines(_MULTI_HUNK_DIFF)
+    # Second hunk @@ -20,2 +21,3 @@: "    run()" is context at new-file line 21,
+    # "+    cleanup()" is added at new-file line 22.
+    assert ("src/svc.py", 21, "RIGHT") in index
+    assert ("src/svc.py", 22, "RIGHT") in index
 
 
 def test_added_line_after_deletion_anchors_correctly() -> None:
-    pos_map = build_position_map(_MULTI_HUNK_DIFF)
-    # "import os" context = new-line 1, pos 1; "-import sys" del = pos 2 (no new line);
-    # "+import sys" add = new-line 2, pos 3; "+import json" add = new-line 3, pos 4.
-    assert pos_map.get(("src/svc.py", 1)) == 1
-    assert pos_map.get(("src/svc.py", 2)) == 3
-    assert pos_map.get(("src/svc.py", 3)) == 4
+    index = build_commentable_lines(_MULTI_HUNK_DIFF)
+    # First hunk: "import os" context = new-line 1; "-import sys" del = old-line 2
+    # (LEFT, no new line); "+import sys" add = new-line 2; "+import json" = new-line 3.
+    assert ("src/svc.py", 1, "RIGHT") in index
+    assert ("src/svc.py", 2, "LEFT") in index
+    assert ("src/svc.py", 2, "RIGHT") in index
+    assert ("src/svc.py", 3, "RIGHT") in index

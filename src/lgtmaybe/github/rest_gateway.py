@@ -21,7 +21,7 @@ from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway
 
-from .diff import PositionMap, build_position_map, is_reviewable
+from .diff import CommentableLines, build_commentable_lines, is_reviewable
 
 _log = get_logger(__name__)
 
@@ -165,14 +165,14 @@ class RestGitHubGateway(GitHubGateway):
         the body), it is updated in-place rather than creating a duplicate.
 
         The ``diff`` parameter is optional; when omitted the method fetches the
-        PR diff to build the position map.
+        PR diff to build the commentable-line index.
         """
         if diff is None:
             ctx = self.get_pr_context()
             diff = ctx.diff
 
-        pos_map: PositionMap = build_position_map(diff)
-        comments = self._build_comments(findings, pos_map)
+        commentable: CommentableLines = build_commentable_lines(diff)
+        comments = self._build_comments(findings, commentable)
 
         body = f"{summary}\n\n{self._marker}"
         existing_id = self._find_existing_review()
@@ -435,17 +435,22 @@ class RestGitHubGateway(GitHubGateway):
     @staticmethod
     def _build_comments(
         findings: list[ReviewFinding],
-        pos_map: PositionMap,
+        commentable: CommentableLines,
     ) -> list[dict[str, Any]]:
-        """Map findings to GitHub review comment dicts, skipping unmapped lines."""
+        """Map findings to GitHub review comment dicts, skipping out-of-diff lines.
+
+        Anchors each comment with `line` + `side` (GitHub's recommended params),
+        not the deprecated `position` count, so a finding binds directly to its
+        file line regardless of how many hunks precede it.
+        """
         comments: list[dict[str, Any]] = []
         for f in findings:
-            position = pos_map.get((f.path, f.line))
-            if position is None:
+            if (f.path, f.line, f.side) not in commentable:
                 continue
             comment: dict[str, Any] = {
                 "path": f.path,
-                "position": position,
+                "line": f.line,
+                "side": f.side,
                 "body": f"**[{f.severity.upper()}] {f.title}**\n\n{f.body}",
             }
             if f.suggestion is not None:

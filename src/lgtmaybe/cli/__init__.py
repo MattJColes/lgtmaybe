@@ -139,7 +139,7 @@ def run_review(
     if not dry_run:
         # Pass the diff we already fetched so post_review doesn't re-fetch the
         # whole PR context (diff + file list + every file's contents) just to
-        # rebuild the position map.
+        # rebuild the commentable-line index.
         github.post_review(findings, summary, diff=ctx.diff)
 
     return findings, summary
