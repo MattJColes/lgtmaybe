@@ -189,7 +189,7 @@ def test_no_fixture_flag_runs_every_fixture(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(run_mod, "_review", fake_review)
 
     run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0"])
-    assert set(seen) == {"badcode", "vibe-multifile"}
+    assert set(seen) == {"badcode", "vibe-multifile", "rlm-bigfile"}
 
 
 def test_unknown_fixture_name_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:

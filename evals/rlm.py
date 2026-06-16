@@ -1,13 +1,16 @@
-"""RLM A/B benchmark — does the recursive hunk-walk beat sending big files whole?
+"""RLM A/B benchmark — does the recursive hunk-walk beat reviewing a file whole?
 
 This measures the shipped ``ReviewConfig.recursive`` feature (engine default on):
-when a file's diff exceeds ``max_input_tokens`` the engine can either send it
-whole (the model's context then drops the tail) or walk it hunk-by-hunk so every
-call fits and nothing is dropped. This harness runs both on a fixture against a
-**live** model and reports recall + token usage (a cost proxy) for each, so the
-"it helps performance" claim can be checked on real numbers rather than a hunch:
+when a file's diff exceeds ``max_input_tokens`` the engine can either review the
+whole file in one call or walk it hunk-by-hunk (each hunk its own focused call).
+Two effects are in play — a *focus* gain (a small model attends better to one
+hunk at a time) on any over-budget file, and *truncation-avoidance* when the file
+genuinely exceeds the model's context window, where the whole-file call drops the
+tail while the walk reviews every hunk. This harness runs both on a fixture
+against a **live** model and reports recall + token usage (a cost proxy) for each,
+so the "it helps performance" claim can be checked on real numbers, not a hunch:
 
-  - ``whole``     — ``recursive=False``: today's fallback on an over-budget diff.
+  - ``whole``     — ``recursive=False``: the over-budget file in one call.
   - ``recursive`` — ``recursive=True``:  the RLM walk, each hunk its own call.
 
 Both strategies run through the **real** ``LLMReviewEngine`` (same redaction,
@@ -17,7 +20,7 @@ pytest gate; the pure plumbing (usage accounting, the comparison record) is
 unit-tested in ``tests/evals/test_rlm.py``.
 
     python -m evals.rlm --provider ollama --model qwen3.5:4b \
-        --api-base http://localhost:11434 --fixture vibe-multifile --budget 1500
+        --api-base http://localhost:11434 --fixture rlm-bigfile --budget 300
 """
 
 from __future__ import annotations
@@ -185,9 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--budget",
         type=int,
-        default=1500,
-        help="max_input_tokens per call — set it below the fixture diff size so the "
-        "whole-file baseline actually drops its tail and the comparison is meaningful",
+        default=300,
+        help="max_input_tokens per call — set it below a file's diff size (but above "
+        "a single hunk) so the over-budget file splits and the comparison is meaningful",
     )
     ap.add_argument("--no-reflect", dest="reflect", action="store_false")
     ap.add_argument(

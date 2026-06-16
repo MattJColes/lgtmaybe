@@ -279,6 +279,44 @@ The scorer (`evals/scorer.py`) is pure and unit-tested (`tests/evals/`); only th
 runner needs a live model. To add a fixture, drop a `diff.txt` and an
 `expected.json` (matching the `Fixture` schema) under `evals/fixtures/<name>/`.
 
+### Benchmarking the recursive (RLM) walk
+
+`ReviewConfig.recursive` (default on) decides what happens when a single file's
+diff exceeds `max_input_tokens`: walk it hunk-by-hunk (each hunk its own focused
+call) or send the whole file in one call. `evals/rlm.py` is an on-demand A/B
+benchmark that runs both through the **real** engine — they differ only by that
+one flag — and reports recall + token usage for each, so "does walking the diff
+actually raise recall?" gets a real number instead of a hunch:
+
+```bash
+# rlm-bigfile is one 5-hunk file (~600 tokens); --budget below that (but above a
+# single hunk) forces the over-budget file to split. Needs a live model.
+uv run python -m evals.rlm --provider ollama --model qwen3.5:4b \
+  --api-base http://localhost:11434 --fixture rlm-bigfile --budget 300
+```
+
+It prints, per fixture, each strategy's recall and token cost plus a one-line
+verdict (e.g. *"recursive recall +25% at 1.4x tokens"*).
+
+Two distinct effects are in play, and the benchmark separates them by fixture
+size:
+
+- **Focus** (every fixture): even when the whole file fits the model's context,
+  splitting gives each hunk its own focused per-lens call. On small local models
+  this tends to lift recall — fewer regions to attend to per call — at the cost
+  of more calls and lost cross-hunk context. `rlm-bigfile` (small, fits any
+  context window) isolates this effect.
+- **Truncation-avoidance** (large files only): when a file's diff genuinely
+  exceeds the model's context window (`num_ctx` on ollama), the whole-file call
+  drops the tail entirely while the walk reviews every hunk. To exercise this you
+  need a diff larger than the context window — the planted bugs in `rlm-bigfile`'s
+  *tail* hunks (`shell=True`, N+1, the unhandled `None`) are what a truncating
+  whole-file pass would miss.
+
+Use it to confirm the walk helps on your model before trusting the default. Its
+plumbing (usage accounting, the comparison record) is unit-tested in
+`tests/evals/test_rlm.py`; only the A/B runner needs a live model.
+
 ## Testing in GitHub Actions
 
 Two distinct CI workflows cover two different things.

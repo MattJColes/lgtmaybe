@@ -61,6 +61,20 @@ def test_vibe_multifile_has_high_signal_and_subtle_findings() -> None:
     assert "off-by-one" in labels
 
 
+def test_rlm_bigfile_is_one_multi_hunk_file() -> None:
+    """The RLM benchmark fixture must be a single file with several hunks — that's
+    the shape that exercises the recursive walk (an over-budget file split into
+    per-hunk calls). Guards against an edit that flattens it to one hunk and
+    silently makes the benchmark a no-op."""
+    from lgtmaybe.engine.compress import split_patch_into_hunks
+
+    diff, manifest = _fixture("rlm-bigfile")
+    parts = split_by_file(diff, [manifest.changed_file])
+    assert len(parts) == 1, "rlm-bigfile must be a single file"
+    _path, patch = parts[0]
+    assert len(split_patch_into_hunks(patch)) >= 3, "rlm-bigfile needs several hunks"
+
+
 def test_fixtures_cover_performance_and_complexity_lenses() -> None:
     """Both fixtures plant a performance and a complexity issue so the e2e exercises
     all seven code lenses, not just security + correctness. (The intent lens needs a
