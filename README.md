@@ -66,9 +66,10 @@ See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every k
 **Big files, small models.** When one file's diff is too big for a single model
 call, lgtmaybe reviews it **hunk-by-hunk** rather than whole, so the model never
 loses the tail of a large file. On by default; `--no-recursive` turns it off.
-Smaller local models gain the most — in one benchmark run a local **qwen3.5:4b**
-caught 6/6 planted bugs this way versus 4/6 reviewing files whole (one run on one
-fixture, so directional, not a guarantee). See
+Smaller local models gain the most — across 8 runs on two fixtures, a local
+**qwen3.5:4b** averaged **88% recall** reviewing hunk-by-hunk versus **61%**
+reviewing files whole, with its *worst* run matching the whole-file method's
+*best* (a real effect, not noise), at ~2.4× the tokens. See
 [the benchmark](DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
 
 **What you get back.** Each finding is structured data — file, line, severity, a

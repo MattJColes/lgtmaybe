@@ -330,17 +330,21 @@ matrix tasks (`whole` vs `recursive`) against a live ollama model and publishes
 each leg's recall to the run summary — on demand (`workflow_dispatch`) or when the
 RLM code/fixture changes.
 
-**Recorded result** (qwen3.5:4b, `rlm-bigfile`, `--max-input-tokens 300`,
-`--categories security,correctness,performance`, single run, temperature 0.6):
+**Recorded result** (qwen3.5:4b, fixtures `rlm-bigfile` + `rlm-pipeline` pooled,
+`--budget 300`, `--categories security,correctness,performance`, `--repeats 8`,
+temperature 0.6):
 
-| strategy | recall | notes |
-|---|---|---|
-| `whole` (original) | 67% (4/6) | missed both bugs in the file's tail hunk |
-| `recursive` (RLM)  | 100% (6/6) | caught the tail bugs the whole-file pass dropped |
+| strategy | mean recall | range | spread | tokens |
+|---|---|---|---|---|
+| `whole` (original) | 61% | 45–82% | 36 pts | ~17.0k |
+| `recursive` (RLM)  | 88% | 82–100% | 18 pts | ~40.4k |
 
-The diff (~600 tokens) fit the 16k context window, so the gap is the *focus*
-effect, not truncation. One non-deterministic run on one fixture — directional,
-not a guarantee; re-run to confirm on your own model.
+Recursive averaged **+27 points** of recall, and its *worst* run (82%) matched the
+whole-file method's *best* — a real effect, not run-to-run noise — while also being
+more stable (smaller spread). The diffs (~600 tokens) fit the 16k context window,
+so this is the *focus* / "lost-in-the-middle" effect, **not** truncation
+avoidance. Cost is ~2.4× the tokens (and wall-time). Measured on a small model,
+where the focus effect is largest; expect a smaller gap on a frontier hosted model.
 
 ## Testing in GitHub Actions
 
