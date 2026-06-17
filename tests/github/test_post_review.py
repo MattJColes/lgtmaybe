@@ -612,4 +612,10 @@ def test_unanchored_finding_demoted_to_body_not_inline() -> None:
     assert len(comments) == 1
     assert all("Unplaced finding" not in c for c in titles_inline)
     # The demoted finding survives in the review body instead.
-    assert "Unplaced finding" in str(body.get("body", ""))
+    rendered = str(body.get("body", ""))
+    assert "Unplaced finding" in rendered
+    # Framed as a feature for the reader, not an apology about our internals:
+    # no pipeline jargon ("anchor") leaks into customer-facing copy.
+    assert "### Additional findings" in rendered
+    assert "anchor" not in rendered.lower()
+    assert "Couldn't anchor" not in rendered
