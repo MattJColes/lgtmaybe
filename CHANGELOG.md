@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.2.1...lgtmaybe-v0.3.0) (2026-06-17)
+
+
+### Features
+
+* deterministically anchor findings to the lines they describe ([#100](https://github.com/MattJColes/lgtmaybe/issues/100)) ([0cee324](https://github.com/MattJColes/lgtmaybe/commit/0cee324b67bf1672a411dd76f31a8035a7ba2cc9))
+
 ## [0.2.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.2.0...lgtmaybe-v0.2.1) (2026-06-16)
 
 
