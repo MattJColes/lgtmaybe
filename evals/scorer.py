@@ -11,9 +11,14 @@ from pydantic import BaseModel
 
 from lgtmaybe.core.models import ReviewFinding, Severity
 
-# How far a reported line may drift from the expected line and still count — models
-# attribute a finding to a nearby line (the call vs the def) often enough.
-_LINE_TOLERANCE = 3
+# How far a reported line may drift from the expected line and still count. The
+# engine re-anchors findings to the exact changed line they quote (see
+# engine._snap_findings), so a correctly-placed finding lands on its line — this
+# is tight on purpose to reward that. The ±1 slack only absorbs the def-vs-first-
+# statement ambiguity of a multi-line issue, which the fixture author picks one
+# line for. A finding the model couldn't anchor is demoted, not mis-placed, so it
+# never reaches here with a wrong line.
+_LINE_TOLERANCE = 1
 
 
 class ExpectedFinding(BaseModel):
