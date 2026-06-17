@@ -83,10 +83,9 @@ def _render_demoted(demoted: list[ReviewFinding]) -> str:
     lines = [
         "",
         "",
-        "### Findings without a precise line",
+        "### Additional findings",
         "",
-        "_Couldn't anchor these to a specific diff line, so they're noted here "
-        "rather than risk an inline comment on the wrong line:_",
+        "_These relate to the changes but aren't tied to a single line:_",
         "",
     ]
     for f in demoted:
