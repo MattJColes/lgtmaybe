@@ -47,6 +47,53 @@ def parse_hunk_header(line: str) -> HunkHeader | None:
     )
 
 
+def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]]:
+    """Map ``(path, side)`` → ordered ``(line_number, text)`` for each changed line.
+
+    ``side`` is ``"RIGHT"`` for added (``+``) lines at their new-file line number
+    and ``"LEFT"`` for deleted (``-``) lines at their old-file line number — the
+    same coordinates GitHub anchors a review comment by. ``text`` is the line
+    content with the ``+``/``-`` marker stripped (surrounding whitespace kept).
+
+    Used to re-anchor a finding whose model-counted ``line`` drifted: the model
+    returns the verbatim flagged line, which is matched back to the real changed
+    line here. Context (unchanged) lines are skipped — a finding always anchors
+    on a changed line.
+    """
+    index: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    current_file: str | None = None
+    new_line = 0
+    old_line = 0
+    in_hunk = False
+
+    for raw_line in diff.splitlines():
+        file_match = FILE_HEADER_RE.match(raw_line)
+        if file_match:
+            current_file = file_match.group(1)
+            in_hunk = False
+            continue
+        if current_file is None:
+            continue
+        hunk = parse_hunk_header(raw_line)
+        if hunk is not None:
+            new_line = hunk.new_start
+            old_line = hunk.old_start
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if raw_line.startswith("-"):
+            index.setdefault((current_file, "LEFT"), []).append((old_line, raw_line[1:]))
+            old_line += 1
+        elif raw_line.startswith("+"):
+            index.setdefault((current_file, "RIGHT"), []).append((new_line, raw_line[1:]))
+            new_line += 1
+        else:  # context line: advances both sides, anchors nothing
+            new_line += 1
+            old_line += 1
+    return index
+
+
 def split_by_file(diff: str, changed_files: list[str]) -> list[tuple[str, str]]:
     """Split a unified diff into per-file ``(path, patch)`` pairs.
 

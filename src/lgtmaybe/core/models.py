@@ -94,6 +94,16 @@ class ReviewFinding(_Strict):
     title: str
     body: str
     suggestion: str | None = None
+    # The verbatim text of the changed line this finding is about (no +/- marker).
+    # The model can't count diff lines reliably, so the engine re-anchors `line`
+    # to the real changed line whose content matches this — see engine._snap_findings.
+    anchor: str | None = None
+    # Engine-derived placement confidence (the model's value is ignored). True when
+    # `line` is trustworthy — the model gave no anchor (we trust its line) or the
+    # anchor matched a changed line. False when an anchor was given but matched no
+    # changed line, so `line` is a guess: the GitHub adapter then demotes the
+    # finding to the review summary rather than posting it inline on a wrong line.
+    anchored: bool = True
 
 
 _BUILTIN_LENS_IDS: frozenset[str] = frozenset(c.value for c in ReviewCategory)

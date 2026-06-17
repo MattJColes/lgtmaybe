@@ -59,3 +59,25 @@ class TestParseHunkHeader:
     def test_non_hunk_line_returns_none(self):
         assert parse_hunk_header(" context line") is None
         assert parse_hunk_header("diff --git a/x b/x") is None
+
+
+class TestChangedLineIndex:
+    def test_indexes_added_line_on_right_at_new_line(self):
+        from lgtmaybe.core.diffparse import changed_line_index
+
+        index = changed_line_index(_TWO_FILE_DIFF)
+        assert index[("src/a.py", "RIGHT")] == [(2, "y = 2")]
+
+    def test_indexes_a_modify_pair_on_both_sides(self):
+        from lgtmaybe.core.diffparse import changed_line_index
+
+        index = changed_line_index(_TWO_FILE_DIFF)
+        assert index[("src/b.py", "LEFT")] == [(10, "old")]
+        assert index[("src/b.py", "RIGHT")] == [(10, "new")]
+
+    def test_context_lines_are_not_indexed(self):
+        from lgtmaybe.core.diffparse import changed_line_index
+
+        index = changed_line_index(_TWO_FILE_DIFF)
+        right = index[("src/a.py", "RIGHT")]
+        assert all(text != "x = 1" and text != "z = 3" for _, text in right)

@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 
-from lgtmaybe.core.diffparse import split_by_file
+from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
@@ -191,21 +191,29 @@ class LLMReviewEngine(ReviewEngine):
                 "(ollama: a larger model needs a longer --timeout), then retry."
             )
 
-        # 6. Merge: a finding can surface under more than one lens (a shell
+        reviewed_diff = "\n".join(patch for _, patch in file_patches)
+
+        # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
+        #    routinely drifts a few lines. Snap each finding's line to the real
+        #    changed line whose content matches its verbatim `anchor`, so comments
+        #    land on the code they describe. Done before dedupe so findings the
+        #    model placed on slightly different wrong lines collapse correctly.
+        all_findings = _snap_findings(all_findings, reviewed_diff)
+
+        # 7. Merge: a finding can surface under more than one lens (a shell
         #    injection is both a security and a correctness issue), so collapse
         #    duplicates before reflecting.
         all_findings = _dedupe(all_findings)
 
-        # 7. Self-reflection: filter out low-confidence findings. Reflect against
+        # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
         if cfg.reflect and all_findings:
             _log.info("reflecting on findings", extra={"findings": len(all_findings)})
-            reviewed_diff = "\n".join(patch for _, patch in file_patches)
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
             all_findings = reflect_findings(all_findings, clean_ctx, cfg, self._provider)
 
-        # 8. Filter by min_severity.
+        # 9. Filter by min_severity.
         filtered = [f for f in all_findings if f.severity >= cfg.min_severity]
 
         plural = "s" if len(filtered) != 1 else ""
@@ -311,6 +319,76 @@ def _error_reason(exc: BaseException) -> str:
     text = " ".join(str(exc).split())
     reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     return reason[:200]
+
+
+def _snap_findings(findings: list[ReviewFinding], diff: str) -> list[ReviewFinding]:
+    """Re-anchor each finding's ``line`` to the changed line matching its ``anchor``.
+
+    LLMs miscount diff line numbers, so a finding's ``line`` often drifts a few
+    rows off the code it describes. Each finding carries the verbatim text of the
+    line it flagged; here we match that back to the real changed line (same path
+    and side) and correct ``line`` to it. When the anchor is missing or matches no
+    changed line, the model's ``line`` is kept untouched — never guess.
+    """
+    index = changed_line_index(diff)
+    return [_snap_one(f, index) for f in findings]
+
+
+# Below this length an anchor is too generic for a substring match to be safe
+# (`}`, `return`, `else:`), so substring matching is only tried for longer lines.
+_MIN_SUBSTRING_ANCHOR = 8
+
+
+def _match_anchor(anchor: str, candidates: list[tuple[int, str]]) -> list[int]:
+    """Line numbers of the changed lines that match *anchor*, loosest level that hits.
+
+    Tried in order, stopping at the first non-empty level:
+    1. exact (whitespace-stripped) equality;
+    2. inner-whitespace-normalised equality (indentation/spacing drift);
+    3. a unique substring relationship (the model trimmed a trailing comment, or
+       quoted a touch more than the line) — only when exactly one line matches, so
+       an ambiguous fragment never snaps to the wrong place.
+    """
+    target = anchor.strip()
+    exact = [line for line, text in candidates if text.strip() == target]
+    if exact:
+        return exact
+    norm = " ".join(target.split())
+    normalised = [line for line, text in candidates if " ".join(text.split()) == norm]
+    if normalised:
+        return normalised
+    if len(target) >= _MIN_SUBSTRING_ANCHOR:
+        substring = [line for line, text in candidates if target in text or text.strip() in target]
+        if len(substring) == 1:
+            return substring
+    return []
+
+
+def _snap_one(
+    finding: ReviewFinding, index: dict[tuple[str, str], list[tuple[int, str]]]
+) -> ReviewFinding:
+    if not finding.anchor or not finding.anchor.strip():
+        return finding  # no anchor → trust the model's line (stays anchored)
+    matches = _match_anchor(finding.anchor, index.get((finding.path, finding.side), []))
+    if not matches:
+        # The model quoted a line we can't find: its line number is a guess. Flag
+        # it so the GitHub adapter demotes it to the summary instead of posting
+        # inline on a line we can't stand behind.
+        _log.info(
+            "anchor unmatched — demoting finding",
+            extra={"path": finding.path, "line": finding.line, "title": finding.title},
+        )
+        return finding.model_copy(update={"anchored": False})
+    if finding.line in matches:
+        return finding
+    # Several identical lines can match; the model's (approximate) line is the
+    # best tiebreaker — snap to the nearest match.
+    best = min(matches, key=lambda line: abs(line - finding.line))
+    _log.info(
+        "re-anchored finding",
+        extra={"path": finding.path, "from": finding.line, "to": best},
+    )
+    return finding.model_copy(update={"line": best})
 
 
 def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:

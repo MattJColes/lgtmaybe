@@ -376,3 +376,22 @@ def test_prompt_explains_line_number_mapping() -> None:
 def test_prompt_asks_for_one_finding_per_distinct_issue() -> None:
     prompt = build_system_prompt().lower()
     assert "each distinct issue" in prompt
+
+
+def test_prompt_asks_for_a_verbatim_anchor() -> None:
+    prompt = build_system_prompt()
+    assert "anchor" in prompt
+    assert "verbatim" in prompt.lower()
+
+
+def test_every_category_example_includes_an_anchor() -> None:
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category)
+        assert '"anchor"' in prompt, f"{category} example missing an anchor field"
+
+
+def test_prompt_warns_minus_lines_are_removed_not_duplicates() -> None:
+    prompt = build_system_prompt().lower()
+    assert "removed" in prompt
+    # A modify pair must not be read as a redefinition / duplication.
+    assert "defined twice" in prompt or "duplicat" in prompt

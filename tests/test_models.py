@@ -231,3 +231,31 @@ def test_extra_fields_forbidden() -> None:
                 "bogus": True,
             }
         )
+
+
+def test_review_finding_accepts_anchor() -> None:
+    f = ReviewFinding(
+        path="a.py",
+        line=42,
+        severity=Severity.high,
+        title="t",
+        body="b",
+        anchor="    return x",
+    )
+    assert f.anchor == "    return x"
+    restored = ReviewFinding.model_validate_json(f.model_dump_json())
+    assert restored.anchor == "    return x"
+
+
+def test_review_finding_anchor_defaults_to_none() -> None:
+    f = ReviewFinding(path="a.py", line=1, severity=Severity.low, title="t", body="b")
+    assert f.anchor is None
+
+
+def test_review_finding_anchored_defaults_true() -> None:
+    f = ReviewFinding(path="a.py", line=1, severity=Severity.low, title="t", body="b")
+    assert f.anchored is True
+    restored = ReviewFinding.model_validate_json(
+        f.model_copy(update={"anchored": False}).model_dump_json()
+    )
+    assert restored.anchored is False

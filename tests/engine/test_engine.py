@@ -856,3 +856,143 @@ def test_custom_lens_runs_as_an_extra_review_call() -> None:
     assert len(review_calls) == n_builtin + 1
     assert any("Simplify or delete" in c["messages"][0]["content"] for c in review_calls)
     assert findings  # the custom lens's finding survived the pipeline
+
+
+# ---------------------------------------------------------------------------
+# deterministic re-anchoring: a finding's drifted line is snapped to the real
+# changed line its verbatim `anchor` matches (the model can't count reliably)
+# ---------------------------------------------------------------------------
+
+_SNAP_DIFF = (
+    "diff --git a/m.py b/m.py\n"
+    "--- a/m.py\n"
+    "+++ b/m.py\n"
+    "@@ -1,2 +1,5 @@\n"
+    " a = 1\n"
+    "+b = 2\n"
+    "+c = 3\n"
+    "+d = 4\n"
+    " e = 5\n"
+)
+
+
+def _snap_ctx() -> PRContext:
+    return PRContext(
+        diff=_SNAP_DIFF,
+        changed_files=["m.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+
+
+def _snap_cfg() -> ReviewConfig:
+    return ReviewConfig(
+        provider=Provider.ollama,
+        model="m",
+        categories=[ReviewCategory.security],
+        reflect=False,
+    )
+
+
+def test_snaps_finding_to_changed_line_matching_anchor() -> None:
+    # Model miscounted (reported line 2) but the verbatim anchor pins line 4.
+    drifted = ReviewFinding(
+        path="m.py", line=2, severity=Severity.high, title="bug", body="x", anchor="d = 4"
+    )
+    findings, _ = LLMReviewEngine(_provider_for([drifted])).review(_snap_ctx(), _snap_cfg())
+    assert [f.line for f in findings] == [4]
+
+
+def test_keeps_model_line_when_anchor_matches_nothing() -> None:
+    f = ReviewFinding(
+        path="m.py", line=3, severity=Severity.high, title="bug", body="x", anchor="z = 99"
+    )
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(_snap_ctx(), _snap_cfg())
+    assert [f.line for f in findings] == [3]
+
+
+def test_keeps_model_line_when_no_anchor_given() -> None:
+    f = ReviewFinding(path="m.py", line=2, severity=Severity.high, title="bug", body="x")
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(_snap_ctx(), _snap_cfg())
+    assert [f.line for f in findings] == [2]
+
+
+def test_snap_breaks_ties_by_nearest_to_model_line() -> None:
+    diff = (
+        "diff --git a/d.py b/d.py\n"
+        "--- a/d.py\n"
+        "+++ b/d.py\n"
+        "@@ -1,1 +1,5 @@\n"
+        " head\n"
+        "+dup = 1\n"
+        "+filler\n"
+        "+dup = 1\n"
+    )
+    ctx = PRContext(
+        diff=diff, changed_files=["d.py"], base_sha="a", head_sha="b", repo="o/r", pr_number=1
+    )
+    # Two changed lines share the anchor "dup = 1" (lines 2 and 4); the model
+    # said line 5, so the nearer of the two (line 4) wins.
+    f = ReviewFinding(
+        path="d.py", line=5, severity=Severity.high, title="bug", body="x", anchor="dup = 1"
+    )
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(ctx, _snap_cfg())
+    assert [f.line for f in findings] == [4]
+
+
+# ---------------------------------------------------------------------------
+# placement confidence: a finding whose anchor can't be matched is flagged
+# `anchored=False` (the GitHub adapter demotes it to the summary rather than
+# guessing an inline line); loose matching keeps that demotion rare.
+# ---------------------------------------------------------------------------
+
+
+def test_unmatched_anchor_marks_finding_unanchored() -> None:
+    f = ReviewFinding(
+        path="m.py", line=3, severity=Severity.high, title="bug", body="x", anchor="nonexistent"
+    )
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(_snap_ctx(), _snap_cfg())
+    assert [f.anchored for f in findings] == [False]
+    assert [f.line for f in findings] == [3]  # line left untouched, not guessed onto a real line
+
+
+def test_matched_anchor_stays_anchored() -> None:
+    f = ReviewFinding(
+        path="m.py", line=2, severity=Severity.high, title="bug", body="x", anchor="d = 4"
+    )
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(_snap_ctx(), _snap_cfg())
+    assert [f.anchored for f in findings] == [True]
+
+
+def test_no_anchor_stays_anchored() -> None:
+    f = ReviewFinding(path="m.py", line=2, severity=Severity.high, title="bug", body="x")
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(_snap_ctx(), _snap_cfg())
+    assert [f.anchored for f in findings] == [True]  # no anchor → trust the model's line
+
+
+def test_loose_match_snaps_when_trailing_comment_trimmed() -> None:
+    diff = (
+        "diff --git a/c.py b/c.py\n"
+        "--- a/c.py\n"
+        "+++ b/c.py\n"
+        "@@ -1,1 +1,3 @@\n"
+        " head\n"
+        "+filler = 0\n"
+        "+    bindings = Field(default_factory=dict)  # keyed by platform\n"
+    )
+    ctx = PRContext(
+        diff=diff, changed_files=["c.py"], base_sha="a", head_sha="b", repo="o/r", pr_number=1
+    )
+    # The model quoted the code without its trailing comment, and miscounted the line.
+    f = ReviewFinding(
+        path="c.py",
+        line=2,
+        severity=Severity.high,
+        title="mutable default",
+        body="x",
+        anchor="    bindings = Field(default_factory=dict)",
+    )
+    findings, _ = LLMReviewEngine(_provider_for([f])).review(ctx, _snap_cfg())
+    assert [(f.line, f.anchored) for f in findings] == [(3, True)]

@@ -74,11 +74,22 @@ This is what lets tracks build in parallel against frozen contracts.
 
 - `core/ports.py` — the ports (interfaces). **Frozen in the foundation step.**
 - litellm / github classes — the adapters.
-- **Engine is a pipeline:** `fetch → compress → prompt → parse → merge/dedupe →
-  reflect → filter → post`, as composable stages. The prompt/parse stage **fans
-  out per `ReviewCategory`** — one concurrent model call per lens — then merges +
-  de-dupes the findings, and a **self-reflection pass** (`engine/reflect.py`)
-  drops the model's own low-confidence findings before posting.
+- **Engine is a pipeline:** `fetch → compress → prompt → parse → re-anchor →
+  merge/dedupe → reflect → filter → post`, as composable stages. The prompt/parse
+  stage **fans out per `ReviewCategory`** — one concurrent model call per lens —
+  then merges + de-dupes the findings, and a **self-reflection pass**
+  (`engine/reflect.py`) drops the model's own low-confidence findings before posting.
+- **Line anchoring (don't trust model arithmetic):** LLMs miscount diff line
+  numbers, so every finding carries a verbatim `anchor` (the flagged line, no
+  +/- marker). After parse, `engine._snap_findings` re-anchors `line` to the real
+  changed line whose content matches the anchor (`core/diffparse.changed_line_index`;
+  exact → whitespace-normalised → unique-substring match, nearest-to-model-line
+  tiebreak). When an anchor matches **nothing**, the line is a guess: the finding
+  is marked `anchored=False` and the GitHub adapter **demotes it to the review body**
+  (`rest_gateway._render_demoted`) rather than post an inline comment on a wrong
+  line — a wrong-line comment breaks trust faster than a finding without a precise
+  line. No anchor → trust the model's line (back-compat). The on-demand eval
+  harness reports an `anchored` rate per fixture so the match rate is measurable.
 - **Provider choice:** strategy + factory. The `--provider` flag selects a
   strategy; a small factory builds the `ProviderClient` (litellm keeps it tiny).
 - **Credential resolution:** chain of responsibility (see auth table).
