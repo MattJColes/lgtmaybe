@@ -46,8 +46,8 @@ _LOCAL_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible})
 
 # Ollama context window. Big enough to hold a real review prompt + diff + the
 # emitted findings; ollama's own default (~4k) truncates the output to a stub.
-# Sized to match what the e2e-ollama workflow needs for a multi-file diff — 16k
-# was tight enough that a real review could overrun it and get truncated.
+# Sized to hold a real multi-file diff review — 16k was tight enough that a real
+# review could overrun it and get truncated.
 _OLLAMA_NUM_CTX = 32768
 
 

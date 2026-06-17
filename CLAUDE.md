@@ -338,16 +338,7 @@ Split by whether it can be deterministic, because that decides where it lives:
   `--temperature` / `--top-p` / `--top-k` set the model's sampling; `--categories`
   cuts the per-category fan-out to a subset). Its plumbing
   is unit-tested in `tests/evals/`. The **hosted** providers stay out of the pytest
-  gate, but a real **local ollama** run *is* wired into CI as its own workflow —
-  `.github/workflows/e2e-ollama.yml` is a deliberately **cut-down smoke**: it pulls
-  a small model (`qwen3.5:4b`, thinking forced off) and reviews the single small
-  `badcode` fixture through only the two **critical** lenses (`--categories
-  security,correctness`) on every PR with `--no-reflect` (the reflection pass
-  over-prunes on a small model) and qwen3.x's recommended non-thinking sampling
-  (`--temperature 0.6 --top-p 0.8 --top-k 20`). It proves the live ollama path
-  parses and picks up critical issues — not that a small model is thorough — so the
-  floor is low (`--min-recall 0.2`, pooled across fixtures — every fixture must
-  parse, and total caught / total planted must clear the floor). The full lens set
+  gate, and so does the live ollama path — the full lens set
   and the large multi-file `vibe-multifile` fixture stay in-repo for on-demand
   `python -m evals.run` runs: the fixtures plant security + correctness bugs **and**
   blatant performance (N+1 / quadratic) + complexity (deep nesting / duplication)
