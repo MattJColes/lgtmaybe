@@ -124,7 +124,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 
 | Input | Default | Description |
 |---|---|---|
-| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `bedrock`, `vertex`, `azure`, `ollama` |
+| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
 | `model` | — | Model identifier for the chosen provider |
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
@@ -134,6 +134,8 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `num_ctx` | `16384` | Ollama context window (ollama only; ignored for hosted providers) |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
 | `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
+| `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
+| `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
 | `aws_region` | `us-east-1` | AWS region for bedrock |
 | `gcp_wif_provider` | — | Workload Identity Federation provider resource name for vertex |

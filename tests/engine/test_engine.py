@@ -697,6 +697,36 @@ def test_all_categories_error_raises_incomplete_not_lgtm() -> None:
         engine.review(_CTX, cfg)
 
 
+def test_prose_wrapped_fenced_findings_review_succeeds() -> None:
+    """Issue #104: an openai-compatible gateway that ignores response_format
+    returns findings wrapped in conversational prose + a markdown fence. The
+    review must succeed rather than fail every lens as 'unparseable'."""
+
+    class _GatewayProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _REFLECT_MARKER in messages[0]["content"]:
+                return ProviderResult(
+                    text='{"verdicts": [{"index": 0, "keep": true}]}',
+                    input_tokens=5,
+                    output_tokens=5,
+                )
+            envelope = json.dumps({"findings": [_HIGH.model_dump(mode="json")]})
+            text = (
+                "I reviewed the 1 changed file [a.py] and here is what I found:\n\n"
+                f"```json\n{envelope}\n```\n\nHope this helps!"
+            )
+            return ProviderResult(text=text, input_tokens=10, output_tokens=20)
+
+    engine = LLMReviewEngine(_GatewayProvider())
+    cfg = ReviewConfig(provider=Provider.openai_compatible, model="gemini-3.5-flash")
+
+    findings, summary = engine.review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["real bug"]
+    assert "incomplete" not in summary.lower()
+
+
 def test_partial_failure_keeps_findings_with_a_notice_and_no_lgtm() -> None:
     # security returns a real finding; every other category is unparseable.
     class _MixedProvider(FakeProvider):

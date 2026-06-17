@@ -163,14 +163,16 @@ Default: auto (ollama 300 s, cloud 60 s). See
 Constrain the model to emit the findings JSON schema using the provider's native
 JSON mode (litellm `response_format`). This keeps models — especially local ones —
 from returning prose or reasoning instead of findings. Leave it on unless a
-particular model/provider doesn't support structured output, in which case the
-lenient parser is the fallback.
+particular model/provider **rejects** `response_format` (some `openai-compatible`
+gateways return a `400`), in which case turn it off; the lenient parser still
+strips fences and pulls JSON out of any surrounding prose. CLI: `--no-structured-output`.
 
 ```yaml
-structured_output: false   # only if your model rejects JSON-schema mode
+structured_output: false   # only if your gateway rejects JSON-schema mode
 ```
 
-Default: `true`.
+Default: `true`. See
+[Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
 
 ### resolve_fixed
 

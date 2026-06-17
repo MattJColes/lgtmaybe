@@ -153,3 +153,30 @@ def test_unparseable_verdict_keeps_all() -> None:
     survivors = reflect_findings([_HIGH, _LOW_CONF], _CTX, _CFG, provider)
 
     assert survivors == [_HIGH, _LOW_CONF]  # safe default
+
+
+# ---------------------------------------------------------------------------
+# gateway output without JSON mode (issue #104): prose-wrapped verdicts
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_wrapped_in_conversational_prose_parses() -> None:
+    """A gateway that ignores response_format returns the verdict inside prose;
+    reflection must still parse it, not silently keep everything."""
+    text = "Sure, here are my verdicts:\n" + _envelope([(0, True), (1, False)]) + "\nDone."
+    provider = _fake_with_text(text)
+
+    survivors = reflect_findings([_HIGH, _LOW_CONF], _CTX, _CFG, provider)
+
+    assert _HIGH in survivors
+    assert _LOW_CONF not in survivors
+
+
+def test_verdict_after_bracket_bearing_prose_parses() -> None:
+    """Prose with stray brackets before the JSON must not derail extraction."""
+    text = "I checked findings [0, 1] carefully:\n" + _envelope([(0, False)])
+    provider = _fake_with_text(text)
+
+    survivors = reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert survivors == []  # the keep=false verdict was parsed past the prose

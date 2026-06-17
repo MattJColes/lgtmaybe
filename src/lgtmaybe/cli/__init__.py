@@ -277,6 +277,7 @@ def action_inputs() -> dict[str, str | None]:
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
         "resolve_fixed": get("RESOLVE_FIXED"),
         "recursive": get("RECURSIVE"),
+        "structured_output": get("STRUCTURED_OUTPUT"),
         "config_path": get("CONFIG_PATH"),
     }
 
