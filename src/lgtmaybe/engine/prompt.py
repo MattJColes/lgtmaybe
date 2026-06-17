@@ -36,7 +36,8 @@ Use exactly one of these severity levels per finding:
 Return ONLY a JSON object with a single key `findings` whose value is an array of \
 finding objects — no prose, no reasoning, nothing before or after. Fields per element:
 path (string), line (integer), side ("LEFT" or "RIGHT", default "RIGHT"), severity (one of \
-the levels above), title (string ≤ 80 chars), body (string), suggestion (string or null).
+the levels above), title (string ≤ 80 chars), body (string), suggestion (string or null), \
+anchor (string — the verbatim flagged line, see below).
 
 Report each distinct issue as its own finding — several findings may share a line.
 
@@ -52,13 +53,18 @@ replace them, indented to match, and nothing else. It is not a place for prose �
 drop-in code change (the fix is structural, spans code you cannot see, or is a \
 judgement call), set `suggestion` to null and make the recommendation in `body`.
 
-### How to fill `line` and `side`
+### How to fill `line`, `side`, and `anchor`
 
 `line` is a real file line number, not a position within the diff. Compute it from the
 hunk header `@@ -old_start,old_count +new_start,new_count @@`: for an added line (`+`)
 use side "RIGHT" and count down from `new_start` over the context and `+` lines; for a
 deleted line (`-`) use side "LEFT" and count down from `old_start` over the context and
 `-` lines.
+
+`anchor` is the exact, verbatim content of the single changed line your finding is
+about — copy it straight from the diff with its leading `+`/`-` marker removed, keeping
+the original indentation, and nothing else. Counting lines is error-prone, so `anchor`
+is what actually places the comment: it must match a changed line character-for-character.
 """
 
 
@@ -99,6 +105,7 @@ _SECURITY_EXAMPLE = _example_block(
         "body": "pickle.loads executes arbitrary code when the input is attacker-controlled. "
         "Use a safe format such as json.loads instead.",
         "suggestion": '    return json.loads(open(path, "rb").read())',
+        "anchor": '    return pickle.loads(open(path, "rb").read())',
     },
 )
 
@@ -116,6 +123,7 @@ _CORRECTNESS_EXAMPLE = _example_block(
         "title": "Off-by-one: items[len(items)] is out of range",
         "body": "Indexing with len(items) raises IndexError; the last index is len(items) - 1.",
         "suggestion": "    return items[-1]",
+        "anchor": "    return items[len(items)]",
     },
 )
 
@@ -133,6 +141,7 @@ _DEPRECATION_EXAMPLE = _example_block(
         "title": "datetime.utcnow() is deprecated",
         "body": "datetime.utcnow() is deprecated since Python 3.12 and returns a naive datetime.",
         "suggestion": "now = datetime.datetime.now(datetime.timezone.utc)",
+        "anchor": "now = datetime.datetime.utcnow()",
     },
 )
 
@@ -151,6 +160,7 @@ _TESTS_EXAMPLE = _example_block(
         "title": "New VIP branch has no accompanying test",
         "body": "The new VIP discount path is untested; a regression here would ship silently.",
         "suggestion": 'def test_vip_discount():\n    assert discount(100.0, "VIP") == 50.0',
+        "anchor": '    if code == "VIP":',
     },
 )
 
@@ -169,6 +179,7 @@ _DOCUMENTATION_EXAMPLE = _example_block(
         "title": "Public function fetch_user lacks a docstring",
         "body": "fetch_user is a public API surface; a short docstring states the contract.",
         "suggestion": 'def fetch_user(user_id):\n    """Fetch one user record by id."""',
+        "anchor": "def fetch_user(user_id):",
     },
 )
 
@@ -186,6 +197,7 @@ _PERFORMANCE_EXAMPLE = _example_block(
         "title": "N+1 query: one database call per user id",
         "body": "Each iteration issues its own query; the cost scales linearly with input size.",
         "suggestion": "    return [u.email for u in db.get_users(user_ids)]",
+        "anchor": "    return [db.get_user(uid).email for uid in user_ids]",
     },
 )
 
@@ -205,6 +217,7 @@ _COMPLEXITY_EXAMPLE = _example_block(
         "title": "Deeply nested conditionals — invert to guard clauses",
         "body": "Three nesting levels for one happy path; guard clauses read flat.",
         "suggestion": "    if not (req and req.user and req.user.active):\n        return None",
+        "anchor": "    if req:",
     },
 )
 
@@ -228,6 +241,7 @@ _PONYTAIL_EXAMPLE = _example_block(
             "The best code is the code you never wrote — delete it for the one-liner."
         ),
         "suggestion": "    return text.upper()",
+        "anchor": "    result = ''",
     },
 )
 
@@ -248,6 +262,7 @@ _INTENT_EXAMPLE = _example_block(
             "verification in the HTTP client — unrelated to the intent and security-sensitive."
         ),
         "suggestion": None,
+        "anchor": "session.verify = False",
     },
     lead_in=(
         'For a PR whose stated intent is "Fix typo in README" and whose diff contains this hunk:'
@@ -502,6 +517,10 @@ _SHARED_RULES = """\
 - Comment ONLY on changed lines shown in the diff (lines starting with + or -).
 - Unchanged lines (starting with a space) are surrounding context — reason from them but
   NEVER raise a finding on them; a comment on an unchanged line cannot be posted.
+- A `-` line is the OLD version of the code; it has been removed and does NOT exist in
+  the resulting file. Only `+` and unchanged (space) lines exist after the change. A `-`
+  line followed by a similar `+` line is ONE modified line, not two copies — never report
+  such a pair as duplicated code or as something "defined twice"/"declared twice".
 - Do NOT comment on lines outside the diff hunk.
 - Return `{"findings": []}` only when there are genuinely no issues.
 - Never output anything other than the JSON object."""

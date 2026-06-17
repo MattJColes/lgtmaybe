@@ -27,9 +27,17 @@ def test_finding_matches_on_line_keyword_and_severity() -> None:
 
 
 def test_line_drift_within_tolerance_still_matches() -> None:
-    findings = [_finding(32, "shell injection")]  # expected line 30, drift 2
+    findings = [_finding(31, "shell injection")]  # expected line 30, drift 1 (def vs statement)
     score = score_fixture("f", findings, [_expected(30, ["injection"])])
     assert score.matched_count == 1
+
+
+def test_line_drift_beyond_one_misses() -> None:
+    # Deterministic anchoring lands a real finding on its exact line, so drift > 1
+    # means a mis-placed finding — the scorer must not credit it.
+    findings = [_finding(32, "shell injection")]  # expected line 30, drift 2
+    score = score_fixture("f", findings, [_expected(30, ["injection"])])
+    assert score.matched_count == 0
 
 
 def test_line_too_far_misses() -> None:

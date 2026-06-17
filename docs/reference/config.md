@@ -62,6 +62,8 @@ The structured output the model must return for each inline comment. All fields 
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `anchor` | string / null | No | `null` | Anchor |
+| `anchored` | boolean | No | `True` | Anchored |
 | `body` | string | Yes | — | Body |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
@@ -189,6 +191,23 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "additionalProperties": false,
       "description": "A single inline review comment the model wants to post.",
       "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor"
+        },
+        "anchored": {
+          "default": true,
+          "title": "Anchored",
+          "type": "boolean"
+        },
         "body": {
           "title": "Body",
           "type": "string"
@@ -413,6 +432,23 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "A single inline review comment the model wants to post.",
   "properties": {
+    "anchor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Anchor"
+    },
+    "anchored": {
+      "default": true,
+      "title": "Anchored",
+      "type": "boolean"
+    },
     "body": {
       "title": "Body",
       "type": "string"

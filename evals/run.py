@@ -142,7 +142,8 @@ def _print(score: FixtureScore) -> None:
     print(
         f"{score.name:14} parsed={status:10} "
         f"recall={score.recall:5.0%} ({score.matched_count}/{score.expected_count}) "
-        f"findings={score.findings_count}"
+        f"findings={score.findings_count} "
+        f"anchored={score.anchored_rate:4.0%} ({score.anchored_count}/{score.findings_count})"
     )
     for miss in score.missed:
         print(f"    missed: {miss}")

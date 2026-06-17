@@ -71,6 +71,29 @@ def _defang_fences(text: str) -> str:
     return text.replace("```", f"`{_ZWSP}`{_ZWSP}`")
 
 
+def _render_demoted(demoted: list[ReviewFinding]) -> str:
+    """Render findings that couldn't be confidently placed inline as a body section.
+
+    These keep their severity, file, and explanation — only the precise line (and
+    its one-click suggestion) is dropped, because we could not anchor it. Returns
+    "" when there is nothing to demote, so a normal review's body is unchanged.
+    """
+    if not demoted:
+        return ""
+    lines = [
+        "",
+        "",
+        "### Findings without a precise line",
+        "",
+        "_Couldn't anchor these to a specific diff line, so they're noted here "
+        "rather than risk an inline comment on the wrong line:_",
+        "",
+    ]
+    for f in demoted:
+        lines.append(f"- **[{f.severity.upper()}] {f.title}** (`{f.path}`) — {f.body}")
+    return "\n".join(lines)
+
+
 class RestGitHubGateway(GitHubGateway):
     """GitHub REST adapter.
 
@@ -172,9 +195,9 @@ class RestGitHubGateway(GitHubGateway):
             diff = ctx.diff
 
         commentable: CommentableLines = build_commentable_lines(diff)
-        comments = self._build_comments(findings, commentable)
+        comments, demoted = self._partition_findings(findings, commentable)
 
-        body = f"{summary}\n\n{self._marker}"
+        body = f"{summary}{_render_demoted(demoted)}\n\n{self._marker}"
         existing_id = self._find_existing_review()
 
         reviews_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
@@ -433,19 +456,25 @@ class RestGitHubGateway(GitHubGateway):
         return payload["data"]
 
     @staticmethod
-    def _build_comments(
+    def _partition_findings(
         findings: list[ReviewFinding],
         commentable: CommentableLines,
-    ) -> list[dict[str, Any]]:
-        """Map findings to GitHub review comment dicts, skipping out-of-diff lines.
+    ) -> tuple[list[dict[str, Any]], list[ReviewFinding]]:
+        """Split findings into inline comments and findings demoted to the body.
 
-        Anchors each comment with `line` + `side` (GitHub's recommended params),
-        not the deprecated `position` count, so a finding binds directly to its
-        file line regardless of how many hunks precede it.
+        A finding is posted inline only when it is confidently placed
+        (``anchored``) AND its ``(path, line, side)`` is a real commentable diff
+        line. Anything else — an anchor the engine could not match, or a line
+        outside the diff — is demoted rather than posted on a line we can't stand
+        behind: a comment on the wrong line breaks trust faster than one without a
+        precise line. Inline comments anchor by ``line`` + ``side`` (GitHub's
+        recommended params), not the deprecated ``position`` count.
         """
         comments: list[dict[str, Any]] = []
+        demoted: list[ReviewFinding] = []
         for f in findings:
-            if (f.path, f.line, f.side) not in commentable:
+            if not f.anchored or (f.path, f.line, f.side) not in commentable:
+                demoted.append(f)
                 continue
             comment: dict[str, Any] = {
                 "path": f.path,
@@ -460,4 +489,4 @@ class RestGitHubGateway(GitHubGateway):
             fp = finding_fingerprint(f.path, f.title)
             comment["body"] += f"\n\n<!-- lgtmaybe-finding:{fp} -->"
             comments.append(comment)
-        return comments
+        return comments, demoted

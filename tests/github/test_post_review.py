@@ -566,3 +566,50 @@ def test_resolve_fixed_swallows_graphql_error() -> None:
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     # Must not raise.
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+
+@respx.mock
+def test_unanchored_finding_demoted_to_body_not_inline() -> None:
+    """A finding flagged anchored=False is never posted inline on a guessed line;
+    it is appended to the review body so the signal survives without a wrong anchor."""
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    created_bodies: list[dict[object, object]] = []
+
+    def capture_create(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        created_bodies.append(body)
+        return httpx.Response(201, json={"id": 1, "body": body.get("body", "")})
+
+    respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
+
+    findings = [
+        ReviewFinding(
+            path="src/app.py",
+            line=2,
+            side="RIGHT",
+            severity=Severity.high,
+            title="Anchored finding",
+            body="this one is placed inline",
+        ),
+        ReviewFinding(
+            path="src/app.py",
+            line=2,  # a real changed line, but we could not anchor it — must NOT post inline
+            side="RIGHT",
+            severity=Severity.high,
+            title="Unplaced finding",
+            body="this one has no trustworthy line",
+            anchored=False,
+        ),
+    ]
+
+    client = httpx.Client()
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=client)
+    gw.post_review(findings, "Summary text", diff=SAMPLE_DIFF)
+
+    body = created_bodies[0]
+    comments = body.get("comments", [])
+    titles_inline = [c["body"] for c in comments]
+    assert len(comments) == 1
+    assert all("Unplaced finding" not in c for c in titles_inline)
+    # The demoted finding survives in the review body instead.
+    assert "Unplaced finding" in str(body.get("body", ""))

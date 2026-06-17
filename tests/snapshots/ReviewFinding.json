@@ -16,6 +16,23 @@
   "additionalProperties": false,
   "description": "A single inline review comment the model wants to post.",
   "properties": {
+    "anchor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Anchor"
+    },
+    "anchored": {
+      "default": true,
+      "title": "Anchored",
+      "type": "boolean"
+    },
     "body": {
       "title": "Body",
       "type": "string"
