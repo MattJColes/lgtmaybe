@@ -522,6 +522,18 @@ _SHARED_RULES = """\
   line followed by a similar `+` line is ONE modified line, not two copies — never report
   such a pair as duplicated code or as something "defined twice"/"declared twice".
 - Do NOT comment on lines outside the diff hunk.
+- The diff and its surrounding context are only a SLICE of the codebase. Base classes,
+  helpers, guards, validators, idempotency checks, callers, config, and schemas you rely
+  on may live in files you CANNOT see. Before claiming something is "missing", "never
+  handled", "unguarded", "not validated", or "will break X", ask: could that handling
+  exist in code that is not shown to me? If so, do NOT assert the absence — hedge the
+  wording ("if there is no X elsewhere…"), lower the severity, and raise it only as a
+  question worth checking. If the finding has no value once that handling might exist,
+  omit it entirely.
+- That restraint applies ONLY to claims about code outside the diff. It does NOT apply to
+  findings about the diff itself — a changed code path the diff leaves untested, a new
+  public surface left undocumented, a stale comment next to changed code — those are real;
+  raise them as usual.
 - Return `{"findings": []}` only when there are genuinely no issues.
 - Never output anything other than the JSON object."""
 
