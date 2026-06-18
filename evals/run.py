@@ -132,9 +132,17 @@ def _review(
     )
     try:
         findings, _summary = engine.review(ctx, cfg)
-        return score_fixture(manifest.name, findings, manifest.expected, parsed_ok=True)
+        return score_fixture(
+            manifest.name,
+            findings,
+            manifest.expected,
+            forbidden=manifest.forbidden,
+            parsed_ok=True,
+        )
     except ReviewIncompleteError:
-        return score_fixture(manifest.name, [], manifest.expected, parsed_ok=False)
+        return score_fixture(
+            manifest.name, [], manifest.expected, forbidden=manifest.forbidden, parsed_ok=False
+        )
 
 
 def _print(score: FixtureScore) -> None:
@@ -147,6 +155,8 @@ def _print(score: FixtureScore) -> None:
     )
     for miss in score.missed:
         print(f"    missed: {miss}")
+    for fp in score.false_positives:
+        print(f"    FALSE POSITIVE: {fp}")
 
 
 def _gate(scores: list[FixtureScore], min_recall: float) -> tuple[bool, float]:
@@ -161,12 +171,16 @@ def _gate(scores: list[FixtureScore], min_recall: float) -> tuple[bool, float]:
       temperature 0, so a single missed finding on one short fixture shouldn't
       flip the whole job — pooling over more samples keeps the bar a real
       regression signal without flaking on that one-finding margin.
+    - Every fixture must be *clean*: a forbidden (cross-file false-positive)
+      finding firing is a humility regression, so any one fails the run. Only
+      fixtures that declare `forbidden` can trip this — the rest are always clean.
     """
     total_expected = sum(s.expected_count for s in scores)
     total_matched = sum(s.matched_count for s in scores)
     aggregate = total_matched / total_expected if total_expected else 1.0
     parsed = all(s.parsed_ok for s in scores)
-    return (parsed and aggregate >= min_recall), aggregate
+    clean = all(s.clean for s in scores)
+    return (parsed and clean and aggregate >= min_recall), aggregate
 
 
 def main(argv: list[str] | None = None) -> int:
