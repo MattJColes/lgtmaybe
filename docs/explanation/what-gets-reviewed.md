@@ -306,6 +306,14 @@ of its own finding type; their findings are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 
+The reviewer only ever sees the diff and a little surrounding context — a *slice*
+of the codebase, not the whole thing. So when a concern depends on code it can't
+see (a guard, a base class, an idempotency check that may live in an unshown
+file), it hedges and lowers the severity rather than asserting that the thing is
+missing, and the self-reflection pass drops findings that rest on such unseen-code
+assumptions. Genuine gaps in the diff itself — a changed path with no test, a new
+public surface left undocumented — are explicitly exempt and still raised.
+
 ## What the response looks like
 
 ### On a GitHub pull request
