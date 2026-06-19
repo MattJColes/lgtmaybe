@@ -37,7 +37,7 @@ Run exactly what CI runs:
 ```bash
 uv lock --check              # lockfile matches pyproject (no drift)
 uv run ruff check .          # lint
-uv run ruff format .         # format (CI checks --check)
+uv run ruff format --check . # format (omit --check to auto-format)
 uv run mypy                  # types (strict)
 uv run pytest -q             # tests
 ```
@@ -59,7 +59,7 @@ uv run --group docs mkdocs serve
 
 1. Branch with a conventional prefix: `feat/`, `fix/`, `chore/`, `docs/`.
 2. Make the change test-first; keep it minimal and focused.
-3. Ensure the four commands above are green.
+3. Ensure the five commands above are green.
 4. Open the PR with a short description of the behaviour change. The maintainer
    dogfoods lgtmaybe on its own PRs, so expect an automated review too.
 

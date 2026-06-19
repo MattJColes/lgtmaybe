@@ -300,7 +300,7 @@ Each finding has:
 | `suggestion` | Optional suggested replacement code |
 
 Each review category (security, correctness, deprecation, tests, documentation,
-performance, complexity, intent)
+performance, complexity, intent, ponytail)
 runs as its own concurrent model call with a focused prompt and a worked example
 of its own finding type; their findings are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
@@ -358,7 +358,7 @@ is a simple:
 ```
 👍 LGTM!
 
-0 findings · model claude-sonnet-4-6
+0 findings · provider anthropic · model claude-sonnet-4-6
 ```
 
 If the file cap kicked in, the summary says so (e.g. "Reviewed the top 50 of 120
@@ -381,7 +381,7 @@ $ lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localh
 src/app.py:2  [MEDIUM] Import order
   sys should be sorted before os
 
-1 finding · model qwen3.6:27b
+1 finding · provider ollama · model qwen3.6:27b
 ```
 
 ![The lgtmaybe review command running in a terminal, printing a [MEDIUM] import-order finding with its file and line, then a summary line naming the model](../assets/cli-example.png){ width="660" }

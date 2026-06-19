@@ -6,7 +6,9 @@ credentials are handled. No data flows occur beyond what is described here.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends one request per review containing:
+lgtmaybe sends one model call per review lens (the categories fan out as
+separate concurrent calls), plus a self-reflection call. Each call contains
+some subset of:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been
@@ -48,13 +50,17 @@ names). Recognised formats include:
 
 - **Cloud / provider keys** — AWS access key IDs (`AKIA…`), OpenAI keys
   (`sk-…`), Stripe secret keys (`sk_live_…`), and Google API keys (`AIza…`).
-- **Source-control / chat tokens** — GitHub classic tokens (`ghp_`, `gho_`, …),
-  GitHub fine-grained PATs (`github_pat_…`), and Slack tokens (`xoxb-…`).
+- **Source-control / chat / registry tokens** — GitHub classic tokens
+  (`ghp_`, `gho_`, …), GitHub fine-grained PATs (`github_pat_…`), Slack tokens
+  (`xoxb-…`), npm tokens (`npm_…`), and PyPI tokens (`pypi-…`).
+- **JSON Web Tokens** — `eyJ….eyJ….…` (the whole token, since the payload
+  carries claims/PII).
 - **Private keys** — PEM `-----BEGIN … PRIVATE KEY-----` blocks.
 - **Generic credentials** — `api_key`/`token`/`secret = "…"` assignments,
   quoted `password`/`passphrase` literals, `Authorization: Bearer/Basic …`
-  headers, and passwords embedded in connection-string URLs
-  (`scheme://user:secret@host`).
+  headers, passwords embedded in connection-string URLs
+  (`scheme://user:secret@host`), and Azure storage / Cosmos connection-string
+  keys (`AccountKey=…` / `SharedAccessKey=…`).
 
 For credential assignments only the value is replaced — the key name or URL host
 stays readable so the reviewer can still reason about the change.

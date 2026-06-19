@@ -42,10 +42,10 @@ consensus across all tracks.
 
 ## Review pipeline
 
-The engine executes five composable stages in sequence:
+The engine executes a pipeline of composable stages in sequence:
 
 ```
-fetch → compress → prompt → parse → post
+fetch → compress → prompt → parse → re-anchor → merge/dedupe → reflect → filter → post
 ```
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
@@ -57,22 +57,38 @@ fetch → compress → prompt → parse → post
    applied. Each remaining hunk is then padded with surrounding context lines
    from the head revision of the file (fetched by the gateway, never a
    checkout), capped by `context_lines` and the remaining token budget. The
-   result is batched to fit `max_input_tokens`. The expanded diff is for the
-   model only — inline-comment positions are always rebuilt from the **real**
-   diff at post time, so a finding on an added context line maps to nothing and
-   is dropped rather than mis-posted.
+   result is batched to fit `max_input_tokens` (and, when `recursive` is on, an
+   over-budget single file is walked hunk-by-hunk rather than sent whole). The
+   expanded diff is for the model only — inline-comment positions are always
+   rebuilt from the **real** diff at post time, so a finding on an added context
+   line maps to nothing and is dropped rather than mis-posted.
 
-3. **prompt** — a structured prompt is built requesting JSON output with the
-   `ReviewFinding` schema (`severity`, `file`, `line`, `body`, `suggestion`).
-   The prompt includes prompt-injection defense instructions to resist PR text
-   that attempts to steer the reviewer.
+3. **prompt + parse** — this stage **fans out one concurrent model call per
+   `ReviewCategory`** (a `ThreadPoolExecutor` over the sync provider port —
+   concurrent for cloud, serial for ollama). Each lens gets its own focused
+   structured prompt requesting JSON output with the `ReviewFinding` schema
+   (`path`, `line`, `side`, `severity`, `title`, `body`, `suggestion`, `anchor`)
+   and carries prompt-injection defense instructions. Each response is parsed
+   and validated against `ReviewFinding` using Pydantic; parse errors are logged
+   and surfaced in the summary rather than silently discarded.
 
-4. **parse** — the model's response is parsed and validated against
-   `ReviewFinding` using Pydantic. Findings below `min_severity` are dropped.
-   Parse errors are logged and surfaced in the summary rather than silently
-   discarded.
+4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
+   changed line whose content matches the finding's verbatim `anchor`, rather
+   than trusting the model's line arithmetic. A finding whose anchor matches
+   nothing is marked `anchored=False` and later demoted to the review body
+   instead of being posted on a guessed line.
 
-5. **post** — findings are batched into a single GitHub review request.
+5. **merge/dedupe** — findings from every lens are merged and de-duplicated
+   (`_dedupe`, keyed on path/line/side/title).
+
+6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
+   to audit its own findings and drops the ones it marks low-confidence
+   (keep-all safe default when the verdict can't be parsed; skippable with
+   `--no-reflect`).
+
+7. **filter** — findings below `min_severity` are dropped.
+
+8. **post** — findings are batched into a single GitHub review request.
    The summary comment is updated idempotently using a hidden marker, so
    re-running lgtmaybe on the same PR does not create duplicate comments. Each
    inline comment is stamped with a hidden per-finding fingerprint; on a re-run,

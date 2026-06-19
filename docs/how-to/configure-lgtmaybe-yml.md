@@ -32,7 +32,7 @@ types and defaults.
 ### provider
 
 Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`,
-`bedrock`, `vertex`, `ollama`.
+`bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
 
 ```yaml
 provider: anthropic
@@ -51,6 +51,7 @@ The model identifier for the chosen provider. Format varies by provider:
 | vertex | `gemini-3-pro`, `gemini-3.5-flash` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
 | ollama | `qwen3.6:27b`, `gemma4:e4b` |
+| openai-compatible | the served model name, e.g. `deepseek-chat` or `meta-llama/Llama-3.1-8B-Instruct` (requires `api_base` — see [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md)) |
 
 ### min_severity
 
@@ -90,9 +91,10 @@ Default: `50`.
 
 ### max_input_tokens
 
-Hard cap on the number of tokens sent to the model. If the compressed diff
-exceeds this limit, lgtmaybe truncates it and notes the truncation in the
-summary.
+Token budget **per model call**. When the compressed diff exceeds this limit,
+lgtmaybe splits it across multiple batched calls (and, with `recursive` on,
+walks an over-budget single file hunk-by-hunk) — nothing is truncated or
+dropped.
 
 ```yaml
 max_input_tokens: 80000
