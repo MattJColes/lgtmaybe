@@ -142,6 +142,13 @@ from lgtmaybe.config.loader import load_config
     "instead of sending it whole and dropping the tail (--no-recursive disables)",
 )
 @click.option(
+    "--structured-output/--no-structured-output",
+    default=None,
+    help="Constrain output to the findings JSON schema via response_format "
+    "(--no-structured-output for a gateway/proxy that rejects it; the lenient "
+    "parser still handles fenced/prose output either way)",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -168,6 +175,7 @@ def review(
     temperature: float | None,
     reflect: bool | None,
     recursive: bool | None,
+    structured_output: bool | None,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -187,6 +195,7 @@ def review(
         temperature=temperature,
         reflect=reflect,
         recursive=recursive,
+        structured_output=structured_output,
     )
 
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
@@ -241,6 +250,7 @@ def action() -> None:
         max_input_tokens=inputs["max_input_tokens"],
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],
+        structured_output=inputs["structured_output"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

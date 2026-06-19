@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from lgtmaybe.core.models import ReviewFinding, Severity
@@ -51,6 +53,59 @@ def test_prose_wrapped_json_extracted() -> None:
     raw = "Here are my findings:\n\n" + _json_findings([_VALID_FINDING]) + "\n\nHope that helps!"
     result = parse_findings(raw)
     assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# gateway output without JSON mode (issue #104): conversational prose that
+# carries stray brackets, and JSON whose own string values contain code fences
+# ---------------------------------------------------------------------------
+
+
+def test_prose_with_brackets_before_json() -> None:
+    """Conversational lead-in with brackets must not derail extraction."""
+    raw = "I reviewed 3 files [app.py, db.py, util.py] and found:\n" + _json_findings(
+        [_VALID_FINDING]
+    )
+    result = parse_findings(raw)
+    assert len(result) == 1
+    assert result[0].path == "src/app.py"
+
+
+def test_valid_json_array_in_prose_before_findings_is_skipped() -> None:
+    """A real JSON array in the prose (e.g. a category list) is not mistaken
+    for the findings — the findings-shaped candidate is selected instead."""
+    raw = 'Categories checked: ["security", "perf"].\n' + json.dumps({"findings": [_VALID_FINDING]})
+    result = parse_findings(raw)
+    assert len(result) == 1
+    assert result[0].severity == Severity.high
+
+
+def test_trailing_prose_with_bracket() -> None:
+    """A closing remark with a bracket after the JSON must not derail extraction."""
+    raw = json.dumps({"findings": [_VALID_FINDING]}) + "\nThat is all [done]."
+    result = parse_findings(raw)
+    assert len(result) == 1
+
+
+def test_fenced_json_with_prose_on_both_sides() -> None:
+    raw = (
+        "Sure! Here are the issues I found:\n\n```json\n"
+        + json.dumps({"findings": [_VALID_FINDING]})
+        + "\n```\n\nLet me know if you need more detail."
+    )
+    result = parse_findings(raw)
+    assert len(result) == 1
+
+
+def test_suggestion_code_fence_survives_verbatim() -> None:
+    """A code fence inside a string value must not be stripped — the old global
+    backtick removal silently corrupted suggestions that contained code blocks."""
+    suggestion = "Use the stdlib instead:\n```python\nimport json\n```"
+    finding = dict(_VALID_FINDING, suggestion=suggestion)
+    raw = json.dumps({"findings": [finding]})
+    result = parse_findings(raw)
+    assert len(result) == 1
+    assert result[0].suggestion == suggestion
 
 
 def test_trailing_comma_tolerated() -> None:

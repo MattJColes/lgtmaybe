@@ -13,7 +13,7 @@ from typing import Any
 from lgtmaybe.core.models import PRContext, ReflectionResult, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import ProviderClient
 
-from .parse import _strip_think_blocks, strip_fences
+from .parse import iter_json_values
 
 _REFLECT_SYSTEM = """\
 You are a senior code reviewer auditing another reviewer's findings for false positives.
@@ -89,20 +89,22 @@ def _parse_verdicts(raw: str) -> dict[int, bool]:
 
     Accepts the structured ``{"verdicts": [{"index": i, "keep": bool}, ...]}``
     envelope, and (as a fallback for models that ignore the schema) the legacy
-    ``{"0": true, "1": false}`` index-to-bool map. Reasoning blocks and code
-    fences are stripped first.
+    ``{"0": true, "1": false}`` index-to-bool map. Shares the findings parser's
+    lenient extraction (:func:`iter_json_values`), so reasoning blocks, code
+    fences, and surrounding prose — including the bracket-bearing prose that an
+    ``openai-compatible`` gateway without JSON mode emits — are tolerated.
     """
-    text = strip_fences(_strip_think_blocks(raw).strip()).strip()
-    data = json.loads(text)
+    for data in iter_json_values(raw):
+        if not isinstance(data, dict):
+            continue
+        if isinstance(data.get("verdicts"), list):
+            out: dict[int, bool] = {}
+            for v in data["verdicts"]:
+                if isinstance(v, dict) and "index" in v and "keep" in v:
+                    out[int(v["index"])] = bool(v["keep"])
+            return out
+        # legacy {"0": true, ...} — a dict of digit keys to bools.
+        if data and all(str(k).lstrip("-").isdigit() for k in data):
+            return {int(k): bool(val) for k, val in data.items()}
 
-    if isinstance(data, dict) and isinstance(data.get("verdicts"), list):
-        out: dict[int, bool] = {}
-        for v in data["verdicts"]:
-            if isinstance(v, dict) and "index" in v and "keep" in v:
-                out[int(v["index"])] = bool(v["keep"])
-        return out
-
-    if isinstance(data, dict):  # legacy {"0": true, ...}
-        return {int(k): bool(val) for k, val in data.items()}
-
-    raise ValueError(f"unrecognised verdict shape: {type(data).__name__}")
+    raise ValueError("unrecognised or unparseable verdict shape")

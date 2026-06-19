@@ -209,6 +209,44 @@ def test_openai_compatible_keyless_local_server_sends_base_and_placeholder(
     assert captured_completion[0].get("api_key")
 
 
+def test_structured_output_sends_response_format_by_default(
+    captured_completion: list[dict[str, Any]],
+) -> None:
+    """By default the findings JSON schema reaches litellm as response_format."""
+    result = CliRunner().invoke(
+        main, ["review", "--provider", "ollama", "--model", "llama3", "--no-reflect"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("response_format") is not None
+
+
+def test_no_structured_output_omits_response_format(
+    captured_completion: list[dict[str, Any]],
+) -> None:
+    """--no-structured-output is the escape hatch for a gateway that rejects
+    response_format: litellm must then be called without it (issue #104)."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openai-compatible",
+            "--model",
+            "gemini-3.5-flash",
+            "--api-base",
+            "https://api.myllm.com/v1",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+            "--no-structured-output",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert all("response_format" not in call for call in captured_completion)
+
+
 def test_num_ctx_flag_reaches_litellm_for_ollama(
     captured_completion: list[dict[str, Any]],
 ) -> None:

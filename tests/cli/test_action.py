@@ -223,6 +223,17 @@ class TestActionRouting:
         monkeypatch.setenv("INPUT_CONFIG_PATH", "")
         assert action_inputs()["config_path"] is None
 
+    def test_structured_output_input_is_read(self, monkeypatch):
+        """INPUT_STRUCTURED_OUTPUT is the action's escape hatch for a gateway that
+        rejects response_format (issue #104); empty/unset normalises to None."""
+        from lgtmaybe.cli import action_inputs
+
+        monkeypatch.delenv("INPUT_STRUCTURED_OUTPUT", raising=False)
+        assert action_inputs()["structured_output"] is None
+
+        monkeypatch.setenv("INPUT_STRUCTURED_OUTPUT", "false")
+        assert action_inputs()["structured_output"] == "false"
+
     def test_azure_api_base_input_reaches_runtime(self, tmp_path, monkeypatch):
         """INPUT_API_BASE carries the azure resource endpoint into the run."""
         captured: dict[str, object] = {}

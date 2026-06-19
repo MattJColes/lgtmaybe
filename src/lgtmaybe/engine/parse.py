@@ -4,9 +4,17 @@ Tolerates:
 - The ``{"findings": [...]}`` structured-output envelope and a bare array alike
 - ``<think>...</think>`` reasoning blocks (qwen-style models) before the JSON
 - Markdown code fences (```json ... ```)
-- Leading/trailing prose
+- Leading/trailing prose — even when it carries stray brackets
 - Trailing commas in objects/arrays
 - A bare object instead of an array
+
+This matters most for ``openai-compatible`` gateways that don't honour the
+``response_format`` JSON-mode hint (see issue #104): the model then answers in
+conversational prose around the JSON, and that prose routinely contains brackets
+(``"reviewed 3 files [a, b, c]"``). Extraction therefore scans for *balanced*
+delimiters that respect JSON string literals, rather than greedily matching the
+first ``[`` to the last ``]`` — and never rewrites the bytes inside a string,
+so a code fence inside a ``suggestion`` survives intact.
 
 Raises ParseError for unrecoverable input.
 """
@@ -15,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from typing import Any
 
 from lgtmaybe.core.models import ReviewFinding
@@ -31,11 +40,7 @@ _TRAILING_COMMA_RE = re.compile(r",\s*([}\]])")
 # we look for JSON so their contents can't be mistaken for the answer.
 _THINK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
 
-
-def strip_fences(text: str) -> str:
-    """Remove markdown code fences, keeping only the content."""
-    text = re.sub(r"```(?:json)?\s*", "", text)
-    return text.replace("```", "")
+_CLOSER = {"{": "}", "[": "]"}
 
 
 def _strip_think_blocks(text: str) -> str:
@@ -47,44 +52,96 @@ def _repair_trailing_commas(text: str) -> str:
     return _TRAILING_COMMA_RE.sub(r"\1", text)
 
 
-def _extract_json_blob(text: str) -> str:
-    """Extract the first JSON array or object from *text*."""
-    # Try to find a JSON array first
-    array_match = re.search(r"\[.*\]", text, re.DOTALL)
-    if array_match:
-        return array_match.group(0)
-    # Fall back to a JSON object
-    obj_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if obj_match:
-        return obj_match.group(0)
-    return text
+def _balanced_span(text: str, start: int) -> str | None:
+    """Return the balanced ``{...}`` / ``[...]`` span beginning at *start*.
 
-
-def _loads_lenient(text: str) -> Any:
-    """Parse JSON from *text*: try it whole, then the first embedded JSON blob."""
-    for candidate in (text, _extract_json_blob(text)):
-        try:
-            return json.loads(_repair_trailing_commas(candidate))
-        except json.JSONDecodeError:
+    Walks forward tracking string state (so quotes, escapes, and brackets inside
+    string values don't affect nesting) and brace/bracket depth, returning the
+    substring once depth returns to zero. ``None`` if the delimiter never closes.
+    """
+    opener = text[start]
+    closer = _CLOSER[opener]
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
             continue
-    raise ParseError("Cannot parse JSON from response")
+        if ch == '"':
+            in_string = True
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 
-def _unwrap(data: Any) -> Any:
-    """Turn the ``{"findings": [...]}`` envelope or a bare object into a list."""
+def iter_json_values(raw: str) -> Iterator[Any]:
+    """Yield every JSON value recoverable from *raw*, most-likely first.
+
+    Tries the whole think-stripped text first (clean JSON, no rewriting), then
+    each balanced ``{``/``[`` span in order. Trailing commas are repaired before
+    parsing. Spans that don't parse are skipped. The caller picks the value whose
+    *shape* it wants, so embedded prose JSON (a stray ``["a", "b"]``) can be
+    passed over in favour of the real payload.
+    """
+    text = _strip_think_blocks(raw).strip()
+    if not text:
+        return
+
+    seen: set[str] = set()
+
+    def _try(candidate: str) -> Iterator[Any]:
+        repaired = _repair_trailing_commas(candidate)
+        if repaired in seen:
+            return
+        seen.add(repaired)
+        try:
+            yield json.loads(repaired)
+        except json.JSONDecodeError:
+            return
+
+    yield from _try(text)
+    for i, ch in enumerate(text):
+        if ch in _CLOSER:
+            span = _balanced_span(text, i)
+            if span is not None:
+                yield from _try(span)
+
+
+def _as_findings_list(data: Any) -> list[Any] | None:
+    """Return *data* as a findings list if it is findings-shaped, else None.
+
+    Accepts the ``{"findings": [...]}`` envelope, a bare object (a single
+    finding), an empty list, or a list of objects. A list of non-objects (e.g. a
+    stray ``["security", "perf"]`` from the prose) is *not* findings-shaped.
+    """
     if isinstance(data, dict):
         findings = data.get("findings")
         if isinstance(findings, list):
             return findings
         return [data]  # a bare single finding object
-    return data
+    if isinstance(data, list):
+        if all(isinstance(item, dict) for item in data):
+            return data
+    return None
 
 
 def parse_findings(raw: str) -> list[ReviewFinding]:
     """Parse *raw* LLM text into a list of ReviewFinding objects.
 
     Accepts the ``{"findings": [...]}`` structured-output envelope or a bare
-    array, with reasoning blocks, fences, prose, and trailing commas tolerated.
+    array, with reasoning blocks, fences, prose (even bracket-bearing prose), and
+    trailing commas tolerated.
 
     Raises:
         ParseError: if the text cannot be recovered into valid findings.
@@ -92,15 +149,13 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     if not raw or not raw.strip():
         raise ParseError("Empty response from provider")
 
-    text = _strip_think_blocks(raw).strip()
-    text = strip_fences(text).strip()
+    for value in iter_json_values(raw):
+        items = _as_findings_list(value)
+        if items is None:
+            continue
+        try:
+            return [ReviewFinding.model_validate(item) for item in items]
+        except Exception as exc:
+            raise ParseError(f"Finding validation failed: {exc}") from exc
 
-    data = _unwrap(_loads_lenient(text))
-
-    if not isinstance(data, list):
-        raise ParseError(f"Expected JSON array or {{'findings': [...]}}, got {type(data).__name__}")
-
-    try:
-        return [ReviewFinding.model_validate(item) for item in data]
-    except Exception as exc:
-        raise ParseError(f"Finding validation failed: {exc}") from exc
+    raise ParseError("Cannot parse JSON findings from response")
