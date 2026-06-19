@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.3.2...lgtmaybe-v0.3.3) (2026-06-19)
+
+
+### Documentation
+
+* correct stale claims across the docs tree ([#112](https://github.com/MattJColes/lgtmaybe/issues/112)) ([cbc0bba](https://github.com/MattJColes/lgtmaybe/commit/cbc0bba2b111765dd6a7520b1014f6a0825c209b))
+* document codebase humility and eval false-positive scoring ([#109](https://github.com/MattJColes/lgtmaybe/issues/109)) ([ad42254](https://github.com/MattJColes/lgtmaybe/commit/ad422544116ea9abcff30ad9a83b9b219619d331))
+
 ## [0.3.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.3.1...lgtmaybe-v0.3.2) (2026-06-19)
 
 
