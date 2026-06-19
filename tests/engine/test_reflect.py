@@ -147,6 +147,19 @@ def test_reflect_prompt_names_gap_findings_as_valid_types() -> None:
     assert "intent" in system
 
 
+def test_reflect_prompt_drops_unseen_code_assumptions() -> None:
+    """The auditor must drop findings whose validity hinges on an assumption about
+    code not shown in the diff (e.g. a guard/field that may exist elsewhere) — the
+    exact shape of the cross-file false positives we keep seeing."""
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "cannot see" in system or "not shown" in system
+    assert "missing" in system
+
+
 def test_unparseable_verdict_keeps_all() -> None:
     provider = _fake_with_text("I'm not really sure about these.")
 

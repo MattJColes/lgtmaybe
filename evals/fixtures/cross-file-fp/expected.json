@@ -1,0 +1,29 @@
+{
+  "name": "cross-file-fp",
+  "changed_file": "migrations/0003_backfill.py",
+  "expected": [
+    {
+      "label": "secret logged: api_token written to the log line",
+      "line": 14,
+      "keywords": ["token", "secret", "api_token", "credential", "sensitive"],
+      "severity_at_least": "high"
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: model_dump may pass fields absent from V2 (shared base is unshown)",
+      "line": 13,
+      "keywords": ["model_dump", "absent", "extra field"]
+    },
+    {
+      "label": "FP: no idempotency guard, backfill could re-run (ledger guard is unshown)",
+      "line": 12,
+      "keywords": ["idempoten", "re-run", "rerun", "run twice"]
+    },
+    {
+      "label": "FP: tenant_id may be None, missing null check (pending() filters upstream)",
+      "line": 13,
+      "keywords": ["tenant_id"]
+    }
+  ]
+}

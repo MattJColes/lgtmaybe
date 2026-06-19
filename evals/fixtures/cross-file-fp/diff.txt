@@ -1,0 +1,23 @@
+diff --git a/migrations/0003_backfill.py b/migrations/0003_backfill.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/migrations/0003_backfill.py
+@@ -0,0 +1,17 @@
++import logging
++
++from .ledger import already_applied, mark_applied, pending
++from .models import SavedSubmittalSetV2
++
++log = logging.getLogger(__name__)
++
++
++def backfill(run_id: str) -> list[SavedSubmittalSetV2]:
++    """Copy every pending row into its V2 shape. Idempotent via the ledger."""
++    copied = []
++    for row in pending(run_id):
++        new = SavedSubmittalSetV2(**row.model_dump())
++        log.info("backfilled %s api_token=%s", row.id, row.api_token)
++        copied.append(new)
++    mark_applied(run_id)
++    return copied

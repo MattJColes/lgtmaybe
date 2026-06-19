@@ -25,6 +25,14 @@ one per finding.
 Keep a finding only if you are confident it is a real issue in the actual changed code.
 Drop it if it is speculative, out of scope, or referring to unchanged lines.
 
+Also drop a finding whose validity depends on an assumption about code NOT shown in the \
+diff. The diff is only a slice of the codebase: base classes, guards, validators, \
+idempotency checks, callers, and config may live in files you cannot see. A finding that \
+asserts something is "missing", "unguarded", "never handled", or "will break" — when that \
+handling could plausibly exist elsewhere — is a likely false positive; drop it unless the \
+diff itself shows the absence. A finding that already hedges this ("if there is no X \
+elsewhere…") may be kept at low severity.
+
 Gap findings are valid types, not false positives: a missing test, a missing or stale \
 docstring, a performance or complexity concern, or a mismatch with the PR's stated intent. \
 For those, judge whether the gap or mismatch is real — not whether the changed line \

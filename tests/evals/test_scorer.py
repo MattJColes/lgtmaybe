@@ -82,6 +82,44 @@ def test_parse_fail_recorded_with_zero_findings() -> None:
     assert score.recall == 0.0
 
 
+def test_forbidden_finding_flagged_as_false_positive() -> None:
+    """A produced finding matching a forbidden entry is a cross-file false positive."""
+    findings = [_finding(13, "model_dump may pass fields absent from V2")]
+    forbidden = [_expected(13, ["model_dump", "absent"])]
+    score = score_fixture("f", findings, [], forbidden=forbidden)
+    assert score.false_positives == ["line 13"]
+    assert score.clean is False
+
+
+def test_no_false_positive_when_forbidden_not_triggered() -> None:
+    """A clean review (no finding matches a forbidden trap) records no false positive."""
+    findings = [_finding(14, "secret api_token logged")]
+    forbidden = [_expected(13, ["model_dump", "absent"])]
+    score = score_fixture("f", findings, [], forbidden=forbidden)
+    assert score.false_positives == []
+    assert score.clean is True
+
+
+def test_forbidden_respects_line_and_keyword() -> None:
+    """A forbidden keyword on a far-off line is not a false positive (precision)."""
+    findings = [_finding(40, "model_dump may pass fields absent from V2")]  # far from line 13
+    forbidden = [_expected(13, ["model_dump", "absent"])]
+    score = score_fixture("f", findings, [], forbidden=forbidden)
+    assert score.false_positives == []
+    assert score.clean is True
+
+
+def test_committed_cross_file_fp_fixture_manifest_is_valid() -> None:
+    """The cross-file FP fixture parses and carries both expected and forbidden."""
+    fixtures = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "cross-file-fp"
+    manifest = Fixture.model_validate_json((fixtures / "expected.json").read_text())
+    assert manifest.changed_file == "migrations/0003_backfill.py"
+    assert manifest.expected, "fixture needs a genuine in-diff finding"
+    assert manifest.forbidden, "fixture needs forbidden (cross-file FP) traps"
+    assert all(e.keywords for e in manifest.expected)
+    assert all(f.keywords for f in manifest.forbidden)
+
+
 def test_committed_badcode_fixture_manifest_is_valid() -> None:
     """The shipped fixture parses and its expected lines fall within the diff."""
     fixtures = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "badcode"
