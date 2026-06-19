@@ -176,7 +176,9 @@ A few things worth knowing when a local run misbehaves:
   Raise `--timeout`, pick a more reliable model, or check `LITELLM_LOG=DEBUG`.
 - **`--no-reflect`** removes the extra confidence-filtering call — useful when a
   weaker model drops valid findings during reflection, and one fewer call to wait
-  on.
+  on. Note the reflection pass also enforces *codebase humility* (it drops findings
+  that rest on assumptions about code outside the diff), so turning it off removes
+  that guard too, not just confidence filtering.
 
 ## Testing
 
@@ -271,13 +273,19 @@ uv run python -m evals.run --provider ollama --model qwen3.6:35b \
 ```
 
 It reviews each fixture and reports, per fixture, whether the model produced
-parseable output and its **recall** against the expected findings, then exits
-non-zero if any fixture failed to parse or fell below `--min-recall` (default
-0.6) — so it can gate a model or prompt change.
+parseable output and its **recall** against the expected findings. It also flags
+any **false positive** — a `FALSE POSITIVE:` line for a *forbidden* finding the
+review should not have made — and the run exits non-zero if any fixture failed to
+parse, fell below `--min-recall` (default 0.6), or wasn't **clean** (a forbidden
+finding fired). Those are the three gate bars: parse, pooled recall, and clean.
 
 The scorer (`evals/scorer.py`) is pure and unit-tested (`tests/evals/`); only the
 runner needs a live model. To add a fixture, drop a `diff.txt` and an
-`expected.json` (matching the `Fixture` schema) under `evals/fixtures/<name>/`.
+`expected.json` (matching the `Fixture` schema) under `evals/fixtures/<name>/`. A
+fixture may also declare `forbidden` traps — claims that must *not* appear,
+typically cross-file false positives where the relevant guard lives in a file the
+reviewer can't see. The `cross-file-fp` fixture is the worked example: one genuine
+in-diff catch alongside three forbidden cross-file claims.
 
 ### Benchmarking the recursive (RLM) walk
 

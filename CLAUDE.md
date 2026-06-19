@@ -205,7 +205,13 @@ pattern, event bus, plugin framework.
      marks low-confidence. The verdict is structured (`ReflectionResult` —
      `{"verdicts": [{"index", "keep"}]}`) with a lenient parser and a **keep-all
      safe default** when it can't be parsed (never silently drop a real finding).
-     Skippable via `--no-reflect` for weaker models that over-prune.
+     Skippable via `--no-reflect` for weaker models that over-prune. The auditor
+     also drops **cross-file false positives** — findings whose validity hinges on
+     an assumption about code outside the diff (a guard/field/handler that may live
+     in an unshown file) — while **carving out gap findings** (a missing test/doc on
+     the diff itself stays valid). This mirrors the shared review rule (below) that
+     tells every lens the diff is only a **slice of the codebase**, so it should
+     hedge a cross-file absence-claim and lower its severity rather than assert it.
    - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
      reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
      one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
@@ -342,8 +348,9 @@ Split by whether it can be deterministic, because that decides where it lives:
 - **Model quality → on-demand eval harness.** "Does this model/setting actually
   produce usable reviews?" needs a live model, so it can't be in the pytest gate.
   `evals/` (`run.py` + `scorer.py` over `evals/fixtures/`) reviews each fixture
-  with a real provider and reports **parse-rate + recall**, exiting non-zero below
-  `--min-recall` so it can gate a model/prompt change when run deliberately
+  with a real provider and reports **parse-rate + recall + a clean / false-positive
+  check**, exiting non-zero below `--min-recall` so it can gate a model/prompt
+  change when run deliberately
   (`python -m evals.run --provider … --model …`; `--timeout` / `--num-ctx` /
   `--max-input-tokens` tune it for a big diff on a slow local model;
   `--temperature` / `--top-p` / `--top-k` set the model's sampling; `--categories`
@@ -357,7 +364,15 @@ Split by whether it can be deterministic, because that decides where it lives:
   guarded in `tests/evals/test_fixtures.py`. (Two lenses aren't scored there: the
   intent lens needs a stated intent the fixtures don't carry, and the ponytail
   lens looks for needless code the fixtures don't plant — the engine still runs
-  ponytail, but there's no planted finding for it to match.)
+  ponytail, but there's no planted finding for it to match.) Beyond recall, a
+  fixture can declare **`forbidden`** findings — claims that must *not* appear,
+  typically cross-file false positives where the relevant guard lives in an unshown
+  file; any produced finding matching one is a **false positive** that makes the
+  fixture un-**clean** and fails the run. `_gate` therefore has **three bars**:
+  parse, pooled recall, and clean. The **`cross-file-fp`** fixture is the worked
+  example — one genuine in-diff catch (a logged secret) plus three forbidden
+  cross-file traps (model_dump-vs-V2, idempotency re-run, tenant_id null) — and it
+  measures the codebase-humility behavior the review prompt + reflection enforce.
   Real-spend hosted-provider e2e remains label-gated in `action-e2e.yml`.
 
 [litellm]: https://github.com/BerriAI/litellm
