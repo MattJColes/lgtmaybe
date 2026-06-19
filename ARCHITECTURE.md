@@ -71,6 +71,7 @@ lgtmaybe/
 │   │   ├── rest_gateway.py  #   fetch PR context · post review · in-thread replies
 │   │   └── diff.py          #   commentable-line index · is_reviewable() skip filter
 │   │
+│   ├── lenses/              # bundled opt-in lens packs (design/robustness/interface/frontend), loaded via pack:<name>
 │   ├── local/               # local-mode adapter: build a PRContext from `git`
 │   ├── config/              # layered config: defaults < user file < repo file < flags
 │   │   ├── loader.py        #   merge layers → ReviewConfig
@@ -97,7 +98,7 @@ lgtmaybe/
 
 ## LLM providers
 
-One `--provider` flag, one [litellm] `completion()` call shape underneath. Seven
+One `--provider` flag, one [litellm] `completion()` call shape underneath. Eight
 backends, each with its own native auth (resolved by the credential chain in
 `providers/credentials.py`):
 
@@ -110,8 +111,9 @@ backends, each with its own native auth (resolved by the credential chain in
 | `vertex`     | `vertex_ai/`   | **ambient GCP creds** (Workload Identity Federation or local ADC) — no static key |
 | `azure`      | `azure/`       | API key **or** keyless Azure AD/Entra token (OIDC); needs the resource endpoint |
 | `ollama`     | `ollama/`      | none — just an `api_base`; fully local, zero cost                 |
+| `openai-compatible` | `openai/` (custom base) | requires an `api_base`; key optional (placeholder for keyless local servers — llama.cpp / LM Studio / vLLM) |
 
-**The wedge:** first-class **Bedrock + Vertex with keyless OIDC/WIF**, so cloud
+**The wedge:** first-class **Bedrock + Vertex + Azure with keyless OIDC/WIF**, so cloud
 reviews need no static keys in GitHub secrets. The `LiteLLMProvider` adds retries
 (exponential backoff + jitter, 4 attempts) and an optional `--fallback-model`.
 

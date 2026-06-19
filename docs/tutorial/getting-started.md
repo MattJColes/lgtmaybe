@@ -20,7 +20,7 @@ pip install lgtmaybe
 Verify the install:
 
 ```bash
-lgtmaybe --version
+lgtmaybe --help
 ```
 
 ## Step 2 — Start ollama and pull a model
@@ -51,7 +51,7 @@ local qwen3.6:27b instance, and prints the findings to your terminal:
 src/app.py:2  [MEDIUM] Import order
   sys should be sorted before os
 
-1 finding · model qwen3.6:27b
+1 finding · provider ollama · model qwen3.6:27b
 ```
 
 To review the whole worktree — your branch's commits plus uncommitted edits —

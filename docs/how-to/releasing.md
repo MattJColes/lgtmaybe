@@ -4,9 +4,9 @@ Releases are automated by **release-please** (`.github/workflows/release-please.
 It reads the **conventional commits** merged to `main` and keeps a "Release PR"
 open that bumps the version and regenerates `CHANGELOG.md`. **Merging that PR** is
 the release: it cuts the tag and the GitHub release, then the same run publishes —
-**PyPI** via trusted publishing (OIDC) and the **GHCR image** + floating `v1` tag
-via the reusable `.github/workflows/release.yml` (built-in `GITHUB_TOKEN`). No
-publish tokens live in secrets.
+**PyPI** via trusted publishing (OIDC) and the **GHCR image** + floating major
+tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
+(built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
 Commit messages must follow conventional-commit format — `.github/workflows/commitlint.yml`
 enforces it on PRs so release-please can compute the next version.
