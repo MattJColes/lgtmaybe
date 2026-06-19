@@ -395,3 +395,22 @@ def test_prompt_warns_minus_lines_are_removed_not_duplicates() -> None:
     assert "removed" in prompt
     # A modify pair must not be read as a redefinition / duplication.
     assert "defined twice" in prompt or "duplicat" in prompt
+
+
+def test_prompt_demands_codebase_humility_about_unseen_code() -> None:
+    """The diff is only a slice of the codebase. A finding that asserts a
+    guard/field/handler is "missing" may be wrong because that thing lives in an
+    unshown file — so every lens must be told to hedge such claims, not assert
+    them. The rule lives in shared rules, so it appears in every focused prompt."""
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category).lower()
+        assert "cannot see" in prompt or "not shown" in prompt
+        assert "missing" in prompt
+        # tells the model to hedge + lower severity rather than assert absence
+        assert "hedge" in prompt
+        assert "severity" in prompt
+
+
+def test_humility_rule_present_in_custom_lens_prompt() -> None:
+    lens = CustomLens(id="x", instructions="flag foo")
+    assert "cannot see" in build_lens_prompt(lens).lower()

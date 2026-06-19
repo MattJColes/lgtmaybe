@@ -49,6 +49,22 @@ def test_gate_fails_on_any_parse_failure_regardless_of_recall() -> None:
     assert not ok
 
 
+def test_gate_fails_on_false_positive() -> None:
+    """A forbidden (cross-file) finding firing fails the run even at full recall —
+    the humility regression signal the cross-file-fp fixture exists to catch."""
+    fp = FixtureScore(
+        name="cross-file-fp",
+        parsed_ok=True,
+        expected_count=1,
+        matched_count=1,
+        findings_count=2,
+        missed=[],
+        false_positives=["FP: model_dump may pass fields absent from V2"],
+    )
+    ok, _ = run_mod._gate([fp], 0.0)
+    assert not ok
+
+
 class _ShellInjectionProvider(FakeProvider):
     """Returns the badcode shell-injection finding for every review call."""
 
@@ -232,7 +248,13 @@ def test_no_fixture_flag_runs_every_fixture(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(run_mod, "_review", fake_review)
 
     run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0"])
-    assert set(seen) == {"badcode", "vibe-multifile", "rlm-bigfile", "rlm-pipeline"}
+    assert set(seen) == {
+        "badcode",
+        "vibe-multifile",
+        "rlm-bigfile",
+        "rlm-pipeline",
+        "cross-file-fp",
+    }
 
 
 def test_unknown_fixture_name_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -36,6 +36,11 @@ class Fixture(BaseModel):
     name: str
     changed_file: str
     expected: list[ExpectedFinding]
+    # Findings that must NOT appear: cross-file false-positive traps. The diff
+    # looks like it omits a guard/field/check, but the handling lives in an
+    # unshown file, so a correct reviewer stays silent. A produced finding that
+    # matches one of these is a regression (see engine codebase-humility rules).
+    forbidden: list[ExpectedFinding] = []
 
 
 class FixtureScore(BaseModel):
@@ -48,12 +53,18 @@ class FixtureScore(BaseModel):
     findings_count: int
     missed: list[str]
     anchored_count: int = 0
+    false_positives: list[str] = []
 
     @property
     def recall(self) -> float:
         if self.expected_count == 0:
             return 1.0
         return self.matched_count / self.expected_count
+
+    @property
+    def clean(self) -> bool:
+        """True when no forbidden (cross-file false-positive) finding fired."""
+        return not self.false_positives
 
     @property
     def anchored_rate(self) -> float:
@@ -87,9 +98,15 @@ def score_fixture(
     findings: list[ReviewFinding],
     expected: list[ExpectedFinding],
     *,
+    forbidden: list[ExpectedFinding] | None = None,
     parsed_ok: bool = True,
 ) -> FixtureScore:
-    """Score *findings* against the *expected* manifest for one fixture."""
+    """Score *findings* against the *expected* manifest for one fixture.
+
+    Recall counts how many *expected* issues were caught. *forbidden* findings are
+    the inverse: any produced finding matching one is a false positive (a cross-file
+    claim the reviewer should not have made), recorded in ``false_positives``.
+    """
     matched = 0
     missed: list[str] = []
     for exp in expected:
@@ -97,6 +114,9 @@ def score_fixture(
             matched += 1
         else:
             missed.append(exp.label)
+    false_positives = [
+        fb.label for fb in (forbidden or []) if any(_matches(f, fb) for f in findings)
+    ]
     return FixtureScore(
         name=name,
         parsed_ok=parsed_ok,
@@ -105,4 +125,5 @@ def score_fixture(
         findings_count=len(findings),
         missed=missed,
         anchored_count=sum(1 for f in findings if f.anchored),
+        false_positives=false_positives,
     )

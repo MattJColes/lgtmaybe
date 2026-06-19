@@ -78,6 +78,16 @@ def test_rlm_fixture_is_one_multi_hunk_file(name: str) -> None:
     assert len(split_patch_into_hunks(patch)) >= 3, f"{name} needs several hunks"
 
 
+def test_cross_file_fp_fixture_has_expected_and_forbidden() -> None:
+    """The cross-file fixture loads with a genuine in-diff catch plus forbidden traps —
+    the diff alone (no sibling file_contents) so the guard is genuinely unseen, which is
+    the real-world shape that produced the invalid findings."""
+    diff, manifest = _fixture("cross-file-fp")
+    assert diff.strip()
+    assert manifest.expected, "needs a real in-diff finding so recall stays meaningful"
+    assert manifest.forbidden, "needs forbidden (cross-file false-positive) traps"
+
+
 def test_fixtures_cover_performance_and_complexity_lenses() -> None:
     """Both fixtures plant a performance and a complexity issue so the e2e exercises
     all seven code lenses, not just security + correctness. (The intent lens needs a
