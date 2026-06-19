@@ -184,9 +184,7 @@ def review_repo(tmp_path: Path) -> tuple[Path, str]:
 
 
 @pytest.mark.parametrize("backend", BACKENDS, ids=[b.id for b in BACKENDS])
-def test_cli_review_against_local_provider(
-    backend: Backend, review_repo: tuple[Path, str]
-) -> None:
+def test_cli_review_against_local_provider(backend: Backend, review_repo: tuple[Path, str]) -> None:
     """`lgtmaybe review` round-trips through a live local model and emits findings."""
     if not _server_up(backend):
         pytest.skip(f"{backend.id} server not reachable at {backend.base}")
