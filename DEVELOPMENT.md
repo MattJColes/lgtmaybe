@@ -214,6 +214,43 @@ LLM or the GitHub API. Test layout mirrors `src/`:
 - `tests/core/`, `tests/local/` — diff parsing, local git context
 - `tests/docs/` + `tests/snapshots/` — committed schema snapshots and the
   generated-reference freshness check (see below)
+- `tests/e2e/` — live end-to-end against a local model server (deselected by
+  default; see below)
+
+### Live provider e2e (tests/e2e/)
+
+`tests/e2e/test_local_providers.py` drives the **real `lgtmaybe` CLI** against a
+local model server, proving the app round-trips end-to-end through each local
+serving stack — **ollama**, **llama.cpp**, and **vLLM** — on a tiny qwen model.
+It exercises the whole path (arg parsing, `.lgtmaybe.yml`, the local git diff,
+provider/credential resolution, the litellm wire format, structured-output
+parsing, rendering). This is a **compatibility** smoke, not a recall test — for
+recall use `evals/run.py` (below).
+
+The three backends cover both adapter routes: ollama hits litellm's native
+`ollama/` route; llama.cpp and vLLM both ride the `openai-compatible` route
+(`openai/` + a custom `--api-base`).
+
+These need a live server + a downloaded model, so they are **marked `e2e` and
+deselected from the default gate** (`addopts = -m 'not e2e'`). Stand the servers
+up, then opt in:
+
+```bash
+scripts/e2e-up.sh            # start every backend with a runner available + pull models
+uv run pytest -m e2e         # run every backend the suite finds reachable
+scripts/e2e-up.sh down       # stop the docker-run backends (llama.cpp, vLLM)
+```
+
+Each backend **auto-skips when its server isn't up**, so you can start only one
+(`scripts/e2e-up.sh ollama`) and just that leg runs. Endpoints and model tags are
+env-overridable (`LGTMAYBE_E2E_OLLAMA_BASE`, `LGTMAYBE_E2E_VLLM_MODEL`, …) so the
+suite fits whatever you have running.
+
+> **Context window is a launch-time setting for llama.cpp/vLLM.** Unlike ollama
+> (where lgtmaybe passes `num_ctx` per request), the OpenAI-compatible servers
+> fix their context at startup — llama.cpp `-c`, vLLM `--max-model-len`. The
+> client can't raise it later, so `scripts/e2e-up.sh` bakes the window in at
+> launch (`E2E_CTX`, default 8192); bump it if you point the suite at a bigger diff.
 
 ### Regenerating generated artifacts
 
