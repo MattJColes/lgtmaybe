@@ -78,6 +78,15 @@ testpaths = ["tests"]
 pythonpath = ["src", "."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# Live e2e tests (tests/e2e/) drive the real CLI against a local model server, so
+# they need a running ollama/llama.cpp/vLLM and a downloaded model — never the
+# default gate. They are DESELECTED here and opted into with `pytest -m e2e`
+# (a command-line -m overrides this one). Markers are registered so the strict
+# warning filter below never trips on an unknown mark.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: live end-to-end test against a local model server (deselected by default; run with -m e2e)",
+]
 # Code-quality gate: using a deprecated API (ours, the stdlib's, or a dependency's
 # triggered on our hot path) is a hard error, not silent noise. This is fully
 # deterministic given the lockfile. If a *third-party* deprecation we don't
