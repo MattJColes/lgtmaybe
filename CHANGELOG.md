@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.3.1...lgtmaybe-v0.3.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* robustly parse findings JSON from gateways without JSON mode ([#105](https://github.com/MattJColes/lgtmaybe/issues/105)) ([f84fd77](https://github.com/MattJColes/lgtmaybe/commit/f84fd774e4602bd0425526e56f031983774756e1))
+
 ## [0.3.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.3.0...lgtmaybe-v0.3.1) (2026-06-17)
 
 
