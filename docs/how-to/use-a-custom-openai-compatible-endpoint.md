@@ -98,6 +98,35 @@ set the same values as inputs (or in `.lgtmaybe.yml`) and pass `api_key` from a
 secret for hosted endpoints; leave it empty for keyless local servers reached at
 `http://host.docker.internal:<port>/v1`.
 
+## Gateways that don't support JSON mode (`response_format`)
+
+To keep models returning clean findings instead of prose, lgtmaybe asks for
+structured output via the OpenAI `response_format` parameter (JSON mode). Most
+endpoints honour it. Some enterprise gateways and custom proxies don't — they
+either **ignore** it (the model then answers with the JSON wrapped in a
+```` ```json ```` fence or surrounded by conversational prose) or **reject** the
+request outright with a `400 Bad Request`.
+
+lgtmaybe handles the first case for you: the parser strips fences and pulls the
+JSON out of surrounding prose, so a gateway that merely ignores `response_format`
+still produces a normal review. (Older versions could fail here with
+`unparseable model output` on every lens — that's fixed.)
+
+If your gateway **rejects** `response_format` with a `400`, turn it off so the
+request never carries the parameter — the prompt still asks for JSON and the
+lenient parser still does its job:
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model gemini-3.5-flash \
+  --api-base https://api.myllm.com/v1 \
+  --no-structured-output
+```
+
+Persist it as `structured_output: false` in `.lgtmaybe.yml`, or set the
+`structured_output` input to `false` in the GitHub Action.
+
 [deepseek]: https://api-docs.deepseek.com/
 [llamacpp]: https://github.com/ggml-org/llama.cpp
 [lmstudio]: https://lmstudio.ai/
