@@ -40,5 +40,5 @@ jobs:
       - uses: ./
         with:
           provider: openai
-          model: gpt-5.4
+          model: gpt-5.4-mini
           api_key: ${{ secrets.OPENAI_API_KEY }}
