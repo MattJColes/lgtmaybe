@@ -77,7 +77,7 @@ jobs:
           #   api_key_secret: ""
           #   cloud: azure
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Build from THIS checkout so we exercise the current code, not the
       # released GHCR image. action.yml runs whatever `image:` we hand it.

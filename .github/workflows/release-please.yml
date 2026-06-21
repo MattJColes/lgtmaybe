@@ -47,7 +47,7 @@ jobs:
     permissions:
       id-token: write # trusted publishing — no PyPI token in secrets
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_tag || needs.release-please.outputs.tag_name }}
       - name: Install uv

@@ -29,7 +29,7 @@ jobs:
       contents: read
       packages: write # push to GHCR with the built-in token
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
       - name: Log in to GHCR
@@ -77,7 +77,7 @@ jobs:
     permissions:
       contents: write # push the clean v-tags
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
       - name: Tag clean exact + floating-major v-tags
