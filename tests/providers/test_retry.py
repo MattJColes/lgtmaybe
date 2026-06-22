@@ -83,6 +83,94 @@ class TestTemperatureRejection:
                 )
 
 
+class TestEmptyStructuredOutputFallback:
+    """Some grammar-constrained backends (LM Studio fronting a thinking qwen
+    model) return empty content under a response_format JSON schema. The provider
+    drops the schema and retries once so the model can emit parseable text."""
+
+    def test_empty_content_under_response_format_retries_without_it(self) -> None:
+        seen_response_format: list[Any] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen_response_format.append("response_format" in kwargs)
+            if "response_format" in kwargs:
+                return _fake_response("")  # schema mode yields nothing
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "openai/qwen",
+                response_format={"type": "json_schema"},
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen_response_format == [True, False]
+
+    def test_non_empty_content_keeps_response_format(self) -> None:
+        calls = 0
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "openai/gpt-4o",
+                response_format={"type": "json_schema"},
+            )
+
+        assert result.text == '{"findings": []}'
+        assert calls == 1  # good content first time → no retry
+
+    def test_empty_once_makes_later_calls_skip_response_format_up_front(self) -> None:
+        """After one empty structured response, the provider remembers the model's
+        schema mode is broken and drops response_format up front on later calls —
+        so a slow local model isn't billed a wasted empty round-trip every time."""
+        seen_response_format: list[bool] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            seen_response_format.append(has_rf)
+            if has_rf:
+                return _fake_response("")  # schema mode yields nothing
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "a"}], "openai/qwen", response_format={"x": 1}
+            )
+            provider.complete(
+                [{"role": "user", "content": "b"}], "openai/qwen", response_format={"x": 1}
+            )
+
+        # First call: with-rf (empty) then without (good). Second call: straight
+        # to without-rf — no wasted empty round-trip.
+        assert seen_response_format == [True, False, False]
+
+    def test_empty_content_without_response_format_is_not_retried(self) -> None:
+        """A genuinely empty answer with no schema to drop is returned as-is — no
+        infinite retry loop."""
+        calls = 0
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            return _fake_response("")
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert result.text == ""
+        assert calls == 1
+
+
 class TestFailFastOnPermanentErrors:
     """Retrying a permanent error can't fix it — and stacked backoff over every
     lens turns an instant "out of credit" into many minutes of burned runner
