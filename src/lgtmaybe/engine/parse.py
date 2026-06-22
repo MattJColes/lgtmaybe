@@ -149,6 +149,12 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     if not raw or not raw.strip():
         raise ParseError("Empty response from provider")
 
+    # A findings-shaped candidate can still fail validation — e.g. a small model
+    # emits a chatter object ({"note": "found 1 issue"}) before the real envelope,
+    # and `_as_findings_list` treats any bare dict as a single finding. Keep trying
+    # later candidates instead of aborting on the first that doesn't validate, so
+    # the real `{"findings": [...]}` that follows is still recovered.
+    last_error: Exception | None = None
     for value in iter_json_values(raw):
         items = _as_findings_list(value)
         if items is None:
@@ -156,6 +162,8 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
         try:
             return [ReviewFinding.model_validate(item) for item in items]
         except Exception as exc:
-            raise ParseError(f"Finding validation failed: {exc}") from exc
+            last_error = exc
 
+    if last_error is not None:
+        raise ParseError(f"Finding validation failed: {last_error}") from last_error
     raise ParseError("Cannot parse JSON findings from response")
