@@ -27,10 +27,12 @@ OLLAMA_MODEL="${LGTMAYBE_E2E_OLLAMA_MODEL:-qwen3:0.6b}"
 OLLAMA_BASE="${LGTMAYBE_E2E_OLLAMA_BASE:-http://localhost:11434}"
 
 # llama.cpp serves whatever GGUF it loads under any requested model id; this HF
-# repo is a tiny qwen the server image can pull on its own.
+# repo is a tiny qwen the server image can pull on its own. The `-hf` flag takes
+# a repo + a *quant tag* (e.g. Q4_K_M), NOT a filename — the current server image
+# rejects a filename with "no GGUF files found in repository".
 LLAMACPP_PORT="${LLAMACPP_PORT:-8080}"
 LLAMACPP_HF_REPO="${LLAMACPP_HF_REPO:-Qwen/Qwen2.5-0.5B-Instruct-GGUF}"
-LLAMACPP_HF_FILE="${LLAMACPP_HF_FILE:-qwen2.5-0.5b-instruct-q4_k_m.gguf}"
+LLAMACPP_HF_QUANT="${LLAMACPP_HF_QUANT:-Q4_K_M}"
 
 # vLLM is strict: the served id must equal the --model it was launched with, and
 # that id is what lgtmaybe must send (LGTMAYBE_E2E_VLLM_MODEL defaults to match).
@@ -82,7 +84,7 @@ start_llamacpp() {
   docker run -d --name "$LLAMACPP_CONTAINER" \
     -p "$LLAMACPP_PORT:8080" \
     ghcr.io/ggml-org/llama.cpp:server \
-    -hf "$LLAMACPP_HF_REPO:$LLAMACPP_HF_FILE" \
+    -hf "$LLAMACPP_HF_REPO:$LLAMACPP_HF_QUANT" \
     -c "$E2E_CTX" \
     --host 0.0.0.0 --port 8080 >/dev/null
   wait_for "http://localhost:$LLAMACPP_PORT/v1/models" "llama.cpp" || true
