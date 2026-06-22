@@ -112,6 +112,13 @@ JSON out of surrounding prose, so a gateway that merely ignores `response_format
 still produces a normal review. (Older versions could fail here with
 `unparseable model output` on every lens — that's fixed.)
 
+There is a third case, common with **LM Studio fronting a "thinking" model**
+(e.g. qwen3.x): the server *accepts* `response_format` but the schema-constrained
+decoder returns **empty content** — every lens would otherwise fail with
+`unparseable model output`. lgtmaybe handles this for you too: when a structured
+call comes back empty, it drops the schema and retries once, and the model then
+emits the findings as normal (fenced) text the parser reads. No flag needed.
+
 If your gateway **rejects** `response_format` with a `400`, turn it off so the
 request never carries the parameter — the prompt still asks for JSON and the
 lenient parser still does its job:

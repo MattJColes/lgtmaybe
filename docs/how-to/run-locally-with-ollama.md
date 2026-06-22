@@ -194,7 +194,7 @@ the `--api-base` URL is reachable.
 
 **Model not found** — run `ollama pull <model>` before using it.
 
-**`review incomplete — the model returned no usable output`** — every category
+**`review incomplete — every review call failed`** — every category
 call timed out or returned output that wasn't valid JSON. Raise `--timeout`, try a
 model that follows instructions more reliably, or check `LITELLM_LOG=DEBUG` output
 for the underlying error. lgtmaybe reports this (and exits non-zero) rather than
