@@ -25,6 +25,12 @@ one per finding.
 Keep a finding only if you are confident it is a real issue in the actual changed code.
 Drop it if it is speculative, out of scope, or referring to unchanged lines.
 
+Also drop a finding that merely DESCRIBES the change without naming a concrete problem \
+("X was removed", "Y now takes a new parameter", "this method is now async") — narration \
+that restates the diff is not a finding, only a changelog. Be especially strict with \
+low-severity (info/low) findings: keep one only when it names a specific, actionable issue, \
+not just an observation about what changed.
+
 Also drop a finding whose validity depends on an assumption about code NOT shown in the \
 diff. The diff is only a slice of the codebase: base classes, guards, validators, \
 idempotency checks, callers, and config may live in files you cannot see. A finding that \

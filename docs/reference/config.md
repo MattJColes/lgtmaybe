@@ -20,7 +20,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `info` |  |
+| `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` | Yes | — |  |
@@ -30,6 +30,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `temperature` | number | No | `0.0` | Temperature |
 | `timeout` | integer / null | No | `null` | Timeout |
+| `unanchored_min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `high` |  |
 
 ## Enums
 
@@ -343,7 +344,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "min_severity": {
       "$ref": "#/$defs/Severity",
-      "default": "info"
+      "default": "low"
     },
     "model": {
       "title": "Model",
@@ -400,6 +401,10 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Timeout"
+    },
+    "unanchored_min_severity": {
+      "$ref": "#/$defs/Severity",
+      "default": "high"
     }
   },
   "required": [

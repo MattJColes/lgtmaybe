@@ -534,6 +534,11 @@ _SHARED_RULES = """\
   findings about the diff itself — a changed code path the diff leaves untested, a new
   public surface left undocumented, a stale comment next to changed code — those are real;
   raise them as usual.
+- Report a finding only when there is a concrete problem, risk, or gap with a clear
+  recommended action. Do NOT raise a finding that merely DESCRIBES what the change does
+  ("X was removed", "Y now takes a new parameter", "this method is now async") — narration
+  that restates the diff is not a finding. If the content is only a restatement of the
+  change with no problem attached, omit it entirely.
 - Return `{"findings": []}` only when there are genuinely no issues.
 - Never output anything other than the JSON object."""
 

@@ -94,6 +94,14 @@ def test_prompt_is_nonempty_string() -> None:
     assert len(prompt) > 200
 
 
+def test_prompt_forbids_narration_only_findings() -> None:
+    # The weak-model failure mode is INFO-level narration that just restates the
+    # diff ("X was removed"). The contract must tell the model that's not a finding.
+    prompt = build_system_prompt().lower()
+    assert "narrat" in prompt or "describe" in prompt
+    assert "restate" in prompt or "merely" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Security-review coverage (the reviewer should actually hunt for vulns)
 # ---------------------------------------------------------------------------

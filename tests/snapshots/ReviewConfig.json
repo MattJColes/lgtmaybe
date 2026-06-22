@@ -235,7 +235,7 @@
     },
     "min_severity": {
       "$ref": "#/$defs/Severity",
-      "default": "info"
+      "default": "low"
     },
     "model": {
       "title": "Model",
@@ -292,6 +292,10 @@
       ],
       "default": null,
       "title": "Timeout"
+    },
+    "unanchored_min_severity": {
+      "$ref": "#/$defs/Severity",
+      "default": "high"
     }
   },
   "required": [
