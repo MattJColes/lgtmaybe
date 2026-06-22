@@ -17,6 +17,7 @@ from pathlib import Path
 
 from lgtmaybe.core.models import PRContext, Provider, ReviewCategory, ReviewConfig
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
+from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
 from .scorer import Fixture, FixtureScore, score_fixture
@@ -80,6 +81,7 @@ def _review(
     model: str,
     api_base: str | None,
     *,
+    api_key: str | None = None,
     timeout: int | None = None,
     num_ctx: int | None = None,
     max_input_tokens: int | None = None,
@@ -127,8 +129,21 @@ def _review(
         extra["top_p"] = top_p
     if top_k is not None:
         extra["top_k"] = top_k
+    # Resolve credentials the same way the CLI does, so the harness works against
+    # a keyless openai-compatible endpoint (LM Studio / llama.cpp / vLLM) — which
+    # needs the placeholder key the OpenAI client demands — and reads provider env
+    # vars (OPENAI_API_KEY, OPENAI_COMPATIBLE_API_KEY, …) for hosted endpoints.
+    auth = resolve_credentials(provider, api_key=api_key, api_base=api_base)
     engine = LLMReviewEngine(
-        build_provider(provider, model, api_base=api_base, timeout=timeout, **extra)
+        build_provider(
+            provider,
+            model,
+            api_key=auth.api_key,
+            api_base=auth.api_base,
+            azure_ad_token=auth.azure_ad_token,
+            timeout=timeout,
+            **extra,
+        )
     )
     try:
         findings, _summary = engine.review(ctx, cfg)
@@ -188,6 +203,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
     ap.add_argument("--model", required=True)
     ap.add_argument("--api-base", default=None)
+    ap.add_argument(
+        "--api-key",
+        default=None,
+        help="API key for a hosted endpoint (else read from the provider's env var); "
+        "omit for keyless local servers (ollama, LM Studio / llama.cpp / vLLM)",
+    )
     ap.add_argument(
         "--min-recall",
         type=float,
@@ -270,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
             provider,
             args.model,
             args.api_base,
+            api_key=args.api_key,
             timeout=args.timeout,
             num_ctx=args.num_ctx,
             max_input_tokens=args.max_input_tokens,
