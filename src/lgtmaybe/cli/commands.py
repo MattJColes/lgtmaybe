@@ -61,6 +61,13 @@ from lgtmaybe.config.loader import load_config
     type=click.Choice(["info", "low", "medium", "high", "critical"]),
     help="Minimum severity to report",
 )
+@click.option(
+    "--unanchored-min-severity",
+    default=None,
+    type=click.Choice(["info", "low", "medium", "high", "critical"]),
+    help="Minimum severity for a finding the engine could not anchor to a changed "
+    "line (default high; raise/lower to control how many low-confidence guesses surface)",
+)
 @click.option("--max-files", default=None, type=int, help="Maximum number of files to review")
 @click.option(
     "--max-input-tokens",
@@ -162,6 +169,7 @@ def review(
     api_key: str | None,
     api_base: str | None,
     min_severity: str | None,
+    unanchored_min_severity: str | None,
     max_files: int | None,
     max_input_tokens: int | None,
     num_ctx: int | None,
@@ -187,6 +195,7 @@ def review(
         provider=provider,
         model=model,
         min_severity=min_severity,
+        unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
         max_input_tokens=max_input_tokens,
         num_ctx=num_ctx,

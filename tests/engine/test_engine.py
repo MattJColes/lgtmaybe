@@ -200,6 +200,61 @@ def test_all_findings_returned_when_min_severity_info() -> None:
 
 
 # ---------------------------------------------------------------------------
+# unanchored confidence gate: a finding whose anchor matched nothing is a guess.
+# Below unanchored_min_severity it is dropped, not demoted to the body.
+# ---------------------------------------------------------------------------
+
+_UNANCHORED_MEDIUM = ReviewFinding(
+    path="a.py",
+    line=2,
+    severity=Severity.medium,
+    title="guessed bug",
+    body="line is a guess",
+    anchor="this text is nowhere in the diff",
+)
+_UNANCHORED_HIGH = ReviewFinding(
+    path="a.py",
+    line=2,
+    severity=Severity.high,
+    title="serious guessed bug",
+    body="line is a guess",
+    anchor="this text is nowhere in the diff",
+)
+
+
+def test_unanchored_finding_below_threshold_dropped() -> None:
+    provider = _provider_for([_UNANCHORED_MEDIUM], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", min_severity=Severity.info)
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    assert findings == []  # medium < unanchored floor (high) → dropped
+
+
+def test_unanchored_high_finding_survives() -> None:
+    provider = _provider_for([_UNANCHORED_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", min_severity=Severity.info)
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    assert len(findings) == 1
+    assert findings[0].anchored is False  # kept for the body, never posted inline
+
+
+def test_anchored_finding_unaffected_by_unanchored_gate() -> None:
+    provider = _provider_for([_INFO], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", min_severity=Severity.info)
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    # _INFO carries no anchor → anchored, so the unanchored gate ignores it.
+    assert len(findings) == 1
+
+
+# ---------------------------------------------------------------------------
 # secret redaction in outbound messages
 # ---------------------------------------------------------------------------
 

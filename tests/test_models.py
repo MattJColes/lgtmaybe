@@ -107,6 +107,20 @@ def test_review_config_structured_output_defaults_true() -> None:
     assert cfg.structured_output is True
 
 
+def test_review_config_min_severity_defaults_to_low() -> None:
+    # The floor sits at `low`, not `info`: pure-info narration ("X was removed")
+    # is the weak-model noise tier and is dropped by default.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.min_severity is Severity.low
+
+
+def test_review_config_unanchored_min_severity_defaults_to_high() -> None:
+    # A failed anchor is a low-confidence signal: only a high/critical guess is
+    # worth surfacing without a precise line.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.unanchored_min_severity is Severity.high
+
+
 def test_review_config_temperature_defaults_to_zero() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     assert cfg.temperature == 0.0

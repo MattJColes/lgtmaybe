@@ -213,8 +213,15 @@ class LLMReviewEngine(ReviewEngine):
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
             all_findings = reflect_findings(all_findings, clean_ctx, cfg, self._provider)
 
-        # 9. Filter by min_severity.
-        filtered = [f for f in all_findings if f.severity >= cfg.min_severity]
+        # 9. Filter: drop findings below the severity floor, and apply the
+        #    stricter unanchored floor — a finding the engine could not anchor is a
+        #    low-confidence guess, so surface it only when it's high/critical.
+        filtered = [
+            f
+            for f in all_findings
+            if f.severity >= cfg.min_severity
+            and (f.anchored or f.severity >= cfg.unanchored_min_severity)
+        ]
 
         plural = "s" if len(filtered) != 1 else ""
         summary_line = (

@@ -207,7 +207,17 @@ class ReviewConfig(_Strict):
     provider: Provider
     model: str
     api_base: str | None = None
-    min_severity: Severity = Severity.info
+    # Severity floor: findings below this are dropped before posting. Defaults to
+    # `low` (not `info`) so pure-info narration — a finding that merely restates
+    # the diff ("X was removed") — never reaches the PR. Raise it to `medium` for
+    # a weak/fast model that still over-reports.
+    min_severity: Severity = Severity.low
+    # Stricter floor applied only to UNANCHORED findings — ones whose verbatim
+    # anchor matched no changed line, so the engine could not place them. A failed
+    # anchor is a low-confidence signal (a weak model miscounting), so only a
+    # high/critical guess is worth surfacing (demoted to the review body, never
+    # posted on a line we can't stand behind); anything weaker is dropped.
+    unanchored_min_severity: Severity = Severity.high
     include_paths: list[str] = Field(default_factory=list)
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50

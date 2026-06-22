@@ -160,6 +160,17 @@ def test_reflect_prompt_drops_unseen_code_assumptions() -> None:
     assert "missing" in system
 
 
+def test_reflect_prompt_drops_narration_only_findings() -> None:
+    """The auditor must drop findings that merely describe the change without
+    naming a concrete problem — the INFO-level narration a weak model emits."""
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "narrat" in system or "describe" in system
+
+
 def test_unparseable_verdict_keeps_all() -> None:
     provider = _fake_with_text("I'm not really sure about these.")
 
