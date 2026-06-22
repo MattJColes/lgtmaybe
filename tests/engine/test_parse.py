@@ -80,6 +80,23 @@ def test_valid_json_array_in_prose_before_findings_is_skipped() -> None:
     assert result[0].severity == Severity.high
 
 
+def test_leading_non_finding_object_is_skipped() -> None:
+    """A small model that emits a chatter object before the real envelope must
+    not abort parsing — any bare dict is treated as a candidate finding, so the
+    parser has to keep going past one that fails validation."""
+    raw = '{"note": "found 1 issue"}\n' + json.dumps({"findings": [_VALID_FINDING]})
+    result = parse_findings(raw)
+    assert len(result) == 1
+    assert result[0].path == "src/app.py"
+
+
+def test_only_non_finding_object_raises_with_validation_detail() -> None:
+    """When nothing findings-shaped validates, the error names the validation
+    failure (not a generic 'cannot parse'), so the cause is debuggable."""
+    with pytest.raises(ParseError, match="Finding validation failed"):
+        parse_findings('{"note": "no findings here"}')
+
+
 def test_trailing_prose_with_bracket() -> None:
     """A closing remark with a bracket after the JSON must not derail extraction."""
     raw = json.dumps({"findings": [_VALID_FINDING]}) + "\nThat is all [done]."
