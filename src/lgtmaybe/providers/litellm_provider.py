@@ -101,6 +101,11 @@ class LiteLLMProvider(ProviderClient):
         self.model = model
         self.fallback_model = fallback_model
         self.default_opts: dict[str, Any] = default_opts
+        # Set once a structured-output call comes back empty (see _call): the
+        # backend's JSON-schema decoder is broken for this model, so every
+        # subsequent call skips response_format up front instead of paying a
+        # wasted empty round-trip first. Sticky for the life of this provider.
+        self._skip_response_format = False
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
@@ -129,21 +134,44 @@ class LiteLLMProvider(ProviderClient):
             reraise=True,
         )
         def _call() -> ProviderResult:
-            try:
-                response = litellm.completion(model=model, messages=messages, **kwargs)
-            except Exception as exc:
-                if "temperature" not in kwargs or not _rejects_temperature(exc):
-                    raise
-                # Drop temperature for this and every subsequent retry, letting the
-                # model use its only supported value (its default).
-                kwargs.pop("temperature")
-                response = litellm.completion(model=model, messages=messages, **kwargs)
-            return self._map_response(response, model)
+            # A prior call already proved this model's JSON-schema mode returns
+            # empty, so don't pay the wasted round-trip again — drop it up front.
+            if self._skip_response_format:
+                kwargs.pop("response_format", None)
+            result = self._raw_completion(model, messages, kwargs)
+            # Some grammar-constrained backends (notably LM Studio fronting a
+            # "thinking" model like qwen3.x) return EMPTY content under a
+            # response_format JSON schema — the schema decoder yields nothing. The
+            # prompt already asks for JSON and the parser is lenient, so drop the
+            # schema and retry once: the model then emits the findings as normal
+            # (fenced) text we can parse. Remember it so later calls skip it too.
+            if not result.text.strip() and kwargs.get("response_format") is not None:
+                self._skip_response_format = True
+                kwargs.pop("response_format")
+                result = self._raw_completion(model, messages, kwargs)
+            return result
 
         return _call()
 
+    def _raw_completion(
+        self, model: str, messages: list[Message], kwargs: dict[str, Any]
+    ) -> ProviderResult:
+        """One litellm call, with the temperature-value-rejection fallback applied."""
+        try:
+            response = litellm.completion(model=model, messages=messages, **kwargs)
+        except Exception as exc:
+            if "temperature" not in kwargs or not _rejects_temperature(exc):
+                raise
+            # Drop temperature for this and every subsequent retry, letting the
+            # model use its only supported value (its default).
+            kwargs.pop("temperature")
+            response = litellm.completion(model=model, messages=messages, **kwargs)
+        return self._map_response(response, model)
+
     def _map_response(self, response: Any, model: str) -> ProviderResult:
-        text: str = response.choices[0].message.content
+        # Some providers return null content (e.g. a model that answered only via
+        # a reasoning channel under JSON mode); treat that as empty, not a crash.
+        text: str = response.choices[0].message.content or ""
         input_tokens: int = response.usage.prompt_tokens
         output_tokens: int = response.usage.completion_tokens
 
