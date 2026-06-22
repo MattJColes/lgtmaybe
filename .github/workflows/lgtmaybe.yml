@@ -36,7 +36,7 @@ jobs:
     # hang, not on an out-of-credit key.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6 # base repo only — for action.yml + .lgtmaybe.yml config
+      - uses: actions/checkout@v7 # base repo only — for action.yml + .lgtmaybe.yml config
       - uses: ./
         with:
           provider: openai
