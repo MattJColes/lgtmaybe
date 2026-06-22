@@ -551,6 +551,7 @@ def test_duplicate_findings_across_categories_are_deduped() -> None:
 
 
 def test_dedupe_keeps_the_highest_severity_for_a_shared_location() -> None:
+    # Same location, same title (case-insensitive) → always collapsed (existing behaviour).
     low = ReviewFinding(path="a.py", line=1, severity=Severity.low, title="Same Title", body="x")
     high = ReviewFinding(path="a.py", line=1, severity=Severity.high, title="same title", body="y")
     provider = _provider_for([low, high], reflection_keeps_all=True)
@@ -561,6 +562,76 @@ def test_dedupe_keeps_the_highest_severity_for_a_shared_location() -> None:
 
     assert len(findings) == 1
     assert findings[0].severity is Severity.high
+
+
+def test_dedupe_collapses_different_title_wording_at_same_location() -> None:
+    # Two lenses flag the same line with different wording — e.g. "Command injection
+    # via shell=True" (security) vs "Unsafe shell=True call" (correctness). Under the
+    # new location-based policy these collapse to the single highest-severity finding.
+    security = ReviewFinding(
+        path="a.py",
+        line=5,
+        severity=Severity.high,
+        title="Command injection via shell=True",
+        body="security body",
+    )
+    correctness = ReviewFinding(
+        path="a.py",
+        line=5,
+        severity=Severity.medium,
+        title="Unsafe shell=True call",
+        body="correctness body",
+    )
+    provider = _provider_for([security, correctness], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.high
+    assert findings[0].title == "Command injection via shell=True"
+
+
+def test_dedupe_keeps_distinct_issues_on_different_lines() -> None:
+    # Different lines → genuinely different locations → both survive.
+    issue_a = ReviewFinding(
+        path="a.py", line=1, severity=Severity.high, title="Bug on line 1", body="x"
+    )
+    issue_b = ReviewFinding(
+        path="a.py", line=2, severity=Severity.medium, title="Different bug on line 2", body="y"
+    )
+    provider = _provider_for([issue_a, issue_b], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    lines = {f.line for f in findings}
+    assert lines == {1, 2}
+
+
+def test_dedupe_tie_break_is_deterministic_by_longer_body() -> None:
+    # When two findings at the same location share the same severity, the one with the
+    # longer body wins (more context is more useful). Deterministic: not insertion order.
+    short = ReviewFinding(
+        path="a.py", line=3, severity=Severity.high, title="Short body finding", body="x"
+    )
+    long_ = ReviewFinding(
+        path="a.py",
+        line=3,
+        severity=Severity.high,
+        title="Long body finding",
+        body="much more detailed explanation of the issue",
+    )
+    provider = _provider_for([short, long_], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    assert len(findings) == 1
+    assert findings[0].title == "Long body finding"
 
 
 def test_categories_config_narrows_the_fan_out() -> None:
