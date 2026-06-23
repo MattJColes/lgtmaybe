@@ -298,6 +298,44 @@ def test_post_review_suggestion_cannot_break_out_of_code_fence() -> None:
 
 
 @respx.mock
+def test_post_review_defangs_fences_in_title_and_body() -> None:
+    """A model-emitted title/body containing ``` must not break Markdown either.
+
+    The suggestion field was already defanged; title and body were rendered raw,
+    so a fence-bearing title/body (reachable via fork-PR prompt injection) could
+    inject markdown into the comment. They are now defanged too.
+    """
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+
+    malicious = [
+        ReviewFinding(
+            path="src/app.py",
+            line=2,
+            side="RIGHT",
+            severity=Severity.medium,
+            title="oops```\n[click](https://evil.example)",
+            body="detail```\nmore evil",
+            suggestion=None,
+        )
+    ]
+
+    created_bodies: list[dict[object, object]] = []
+
+    def capture_create(request: httpx.Request) -> httpx.Response:
+        created_bodies.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
+    respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(malicious, "Summary", diff=SAMPLE_DIFF)
+
+    comment_body = created_bodies[0]["comments"][0]["body"]
+    # No suggestion here, so no fence at all should survive — every ``` is defanged.
+    assert "```" not in comment_body
+
+
+@respx.mock
 def test_post_review_uses_provider_scoped_marker() -> None:
     """A gateway built with a marker_key embeds a provider/model-scoped marker."""
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
