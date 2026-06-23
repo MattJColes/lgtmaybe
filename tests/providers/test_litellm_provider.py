@@ -40,6 +40,16 @@ class TestLiteLLMProvider:
 
         assert result.text == "some text"
 
+    def test_null_content_maps_to_empty_string(self) -> None:
+        """A model that returns null content (e.g. answered only via a reasoning
+        channel under JSON mode) maps to "" rather than crashing downstream."""
+        response = _fake_response(content=None)
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert result.text == ""
+
     def test_complete_maps_token_counts_from_usage(self) -> None:
         response = _fake_response(prompt_tokens=50, completion_tokens=100)
         with patch("litellm.completion", return_value=response):

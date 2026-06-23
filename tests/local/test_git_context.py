@@ -77,6 +77,23 @@ def test_not_a_git_repo_raises(tmp_path: Path) -> None:
         local_pr_context(base="main", working=False, cwd=tmp_path)
 
 
+def test_default_base_falls_back_to_head_with_no_main_master_or_remote(tmp_path: Path) -> None:
+    """A repo with no remote and no main/master branch resolves the base to HEAD
+    (an empty comparison) rather than raising — the last link in the fallback
+    chain origin/HEAD → origin/main → origin/master → main → master → HEAD."""
+    from lgtmaybe.local import _default_base
+
+    _git(tmp_path, "init", "-b", "trunk")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "config", "commit.gpgsign", "false")
+    (tmp_path / "app.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "app.py")
+    _git(tmp_path, "commit", "-m", "base")
+
+    assert _default_base(tmp_path) == "HEAD"
+
+
 def test_branch_mode_collects_commit_subjects(repo: Path) -> None:
     """Commit names are the CLI's stated intent — the local counterpart to a PR
     title — so the intent lens works without GitHub."""

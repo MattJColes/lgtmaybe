@@ -6,10 +6,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import litellm
 import pytest
 
-from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
 
 
 def _fake_response(content: str = "ok") -> Any:
@@ -244,6 +245,63 @@ class TestFailFastOnPermanentErrors:
                 provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
         assert calls == 1
+
+    def test_not_found_error_is_not_retried(self) -> None:
+        """An unknown model won't be found on a retry — fail fast, one attempt."""
+        calls = 0
+
+        def not_found(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.NotFoundError(
+                message="NotFoundError: model does not exist",
+                model="gpt-9000",
+                llm_provider="openai",
+            )
+
+        with patch("litellm.completion", side_effect=not_found):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.NotFoundError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-9000")
+
+        assert calls == 1
+
+    def test_permission_denied_error_is_not_retried(self) -> None:
+        """A denied permission won't be granted on a retry — fail fast."""
+        calls = 0
+
+        def denied(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.exceptions.PermissionDeniedError(
+                message="PermissionDeniedError: access denied",
+                model="gpt-4o",
+                llm_provider="openai",
+                response=httpx.Response(403, request=httpx.Request("POST", "https://api")),
+            )
+
+        with patch("litellm.completion", side_effect=denied):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.exceptions.PermissionDeniedError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls == 1
+
+    def test_transient_error_retries_up_to_max_attempts(self) -> None:
+        """A transient error is retried, but no more than _MAX_ATTEMPTS times."""
+        calls = 0
+
+        def always_transient(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("transient")
+
+        with patch("litellm.completion", side_effect=always_transient):
+            provider = LiteLLMProvider()
+            with pytest.raises(RuntimeError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls == _MAX_ATTEMPTS
 
     def test_quota_error_does_not_storm_the_fallback_either(self) -> None:
         """Fail-fast applies to the fallback leg too: each model is tried once,

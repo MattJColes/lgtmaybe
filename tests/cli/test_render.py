@@ -55,3 +55,51 @@ def test_agent_output_with_no_findings_says_nothing_to_correct() -> None:
     out = render_findings([], "👍 LGTM! · llama3", fmt="agent")
 
     assert "nothing to correct" in out.lower()
+
+
+_NO_SUGGESTION = ReviewFinding(
+    path="src/db.py",
+    line=7,
+    severity=Severity.low,
+    title="unused import",
+    body="`os` is never used.",
+    suggestion=None,
+)
+
+
+def test_human_output_omits_suggestion_line_when_absent() -> None:
+    out = render_findings([_NO_SUGGESTION], "summary", fmt="human")
+
+    assert "unused import" in out
+    assert "suggestion:" not in out
+
+
+def test_agent_output_omits_suggested_fix_when_absent() -> None:
+    out = render_findings([_NO_SUGGESTION], "summary", fmt="agent")
+
+    assert "unused import" in out
+    assert "Suggested fix:" not in out
+
+
+def test_agent_output_indents_each_line_of_a_multiline_suggestion() -> None:
+    finding = ReviewFinding(
+        path="src/app.py",
+        line=1,
+        severity=Severity.medium,
+        title="use a guard",
+        body="add an early return",
+        suggestion="if not user:\n    return None",
+    )
+    out = render_findings([finding], "summary", fmt="agent")
+
+    assert "        if not user:" in out
+    assert "            return None" in out
+
+
+def test_human_output_renders_every_finding_with_one_trailing_summary() -> None:
+    out = render_findings([_FINDING, _NO_SUGGESTION], "2 findings · llama3", fmt="human")
+
+    assert "possible NPE" in out
+    assert "unused import" in out
+    assert out.count("2 findings · llama3") == 1
+    assert out.rstrip().endswith("2 findings · llama3")
