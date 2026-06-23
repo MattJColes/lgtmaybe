@@ -110,6 +110,43 @@ class TestOpenRouter:
         assert "OPENROUTER_API_KEY" in str(exc_info.value)
 
 
+class TestZai:
+    """GLM / Zhipu AI: a pure API-key provider with an optional endpoint override."""
+
+    def test_zai_with_api_key_resolves(self) -> None:
+        config = resolve_credentials(Provider.zai, api_key="zai-secret")
+        assert config.api_key == "zai-secret"
+
+    def test_zai_reads_key_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ZAI_API_KEY", "zai-env")
+        config = resolve_credentials(Provider.zai)
+        assert config.api_key == "zai-env"
+
+    def test_zai_without_key_raises_naming_the_env_var(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            resolve_credentials(Provider.zai)
+        assert "ZAI_API_KEY" in str(exc_info.value)
+
+    def test_zai_threads_optional_api_base_override(self) -> None:
+        """The China / coding-plan endpoint flows through instead of being dropped."""
+        config = resolve_credentials(
+            Provider.zai,
+            api_key="zai-secret",
+            api_base="https://open.bigmodel.cn/api/paas/v4",
+        )
+        assert config.api_base == "https://open.bigmodel.cn/api/paas/v4"
+
+    def test_zai_reads_api_base_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ZAI_API_BASE", "https://open.bigmodel.cn/api/paas/v4")
+        config = resolve_credentials(Provider.zai, api_key="zai-secret")
+        assert config.api_base == "https://open.bigmodel.cn/api/paas/v4"
+
+    def test_zai_without_override_leaves_base_unset(self) -> None:
+        """No override → litellm's native zai/ default endpoint is used."""
+        config = resolve_credentials(Provider.zai, api_key="zai-secret")
+        assert config.api_base is None
+
+
 class TestAzure:
     def test_azure_with_api_key_and_base_resolves(self) -> None:
         config = resolve_credentials(

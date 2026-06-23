@@ -1,10 +1,10 @@
 # Auth Model
 
-lgtmaybe supports six hosted providers plus local ollama, and an
+lgtmaybe supports seven hosted providers plus local ollama, and an
 `openai-compatible` escape hatch for any server speaking the OpenAI `/v1` wire
 format (DeepSeek's API, llama.cpp, LM Studio, vLLM). The design principle is **no
 static cloud credentials**: cloud providers use ambient, short-lived tokens;
-key-based SaaS providers (openai, anthropic, openrouter) require an API key that
+key-based SaaS providers (openai, anthropic, openrouter, zai) require an API key that
 stays in secrets rather than being committed to config. Azure straddles both — it
 prefers ambient Azure AD (Entra) credentials but accepts a resource key — and
 always needs the resource endpoint (`AZURE_API_BASE`), since each Azure OpenAI
@@ -41,9 +41,12 @@ chain:
 2. **Ambient cloud creds** — for Bedrock and Vertex, the chain stops here.
    If no ambient creds exist, lgtmaybe fails immediately with a clear
    "how to auth this provider" message. It does not fall back to a key.
-3. **API key** — for openai, anthropic, and openrouter, lgtmaybe reads the
-   key from the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-   `OPENROUTER_API_KEY`). The `--api-key` flag can override this at the CLI.
+3. **API key** — for openai, anthropic, openrouter, and zai (GLM / Zhipu AI),
+   lgtmaybe reads the key from the environment (`OPENAI_API_KEY`,
+   `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`). The `--api-key` flag
+   can override this at the CLI. `zai` also accepts an optional `--api-base` /
+   `ZAI_API_BASE` override for the China / coding-plan GLM endpoint; without it
+   litellm's native `zai/` route targets the international endpoint.
 4. **Azure** — always needs the resource endpoint (`AZURE_API_BASE` or
    `--api-base`). For the credential it prefers a key when one is present
    (`AZURE_API_KEY` / `--api-key`); otherwise it goes **keyless**, minting an
@@ -66,6 +69,7 @@ chain:
 | openai | API key | `OPENAI_API_KEY` env var or `--api-key` |
 | anthropic | API key | `ANTHROPIC_API_KEY` env var or `--api-key` |
 | openrouter | API key | `OPENROUTER_API_KEY` env var or `--api-key` |
+| zai | API key (+ optional endpoint) | `ZAI_API_KEY` env var or `--api-key` (GLM / Zhipu AI); optional `ZAI_API_BASE` / `--api-base` for the China / coding-plan endpoint |
 | bedrock | Ambient AWS creds | GitHub OIDC role or local `~/.aws`; IAM requires only `bedrock:InvokeModel*` |
 | vertex | Ambient GCP creds | GitHub WIF or local ADC (`gcloud auth application-default login`) |
 | azure | Ambient Azure AD creds (keyless) or API key, + endpoint | GitHub OIDC → Entra federated credential, or local `az login` / managed identity; or `AZURE_API_KEY`. Always with `AZURE_API_BASE` / `--api-base` |

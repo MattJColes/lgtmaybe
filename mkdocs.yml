@@ -1,5 +1,5 @@
 site_name: lgtmaybe
-site_description: Provider-agnostic PR reviewer — six hosted providers, ollama, and any OpenAI-compatible endpoint, one flag, no keys in secrets for cloud.
+site_description: Provider-agnostic PR reviewer — seven hosted providers, ollama, and any OpenAI-compatible endpoint, one flag, no keys in secrets for cloud.
 site_url: https://mattjcoles.github.io/lgtmaybe/
 repo_url: https://github.com/MattJColes/lgtmaybe
 repo_name: MattJColes/lgtmaybe

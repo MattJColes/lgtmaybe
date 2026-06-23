@@ -31,7 +31,7 @@ types and defaults.
 
 ### provider
 
-Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`,
+Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
 `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
 
 ```yaml
@@ -47,6 +47,7 @@ The model identifier for the chosen provider. Format varies by provider:
 | openai | `gpt-5.5` |
 | anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
 | openrouter | `anthropic/claude-sonnet-4-6` |
+| zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` pass through too) |
 | bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5` (prefer the cross-region inference profile; a non-Bedrock id like `openai.gpt-5.5` is invalid — see [Review with Bedrock](review-with-bedrock-oidc.md)) |
 | vertex | `gemini-3-pro`, `gemini-3.5-flash` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
@@ -62,7 +63,7 @@ suppressed. Ordered low to high: `info`, `low`, `medium`, `high`, `critical`.
 min_severity: medium   # suppresses info and low findings
 ```
 
-Default: `info` (all findings reported).
+Default: `low` (suppresses only `info` findings).
 
 ### include_paths / exclude_paths
 

@@ -1,5 +1,5 @@
 name: lgtmaybe
-description: Provider-agnostic PR reviewer — six hosted providers plus ollama and any OpenAI-compatible endpoint, one flag, no static keys for cloud.
+description: Provider-agnostic PR reviewer — seven hosted providers plus ollama and any OpenAI-compatible endpoint, one flag, no static keys for cloud.
 author: Matt Coles
 branding:
   icon: check-circle

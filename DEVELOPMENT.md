@@ -441,4 +441,7 @@ pytest suite (`tests/cli/test_provider_threading.py`), not by this workflow.
   on dependency-touching changes). A known CVE upstream surfaces here, not as a
   per-PR gate.
 - **`docs.yml`** — builds/publishes the docs site.
-- **`release.yml`** — on a `v*.*.*` tag: PyPI trusted publishing + GHCR image push.
+- **`release.yml`** — reusable workflow called by `release-please.yml` (or run
+  manually via `workflow_dispatch`): pushes the GHCR image + moves the clean
+  v-tags. PyPI trusted publishing is *not* here — it runs inline in
+  `release-please.yml` so the OIDC publisher matches that workflow.

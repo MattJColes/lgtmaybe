@@ -23,7 +23,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
-| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` | Yes | — |  |
+| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
@@ -46,6 +46,7 @@ LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azu
 - `openai-compatible`
 - `openrouter`
 - `vertex`
+- `zai`
 
 ### Severity
 
@@ -75,7 +76,7 @@ The structured output the model must return for each inline comment. All fields 
 
 ## ProviderResult
 
-The normalised return value of one LLM completion, including usage and cost.
+The normalised return value of one LLM completion, including token usage.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -167,7 +168,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "vertex",
         "azure",
         "ollama",
-        "openai-compatible"
+        "openai-compatible",
+        "zai"
       ],
       "title": "Provider",
       "type": "string"

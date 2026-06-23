@@ -183,6 +183,20 @@ def resolve_credentials(
     if provider is Provider.ollama:
         return AuthConfig(api_base=api_base or DEFAULT_OLLAMA_BASE)
 
+    if provider is Provider.zai:
+        import os
+
+        key = api_key or os.environ.get("ZAI_API_KEY")
+        if not key:
+            raise ValueError(
+                "zai (GLM / Zhipu AI) requires an API key. Set the ZAI_API_KEY "
+                "environment variable or pass --api-key."
+            )
+        # Key-only by default (litellm's native zai/ route targets the international
+        # endpoint). An explicit base overrides it for the China / coding-plan
+        # endpoints (e.g. https://open.bigmodel.cn/api/paas/v4).
+        return AuthConfig(api_key=key, api_base=api_base or os.environ.get("ZAI_API_BASE"))
+
     if provider is Provider.openai_compatible:
         import os
 

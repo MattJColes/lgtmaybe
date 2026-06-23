@@ -4,7 +4,7 @@
 
 # lgtmaybe
 
-Provider-agnostic PR reviewer. Six hosted providers, local ollama, and any
+Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, no static keys for cloud providers. Posts
 inline review comments and a summary.
 
@@ -59,7 +59,7 @@ latency:
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
 - `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
 - `categories` (default all nine) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
-- `min_severity` (default `info`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
+- `min_severity` (default `low`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.
 
@@ -123,6 +123,7 @@ up the [GitHub Action](#use-as-a-github-action). See
 | `openai` | `OPENAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
+| `zai` | `ZAI_API_KEY` — GLM / Zhipu AI (`glm-4.6`, `glm-4.7`, `glm-4.5-air`, …; newer `glm-5.x` too). Optional `--api-base` for the China / coding-plan endpoint |
 | `bedrock` | Ambient AWS creds — GitHub OIDC, no static key |
 | `vertex` | Ambient GCP creds — Workload Identity Federation, no key |
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
