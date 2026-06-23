@@ -142,11 +142,47 @@ def test_num_ctx_is_omitted_for_hosted_provider(monkeypatch: pytest.MonkeyPatch)
     calls = _capture_build_provider(monkeypatch)
 
     run_mod.main(
-        ["--provider", "openai", "--model", "x", "--min-recall", "0.0", "--num-ctx", "9000"]
+        [
+            "--provider",
+            "openai",
+            "--model",
+            "x",
+            "--api-key",
+            "sk-test",
+            "--min-recall",
+            "0.0",
+            "--num-ctx",
+            "9000",
+        ]
     )
 
     assert calls
     assert "num_ctx" not in calls[0]
+
+
+def test_keyless_openai_compatible_gets_placeholder_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A keyless local endpoint (LM Studio / llama.cpp / vLLM) must still reach
+    build_provider with a key — the OpenAI client litellm uses rejects an empty
+    one — so the harness resolves credentials like the CLI does."""
+    monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
+    calls = _capture_build_provider(monkeypatch)
+
+    run_mod.main(
+        [
+            "--provider",
+            "openai-compatible",
+            "--model",
+            "qwen",
+            "--api-base",
+            "http://localhost:1234/v1",
+            "--min-recall",
+            "0.0",
+        ]
+    )
+
+    assert calls
+    assert calls[0]["api_key"]  # a placeholder, not None/empty
+    assert calls[0]["api_base"] == "http://localhost:1234/v1"
 
 
 def test_max_input_tokens_threads_to_review_config(monkeypatch: pytest.MonkeyPatch) -> None:
