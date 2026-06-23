@@ -399,15 +399,34 @@ def _snap_one(
 
 
 def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
-    """Collapse findings that share a location and title, keeping the highest severity.
+    """Collapse findings at the same location (path, line, side) to a single finding.
 
-    Different titles on the same line are kept — they are distinct lenses on the
-    same code, not duplicates.
+    Multiple lenses often flag the same code with different wording — e.g. "Command
+    injection via shell=True" (security) and "Unsafe shell=True call" (correctness).
+    Posting both produces noisy duplicate comments; collapsing by location surfaces
+    one comment per code site, which is the right level of precision.
+
+    Trade-off: a line that genuinely has two independent issues (e.g. a null-deref
+    AND a type error) will lose one of them. This is an acceptable precision/recall
+    trade: line-level duplicates are far more common than two truly distinct issues
+    on the exact same changed line, and the reflection pass is the right place to
+    surface nuance — not duplicate inline comments.
+
+    Selection policy (deterministic):
+    1. Highest severity wins.
+    2. On a tie: the finding with the longer body wins (more context is more useful).
+    3. On a further tie: the first in input order wins (stable, provider-independent).
     """
-    best: dict[tuple[str, int, str, str], ReviewFinding] = {}
+    best: dict[tuple[str, int, str], ReviewFinding] = {}
     for finding in findings:
-        key = (finding.path, finding.line, finding.side, finding.title.strip().lower())
+        key = (finding.path, finding.line, finding.side)
         existing = best.get(key)
-        if existing is None or finding.severity >= existing.severity:
+        if existing is None:
+            best[key] = finding
+        elif finding.severity.rank > existing.severity.rank:
+            best[key] = finding
+        elif finding.severity.rank == existing.severity.rank and len(finding.body) > len(
+            existing.body
+        ):
             best[key] = finding
     return list(best.values())
