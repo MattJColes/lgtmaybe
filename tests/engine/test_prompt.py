@@ -422,3 +422,47 @@ def test_prompt_demands_codebase_humility_about_unseen_code() -> None:
 def test_humility_rule_present_in_custom_lens_prompt() -> None:
     lens = CustomLens(id="x", instructions="flag foo")
     assert "cannot see" in build_lens_prompt(lens).lower()
+
+
+def test_prompt_warns_cross_hunk_is_one_file_not_duplicate() -> None:
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category).lower()
+        assert "windows into the same file" in prompt
+        assert "defined twice" in prompt
+
+
+def test_prompt_guards_whole_file_symbol_claims() -> None:
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category).lower()
+        assert "undefined" in prompt
+        assert "unless the diff" in prompt
+        assert "hedge" in prompt
+
+
+def test_prompt_guards_unused_import_inside_functions() -> None:
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category).lower()
+        assert "unused" in prompt
+        assert "depends(" in prompt
+
+
+def test_prompt_demands_library_and_cloud_semantics_humility() -> None:
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category).lower()
+        assert "sdk" in prompt
+        assert "encoding" in prompt
+        assert "iam" in prompt or "access policy" in prompt
+        assert "index" in prompt
+
+
+def test_prompt_does_not_predict_test_runtime_failures() -> None:
+    prompt = build_system_prompt(ReviewCategory.tests).lower()
+    assert "cannot run the suite" in prompt
+    assert "fixtures" in prompt
+    assert "predict" in prompt
+
+
+def test_prompt_intent_fulfilment_is_not_a_defect() -> None:
+    prompt = build_system_prompt(ReviewCategory.intent).lower()
+    assert "fulfils the stated intent" in prompt or "fulfils the intent" in prompt
+    assert "deliberate removal" in prompt
