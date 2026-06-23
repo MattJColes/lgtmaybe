@@ -163,7 +163,7 @@ def generate() -> str:
     # ProviderResult
     sections.append("## ProviderResult\n")
     sections.append(
-        "The normalised return value of one LLM completion, including usage and cost.\n"
+        "The normalised return value of one LLM completion, including token usage.\n"
     )
     sections.append(_render_schema_table(provider_result_schema))
     sections.append("")

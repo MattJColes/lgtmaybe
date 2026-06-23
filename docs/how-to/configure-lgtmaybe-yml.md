@@ -62,7 +62,7 @@ suppressed. Ordered low to high: `info`, `low`, `medium`, `high`, `critical`.
 min_severity: medium   # suppresses info and low findings
 ```
 
-Default: `info` (all findings reported).
+Default: `low` (suppresses only `info` findings).
 
 ### include_paths / exclude_paths
 
