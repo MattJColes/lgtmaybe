@@ -9,6 +9,7 @@ litellm model-string conventions:
   azure      → azure/<model>   (+ api_base = resource endpoint)
   ollama     → ollama/<model>  (+ api_base)
   openai-compatible → openai/<model>  (+ api_base = custom endpoint)
+  zai        → zai/<model>     (GLM / Zhipu AI; optional api_base override)
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ _PREFIXES: dict[Provider, str] = {
     # OpenAI-compatible servers (DeepSeek, llama.cpp, LM Studio, vLLM) ride the
     # openai route; the custom endpoint comes through api_base.
     Provider.openai_compatible: "openai",
+    # GLM / Zhipu AI on litellm's native zai/ route (e.g. zai/glm-4.6).
+    Provider.zai: "zai",
 }
 
 # Default per-request timeout (seconds) when the caller doesn't set one. Local

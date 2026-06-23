@@ -33,7 +33,7 @@ from lgtmaybe.config.loader import load_config
     "--provider",
     default=None,
     help="LLM provider (openai, anthropic, bedrock, vertex, azure, ollama, "
-    "openrouter, openai-compatible)",
+    "openrouter, zai, openai-compatible)",
 )
 @click.option("--model", default=None, help="Model name understood by the chosen provider")
 @click.option(
@@ -53,7 +53,9 @@ from lgtmaybe.config.loader import load_config
     help="API base URL (ollama: http://localhost:11434; "
     "azure: https://<resource>.openai.azure.com; "
     "openai-compatible: any OpenAI /v1 endpoint, e.g. https://api.deepseek.com/v1 "
-    "or http://localhost:8000/v1)",
+    "or http://localhost:8000/v1; "
+    "zai: optional override for the China / coding-plan GLM endpoint, "
+    "e.g. https://open.bigmodel.cn/api/paas/v4)",
 )
 @click.option(
     "--min-severity",
