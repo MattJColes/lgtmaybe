@@ -1,0 +1,40 @@
+# Copy into your repo at .github/workflows/lgtmaybe.yml
+#
+# Z.AI / Zhipu AI GLM (key-based). Add a ZAI_API_KEY repo secret.
+name: lgtmaybe (zai)
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Only trusted authors (repo owner / org member / collaborator) can trigger a
+    # review, so fork PRs and drive-by /ask or /review comments from strangers
+    # cannot spend your provider budget. A maintainer can still opt-in to an
+    # external PR by commenting /review on it. (Comments not on a PR are skipped.)
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: zai
+          model: glm-4.6
+          api_key: ${{ secrets.ZAI_API_KEY }}
+          # Optional: point at the China / coding-plan endpoint instead of the
+          # international default.
+          # api_base: https://open.bigmodel.cn/api/paas/v4

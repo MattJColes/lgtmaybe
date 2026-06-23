@@ -58,7 +58,8 @@
         "vertex",
         "azure",
         "ollama",
-        "openai-compatible"
+        "openai-compatible",
+        "zai"
       ],
       "title": "Provider",
       "type": "string"

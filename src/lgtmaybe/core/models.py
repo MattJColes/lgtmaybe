@@ -78,6 +78,9 @@ class Provider(StrEnum):
     # Any server speaking the OpenAI /v1 wire format, reached via --api-base:
     # DeepSeek's API, llama.cpp, LM Studio, vLLM, and other proxies. Key optional.
     openai_compatible = "openai-compatible"
+    # GLM / Zhipu AI via litellm's native zai/ route; API-key auth (ZAI_API_KEY),
+    # optional --api-base override for the China / coding-plan endpoints.
+    zai = "zai"
 
 
 class _Strict(BaseModel):
