@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.4.1...lgtmaybe-v0.5.0) (2026-06-23)
+
+
+### Features
+
+* **engine:** collapse same-location findings regardless of title wording ([#123](https://github.com/MattJColes/lgtmaybe/issues/123)) ([bfd2031](https://github.com/MattJColes/lgtmaybe/commit/bfd2031fe0c15104381c12bec97ca4cd2e14c3b6))
+
 ## [0.4.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.4.0...lgtmaybe-v0.4.1) (2026-06-22)
 
 
