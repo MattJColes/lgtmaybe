@@ -60,12 +60,16 @@ nav:
   - Tutorial:
       - Getting started: tutorial/getting-started.md
   - How-to:
-      - Run locally with ollama: how-to/run-locally-with-ollama.md
-      - Use a custom OpenAI-compatible endpoint: how-to/use-a-custom-openai-compatible-endpoint.md
-      - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
+      - Review with OpenAI: how-to/review-with-openai.md
+      - Review with Claude (Anthropic): how-to/review-with-anthropic.md
+      - Review with OpenRouter: how-to/review-with-openrouter.md
+      - Review with z.ai (GLM): how-to/review-with-zai.md
       - Review with Bedrock OIDC: how-to/review-with-bedrock-oidc.md
       - Review with Vertex WIF: how-to/review-with-vertex-wif.md
       - Review with Azure OpenAI: how-to/review-with-azure.md
+      - Run locally with ollama: how-to/run-locally-with-ollama.md
+      - Local models & other OpenAI providers: how-to/use-a-custom-openai-compatible-endpoint.md
+      - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
       - Use as a GitHub Action: how-to/use-as-github-action.md
       - Configure .lgtmaybe.yml: how-to/configure-lgtmaybe-yml.md
       - Add a custom review lens: how-to/add-a-custom-lens.md
