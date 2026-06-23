@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.6.1...lgtmaybe-v0.6.2) (2026-06-23)
+
+
+### Documentation
+
+* add per-provider how-to guides and reframe the OpenAI-compatible guide ([#133](https://github.com/MattJColes/lgtmaybe/issues/133)) ([14c5470](https://github.com/MattJColes/lgtmaybe/commit/14c5470c56e53bfdf9b1ae279641a98d397bb30a))
+
 ## [0.6.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.6.0...lgtmaybe-v0.6.1) (2026-06-23)
 
 
