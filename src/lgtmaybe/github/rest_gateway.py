@@ -60,8 +60,9 @@ _ZWSP = "​"
 
 
 def _defang_fences(text: str) -> str:
-    """Neutralise embedded triple-backticks so a model suggestion can't break out
-    of the ```suggestion fence and inject Markdown (e.g. a phishing link) below it.
+    """Neutralise embedded triple-backticks in model-supplied text (title, body,
+    suggestion) so it can't break out of a Markdown fence and inject content
+    (e.g. a phishing link) into the rendered comment.
 
     The diff is attacker-controlled on a fork PR, so a prompt injection that
     survives the guard could steer the model into fence-breaking output. We insert
@@ -89,7 +90,10 @@ def _render_demoted(demoted: list[ReviewFinding]) -> str:
         "",
     ]
     for f in demoted:
-        lines.append(f"- **[{f.severity.upper()}] {f.title}** (`{f.path}`) — {f.body}")
+        lines.append(
+            f"- **[{f.severity.upper()}] {_defang_fences(f.title)}** "
+            f"(`{f.path}`) — {_defang_fences(f.body)}"
+        )
     return "\n".join(lines)
 
 
@@ -479,7 +483,8 @@ class RestGitHubGateway(GitHubGateway):
                 "path": f.path,
                 "line": f.line,
                 "side": f.side,
-                "body": f"**[{f.severity.upper()}] {f.title}**\n\n{f.body}",
+                "body": f"**[{f.severity.upper()}] {_defang_fences(f.title)}**"
+                f"\n\n{_defang_fences(f.body)}",
             }
             if f.suggestion is not None:
                 comment["body"] += f"\n\n```suggestion\n{_defang_fences(f.suggestion)}\n```"
