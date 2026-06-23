@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.6.0...lgtmaybe-v0.6.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* **diffparse:** ignore "No newline at end of file" markers when anchoring ([#128](https://github.com/MattJColes/lgtmaybe/issues/128)) ([94a03e3](https://github.com/MattJColes/lgtmaybe/commit/94a03e3a8f44172a3d72197eb6f5e474d7a97c05))
+* **github:** defang triple-backticks in finding title and body ([#132](https://github.com/MattJColes/lgtmaybe/issues/132)) ([0496939](https://github.com/MattJColes/lgtmaybe/commit/0496939f530044699f752a5c98c4f9bed2effe73))
+* **models:** coerce model severity case so mixed-case findings aren't dropped ([#131](https://github.com/MattJColes/lgtmaybe/issues/131)) ([82c9078](https://github.com/MattJColes/lgtmaybe/commit/82c9078b02b625de36ccc5c575863beea02234a3))
+* **redact:** bound scheme length to stop quadratic connection-string match ([#130](https://github.com/MattJColes/lgtmaybe/issues/130)) ([4701287](https://github.com/MattJColes/lgtmaybe/commit/4701287f518acc8635aac6e296dfd0199d97ed17))
+
+
+### Documentation
+
+* correct stale defaults, dedupe key, and release/redaction descriptions ([#127](https://github.com/MattJColes/lgtmaybe/issues/127)) ([266137f](https://github.com/MattJColes/lgtmaybe/commit/266137fe4819b4c18f4e744cf906462ef40b14aa))
+
 ## [0.6.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.5.0...lgtmaybe-v0.6.0) (2026-06-23)
 
 
