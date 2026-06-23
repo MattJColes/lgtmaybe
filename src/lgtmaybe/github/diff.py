@@ -74,6 +74,11 @@ def build_commentable_lines(diff: str) -> CommentableLines:
         if not in_hunk:
             continue
 
+        if raw_line.startswith("\\"):
+            # "\ No newline at end of file" — a diff marker, not a real line. It
+            # must not advance either counter or every later line shifts by one.
+            continue
+
         if raw_line.startswith("-"):
             # Deleted line: present on the old side only.
             commentable.add((current_file, old_line, "LEFT"))

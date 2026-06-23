@@ -79,7 +79,7 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
    instead of being posted on a guessed line.
 
 5. **merge/dedupe** — findings from every lens are merged and de-duplicated
-   (`_dedupe`, keyed on path/line/side/title).
+   (`_dedupe`, keyed on path/line/side).
 
 6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings and drops the ones it marks low-confidence

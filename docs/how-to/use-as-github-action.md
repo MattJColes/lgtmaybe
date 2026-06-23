@@ -103,6 +103,13 @@ Swap the `provider`, `model`, and `api_key` inputs:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
+
+# zai (GLM / Zhipu AI)
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: zai
+    model: glm-4.6
+    api_key: ${{ secrets.ZAI_API_KEY }}
 ```
 
 For these, the one-time setup is just: generate an API key in the provider's
@@ -124,7 +131,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 
 | Input | Default | Description |
 |---|---|---|
-| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
+| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
 | `model` | — | Model identifier for the chosen provider |
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |

@@ -6,7 +6,7 @@
 
 </div>
 
-Provider-agnostic PR reviewer. Six hosted providers, local ollama, and any
+Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
 posts inline comments and a summary straight onto the pull request.
 
@@ -54,6 +54,7 @@ before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
 | `openai` | `OPENAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
+| `zai` | `ZAI_API_KEY` — GLM / Zhipu AI; optional `--api-base` for the China / coding-plan endpoint |
 | `bedrock` | Ambient AWS creds — GitHub OIDC, no static key |
 | `vertex` | Ambient GCP creds — Workload Identity Federation, no key |
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |

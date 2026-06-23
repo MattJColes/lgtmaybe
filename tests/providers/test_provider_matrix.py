@@ -32,6 +32,8 @@ EXPECTED_PREFIX: dict[Provider, str] = {
     Provider.ollama: "ollama/",
     # OpenAI-compatible servers ride the openai route with a custom api_base.
     Provider.openai_compatible: "openai/",
+    # GLM / Zhipu AI rides litellm's native zai/ route.
+    Provider.zai: "zai/",
 }
 
 # Providers that authenticate with an API key, and the env var that supplies it.
@@ -39,6 +41,7 @@ KEY_PROVIDERS: dict[Provider, str] = {
     Provider.openai: "OPENAI_API_KEY",
     Provider.anthropic: "ANTHROPIC_API_KEY",
     Provider.openrouter: "OPENROUTER_API_KEY",
+    Provider.zai: "ZAI_API_KEY",
 }
 # Providers that authenticate with ambient cloud creds (keyless).
 CLOUD_PROVIDERS = (Provider.bedrock, Provider.vertex)
