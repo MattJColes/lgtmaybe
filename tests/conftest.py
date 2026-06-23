@@ -19,6 +19,9 @@ _PROVIDER_CRED_ENV = (
     "ANTHROPIC_API_KEY",
     "OPENROUTER_API_KEY",
     "LGTMAYBE_API_KEY",
+    # GLM / Zhipu AI (zai)
+    "ZAI_API_KEY",
+    "ZAI_API_BASE",
     # Ambient AWS creds (bedrock)
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
