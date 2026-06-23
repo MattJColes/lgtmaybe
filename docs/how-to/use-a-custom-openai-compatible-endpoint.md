@@ -1,12 +1,33 @@
-# Use a Custom OpenAI-Compatible Endpoint
+# Local Models & other OpenAI providers
 
-Lots of model servers speak the OpenAI `/v1` wire format: [DeepSeek's API][deepseek],
-[llama.cpp][llamacpp]'s server, [LM Studio][lmstudio], [vLLM][vllm], and many
-hosted proxies. The `openai-compatible` provider points lgtmaybe at any of them —
-you supply the base URL, and (if the server wants one) a key.
+Lots of model servers speak the OpenAI `/v1` wire format: local and self-hosted
+runtimes like [vLLM][vllm], [llama.cpp][llamacpp], and [LM Studio][lmstudio], plus
+hosted APIs like [DeepSeek][deepseek] and many proxies. The `openai-compatible`
+provider points lgtmaybe at any of them — you supply the base URL, and (if the
+server wants one) a key.
 
 This is the answer to "I don't want to be limited to the built-in provider list":
 anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag.
+
+> Some endpoints that *could* run through here have a first-class provider
+> instead — use it for less setup: [z.ai / GLM](review-with-zai.md) (`zai`) and
+> [ollama](run-locally-with-ollama.md) (`ollama`).
+
+## Local models at a glance
+
+Run a model on your own hardware — zero cost, no key, nothing leaves the machine:
+
+| Runtime | Provider | Key needed? | See |
+|---|---|---|---|
+| [ollama][ollama] | `ollama` (native) | No | [Run locally with ollama](run-locally-with-ollama.md) |
+| [vLLM][vllm] | `openai-compatible` | No | [below](#vllm-local-or-self-hosted-keyless) |
+| [llama.cpp][llamacpp] | `openai-compatible` | No | [below](#llamacpp-local-keyless) |
+| [LM Studio][lmstudio] | `openai-compatible` | No | [below](#lm-studio-local-keyless) |
+
+ollama has its own first-class `--provider ollama` (it's the easiest local
+start), so it gets its [own guide](run-locally-with-ollama.md). vLLM, llama.cpp,
+and LM Studio are reached through `openai-compatible` and the `--api-base` of
+their local server, as shown below.
 
 ## How it works
 
@@ -138,3 +159,4 @@ Persist it as `structured_output: false` in `.lgtmaybe.yml`, or set the
 [llamacpp]: https://github.com/ggml-org/llama.cpp
 [lmstudio]: https://lmstudio.ai/
 [vllm]: https://docs.vllm.ai/
+[ollama]: https://ollama.com/
