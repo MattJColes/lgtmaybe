@@ -172,7 +172,7 @@ pattern, event bus, plugin framework.
      and the engine runs each category as its own **concurrent** `provider.complete`
      call per batch (a `ThreadPoolExecutor` over the sync port — concurrent for
      cloud, serial for ollama), then **merges and de-dupes** the findings
-     (`engine._dedupe`, keyed on path/line/side/title) before reflection.
+     (`engine._dedupe`, keyed on path/line/side) before reflection.
      `ReviewConfig.categories` selects the lenses (default: all nine).
    - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
      their own lenses via `ReviewConfig.extra_lenses` (a `CustomLens`: `id` +

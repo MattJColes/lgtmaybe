@@ -59,7 +59,7 @@ latency:
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
 - `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
 - `categories` (default all nine) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
-- `min_severity` (default `info`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
+- `min_severity` (default `low`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.
 

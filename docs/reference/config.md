@@ -76,7 +76,7 @@ The structured output the model must return for each inline comment. All fields 
 
 ## ProviderResult
 
-The normalised return value of one LLM completion, including usage and cost.
+The normalised return value of one LLM completion, including token usage.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
