@@ -81,3 +81,24 @@ class TestChangedLineIndex:
         index = changed_line_index(_TWO_FILE_DIFF)
         right = index[("src/a.py", "RIGHT")]
         assert all(text != "x = 1" and text != "z = 3" for _, text in right)
+
+    def test_no_newline_marker_does_not_shift_later_lines(self):
+        from lgtmaybe.core.diffparse import changed_line_index
+
+        # git emits "\ No newline at end of file" after a +/- line for files
+        # without a trailing newline. It must not advance the line counters.
+        diff = (
+            "diff --git a/f.txt b/f.txt\n"
+            "--- a/f.txt\n"
+            "+++ b/f.txt\n"
+            "@@ -1,2 +1,2 @@\n"
+            " context line\n"
+            "-old line\n"
+            "\\ No newline at end of file\n"
+            "+new line\n"
+            "\\ No newline at end of file\n"
+        )
+        index = changed_line_index(diff)
+        # context is line 1, so the added line is the new-file line 2 (not 3).
+        assert index[("f.txt", "RIGHT")] == [(2, "new line")]
+        assert index[("f.txt", "LEFT")] == [(2, "old line")]

@@ -199,3 +199,18 @@ def test_azure_storage_account_key_redacted() -> None:
     assert REDACTED_PLACEHOLDER in result
     # Non-secret structure stays readable for the reviewer.
     assert "AccountName=devstore" in result
+
+
+def test_connection_string_pattern_is_not_quadratic() -> None:
+    """A long credential-free line must not blow up the connection-string regex.
+
+    The diff is attacker-controlled on a fork PR; with an unbounded scheme the
+    pattern was O(n^2) (~18s for 100k chars), stalling every review. Bounding the
+    scheme keeps it linear. A generous bound stays robust on a slow CI box.
+    """
+    import time
+
+    pathological = "x://" + "a" * 200_000  # scheme-like prefix, no credentials
+    start = time.perf_counter()
+    redact(pathological)
+    assert time.perf_counter() - start < 2.0

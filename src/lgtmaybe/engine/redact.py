@@ -63,8 +63,11 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
         r"(?i)[\"']?authorization[\"']?\s*[=:]\s*[\"']?(?:bearer|basic)\s+"
         r"(?P<secret>[A-Za-z0-9\-._~+/=]{16,})"
     ),
-    # Credentials embedded in connection-string URLs: scheme://user:secret@host
-    re.compile(r"(?i)[a-z][a-z0-9+.\-]*://[^:/?#\s]+:(?P<secret>[^@/?#\s]{4,})@"),
+    # Credentials embedded in connection-string URLs: scheme://user:secret@host.
+    # The scheme length is bounded (schemes are short) so the leading character
+    # class can't rescan a long run at every start offset — an unbounded `*` here
+    # is quadratic (ReDoS) on a long credential-free line, e.g. a base64 blob.
+    re.compile(r"(?i)[a-z][a-z0-9+.\-]{0,31}://[^:/?#\s]+:(?P<secret>[^@/?#\s]{4,})@"),
     # Azure storage / Cosmos connection strings: ...;AccountKey=<base64>;...
     # Only the key value is scrubbed; AccountName/EndpointSuffix stay readable.
     re.compile(r"(?i)(?:Account|Shared(?:Access)?)Key\s*=\s*(?P<secret>[A-Za-z0-9/+]{32,}={0,2})"),
