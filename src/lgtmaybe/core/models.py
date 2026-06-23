@@ -105,6 +105,20 @@ class ReviewFinding(_Strict):
     # finding to the review summary rather than posting it inline on a wrong line.
     anchored: bool = True
 
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _normalise_severity(cls, value: object) -> object:
+        """Accept model-supplied severity in any case ("High", "MEDIUM", " low ").
+
+        Models routinely capitalise severities. The Severity enum is lower-case,
+        so an un-coerced "High" fails validation — and because findings are parsed
+        as a batch, one mis-cased item would drop its valid siblings. Lower-casing
+        here keeps the whole batch.
+        """
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
 
 _BUILTIN_LENS_IDS: frozenset[str] = frozenset(c.value for c in ReviewCategory)
 
