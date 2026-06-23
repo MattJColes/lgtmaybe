@@ -257,3 +257,17 @@ def test_json_null_literal_raises_parse_error() -> None:
     """A literal `null` is neither an array nor an object of findings."""
     with pytest.raises(ParseError):
         parse_findings("null")
+
+
+def test_mixed_case_severity_does_not_drop_sibling_findings() -> None:
+    """A capitalised severity must coerce, not fail and lose its batch siblings.
+
+    The batch is validated in one comprehension, so before severity coercion a
+    single "High" item raised and the parser recovered only findings that happened
+    to parse as standalone objects — silently losing the rest.
+    """
+    miscased = dict(_VALID_FINDING, path="a.py", severity="High")
+    valid = dict(_VALID_FINDING, path="b.py", severity="critical")
+    result = parse_findings(_json_findings([miscased, valid]))
+    assert {f.path for f in result} == {"a.py", "b.py"}
+    assert result[0].severity == Severity.high

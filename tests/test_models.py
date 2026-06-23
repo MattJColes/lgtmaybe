@@ -68,6 +68,14 @@ def test_severity_is_ordered() -> None:
     assert not (Severity.low >= Severity.high)
 
 
+def test_review_finding_severity_is_case_insensitive() -> None:
+    """Models emit "High"/"MEDIUM"; the finding coerces case rather than failing."""
+    cases = [("High", Severity.high), ("MEDIUM", Severity.medium), (" low ", Severity.low)]
+    for raw, expected in cases:
+        finding = ReviewFinding(path="x.py", line=1, severity=raw, title="t", body="b")
+        assert finding.severity is expected
+
+
 def test_review_config_accepts_api_base() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", api_base="http://localhost:11434")
     assert cfg.api_base == "http://localhost:11434"
