@@ -82,6 +82,10 @@ def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]
             continue
         if not in_hunk:
             continue
+        if raw_line.startswith("\\"):
+            # "\ No newline at end of file" — a diff marker, not a real line. It
+            # must not advance either counter or every later line shifts by one.
+            continue
         if raw_line.startswith("-"):
             index.setdefault((current_file, "LEFT"), []).append((old_line, raw_line[1:]))
             old_line += 1
