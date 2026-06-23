@@ -65,8 +65,8 @@ names). Recognised formats include:
 For credential assignments only the value is replaced — the key name or URL host
 stays readable so the reviewer can still reason about the change.
 
-This happens inside the **compress** stage, before the prompt is built, so
-redacted values never reach the LLM or appear in logs.
+This happens as the **first** pipeline stage, before the diff is compressed or
+the prompt is built, so redacted values never reach the LLM or appear in logs.
 
 Redaction is a best-effort defence. Do not commit real secrets to your
 repository and rely on this alone.

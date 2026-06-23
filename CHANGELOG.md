@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.5.0...lgtmaybe-v0.6.0) (2026-06-23)
+
+
+### Features
+
+* **providers:** add first-class zai (GLM / Zhipu AI) provider ([#125](https://github.com/MattJColes/lgtmaybe/issues/125)) ([f103e4f](https://github.com/MattJColes/lgtmaybe/commit/f103e4f1571173dae90eeec201de4d1211f35b30))
+
 ## [0.5.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.4.1...lgtmaybe-v0.5.0) (2026-06-23)
 
 

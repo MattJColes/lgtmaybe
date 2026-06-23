@@ -15,7 +15,7 @@ variants:
   auth, then runs a GHCR image via the `action` entrypoint
 
 **The wedge:** first-class **Bedrock + Vertex + Azure with keyless OIDC/WIF**.
-Six hosted providers (plus local ollama), one flag, no keys in secrets for
+Seven hosted providers (plus local ollama), one flag, no keys in secrets for
 cloud. We win on auth + simplicity. An `openai-compatible` provider is the escape
 hatch for anything else that speaks the OpenAI `/v1` wire format (DeepSeek's API,
 llama.cpp, LM Studio, vLLM) — you bring the `--api-base`, the key is optional —
@@ -57,6 +57,7 @@ so the provider list is never a cage.
 | Provider               | Auth                                                              |
 |------------------------|------------------------------------------------------------------|
 | openai / openrouter / anthropic | API key from `secrets.*` / env / `--api-key`            |
+| zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route. Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
 | bedrock                | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
 | vertex                 | ambient GCP creds (WIF, or local ADC)                            |
 | azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) → else `AZURE_API_KEY` / `--api-key` |
@@ -171,7 +172,7 @@ pattern, event bus, plugin framework.
      and the engine runs each category as its own **concurrent** `provider.complete`
      call per batch (a `ThreadPoolExecutor` over the sync port — concurrent for
      cloud, serial for ollama), then **merges and de-dupes** the findings
-     (`engine._dedupe`, keyed on path/line/side/title) before reflection.
+     (`engine._dedupe`, keyed on path/line/side) before reflection.
      `ReviewConfig.categories` selects the lenses (default: all nine).
    - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
      their own lenses via `ReviewConfig.extra_lenses` (a `CustomLens`: `id` +
