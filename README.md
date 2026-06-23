@@ -118,17 +118,17 @@ up the [GitHub Action](#use-as-a-github-action). See
 
 ## Providers
 
-| Provider | Auth |
-|---|---|
-| `openai` | `OPENAI_API_KEY` |
-| `anthropic` | `ANTHROPIC_API_KEY` |
-| `openrouter` | `OPENROUTER_API_KEY` |
-| `zai` | `ZAI_API_KEY` — GLM / Zhipu AI (`glm-4.6`, `glm-4.7`, `glm-4.5-air`, …; newer `glm-5.x` too). Optional `--api-base` for the China / coding-plan endpoint |
-| `bedrock` | Ambient AWS creds — GitHub OIDC, no static key |
-| `vertex` | Ambient GCP creds — Workload Identity Federation, no key |
-| `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
-| `ollama` | None — local only, zero cost |
-| `openai-compatible` | Any OpenAI `/v1` endpoint via `--api-base` (DeepSeek, llama.cpp, LM Studio, vLLM). Key optional — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for local servers |
+| Provider | Auth | Guide |
+|---|---|---|
+| `openai` | `OPENAI_API_KEY` | [OpenAI](docs/how-to/review-with-openai.md) |
+| `anthropic` | `ANTHROPIC_API_KEY` | [Claude](docs/how-to/review-with-anthropic.md) |
+| `openrouter` | `OPENROUTER_API_KEY` | [OpenRouter](docs/how-to/review-with-openrouter.md) |
+| `zai` | `ZAI_API_KEY` — GLM / Zhipu AI (`glm-4.6`, `glm-4.7`, `glm-4.5-air`, …; newer `glm-5.x` too). Optional `--api-base` for the China / coding-plan endpoint | [z.ai (GLM)](docs/how-to/review-with-zai.md) |
+| `bedrock` | Ambient AWS creds — GitHub OIDC, no static key | [Bedrock](docs/how-to/review-with-bedrock-oidc.md) |
+| `vertex` | Ambient GCP creds — Workload Identity Federation, no key | [Vertex](docs/how-to/review-with-vertex-wif.md) |
+| `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint | [Azure](docs/how-to/review-with-azure.md) |
+| `ollama` | None — local only, zero cost | [ollama](docs/how-to/run-locally-with-ollama.md) |
+| `openai-compatible` | Any OpenAI `/v1` endpoint via `--api-base` (DeepSeek, llama.cpp, LM Studio, vLLM). Key optional — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for local servers | [Local & OpenAI-compatible](docs/how-to/use-a-custom-openai-compatible-endpoint.md) |
 
 ## Documentation
 
@@ -141,11 +141,15 @@ Markdown sources below.
 
 **How-to guides** — task recipes
 
-- [Run locally with ollama](docs/how-to/run-locally-with-ollama.md)
-- [Use a custom OpenAI-compatible endpoint](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
+- [Review with OpenAI](docs/how-to/review-with-openai.md)
+- [Review with Claude (Anthropic)](docs/how-to/review-with-anthropic.md)
+- [Review with OpenRouter](docs/how-to/review-with-openrouter.md)
+- [Review with z.ai (GLM)](docs/how-to/review-with-zai.md)
 - [Review with Bedrock OIDC](docs/how-to/review-with-bedrock-oidc.md)
 - [Review with Vertex WIF](docs/how-to/review-with-vertex-wif.md)
 - [Review with Azure OpenAI](docs/how-to/review-with-azure.md)
+- [Run locally with ollama](docs/how-to/run-locally-with-ollama.md)
+- [Local models & other OpenAI providers](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
 - [Use as a GitHub Action](docs/how-to/use-as-github-action.md)
 - [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
