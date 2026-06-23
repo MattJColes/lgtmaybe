@@ -129,6 +129,36 @@ def test_review_config_unanchored_min_severity_defaults_to_high() -> None:
     assert cfg.unanchored_min_severity is Severity.high
 
 
+def test_review_finding_broad_defaults_false() -> None:
+    # `broad` is engine-set (like `anchored`); a fresh finding is not broad.
+    f = ReviewFinding(path="x.py", line=1, severity=Severity.high, title="t", body="b")
+    assert f.broad is False
+    broad = f.model_copy(update={"broad": True})
+    assert ReviewFinding.model_validate_json(broad.model_dump_json()).broad is True
+
+
+def test_review_config_reflect_model_defaults_none() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.reflect_model is None
+
+
+def test_review_config_accepts_reflect_model() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect_model="big-judge")
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.reflect_model == "big-judge"
+
+
+def test_review_config_ignore_fingerprints_defaults_empty() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.ignore_fingerprints == []
+
+
+def test_review_config_accepts_ignore_fingerprints() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", ignore_fingerprints=["abc123"])
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.ignore_fingerprints == ["abc123"]
+
+
 def test_review_config_temperature_defaults_to_zero() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     assert cfg.temperature == 0.0

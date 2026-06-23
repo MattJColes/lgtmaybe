@@ -216,12 +216,7 @@ class LLMReviewEngine(ReviewEngine):
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a
         #    low-confidence guess, so surface it only when it's high/critical.
-        filtered = [
-            f
-            for f in all_findings
-            if f.severity >= cfg.min_severity
-            and (f.anchored or f.severity >= cfg.unanchored_min_severity)
-        ]
+        filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
 
         plural = "s" if len(filtered) != 1 else ""
         summary_line = (
@@ -326,6 +321,19 @@ def _error_reason(exc: BaseException) -> str:
     text = " ".join(str(exc).split())
     reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     return reason[:200]
+
+
+def _passes_severity_floor(finding: ReviewFinding, cfg: ReviewConfig) -> bool:
+    """Whether a finding clears the severity floors and may be surfaced.
+
+    Two floors: the plain ``min_severity`` for every finding, plus the stricter
+    ``unanchored_min_severity`` for ones the engine could not anchor (a failed
+    anchor is a low-confidence guess). Extracted so the on-demand replay benchmark
+    asserts against the exact predicate production uses — no drift.
+    """
+    return finding.severity >= cfg.min_severity and (
+        finding.anchored or finding.severity >= cfg.unanchored_min_severity
+    )
 
 
 def _snap_findings(findings: list[ReviewFinding], diff: str) -> list[ReviewFinding]:

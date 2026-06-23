@@ -105,6 +105,11 @@
           "title": "Body",
           "type": "string"
         },
+        "broad": {
+          "default": false,
+          "title": "Broad",
+          "type": "boolean"
+        },
         "line": {
           "title": "Line",
           "type": "integer"
@@ -217,6 +222,13 @@
       "title": "Extra Lenses",
       "type": "array"
     },
+    "ignore_fingerprints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Ignore Fingerprints",
+      "type": "array"
+    },
     "include_paths": {
       "items": {
         "type": "string"
@@ -266,6 +278,18 @@
       "default": true,
       "title": "Reflect",
       "type": "boolean"
+    },
+    "reflect_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reflect Model"
     },
     "resolve_fixed": {
       "default": true,
