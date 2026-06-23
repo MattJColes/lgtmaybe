@@ -218,3 +218,30 @@ def test_added_line_after_deletion_anchors_correctly() -> None:
     assert ("src/svc.py", 2, "LEFT") in index
     assert ("src/svc.py", 2, "RIGHT") in index
     assert ("src/svc.py", 3, "RIGHT") in index
+
+
+_NO_NEWLINE_DIFF = """\
+diff --git a/f.txt b/f.txt
+index 0000001..0000002 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,2 @@
+ context line
+-old line
+\\ No newline at end of file
++new line
+\\ No newline at end of file
+"""
+
+
+def test_no_newline_marker_does_not_shift_commentable_lines() -> None:
+    """The "\\ No newline at end of file" marker is not a real line.
+
+    If it advanced the line counters, the added line would be commentable at the
+    non-existent new-file line 3 instead of its true line 2, and GitHub would
+    reject the inline comment.
+    """
+    index = build_commentable_lines(_NO_NEWLINE_DIFF)
+    assert ("f.txt", 2, "RIGHT") in index
+    assert ("f.txt", 3, "RIGHT") not in index
+    assert ("f.txt", 2, "LEFT") in index
