@@ -44,7 +44,27 @@ class Fixture(BaseModel):
 
 
 class FixtureScore(BaseModel):
-    """The outcome of scoring one fixture's findings against its manifest."""
+    """The outcome of scoring one fixture's findings against its manifest.
+
+    Precision answers the inverse of recall — *of the findings the reviewer made
+    near issues we catalogued, how many were right?* It is deliberately scoped to
+    "adjudicable" findings:
+
+    - A finding is **adjudicable** if it lands within the line tolerance
+      (:data:`_LINE_TOLERANCE`) of SOME catalogued line — an expected OR a
+      forbidden one. A finding far from every catalogued line is **excluded** from
+      precision (neither credited nor penalised): the fixture didn't enumerate
+      that spot, so it may well be a legit extra catch, and punishing it would
+      discourage real signal.
+    - ``forbidden_count`` is how many findings fired a forbidden (cross-file
+      false-positive) trap; ``unexpected_count`` is how many adjudicable findings
+      matched neither an expected nor a forbidden entry — wrong findings on a line
+      we DO know about.
+    - ``precision = 1 - (forbidden_count + unexpected_count) / adjudicable_count``,
+      clamped to ``[0, 1]``; it is ``1.0`` when ``adjudicable_count == 0`` (nothing
+      to adjudicate). Precision is **reported, not gated** — ``run.py::_gate``
+      keeps its parse/recall/clean bars unchanged.
+    """
 
     name: str
     parsed_ok: bool
@@ -54,12 +74,30 @@ class FixtureScore(BaseModel):
     missed: list[str]
     anchored_count: int = 0
     false_positives: list[str] = []
+    # Adjudication counts (see class docstring). adjudicable = findings near some
+    # catalogued line; forbidden = of those, ones that fired a forbidden trap;
+    # unexpected = of those, ones matching neither expected nor forbidden.
+    adjudicable_count: int = 0
+    forbidden_count: int = 0
+    unexpected_count: int = 0
 
     @property
     def recall(self) -> float:
         if self.expected_count == 0:
             return 1.0
         return self.matched_count / self.expected_count
+
+    @property
+    def precision(self) -> float:
+        """Share of adjudicable findings that were right (1.0 when none adjudicable).
+
+        ``1 - (forbidden + unexpected) / adjudicable``, clamped to ``[0, 1]``. Far-off
+        findings are excluded, so an extra catch the fixture didn't list can't lower it.
+        """
+        if self.adjudicable_count == 0:
+            return 1.0
+        wrong = self.forbidden_count + self.unexpected_count
+        return max(0.0, min(1.0, 1.0 - wrong / self.adjudicable_count))
 
     @property
     def clean(self) -> bool:
@@ -77,6 +115,16 @@ class FixtureScore(BaseModel):
         if self.findings_count == 0:
             return 1.0
         return self.anchored_count / self.findings_count
+
+
+def _near(finding: ReviewFinding, catalogued: list[ExpectedFinding]) -> bool:
+    """True if *finding* lands within the line tolerance of any *catalogued* line.
+
+    Line-only (keywords/severity ignored): this decides whether a finding is on a
+    spot the fixture knows about — and so is *adjudicable* for precision — not
+    whether it's a correct match.
+    """
+    return any(abs(finding.line - c.line) <= _LINE_TOLERANCE for c in catalogued)
 
 
 def _matches(finding: ReviewFinding, expected: ExpectedFinding) -> bool:
@@ -114,9 +162,23 @@ def score_fixture(
             matched += 1
         else:
             missed.append(exp.label)
-    false_positives = [
-        fb.label for fb in (forbidden or []) if any(_matches(f, fb) for f in findings)
-    ]
+    forbidden = forbidden or []
+    false_positives = [fb.label for fb in forbidden if any(_matches(f, fb) for f in findings)]
+
+    # Precision accounting: only findings near a catalogued (expected OR forbidden)
+    # line are adjudicable. Of those, a finding is "wrong" if it fires a forbidden
+    # trap OR matches no expected at all (an unexpected finding on a known line).
+    catalogued = expected + forbidden
+    adjudicable = forbidden_count = unexpected_count = 0
+    for f in findings:
+        if not _near(f, catalogued):
+            continue  # far off — excluded from precision (could be a legit extra catch)
+        adjudicable += 1
+        if any(_matches(f, fb) for fb in forbidden):
+            forbidden_count += 1
+        elif not any(_matches(f, exp) for exp in expected):
+            unexpected_count += 1
+
     return FixtureScore(
         name=name,
         parsed_ok=parsed_ok,
@@ -126,4 +188,7 @@ def score_fixture(
         missed=missed,
         anchored_count=sum(1 for f in findings if f.anchored),
         false_positives=false_positives,
+        adjudicable_count=adjudicable,
+        forbidden_count=forbidden_count,
+        unexpected_count=unexpected_count,
     )

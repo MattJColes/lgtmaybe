@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "path": "billing/charges.py",
+      "line": 31,
+      "side": "RIGHT",
+      "severity": "high",
+      "title": "Sensitive data logged: customer.card_number in the log line",
+      "body": "The card number is interpolated into the log message and leaks PII into logs.",
+      "anchor": "    log.info(\"charged batch total=%s card=%s\", total, customer.card_number)"
+    },
+    {
+      "path": "billing/charges.py",
+      "line": 11,
+      "side": "RIGHT",
+      "severity": "medium",
+      "title": "process_batch is defined twice across the two hunks",
+      "body": "The function appears in both hunks, which looks like a duplicate definition.",
+      "anchor": "def process_batch(rows, customer, dry_run=False):"
+    }
+  ]
+}

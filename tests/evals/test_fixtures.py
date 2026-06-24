@@ -11,8 +11,13 @@ from __future__ import annotations
 import pytest
 
 from evals import run as run_mod
-from lgtmaybe.core.diffparse import split_by_file
+from lgtmaybe.core.diffparse import changed_line_index, split_by_file
+from lgtmaybe.engine.compress import split_patch_into_hunks
 from lgtmaybe.github import is_reviewable
+
+# The four live false-positive fixtures Track C adds: each plants a genuine catch
+# plus forbidden traps drawn from real over-eager reviewer claims.
+_FP_FIXTURES = ["lazy-imports", "split-hunks", "cloud-semantics", "test-harness"]
 
 _VIBE_FILES = {
     "src/api/handlers.py",
@@ -86,6 +91,47 @@ def test_cross_file_fp_fixture_has_expected_and_forbidden() -> None:
     assert diff.strip()
     assert manifest.expected, "needs a real in-diff finding so recall stays meaningful"
     assert manifest.forbidden, "needs forbidden (cross-file false-positive) traps"
+
+
+def _changed_lines(diff: str, path: str, side: str = "RIGHT") -> set[int]:
+    """The set of new-file (RIGHT) line numbers that the diff actually changes."""
+    index = changed_line_index(diff)
+    return {line for line, _text in index.get((path, side), [])}
+
+
+@pytest.mark.parametrize("name", _FP_FIXTURES)
+def test_fp_fixture_loads_with_expected_and_forbidden(name: str) -> None:
+    """Each live FP fixture loads with a genuine catch AND forbidden traps, every
+    entry has keywords, and every expected/forbidden line is a real changed line —
+    mirrors the cross-file-fp coverage so a malformed fixture fails in the gate."""
+    diff, manifest = _fixture(name)
+    assert diff.strip()
+    assert manifest.expected, f"{name}: needs a real in-diff catch so recall stays meaningful"
+    assert manifest.forbidden, f"{name}: needs forbidden (false-positive) traps"
+    assert all(e.keywords for e in manifest.expected), f"{name}: an expected entry has no keywords"
+    assert all(f.keywords for f in manifest.forbidden), f"{name}: a forbidden entry has no keywords"
+
+    changed = _changed_lines(diff, manifest.changed_file)
+    assert changed, f"{name}: diff has no changed RIGHT lines"
+    for entry in manifest.expected + manifest.forbidden:
+        assert entry.line in changed, (
+            f"{name}: line {entry.line} ({entry.label!r}) is not a changed line; "
+            f"changed lines are {sorted(changed)}"
+        )
+
+
+def test_split_hunks_fixture_is_multi_hunk() -> None:
+    """split-hunks must be a single file split into >=2 hunks that both touch the
+    same def (signature in one hunk, body edit in another) — the exact shape that
+    tempts a model into a bogus "duplicate definition" finding."""
+    diff, manifest = _fixture("split-hunks")
+    parts = split_by_file(diff, [manifest.changed_file])
+    assert len(parts) == 1, "split-hunks must be a single file"
+    _path, patch = parts[0]
+    hunks = split_patch_into_hunks(patch)
+    assert len(hunks) >= 2, "split-hunks needs at least two hunks"
+    touching = [h for h in hunks if "process_batch" in h]
+    assert len(touching) >= 2, "both hunks must touch the same def (process_batch)"
 
 
 def test_fixtures_cover_performance_and_complexity_lenses() -> None:

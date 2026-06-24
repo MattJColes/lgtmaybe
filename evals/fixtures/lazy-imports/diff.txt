@@ -1,0 +1,25 @@
+diff --git a/jobs/exporter.py b/jobs/exporter.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/jobs/exporter.py
+@@ -0,0 +1,19 @@
++import logging
++
++log = logging.getLogger(__name__)
++
++
++def upload_report(bucket: str, key: str, body: bytes, api_token: str) -> None:
++    import boto3
++
++    log.info("uploading report key=%s api_token=%s", key, api_token)
++    client = boto3.client("s3")
++    client.put_object(Bucket=bucket, Key=key, Body=body)
++
++
++async def upload_many(bucket: str, items: list[tuple[str, bytes]]) -> None:
++    import boto3
++
++    client = boto3.client("s3")
++    for key, body in items:
++        client.put_object(Bucket=bucket, Key=key, Body=body)

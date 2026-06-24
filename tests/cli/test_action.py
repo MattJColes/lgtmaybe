@@ -154,6 +154,33 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert captured == {"timeout": 900, "temperature": 0.2}
 
+    def test_reflect_model_input_reaches_config(self, tmp_path, monkeypatch):
+        """INPUT_REFLECT_MODEL selects the reflection-pass model from the Action."""
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["reflect_model"] = cfg.reflect_model
+            return FakeGitHub(), FakeEngine(FakeProvider())
+
+        monkeypatch.setattr(cli_module, "build_adapters", fake_build)
+
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        monkeypatch.setenv("INPUT_REFLECT_MODEL", "bigger-judge")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"reflect_model": "bigger-judge"}
+
     def test_num_ctx_and_max_input_tokens_inputs_reach_config(self, tmp_path, monkeypatch):
         """INPUT_NUM_CTX / INPUT_MAX_INPUT_TOKENS tune a big-diff run from the Action."""
         captured: dict[str, object] = {}

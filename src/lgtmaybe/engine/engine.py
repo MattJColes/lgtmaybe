@@ -30,6 +30,8 @@ from .parse import ParseError, parse_findings
 from .prompt import build_lens_prompt, build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
+from .retrieve import FileFetcher
+from .suppress import apply_suppressions
 
 _log = get_logger(__name__)
 
@@ -91,8 +93,23 @@ def _worker_count(cfg: ReviewConfig, lens_count: int) -> int:
 class LLMReviewEngine(ReviewEngine):
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
-    def __init__(self, provider: ProviderClient) -> None:
+    def __init__(self, provider: ProviderClient, fetch_file: FileFetcher | None = None) -> None:
         self._provider = provider
+        # Optional read-only file reader for the reflection pass's bounded retrieval
+        # escalation: when the auditor defers a finding for lack of a referenced
+        # file, this fetches it (read-only — never a checkout) so it can re-judge.
+        # None (the default) keeps the prior behavior: a deferral can't resolve, so
+        # the unverifiable finding is dropped.
+        self._fetch_file = fetch_file
+
+    def set_fetch_file(self, fetch_file: FileFetcher | None) -> None:
+        """Attach (or clear) the read-only file fetcher used by reflection.
+
+        A small setter so a caller that builds the engine before the gateway (the
+        GitHub path) can wire the gateway's read-only ``get_file_contents`` in after
+        the fact, without threading it through ``build_provider_engine``.
+        """
+        self._fetch_file = fetch_file
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
@@ -205,23 +222,28 @@ class LLMReviewEngine(ReviewEngine):
         #    duplicates before reflecting.
         all_findings = _dedupe(all_findings)
 
+        # 7b. Suppression: drop findings a team has marked known-fine — by
+        #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
+        #     ignore` pragma on/above the flagged line. Done before reflection so a
+        #     suppressed finding costs no reflection tokens and never posts.
+        all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
         if cfg.reflect and all_findings:
             _log.info("reflecting on findings", extra={"findings": len(all_findings)})
+            # model_copy keeps file_contents — reflection now grounds itself on the
+            # (redacted) head text of flagged files to verify whole-file claims.
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
-            all_findings = reflect_findings(all_findings, clean_ctx, cfg, self._provider)
+            all_findings = reflect_findings(
+                all_findings, clean_ctx, cfg, self._provider, fetch_file=self._fetch_file
+            )
 
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a
         #    low-confidence guess, so surface it only when it's high/critical.
-        filtered = [
-            f
-            for f in all_findings
-            if f.severity >= cfg.min_severity
-            and (f.anchored or f.severity >= cfg.unanchored_min_severity)
-        ]
+        filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
 
         plural = "s" if len(filtered) != 1 else ""
         summary_line = (
@@ -326,6 +348,19 @@ def _error_reason(exc: BaseException) -> str:
     text = " ".join(str(exc).split())
     reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     return reason[:200]
+
+
+def _passes_severity_floor(finding: ReviewFinding, cfg: ReviewConfig) -> bool:
+    """Whether a finding clears the severity floors and may be surfaced.
+
+    Two floors: the plain ``min_severity`` for every finding, plus the stricter
+    ``unanchored_min_severity`` for ones the engine could not anchor (a failed
+    anchor is a low-confidence guess). Extracted so the on-demand replay benchmark
+    asserts against the exact predicate production uses — no drift.
+    """
+    return finding.severity >= cfg.min_severity and (
+        finding.anchored or finding.severity >= cfg.unanchored_min_severity
+    )
 
 
 def _snap_findings(findings: list[ReviewFinding], diff: str) -> list[ReviewFinding]:

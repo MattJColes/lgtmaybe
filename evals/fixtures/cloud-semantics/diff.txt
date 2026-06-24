@@ -1,0 +1,40 @@
+diff --git a/infra/tenant_storage.py b/infra/tenant_storage.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/infra/tenant_storage.py
+@@ -0,0 +1,34 @@
++import base64
++import json
++
++
++TRUST_POLICY = {
++    "Version": "2012-10-17",
++    "Statement": [
++        {
++            "Effect": "Allow",
++            "Principal": {"AWS": "arn:aws:iam::123456789012:role/app"},
++            "Action": "sts:AssumeRole",
++            "Condition": {
++                "StringEquals": {"aws:PrincipalTag/tenant": "${aws:RequestTag/tenant}"}
++            },
++        }
++    ],
++}
++
++
++def encryption_context(tenant_id: str) -> str:
++    ctx = {"tenant": tenant_id}
++    return base64.b64encode(json.dumps(ctx).encode()).decode()
++
++
++def object_key(tenant_id: str, name: str) -> str:
++    return f"tenants/{tenant_id}/{name}"
++
++
++def grant_policy(bucket: str) -> dict:
++    return {
++        "Effect": "Allow",
++        "Action": ["s3:GetObject", "s3:PutObject"],
++        "Resource": "*",
++    }

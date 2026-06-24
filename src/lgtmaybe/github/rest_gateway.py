@@ -97,6 +97,35 @@ def _render_demoted(demoted: list[ReviewFinding]) -> str:
     return "\n".join(lines)
 
 
+def _render_broad(broad: list[ReviewFinding]) -> str:
+    """Render broad (redesign / infra / contract / needs-verification) findings.
+
+    These are real findings the reflection pass judged too wide-reaching to action
+    on a single line, so they're collapsed into a ``<details>`` block to keep the
+    must-fix inline list tight without dropping the observation. Returns "" when
+    there is nothing broad, so a normal review's body is unchanged.
+    """
+    if not broad:
+        return ""
+    lines = [
+        "",
+        "",
+        "<details><summary>Broader observations</summary>",
+        "",
+        "_These are wider-reaching — a redesign, an infra/contract change, or one "
+        "needing independent verification — so they're collected here rather than "
+        "pinned to a line:_",
+        "",
+    ]
+    for f in broad:
+        lines.append(
+            f"- **[{f.severity.upper()}] {_defang_fences(f.title)}** "
+            f"(`{f.path}`) — {_defang_fences(f.body)}"
+        )
+    lines += ["", "</details>"]
+    return "\n".join(lines)
+
+
 class RestGitHubGateway(GitHubGateway):
     """GitHub REST adapter.
 
@@ -128,6 +157,9 @@ class RestGitHubGateway(GitHubGateway):
         # clobbering each other. Unkeyed gateways keep the legacy marker.
         self._marker = f"<!-- lgtmaybe:{marker_key} -->" if marker_key else _MARKER
         self._resolve_fixed = resolve_fixed
+        # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
+        # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
+        self._head_sha: str | None = None
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -141,6 +173,7 @@ class RestGitHubGateway(GitHubGateway):
         meta = self._get_json(pr_url)
         base_sha: str = meta["base"]["sha"]
         head_sha: str = meta["head"]["sha"]
+        self._head_sha = head_sha  # cache for on-demand get_file_contents fetches
 
         # Fetch unified diff
         diff_headers = {**self._headers, "Accept": "application/vnd.github.v3.diff"}
@@ -198,9 +231,9 @@ class RestGitHubGateway(GitHubGateway):
             diff = ctx.diff
 
         commentable: CommentableLines = build_commentable_lines(diff)
-        comments, demoted = self._partition_findings(findings, commentable)
+        comments, demoted, broad = self._partition_findings(findings, commentable)
 
-        body = f"{summary}{_render_demoted(demoted)}\n\n{self._marker}"
+        body = f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
         existing_id = self._find_existing_review()
 
         reviews_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
@@ -234,6 +267,24 @@ class RestGitHubGateway(GitHubGateway):
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
+
+    def get_file_contents(self, path: str) -> str | None:
+        """Return the head-revision text of *path*, or None if it can't be fetched.
+
+        Read-only adapter method (beyond the frozen GitHubGateway port) used by the
+        engine's reflection pass to resolve a deferred verdict: when the auditor
+        needs to SEE a file it didn't get in the diff, this fetches that file's TEXT
+        at the PR head via the same contents API ``get_pr_context`` uses — never a
+        checkout, never executing PR code (fork-safe). The head SHA is fetched once
+        and cached so repeated lookups in one review don't re-hit the PR metadata.
+        """
+        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
+        if self._head_sha is None:
+            try:
+                self._head_sha = self._get_json(url)["head"]["sha"]
+            except httpx.HTTPError:
+                return None
+        return self._get_file_content(path, self._head_sha)
 
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone comment to the PR conversation (in-thread reply).
@@ -462,8 +513,8 @@ class RestGitHubGateway(GitHubGateway):
     def _partition_findings(
         findings: list[ReviewFinding],
         commentable: CommentableLines,
-    ) -> tuple[list[dict[str, Any]], list[ReviewFinding]]:
-        """Split findings into inline comments and findings demoted to the body.
+    ) -> tuple[list[dict[str, Any]], list[ReviewFinding], list[ReviewFinding]]:
+        """Split findings into inline comments, body-demoted, and broad findings.
 
         A finding is posted inline only when it is confidently placed
         (``anchored``) AND its ``(path, line, side)`` is a real commentable diff
@@ -472,10 +523,19 @@ class RestGitHubGateway(GitHubGateway):
         behind: a comment on the wrong line breaks trust faster than one without a
         precise line. Inline comments anchor by ``line`` + ``side`` (GitHub's
         recommended params), not the deprecated ``position`` count.
+
+        A ``broad`` finding (reflection tiered it as redesign / infra / contract /
+        needs-verification) is routed to its own group even when it would anchor,
+        so it renders in the collapsed "Broader observations" block instead of
+        cluttering the must-fix inline list.
         """
         comments: list[dict[str, Any]] = []
         demoted: list[ReviewFinding] = []
+        broad: list[ReviewFinding] = []
         for f in findings:
+            if f.broad:
+                broad.append(f)
+                continue
             if not f.anchored or (f.path, f.line, f.side) not in commentable:
                 demoted.append(f)
                 continue
@@ -493,4 +553,4 @@ class RestGitHubGateway(GitHubGateway):
             fp = finding_fingerprint(f.path, f.title)
             comment["body"] += f"\n\n<!-- lgtmaybe-finding:{fp} -->"
             comments.append(comment)
-        return comments, demoted
+        return comments, demoted, broad

@@ -37,6 +37,11 @@
       "title": "Body",
       "type": "string"
     },
+    "broad": {
+      "default": false,
+      "title": "Broad",
+      "type": "boolean"
+    },
     "line": {
       "title": "Line",
       "type": "integer"

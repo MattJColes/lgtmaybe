@@ -1,0 +1,29 @@
+{
+  "name": "lazy-imports",
+  "changed_file": "jobs/exporter.py",
+  "expected": [
+    {
+      "label": "secret logged: api_token written to the log line",
+      "line": 9,
+      "keywords": ["token", "secret", "api_token", "credential", "sensitive"],
+      "severity_at_least": "high"
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: boto3 imported but unused (it is used a few lines below)",
+      "line": 7,
+      "keywords": ["unused import", "unused", "never used", "not used"]
+    },
+    {
+      "label": "FP: function-local import has overhead, move it to module top (deliberate lazy import)",
+      "line": 7,
+      "keywords": ["module top", "module level", "top of the file", "import overhead", "move the import"]
+    },
+    {
+      "label": "FP: blocking boto3 call inside async def (intentional, out of scope here)",
+      "line": 19,
+      "keywords": ["blocking call", "blocking", "block the event loop", "synchronous", "await"]
+    }
+  ]
+}

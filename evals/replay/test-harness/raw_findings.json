@@ -1,0 +1,31 @@
+{
+  "findings": [
+    {
+      "path": "tests/integration/test_s3_roundtrip.py",
+      "line": 4,
+      "side": "RIGHT",
+      "severity": "high",
+      "title": "Hardcoded AWS secret key in the test module",
+      "body": "A secret access key is hardcoded; move it to an env var or fixture.",
+      "anchor": "SECRET_KEY = \"test_aws_secret_AKIAIOSFODNN7EXAMPLEKEY1234567890\""
+    },
+    {
+      "path": "tests/integration/test_s3_roundtrip.py",
+      "line": 11,
+      "side": "RIGHT",
+      "severity": "low",
+      "title": "Assertion-free test: test_put_and_get_roundtrip never asserts",
+      "body": "The test exercises put/get but makes no assertion, so it cannot fail on a regression.",
+      "anchor": "def test_put_and_get_roundtrip():"
+    },
+    {
+      "path": "tests/integration/test_s3_roundtrip.py",
+      "line": 8,
+      "side": "RIGHT",
+      "severity": "medium",
+      "title": "Test constructs a real boto3 client and will fail in CI without a mock",
+      "body": "The client should be mocked or moto-backed or it will fail in CI.",
+      "anchor": "    return boto3.client(\"s3\", endpoint_url=ENDPOINT, aws_secret_access_key=SECRET_KEY)"
+    }
+  ]
+}

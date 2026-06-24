@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "path": "infra/tenant_storage.py",
+      "line": 33,
+      "side": "RIGHT",
+      "severity": "high",
+      "title": "Overly broad IAM grant: Resource is \"*\"",
+      "body": "grant_policy grants s3:GetObject/PutObject on every resource; scope it to the bucket.",
+      "anchor": "        \"Resource\": \"*\","
+    },
+    {
+      "path": "infra/tenant_storage.py",
+      "line": 13,
+      "side": "RIGHT",
+      "severity": "high",
+      "title": "Trust policy allows any tenant to assume the role",
+      "body": "The condition does not scope the principal to a tenant.",
+      "anchor": "                \"StringEquals\": {\"aws:PrincipalTag/tenant\": \"${aws:RequestTag/tenant}\"}"
+    },
+    {
+      "path": "infra/tenant_storage.py",
+      "line": 22,
+      "side": "RIGHT",
+      "severity": "medium",
+      "title": "Incorrect base64 encoding of the EncryptionContext",
+      "body": "The EncryptionContext is base64-encoded incorrectly and will fail to decode.",
+      "anchor": "    return base64.b64encode(json.dumps(ctx).encode()).decode()"
+    },
+    {
+      "path": "infra/tenant_storage.py",
+      "line": 26,
+      "side": "RIGHT",
+      "severity": "low",
+      "title": "Path traversal via tenant_id in the S3 key",
+      "body": "tenant_id is concatenated into the object key without sanitisation.",
+      "anchor": "    key = sanitize(tenant_id) + name  # this line is not in the diff"
+    }
+  ]
+}

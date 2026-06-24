@@ -107,6 +107,13 @@ class ReviewFinding(_Strict):
     # changed line, so `line` is a guess: the GitHub adapter then demotes the
     # finding to the review summary rather than posting it inline on a wrong line.
     anchored: bool = True
+    # Engine-derived (the model's value is ignored, like `anchored`). True when the
+    # reflection pass judged this a BROAD change — a redesign, infrastructure or
+    # API/contract change, or one needing independent verification — rather than a
+    # safe, self-contained edit. The GitHub adapter renders broad findings in a
+    # collapsed "Broader observations" section instead of inline, so the must-fix
+    # list stays tight without dropping the observation.
+    broad: bool = False
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -176,6 +183,19 @@ class Verdict(_Strict):
 
     index: int
     keep: bool
+    # The auditor's actionability call: True when fixing this needs a broad change
+    # (redesign / infra / API-contract / independent verification) rather than a
+    # safe self-contained edit. Optional with a back-compat default so a model that
+    # omits it still validates; the engine copies it onto the kept finding's
+    # `broad` flag for collapsed rendering.
+    broad: bool = False
+    # Deferral (Track D): file path(s) — and/or symbol names — the auditor needs to
+    # SEE before it can decide this verdict. When non-empty the engine fetches that
+    # text read-only, redacts it, and re-judges the finding with it in context
+    # (bounded to engine.retrieve.MAX_HOPS hops), instead of dropping a finding
+    # merely because the referenced code wasn't in the diff. Optional with a
+    # back-compat default so a model that omits it still validates.
+    needs: list[str] = Field(default_factory=list)
 
 
 class ReflectionResult(_Strict):
@@ -264,6 +284,17 @@ class ReviewConfig(_Strict):
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True
+    # Model used for the self-reflection (false-positive audit) pass. None falls
+    # back to `model`. Point it at a stronger model so a weaker reviewer's findings
+    # get audited by a better judge. Same provider/credentials as `model` — only
+    # the model id changes (the provider client is built once).
+    reflect_model: str | None = None
+    # Finding fingerprints to permanently suppress — a team dismissing a known-fine
+    # pattern. Each entry is a finding_fingerprint(path, title) hex id (surfaced in
+    # the inline comment's hidden marker). Findings matching one are dropped before
+    # reflection and posting. Set it in .lgtmaybe.yml; an inline `# lgtmaybe: ignore`
+    # comment on (or just above) a flagged line suppresses that finding too.
+    ignore_fingerprints: list[str] = Field(default_factory=list)
     # Auto-resolve a previously-posted review conversation once its finding is
     # fixed: on a re-run, when a finding lgtmaybe flagged is no longer produced
     # and GitHub marks the thread outdated (the code under it changed), lgtmaybe

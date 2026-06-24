@@ -17,6 +17,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
+| `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
@@ -26,6 +27,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
+| `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `temperature` | number | No | `0.0` | Temperature |
@@ -67,6 +69,7 @@ The structured output the model must return for each inline comment. All fields 
 | `anchor` | string / null | No | `null` | Anchor |
 | `anchored` | boolean | No | `True` | Anchored |
 | `body` | string | Yes | — | Body |
+| `broad` | boolean | No | `False` | Broad |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
 | `severity` | `critical` / `high` / `info` / `low` / `medium` | Yes | — |  |
@@ -215,6 +218,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Body",
           "type": "string"
         },
+        "broad": {
+          "default": false,
+          "title": "Broad",
+          "type": "boolean"
+        },
         "line": {
           "title": "Line",
           "type": "integer"
@@ -327,6 +335,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Extra Lenses",
       "type": "array"
     },
+    "ignore_fingerprints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Ignore Fingerprints",
+      "type": "array"
+    },
     "include_paths": {
       "items": {
         "type": "string"
@@ -376,6 +391,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": true,
       "title": "Reflect",
       "type": "boolean"
+    },
+    "reflect_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reflect Model"
     },
     "resolve_fixed": {
       "default": true,
@@ -459,6 +486,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "body": {
       "title": "Body",
       "type": "string"
+    },
+    "broad": {
+      "default": false,
+      "title": "Broad",
+      "type": "boolean"
     },
     "line": {
       "title": "Line",

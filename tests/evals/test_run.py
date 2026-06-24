@@ -91,6 +91,131 @@ def test_runner_loads_fixtures_and_scores(monkeypatch: pytest.MonkeyPatch) -> No
     assert run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.9"]) == 1
 
 
+def test_pooled_precision_reported_in_summary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The summary reports a pooled precision — sum of wrong / sum of adjudicable,
+    not an average of per-fixture percentages."""
+    # fixture A: 2 adjudicable, 0 wrong (precision 100%).
+    # fixture B: 2 adjudicable, 2 wrong (precision 0%).
+    # Averaging percentages → 50%. Pooling over counts → (0+2)/(2+2) wrong = 50% wrong
+    # → 50% precision here too, so make the split uneven to tell them apart:
+    # A: 4 adjudicable / 0 wrong, B: 1 adjudicable / 1 wrong.
+    # avg of pct = (100% + 0%)/2 = 50%; pooled = 1 wrong / 5 adjudicable = 80% precision.
+    scores = [
+        FixtureScore(
+            name="a",
+            parsed_ok=True,
+            expected_count=4,
+            matched_count=4,
+            findings_count=4,
+            missed=[],
+            adjudicable_count=4,
+            forbidden_count=0,
+            unexpected_count=0,
+        ),
+        FixtureScore(
+            name="b",
+            parsed_ok=True,
+            expected_count=1,
+            matched_count=1,
+            findings_count=2,
+            missed=[],
+            adjudicable_count=1,
+            forbidden_count=1,
+            unexpected_count=0,
+        ),
+    ]
+
+    def fake_review(_diff, manifest, *_a, **_k):  # type: ignore[no-untyped-def]
+        return scores.pop(0)
+
+    monkeypatch.setattr(run_mod, "_review", fake_review)
+    run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--fixture",
+            "vibe-multifile",
+        ]
+    )
+    out = capsys.readouterr().out
+    # pooled precision = 1 - 1/5 = 80%, NOT the 50% an average-of-percentages gives.
+    assert "precision 80%" in out
+    assert "precision 50%" not in out
+
+
+def test_per_fixture_precision_printed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Each fixture line shows its own precision."""
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    run_mod.main(
+        ["--provider", "ollama", "--model", "x", "--min-recall", "0.0", "--fixture", "badcode"]
+    )
+    out = capsys.readouterr().out
+    assert "precision=" in out
+
+
+def test_json_flag_emits_machine_readable_scores(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--json prints one JSON object with the per-fixture scores + pooled metrics —
+    the shape the evals.ab A/B harness parses from a worktree subprocess."""
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    rc = run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "fixtures" in payload
+    assert "pooled_recall" in payload
+    assert "pooled_precision" in payload
+    assert "pooled_anchored" in payload
+    assert payload["fixtures"][0]["name"] == "badcode"
+
+
+def test_save_results_writes_a_record(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """--save-results persists a RunRecord JSON keyed by the head sha."""
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    monkeypatch.setattr(run_mod, "_RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(run_mod, "_head_sha", lambda: "cafef00d")
+    run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--save-results",
+        ]
+    )
+    saved = tmp_path / "cafef00d.json"
+    assert saved.exists()
+    record = run_mod.RunRecord.model_validate_json(saved.read_text())
+    assert record.sha == "cafef00d"
+    assert record.model == "x"
+
+
 def test_runner_fails_when_review_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Unparseable(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[override]
@@ -284,13 +409,13 @@ def test_no_fixture_flag_runs_every_fixture(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(run_mod, "_review", fake_review)
 
     run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0"])
-    assert set(seen) == {
+    assert {
         "badcode",
         "vibe-multifile",
         "rlm-bigfile",
         "rlm-pipeline",
         "cross-file-fp",
-    }
+    } <= set(seen)
 
 
 def test_unknown_fixture_name_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
