@@ -7,6 +7,7 @@ from .parse import ParseError, parse_findings
 from .prompt import build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
+from .retrieve import FileFetcher, resolve_needs
 
 __all__ = [
     "LLMReviewEngine",
@@ -21,4 +22,6 @@ __all__ = [
     "build_system_prompt",
     "redact",
     "reflect_findings",
+    "FileFetcher",
+    "resolve_needs",
 ]

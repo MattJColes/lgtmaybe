@@ -15,6 +15,11 @@ from lgtmaybe.core.ports import ProviderClient, ReviewEngine
 class FakeEngine(ReviewEngine):
     def __init__(self, provider: ProviderClient) -> None:
         self._provider = provider
+        self.fetch_file = None
+
+    def set_fetch_file(self, fetch_file) -> None:  # type: ignore[no-untyped-def]
+        """Match LLMReviewEngine's setter so the CLI's local-review wiring works."""
+        self.fetch_file = fetch_file
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         result = self._provider.complete([{"role": "user", "content": ctx.diff}], cfg.model)

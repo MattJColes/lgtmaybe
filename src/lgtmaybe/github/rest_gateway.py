@@ -157,6 +157,9 @@ class RestGitHubGateway(GitHubGateway):
         # clobbering each other. Unkeyed gateways keep the legacy marker.
         self._marker = f"<!-- lgtmaybe:{marker_key} -->" if marker_key else _MARKER
         self._resolve_fixed = resolve_fixed
+        # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
+        # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
+        self._head_sha: str | None = None
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -170,6 +173,7 @@ class RestGitHubGateway(GitHubGateway):
         meta = self._get_json(pr_url)
         base_sha: str = meta["base"]["sha"]
         head_sha: str = meta["head"]["sha"]
+        self._head_sha = head_sha  # cache for on-demand get_file_contents fetches
 
         # Fetch unified diff
         diff_headers = {**self._headers, "Accept": "application/vnd.github.v3.diff"}
@@ -265,6 +269,24 @@ class RestGitHubGateway(GitHubGateway):
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
+
+    def get_file_contents(self, path: str) -> str | None:
+        """Return the head-revision text of *path*, or None if it can't be fetched.
+
+        Read-only adapter method (beyond the frozen GitHubGateway port) used by the
+        engine's reflection pass to resolve a deferred verdict: when the auditor
+        needs to SEE a file it didn't get in the diff, this fetches that file's TEXT
+        at the PR head via the same contents API ``get_pr_context`` uses — never a
+        checkout, never executing PR code (fork-safe). The head SHA is fetched once
+        and cached so repeated lookups in one review don't re-hit the PR metadata.
+        """
+        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
+        if self._head_sha is None:
+            try:
+                self._head_sha = self._get_json(url)["head"]["sha"]
+            except httpx.HTTPError:
+                return None
+        return self._get_file_content(path, self._head_sha)
 
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone comment to the PR conversation (in-thread reply).

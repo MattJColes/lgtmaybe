@@ -30,6 +30,7 @@ from .parse import ParseError, parse_findings
 from .prompt import build_lens_prompt, build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
+from .retrieve import FileFetcher
 from .suppress import apply_suppressions
 
 _log = get_logger(__name__)
@@ -92,8 +93,25 @@ def _worker_count(cfg: ReviewConfig, lens_count: int) -> int:
 class LLMReviewEngine(ReviewEngine):
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
-    def __init__(self, provider: ProviderClient) -> None:
+    def __init__(
+        self, provider: ProviderClient, fetch_file: FileFetcher | None = None
+    ) -> None:
         self._provider = provider
+        # Optional read-only file reader for the reflection pass's bounded retrieval
+        # escalation: when the auditor defers a finding for lack of a referenced
+        # file, this fetches it (read-only — never a checkout) so it can re-judge.
+        # None (the default) keeps the prior behavior: a deferral can't resolve, so
+        # the unverifiable finding is dropped.
+        self._fetch_file = fetch_file
+
+    def set_fetch_file(self, fetch_file: FileFetcher | None) -> None:
+        """Attach (or clear) the read-only file fetcher used by reflection.
+
+        A small setter so a caller that builds the engine before the gateway (the
+        GitHub path) can wire the gateway's read-only ``get_file_contents`` in after
+        the fact, without threading it through ``build_provider_engine``.
+        """
+        self._fetch_file = fetch_file
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
@@ -220,7 +238,9 @@ class LLMReviewEngine(ReviewEngine):
             # model_copy keeps file_contents — reflection now grounds itself on the
             # (redacted) head text of flagged files to verify whole-file claims.
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
-            all_findings = reflect_findings(all_findings, clean_ctx, cfg, self._provider)
+            all_findings = reflect_findings(
+                all_findings, clean_ctx, cfg, self._provider, fetch_file=self._fetch_file
+            )
 
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a

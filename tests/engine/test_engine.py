@@ -1192,3 +1192,77 @@ def test_loose_match_snaps_when_trailing_comment_trimmed() -> None:
     )
     findings, _ = LLMReviewEngine(_provider_for([f])).review(ctx, _snap_cfg())
     assert [(f.line, f.anchored) for f in findings] == [(3, True)]
+
+
+# ---------------------------------------------------------------------------
+# TRACK D — the engine threads its injected fetch_file into reflection
+# ---------------------------------------------------------------------------
+
+
+def test_engine_passes_fetcher_into_reflection() -> None:
+    """An engine built with a fetch_file uses it during reflection: a deferred
+    verdict triggers a read-only fetch and the finding is re-judged (and kept)."""
+    findings_text = json.dumps([_HIGH.model_dump(mode="json")])
+    fetched: list[str] = []
+
+    def fetch(path: str) -> str | None:
+        fetched.append(path)
+        return "def referenced():\n    return 1\n"
+
+    class _DeferThenKeepProvider(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self._reflect_calls = 0
+
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _REFLECT_MARKER in messages[0]["content"]:
+                self._reflect_calls += 1
+                if self._reflect_calls == 1:
+                    text = json.dumps(
+                        {"verdicts": [{"index": 0, "keep": False, "needs": ["other.py"]}]}
+                    )
+                else:
+                    text = json.dumps({"verdicts": [{"index": 0, "keep": True}]})
+                return ProviderResult(text=text, input_tokens=5, output_tokens=5)
+            return ProviderResult(text=findings_text, input_tokens=10, output_tokens=20)
+
+    provider = _DeferThenKeepProvider()
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.security],
+    )
+
+    engine = LLMReviewEngine(provider, fetch_file=fetch)
+    out, _ = engine.review(_CTX, cfg)
+
+    assert fetched == ["other.py"]
+    assert any(f.title == "real bug" for f in out)
+
+
+def test_engine_without_fetcher_drops_deferred_finding() -> None:
+    """With no fetch_file wired (default), a deferred verdict can't be resolved, so
+    the finding is dropped — graceful, no crash."""
+    findings_text = json.dumps([_HIGH.model_dump(mode="json")])
+
+    class _AlwaysDeferProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _REFLECT_MARKER in messages[0]["content"]:
+                text = json.dumps(
+                    {"verdicts": [{"index": 0, "keep": False, "needs": ["other.py"]}]}
+                )
+                return ProviderResult(text=text, input_tokens=5, output_tokens=5)
+            return ProviderResult(text=findings_text, input_tokens=10, output_tokens=20)
+
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.security],
+    )
+
+    engine = LLMReviewEngine(_AlwaysDeferProvider())  # no fetch_file
+    out, _ = engine.review(_CTX, cfg)
+
+    assert out == []

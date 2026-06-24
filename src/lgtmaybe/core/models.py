@@ -189,6 +189,13 @@ class Verdict(_Strict):
     # omits it still validates; the engine copies it onto the kept finding's
     # `broad` flag for collapsed rendering.
     broad: bool = False
+    # Deferral (Track D): file path(s) — and/or symbol names — the auditor needs to
+    # SEE before it can decide this verdict. When non-empty the engine fetches that
+    # text read-only, redacts it, and re-judges the finding with it in context
+    # (bounded to engine.retrieve.MAX_HOPS hops), instead of dropping a finding
+    # merely because the referenced code wasn't in the diff. Optional with a
+    # back-compat default so a model that omits it still validates.
+    needs: list[str] = Field(default_factory=list)
 
 
 class ReflectionResult(_Strict):

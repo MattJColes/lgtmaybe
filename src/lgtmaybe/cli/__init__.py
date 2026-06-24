@@ -26,7 +26,7 @@ from lgtmaybe.core.models import Provider, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.github import RestGitHubGateway
-from lgtmaybe.local import local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
@@ -110,6 +110,10 @@ def build_review_context(
         marker_key=f"{cfg.provider}/{cfg.model}",
         resolve_fixed=cfg.resolve_fixed,
     )
+    # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
+    # deferred verdict (fetch a referenced file the auditor needs) instead of
+    # dropping the finding. Read-only API fetch — never a checkout (fork-safe).
+    engine.set_fetch_file(github.get_file_contents)
     return github, engine, provider
 
 
@@ -162,6 +166,9 @@ def execute_local_review(
     """
     try:
         engine, _provider = build_provider_engine(cfg, runtime)
+        # Wire a read-only working-tree reader so reflection can resolve a deferred
+        # verdict against the user's own checkout (safe — their branch, not PR code).
+        engine.set_fetch_file(local_file_reader())
         ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
         findings, summary = engine.review(ctx, cfg)
     except Exception as exc:

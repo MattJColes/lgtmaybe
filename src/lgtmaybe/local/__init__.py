@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from lgtmaybe.core.models import PRContext
@@ -76,6 +77,29 @@ def local_pr_context(
         pr_number=0,
         commit_messages=commit_messages,
     )
+
+
+def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
+    """A read-only working-tree file reader for the engine's reflection pass.
+
+    Returns the current text of a repo-relative ``path`` (the user's own branch —
+    safe to read directly, no untrusted PR content), or None when the file is
+    missing or unreadable. Lets the local CLI resolve a deferred reflection verdict
+    the same way the GitHub gateway does, and finally gives local reviews grounding
+    content. Paths that escape the repo root are refused.
+    """
+    root = Path(cwd) if cwd is not None else Path.cwd()
+    root = root.resolve()
+
+    def read(path: str) -> str | None:
+        try:
+            target = (root / path).resolve()
+            target.relative_to(root)  # refuse paths that climb out of the repo
+            return target.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            return None
+
+    return read
 
 
 def _git(cwd: Path | None, *args: str) -> str:
