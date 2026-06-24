@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.6.2...lgtmaybe-v0.7.0) (2026-06-24)
+
+
+### Features
+
+* cut false positives from real-project feedback (prompts, grounded reflection, retrieval, benchmark) ([#136](https://github.com/MattJColes/lgtmaybe/issues/136)) ([e98eddf](https://github.com/MattJColes/lgtmaybe/commit/e98eddf56c98b0e90129cd3fd3b5dc7579c8f954))
+
 ## [0.6.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.6.1...lgtmaybe-v0.6.2) (2026-06-23)
 
 
