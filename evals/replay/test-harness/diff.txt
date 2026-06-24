@@ -1,0 +1,22 @@
+diff --git a/tests/integration/test_s3_roundtrip.py b/tests/integration/test_s3_roundtrip.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/tests/integration/test_s3_roundtrip.py
+@@ -0,0 +1,16 @@
++import boto3
++
++ENDPOINT = "http://localhost:4566"
++SECRET_KEY = "test_aws_secret_AKIAIOSFODNN7EXAMPLEKEY1234567890"
++
++
++def make_client():
++    return boto3.client("s3", endpoint_url=ENDPOINT, aws_secret_access_key=SECRET_KEY)
++
++
++def test_put_and_get_roundtrip():
++    client = make_client()
++    client.create_bucket(Bucket="demo")
++    client.put_object(Bucket="demo", Key="k", Body=b"hi")
++    got = client.get_object(Bucket="demo", Key="k")
++    got["Body"].read()

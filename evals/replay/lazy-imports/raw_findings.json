@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "path": "jobs/exporter.py",
+      "line": 9,
+      "side": "RIGHT",
+      "severity": "high",
+      "title": "Secret logged: api_token written to the log line",
+      "body": "api_token is interpolated into the log message and will leak into log sinks.",
+      "anchor": "    log.info(\"uploading report key=%s api_token=%s\", key, api_token)"
+    },
+    {
+      "path": "jobs/exporter.py",
+      "line": 7,
+      "side": "RIGHT",
+      "severity": "low",
+      "title": "Unused import boto3",
+      "body": "boto3 is imported but never used.",
+      "anchor": "    import boto3"
+    },
+    {
+      "path": "jobs/exporter.py",
+      "line": 15,
+      "side": "RIGHT",
+      "severity": "low",
+      "title": "Function-local import should move to module top",
+      "body": "Importing boto3 inside the function adds overhead on every call.",
+      "anchor": "    import boto3"
+    },
+    {
+      "path": "jobs/exporter.py",
+      "line": 19,
+      "side": "RIGHT",
+      "severity": "medium",
+      "title": "Blocking boto3 call inside async def",
+      "body": "The synchronous put_object blocks the event loop inside upload_many.",
+      "anchor": "        client.put_object(Bucket=bucket, Key=key, Body=body)"
+    }
+  ]
+}

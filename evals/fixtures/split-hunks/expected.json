@@ -1,0 +1,19 @@
+{
+  "name": "split-hunks",
+  "changed_file": "billing/charges.py",
+  "expected": [
+    {
+      "label": "secret/PII logged: customer.card_number written to the log line",
+      "line": 31,
+      "keywords": ["card", "secret", "pii", "sensitive", "credential", "log"],
+      "severity_at_least": "high"
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: process_batch appears defined twice across the two hunks (it is one function, edited in two places)",
+      "line": 11,
+      "keywords": ["duplicate definition", "defined twice", "redefinition", "duplicate def", "two definitions"]
+    }
+  ]
+}

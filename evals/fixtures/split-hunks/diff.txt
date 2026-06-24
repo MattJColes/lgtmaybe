@@ -1,0 +1,20 @@
+diff --git a/billing/charges.py b/billing/charges.py
+index 1111111..2222222 100644
+--- a/billing/charges.py
++++ b/billing/charges.py
+@@ -8,7 +8,7 @@ from .money import Money
+ from .rates import rate_for
+
+
+-def process_batch(rows, dry_run=True):
++def process_batch(rows, customer, dry_run=False):
+     """Charge every row in the batch and return the receipts."""
+     receipts = []
+     for row in rows:
+@@ -28,5 +28,5 @@ def process_batch(rows, dry_run=True):
+         receipt = charge(row, amount)
+         receipts.append(receipt)
+     total = sum(r.amount for r in receipts)
+-    log.info("charged batch total=%s", total)
++    log.info("charged batch total=%s card=%s", total, customer.card_number)
+     return receipts

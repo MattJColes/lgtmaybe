@@ -1,0 +1,4 @@
+[
+  {"title": "Hardcoded AWS secret key in the test module", "line": 4},
+  {"title": "Assertion-free test: test_put_and_get_roundtrip never asserts", "line": 11}
+]

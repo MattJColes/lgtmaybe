@@ -12,7 +12,11 @@ fixture. Needs a live model, so it is NOT in the pytest gate — run it on deman
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 from lgtmaybe.core.models import PRContext, Provider, ReviewCategory, ReviewConfig
@@ -20,9 +24,28 @@ from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
+from .persist import RunRecord, write_run_record
 from .scorer import Fixture, FixtureScore, score_fixture
 
-_FIXTURES = Path(__file__).parent / "fixtures"
+# Fixtures default to this checkout's, but EVALS_FIXTURES_DIR overrides them so the
+# A/B harness can point a baseline-ref worktree at the CURRENT tree's fixtures —
+# keeping the yardstick fixed while only the reviewer code varies between legs.
+_FIXTURES = Path(os.environ.get("EVALS_FIXTURES_DIR") or (Path(__file__).parent / "fixtures"))
+_RESULTS_DIR = Path(__file__).parent / "results"
+
+
+def _head_sha() -> str:
+    """The short git sha of the current tree (``unknown`` if git is unavailable)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return out.stdout.strip() or "unknown"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
 
 
 def _load_fixtures() -> list[tuple[str, Fixture]]:
@@ -91,6 +114,7 @@ def _review(
     top_p: float | None = None,
     top_k: int | None = None,
     categories: list[ReviewCategory] | None = None,
+    context_lines: int | None = None,
 ):
     ctx = PRContext(
         diff=diff,
@@ -105,6 +129,8 @@ def _review(
         cfg_overrides["max_input_tokens"] = max_input_tokens
     if categories is not None:
         cfg_overrides["categories"] = categories
+    if context_lines is not None:
+        cfg_overrides["context_lines"] = context_lines
     cfg = ReviewConfig(
         provider=provider,
         model=model,
@@ -162,9 +188,12 @@ def _review(
 
 def _print(score: FixtureScore) -> None:
     status = "ok" if score.parsed_ok else "PARSE-FAIL"
+    wrong = score.forbidden_count + score.unexpected_count
+    right = score.adjudicable_count - wrong
     print(
         f"{score.name:14} parsed={status:10} "
         f"recall={score.recall:5.0%} ({score.matched_count}/{score.expected_count}) "
+        f"precision={score.precision:5.0%} ({right}/{score.adjudicable_count}) "
         f"findings={score.findings_count} "
         f"anchored={score.anchored_rate:4.0%} ({score.anchored_count}/{score.findings_count})"
     )
@@ -196,6 +225,26 @@ def _gate(scores: list[FixtureScore], min_recall: float) -> tuple[bool, float]:
     parsed = all(s.parsed_ok for s in scores)
     clean = all(s.clean for s in scores)
     return (parsed and clean and aggregate >= min_recall), aggregate
+
+
+def pooled_metrics(scores: list[FixtureScore]) -> dict[str, float]:
+    """Pool recall / precision / anchored across fixtures over raw counts.
+
+    Each metric pools the underlying counts (total caught / total planted, etc.) —
+    NOT an average of per-fixture percentages — so a fixture with more findings
+    carries proportionally more weight. Shared by the JSON output and the A/B leg.
+    """
+    total_expected = sum(s.expected_count for s in scores)
+    total_matched = sum(s.matched_count for s in scores)
+    total_adjudicable = sum(s.adjudicable_count for s in scores)
+    total_wrong = sum(s.forbidden_count + s.unexpected_count for s in scores)
+    total_findings = sum(s.findings_count for s in scores)
+    total_anchored = sum(s.anchored_count for s in scores)
+    return {
+        "pooled_recall": total_matched / total_expected if total_expected else 1.0,
+        "pooled_precision": 1.0 - total_wrong / total_adjudicable if total_adjudicable else 1.0,
+        "pooled_anchored": total_anchored / total_findings if total_findings else 1.0,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -232,6 +281,13 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="token budget per model call before the diff is split into batches",
+    )
+    ap.add_argument(
+        "--context-lines",
+        type=int,
+        default=None,
+        help="surrounding context lines padded around each hunk (ReviewConfig.context_lines); "
+        "0 disables. Lets the A/B harness sweep the window width.",
     )
     ap.add_argument(
         "--no-reflect",
@@ -279,6 +335,18 @@ def main(argv: list[str] | None = None) -> int:
         help="only run the named fixture(s); repeatable. Default: all. Lets CI run a fast "
         "single-fixture subset while the full set stays available on demand.",
     )
+    ap.add_argument(
+        "--json",
+        dest="json_out",
+        action="store_true",
+        help="emit the per-fixture scores + pooled metrics as a single JSON object on "
+        "stdout (machine-readable; consumed by the evals.ab A/B harness)",
+    )
+    ap.add_argument(
+        "--save-results",
+        action="store_true",
+        help="persist this run's pooled metrics to evals/results/<sha>.json for tracking",
+    )
     args = ap.parse_args(argv)
 
     provider = Provider(args.provider)
@@ -301,18 +369,58 @@ def main(argv: list[str] | None = None) -> int:
             top_p=args.top_p,
             top_k=args.top_k,
             categories=categories,
+            context_lines=args.context_lines,
         )
         for diff, m in fixtures
     ]
-    for score in scores:
-        _print(score)
 
     ok, aggregate = _gate(scores, args.min_recall)
+    pooled = pooled_metrics(scores)
+
+    if args.json_out:
+        # Machine-readable: the per-fixture scores plus the pooled metrics, emitted
+        # as the only thing on stdout so evals.ab can json.loads() it from a worktree.
+        print(
+            json.dumps(
+                {
+                    "fixtures": [s.model_dump() for s in scores],
+                    "passed": ok,
+                    "aggregate_recall": aggregate,
+                    **pooled,
+                }
+            )
+        )
+        return 0 if ok else 1
+
+    for score in scores:
+        _print(score)
     print(
         f"\naggregate recall {aggregate:.0%} — "
         + ("PASS" if ok else "FAIL")
         + f" (min recall {args.min_recall:.0%})"
     )
+    right = sum(s.adjudicable_count - s.forbidden_count - s.unexpected_count for s in scores)
+    adjudicable = sum(s.adjudicable_count for s in scores)
+    print(
+        f"pooled precision {pooled['pooled_precision']:.0%} "
+        f"({right}/{adjudicable} adjudicable findings right)"
+    )
+
+    if args.save_results:
+        record = RunRecord(
+            sha=_head_sha(),
+            model=args.model,
+            provider=args.provider,
+            date=date.today().isoformat(),
+            min_recall=args.min_recall,
+            pooled_recall=pooled["pooled_recall"],
+            pooled_precision=pooled["pooled_precision"],
+            pooled_anchored=pooled["pooled_anchored"],
+            fixtures=scores,
+        )
+        path = write_run_record(record, _RESULTS_DIR)
+        print(f"saved results → {path}")
+
     return 0 if ok else 1
 
 

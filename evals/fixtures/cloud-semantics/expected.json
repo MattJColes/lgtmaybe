@@ -1,0 +1,29 @@
+{
+  "name": "cloud-semantics",
+  "changed_file": "infra/tenant_storage.py",
+  "expected": [
+    {
+      "label": "overly broad IAM grant: Resource set to \"*\" in grant_policy",
+      "line": 33,
+      "keywords": ["resource", "wildcard", "*", "broad", "least privilege", "iam"],
+      "severity_at_least": "medium"
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: trust policy allows any tenant (the PrincipalTag/RequestTag ABAC condition scopes it correctly)",
+      "line": 13,
+      "keywords": ["any tenant", "all tenants", "every tenant", "cross-tenant", "tenant isolation"]
+    },
+    {
+      "label": "FP: incorrect base64 encoding of the EncryptionContext (b64encode is used correctly)",
+      "line": 22,
+      "keywords": ["base64", "incorrect encoding", "wrong encoding", "invalid base64", "encoding bug"]
+    },
+    {
+      "label": "FP: path traversal via tenant_id in the S3 key (tenant_id is an authenticated server value)",
+      "line": 26,
+      "keywords": ["path traversal", "traversal", "directory traversal", "../", "sanitize the key"]
+    }
+  ]
+}

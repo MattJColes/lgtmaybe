@@ -1,0 +1,7 @@
+{
+  "verdicts": [
+    {"index": 0, "keep": true},
+    {"index": 1, "keep": true},
+    {"index": 2, "keep": false}
+  ]
+}
