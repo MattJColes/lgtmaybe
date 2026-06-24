@@ -30,6 +30,7 @@ from .parse import ParseError, parse_findings
 from .prompt import build_lens_prompt, build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
+from .suppress import apply_suppressions
 
 _log = get_logger(__name__)
 
@@ -205,11 +206,19 @@ class LLMReviewEngine(ReviewEngine):
         #    duplicates before reflecting.
         all_findings = _dedupe(all_findings)
 
+        # 7b. Suppression: drop findings a team has marked known-fine — by
+        #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
+        #     ignore` pragma on/above the flagged line. Done before reflection so a
+        #     suppressed finding costs no reflection tokens and never posts.
+        all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
         if cfg.reflect and all_findings:
             _log.info("reflecting on findings", extra={"findings": len(all_findings)})
+            # model_copy keeps file_contents — reflection now grounds itself on the
+            # (redacted) head text of flagged files to verify whole-file claims.
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
             all_findings = reflect_findings(all_findings, clean_ctx, cfg, self._provider)
 

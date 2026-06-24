@@ -336,6 +336,55 @@ def test_post_review_defangs_fences_in_title_and_body() -> None:
 
 
 @respx.mock
+def test_broad_finding_rendered_collapsed_not_inline() -> None:
+    """A finding marked broad is routed away from inline comments into a collapsed
+    "Broader observations" section in the review body, even though it anchors."""
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    created_bodies: list[dict[object, object]] = []
+
+    def capture_create(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        created_bodies.append(body)
+        return httpx.Response(201, json={"id": 1, "body": body.get("body", "")})
+
+    respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
+
+    findings = [
+        ReviewFinding(
+            path="src/app.py",
+            line=2,
+            side="RIGHT",
+            severity=Severity.high,
+            title="Anchored inline finding",
+            body="this one is placed inline",
+        ),
+        ReviewFinding(
+            path="src/app.py",
+            line=2,  # a real, anchorable changed line — but broad, so not inline
+            side="RIGHT",
+            severity=Severity.high,
+            title="Broad observation",
+            body="needs a wider redesign",
+            broad=True,
+        ),
+    ]
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(findings, "Summary text", diff=SAMPLE_DIFF)
+
+    body = created_bodies[0]
+    comments = body.get("comments", [])
+    # Only the non-broad finding is inline.
+    assert len(comments) == 1
+    assert all("Broad observation" not in c["body"] for c in comments)
+    # The broad finding lives in a collapsed details block in the review body.
+    rendered = str(body.get("body", ""))
+    assert "Broad observation" in rendered
+    assert "<details>" in rendered
+    assert "Broader observations" in rendered
+
+
+@respx.mock
 def test_post_review_uses_provider_scoped_marker() -> None:
     """A gateway built with a marker_key embeds a provider/model-scoped marker."""
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))

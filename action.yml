@@ -18,6 +18,10 @@ inputs:
     description: "Model to retry with if the primary model fails."
     required: false
     default: ""
+  reflect_model:
+    description: "Model for the self-reflection (false-positive audit) pass. Defaults to model; point it at a stronger model to audit a weaker reviewer's findings."
+    required: false
+    default: ""
   api_key:
     description: "API key for key-based providers (openai/anthropic/openrouter/azure, and openai-compatible hosted endpoints like DeepSeek). Leave empty for bedrock/vertex/ollama and keyless local openai-compatible servers."
     required: false
@@ -138,6 +142,7 @@ runs:
         INPUT_PROVIDER: ${{ inputs.provider }}
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_FALLBACK_MODEL: ${{ inputs.fallback_model }}
+        INPUT_REFLECT_MODEL: ${{ inputs.reflect_model }}
         INPUT_API_KEY: ${{ inputs.api_key }}
         INPUT_API_BASE: ${{ inputs.api_base }}
         INPUT_TIMEOUT: ${{ inputs.timeout }}
@@ -155,7 +160,7 @@ runs:
           -e GITHUB_TOKEN \
           -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH \
           -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL \
-          -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_FALLBACK_MODEL \
+          -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_FALLBACK_MODEL -e INPUT_REFLECT_MODEL \
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
           -e INPUT_TIMEOUT -e INPUT_TEMPERATURE \
           -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS -e INPUT_RESOLVE_FIXED \

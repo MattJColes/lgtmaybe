@@ -55,6 +55,24 @@ def test_resolve_fixed_round_trips_from_file():
     assert cfg.resolve_fixed is False
 
 
+def test_reflect_model_round_trips_from_file_and_cli():
+    """reflect_model can be set in .lgtmaybe.yml and overridden via a CLI input."""
+    import io
+
+    cfg = load_config(
+        config_stream=io.StringIO(
+            "provider: openai\nmodel: gpt-4o\nreflect_model: gpt-4o-stronger\n"
+        )
+    )
+    assert cfg.reflect_model == "gpt-4o-stronger"
+
+    cfg = load_config(
+        config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\n"),
+        reflect_model="cli-judge",
+    )
+    assert cfg.reflect_model == "cli-judge"
+
+
 def test_cli_input_overrides_file_value():
     """An explicit CLI input takes precedence over the file's value."""
     import io

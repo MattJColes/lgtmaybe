@@ -200,6 +200,46 @@ def test_all_findings_returned_when_min_severity_info() -> None:
 
 
 # ---------------------------------------------------------------------------
+# suppression: a suppressed finding never reaches reflection nor the output.
+# ---------------------------------------------------------------------------
+
+
+def test_suppressed_finding_skips_reflection_and_output() -> None:
+    """A finding whose fingerprint is in ignore_fingerprints is dropped right
+    after dedupe — it costs no reflection tokens and is never returned."""
+    from lgtmaybe.github.rest_gateway import finding_fingerprint
+
+    suppressed = ReviewFinding(
+        path="a.py", line=1, severity=Severity.high, title="known fine", body="dismissed"
+    )
+    kept = ReviewFinding(
+        path="a.py", line=1, severity=Severity.high, title="real bug", body="keep me"
+    )
+    # Both lenses return both findings on the same line; dedupe keeps one per line,
+    # so give them distinct lines so both survive to the suppression step.
+    kept = kept.model_copy(update={"line": 2})
+
+    provider = _provider_for([suppressed, kept], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    fp = finding_fingerprint("a.py", "known fine")
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        min_severity=Severity.info,
+        ignore_fingerprints=[fp],
+    )
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    titles = {f.title for f in findings}
+    assert "known fine" not in titles
+    assert "real bug" in titles
+    # The suppressed finding must not have been sent to the reflection call.
+    reflection_user = _reflection_calls(provider)[0]["messages"][1]["content"]
+    assert "known fine" not in reflection_user
+
+
+# ---------------------------------------------------------------------------
 # unanchored confidence gate: a finding whose anchor matched nothing is a guess.
 # Below unanchored_min_severity it is dropped, not demoted to the body.
 # ---------------------------------------------------------------------------

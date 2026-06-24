@@ -42,6 +42,12 @@ from lgtmaybe.config.loader import load_config
     help="Model to retry with if the primary model fails",
 )
 @click.option(
+    "--reflect-model",
+    default=None,
+    help="Model for the self-reflection (false-positive audit) pass; defaults to "
+    "--model. Point it at a stronger model to audit a weaker reviewer's findings",
+)
+@click.option(
     "--api-key",
     default=None,
     envvar="LGTMAYBE_API_KEY",
@@ -168,6 +174,7 @@ def review(
     provider: str | None,
     model: str | None,
     fallback_model: str | None,
+    reflect_model: str | None,
     api_key: str | None,
     api_base: str | None,
     min_severity: str | None,
@@ -196,6 +203,7 @@ def review(
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
+        reflect_model=reflect_model,
         min_severity=min_severity,
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
@@ -255,6 +263,7 @@ def action() -> None:
         config_path=Path(inputs["config_path"] or ".lgtmaybe.yml"),
         provider=inputs["provider"],
         model=inputs["model"],
+        reflect_model=inputs["reflect_model"],
         timeout=inputs["timeout"],
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],

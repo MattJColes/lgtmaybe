@@ -204,3 +204,129 @@ def test_verdict_after_bracket_bearing_prose_parses() -> None:
     survivors = reflect_findings([_HIGH], _CTX, _CFG, provider)
 
     assert survivors == []  # the keep=false verdict was parsed past the prose
+
+
+# ---------------------------------------------------------------------------
+# PIECE 1 — grounding reflection with file head text (asymmetric context)
+# ---------------------------------------------------------------------------
+
+
+def test_grounding_includes_head_text_of_flagged_file() -> None:
+    """The full head text of a file carrying a finding reaches the auditor so it
+    can verify a whole-file claim (e.g. that an import IS present)."""
+    ctx = _CTX.model_copy(
+        update={"file_contents": {"a.py": "import os\nimport sys\n\ndef f():\n    return 1\n"}}
+    )
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], ctx, _CFG, provider)
+
+    user = provider.calls[0]["messages"][1]["content"]
+    assert "import sys" in user  # the file head text was attached
+    assert "def f():" in user
+
+
+def test_grounding_redacts_secret_in_file_contents() -> None:
+    """PRContext.file_contents is RAW head text — a secret in it must be redacted
+    before the grounding block is sent to the provider."""
+    secret = "AKIA" + "A" * 16
+    ctx = _CTX.model_copy(
+        update={"file_contents": {"a.py": f"key = '{secret}'\n"}}
+    )
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], ctx, _CFG, provider)
+
+    user = provider.calls[0]["messages"][1]["content"]
+    assert secret not in user
+    assert "[REDACTED]" in user
+
+
+def test_reflect_prompt_has_new_grounding_drop_rules() -> None:
+    """The three new drop-rules' keywords appear in the system prompt: a
+    library/framework-semantics claim the diff doesn't prove, a missing-import/
+    await/symbol claim contradicted by the provided file text, and a
+    test-will-fail / wrong-patch-target claim."""
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "semantics" in system
+    assert "import" in system and "await" in system
+    assert "patch target" in system or "mock" in system
+
+
+# ---------------------------------------------------------------------------
+# PIECE 3 — actionability tiering (broad vs safe self-contained)
+# ---------------------------------------------------------------------------
+
+
+def test_reflection_marks_finding_broad() -> None:
+    """A {"index":0,"keep":true,"broad":true} verdict sets broad=True on the
+    surviving finding."""
+    text = json.dumps({"verdicts": [{"index": 0, "keep": True, "broad": True}]})
+    provider = _fake_with_text(text)
+
+    survivors = reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert len(survivors) == 1
+    assert survivors[0].broad is True
+
+
+def test_reflection_defaults_broad_false_when_absent() -> None:
+    """A verdict that omits broad keeps the finding non-broad."""
+    provider = _fake_with_text(_envelope([(0, True)]))
+
+    survivors = reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert survivors[0].broad is False
+
+
+def test_reflect_prompt_asks_for_broad_flag() -> None:
+    """The system prompt asks the auditor for a per-verdict broad flag."""
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "broad" in system
+
+
+def test_reflection_uses_reflect_model_when_set() -> None:
+    """A configured reflect_model is the model passed to the reflection call,
+    overriding the review model."""
+    cfg = ReviewConfig(
+        provider=Provider.ollama, model="llama3", reflect_model="bigger-judge"
+    )
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, cfg, provider)
+
+    assert provider.calls[0]["model"] == "bigger-judge"
+
+
+def test_reflection_falls_back_to_model_without_reflect_model() -> None:
+    """With no reflect_model, the reflection call uses cfg.model."""
+    provider = _fake_with_verdict({0: True})  # _CFG has reflect_model=None
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert provider.calls[0]["model"] == "llama3"
+
+
+def test_grounding_truncates_huge_file_within_budget() -> None:
+    """A file_contents far larger than the token budget is head+tail-truncated so
+    the user message stays within roughly the budget."""
+    from lgtmaybe.engine.compress import count_tokens
+
+    huge = "\n".join(f"line {i} of a very large file here" for i in range(20_000)) + "\n"
+    ctx = _CTX.model_copy(update={"file_contents": {"a.py": huge}})
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", max_input_tokens=4_000)
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], ctx, cfg, provider)
+
+    user = provider.calls[0]["messages"][1]["content"]
+    # The whole file (~120k tokens) would blow the 4k budget; truncation keeps it bounded.
+    assert count_tokens(user) <= cfg.max_input_tokens * 2
