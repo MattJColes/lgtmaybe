@@ -231,9 +231,7 @@ def test_grounding_redacts_secret_in_file_contents() -> None:
     """PRContext.file_contents is RAW head text — a secret in it must be redacted
     before the grounding block is sent to the provider."""
     secret = "AKIA" + "A" * 16
-    ctx = _CTX.model_copy(
-        update={"file_contents": {"a.py": f"key = '{secret}'\n"}}
-    )
+    ctx = _CTX.model_copy(update={"file_contents": {"a.py": f"key = '{secret}'\n"}})
     provider = _fake_with_verdict({0: True})
 
     reflect_findings([_HIGH], ctx, _CFG, provider)
@@ -297,9 +295,7 @@ def test_reflect_prompt_asks_for_broad_flag() -> None:
 def test_reflection_uses_reflect_model_when_set() -> None:
     """A configured reflect_model is the model passed to the reflection call,
     overriding the review model."""
-    cfg = ReviewConfig(
-        provider=Provider.ollama, model="llama3", reflect_model="bigger-judge"
-    )
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect_model="bigger-judge")
     provider = _fake_with_verdict({0: True})
 
     reflect_findings([_HIGH], _CTX, cfg, provider)
@@ -442,9 +438,7 @@ def test_defer_without_fetcher_drops_finding() -> None:
 def test_resolver_only_calls_injected_fetcher() -> None:
     """Fork-safety: the only I/O the resolver does is the injected read-only
     fetch_file. A recording fetcher captures the single path; nothing else."""
-    provider = _ScriptedProvider(
-        [_needs_envelope(0, ["other.py"]), _envelope([(0, True)])]
-    )
+    provider = _ScriptedProvider([_needs_envelope(0, ["other.py"]), _envelope([(0, True)])])
     fetcher = _RecordingFetcher({"other.py": "ok = True\n"})
 
     reflect_findings([_HIGH], _CTX, _CFG, provider, fetch_file=fetcher)
@@ -455,9 +449,7 @@ def test_resolver_only_calls_injected_fetcher() -> None:
 def test_fetched_file_secret_never_reaches_recheck_prompt() -> None:
     """A secret in a fetched file is redacted before the recheck prompt is built."""
     secret = "AKIA" + "B" * 16
-    provider = _ScriptedProvider(
-        [_needs_envelope(0, ["secrets.py"]), _envelope([(0, True)])]
-    )
+    provider = _ScriptedProvider([_needs_envelope(0, ["secrets.py"]), _envelope([(0, True)])])
     fetcher = _RecordingFetcher({"secrets.py": f"token = '{secret}'\n"})
 
     reflect_findings([_HIGH], _CTX, _CFG, provider, fetch_file=fetcher)

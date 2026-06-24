@@ -171,9 +171,7 @@ def _reflect_pass(
                 "reflection deferral — fetched files for recheck",
                 extra={"hop": hop + 1, "files": sorted(fetched)},
             )
-            augmented = ctx.model_copy(
-                update={"file_contents": {**ctx.file_contents, **fetched}}
-            )
+            augmented = ctx.model_copy(update={"file_contents": {**ctx.file_contents, **fetched}})
             survivors.extend(
                 _reflect_pass(
                     deferred,
@@ -290,10 +288,7 @@ def _grounding_block(
     if not blocks:
         return ""
     body = "\n\n".join(blocks)
-    return (
-        "Full head text of the changed files (for verification only):\n"
-        f"{body}\n\n"
-    )
+    return f"Full head text of the changed files (for verification only):\n{body}\n\n"
 
 
 def _head_tail(text: str, max_tokens: int) -> str:

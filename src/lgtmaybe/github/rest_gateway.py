@@ -233,9 +233,7 @@ class RestGitHubGateway(GitHubGateway):
         commentable: CommentableLines = build_commentable_lines(diff)
         comments, demoted, broad = self._partition_findings(findings, commentable)
 
-        body = (
-            f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
-        )
+        body = f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
         existing_id = self._find_existing_review()
 
         reviews_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"

@@ -93,9 +93,7 @@ def _worker_count(cfg: ReviewConfig, lens_count: int) -> int:
 class LLMReviewEngine(ReviewEngine):
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
-    def __init__(
-        self, provider: ProviderClient, fetch_file: FileFetcher | None = None
-    ) -> None:
+    def __init__(self, provider: ProviderClient, fetch_file: FileFetcher | None = None) -> None:
         self._provider = provider
         # Optional read-only file reader for the reflection pass's bounded retrieval
         # escalation: when the auditor defers a finding for lack of a referenced

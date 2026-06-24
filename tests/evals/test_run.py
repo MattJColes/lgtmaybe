@@ -133,8 +133,16 @@ def test_pooled_precision_reported_in_summary(
     monkeypatch.setattr(run_mod, "_review", fake_review)
     run_mod.main(
         [
-            "--provider", "ollama", "--model", "x", "--min-recall", "0.0",
-            "--fixture", "badcode", "--fixture", "vibe-multifile",
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--fixture",
+            "vibe-multifile",
         ]
     )
     out = capsys.readouterr().out
@@ -163,8 +171,15 @@ def test_json_flag_emits_machine_readable_scores(
     monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
     rc = run_mod.main(
         [
-            "--provider", "ollama", "--model", "x", "--min-recall", "0.0",
-            "--fixture", "badcode", "--json",
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--json",
         ]
     )
     assert rc == 0
@@ -176,17 +191,22 @@ def test_json_flag_emits_machine_readable_scores(
     assert payload["fixtures"][0]["name"] == "badcode"
 
 
-def test_save_results_writes_a_record(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_save_results_writes_a_record(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """--save-results persists a RunRecord JSON keyed by the head sha."""
     monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
     monkeypatch.setattr(run_mod, "_RESULTS_DIR", tmp_path)
     monkeypatch.setattr(run_mod, "_head_sha", lambda: "cafef00d")
     run_mod.main(
         [
-            "--provider", "ollama", "--model", "x", "--min-recall", "0.0",
-            "--fixture", "badcode", "--save-results",
+            "--provider",
+            "ollama",
+            "--model",
+            "x",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--save-results",
         ]
     )
     saved = tmp_path / "cafef00d.json"

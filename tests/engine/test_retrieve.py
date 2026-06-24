@@ -17,9 +17,7 @@ def test_resolve_needs_fetches_and_redacts() -> None:
         fetched_paths.append(path)
         return "def helper():\n    return 1\n"
 
-    out = resolve_needs(
-        ["other.py"], fetch, already=set(), budget_tokens=10_000, max_files=5
-    )
+    out = resolve_needs(["other.py"], fetch, already=set(), budget_tokens=10_000, max_files=5)
 
     assert fetched_paths == ["other.py"]
     assert out == {"other.py": "def helper():\n    return 1\n"}
@@ -31,9 +29,7 @@ def test_resolve_needs_redacts_secret() -> None:
     def fetch(path: str) -> str | None:
         return f"key = '{secret}'\n"
 
-    out = resolve_needs(
-        ["s.py"], fetch, already=set(), budget_tokens=10_000, max_files=5
-    )
+    out = resolve_needs(["s.py"], fetch, already=set(), budget_tokens=10_000, max_files=5)
 
     assert secret not in out["s.py"]
     assert "[REDACTED]" in out["s.py"]

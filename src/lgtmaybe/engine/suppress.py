@@ -22,9 +22,7 @@ from lgtmaybe.github.rest_gateway import finding_fingerprint
 _PRAGMA = re.compile(r"#\s*lgtmaybe:\s*ignore\b", re.IGNORECASE)
 
 
-def is_suppressed(
-    finding: ReviewFinding, cfg: ReviewConfig, file_contents: dict[str, str]
-) -> bool:
+def is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, file_contents: dict[str, str]) -> bool:
     """Whether *finding* should be dropped before reflection and posting.
 
     Suppressed when its ``finding_fingerprint(path, title)`` is in

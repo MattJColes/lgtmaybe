@@ -10,9 +10,7 @@ _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
 
 def _finding(path: str = "a.py", line: int = 2, title: str = "Possible bug") -> ReviewFinding:
-    return ReviewFinding(
-        path=path, line=line, severity=Severity.medium, title=title, body="detail"
-    )
+    return ReviewFinding(path=path, line=line, severity=Severity.medium, title=title, body="detail")
 
 
 def test_config_fingerprint_suppresses() -> None:
