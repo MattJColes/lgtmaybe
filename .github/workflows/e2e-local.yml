@@ -45,7 +45,7 @@ jobs:
         run: curl -fsSL https://ollama.com/install.sh | sh
 
       - name: Cache ollama model
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-${{ runner.os }}-${{ env.LGTMAYBE_E2E_OLLAMA_MODEL }}
