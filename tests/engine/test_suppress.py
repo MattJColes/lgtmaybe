@@ -65,3 +65,28 @@ def test_apply_suppressions_filters_only_suppressed() -> None:
 
     assert keep in out
     assert drop not in out
+
+
+class _CountingStr(str):
+    """A str that tallies how many times it is split — to prove the hot path
+    splits each file's text once, not once per finding on that file."""
+
+    splits = 0
+
+    def split(self, *args: object, **kwargs: object) -> list[str]:  # type: ignore[override]
+        type(self).splits += 1
+        return super().split(*args, **kwargs)  # type: ignore[arg-type]
+
+
+def test_apply_suppressions_splits_each_file_once() -> None:
+    text = _CountingStr("import os\nx = 1\ny = 2\nz = 3\n")
+    _CountingStr.splits = 0
+    findings = [
+        _finding(line=2, title="One"),
+        _finding(line=3, title="Two"),
+        _finding(line=4, title="Three"),
+    ]
+
+    apply_suppressions(findings, _CFG, {"a.py": text})
+
+    assert _CountingStr.splits == 1

@@ -373,6 +373,34 @@ def test_grounding_truncates_huge_file_within_budget() -> None:
     assert count_tokens(user) <= cfg.max_input_tokens * 2
 
 
+def test_head_tail_returns_text_and_accurate_token_count() -> None:
+    """_head_tail returns (text, token_count) and the count matches the text, so
+    callers reuse it instead of recounting."""
+    from lgtmaybe.engine.compress import count_tokens
+    from lgtmaybe.engine.reflect import _head_tail
+
+    text = "\n".join(f"line {i}" for i in range(2_000)) + "\n"
+
+    truncated, used = _head_tail(text, 200)
+
+    assert "… [truncated] …" in truncated
+    assert used == count_tokens(truncated)
+    assert used <= 200
+
+
+def test_head_tail_within_budget_returns_full_text_and_count() -> None:
+    """When the text already fits, _head_tail returns it unchanged with its count."""
+    from lgtmaybe.engine.compress import count_tokens
+    from lgtmaybe.engine.reflect import _head_tail
+
+    text = "short\nfile\n"
+
+    out, used = _head_tail(text, 10_000)
+
+    assert out == text
+    assert used == count_tokens(text)
+
+
 # ---------------------------------------------------------------------------
 # TRACK D — bounded retrieval escalation (verify, don't cull)
 #
@@ -581,14 +609,18 @@ def test_head_tail_respects_tiny_budget() -> None:
     """
     text = "alpha\nbravo\ncharlie\ndelta\necho"
     for budget in range(1, 6):
-        result = _head_tail(text, max_tokens=budget)
+        result, used = _head_tail(text, max_tokens=budget)
         assert count_tokens(result) <= budget, (budget, repr(result))
+        # The returned count is what the caller subtracts from its budget; it must
+        # not overstate the budget (0 for the degenerate empty result).
+        assert used <= budget
 
 
 def test_head_tail_truncates_within_budget() -> None:
     """With room for the marker, the result keeps both ends and stays in budget."""
     text = "\n".join(f"line{i}" for i in range(200))
-    result = _head_tail(text, max_tokens=40)
+    result, used = _head_tail(text, max_tokens=40)
     assert count_tokens(result) <= 40
+    assert used == count_tokens(result)
     assert "[truncated]" in result
     assert result.startswith("line0")

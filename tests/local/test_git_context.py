@@ -235,3 +235,28 @@ def test_uncommitted_reviews_only_uncommitted_changes(repo: Path) -> None:
 def test_working_and_uncommitted_are_mutually_exclusive(repo: Path) -> None:
     with pytest.raises(ValueError, match="mutually exclusive"):
         local_pr_context(working=True, uncommitted=True, cwd=repo)
+
+
+def test_uncommitted_resolves_head_with_a_single_rev_parse(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In --uncommitted mode the base and head are both HEAD; resolving it should
+    cost one `git rev-parse HEAD` subprocess, not two."""
+    import lgtmaybe.local as local_mod
+
+    real_git = local_mod._git
+    head_calls = 0
+
+    def counting_git(cwd: Path | None, *args: str) -> str:
+        nonlocal head_calls
+        if args == ("rev-parse", "HEAD"):
+            head_calls += 1
+        return real_git(cwd, *args)
+
+    monkeypatch.setattr(local_mod, "_git", counting_git)
+
+    (repo / "app.py").write_text("def f():\n    return 99\n")
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert head_calls == 1
+    assert ctx.base_sha == ctx.head_sha

@@ -47,9 +47,11 @@ def local_pr_context(
 
     _ensure_repo(cwd)
 
+    head_sha = _git(cwd, "rev-parse", "HEAD").strip()
+
     if uncommitted:
         spec = "HEAD"
-        base_sha = _git(cwd, "rev-parse", "HEAD").strip()
+        base_sha = head_sha  # base and head are both HEAD — resolved once above
         commit_messages: list[str] = []
     else:
         base_ref = base or _default_base(cwd)
@@ -72,7 +74,7 @@ def local_pr_context(
         diff=diff,
         changed_files=changed_files,
         base_sha=base_sha,
-        head_sha=_git(cwd, "rev-parse", "HEAD").strip(),
+        head_sha=head_sha,
         repo=_repo_name(cwd),
         pr_number=0,
         commit_messages=commit_messages,

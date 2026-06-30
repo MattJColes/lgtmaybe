@@ -291,9 +291,11 @@ def _grounding_block(
         if not raw:
             continue
         text = redact(raw)
-        if count_tokens(text) > remaining:
-            text = _head_tail(text, remaining)
-        used = count_tokens(text)
+        full = count_tokens(text)
+        if full > remaining:
+            text, used = _head_tail(text, remaining, full)
+        else:
+            used = full
         if used <= 0:
             continue
         blocks.append(f"--- {path} ---\n{text}")
@@ -307,26 +309,32 @@ def _grounding_block(
     return f"Full head text of the changed files (for verification only):\n{body}\n\n"
 
 
-def _head_tail(text: str, max_tokens: int) -> str:
+def _head_tail(text: str, max_tokens: int, full_tokens: int | None = None) -> tuple[str, int]:
     """Keep the head and tail of *text* so its token count fits within *max_tokens*.
 
     Whole-file claims hinge on imports (top of file) and the symbol/usage near the
     flagged code, so keeping both ends — with a marker where the middle was cut —
     is more useful for verification than a head-only truncation.
+
+    Returns ``(text, token_count)`` so the caller reuses the count instead of
+    recounting. Pass ``full_tokens`` (a count of *text* the caller already has) to
+    skip recomputing it here.
     """
     if max_tokens <= 0:
-        return ""
-    lines = text.split("\n")
-    if count_tokens(text) <= max_tokens:
-        return text
+        return "", 0
+    if full_tokens is None:
+        full_tokens = count_tokens(text)
+    if full_tokens <= max_tokens:
+        return text, full_tokens
 
+    lines = text.split("\n")
     marker = "… [truncated] …"
     half = (max_tokens - count_tokens(marker)) // 2
     if half <= 0:
         # Budget too small to hold the marker plus any head/tail — flooring the
         # per-end budget to 1 here would push the result over *max_tokens*, so
         # attach nothing rather than overflow.
-        return ""
+        return "", 0
 
     head: list[str] = []
     used = 0
@@ -347,7 +355,10 @@ def _head_tail(text: str, max_tokens: int) -> str:
         used += t
     tail.reverse()
 
-    return "\n".join([*head, marker, *tail])
+    result = "\n".join([*head, marker, *tail])
+    # Joining can merge tokens at the head/marker/tail seams, so the assembled
+    # count isn't simply the per-line sums — count the result once and hand it back.
+    return result, count_tokens(result)
 
 
 def _parse_verdicts(raw: str) -> dict[int, tuple[bool, bool, list[str]]]:
