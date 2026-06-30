@@ -7,7 +7,7 @@ and no pull request required.
 
 ## What you need
 
-- Python 3.12 or later
+- Python 3.11 or later
 - [ollama](https://ollama.com) running locally
 - A local git repository with some changes on a branch to review
 

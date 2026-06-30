@@ -127,8 +127,8 @@ lgtmaybe does not require or accept a static API key for Bedrock.
 > **`No matching distribution found for lgtmaybe[bedrock]`** (`from versions:
 > none`) — this is not a packaging problem; the `bedrock` extra is published on
 > PyPI. It means `pip` found no version compatible with your environment. The
-> usual cause is an interpreter older than the required **Python 3.12+** (check
-> with `python --version`); install under 3.12+ (e.g. via `pipx`/`uv`). If your
+> usual cause is an interpreter older than the required **Python 3.11+** (check
+> with `python --version`); install under 3.11+ (e.g. via `pipx`/`uv`). If your
 > Python is fine, your `pip` can't reach PyPI — check your network/proxy or
 > `--index-url`.
 
