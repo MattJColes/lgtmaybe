@@ -609,14 +609,18 @@ def test_head_tail_respects_tiny_budget() -> None:
     """
     text = "alpha\nbravo\ncharlie\ndelta\necho"
     for budget in range(1, 6):
-        result = _head_tail(text, max_tokens=budget)
+        result, used = _head_tail(text, max_tokens=budget)
         assert count_tokens(result) <= budget, (budget, repr(result))
+        # The returned count is what the caller subtracts from its budget; it must
+        # not overstate the budget (0 for the degenerate empty result).
+        assert used <= budget
 
 
 def test_head_tail_truncates_within_budget() -> None:
     """With room for the marker, the result keeps both ends and stays in budget."""
     text = "\n".join(f"line{i}" for i in range(200))
-    result = _head_tail(text, max_tokens=40)
+    result, used = _head_tail(text, max_tokens=40)
     assert count_tokens(result) <= 40
+    assert used == count_tokens(result)
     assert "[truncated]" in result
     assert result.startswith("line0")

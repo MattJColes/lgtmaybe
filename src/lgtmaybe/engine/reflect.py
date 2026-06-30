@@ -334,7 +334,7 @@ def _head_tail(text: str, max_tokens: int, full_tokens: int | None = None) -> tu
         # Budget too small to hold the marker plus any head/tail — flooring the
         # per-end budget to 1 here would push the result over *max_tokens*, so
         # attach nothing rather than overflow.
-        return ""
+        return "", 0
 
     head: list[str] = []
     used = 0
