@@ -1101,6 +1101,30 @@ def test_snaps_finding_to_changed_line_matching_anchor() -> None:
     assert [f.line for f in findings] == [4]
 
 
+def test_prepared_candidates_match_across_all_levels() -> None:
+    """_match_anchor works against candidates normalised once by _prepare_candidates,
+    covering exact, whitespace-normalised, and unique-substring matching."""
+    from lgtmaybe.engine.engine import _match_anchor, _prepare_candidates
+
+    index = {
+        ("m.py", "RIGHT"): [
+            (4, "    d = compute(value)  # trailing note"),
+            (7, "x = 1"),
+        ]
+    }
+    prepared = _prepare_candidates(index)
+    cands = prepared[("m.py", "RIGHT")]
+
+    # exact (whitespace-stripped)
+    assert _match_anchor("x = 1", cands) == [7]
+    # inner-whitespace-normalised (indentation/spacing drift)
+    assert _match_anchor("d  =  compute(value)  # trailing note", cands) == [4]
+    # unique substring (model trimmed the trailing comment)
+    assert _match_anchor("d = compute(value)", cands) == [4]
+    # no match
+    assert _match_anchor("nonexistent line", cands) == []
+
+
 def test_keeps_model_line_when_anchor_matches_nothing() -> None:
     f = ReviewFinding(
         path="m.py", line=3, severity=Severity.high, title="bug", body="x", anchor="z = 99"

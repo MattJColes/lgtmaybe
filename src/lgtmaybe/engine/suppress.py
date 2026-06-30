@@ -32,13 +32,21 @@ def is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, file_contents: dict
     so a finding whose line is past the file (or whose file has no fetched text)
     simply isn't pragma-suppressed.
     """
+    text = file_contents.get(finding.path)
+    return _is_suppressed(finding, cfg, text.split("\n") if text else None)
+
+
+def _is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, lines: list[str] | None) -> bool:
+    """``is_suppressed`` against a file's already-split lines (None if no text).
+
+    Split out so ``apply_suppressions`` can split each file's head text once and
+    reuse it across every finding on that file, rather than re-splitting per
+    finding (the file's text is unchanged within a run).
+    """
     if finding_fingerprint(finding.path, finding.title) in cfg.ignore_fingerprints:
         return True
-
-    text = file_contents.get(finding.path)
-    if not text:
+    if not lines:
         return False
-    lines = text.split("\n")
     # The finding's own line and the one just above it (1-based -> 0-based index).
     for idx in (finding.line - 1, finding.line - 2):
         if 0 <= idx < len(lines) and _PRAGMA.search(lines[idx]):
@@ -49,5 +57,19 @@ def is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, file_contents: dict
 def apply_suppressions(
     findings: list[ReviewFinding], cfg: ReviewConfig, file_contents: dict[str, str]
 ) -> list[ReviewFinding]:
-    """Return *findings* with the suppressed ones removed (order preserved)."""
-    return [f for f in findings if not is_suppressed(f, cfg, file_contents)]
+    """Return *findings* with the suppressed ones removed (order preserved).
+
+    Each file's head text is split into lines once (lazily, only for paths a
+    finding actually lands on) and reused across that file's findings.
+    """
+    lines_cache: dict[str, list[str]] = {}
+
+    def lines_for(path: str) -> list[str]:
+        cached = lines_cache.get(path)
+        if cached is None:
+            text = file_contents.get(path)
+            cached = text.split("\n") if text else []
+            lines_cache[path] = cached
+        return cached
+
+    return [f for f in findings if not _is_suppressed(f, cfg, lines_for(f.path))]

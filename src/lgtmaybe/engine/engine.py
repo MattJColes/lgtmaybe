@@ -391,7 +391,7 @@ def _snap_findings(findings: list[ReviewFinding], diff: str) -> list[ReviewFindi
     and side) and correct ``line`` to it. When the anchor is missing or matches no
     changed line, the model's ``line`` is kept untouched — never guess.
     """
-    index = changed_line_index(diff)
+    index = _prepare_candidates(changed_line_index(diff))
     return [_snap_one(f, index) for f in findings]
 
 
@@ -399,8 +399,23 @@ def _snap_findings(findings: list[ReviewFinding], diff: str) -> list[ReviewFindi
 # (`}`, `return`, `else:`), so substring matching is only tried for longer lines.
 _MIN_SUBSTRING_ANCHOR = 8
 
+# A changed line prepared for matching: (line, raw text, stripped, whitespace-normalised).
+# The stripped/normalised forms are computed once per diff rather than recomputed
+# for every finding that matches against the same (path, side) candidate list.
+_PreparedCandidate = tuple[int, str, str, str]
 
-def _match_anchor(anchor: str, candidates: list[tuple[int, str]]) -> list[int]:
+
+def _prepare_candidates(
+    index: dict[tuple[str, str], list[tuple[int, str]]],
+) -> dict[tuple[str, str], list[_PreparedCandidate]]:
+    """Precompute each candidate line's match forms (stripped + normalised) once."""
+    return {
+        key: [(line, text, text.strip(), " ".join(text.split())) for line, text in candidates]
+        for key, candidates in index.items()
+    }
+
+
+def _match_anchor(anchor: str, candidates: list[_PreparedCandidate]) -> list[int]:
     """Line numbers of the changed lines that match *anchor*, loosest level that hits.
 
     Tried in order, stopping at the first non-empty level:
@@ -409,24 +424,31 @@ def _match_anchor(anchor: str, candidates: list[tuple[int, str]]) -> list[int]:
     3. a unique substring relationship (the model trimmed a trailing comment, or
        quoted a touch more than the line) — only when exactly one line matches, so
        an ambiguous fragment never snaps to the wrong place.
+
+    Candidates carry their stripped/normalised forms precomputed (see
+    ``_prepare_candidates``), so this does no per-finding string rebuilding.
     """
     target = anchor.strip()
-    exact = [line for line, text in candidates if text.strip() == target]
+    exact = [line for line, _text, stripped, _norm in candidates if stripped == target]
     if exact:
         return exact
     norm = " ".join(target.split())
-    normalised = [line for line, text in candidates if " ".join(text.split()) == norm]
+    normalised = [line for line, _text, _stripped, cnorm in candidates if cnorm == norm]
     if normalised:
         return normalised
     if len(target) >= _MIN_SUBSTRING_ANCHOR:
-        substring = [line for line, text in candidates if target in text or text.strip() in target]
+        substring = [
+            line
+            for line, text, stripped, _norm in candidates
+            if target in text or stripped in target
+        ]
         if len(substring) == 1:
             return substring
     return []
 
 
 def _snap_one(
-    finding: ReviewFinding, index: dict[tuple[str, str], list[tuple[int, str]]]
+    finding: ReviewFinding, index: dict[tuple[str, str], list[_PreparedCandidate]]
 ) -> ReviewFinding:
     if not finding.anchor or not finding.anchor.strip():
         return finding  # no anchor → trust the model's line (stays anchored)
