@@ -7,7 +7,9 @@ model produced parseable output at all. No I/O, no model — unit-tested.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pathlib import Path
+
+from pydantic import BaseModel, Field
 
 from lgtmaybe.core.models import ReviewFinding, Severity
 
@@ -41,6 +43,12 @@ class Fixture(BaseModel):
     # unshown file, so a correct reviewer stays silent. A produced finding that
     # matches one of these is a regression (see engine codebase-humility rules).
     forbidden: list[ExpectedFinding] = []
+    # On-disk corpus that backs this fixture's *unshown* files (a ``repo/`` subdir
+    # next to ``diff.txt``). Populated by the loader, not the manifest JSON, so it is
+    # excluded from (de)serialisation. When present the harness wires a read-only
+    # reader + ast-grep symbol resolver rooted here, so a deferred cross-file verdict
+    # can fetch the real definition — exactly the path symbol resolution adds.
+    corpus_root: Path | None = Field(default=None, exclude=True)
 
 
 class FixtureScore(BaseModel):
