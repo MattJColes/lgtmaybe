@@ -1,3 +1,7 @@
+---
+description: Point lgtmaybe at any OpenAI-compatible server — vLLM, llama.cpp, LM Studio, DeepSeek — with --api-base; the key is optional.
+---
+
 # Local Models & other OpenAI providers
 
 Lots of model servers speak the OpenAI `/v1` wire format: local and self-hosted

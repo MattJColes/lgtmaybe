@@ -1,3 +1,7 @@
+---
+description: Set up lgtmaybe pull-request reviews with OpenAI — add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
+---
+
 # Review with OpenAI
 
 OpenAI is a key-based provider: add an `OPENAI_API_KEY` and pick a model. No

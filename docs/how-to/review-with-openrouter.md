@@ -1,3 +1,7 @@
+---
+description: Use OpenRouter as the lgtmaybe backend to reach many model vendors through one OpenAI-compatible API key.
+---
+
 # Review with OpenRouter
 
 [OpenRouter](https://openrouter.ai/) is a key-based gateway to many model

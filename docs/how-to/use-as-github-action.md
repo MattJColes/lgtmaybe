@@ -1,3 +1,7 @@
+---
+description: Add lgtmaybe as a GitHub Action to review every pull request automatically with inline comments and a summary.
+---
+
 # Use lgtmaybe as a GitHub Action
 
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow

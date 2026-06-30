@@ -133,7 +133,10 @@ up the [GitHub Action](#use-as-a-github-action). See
 ## Documentation
 
 Browse the rendered docs at <https://mattjcoles.github.io/lgtmaybe/>, or read the
-Markdown sources below.
+Markdown sources below. For LLM agents, a curated
+[`llms.txt`](https://mattjcoles.github.io/lgtmaybe/llms.txt) index (and a
+whole-corpus [`llms-full.txt`](https://mattjcoles.github.io/lgtmaybe/llms-full.txt))
+are published at the docs root.
 
 **Tutorial** — learn by doing
 

@@ -1,3 +1,7 @@
+---
+description: How lgtmaybe authenticates to each provider — keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
+---
+
 # Auth Model
 
 lgtmaybe supports seven hosted providers plus local ollama, and an

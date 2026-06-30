@@ -1,3 +1,7 @@
+---
+description: Run lgtmaybe on Google Vertex AI with keyless Workload Identity Federation — no service-account JSON in secrets.
+---
+
 # Review with Google Vertex AI (keyless WIF)
 
 Use this guide to run lgtmaybe with **Google Vertex AI** using Workload Identity

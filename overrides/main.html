@@ -2,4 +2,60 @@
 
 {% block extrahead %}
   <link rel="apple-touch-icon" sizes="180x180" href="{{ 'assets/apple-touch-icon.png' | url }}">
+
+  {#- SEO / social: Open Graph + Twitter card, sharing one static preview image. -#}
+  {% set page_title = (page.title ~ " — " ~ config.site_name) if page and page.title and not page.is_homepage else config.site_name %}
+  {% set page_desc = page.meta.description if page and page.meta and page.meta.description else config.site_description %}
+  {% set page_url = page.canonical_url if page and page.canonical_url else config.site_url %}
+  {% set og_image = config.site_url ~ "assets/og-card.png" %}
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ page_title }}">
+  <meta property="og:description" content="{{ page_desc }}">
+  <meta property="og:url" content="{{ page_url }}">
+  <meta property="og:image" content="{{ og_image }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ page_title }}">
+  <meta name="twitter:description" content="{{ page_desc }}">
+  <meta name="twitter:image" content="{{ og_image }}">
+
+  {#- Structured data: the tool itself, plus the docs site. Site-wide, not per-page. -#}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "lgtmaybe",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows",
+    "description": {{ config.site_description | tojson }},
+    "url": "{{ config.site_url }}",
+    "downloadUrl": "https://pypi.org/project/lgtmaybe/",
+    "codeRepository": "{{ config.repo_url }}",
+    "license": "{{ config.repo_url }}/blob/main/LICENSE",
+    "programmingLanguage": "Python",
+    "isAccessibleForFree": true,
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "Matt Coles"
+    }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "{{ config.site_name }}",
+    "url": "{{ config.site_url }}",
+    "description": {{ config.site_description | tojson }}
+  }
+  </script>
 {% endblock %}

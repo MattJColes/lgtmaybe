@@ -1,3 +1,7 @@
+---
+description: How lgtmaybe's trigger gate and cost model work — who can start a review, and why opening it wide is a cost not a security choice.
+---
+
 # Trust and Cost
 
 lgtmaybe lets you decide **who can trigger a review**. This document explains that
