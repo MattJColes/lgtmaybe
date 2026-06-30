@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.0...lgtmaybe-v0.8.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **homebrew:** make the tap actually publish (path, tap registration, first-publish commit) ([#154](https://github.com/MattJColes/lgtmaybe/issues/154)) ([4e71803](https://github.com/MattJColes/lgtmaybe/commit/4e718030197ec091367bc2fbec8e738b623818b6))
+* **homebrew:** make the tap publish reliably on release ([#152](https://github.com/MattJColes/lgtmaybe/issues/152)) ([b46619b](https://github.com/MattJColes/lgtmaybe/commit/b46619bc42a2e48d973b79d7977d0ad1f5a10dac))
+
 ## [0.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.2...lgtmaybe-v0.8.0) (2026-06-30)
 
 
