@@ -4,6 +4,16 @@ Use this guide to run lgtmaybe against **Azure OpenAI** using GitHub's OIDC toke
 federated to Entra (Azure AD) — no static Azure key stored in secrets. A
 key-based fallback is covered at the end.
 
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time Azure setup](#one-time-azure-setup)
+- [Workflow example](#workflow-example)
+- [Choosing the model name](#choosing-the-model-name)
+- [Running locally with ambient Azure credentials](#running-locally-with-ambient-azure-credentials)
+- [Key-based alternative](#key-based-alternative)
+- [Troubleshooting](#troubleshooting)
+
 ## How it works
 
 GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it —
