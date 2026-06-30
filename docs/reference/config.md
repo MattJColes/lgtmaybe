@@ -225,6 +225,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "type": "boolean"
         },
         "line": {
+          "minimum": 1,
           "title": "Line",
           "type": "integer"
         },
@@ -499,6 +500,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "boolean"
     },
     "line": {
+      "minimum": 1,
       "title": "Line",
       "type": "integer"
     },

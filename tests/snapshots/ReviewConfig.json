@@ -111,6 +111,7 @@
           "type": "boolean"
         },
         "line": {
+          "minimum": 1,
           "title": "Line",
           "type": "integer"
         },
