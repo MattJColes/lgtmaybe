@@ -63,6 +63,11 @@ echo "lgtmaybe ${VERSION}: ${SDIST_URL} (uploaded ${AGE_SECONDS}s ago)" >&2
 # 2. Write the formula skeleton. `brew update-python-resources` fills in the
 #    `resource` stanzas below the `depends_on` lines.
 mkdir -p "$(dirname "$OUT")"
+# Resolve OUT to an absolute path. `brew update-python-resources` parses a
+# relative arg shaped like `tap/Formula/lgtmaybe.rb` as a tap-qualified formula
+# NAME (tap `tap/formula`, formula `lgtmaybe.rb`) rather than a file path, and
+# fails with "No available formula". An absolute path is unambiguous.
+OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 cat > "$OUT" <<RUBY
 class Lgtmaybe < Formula
   include Language::Python::Virtualenv
@@ -75,7 +80,7 @@ class Lgtmaybe < Formula
 
   # The ast-grep-cli dependency ships a prebuilt binary via platform wheels, but
   # Homebrew installs resources from sdists (--no-binary), so we get the binary
-  # from the core `ast-grep` formula instead and exclude ast-grep-cli from the
+  # from the core \`ast-grep\` formula instead and exclude ast-grep-cli from the
   # venv (see --exclude-packages below). lgtmaybe finds it on PATH via
   # shutil.which("ast-grep").
   depends_on "ast-grep"
