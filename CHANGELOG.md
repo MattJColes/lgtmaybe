@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.1...lgtmaybe-v0.8.2) (2026-06-30)
+
+
+### Documentation
+
+* **homebrew:** document the required `brew trust` step for the tap ([#155](https://github.com/MattJColes/lgtmaybe/issues/155)) ([5099cd3](https://github.com/MattJColes/lgtmaybe/commit/5099cd324247303263c6293e201a7c6a6e21a7dc))
+
 ## [0.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.0...lgtmaybe-v0.8.1) (2026-06-30)
 
 
