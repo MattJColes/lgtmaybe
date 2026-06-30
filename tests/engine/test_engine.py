@@ -1027,6 +1027,38 @@ def test_review_logs_a_heartbeat_as_each_lens_runs(engine_logs) -> None:
     assert all(getattr(r, "lens", None) for r in completed)
 
 
+def test_suppressed_findings_are_logged_with_a_count(engine_logs) -> None:
+    """A suppression silently dropping findings is invisible; log how many went, so
+    a team can tell a too-broad fingerprint/pragma from a genuinely clean review."""
+    from lgtmaybe.github.rest_gateway import finding_fingerprint
+
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        ignore_fingerprints=[finding_fingerprint(_HIGH.path, _HIGH.title)],
+    )
+
+    findings, _ = engine.review(_CTX, cfg)
+
+    assert findings == []  # the only finding was suppressed
+    suppressed = [r for r in engine_logs if "suppress" in r.getMessage().lower()]
+    assert suppressed, "expected a log noting suppressed findings"
+    assert getattr(suppressed[0], "count", None) == 1
+
+
+def test_no_suppression_log_when_nothing_suppressed(engine_logs) -> None:
+    """Don't add noise: with no suppressions configured, emit no suppression log."""
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    engine.review(_CTX, cfg)
+
+    assert not [r for r in engine_logs if "suppress" in r.getMessage().lower()]
+
+
 def test_custom_lens_runs_as_an_extra_review_call() -> None:
     """A configured extra lens fans out as its own focused review call, and its
     findings flow through the same merge/dedupe/reflect pipeline."""
