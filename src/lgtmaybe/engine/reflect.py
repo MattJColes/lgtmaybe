@@ -14,6 +14,7 @@ from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, ReflectionResult, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import ProviderClient
 
+from .astgrep import SymbolResolver
 from .compress import count_tokens
 from .parse import iter_json_values
 from .redact import redact
@@ -94,6 +95,7 @@ def reflect_findings(
     cfg: ReviewConfig,
     provider: ProviderClient,
     fetch_file: FileFetcher | None = None,
+    resolve_symbol: SymbolResolver | None = None,
 ) -> list[ReviewFinding]:
     """Filter *findings* by asking the provider to score confidence.
 
@@ -105,13 +107,17 @@ def reflect_findings(
     ONLY because it can't see a referenced file, it DEFERS by naming what it needs
     (a verdict's ``needs``). When ``fetch_file`` is supplied, the engine fetches
     that text read-only, redacts it, and re-judges the deferred findings with it in
-    context — bounded to :data:`~lgtmaybe.engine.retrieve.MAX_HOPS` hops. With no
-    fetcher (or once the hops/files are exhausted) an unresolved deferral is
-    dropped, consistent with "don't assert a cross-file claim you can't verify".
+    context — bounded to :data:`~lgtmaybe.engine.retrieve.MAX_HOPS` hops. When the
+    auditor names a SYMBOL rather than a path, ``resolve_symbol`` (ast-grep) locates
+    the file that defines it so the same fetcher can pull it. With no fetcher (or
+    once the hops/files are exhausted) an unresolved deferral is dropped, consistent
+    with "don't assert a cross-file claim you can't verify".
     """
     if not findings:
         return []
-    return _reflect_pass(findings, ctx, cfg, provider, fetch_file, hop=0, fetched_paths=[])
+    return _reflect_pass(
+        findings, ctx, cfg, provider, fetch_file, resolve_symbol, hop=0, fetched_paths=[]
+    )
 
 
 def _reflect_pass(
@@ -120,6 +126,7 @@ def _reflect_pass(
     cfg: ReviewConfig,
     provider: ProviderClient,
     fetch_file: FileFetcher | None,
+    resolve_symbol: SymbolResolver | None,
     *,
     hop: int,
     fetched_paths: list[str],
@@ -165,6 +172,7 @@ def _reflect_pass(
             already=already,
             budget_tokens=hop_budget_tokens(cfg.max_input_tokens),
             max_files=MAX_FETCH_FILES,
+            resolve_symbol=resolve_symbol,
         )
         if fetched:
             _log.info(
@@ -179,6 +187,7 @@ def _reflect_pass(
                     cfg,
                     provider,
                     fetch_file,
+                    resolve_symbol,
                     hop=hop + 1,
                     fetched_paths=sorted(fetched),
                 )

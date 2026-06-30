@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 jobs:
-  check:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,3 +38,20 @@ jobs:
 
       - name: Tests
         run: uv run pytest -q
+
+  # Single, matrix-independent status for branch protection to require. The `test`
+  # job above runs once per Python version, so it reports as `test (3.11)` /
+  # `test (3.12)` — names that change whenever the matrix does. This gate reports a
+  # stable `check` context that is green only when every `test` leg passed, so the
+  # required check never dangles as "Expected" when the matrix is edited.
+  check:
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All test legs passed
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "test matrix result: ${{ needs.test.result }}"
+            exit 1
+          fi

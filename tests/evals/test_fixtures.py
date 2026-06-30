@@ -8,12 +8,19 @@ ollama e2e run.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from evals import run as run_mod
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
+from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig, ReviewFinding
+from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.engine.astgrep import ast_grep_available, build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
+from lgtmaybe.engine.reflect import reflect_findings
 from lgtmaybe.github import is_reviewable
+from lgtmaybe.local import local_file_reader
 
 # The four live false-positive fixtures Track C adds: each plants a genuine catch
 # plus forbidden traps drawn from real over-eager reviewer claims.
@@ -132,6 +139,114 @@ def test_split_hunks_fixture_is_multi_hunk() -> None:
     assert len(hunks) >= 2, "split-hunks needs at least two hunks"
     touching = [h for h in hunks if "process_batch" in h]
     assert len(touching) >= 2, "both hunks must touch the same def (process_batch)"
+
+
+def test_cross_file_fp_ships_corpus_refuting_its_forbidden_traps() -> None:
+    """The cross-file-fp fixture now carries an on-disk corpus of the *unshown*
+    files its forbidden traps hinge on, so symbol resolution has something real to
+    find. The defining symbols are present in that corpus."""
+    _diff, manifest = _fixture("cross-file-fp")
+
+    assert manifest.corpus_root is not None, "cross-file-fp must ship a repo/ corpus"
+    ledger = manifest.corpus_root / "migrations" / "ledger.py"
+    models = manifest.corpus_root / "migrations" / "models.py"
+    assert ledger.is_file() and models.is_file()
+    ledger_text = ledger.read_text()
+    # The idempotency guard + tenant filter the "no guard"/"tenant_id None" traps deny.
+    assert "def already_applied" in ledger_text
+    assert "def mark_applied" in ledger_text
+    assert "def pending" in ledger_text
+    # The V2 shape the "field absent from V2" trap denies.
+    assert "class SavedSubmittalSetV2" in models.read_text()
+
+
+def test_loader_sets_corpus_root_only_for_fixtures_with_a_repo_dir() -> None:
+    """The loader attaches corpus_root for fixtures that ship a repo/ dir and leaves
+    it None for the rest — so wiring a resolver never touches a corpus-less fixture."""
+    by_name = {m.name: m for _diff, m in run_mod._load_fixtures()}
+    assert by_name["cross-file-fp"].corpus_root is not None
+    # A plain single-file fixture has no corpus.
+    assert by_name["badcode"].corpus_root is None
+
+
+@pytest.mark.skipif(not ast_grep_available(), reason="ast-grep binary not installed")
+def test_real_ast_grep_resolves_cross_file_symbols_in_the_corpus() -> None:
+    """Real ast-grep, rooted at the fixture corpus, maps each deferred symbol to the
+    file that defines it — the resolution the auditor relies on."""
+    _diff, manifest = _fixture("cross-file-fp")
+    root = manifest.corpus_root
+    resolve = build_symbol_resolver(lambda: root)
+    assert resolve is not None
+    assert resolve("already_applied") == ["migrations/ledger.py"]
+    assert resolve("SavedSubmittalSetV2") == ["migrations/models.py"]
+
+
+class _ScriptedProvider(ProviderClient):
+    """Returns a different canned text per successive call (records each call)."""
+
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = texts
+        self.calls: list[dict[str, object]] = []
+
+    def complete(self, messages, model, **opts):  # type: ignore[no-untyped-def]
+        idx = min(len(self.calls), len(self._texts) - 1)
+        self.calls.append({"messages": messages})
+        return ProviderResult(text=self._texts[idx], input_tokens=5, output_tokens=5)
+
+
+@pytest.mark.skipif(not ast_grep_available(), reason="ast-grep binary not installed")
+def test_end_to_end_symbol_deferral_drops_forbidden_finding_with_real_ast_grep() -> None:
+    """The whole chain, no fakes in the resolution path: a finding is deferred on a
+    SYMBOL; real ast-grep finds its file in the corpus; the real read-only reader
+    loads it; the definition reaches the recheck prompt; the cross-file false
+    positive is dropped. This is the proof the feature works integrated, not just
+    unit by unit."""
+    _diff, manifest = _fixture("cross-file-fp")
+    root = manifest.corpus_root
+    assert root is not None
+
+    finding = ReviewFinding(
+        path="migrations/0003_backfill.py",
+        line=12,
+        severity="medium",
+        title="backfill has no idempotency guard",
+        body="Re-running backfill could copy rows twice.",
+    )
+    # Auditor: 1st call defers on the symbol `pending`; 2nd call (with the file in
+    # context) drops the finding — the ledger shows pending() is idempotent.
+    provider = _ScriptedProvider(
+        [
+            json.dumps(
+                {"verdicts": [{"index": 0, "keep": False, "broad": False, "needs": ["pending"]}]}
+            ),
+            json.dumps({"verdicts": [{"index": 0, "keep": False, "broad": False, "needs": []}]}),
+        ]
+    )
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    ctx = PRContext(
+        diff="--- a/migrations/0003_backfill.py\n+++ b/migrations/0003_backfill.py\n",
+        changed_files=["migrations/0003_backfill.py"],
+        base_sha="0",
+        head_sha="1",
+        repo="eval/eval",
+        pr_number=0,
+    )
+
+    survivors = reflect_findings(
+        [finding],
+        ctx,
+        cfg,
+        provider,
+        fetch_file=local_file_reader(root),
+        resolve_symbol=build_symbol_resolver(lambda: root),
+    )
+
+    # The real ledger.py reached the recheck prompt via real ast-grep + real reader.
+    recheck_prompt = " ".join(
+        m["content"] for m in provider.calls[1]["messages"] if isinstance(m, dict)
+    )
+    assert "def pending" in recheck_prompt
+    assert survivors == []  # cross-file false positive correctly dropped
 
 
 def test_fixtures_cover_performance_and_complexity_lenses() -> None:

@@ -20,7 +20,8 @@ from datetime import date
 from pathlib import Path
 
 from lgtmaybe.core.models import PRContext, Provider, ReviewCategory, ReviewConfig
-from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
+from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError, build_symbol_resolver
+from lgtmaybe.local import local_file_reader
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
@@ -53,6 +54,12 @@ def _load_fixtures() -> list[tuple[str, Fixture]]:
     for d in sorted(p for p in _FIXTURES.iterdir() if p.is_dir()):
         diff = (d / "diff.txt").read_text()
         manifest = Fixture.model_validate_json((d / "expected.json").read_text())
+        # A `repo/` subdir is the fixture's on-disk corpus of unshown files — the
+        # ones a cross-file deferral needs to verify. When present, the harness
+        # roots a read-only reader + symbol resolver here (see `_review`).
+        corpus = d / "repo"
+        if corpus.is_dir():
+            manifest.corpus_root = corpus
         out.append((diff, manifest))
     return out
 
@@ -110,6 +117,7 @@ def _review(
     max_input_tokens: int | None = None,
     reflect: bool = True,
     recursive: bool = True,
+    symbol_resolution: bool = True,
     temperature: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
@@ -171,6 +179,16 @@ def _review(
             **extra,
         )
     )
+    # When the fixture ships an on-disk corpus of its unshown files, wire the same
+    # read-only reader + ast-grep symbol resolver the CLI/Action use, rooted there.
+    # A cross-file deferral can then fetch the real definition (a path directly, or
+    # a symbol via ast-grep) and re-judge — the behaviour symbol resolution adds.
+    # Toggle it off to A/B the forbidden-FP rate with vs without resolution.
+    if manifest.corpus_root is not None:
+        engine.set_fetch_file(local_file_reader(manifest.corpus_root))
+        if symbol_resolution:
+            root = manifest.corpus_root
+            engine.set_symbol_resolver(build_symbol_resolver(lambda: root))
     try:
         findings, _summary = engine.review(ctx, cfg)
         return score_fixture(
@@ -304,6 +322,15 @@ def main(argv: list[str] | None = None) -> int:
         "pins the original whole-file method so a run can A/B the two strategies",
     )
     ap.add_argument(
+        "--symbol-resolution",
+        dest="symbol_resolution",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="for fixtures with an on-disk corpus, let ast-grep resolve a deferred "
+        "symbol to its defining file (default on); --no-symbol-resolution pins the "
+        "path-only fetch so a run can A/B the cross-file false-positive rate",
+    )
+    ap.add_argument(
         "--temperature",
         type=float,
         default=None,
@@ -365,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
             max_input_tokens=args.max_input_tokens,
             reflect=args.reflect,
             recursive=args.recursive,
+            symbol_resolution=args.symbol_resolution,
             temperature=args.temperature,
             top_p=args.top_p,
             top_k=args.top_k,

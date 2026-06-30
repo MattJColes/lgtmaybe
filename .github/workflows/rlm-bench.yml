@@ -5,10 +5,11 @@
 # numbers AND how noisy the result is (the model samples at temperature > 0).
 #
 # This is a BENCHMARK, not a gate: --min-recall 0.0 means neither leg can fail.
-# On a pull_request it runs a single quick pass (repeats=1) when the RLM
-# code/fixtures change; for the wide sweep, dispatch it manually with a larger
-# `repeats`. --max-input-tokens 300 (below each fixture's ~600 tokens, above a
-# single hunk) forces the over-budget file to split so the strategies diverge.
+# It runs a live ollama model on a CPU runner (minutes per leg), so it is
+# DISPATCH-ONLY — run it ad hoc from the Actions tab when you want the numbers,
+# rather than on every PR that touches the RLM code. --max-input-tokens 300
+# (below each fixture's ~600 tokens, above a single hunk) forces the over-budget
+# file to split so the strategies diverge.
 name: rlm-bench
 
 on:
@@ -30,15 +31,6 @@ on:
         description: "--max-input-tokens (set below a fixture's size to force the split)"
         required: false
         default: "300"
-  pull_request:
-    paths:
-      - "src/lgtmaybe/engine/compress.py"
-      - "src/lgtmaybe/engine/engine.py"
-      - "evals/rlm.py"
-      - "evals/run.py"
-      - "evals/fixtures/rlm-bigfile/**"
-      - "evals/fixtures/rlm-pipeline/**"
-      - ".github/workflows/rlm-bench.yml"
 
 concurrency:
   group: rlm-bench-${{ github.ref }}
@@ -54,8 +46,8 @@ jobs:
         # whole = the original method (file sent whole); recursive = the RLM walk.
         method: [whole, recursive]
     env:
-      # Inputs only exist on workflow_dispatch; fall back to a fast single pass on
-      # a pull_request so an unrelated PR doesn't burn a multi-hour sweep.
+      # The `|| ...` fallbacks keep the job runnable even if a dispatch omits an
+      # input; on a normal dispatch the input defaults above supply these instead.
       OLLAMA_MODEL: ${{ github.event.inputs.model || 'qwen3.5:4b' }}
       REPEATS: ${{ github.event.inputs.repeats || '1' }}
       CATEGORIES: ${{ github.event.inputs.categories || 'security,correctness,performance' }}

@@ -213,3 +213,47 @@ def test_get_pr_context_degrades_when_commits_fetch_fails() -> None:
 
     assert ctx.commit_messages == []
     assert ctx.title == "Add rate limiting"  # the rest of the context is intact
+
+
+@respx.mock
+def test_base_checkout_root_clones_once_and_caches(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The base tree is cloned at most once per gateway and the result is cached:
+    a second symbol deferral reuses it instead of re-cloning."""
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json={"base": {"ref": "main"}})
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_clone(repo: str, ref: str, token: str, **_: object) -> Path:
+        calls.append((repo, ref))
+        return Path("/tmp/fake-base")
+
+    monkeypatch.setattr("lgtmaybe.github.rest_gateway.clone_base_tree", fake_clone)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    first = gw.base_checkout_root()
+    second = gw.base_checkout_root()
+
+    assert first == Path("/tmp/fake-base")
+    assert second == first
+    assert calls == [(REPO, "main")]  # cloned exactly once, with the base ref
+
+
+@respx.mock
+def test_base_checkout_root_returns_none_when_ref_unavailable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """If the base ref can't be fetched, no clone is attempted and None is returned."""
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(500))
+
+    cloned = False
+
+    def fake_clone(*_a: object, **_k: object) -> Path:
+        nonlocal cloned
+        cloned = True
+        return Path("/x")
+
+    monkeypatch.setattr("lgtmaybe.github.rest_gateway.clone_base_tree", fake_clone)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    assert gw.base_checkout_root() is None
+    assert cloned is False  # never tried to clone without a ref

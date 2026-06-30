@@ -84,7 +84,19 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
 6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings and drops the ones it marks low-confidence
    (keep-all safe default when the verdict can't be parsed; skippable with
-   `--no-reflect`).
+   `--no-reflect`). When the auditor would drop a finding *only* because it can't
+   see code outside the diff, it **defers** by naming what it needs — a file path
+   or a **symbol**. A path is fetched read-only (`get_file_contents`); a symbol is
+   located by **ast-grep** (`engine/astgrep.py`), which structurally searches a
+   corpus — the local worktree for the CLI, or a read-only shallow clone of the
+   trusted **base** branch for the GitHub path — for the file that *defines* it.
+   That file is then fetched through the same read-only boundary and the auditor
+   re-judges with the real definition in front of it, instead of guessing about an
+   unseen guard or base class. ast-grep only *parses* the corpus (never executes
+   it) and the base clone is never the PR head, so this stays inside the
+   fork-safety model. It needs the bundled `ast-grep` binary and a corpus;
+   without either it degrades to the path-only fetch (`--no-symbol-resolution`
+   disables it entirely). Bounded by the same hop/file caps as the path fetch.
 
 7. **filter** — findings below `min_severity` are dropped.
 
