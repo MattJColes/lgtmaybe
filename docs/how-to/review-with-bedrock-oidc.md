@@ -3,6 +3,15 @@
 Use this guide to run lgtmaybe with **AWS Bedrock** using GitHub's OIDC token
 — no static AWS credentials stored in secrets.
 
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time AWS setup](#one-time-aws-setup)
+- [Workflow example](#workflow-example)
+- [Choosing a Bedrock model ID](#choosing-a-bedrock-model-id)
+- [Running locally with ambient AWS credentials](#running-locally-with-ambient-aws-credentials)
+- [Troubleshooting](#troubleshooting)
+
 ## How it works
 
 GitHub Actions issues a short-lived OIDC token. AWS STS exchanges that token
