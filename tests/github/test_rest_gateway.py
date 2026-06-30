@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 
 from lgtmaybe.github import RestGitHubGateway
@@ -65,6 +66,22 @@ def test_get_pr_context_returns_expected_shas_and_diff() -> None:
     assert ctx.repo == REPO
     assert ctx.pr_number == PR_NUMBER
     assert "src/app.py" in ctx.diff
+
+
+@respx.mock
+def test_get_pr_context_raises_clear_error_when_metadata_lacks_shas() -> None:
+    """A PR-detail response missing base/head must surface a clear error.
+
+    Regression: ``meta["base"]["sha"]`` raised a bare ``KeyError`` on a
+    malformed/partial GitHub response — an opaque traceback rather than the
+    clear, surfaced error the project requires. Should raise with a message that
+    names the missing base/head SHA, not a KeyError.
+    """
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    with pytest.raises(RuntimeError, match="base/head"):
+        gw.get_pr_context()
 
 
 @respx.mock
