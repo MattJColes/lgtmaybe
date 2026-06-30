@@ -5,6 +5,20 @@ cost, zero egress, no keys required. The CLI reviews your `git` diff and prints
 the findings; to post reviews on real pull requests, use the
 [GitHub Action](use-as-github-action.md).
 
+## Contents
+
+- [Prerequisites](#prerequisites)
+- [Pull the model you want](#pull-the-model-you-want)
+- [Which model, and will it fit?](#which-model-and-will-it-fit)
+- [Run the review](#run-the-review)
+- [Reviewing large files (recursive walk)](#reviewing-large-files-recursive-walk)
+- [Use a remote ollama instance](#use-a-remote-ollama-instance)
+- [Inside the GitHub Action's container](#inside-the-github-actions-container)
+- [Get findings as JSON](#get-findings-as-json)
+- [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
+- [Slow models and timeouts](#slow-models-and-timeouts)
+- [Troubleshooting](#troubleshooting)
+
 ## Prerequisites
 
 - lgtmaybe installed (`pip install lgtmaybe`)
