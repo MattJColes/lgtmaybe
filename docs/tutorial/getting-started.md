@@ -17,6 +17,16 @@ and no pull request required.
 pip install lgtmaybe
 ```
 
+On macOS you can install from the Homebrew tap instead:
+
+```bash
+brew install MattJColes/lgtmaybe/lgtmaybe
+```
+
+See [Install with Homebrew](../how-to/install-with-homebrew.md) for details (the
+Homebrew build covers the API-key and local providers; keyless cloud providers
+need the `pip` extras).
+
 Verify the install:
 
 ```bash

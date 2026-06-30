@@ -8,6 +8,13 @@ the release: it cuts the tag and the GitHub release, then the same run publishes
 tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
+A third workflow, `.github/workflows/homebrew.yml`, fires on the published
+release and regenerates the **Homebrew formula** in the tap repo
+(`MattJColes/homebrew-lgtmaybe`) so `brew install MattJColes/lgtmaybe/lgtmaybe`
+tracks the latest version. It regenerates the whole formula — including every
+PyPI resource stanza via `scripts/update-homebrew-formula.sh` — so a dependency
+bump is picked up too.
+
 Commit messages must follow conventional-commit format — `.github/workflows/commitlint.yml`
 enforces it on PRs so release-please can compute the next version.
 
@@ -31,6 +38,12 @@ The only human-only pieces:
 - First release only: from the GitHub release page, tick **"Publish this Action
   to the GitHub Marketplace"**, accept the terms, and pick the categories
   `code-review` and `continuous-integration`.
+- **Homebrew tap:** create the repo **`MattJColes/homebrew-lgtmaybe`** with a
+  `Formula/` directory (it can start empty — the workflow writes the formula).
+  Add a repo secret **`HOMEBREW_TAP_TOKEN`** to *this* repo: a fine-grained PAT
+  with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
+  to another repository). To seed or verify the formula by hand on a Mac, run
+  `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
 
 ## Each release
 
