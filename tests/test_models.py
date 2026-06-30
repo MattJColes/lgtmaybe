@@ -110,6 +110,17 @@ def test_review_config_accepts_recursive_false() -> None:
     assert cfg.recursive is False
 
 
+def test_review_config_symbol_resolution_defaults_true() -> None:
+    # ast-grep cross-file symbol resolution during reflection is on by default.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.symbol_resolution is True
+
+
+def test_review_config_accepts_symbol_resolution_false() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", symbol_resolution=False)
+    assert cfg.symbol_resolution is False
+
+
 def test_review_config_structured_output_defaults_true() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     assert cfg.structured_output is True

@@ -164,6 +164,13 @@ from lgtmaybe.config.loader import load_config
     "parser still handles fenced/prose output either way)",
 )
 @click.option(
+    "--symbol-resolution/--no-symbol-resolution",
+    default=None,
+    help="During reflection, use ast-grep to resolve a deferred finding's "
+    "referenced symbol to the file that defines it (searched in your worktree) so "
+    "the auditor re-judges with the real definition (--no-symbol-resolution disables)",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -193,6 +200,7 @@ def review(
     reflect: bool | None,
     recursive: bool | None,
     structured_output: bool | None,
+    symbol_resolution: bool | None,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -215,6 +223,7 @@ def review(
         reflect=reflect,
         recursive=recursive,
         structured_output=structured_output,
+        symbol_resolution=symbol_resolution,
     )
 
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
@@ -271,6 +280,7 @@ def action() -> None:
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],
         structured_output=inputs["structured_output"],
+        symbol_resolution=inputs["symbol_resolution"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

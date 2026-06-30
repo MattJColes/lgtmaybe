@@ -24,6 +24,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
 from lgtmaybe.github import is_reviewable
 
+from .astgrep import SymbolResolver
 from .compress import batch_files, context_lines_for_budget, count_tokens, expand_hunks
 from .injection import wrap_diff, wrap_intent
 from .parse import ParseError, parse_findings
@@ -101,6 +102,10 @@ class LLMReviewEngine(ReviewEngine):
         # None (the default) keeps the prior behavior: a deferral can't resolve, so
         # the unverifiable finding is dropped.
         self._fetch_file = fetch_file
+        # Optional ast-grep symbol resolver: when the auditor defers by naming a
+        # SYMBOL (not a path), this maps it to the file that defines it so the
+        # fetcher above can pull it. None keeps the prior path-only behaviour.
+        self._resolve_symbol: SymbolResolver | None = None
 
     def set_fetch_file(self, fetch_file: FileFetcher | None) -> None:
         """Attach (or clear) the read-only file fetcher used by reflection.
@@ -110,6 +115,15 @@ class LLMReviewEngine(ReviewEngine):
         the fact, without threading it through ``build_provider_engine``.
         """
         self._fetch_file = fetch_file
+
+    def set_symbol_resolver(self, resolve_symbol: SymbolResolver | None) -> None:
+        """Attach (or clear) the ast-grep symbol resolver used by reflection.
+
+        Mirrors :meth:`set_fetch_file` so the CLI/GitHub wiring can supply a corpus
+        (the local worktree, or a base checkout) after the engine is built. None is
+        a no-op clear — the reflection pass then resolves only path-named deferrals.
+        """
+        self._resolve_symbol = resolve_symbol
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
@@ -237,7 +251,12 @@ class LLMReviewEngine(ReviewEngine):
             # (redacted) head text of flagged files to verify whole-file claims.
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
             all_findings = reflect_findings(
-                all_findings, clean_ctx, cfg, self._provider, fetch_file=self._fetch_file
+                all_findings,
+                clean_ctx,
+                cfg,
+                self._provider,
+                fetch_file=self._fetch_file,
+                resolve_symbol=self._resolve_symbol,
             )
 
         # 9. Filter: drop findings below the severity floor, and apply the

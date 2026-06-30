@@ -301,6 +301,11 @@
       "title": "Structured Output",
       "type": "boolean"
     },
+    "symbol_resolution": {
+      "default": true,
+      "title": "Symbol Resolution",
+      "type": "boolean"
+    },
     "temperature": {
       "default": 0.0,
       "title": "Temperature",

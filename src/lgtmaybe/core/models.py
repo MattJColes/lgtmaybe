@@ -265,6 +265,13 @@ class ReviewConfig(_Strict):
     # each call's context stays small — better recall on big files, especially for
     # smaller models. Files within budget are reviewed whole (context preserved).
     recursive: bool = True
+    # Cross-file symbol resolution during reflection: when the auditor defers a
+    # finding because it needs to see a SYMBOL (function/class/type) defined outside
+    # the diff, ast-grep locates that symbol's file in the corpus (the local
+    # worktree, or a checkout of the trusted base branch) so the auditor re-judges
+    # with the real definition instead of guessing. Needs the ast-grep binary (a
+    # bundled dependency) and a corpus; degrades to the path-only fetch otherwise.
+    symbol_resolution: bool = True
     # Ollama's context window (num_ctx). Ollama only — hosted providers manage
     # their own context window server-side and litellm won't forward this, so it
     # is ignored for them. None keeps the factory default (32768); raise it so a

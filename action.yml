@@ -58,6 +58,10 @@ inputs:
     description: "Constrain model output to the findings JSON schema via the provider's response_format (JSON mode). On by default; set to false for an openai-compatible gateway/proxy that rejects response_format (the lenient parser still handles fenced/prose output either way)."
     required: false
     default: ""
+  symbol_resolution:
+    description: "During reflection, use ast-grep to resolve a deferred finding's referenced symbol to the file that defines it — searched in a read-only shallow clone of the PR's base branch — so the auditor re-judges a cross-file finding against the real definition. On by default; set to false to disable."
+    required: false
+    default: ""
   aws_role_arn:
     description: "IAM role ARN to assume via GitHub OIDC for bedrock. No static AWS key is ever stored."
     required: false
@@ -152,6 +156,7 @@ runs:
         INPUT_RESOLVE_FIXED: ${{ inputs.resolve_fixed }}
         INPUT_RECURSIVE: ${{ inputs.recursive }}
         INPUT_STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
+        INPUT_SYMBOL_RESOLUTION: ${{ inputs.symbol_resolution }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         LGTMAYBE_IMAGE: ${{ inputs.image }}
       run: |
@@ -164,7 +169,7 @@ runs:
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
           -e INPUT_TIMEOUT -e INPUT_TEMPERATURE \
           -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS -e INPUT_RESOLVE_FIXED \
-          -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT \
+          -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \
           -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
           -e AWS_REGION -e AWS_DEFAULT_REGION \
           -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

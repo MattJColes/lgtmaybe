@@ -446,6 +446,33 @@ def test_resolver_only_calls_injected_fetcher() -> None:
     assert fetcher.calls == ["other.py"]  # exactly one read-only fetch, no other path
 
 
+def test_symbol_deferral_resolves_via_ast_grep_resolver() -> None:
+    """The auditor defers by naming a SYMBOL (not a path). The symbol resolver
+    (ast-grep) maps it to its defining file, which is then fetched read-only and
+    reaches the recheck prompt — closing the gap a bare symbol used to dead-end in.
+    """
+    provider = _ScriptedProvider(
+        [
+            _needs_envelope(0, ["already_applied"]),  # defer on a symbol name
+            _envelope([(0, False)]),  # recheck: the guard exists → false positive
+        ]
+    )
+    fetcher = _RecordingFetcher({"pkg/ledger.py": "def already_applied(run_id):\n    ...\n"})
+
+    def resolve_symbol(symbol: str) -> list[str]:
+        return ["pkg/ledger.py"] if symbol == "already_applied" else []
+
+    survivors = reflect_findings(
+        [_HIGH], _CTX, _CFG, provider, fetch_file=fetcher, resolve_symbol=resolve_symbol
+    )
+
+    # The bare name is tried as a path first (miss), then resolved to its file.
+    assert fetcher.calls == ["already_applied", "pkg/ledger.py"]
+    recheck_user = provider.calls[1]["messages"][1]["content"]
+    assert "def already_applied(run_id):" in recheck_user
+    assert survivors == []  # recheck saw the guard and dropped the cross-file FP
+
+
 def test_fetched_file_secret_never_reaches_recheck_prompt() -> None:
     """A secret in a fetched file is redacted before the recheck prompt is built."""
     secret = "AKIA" + "B" * 16

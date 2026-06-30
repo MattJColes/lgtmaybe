@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +22,7 @@ from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway
 
+from .checkout import clone_base_tree
 from .diff import CommentableLines, build_commentable_lines, is_reviewable
 
 _log = get_logger(__name__)
@@ -147,6 +149,7 @@ class RestGitHubGateway(GitHubGateway):
     ) -> None:
         self._repo = repo
         self._pr_number = pr_number
+        self._token = token
         self._headers = {
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -160,6 +163,10 @@ class RestGitHubGateway(GitHubGateway):
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
         # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
         self._head_sha: str | None = None
+        # Lazily-cloned base tree for ast-grep symbol resolution (cloned at most once,
+        # and only if a symbol deferral actually needs it). _done guards the one-shot.
+        self._base_root: Path | None = None
+        self._base_root_done = False
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -285,6 +292,32 @@ class RestGitHubGateway(GitHubGateway):
             except httpx.HTTPError:
                 return None
         return self._get_file_content(path, self._head_sha)
+
+    def base_checkout_root(self) -> Path | None:
+        """Lazily clone the PR's BASE tree (once) for ast-grep symbol resolution.
+
+        On the GitHub path there is no working tree to search, so this shallow-clones
+        the **base** branch — the trusted target repo, never the PR head/fork — into a
+        throwaway temp dir. ast-grep only *parses* it (parsing is not executing), so it
+        stays within the fork-safety model. Cloned at most once per gateway and only
+        when a symbol deferral asks for a corpus; returns None if the base ref can't be
+        resolved or the clone fails, in which case symbol resolution simply finds
+        nothing. Suitable as the ``get_root`` callback of ``build_symbol_resolver``.
+        """
+        if not self._base_root_done:
+            self._base_root_done = True
+            ref = self._get_base_ref()
+            self._base_root = clone_base_tree(self._repo, ref, self._token) if ref else None
+        return self._base_root
+
+    def _get_base_ref(self) -> str | None:
+        """The PR's base branch name (e.g. ``main``), or None if it can't be fetched."""
+        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
+        try:
+            ref = self._get_json(url)["base"]["ref"]
+        except (httpx.HTTPError, KeyError, TypeError):
+            return None
+        return ref if isinstance(ref, str) and ref else None
 
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone comment to the PR conversation (in-thread reply).
