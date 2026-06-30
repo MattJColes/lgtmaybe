@@ -178,8 +178,14 @@ class RestGitHubGateway(GitHubGateway):
 
         # Fetch metadata (base/head SHAs)
         meta = self._get_json(pr_url)
-        base_sha: str = meta["base"]["sha"]
-        head_sha: str = meta["head"]["sha"]
+        try:
+            base_sha: str = meta["base"]["sha"]
+            head_sha: str = meta["head"]["sha"]
+        except (KeyError, TypeError) as exc:
+            raise RuntimeError(
+                f"PR metadata for {self._repo}#{self._pr_number} is missing the "
+                f"base/head SHA — unexpected GitHub API response ({exc})."
+            ) from exc
         self._head_sha = head_sha  # cache for on-demand get_file_contents fetches
 
         # Fetch unified diff
