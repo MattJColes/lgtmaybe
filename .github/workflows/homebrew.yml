@@ -121,10 +121,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- Formula/lgtmaybe.rb; then
+          # Stage first, then check the staged diff: `git diff` alone ignores a
+          # brand-new untracked formula (the first-publish case), so the index
+          # diff is what correctly detects "new or changed" vs "nothing to do".
+          git add Formula/lgtmaybe.rb
+          if git diff --cached --quiet; then
             echo "Formula already up to date for ${{ steps.ver.outputs.version }}."
             exit 0
           fi
-          git add Formula/lgtmaybe.rb
           git commit -m "lgtmaybe ${{ steps.ver.outputs.version }}"
           git push

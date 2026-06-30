@@ -63,6 +63,11 @@ echo "lgtmaybe ${VERSION}: ${SDIST_URL} (uploaded ${AGE_SECONDS}s ago)" >&2
 # 2. Write the formula skeleton. `brew update-python-resources` fills in the
 #    `resource` stanzas below the `depends_on` lines.
 mkdir -p "$(dirname "$OUT")"
+# Resolve OUT to an absolute path. `brew update-python-resources` parses a
+# relative arg shaped like `tap/Formula/lgtmaybe.rb` as a tap-qualified formula
+# NAME (tap `tap/formula`, formula `lgtmaybe.rb`) rather than a file path, and
+# fails with "No available formula". An absolute path is unambiguous.
+OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 cat > "$OUT" <<RUBY
 class Lgtmaybe < Formula
   include Language::Python::Virtualenv
@@ -75,7 +80,7 @@ class Lgtmaybe < Formula
 
   # The ast-grep-cli dependency ships a prebuilt binary via platform wheels, but
   # Homebrew installs resources from sdists (--no-binary), so we get the binary
-  # from the core `ast-grep` formula instead and exclude ast-grep-cli from the
+  # from the core \`ast-grep\` formula instead and exclude ast-grep-cli from the
   # venv (see --exclude-packages below). lgtmaybe finds it on PATH via
   # shutil.which("ast-grep").
   depends_on "ast-grep"
@@ -94,7 +99,21 @@ class Lgtmaybe < Formula
 end
 RUBY
 
-# 3. Populate (or refresh) the resource stanzas for the full dependency tree.
+# 3. Register the formula's repo as a local Homebrew tap. `brew
+#    update-python-resources` refuses to operate on a loose .rb file ("Homebrew
+#    requires formulae to be in a tap") — the formula must live in a registered
+#    tap. The output path is a plain checkout of the tap repo, so symlink it into
+#    Homebrew's Library/Taps and address the formula by its tap NAME. brew then
+#    edits the same file we wrote (and that the caller commits + pushes).
+FORMULA_NAME="$(basename "$OUT" .rb)"
+REPO_DIR="$(cd "$(dirname "$(dirname "$OUT")")" && pwd -P)"
+TAP_LINK="$(brew --repository)/Library/Taps/local/homebrew-${FORMULA_NAME}"
+mkdir -p "$(dirname "$TAP_LINK")"
+ln -sfn "$REPO_DIR" "$TAP_LINK"
+export HOMEBREW_NO_REQUIRE_TAP_TRUST=1  # trust our own local tap
+TAP_FORMULA="local/${FORMULA_NAME}/${FORMULA_NAME}"
+
+# 4. Populate (or refresh) the resource stanzas for the full dependency tree.
 #    ast-grep-cli is excluded: its sdist would try to build/fetch a Rust binary
 #    inside Homebrew's network-sandboxed build and break `brew install`. The
 #    `depends_on "ast-grep"` above supplies that binary instead.
@@ -106,7 +125,7 @@ RUBY
 #    caller defers to a later scheduled run) from a genuine resolution failure
 #    (propagate the real exit code so CI goes red).
 COOLDOWN_WITH_MARGIN=$((25 * 3600))  # 24h cooldown + 1h margin for clock skew
-if brew update-python-resources --exclude-packages=ast-grep-cli "$OUT"; then
+if brew update-python-resources --exclude-packages=ast-grep-cli "$TAP_FORMULA"; then
   echo "Wrote ${OUT} for lgtmaybe ${VERSION}" >&2
 else
   rc=$?
