@@ -13,6 +13,12 @@ enforces it on PRs so release-please can compute the next version.
 
 The only human-only pieces:
 
+## Contents
+
+- [One-time setup](#one-time-setup)
+- [Each release](#each-release)
+- [Before going public](#before-going-public)
+
 ## One-time setup
 
 - On PyPI, add a **trusted publisher** for this repo: workflow
