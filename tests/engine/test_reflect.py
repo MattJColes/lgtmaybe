@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from lgtmaybe.core.models import (
     PRContext,
@@ -178,6 +179,48 @@ def test_unparseable_verdict_keeps_all() -> None:
     survivors = reflect_findings([_HIGH, _LOW_CONF], _CTX, _CFG, provider)
 
     assert survivors == [_HIGH, _LOW_CONF]  # safe default
+
+
+class _RaisingProvider(ProviderClient):
+    """A ProviderClient whose complete() always raises (quota/auth/network)."""
+
+    def complete(self, messages: list[dict[str, str]], model: str, **opts: object):
+        raise RuntimeError("provider exploded")
+
+
+class _ListHandler(logging.Handler):
+    """Collects emitted LogRecords for assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def test_reflection_failure_keeps_all_and_logs() -> None:
+    """When the audit call raises, keep every finding (safe default) AND warn.
+
+    Swallowing the cause silently makes an always-failing reflection pass look
+    identical to "nothing to prune" — the repo convention is errors must surface.
+    The reflect logger does not propagate to root, so attach a handler directly.
+    """
+    from lgtmaybe.engine import reflect as reflect_mod
+
+    handler = _ListHandler()
+    reflect_mod._log.addHandler(handler)
+    try:
+        survivors = reflect_findings([_HIGH, _LOW_CONF], _CTX, _CFG, _RaisingProvider())
+    finally:
+        reflect_mod._log.removeHandler(handler)
+
+    assert survivors == [_HIGH, _LOW_CONF]  # safe default — nothing dropped
+    warnings = [r for r in handler.records if r.levelno >= logging.WARNING]
+    assert warnings, "expected a warning when the reflection pass fails"
+    assert any("reflection" in r.getMessage().lower() for r in warnings)
+    # The cause must be attached so logs name why it failed, not just that it did.
+    assert any(r.exc_info for r in warnings)
 
 
 # ---------------------------------------------------------------------------

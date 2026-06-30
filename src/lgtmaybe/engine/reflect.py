@@ -142,8 +142,15 @@ def _reflect_pass(
     try:
         verdicts = _audit(findings, ctx, cfg, provider, fetched_paths=fetched_paths)
     except Exception:
-        # If reflection fails to parse, keep all findings (safe default), each
-        # non-broad — never silently drop a real finding, nor tier it as broad.
+        # If reflection fails (provider error, quota, unparseable output), keep all
+        # findings (safe default), each non-broad — never silently drop a real
+        # finding, nor tier it as broad. Log the cause: an always-failing reflection
+        # pass otherwise looks identical to "nothing to prune".
+        _log.warning(
+            "reflection pass failed; keeping all findings",
+            extra={"findings": len(findings)},
+            exc_info=True,
+        )
         return findings
 
     survivors: list[ReviewFinding] = []
