@@ -4,6 +4,14 @@
 vendors behind one API. Add an `OPENROUTER_API_KEY`, then pick any model
 OpenRouter offers using its `vendor/model` name.
 
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
 ## Get an API key
 
 Create a key at <https://openrouter.ai/keys>. In your repository, add it as an
