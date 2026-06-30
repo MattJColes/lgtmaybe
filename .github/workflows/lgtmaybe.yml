@@ -1,15 +1,18 @@
 # Dogfood: lgtmaybe reviews its own PRs with OpenAI gpt-5.5.
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
 # Add an OPENAI_API_KEY repo secret.
+#
+# ON DEMAND ONLY: a real provider review costs money + runs a live model, so this
+# does NOT fire automatically on every PR. A maintainer triggers it by commenting
+# a slash command (/review, /improve, /ask, /describe) on the PR.
 name: lgtmaybe
 
 on:
-  pull_request_target:
   issue_comment:
     types: [created]
 
-# pull_request_target runs against the BASE repo (secrets available); the action
-# only ever reads the diff via the API and never checks out PR code.
+# issue_comment runs against the BASE repo (secrets available); the action only
+# ever reads the diff via the API and never checks out PR code.
 permissions:
   contents: read
   pull-requests: write
@@ -20,15 +23,13 @@ concurrency:
 
 jobs:
   review:
-    # Only trusted authors (repo owner / org member / collaborator) can trigger a
-    # review, so fork PRs and drive-by /ask or /review comments from strangers
-    # cannot spend the provider budget. A maintainer can still opt-in to an
-    # external PR by commenting /review on it. (Comments not on a PR are skipped.)
+    # Comment-triggered only, and only on a PR: a slash command from a trusted
+    # author (repo owner / org member / collaborator). This keeps a drive-by /ask
+    # or /review from a stranger from spending the provider budget, and skips
+    # comments that aren't on a pull request.
     if: >-
-      (github.event_name == 'pull_request_target' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
-      (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+      github.event.issue.pull_request &&
+      contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     # A healthy full review runs in a handful of minutes; cap it so a wedged
     # model call can't sit on the runner for GitHub's 6-hour default. Fail-fast on
