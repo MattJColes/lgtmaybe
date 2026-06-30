@@ -16,29 +16,32 @@ tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml
 
 A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
 formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
-`brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version. It
-regenerates the whole formula — including every PyPI resource stanza via
-`scripts/update-homebrew-formula.sh` — so a dependency bump is picked up too.
+`brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version.
+`scripts/update-homebrew-formula.sh` writes a small formula that creates a venv
+and `pip install`s lgtmaybe + its dependencies from **PyPI wheels** (no
+per-dependency `resource` stanzas): litellm's tree includes Rust sdists
+(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so the source-build
+approach is a dead end — the wheels work. The formula declares **`preserve_rpath`**
+so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
+rewrite them ("Failed to fix install linkage"). It's a plain source formula —
+no bottle — so it installs on any architecture and macOS version.
 
-Two things make the Homebrew publish less direct than PyPI/GHCR, and the
-workflow is built around both:
+The workflow:
 
-- A `release: published` event is **not** delivered for a release that
-  release-please cuts, because it is created with the built-in `GITHUB_TOKEN`
-  (GitHub suppresses downstream workflow triggers from `GITHUB_TOKEN` to prevent
-  recursion). So `release-please.yml` **calls** `homebrew.yml` directly
-  (`workflow_call`) instead of relying on the event.
-- Homebrew's `brew update-python-resources` hardcodes a 24-hour PyPI cooldown
-  (`RELEASE_COOLDOWN_SECONDS`) and refuses to resolve a version published in the
-  last day — a supply-chain guard with no opt-out. A brand-new release therefore
-  **cannot** be turned into a formula immediately. The release-time call detects
-  this and defers; a **daily scheduled run** in `homebrew.yml` is the workhorse
-  that publishes the formula once the version has aged past the cooldown
-  (idempotent — a no-op when the tap is already current). Net effect: a new
-  version lands in the tap within roughly a day of release, not instantly. To
-  publish sooner, re-run `homebrew.yml` via **workflow_dispatch** with the
-  version once it is >24h old, or run `scripts/update-homebrew-formula.sh`
-  locally on a Mac.
+- Is **called** by `release-please.yml` (`workflow_call`) right after a release,
+  because a `release: published` event is **not** delivered for a release
+  release-please cuts with the built-in `GITHUB_TOKEN` (GitHub suppresses
+  downstream triggers from `GITHUB_TOKEN` to prevent recursion). A daily
+  `schedule` and a manual `workflow_dispatch` (with an optional `force` to
+  re-publish the same version) are the safety nets.
+- **Installs the regenerated formula in CI before committing it** — a real
+  `brew install` of the formula gates the push, so a formula that doesn't install
+  is never published. (You can seed/verify it by hand on a Mac by running
+  `scripts/update-homebrew-formula.sh <version> path/to/Formula/lgtmaybe.rb`.)
+
+Net effect: a new version lands in the tap within minutes of release — no PyPI
+cooldown to wait out, since `brew update-python-resources` (which imposes one)
+isn't used.
 
 Commit messages must follow conventional-commit format — `.github/workflows/commitlint.yml`
 enforces it on PRs so release-please can compute the next version.
