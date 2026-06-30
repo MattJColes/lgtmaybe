@@ -61,6 +61,7 @@ nav:
   - Tutorial:
       - Getting started: tutorial/getting-started.md
   - How-to:
+      - Install with Homebrew: how-to/install-with-homebrew.md
       - Review with OpenAI: how-to/review-with-openai.md
       - Review with Claude (Anthropic): how-to/review-with-anthropic.md
       - Review with OpenRouter: how-to/review-with-openrouter.md

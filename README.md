@@ -98,7 +98,7 @@ From inside a git repo, on a branch with changes, review your diff against the
 remote primary branch and print the findings:
 
 ```bash
-pip install lgtmaybe
+pip install lgtmaybe        # or: brew install MattJColes/lgtmaybe/lgtmaybe
 
 lgtmaybe review \
   --provider ollama \
@@ -214,7 +214,9 @@ only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instea
 
 ## Distribution
 
-- **CLI** — `pip install lgtmaybe`
+- **CLI (PyPI)** — `pip install lgtmaybe`
+- **CLI (Homebrew)** — `brew install MattJColes/lgtmaybe/lgtmaybe`
+  ([details](docs/how-to/install-with-homebrew.md))
 - **GitHub Action** — `uses: MattJColes/lgtmaybe@v0`
 
 ## Contributing
