@@ -10,10 +10,26 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
-from lgtmaybe.cli import main, pr_url_from_event
+from lgtmaybe.cli import RuntimeOptions, execute_comment, main, pr_url_from_event
+from lgtmaybe.core.models import Provider, ReviewConfig
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
+
+
+def test_execute_comment_missing_repository_raises_clean_error():
+    """An issue_comment payload missing ``repository`` surfaces a ClickException."""
+    import click
+
+    event = {
+        "comment": {"body": "/review"},
+        "issue": {"pull_request": {"url": "x"}, "number": 5},
+        # no "repository" key
+    }
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    with pytest.raises(click.ClickException, match="missing required field"):
+        execute_comment(event, cfg, RuntimeOptions())
 
 
 class TestPrUrlFromEvent:
@@ -31,6 +47,13 @@ class TestPrUrlFromEvent:
             "pull_request": {"number": 7},
         }
         assert pr_url_from_event(event) == "https://ghe.example.com/org/repo/pull/7"
+
+    def test_missing_field_raises_clean_click_exception(self):
+        """A malformed event payload surfaces a clear ClickException, not KeyError."""
+        import click
+
+        with pytest.raises(click.ClickException, match="missing required field"):
+            pr_url_from_event({"pull_request": {"number": 7}})  # no "repository"
 
 
 def _write_event(tmp_path: Path, payload: dict) -> Path:

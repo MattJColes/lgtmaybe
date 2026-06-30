@@ -15,7 +15,8 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.core.ports import ProviderClient
-from lgtmaybe.engine.reflect import reflect_findings
+from lgtmaybe.engine.compress import count_tokens
+from lgtmaybe.engine.reflect import _head_tail, reflect_findings
 from tests.fakes import FakeProvider
 
 # ---------------------------------------------------------------------------
@@ -563,3 +564,31 @@ def test_kept_and_deferred_findings_handled_together() -> None:
 
     assert _HIGH in survivors
     assert _LOW_CONF in survivors
+
+
+# ---------------------------------------------------------------------------
+# _head_tail — token-budget contract
+# ---------------------------------------------------------------------------
+
+
+def test_head_tail_respects_tiny_budget() -> None:
+    """A budget smaller than the truncation marker must not overflow.
+
+    Regression: ``half = max(1, ...)`` floored the per-end budget to 1 token, so
+    head + marker + tail could exceed *max_tokens* when the budget was smaller
+    than the marker itself. The function's contract is that the result fits
+    within *max_tokens*.
+    """
+    text = "alpha\nbravo\ncharlie\ndelta\necho"
+    for budget in range(1, 6):
+        result = _head_tail(text, max_tokens=budget)
+        assert count_tokens(result) <= budget, (budget, repr(result))
+
+
+def test_head_tail_truncates_within_budget() -> None:
+    """With room for the marker, the result keeps both ends and stays in budget."""
+    text = "\n".join(f"line{i}" for i in range(200))
+    result = _head_tail(text, max_tokens=40)
+    assert count_tokens(result) <= 40
+    assert "[truncated]" in result
+    assert result.startswith("line0")

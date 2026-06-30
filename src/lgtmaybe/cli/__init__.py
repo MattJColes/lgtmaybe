@@ -232,8 +232,11 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         click.echo("Comment is not on a pull request; ignoring.")
         return
 
-    repo = event["repository"]["full_name"]
-    pr_number = issue["number"]
+    try:
+        repo = event["repository"]["full_name"]
+        pr_number = issue["number"]
+    except (KeyError, TypeError) as exc:
+        raise click.ClickException(f"event payload missing required field: {exc}") from exc
     runtime = runtime.with_pr_url(f"https://github.com/{repo}/pull/{pr_number}")
 
     try:
@@ -267,8 +270,11 @@ def pr_url_from_event(event: dict[str, Any]) -> str:
     api.github.com.
     """
     server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
-    repo = event["repository"]["full_name"]
-    number = event["pull_request"]["number"]
+    try:
+        repo = event["repository"]["full_name"]
+        number = event["pull_request"]["number"]
+    except (KeyError, TypeError) as exc:
+        raise click.ClickException(f"event payload missing required field: {exc}") from exc
     return f"{server}/{repo}/pull/{number}"
 
 
