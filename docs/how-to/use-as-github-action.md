@@ -8,6 +8,17 @@ Ready-to-copy workflows for every cloud and API-key provider live in
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
+## Contents
+
+- [Security requirement: pull_request_target](#security-requirement-pull_request_target)
+- [Who can trigger a review](#who-can-trigger-a-review)
+- [Minimal workflow — openai](#minimal-workflow-openai)
+- [Other key-based providers](#other-key-based-providers)
+- [Keyless cloud workflows](#keyless-cloud-workflows)
+- [Action inputs](#action-inputs)
+- [Adding a config file](#adding-a-config-file)
+- [Pin to a specific version](#pin-to-a-specific-version)
+
 ## Security requirement: pull_request_target
 
 All lgtmaybe workflows use the `pull_request_target` trigger, not
