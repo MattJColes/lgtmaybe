@@ -1,0 +1,72 @@
+name: homebrew
+
+# Keeps the Homebrew tap formula (MattJColes/homebrew-lgtmaybe) in sync with the
+# latest PyPI release. Fires when a GitHub release is published (release-please
+# cuts it) and can be re-run manually for any version. It regenerates the whole
+# formula — including every PyPI resource stanza — so a dependency bump is picked
+# up too, not just the lgtmaybe version.
+#
+# One-time setup (see docs/how-to/releasing.md):
+#   - Create the tap repo MattJColes/homebrew-lgtmaybe.
+#   - Add a repo secret HOMEBREW_TAP_TOKEN: a PAT with `contents: write` on the
+#     tap repo (GITHUB_TOKEN cannot push to a different repository).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish to the tap, e.g. 0.7.2 (no leading v)."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    # macOS so `brew` and `brew update-python-resources` are available.
+    runs-on: macos-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v="${{ inputs.version }}"
+          else
+            v="${{ github.event.release.tag_name }}"
+          fi
+          v="${v#lgtmaybe-v}"
+          v="${v#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout lgtmaybe (for the generator script)
+        uses: actions/checkout@v7
+        with:
+          path: lgtmaybe
+
+      - name: Checkout the tap
+        uses: actions/checkout@v7
+        with:
+          repository: MattJColes/homebrew-lgtmaybe
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Regenerate the formula
+        run: |
+          lgtmaybe/scripts/update-homebrew-formula.sh \
+            "${{ steps.ver.outputs.version }}" \
+            "tap/Formula/lgtmaybe.rb"
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/lgtmaybe.rb; then
+            echo "Formula already up to date for ${{ steps.ver.outputs.version }}."
+            exit 0
+          fi
+          git add Formula/lgtmaybe.rb
+          git commit -m "lgtmaybe ${{ steps.ver.outputs.version }}"
+          git push

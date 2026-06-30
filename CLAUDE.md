@@ -7,10 +7,17 @@ Read this before writing code. It encodes decisions that are **made, not options
 
 A PR reviewer that posts inline review comments + a summary. The user picks the
 LLM backend with a `--provider` flag, drops a key into GitHub secrets (or wires
-OIDC/WIF for cloud providers), and gets a review. One core, two distribution
+OIDC/WIF for cloud providers), and gets a review. One core, three distribution
 variants:
 
 - **PyPI CLI** — `pip install lgtmaybe`
+- **Homebrew CLI** — `brew install MattJColes/lgtmaybe/lgtmaybe`, from the
+  `MattJColes/homebrew-lgtmaybe` tap. The formula installs the core deps (covers
+  the API-key + local providers; keyless cloud needs the `pip` extras), and is
+  regenerated from the published PyPI release on each release by
+  `.github/workflows/homebrew.yml` + `scripts/update-homebrew-formula.sh` (full
+  resource stanzas via `brew update-python-resources`, so dep bumps are picked
+  up — never hand-maintained)
 - **GitHub Action** — composite action (`action.yml`) that does keyless OIDC/WIF
   auth, then runs a GHCR image via the `action` entrypoint
 
@@ -245,6 +252,13 @@ pattern, event bus, plugin framework.
      pushes the GHCR image (`{version}`, `v{major}`, `latest`) + moves the floating
      `v1`. `.github/workflows/commitlint.yml` (`commitlint.config.cjs`) gates PR
      titles/commits to conventional-commit format so the automation can version.
+   - **Homebrew tap** — `.github/workflows/homebrew.yml` fires on the published
+     release and regenerates the formula in the `MattJColes/homebrew-lgtmaybe`
+     tap via `scripts/update-homebrew-formula.sh` (resolves the PyPI sdist
+     url/sha, then `brew update-python-resources` fills the full dependency tree;
+     pushes with the `HOMEBREW_TAP_TOKEN` PAT). Regenerated wholesale each release
+     so dep bumps flow through — never hand-edited. Maintainer setup (tap repo +
+     PAT) is in `docs/how-to/releasing.md`.
    - **`examples/workflows/`** — one per posting provider (cloud + API-key);
      `id-token: write` for cloud. ollama is local-only (CLI), not a workflow.
    - **Model IDs in docs are kept current** per platform (litellm-native form).
