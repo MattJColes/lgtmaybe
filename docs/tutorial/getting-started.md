@@ -24,12 +24,14 @@ pip install lgtmaybe
 On macOS you can install from the Homebrew tap instead:
 
 ```bash
-brew install MattJColes/lgtmaybe/lgtmaybe
+brew tap MattJColes/lgtmaybe
+brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-party taps
+brew install lgtmaybe
 ```
 
 See [Install with Homebrew](../how-to/install-with-homebrew.md) for details (the
-Homebrew build covers the API-key and local providers; keyless cloud providers
-need the `pip` extras).
+`brew trust` step, and that the Homebrew build covers the API-key and local
+providers while keyless cloud providers need the `pip` extras).
 
 Verify the install:
 

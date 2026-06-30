@@ -8,16 +8,21 @@ On macOS (and Linuxbrew), you can install the `lgtmaybe` CLI from the project's
 [Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`.
 
 ```bash
-brew install MattJColes/lgtmaybe/lgtmaybe
-```
-
-That one command taps the repository and installs the formula. If you prefer to
-tap first:
-
-```bash
 brew tap MattJColes/lgtmaybe
+brew trust MattJColes/lgtmaybe
 brew install lgtmaybe
 ```
+
+The middle step is required: current Homebrew refuses to load a formula from a
+third-party tap until you explicitly **trust** it (`Error: Refusing to load
+formula … from untrusted tap`). This is a one-time, per-machine decision that
+applies to every tap outside Homebrew's core — the tap author can't waive it for
+you, by design. To trust only this one formula instead of the whole tap, use
+`brew trust --formula MattJColes/lgtmaybe/lgtmaybe`.
+
+Tapping and installing in one line (`brew install MattJColes/lgtmaybe/lgtmaybe`)
+works too, but still needs the `brew trust …` step first — otherwise the install
+stops at the untrusted-tap error.
 
 Verify it:
 
