@@ -100,6 +100,16 @@ and no pull request required.
 pip install lgtmaybe
 ```
 
+On macOS you can install from the Homebrew tap instead:
+
+```bash
+brew install MattJColes/lgtmaybe/lgtmaybe
+```
+
+See [Install with Homebrew](../how-to/install-with-homebrew.md) for details (the
+Homebrew build covers the API-key and local providers; keyless cloud providers
+need the `pip` extras).
+
 Verify the install:
 
 ```bash
@@ -180,6 +190,70 @@ lgtmaybe ran its pipeline over your local diff:
   [Review with Vertex WIF](../how-to/review-with-vertex-wif.md).
 - To use lgtmaybe in a GitHub Actions workflow, see
   [Use as a GitHub Action](../how-to/use-as-github-action.md).
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/install-with-homebrew/ -->
+
+# Install with Homebrew
+
+On macOS (and Linuxbrew), you can install the `lgtmaybe` CLI from the project's
+[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`.
+
+```bash
+brew install MattJColes/lgtmaybe/lgtmaybe
+```
+
+That one command taps the repository and installs the formula. If you prefer to
+tap first:
+
+```bash
+brew tap MattJColes/lgtmaybe
+brew install lgtmaybe
+```
+
+Verify it:
+
+```bash
+lgtmaybe --help
+```
+
+Upgrade later with:
+
+```bash
+brew upgrade lgtmaybe
+```
+
+Homebrew installs lgtmaybe into its own isolated virtualenv, so it never touches
+your system or project Python. The first install builds a few native
+dependencies from source (pydantic-core, tiktoken, tokenizers), which can take a
+minute. It also pulls the `ast-grep` formula, which lgtmaybe uses for cross-file
+symbol resolution during review.
+
+## Which providers does the Homebrew build cover?
+
+The formula installs the core dependencies, which covers every **API-key** and
+**local** provider:
+
+- `openai`, `anthropic`, `openrouter`, `zai` — set the provider's API key in your
+  environment.
+- `ollama` and `openai-compatible` — fully local, point `--api-base` at the server.
+
+The **keyless cloud** providers — `bedrock`, `vertex`, `azure` — need extra cloud
+SDKs that the Homebrew formula does not bundle. For those, install the CLI from
+PyPI with the matching extra, e.g.:
+
+```bash
+pip install 'lgtmaybe[bedrock]'   # or [vertex] / [azure]
+```
+
+or run them through the [GitHub Action](use-as-github-action.md), where the image
+bundles all three and wires up the OIDC/WIF auth for you.
+
+## Next steps
+
+- Run your first local review: [Getting started](../tutorial/getting-started.md).
+- Post reviews on real pull requests: [Use as a GitHub Action](use-as-github-action.md).
 
 ---
 
@@ -1686,6 +1760,7 @@ provides defaults for all runs.
   - [context_lines](#context_lines)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
+  - [reflect](#reflect)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -1863,6 +1938,22 @@ structured_output: false   # only if your gateway rejects JSON-schema mode
 
 Default: `true`. See
 [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
+
+### reflect
+
+Run the **self-reflection pass** that audits the merged findings and drops the
+ones the model marks low-confidence, before anything is posted. This trims false
+positives, so leave it on for most models. Turn it **off** for a weaker or local
+model that over-prunes and drops valid findings during the audit. CLI:
+`--no-reflect`.
+
+```yaml
+reflect: false   # keep every finding; skip the false-positive audit
+```
+
+Default: `true`. To audit a weak reviewer's findings with a stronger model
+instead of disabling the pass, set `reflect_model` to that model id (it uses the
+same provider and credentials as `model`).
 
 ### resolve_fixed
 
@@ -2126,6 +2217,13 @@ the release: it cuts the tag and the GitHub release, then the same run publishes
 tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
+A third workflow, `.github/workflows/homebrew.yml`, fires on the published
+release and regenerates the **Homebrew formula** in the tap repo
+(`MattJColes/homebrew-lgtmaybe`) so `brew install MattJColes/lgtmaybe/lgtmaybe`
+tracks the latest version. It regenerates the whole formula — including every
+PyPI resource stanza via `scripts/update-homebrew-formula.sh` — so a dependency
+bump is picked up too.
+
 Commit messages must follow conventional-commit format — `.github/workflows/commitlint.yml`
 enforces it on PRs so release-please can compute the next version.
 
@@ -2149,6 +2247,12 @@ The only human-only pieces:
 - First release only: from the GitHub release page, tick **"Publish this Action
   to the GitHub Marketplace"**, accept the terms, and pick the categories
   `code-review` and `continuous-integration`.
+- **Homebrew tap:** create the repo **`MattJColes/homebrew-lgtmaybe`** with a
+  `Formula/` directory (it can start empty — the workflow writes the formula).
+  Add a repo secret **`HOMEBREW_TAP_TOKEN`** to *this* repo: a fine-grained PAT
+  with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
+  to another repository). To seed or verify the formula by hand on a Mac, run
+  `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
 
 ## Each release
 
@@ -3103,7 +3207,7 @@ configurable in `.lgtmaybe.yml` (see
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `categories` | all nine | Which review lenses to run; each runs as its own model call. Narrowing the list means fewer calls. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
-| `min_severity` | `info` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`). |
+| `min_severity` | `low` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
 | `include_paths` / `exclude_paths` | — | Glob filters to focus the review. |
 
 > These bound a **single run**, not the number of runs. On a public repo, anyone
@@ -3686,8 +3790,8 @@ run:
 
 - **ollama is free** — it runs the model on your own hardware, so trigger it for
   whoever you like; there's no per-run cost.
-- **Hosted providers** (OpenAI, Anthropic, OpenRouter, Bedrock, Vertex, Azure)
-  charge for the tokens each review uses.
+- **Hosted providers** (OpenAI, Anthropic, OpenRouter, z.ai, Bedrock, Vertex,
+  Azure) charge for the tokens each review uses.
 
 So if you're on a hosted provider and your repo is public, "everyone" means
 anyone can start a run. That's perfectly fine for plenty of projects — just pick

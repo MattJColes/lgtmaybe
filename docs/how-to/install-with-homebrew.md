@@ -1,3 +1,7 @@
+---
+description: Install the lgtmaybe CLI on macOS or Linuxbrew from the project's Homebrew tap instead of pip.
+---
+
 # Install with Homebrew
 
 On macOS (and Linuxbrew), you can install the `lgtmaybe` CLI from the project's

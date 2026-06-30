@@ -8,6 +8,7 @@
 
 ## How-to
 
+- [Install with Homebrew](https://mattjcoles.github.io/lgtmaybe/how-to/install-with-homebrew/): Install the lgtmaybe CLI on macOS or Linuxbrew from the project's Homebrew tap instead of pip.
 - [Review with OpenAI](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI — add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
 - [Review with Claude (Anthropic)](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-anthropic/): Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
 - [Review with OpenRouter](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openrouter/): Use OpenRouter as the lgtmaybe backend to reach many model vendors through one OpenAI-compatible API key.
