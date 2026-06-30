@@ -1,3 +1,7 @@
+---
+description: Turn lgtmaybe findings into instructions an AI coding agent can apply, for a local review-and-fix loop before you push.
+---
+
 # Fix findings with an AI agent
 
 `lgtmaybe review` runs locally and prints findings; it never posts anywhere. The

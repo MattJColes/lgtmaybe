@@ -177,6 +177,40 @@ def test_jwt_redacted() -> None:
     assert REDACTED_PLACEHOLDER in result
 
 
+_JWE = (
+    "eyJ" + "hbGciOiJSU0EtT0FFUCIsImVuYyI6IkEyNTZHQ00ifQ"  # protected header (eyJ…)
+    ".OKOawDo13gRp2ojaHV7LFpZcgV7T6DVZKTyKOMTYUmKoTCVJRgckCL9kiMT03JGe"  # encrypted key
+    ".48V1_ALb6US04U3b"  # iv
+    ".5eym8TW_c8SuK0ltJ3rpYIzOeDQz7TALvtu6UG9oMo4vpzs9tX_EFShS8iB7j6ji"  # ciphertext
+    ".XFBoMYUZodetZdvTiFvSkQ"  # auth tag
+)
+
+
+def test_jwe_compact_token_redacted() -> None:
+    """A five-segment compact JWE (common with cloud OIDC/Entra) must be scrubbed.
+
+    The three-segment JWT pattern can't match a JWE — its second segment is an
+    encrypted key, not a base64url JSON header (`eyJ…`) — so without a dedicated
+    pattern the whole token would egress. Framed without an assignment keyword so
+    the generic value pattern can't take credit by scrubbing only the first
+    segment; the middle (ciphertext) segment must be gone for this to pass.
+    """
+    result = redact(f"+  cookie {_JWE}\n")
+    assert _JWE not in result
+    # A middle segment — not just the leading header — must be scrubbed.
+    assert "5eym8TW_c8SuK0lt" not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_jwt_still_redacted_alongside_jwe_pattern() -> None:
+    """The new JWE pattern must not stop a plain three-segment JWT being scrubbed."""
+    result = redact(f"+  cookie {_JWT}\n")
+    assert _JWT not in result
+    # The payload segment carries claims/PII — none of it may survive.
+    assert "zdWIiOiIxMjM0" not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
 def test_npm_token_redacted() -> None:
     result = redact(f"+//registry.npmjs.org/:_authToken={_NPM_TOKEN}\n")
     assert _NPM_TOKEN not in result

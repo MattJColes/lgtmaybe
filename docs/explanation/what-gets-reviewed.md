@@ -1,3 +1,7 @@
+---
+description: What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
+---
+
 # What gets reviewed
 
 This page explains what lgtmaybe looks at, how it bounds the work, and what the
@@ -276,7 +280,7 @@ configurable in `.lgtmaybe.yml` (see
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `categories` | all nine | Which review lenses to run; each runs as its own model call. Narrowing the list means fewer calls. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
-| `min_severity` | `info` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`). |
+| `min_severity` | `low` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
 | `include_paths` / `exclude_paths` | — | Glob filters to focus the review. |
 
 > These bound a **single run**, not the number of runs. On a public repo, anyone

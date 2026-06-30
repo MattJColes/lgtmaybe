@@ -1,3 +1,7 @@
+---
+description: Run lgtmaybe entirely locally with an ollama model — zero API cost, zero egress, no keys, and code never leaves your machine.
+---
+
 # Run Locally with ollama
 
 Use this guide to review your local changes with a local ollama model — zero API

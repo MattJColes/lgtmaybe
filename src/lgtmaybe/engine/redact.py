@@ -28,6 +28,12 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"AIza[0-9A-Za-z\-_]{35}"),
     # Stripe live/test secret keys
     re.compile(r"sk_(?:live|test)_[A-Za-z0-9]{16,}"),
+    # JSON Web Encryption (compact): header.encrypted_key.iv.ciphertext.tag —
+    # five base64url segments. The second segment is an encrypted key, NOT a
+    # base64url JSON header, so the three-part JWT pattern below never matches a
+    # JWE; without this it would egress whole. Listed first so the 5-segment form
+    # is consumed before the 3-segment pattern can claim a prefix of it.
+    re.compile(r"eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){4}"),
     # JSON Web Tokens: header.payload.signature, each base64url. The payload
     # carries claims/PII, so the whole token must go — not just up to a dot.
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),

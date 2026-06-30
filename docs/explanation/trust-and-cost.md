@@ -1,3 +1,7 @@
+---
+description: How lgtmaybe's trigger gate and cost model work — who can start a review, and why opening it wide is a cost not a security choice.
+---
+
 # Trust and Cost
 
 lgtmaybe lets you decide **who can trigger a review**. This document explains that
@@ -26,8 +30,8 @@ run:
 
 - **ollama is free** — it runs the model on your own hardware, so trigger it for
   whoever you like; there's no per-run cost.
-- **Hosted providers** (OpenAI, Anthropic, OpenRouter, Bedrock, Vertex, Azure)
-  charge for the tokens each review uses.
+- **Hosted providers** (OpenAI, Anthropic, OpenRouter, z.ai, Bedrock, Vertex,
+  Azure) charge for the tokens each review uses.
 
 So if you're on a hosted provider and your repo is public, "everyone" means
 anyone can start a run. That's perfectly fine for plenty of projects — just pick

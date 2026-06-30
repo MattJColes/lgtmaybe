@@ -1,3 +1,7 @@
+---
+description: Configure lgtmaybe to review pull requests with z.ai GLM models through litellm's native zai route.
+---
+
 # Review with z.ai (GLM)
 
 [z.ai](https://z.ai/)'s GLM models (GLM-4.6 and friends, from Zhipu AI) are a

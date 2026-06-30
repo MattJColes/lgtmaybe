@@ -322,3 +322,14 @@ def test_review_finding_anchored_defaults_true() -> None:
         f.model_copy(update={"anchored": False}).model_dump_json()
     )
     assert restored.anchored is False
+
+
+def test_review_finding_line_must_be_positive() -> None:
+    """Line numbers are 1-based; a 0/negative line is bogus model output and would
+    map to no real diff line (or worse, a wrong one) — reject it at the boundary."""
+    for bad in (0, -1):
+        with pytest.raises(ValidationError):
+            ReviewFinding(path="a.py", line=bad, severity=Severity.low, title="t", body="b")
+    # The first valid line is accepted.
+    f = ReviewFinding(path="a.py", line=1, severity=Severity.low, title="t", body="b")
+    assert f.line == 1

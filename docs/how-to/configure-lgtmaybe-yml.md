@@ -1,3 +1,7 @@
+---
+description: Configure lgtmaybe with a .lgtmaybe.yml file — provider, model, severity floor, lenses, caps, and other non-secret defaults.
+---
+
 # Configure .lgtmaybe.yml
 
 Place a `.lgtmaybe.yml` file at the root of your repository to control how
@@ -18,6 +22,7 @@ provides defaults for all runs.
   - [context_lines](#context_lines)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
+  - [reflect](#reflect)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -195,6 +200,22 @@ structured_output: false   # only if your gateway rejects JSON-schema mode
 
 Default: `true`. See
 [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
+
+### reflect
+
+Run the **self-reflection pass** that audits the merged findings and drops the
+ones the model marks low-confidence, before anything is posted. This trims false
+positives, so leave it on for most models. Turn it **off** for a weaker or local
+model that over-prunes and drops valid findings during the audit. CLI:
+`--no-reflect`.
+
+```yaml
+reflect: false   # keep every finding; skip the false-positive audit
+```
+
+Default: `true`. To audit a weak reviewer's findings with a stronger model
+instead of disabling the pass, set `reflect_model` to that model id (it uses the
+same provider and credentials as `model`).
 
 ### resolve_fixed
 

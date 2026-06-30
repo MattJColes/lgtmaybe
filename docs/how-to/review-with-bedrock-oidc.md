@@ -1,3 +1,7 @@
+---
+description: Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC — no static AWS credentials stored in repository secrets.
+---
+
 # Review with AWS Bedrock (keyless OIDC)
 
 Use this guide to run lgtmaybe with **AWS Bedrock** using GitHub's OIDC token

@@ -1,3 +1,7 @@
+---
+description: Review pull requests with Azure OpenAI in lgtmaybe using keyless GitHub OIDC federated to Entra, or an API key.
+---
+
 # Review with Azure OpenAI (keyless OIDC)
 
 Use this guide to run lgtmaybe against **Azure OpenAI** using GitHub's OIDC token
