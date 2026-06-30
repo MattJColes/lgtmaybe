@@ -3,6 +3,14 @@
 OpenAI is a key-based provider: add an `OPENAI_API_KEY` and pick a model. No
 OIDC, no endpoint to configure — the simplest path to a hosted review.
 
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
 ## Get an API key
 
 Create a key at <https://platform.openai.com/api-keys>. In your repository, add
