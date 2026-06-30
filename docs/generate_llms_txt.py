@@ -80,7 +80,7 @@ def _sections() -> tuple[str | None, list[tuple[str, list[tuple[str, str]]]]]:
     home_md: str | None = None
     sections: list[tuple[str, list[tuple[str, str]]]] = []
     for entry in _load_nav():
-        (label, value), = entry.items()
+        ((label, value),) = entry.items()
         if isinstance(value, str):
             if value == "index.md":
                 home_md = value
