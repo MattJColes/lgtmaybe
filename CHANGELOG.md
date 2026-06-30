@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.2...lgtmaybe-v0.8.0) (2026-06-30)
+
+
+### Features
+
+* add Homebrew install support ([#143](https://github.com/MattJColes/lgtmaybe/issues/143)) ([e4b9e1b](https://github.com/MattJColes/lgtmaybe/commit/e4b9e1b357e4edc3c40b0635f8926cc98edbcf7e))
+* resolve cross-file symbols with ast-grep during reflection ([#144](https://github.com/MattJColes/lgtmaybe/issues/144)) ([0ad9cdf](https://github.com/MattJColes/lgtmaybe/commit/0ad9cdf91a2f05fab716beb469a63e2ca4093779))
+
+
+### Bug Fixes
+
+* surface clear errors for malformed payloads and tiny reflect budgets ([#148](https://github.com/MattJColes/lgtmaybe/issues/148)) ([dad6e7a](https://github.com/MattJColes/lgtmaybe/commit/dad6e7a61300a192104f376c9b1eafb4f457c0da))
+
+
+### Documentation
+
+* align end-user docs with the codebase ([#146](https://github.com/MattJColes/lgtmaybe/issues/146)) ([fd7bf94](https://github.com/MattJColes/lgtmaybe/commit/fd7bf94e3ea9780f699dbfae8f31f42a179e8e25))
+* optimise documentation for SEO and LLM crawlers ([#147](https://github.com/MattJColes/lgtmaybe/issues/147)) ([b881877](https://github.com/MattJColes/lgtmaybe/commit/b881877b3192964c71a9866e7070ecf3ceb5fed6))
+
 ## [0.7.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.1...lgtmaybe-v0.7.2) (2026-06-30)
 
 
