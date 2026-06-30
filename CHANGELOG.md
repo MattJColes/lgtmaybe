@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.1...lgtmaybe-v0.7.2) (2026-06-30)
+
+
+### Documentation
+
+* add how-to contents, default examples to Sonnet, and support Python 3.11 ([#141](https://github.com/MattJColes/lgtmaybe/issues/141)) ([a79bb12](https://github.com/MattJColes/lgtmaybe/commit/a79bb122a5dbcfc4bdad02dde131138cbec7dbc0))
+
 ## [0.7.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.0...lgtmaybe-v0.7.1) (2026-06-30)
 
 
