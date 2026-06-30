@@ -240,7 +240,11 @@ class LLMReviewEngine(ReviewEngine):
         #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
         #     ignore` pragma on/above the flagged line. Done before reflection so a
         #     suppressed finding costs no reflection tokens and never posts.
+        before_suppress = len(all_findings)
         all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+        suppressed = before_suppress - len(all_findings)
+        if suppressed:
+            _log.info("suppressed findings", extra={"count": suppressed})
 
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.

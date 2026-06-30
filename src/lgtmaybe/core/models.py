@@ -91,7 +91,11 @@ class ReviewFinding(_Strict):
     """A single inline review comment the model wants to post."""
 
     path: str
-    line: int
+    # 1-based diff line. A 0/negative value is degenerate model output that maps to
+    # no real changed line (re-anchoring finds nothing) or mis-posts on GitHub, so
+    # reject it at the boundary — like a non-integer line, this fails the lens
+    # loudly rather than posting a comment on a nonsensical line.
+    line: int = Field(ge=1)
     side: Side = "RIGHT"
     severity: Severity
     title: str
