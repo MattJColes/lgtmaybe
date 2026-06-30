@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.0...lgtmaybe-v0.7.1) (2026-06-30)
+
+
+### Dependencies
+
+* bump the python-dependencies group with 5 updates ([#139](https://github.com/MattJColes/lgtmaybe/issues/139)) ([8b03a49](https://github.com/MattJColes/lgtmaybe/commit/8b03a493b2ee9fa73e12ddd83840f57e3f3d3025))
+
 ## [0.7.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.6.2...lgtmaybe-v0.7.0) (2026-06-24)
 
 
