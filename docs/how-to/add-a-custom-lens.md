@@ -7,6 +7,16 @@ own — a "skill file" that runs alongside the built-ins, fans out as its own
 focused model call, and merges its findings into the same review. Use it to bake
 in a house style or a team convention the built-in lenses don't cover.
 
+## Contents
+
+- [How a lens works](#how-a-lens-works)
+- [Inline in `.lgtmaybe.yml`](#inline-in-lgtmaybeyml)
+- [As reusable skill files](#as-reusable-skill-files)
+- [Bundled lens packs (`pack:<name>`)](#bundled-lens-packs-packname)
+- [Run it](#run-it)
+- [Security: lenses are trusted input](#security-lenses-are-trusted-input)
+- [See also](#see-also)
+
 ## How a lens works
 
 Every lens — built-in or custom — is the same shape: a focused instruction set and
