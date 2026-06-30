@@ -3,6 +3,16 @@
 Use this guide to run lgtmaybe with **Google Vertex AI** using Workload Identity
 Federation — no service-account JSON or static keys in secrets.
 
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time GCP setup](#one-time-gcp-setup)
+- [Workflow example](#workflow-example)
+- [Environment variables](#environment-variables)
+- [Available Vertex AI models](#available-vertex-ai-models)
+- [Running locally with ADC](#running-locally-with-adc)
+- [Troubleshooting](#troubleshooting)
+
 ## How it works
 
 GitHub Actions issues an OIDC token. GCP's Workload Identity Federation
