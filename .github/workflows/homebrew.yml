@@ -1,29 +1,21 @@
 name: homebrew
 
-# Keeps the Homebrew tap formula (MattJColes/homebrew-lgtmaybe) in sync with the
-# latest PyPI release. It regenerates the whole formula — including every PyPI
-# resource stanza — so a dependency bump is picked up too, not just the lgtmaybe
-# version.
+# Publishes lgtmaybe to the Homebrew tap (MattJColes/homebrew-lgtmaybe).
 #
-# How it gets invoked (belt and braces, because no single trigger is reliable):
-#   - workflow_call — release-please.yml calls this right after it cuts a release
-#     (a `release: published` event is NOT delivered when release-please creates
-#     the release with the built-in GITHUB_TOKEN, so we cannot rely on it).
-#   - schedule — a daily run is the workhorse. Homebrew's `update-python-resources`
-#     refuses to resolve a PyPI version published in the last 24h (its hardcoded
-#     RELEASE_COOLDOWN_SECONDS supply-chain guard), so a brand-new release cannot
-#     be turned into a formula immediately. The scheduled run picks the version up
-#     once it has aged past that cooldown. It is idempotent: it no-ops when the tap
-#     is already on the latest version.
-#   - workflow_dispatch — manual re-run for any version.
-#   - release: published — still honoured for a release published by a human (a
-#     real user token DOES trigger downstream workflows); a no-op for the
-#     release-please flow.
+# The formula installs lgtmaybe + its dependency tree from PyPI **wheels** into an
+# isolated virtualenv (see scripts/update-homebrew-formula.sh). Building every
+# dependency from source as `resource` stanzas does not work for this tree —
+# tokenizers/hf-xet are Rust sdists that can't build in Homebrew's sandbox — so we
+# use the upstream wheels instead. The CI install smoke-test below gates the
+# commit, so we never publish a formula that doesn't install.
 #
-# One-time setup (see docs/how-to/releasing.md):
-#   - Create the tap repo MattJColes/homebrew-lgtmaybe.
-#   - Add a repo secret HOMEBREW_TAP_TOKEN: a PAT with `contents: write` on the
-#     tap repo (GITHUB_TOKEN cannot push to a different repository).
+# Invocation: workflow_call (release-please calls it post-release, since a
+# `release: published` event isn't delivered for a GITHUB_TOKEN release),
+# workflow_dispatch (manual; `force` re-publishes the same version), a daily
+# schedule safety net, and release: published (for a human-cut release).
+#
+# One-time setup (see docs/how-to/releasing.md): create MattJColes/homebrew-lgtmaybe
+# and add repo secret HOMEBREW_TAP_TOKEN (a PAT with contents:write on the tap).
 on:
   workflow_call:
     inputs:
@@ -37,8 +29,12 @@ on:
         description: "Version to publish to the tap, e.g. 0.7.2 (no leading v)."
         required: true
         type: string
+      force:
+        description: "Regenerate even if the tap is already on this version."
+        required: false
+        default: false
+        type: boolean
   schedule:
-    # Daily — catches a release once it has aged past Homebrew's 24h PyPI cooldown.
     - cron: "17 7 * * *"
   release:
     types: [published]
@@ -48,7 +44,6 @@ permissions:
 
 jobs:
   formula:
-    # macOS so `brew` and `brew update-python-resources` are available.
     runs-on: macos-latest
     steps:
       - name: Resolve version
@@ -59,8 +54,6 @@ jobs:
             raw="${{ github.event.release.tag_name }}"
           fi
           if [ -z "$raw" ]; then
-            # schedule (or anything without an explicit version): take the latest
-            # published version straight from PyPI.
             raw="$(curl -fsSL https://pypi.org/pypi/lgtmaybe/json \
               | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
           fi
@@ -86,12 +79,12 @@ jobs:
           f="tap/Formula/lgtmaybe.rb"
           cur=""
           if [ -f "$f" ]; then
-            # Pull the version out of the sdist filename in the formula's url line,
-            # e.g. .../lgtmaybe-0.8.0.tar.gz -> 0.8.0
             cur="$(grep -oE '/lgtmaybe-[0-9][^/]*\.tar\.gz' "$f" | head -n1 | sed -E 's#/lgtmaybe-##; s#\.tar\.gz$##')"
           fi
-          echo "Current formula version: '${cur}', target: '${{ steps.ver.outputs.version }}'"
-          if [ "$cur" = "${{ steps.ver.outputs.version }}" ]; then
+          echo "Current formula version: '${cur}', target: '${{ steps.ver.outputs.version }}', force: '${{ inputs.force }}'"
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "force=true; regenerating regardless of the current version."
+          elif [ "$cur" = "${{ steps.ver.outputs.version }}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Tap already at ${cur}; nothing to do."
           fi
@@ -100,30 +93,32 @@ jobs:
         id: gen
         if: steps.idem.outputs.skip != 'true'
         run: |
-          set +e
           lgtmaybe/scripts/update-homebrew-formula.sh \
             "${{ steps.ver.outputs.version }}" \
             "tap/Formula/lgtmaybe.rb"
-          rc=$?
-          set -e
-          if [ "$rc" -eq 75 ]; then
-            # Within Homebrew's 24h PyPI cooldown — not an error. The next
-            # scheduled run will publish it once it has aged past the cooldown.
-            echo "deferred=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::lgtmaybe ${{ steps.ver.outputs.version }} is within Homebrew's 24h PyPI cooldown; deferring to a later scheduled run."
-            exit 0
-          fi
-          exit "$rc"
+
+      # Install the regenerated formula exactly as a user would (sandbox on, no
+      # build-bottle), so the commit is gated on a real, working install.
+      - name: Smoke-test that the formula installs and runs
+        if: steps.idem.outputs.skip != 'true'
+        env:
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+        run: |
+          tap_link="$(brew --repository)/Library/Taps/local/homebrew-lgtmaybe"
+          mkdir -p "$(dirname "$tap_link")"
+          ln -sfn "$GITHUB_WORKSPACE/tap" "$tap_link"
+          # Exactly what a user runs. With `preserve_rpath` the install must now
+          # exit cleanly AND link `lgtmaybe` onto the prefix bin.
+          brew install --formula "local/lgtmaybe/lgtmaybe"
+          "$(brew --prefix)/bin/lgtmaybe" --help | grep -qi usage
+          echo "smoke test passed: lgtmaybe installs cleanly and runs"
 
       - name: Commit and push
-        if: steps.idem.outputs.skip != 'true' && steps.gen.outputs.deferred != 'true'
+        if: ${{ success() && steps.idem.outputs.skip != 'true' }}
         working-directory: tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Stage first, then check the staged diff: `git diff` alone ignores a
-          # brand-new untracked formula (the first-publish case), so the index
-          # diff is what correctly detects "new or changed" vs "nothing to do".
           git add Formula/lgtmaybe.rb
           if git diff --cached --quiet; then
             echo "Formula already up to date for ${{ steps.ver.outputs.version }}."

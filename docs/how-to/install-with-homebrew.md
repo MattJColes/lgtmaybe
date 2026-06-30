@@ -37,10 +37,12 @@ brew upgrade lgtmaybe
 ```
 
 Homebrew installs lgtmaybe into its own isolated virtualenv, so it never touches
-your system or project Python. The first install builds a few native
-dependencies from source (pydantic-core, tiktoken, tokenizers), which can take a
-minute. It also pulls the `ast-grep` formula, which lgtmaybe uses for cross-file
-symbol resolution during review.
+your system or project Python. The formula creates the venv and installs
+lgtmaybe and its dependencies from prebuilt **PyPI wheels** (no compiling), so a
+first install takes about a minute, mostly download time. It works on any
+architecture and macOS version — there's no prebuilt bottle to match. It also
+pulls the `ast-grep` formula, which lgtmaybe uses for cross-file symbol
+resolution during review.
 
 ## Which providers does the Homebrew build cover?
 
