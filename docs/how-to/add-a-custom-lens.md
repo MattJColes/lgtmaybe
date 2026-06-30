@@ -1,3 +1,7 @@
+---
+description: Add a custom review lens to lgtmaybe — a bring-your-own skill file that runs alongside the nine built-in lenses.
+---
+
 # Add a custom review lens (BYO skills)
 
 lgtmaybe ships nine built-in review lenses (security, correctness, deprecation,

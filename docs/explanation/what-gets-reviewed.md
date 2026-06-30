@@ -1,3 +1,7 @@
+---
+description: What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
+---
+
 # What gets reviewed
 
 This page explains what lgtmaybe looks at, how it bounds the work, and what the

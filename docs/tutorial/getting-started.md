@@ -1,3 +1,7 @@
+---
+description: Run your first lgtmaybe pull-request review locally with ollama — no API keys, no GitHub token, and no pull request required.
+---
+
 # Getting Started with lgtmaybe
 
 This tutorial walks you through your first review using **ollama** — a fully

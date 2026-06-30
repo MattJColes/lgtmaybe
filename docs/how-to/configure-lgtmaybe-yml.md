@@ -1,3 +1,7 @@
+---
+description: Configure lgtmaybe with a .lgtmaybe.yml file — provider, model, severity floor, lenses, caps, and other non-secret defaults.
+---
+
 # Configure .lgtmaybe.yml
 
 Place a `.lgtmaybe.yml` file at the root of your repository to control how

@@ -1,0 +1,3746 @@
+# lgtmaybe — full documentation
+
+> Provider-agnostic AI pull-request reviewer. It posts inline review comments and a summary onto a GitHub pull request, or prints findings locally from your git diff. Seven hosted providers, local ollama, and any OpenAI-compatible endpoint — one flag, and keyless OIDC/WIF auth for cloud providers (no static keys in secrets).
+
+Source: https://mattjcoles.github.io/lgtmaybe/ — generated from the docs/ tree.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/ -->
+
+<div class="hero" markdown>
+
+![lgtmaybe logo — a shrugging face with curly-brace arms](assets/logo.svg){ width="128" }
+
+# lgtmaybe
+
+</div>
+
+Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
+OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
+posts inline comments and a summary straight onto the pull request.
+
+lgtmaybe reviews the lines a change touches, and it runs in two places: as a
+GitHub Action on a pull request, or locally from the command line against your
+`git` diff before you push. As an Action it fetches the diff from the GitHub API
+and never checks out or runs your code; locally it reads your working branch.
+Either way it pads each change with a few surrounding lines, so a finding lands
+with the function around it in view, but it only ever comments on the lines that
+actually changed.
+
+Reviews surface the things you'd want a careful reviewer to catch:
+
+- **Logic and correctness bugs** — edge cases, null/None dereferences, off-by-one and boundary errors, mismatched or inverted ranges, unhandled error paths, races and TOCTOU, missed `await`s, and numeric or timezone bugs.
+- **Security vulnerabilities** — an OWASP-aligned sweep: injection, XSS, CSRF and open redirects, hardcoded secrets, broken authn/authz (including JWT pitfalls), path traversal, unrestricted uploads, SSRF, insecure deserialization and XXE, mass assignment, weak crypto, resource/DoS safety (including ReDoS), secrets or PII (passwords, tokens, SSNs, card data) leaking into logs, and CI/IaC misconfiguration.
+- **Missing or weak tests** — changed code paths shipped without a test (flagged with a suggested test to drop in), and tests that don't really test: assertion-free, over-mocked, or sleep-based.
+- **Documentation gaps and stale docs** — public APIs added without a docstring, names that contradict what the code does, and docstrings or comments the change just made wrong.
+- **Deprecated and end-of-life code** — deprecated APIs, end-of-life or vulnerable dependencies, and typosquat-looking additions, flagged when the diff shows them (with the modern replacement suggested where known).
+- **Intent** — does the PR do what it says? The PR title, description, and commit names (or your local `git log` commit names on the CLI) are compared against the diff, flagging out-of-scope hunks, contradictions, and promised behaviour that never lands.
+- **Ponytail** — the "lazy senior dev" lens: the best code is the code you never wrote. Flags code that needn't exist at all — YAGNI, reaching for the standard library, doing it in fewer lines.
+
+Every finding is graded from `info` up to `critical`, so you can set the
+severity floor that matters to you, and each one lands as an inline comment on
+the exact line where the problem is, with a single summary at the top. On the CLI
+the same findings print to your terminal — ready to read, or to hand to an AI
+agent to apply. Generated files and binaries are skipped, secrets are redacted
+and the diff is treated as untrusted input (hardened against prompt injection)
+before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
+
+## Start here
+
+<div class="grid cards" markdown>
+
+- **Tutorial** — [Getting started](tutorial/getting-started.md): your first review with ollama, locally and free.
+- **How-to** — task recipes: [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md).
+- **Reference** — [Configuration](reference/config.md): every config field and schema.
+- **Explanation** — [What gets reviewed](explanation/what-gets-reviewed.md), [Architecture](explanation/architecture.md), [Auth model](explanation/auth-model.md), [Data & privacy](explanation/data-and-privacy.md).
+
+</div>
+
+## Providers
+
+| Provider | Auth |
+|---|---|
+| `openai` | `OPENAI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `openrouter` | `OPENROUTER_API_KEY` |
+| `zai` | `ZAI_API_KEY` — GLM / Zhipu AI; optional `--api-base` for the China / coding-plan endpoint |
+| `bedrock` | Ambient AWS creds — GitHub OIDC, no static key |
+| `vertex` | Ambient GCP creds — Workload Identity Federation, no key |
+| `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
+| `ollama` | None — local only, zero cost |
+| `openai-compatible` | `--api-base` to any OpenAI `/v1` endpoint; key optional (placeholder for keyless local servers) |
+
+## For AI agents
+
+A curated [`llms.txt`](llms.txt) index of these docs — and a whole-corpus
+[`llms-full.txt`](llms-full.txt) — are published at the site root for LLM
+crawlers and coding agents.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/tutorial/getting-started/ -->
+
+# Getting Started with lgtmaybe
+
+This tutorial walks you through your first review using **ollama** — a fully
+local model that costs nothing and needs no API keys. By the end you will have
+reviewed a branch and seen the findings in your terminal, with no GitHub token
+and no pull request required.
+
+## What you need
+
+- Python 3.11 or later
+- [ollama](https://ollama.com) running locally
+- A local git repository with some changes on a branch to review
+
+## Step 1 — Install lgtmaybe
+
+```bash
+pip install lgtmaybe
+```
+
+Verify the install:
+
+```bash
+lgtmaybe --help
+```
+
+## Step 2 — Start ollama and pull a model
+
+```bash
+ollama serve          # starts the local server on http://localhost:11434
+ollama pull qwen3.6:27b    # or any model you prefer
+```
+
+Leave `ollama serve` running in a separate terminal.
+
+## Step 3 — Review your changes
+
+From inside a git repo, on a branch with some changes, run:
+
+```bash
+lgtmaybe review \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434
+```
+
+lgtmaybe diffs your current branch against the remote primary branch
+(`origin/HEAD`, falling back to `origin/main`), sends the changed lines to your
+local qwen3.6:27b instance, and prints the findings to your terminal:
+
+```console
+src/app.py:2  [MEDIUM] Import order
+  sys should be sorted before os
+
+1 finding · provider ollama · model qwen3.6:27b
+```
+
+To review the whole worktree — your branch's commits plus uncommitted edits —
+add `--working`; for only the uncommitted edits, add `--uncommitted`; to diff
+against a different base, pass `--base main`.
+
+## Step 4 — Change the output format
+
+`--format` controls what `review` prints. `--json` (shorthand for
+`--format json`) emits a JSON array ready to pipe into other tooling:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.6:27b \
+  --api-base http://localhost:11434 --json
+```
+
+`--format agent` instead prints the findings as correction instructions an AI
+coding agent can read and apply, for a local review-and-fix loop — see
+[Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
+
+## Step 5 — Post reviews on real pull requests
+
+The CLI reviews local changes. To run lgtmaybe on actual pull requests — inline
+comments and a summary posted back to GitHub — add the GitHub Action to your
+repo. See [Use as a GitHub Action](../how-to/use-as-github-action.md).
+
+## What happened under the hood
+
+lgtmaybe ran its pipeline over your local diff:
+
+1. **fetch** — read the diff from your local repo with `git diff`
+2. **compress** — stripped generated files, binaries, and lockfiles
+3. **prompt** — built a structured prompt asking for JSON output
+4. **parse** — validated the model's JSON against the `ReviewFinding` schema
+5. **render** — printed the findings (the Action posts them to the PR instead)
+
+## Next steps
+
+- To configure severity thresholds, path filters, and token caps, see
+  [Configure .lgtmaybe.yml](../how-to/configure-lgtmaybe-yml.md).
+- To use a cloud provider with no API keys, see
+  [Review with Bedrock OIDC](../how-to/review-with-bedrock-oidc.md) or
+  [Review with Vertex WIF](../how-to/review-with-vertex-wif.md).
+- To use lgtmaybe in a GitHub Actions workflow, see
+  [Use as a GitHub Action](../how-to/use-as-github-action.md).
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openai/ -->
+
+# Review with OpenAI
+
+OpenAI is a key-based provider: add an `OPENAI_API_KEY` and pick a model. No
+OIDC, no endpoint to configure — the simplest path to a hosted review.
+
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
+## Get an API key
+
+Create a key at <https://platform.openai.com/api-keys>. In your repository, add
+it as an Actions secret named `OPENAI_API_KEY`
+(**Settings → Secrets and variables → Actions → New repository secret**).
+
+## GitHub Action
+
+Copy [`examples/workflows/review-openai.yml`][wf] to
+`.github/workflows/lgtmaybe.yml`. The core step is:
+
+```yaml
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: openai
+    model: gpt-5.5
+    api_key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+That review runs on `pull_request_target`, so the secret is available while PR
+code is **never** checked out — lgtmaybe only reads the diff via the API. See
+[Use as a GitHub Action](use-as-github-action.md) for the full workflow,
+including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
+
+## Run locally
+
+```bash
+export OPENAI_API_KEY=sk-...
+
+lgtmaybe review --provider openai --model gpt-5.5
+```
+
+You can pass the key inline with `--api-key sk-...` instead of the env var. The
+key is read from the environment or the flag and is **never persisted** to
+config.
+
+## Choosing the model
+
+Use any chat model your key can access — e.g. `gpt-5.5` for the strongest
+reviews or a smaller/cheaper model to cut cost. Pass the model litellm's native
+OpenAI name (the same string you'd send to the API).
+
+## Persist non-secret defaults
+
+Provider and model are non-secret, so they can live in `.lgtmaybe.yml` (the key
+stays in the environment):
+
+```yaml
+provider: openai
+model: gpt-5.5
+```
+
+With that file in place, `lgtmaybe review` needs no flags. See
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every knob.
+
+[wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-openai.yml
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-anthropic/ -->
+
+# Review with Claude (Anthropic)
+
+Anthropic is a key-based provider: add an `ANTHROPIC_API_KEY` and pick a Claude
+model. No OIDC, no endpoint to configure.
+
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [Want it through a gateway instead?](#want-it-through-a-gateway-instead)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
+## Get an API key
+
+Create a key in the [Anthropic Console](https://console.anthropic.com/). In your
+repository, add it as an Actions secret named `ANTHROPIC_API_KEY`
+(**Settings → Secrets and variables → Actions → New repository secret**).
+
+## GitHub Action
+
+Copy [`examples/workflows/review-anthropic.yml`][wf] to
+`.github/workflows/lgtmaybe.yml`. The core step is:
+
+```yaml
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+That review runs on `pull_request_target`, so the secret is available while PR
+code is **never** checked out — lgtmaybe only reads the diff via the API. See
+[Use as a GitHub Action](use-as-github-action.md) for the full workflow,
+including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
+
+## Run locally
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+
+lgtmaybe review --provider anthropic --model claude-sonnet-4-6
+```
+
+You can pass the key inline with `--api-key sk-ant-...` instead of the env var.
+The key is read from the environment or the flag and is **never persisted** to
+config.
+
+## Choosing the model
+
+Pass the model litellm's native Anthropic name. `claude-sonnet-4-6` is a strong
+default; reach for a larger Opus-class model when you want the deepest review and
+are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+
+## Want it through a gateway instead?
+
+If you route Claude through OpenRouter or a Bedrock/Vertex deployment rather than
+the Anthropic API directly, use that provider instead:
+
+- [OpenRouter](review-with-openrouter.md) — `anthropic/claude-sonnet-4-6`
+- [Bedrock (keyless OIDC)](review-with-bedrock-oidc.md)
+- [Vertex (keyless WIF)](review-with-vertex-wif.md)
+
+## Persist non-secret defaults
+
+```yaml
+provider: anthropic
+model: claude-sonnet-4-6
+```
+
+With that file in place, `lgtmaybe review` needs no flags. See
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every knob.
+
+[wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-anthropic.yml
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openrouter/ -->
+
+# Review with OpenRouter
+
+[OpenRouter](https://openrouter.ai/) is a key-based gateway to many model
+vendors behind one API. Add an `OPENROUTER_API_KEY`, then pick any model
+OpenRouter offers using its `vendor/model` name.
+
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
+## Get an API key
+
+Create a key at <https://openrouter.ai/keys>. In your repository, add it as an
+Actions secret named `OPENROUTER_API_KEY`
+(**Settings → Secrets and variables → Actions → New repository secret**).
+
+## GitHub Action
+
+Copy [`examples/workflows/review-openrouter.yml`][wf] to
+`.github/workflows/lgtmaybe.yml`. The core step is:
+
+```yaml
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4-6
+    api_key: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+That review runs on `pull_request_target`, so the secret is available while PR
+code is **never** checked out — lgtmaybe only reads the diff via the API. See
+[Use as a GitHub Action](use-as-github-action.md) for the full workflow,
+including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
+
+## Run locally
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+
+lgtmaybe review --provider openrouter --model anthropic/claude-sonnet-4-6
+```
+
+You can pass the key inline with `--api-key sk-or-...` instead of the env var.
+The key is read from the environment or the flag and is **never persisted** to
+config.
+
+## Choosing the model
+
+OpenRouter models are named `vendor/model`. Pick whichever fits your budget and
+quality bar, for example:
+
+- `anthropic/claude-sonnet-4-6`
+- `openai/gpt-5.5`
+- `z-ai/glm-4.6`
+
+Browse the full catalogue and per-model pricing at
+<https://openrouter.ai/models>.
+
+## Persist non-secret defaults
+
+```yaml
+provider: openrouter
+model: anthropic/claude-sonnet-4-6
+```
+
+With that file in place, `lgtmaybe review` needs no flags. See
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every knob.
+
+[wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-openrouter.yml
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-zai/ -->
+
+# Review with z.ai (GLM)
+
+[z.ai](https://z.ai/)'s GLM models (GLM-4.6 and friends, from Zhipu AI) are a
+first-class provider: add a `ZAI_API_KEY` and pick a model. lgtmaybe reaches them
+through litellm's native `zai/` route — no `api_base` needed for the
+international endpoint.
+
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [China / coding-plan endpoint](#china-coding-plan-endpoint)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
+## Get an API key
+
+Create a key in the [z.ai developer console](https://z.ai/) (see the
+[API docs](https://docs.z.ai/)). In your repository, add it as an Actions secret
+named `ZAI_API_KEY`
+(**Settings → Secrets and variables → Actions → New repository secret**).
+
+## GitHub Action
+
+Copy [`examples/workflows/review-zai.yml`][wf] to
+`.github/workflows/lgtmaybe.yml`. The core step is:
+
+```yaml
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: zai
+    model: glm-4.6
+    api_key: ${{ secrets.ZAI_API_KEY }}
+```
+
+That review runs on `pull_request_target`, so the secret is available while PR
+code is **never** checked out — lgtmaybe only reads the diff via the API. See
+[Use as a GitHub Action](use-as-github-action.md) for the full workflow,
+including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
+
+## Run locally
+
+```bash
+export ZAI_API_KEY=...
+
+lgtmaybe review --provider zai --model glm-4.6
+```
+
+You can pass the key inline with `--api-key ...` instead of the env var. The key
+is read from the environment or the flag and is **never persisted** to config.
+
+## Choosing the model
+
+Pass any GLM chat model your key can access — e.g. `glm-4.6`, `glm-4.7`,
+`glm-4.5-air`, or a newer `glm-5.x`. Use the model name as z.ai's API expects it
+(litellm prefixes the `zai/` route for you).
+
+## China / coding-plan endpoint
+
+The native route targets z.ai's **international** endpoint. To use the China or
+coding-plan endpoint instead, point `--api-base` (or `ZAI_API_BASE`, or the
+Action's `api_base` input) at it:
+
+```bash
+lgtmaybe review \
+  --provider zai \
+  --model glm-4.6 \
+  --api-base https://open.bigmodel.cn/api/paas/v4
+```
+
+## Persist non-secret defaults
+
+```yaml
+provider: zai
+model: glm-4.6
+```
+
+With that file in place, `lgtmaybe review` needs no flags. See
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every knob.
+
+[wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-zai.yml
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-bedrock-oidc/ -->
+
+# Review with AWS Bedrock (keyless OIDC)
+
+Use this guide to run lgtmaybe with **AWS Bedrock** using GitHub's OIDC token
+— no static AWS credentials stored in secrets.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time AWS setup](#one-time-aws-setup)
+- [Workflow example](#workflow-example)
+- [Choosing a Bedrock model ID](#choosing-a-bedrock-model-id)
+- [Running locally with ambient AWS credentials](#running-locally-with-ambient-aws-credentials)
+- [Troubleshooting](#troubleshooting)
+
+## How it works
+
+GitHub Actions issues a short-lived OIDC token. AWS STS exchanges that token
+for temporary IAM credentials scoped to a role you control. The action performs
+that exchange for you (pass `aws_role_arn`) and lgtmaybe picks up the ambient
+credentials automatically — no `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY`
+in your secrets.
+
+## One-time AWS setup
+
+This is the human-only part — do it once in your AWS account:
+
+1. Create an IAM **OIDC identity provider** for `token.actions.githubusercontent.com`.
+2. Create an IAM **role** with a trust policy scoped to your repo
+   (`repo:<org>/lgtmaybe:*`).
+3. Attach the least-privilege policy below.
+4. Confirm the models you want are enabled in the target region (model access
+   request in the Bedrock console).
+5. Note the **role ARN** (e.g. `arn:aws:iam::123456789012:role/lgtmaybe-bedrock`)
+   — it becomes the `aws_role_arn` action input. No static key is ever stored.
+
+The role needs only:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream"
+  ],
+  "Resource": [
+    "arn:aws:bedrock:*:<account-id>:inference-profile/*",
+    "arn:aws:bedrock:*::foundation-model/*"
+  ]
+}
+```
+
+**Both ARNs are required for the recommended inference-profile model ids**
+(the `us.`/`eu.`/`apac.`-prefixed ids below). A cross-region inference profile
+fans the call out to the foundation model in several regions, so the role needs
+`bedrock:InvokeModel*` on **both** the `inference-profile/*` ARN **and** the
+underlying `foundation-model/*` ARN — granting only one of them still fails with
+`AccessDeniedException`. (A bare `anthropic.…` model id needs only the
+`foundation-model/*` ARN, but most current Claude models are invocable only
+through an inference profile — see the model table below.)
+
+Scope each `Resource` to specific model / inference-profile ARNs for tighter
+least-privilege once it works, e.g.
+`arn:aws:bedrock:*:<account-id>:inference-profile/us.anthropic.claude-opus-4-8*`
+and `arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*`.
+
+## Workflow example
+
+The action assumes the role for you — no separate `configure-aws-credentials`
+step needed. Store the role ARN in an `AWS_ROLE_ARN` secret.
+
+```yaml
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write          # required for the OIDC token exchange (keyless)
+  pull-requests: write     # required to post review comments
+  contents: read
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'pull_request_target' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: bedrock
+          model: us.anthropic.claude-sonnet-4-6
+          aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws_region: us-east-1
+```
+
+## Choosing a Bedrock model ID
+
+The `model` must be a **Bedrock** model identifier. Bedrock hosts Anthropic
+Claude, Amazon Nova/Titan, Meta Llama, Mistral, Cohere and others — it does
+**not** host OpenAI's GPT models, so an id like `openai.gpt-5.5` is rejected with
+`The provided model identifier is invalid`. Use one of the Claude ids below
+(prefixed with a cross-region inference profile — see the note):
+
+| Model | Inference-profile ID (recommended) | Base model ID |
+|---|---|---|
+| Claude Opus 4.8 | `us.anthropic.claude-opus-4-8` | `anthropic.claude-opus-4-8` |
+| Claude Sonnet 4.6 | `us.anthropic.claude-sonnet-4-6` | `anthropic.claude-sonnet-4-6` |
+| Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5` | `anthropic.claude-haiku-4-5` |
+
+**Prefer the inference-profile form.** Most current Claude models on Bedrock are
+invocable only through a cross-region inference profile, not via on-demand
+throughput on the bare model id — so a bare id often fails with the same
+`invalid model identifier` (or `on-demand throughput isn't supported`) error.
+Prefix with your geography: `us.` (US), `eu.` (Europe) or `apac.` (Asia
+Pacific), matching `aws_region`. Use the bare `anthropic.…` id only where
+on-demand access to that model is enabled in your region.
+
+## Running locally with ambient AWS credentials
+
+If your local shell has AWS credentials (via `~/.aws`, SSO, or an assumed role),
+you can review your current branch's changes with Bedrock. Bedrock signing needs
+`boto3`, so install the extra (the Action image already bundles it):
+
+```bash
+pip install 'lgtmaybe[bedrock]'
+
+lgtmaybe review \
+  --provider bedrock \
+  --model us.anthropic.claude-sonnet-4-6
+```
+
+lgtmaybe does not require or accept a static API key for Bedrock.
+
+> **`No matching distribution found for lgtmaybe[bedrock]`** (`from versions:
+> none`) — this is not a packaging problem; the `bedrock` extra is published on
+> PyPI. It means `pip` found no version compatible with your environment. The
+> usual cause is an interpreter older than the required **Python 3.11+** (check
+> with `python --version`); install under 3.11+ (e.g. via `pipx`/`uv`). If your
+> Python is fine, your `pip` can't reach PyPI — check your network/proxy or
+> `--index-url`.
+
+## Troubleshooting
+
+**`ExpiredTokenException`** — the OIDC exchange failed or the role session
+expired. Check that `id-token: write` permission is present in the workflow and
+that the IAM trust policy references the correct GitHub repository.
+
+**`AccessDeniedException`** — the role lacks `bedrock:InvokeModel` for the
+selected model, or the model is not enabled in the Bedrock console for your
+account and region. For an inference-profile id (`us.`/`eu.`/`apac.`-prefixed),
+the policy must also allow the `inference-profile/*` ARN, not just
+`foundation-model/*`.
+
+**`The provided model identifier is invalid`** — the `model` is not a Bedrock
+model id. Two common causes: (1) it's a non-Bedrock id such as `openai.gpt-5.5`
+or another provider's name — Bedrock hosts Claude / Nova / Llama / Mistral /
+Cohere, not OpenAI GPT, so pick a Claude id from the table above; (2) the model
+needs a cross-region inference profile — prefix with `us.`/`eu.`/`apac.` (e.g.
+`us.anthropic.claude-sonnet-4-6`) rather than the bare `anthropic.…` id.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-vertex-wif/ -->
+
+# Review with Google Vertex AI (keyless WIF)
+
+Use this guide to run lgtmaybe with **Google Vertex AI** using Workload Identity
+Federation — no service-account JSON or static keys in secrets.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time GCP setup](#one-time-gcp-setup)
+- [Workflow example](#workflow-example)
+- [Environment variables](#environment-variables)
+- [Available Vertex AI models](#available-vertex-ai-models)
+- [Running locally with ADC](#running-locally-with-adc)
+- [Troubleshooting](#troubleshooting)
+
+## How it works
+
+GitHub Actions issues an OIDC token. GCP's Workload Identity Federation
+exchanges that token for a short-lived GCP access token, impersonating a service
+account that has only the Vertex AI permissions it needs. lgtmaybe uses
+Application Default Credentials (ADC) to pick up those tokens automatically.
+
+## One-time GCP setup
+
+This is the human-only part — do it once in your GCP project:
+
+1. Enable the Vertex AI API on the project.
+2. Create a **workload identity pool** + a GitHub provider in it.
+3. Create a **service account** with `roles/aiplatform.user` (or narrower — that
+   role grants `aiplatform.endpoints.predict`; do not assign broader project-level
+   roles).
+4. Grant the GitHub principal permission to impersonate that service account,
+   scoped to your repo.
+5. Note the **WIF provider resource name** (→ `gcp_wif_provider`) and the
+   **service account email** (→ `gcp_service_account`). No key file is ever stored.
+
+## Workflow example
+
+The action authenticates to GCP for you — no separate
+`google-github-actions/auth` step needed. Store the provider resource name and
+service account email in `GCP_WIF_PROVIDER` and `GCP_SERVICE_ACCOUNT` secrets.
+
+```yaml
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write          # required for the WIF token exchange (keyless)
+  pull-requests: write     # required to post review comments
+  contents: read
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'pull_request_target' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: vertex
+          model: gemini-3-pro
+          gcp_wif_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          gcp_service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+```
+
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `VERTEXAI_PROJECT` | Yes | GCP project ID |
+| `VERTEXAI_LOCATION` | No | Region (default: `us-central1`) |
+
+## Available Vertex AI models
+
+| Model | Vertex model ID |
+|---|---|
+| Gemini 3 Pro | `gemini-3-pro` |
+| Gemini 3.1 Pro | `gemini-3.1-pro` |
+| Gemini 3 Flash | `gemini-3-flash` |
+| Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Gemini 2.5 Pro | `gemini-2.5-pro` |
+
+## Running locally with ADC
+
+If your local shell has application default credentials (`gcloud auth
+application-default login`). Vertex token minting needs `google-auth`, so install
+the extra (the Action image already bundles it):
+
+```bash
+pip install 'lgtmaybe[vertex]'
+
+export VERTEXAI_PROJECT=my-project
+export VERTEXAI_LOCATION=us-central1
+
+lgtmaybe review \
+  --provider vertex \
+  --model gemini-3-pro
+```
+
+This reviews your current branch's changes with Vertex; lgtmaybe does not accept
+a static API key for it.
+
+## Troubleshooting
+
+**`UNAUTHENTICATED`** — ADC credentials are missing or expired. Run
+`gcloud auth application-default login` locally, or verify the WIF provider and
+service account impersonation binding in CI.
+
+**`PERMISSION_DENIED`** — the service account lacks `roles/aiplatform.user`, or
+the Vertex AI API is not enabled in the project. Enable it with:
+
+```bash
+gcloud services enable aiplatform.googleapis.com --project=my-project
+```
+
+**`Model not found`** — the model ID may not be available in your selected
+region. Check the [Vertex AI model garden](https://console.cloud.google.com/vertex-ai/model-garden).
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-azure/ -->
+
+# Review with Azure OpenAI (keyless OIDC)
+
+Use this guide to run lgtmaybe against **Azure OpenAI** using GitHub's OIDC token
+federated to Entra (Azure AD) — no static Azure key stored in secrets. A
+key-based fallback is covered at the end.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time Azure setup](#one-time-azure-setup)
+- [Workflow example](#workflow-example)
+- [Choosing the model name](#choosing-the-model-name)
+- [Running locally with ambient Azure credentials](#running-locally-with-ambient-azure-credentials)
+- [Key-based alternative](#key-based-alternative)
+- [Troubleshooting](#troubleshooting)
+
+## How it works
+
+GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it —
+via a **federated credential** on an app registration or managed identity — for
+an Azure AD access token scoped to your Azure OpenAI resource. The action does
+that exchange for you (pass `azure_client_id` / `azure_tenant_id`) and lgtmaybe
+picks up the ambient token through `azure-identity`'s `DefaultAzureCredential` —
+no `AZURE_API_KEY` in your secrets.
+
+Azure still needs two non-secret values: the **deployment name** (`model`) and
+the **resource endpoint** (`api_base`, `https://<resource>.openai.azure.com`).
+
+## One-time Azure setup
+
+This is the human-only part — do it once in your Azure tenant:
+
+1. Register an **Entra app** (or use a user-assigned **managed identity**). Note
+   its **client ID** (`azure_client_id`) and your **tenant ID**
+   (`azure_tenant_id`).
+2. Add a **federated credential** to it for GitHub Actions:
+   - Issuer: `https://token.actions.githubusercontent.com`
+   - Subject: scope it to your repo, e.g.
+     `repo:<org>/<repo>:pull_request` (or `:ref:refs/heads/main`, `:environment:…`)
+   - Audience: `api://AzureADTokenExchange`
+3. On the **Azure OpenAI resource**, grant the app the
+   **Cognitive Services OpenAI User** role (least privilege — it can call models,
+   not manage the resource).
+4. **Deploy** the model you want and note the **deployment name** — that is what
+   you pass as `model`, not the upstream OpenAI model id.
+5. Note the resource **endpoint** (`https://<resource>.openai.azure.com`) — it
+   becomes `api_base`. No static key is ever stored.
+
+## Workflow example
+
+The action performs the OIDC exchange for you — no separate `azure/login` step
+needed. `id-token: write` is required so GitHub will mint the OIDC token.
+
+```yaml
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write          # required for the OIDC token exchange (keyless)
+  pull-requests: write     # required to post review comments
+  contents: read
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'pull_request_target' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: azure
+          model: my-gpt-4o-deployment            # your deployment name
+          api_base: ${{ secrets.AZURE_API_BASE }} # https://<resource>.openai.azure.com
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+```
+
+## Choosing the model name
+
+For Azure, `model` is the **deployment name** you chose in the portal, not the
+underlying OpenAI model id. A deployment of `gpt-4o` named `my-gpt-4o-deployment`
+is referenced as `model: my-gpt-4o-deployment`. litellm routes it as
+`azure/<deployment-name>`.
+
+## Running locally with ambient Azure credentials
+
+Keyless works locally too. Install the azure extra, sign in (or use a managed
+identity), set the endpoint, and review your current branch's changes:
+
+```bash
+pip install 'lgtmaybe[azure]'
+az login
+
+export AZURE_API_BASE="https://<resource>.openai.azure.com"
+
+lgtmaybe review \
+  --provider azure \
+  --model my-gpt-4o-deployment
+```
+
+`DefaultAzureCredential` finds your `az login` session (or a managed identity, or
+`AZURE_*` env vars) and lgtmaybe never stores a static key.
+
+## Key-based alternative
+
+If you would rather use a resource key, set `AZURE_API_KEY` and `AZURE_API_BASE`
+(no `id-token` permission, no `azure_client_id` needed). The `azure-identity`
+extra is not required in this mode.
+
+```yaml
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: azure
+          model: my-gpt-4o-deployment
+          api_key: ${{ secrets.AZURE_API_KEY }}
+          api_base: ${{ secrets.AZURE_API_BASE }}
+```
+
+Locally: `export AZURE_API_KEY=… AZURE_API_BASE=…` (or pass `--api-key` /
+`--api-base`).
+
+## Troubleshooting
+
+**`azure requires credentials`** — neither a key nor an ambient AD credential was
+found. For keyless, check `id-token: write` is present and the federated
+credential's subject matches the triggering ref/event. For key mode, set
+`AZURE_API_KEY`.
+
+**`azure requires the resource endpoint`** — set `api_base` (or `AZURE_API_BASE`)
+to `https://<resource>.openai.azure.com`.
+
+**`keyless azure needs the azure-identity package`** — running keyless on the CLI
+without the extra; install `lgtmaybe[azure]`. (The Action image already bundles
+it.)
+
+**`AADSTS70021` / no matching federated identity** — the federated credential's
+issuer/subject/audience don't match this workflow. Audience must be
+`api://AzureADTokenExchange` and the subject must match the repo and event.
+
+**`DeploymentNotFound` / 404** — `model` must be the **deployment name** on the
+resource that `api_base` points at, not the upstream OpenAI model id.
+
+**`Unsupported API version`** — pin one by setting `AZURE_API_VERSION`
+(e.g. `2024-08-01-preview`) in the environment; litellm otherwise uses a default.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/run-locally-with-ollama/ -->
+
+# Run Locally with ollama
+
+Use this guide to review your local changes with a local ollama model — zero API
+cost, zero egress, no keys required. The CLI reviews your `git` diff and prints
+the findings; to post reviews on real pull requests, use the
+[GitHub Action](use-as-github-action.md).
+
+## Contents
+
+- [Prerequisites](#prerequisites)
+- [Pull the model you want](#pull-the-model-you-want)
+- [Which model, and will it fit?](#which-model-and-will-it-fit)
+- [Run the review](#run-the-review)
+- [Reviewing large files (recursive walk)](#reviewing-large-files-recursive-walk)
+- [Use a remote ollama instance](#use-a-remote-ollama-instance)
+- [Inside the GitHub Action's container](#inside-the-github-actions-container)
+- [Get findings as JSON](#get-findings-as-json)
+- [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
+- [Slow models and timeouts](#slow-models-and-timeouts)
+- [Troubleshooting](#troubleshooting)
+
+## Prerequisites
+
+- lgtmaybe installed (`pip install lgtmaybe`)
+- [ollama](https://ollama.com) installed and running
+- A local git repository with changes to review
+
+## Pull the model you want
+
+```bash
+ollama pull qwen3.6:27b        # strong all-round coding model
+ollama pull gemma4:e4b         # smaller — for devices with limited RAM
+```
+
+List available models:
+
+```bash
+ollama list
+```
+
+## Which model, and will it fit?
+
+Two simple rules:
+
+1. **Pick a coding model.** Reviewing a PR is a coding task, so use a model built
+   for code (e.g. the Qwen3 coder line), not a general chat model. Models are
+   tuned for different jobs — match the model to the use case.
+2. **Bigger and newer is more accurate.** Use the largest, most recent coding
+   model your hardware can run. Our accuracy numbers are for a *small* model —
+   we benchmarked **qwen3.5:4b**, and it did well, but only *with recursive
+   review on* (88% vs 61% recall). A larger, newer model catches more across the
+   board and leans on that trick less.
+
+A solid mid-2026 default is **Qwen3.6-27B** (`qwen3.6:27b`): near frontier API
+models on coding benchmarks (SWE-bench Verified ~77%) yet small enough to run on a
+workstation or a well-specced laptop, so it clears lgtmaybe's bar across all the
+review lenses without a data-center GPU. Smaller models work too — accuracy just
+falls off (you'll miss subtler findings and may need `--no-reflect`, because the
+reflection pass over-prunes on a weak model).
+
+**Hardware, quantised (the usual way to run it locally):**
+
+| You have | What to expect |
+|---|---|
+| **< 32 GB** RAM/VRAM | Drop to a smaller model (`gemma4:e4b`) or route to a hosted provider — 27B at a usable quant won't leave room for the diff. |
+| **32 GB** RAM/VRAM | The practical floor. Run `qwen3.6:27b` at a 4-bit quant (≈16–18 GB of weights) with a modest context window. Keep `num_ctx` conservative so the model plus the diff and findings fit. |
+| **48 GB+** RAM/VRAM (preferred) | Comfortable. Room for the weights plus a generous `--num-ctx` (32k) for big multi-file diffs, with headroom for the KV cache. |
+
+This applies to both discrete VRAM and Apple-Silicon unified memory. A bigger
+context window costs memory on top of the weights, so if you bump `--num-ctx` for
+a large diff (see [Slow models and timeouts](#slow-models-and-timeouts)), size it
+to the table above. On a hosted provider none of this matters — the model runs on
+the provider's hardware.
+
+## Run the review
+
+From inside the repo, on the branch you want reviewed:
+
+```bash
+lgtmaybe review \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434
+```
+
+This diffs your current branch against the remote primary branch and prints the
+findings. Add `--working` to review the whole worktree (branch commits plus
+uncommitted edits) against that same base, `--uncommitted` to review only your
+uncommitted edits against HEAD, or `--base <ref>` to diff against a different
+base.
+
+## Reviewing large files (recursive walk)
+
+When a single file's diff is larger than the per-call token budget
+(`--max-input-tokens`, default 100000), lgtmaybe **walks it hunk-by-hunk** —
+each hunk reviewed in its own focused call — instead of sending the whole file at
+once and letting the tail drop out of the model's attention. The findings are
+merged back together, and inline-comment positions still bind to the real diff.
+This **RLM-style recursive review is on by default** (`recursive: true`); files
+that already fit the budget are still reviewed whole, so nothing changes for small
+diffs.
+
+It helps **small local models the most**, because a smaller, focused prompt is
+easier to review thoroughly. In our A/B benchmark a local **qwen3.5:4b** caught
+**all 6** planted bugs reviewing recursively versus **4/6** reviewing each file
+whole — the two it missed whole were both in the file's *tail*, even though the
+diff fit the context window (so the gain is focus, not just avoiding truncation).
+It's a single non-deterministic run on one fixture, so treat it as directional;
+the harness behind it is in
+[DEVELOPMENT.md](https://github.com/MattJColes/lgtmaybe/blob/main/DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
+
+To use the **original whole-file method** instead — one call per file, which keeps
+all of a file's hunks in view together but tends to miss more on big files with
+small models — pass `--no-recursive`:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.5:4b \
+  --api-base http://localhost:11434 --no-recursive
+```
+
+```yaml
+# or in .lgtmaybe.yml (also how the GitHub Action picks it up):
+recursive: false
+```
+
+## Use a remote ollama instance
+
+If ollama runs on another machine (e.g. a Tailscale peer):
+
+```bash
+lgtmaybe review \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://100.x.x.x:11434
+```
+
+No authentication is added — ollama has no built-in auth. Ensure network access
+is restricted at the host or firewall level.
+
+## Inside the GitHub Action's container
+
+The Action runs lgtmaybe in a container, so ollama on the runner host is reached
+at `host.docker.internal` rather than `localhost`. Set it in `.lgtmaybe.yml`,
+since the Action reads its provider settings from config:
+
+```yaml
+provider: ollama
+model: qwen3.6:27b
+api_base: http://host.docker.internal:11434
+```
+
+## Get findings as JSON
+
+The CLI prints a readable listing by default and never posts anywhere. Add
+`--json` for a machine-readable array you can pipe into other tooling:
+
+```bash
+lgtmaybe review \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434 \
+  --json
+```
+
+## Let an AI agent apply the fixes
+
+`--format agent` prints the findings as correction instructions an AI coding
+agent (such as Claude Code) can read and apply, so you can review and fix a
+branch locally before opening a PR. See
+[Fix findings with an AI agent](fix-findings-with-an-ai-agent.md).
+
+## Slow models and timeouts
+
+Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
+long default per-request timeout (300 seconds)** automatically — you don't need
+to set anything for a normal run. (Cloud providers default to 60 s.)
+
+If a big model still times out — you'll see
+`litellm.Timeout: Connection timed out after 300.0 seconds` — raise it explicitly:
+
+```bash
+# CLI flag (seconds):
+lgtmaybe review --provider ollama --model qwen3.6:35b \
+  --api-base http://localhost:11434 --timeout 900
+```
+
+```yaml
+# or in .lgtmaybe.yml (also how the GitHub Action picks it up):
+provider: ollama
+model: qwen3.6:35b
+timeout: 900
+```
+
+The review fans out one call per category. lgtmaybe runs those **serially for
+ollama** (a single ollama instance serves one request at a time, so firing them
+concurrently would only make each wait and time out). The trade-off is wall-clock
+time — a slow model takes roughly `categories × per-call time`. To go faster,
+narrow the lenses with `categories:` in `.lgtmaybe.yml` (e.g. just `security` and
+`correctness`), use a smaller model, or give ollama more GPU. If you have the VRAM
+to truly serve requests in parallel, raise `OLLAMA_NUM_PARALLEL` on the **ollama
+server** — lgtmaybe still issues ollama calls one at a time, but a faster server
+shortens each.
+
+## Troubleshooting
+
+**`Connection refused` on port 11434** — ensure `ollama serve` is running and
+the `--api-base` URL is reachable.
+
+**Model not found** — run `ollama pull <model>` before using it.
+
+**`review incomplete — every review call failed`** — every category
+call timed out or returned output that wasn't valid JSON. Raise `--timeout`, try a
+model that follows instructions more reliably, or check `LITELLM_LOG=DEBUG` output
+for the underlying error. lgtmaybe reports this (and exits non-zero) rather than
+pretending the PR is clean.
+
+For a **large diff** this can mean the prompt plus the findings don't fit in
+ollama's context window and the output gets truncated. lgtmaybe runs ollama with
+a generous context (`num_ctx` of 32768) and **structured JSON output** (it also
+disables "thinking" so reasoning models like qwen3.x emit the findings directly),
+which covers most reviews.
+
+For a big multi-file change ("vibe-coded" commits across many files), raise the
+context window with `--num-ctx` so the whole diff and the findings fit — this is
+**ollama-only** (hosted providers manage their context window server-side and
+ignore it):
+
+```bash
+# A large multi-file diff on a local model — more time and more context:
+lgtmaybe review --provider ollama --model qwen3.6:35b \
+  --api-base http://localhost:11434 --timeout 900 --num-ctx 32768
+```
+
+```yaml
+# or in .lgtmaybe.yml (also how the GitHub Action picks it up):
+provider: ollama
+model: qwen3.6:35b
+timeout: 900
+num_ctx: 32768
+```
+
+`--num-ctx` needs enough RAM/VRAM on the ollama host — a bigger window costs
+memory, so size it to your machine. The token budget that decides when lgtmaybe
+splits a diff into separate model calls is `--max-input-tokens` (default 100000),
+which applies to **any** provider — raise it to send a large diff in fewer calls,
+lower it for a small-context model. If a very large diff still truncates, narrow
+it with `include_paths` / `exclude_paths` or a lower `max_files` in `.lgtmaybe.yml`,
+or run a model with a bigger context window.
+
+> **Keep `--max-input-tokens` under `--num-ctx`.** The two are independent:
+> `--max-input-tokens` caps each batch lgtmaybe *sends*, while `--num-ctx` is the
+> window ollama actually *allocates*. lgtmaybe estimates tokens with a generic
+> tokenizer, and local models tokenize differently, so leave headroom — a batch
+> budget comfortably below your context window (e.g. `--max-input-tokens 24000`
+> with `--num-ctx 32768`) avoids ollama silently truncating the findings JSON,
+> which otherwise surfaces only as an unhelpful "review failed".
+
+**Review is empty or truncated** — the diff may exceed the model's context
+window. Add a path filter in `.lgtmaybe.yml` to reduce diff size, or set
+`max_files` to a lower value.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-a-custom-openai-compatible-endpoint/ -->
+
+# Local Models & other OpenAI providers
+
+Lots of model servers speak the OpenAI `/v1` wire format: local and self-hosted
+runtimes like [vLLM][vllm], [llama.cpp][llamacpp], and [LM Studio][lmstudio], plus
+hosted APIs like [DeepSeek][deepseek] and many proxies. The `openai-compatible`
+provider points lgtmaybe at any of them — you supply the base URL, and (if the
+server wants one) a key.
+
+This is the answer to "I don't want to be limited to the built-in provider list":
+anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag.
+
+> Some endpoints that *could* run through here have a first-class provider
+> instead — use it for less setup: [z.ai / GLM](review-with-zai.md) (`zai`) and
+> [ollama](run-locally-with-ollama.md) (`ollama`).
+
+## Contents
+
+- [Local models at a glance](#local-models-at-a-glance)
+- [How it works](#how-it-works)
+- [DeepSeek (hosted, keyed)](#deepseek-hosted-keyed)
+- [llama.cpp (local, keyless)](#llamacpp-local-keyless)
+- [LM Studio (local, keyless)](#lm-studio-local-keyless)
+- [vLLM (local or self-hosted, keyless)](#vllm-local-or-self-hosted-keyless)
+- [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
+- [Gateways that don't support JSON mode (`response_format`)](#gateways-that-dont-support-json-mode-response_format)
+
+## Local models at a glance
+
+Run a model on your own hardware — zero cost, no key, nothing leaves the machine:
+
+| Runtime | Provider | Key needed? | See |
+|---|---|---|---|
+| [ollama][ollama] | `ollama` (native) | No | [Run locally with ollama](run-locally-with-ollama.md) |
+| [vLLM][vllm] | `openai-compatible` | No | [below](#vllm-local-or-self-hosted-keyless) |
+| [llama.cpp][llamacpp] | `openai-compatible` | No | [below](#llamacpp-local-keyless) |
+| [LM Studio][lmstudio] | `openai-compatible` | No | [below](#lm-studio-local-keyless) |
+
+ollama has its own first-class `--provider ollama` (it's the easiest local
+start), so it gets its [own guide](run-locally-with-ollama.md). vLLM, llama.cpp,
+and LM Studio are reached through `openai-compatible` and the `--api-base` of
+their local server, as shown below.
+
+## How it works
+
+`--provider openai-compatible` routes through litellm's OpenAI client, but sends
+your requests to the `--api-base` you give instead of `api.openai.com`. The
+**base URL is required** (that's the whole point); the **API key is optional**:
+
+- **Hosted endpoints** (DeepSeek, a paid proxy) need a key — pass `--api-key` or
+  set `OPENAI_COMPATIBLE_API_KEY`.
+- **Local servers** (llama.cpp, LM Studio, vLLM) usually need none. lgtmaybe
+  sends a harmless placeholder key in that case, because the OpenAI client rejects
+  an empty one.
+
+The API key, when you do supply one, is read from the environment or `--api-key`
+and is **never persisted** to config.
+
+Because the endpoint might be a slow local model, `openai-compatible` defaults to
+the same generous **300s** per-call timeout as ollama. For a fast hosted endpoint
+like DeepSeek you can dial it down with `--timeout` (or `timeout:` in config).
+
+## DeepSeek (hosted, keyed)
+
+```bash
+export OPENAI_COMPATIBLE_API_KEY=sk-...        # your DeepSeek key
+
+lgtmaybe review \
+  --provider openai-compatible \
+  --model deepseek-chat \
+  --api-base https://api.deepseek.com/v1
+```
+
+You can pass the key inline with `--api-key sk-...` instead of the env var.
+
+## llama.cpp (local, keyless)
+
+Start the server:
+
+```bash
+llama-server -m ./model.gguf --port 8000        # serves the OpenAI API at /v1
+```
+
+Then review against it — no key needed:
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model local-model \
+  --api-base http://localhost:8000/v1
+```
+
+## LM Studio (local, keyless)
+
+Enable the local server in LM Studio (it serves the OpenAI API, default port
+`1234`), then:
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model your-loaded-model \
+  --api-base http://localhost:1234/v1
+```
+
+## vLLM (local or self-hosted, keyless)
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
+```
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model meta-llama/Llama-3.1-8B-Instruct \
+  --api-base http://localhost:8000/v1
+```
+
+## Persist it in `.lgtmaybe.yml`
+
+The provider, model, and base URL are non-secret defaults, so they can live in
+config (the key stays in the environment):
+
+```yaml
+provider: openai-compatible
+model: deepseek-chat
+api_base: https://api.deepseek.com/v1
+```
+
+With that file in place, `lgtmaybe review` needs no flags. In the GitHub Action,
+set the same values as inputs (or in `.lgtmaybe.yml`) and pass `api_key` from a
+secret for hosted endpoints; leave it empty for keyless local servers reached at
+`http://host.docker.internal:<port>/v1`.
+
+## Gateways that don't support JSON mode (`response_format`)
+
+To keep models returning clean findings instead of prose, lgtmaybe asks for
+structured output via the OpenAI `response_format` parameter (JSON mode). Most
+endpoints honour it. Some enterprise gateways and custom proxies don't — they
+either **ignore** it (the model then answers with the JSON wrapped in a
+```` ```json ```` fence or surrounded by conversational prose) or **reject** the
+request outright with a `400 Bad Request`.
+
+lgtmaybe handles the first case for you: the parser strips fences and pulls the
+JSON out of surrounding prose, so a gateway that merely ignores `response_format`
+still produces a normal review. (Older versions could fail here with
+`unparseable model output` on every lens — that's fixed.)
+
+There is a third case, common with **LM Studio fronting a "thinking" model**
+(e.g. qwen3.x): the server *accepts* `response_format` but the schema-constrained
+decoder returns **empty content** — every lens would otherwise fail with
+`unparseable model output`. lgtmaybe handles this for you too: when a structured
+call comes back empty, it drops the schema and retries once, and the model then
+emits the findings as normal (fenced) text the parser reads. No flag needed.
+
+If your gateway **rejects** `response_format` with a `400`, turn it off so the
+request never carries the parameter — the prompt still asks for JSON and the
+lenient parser still does its job:
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model gemini-3.5-flash \
+  --api-base https://api.myllm.com/v1 \
+  --no-structured-output
+```
+
+Persist it as `structured_output: false` in `.lgtmaybe.yml`, or set the
+`structured_output` input to `false` in the GitHub Action.
+
+[deepseek]: https://api-docs.deepseek.com/
+[llamacpp]: https://github.com/ggml-org/llama.cpp
+[lmstudio]: https://lmstudio.ai/
+[vllm]: https://docs.vllm.ai/
+[ollama]: https://ollama.com/
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/fix-findings-with-an-ai-agent/ -->
+
+# Fix findings with an AI agent
+
+`lgtmaybe review` runs locally and prints findings; it never posts anywhere. The
+`--format agent` output turns those findings into plain correction instructions
+an AI coding agent (such as Claude Code) can read and apply, so you get a
+review-and-fix loop on your own machine before you ever open a pull request.
+
+This works with any provider. ollama keeps it local and free; a cloud provider
+gives you a stronger reviewer at a small cost.
+
+## Contents
+
+- [Print the findings as agent instructions](#print-the-findings-as-agent-instructions)
+- [Hand it to the agent](#hand-it-to-the-agent)
+- [Close the loop](#close-the-loop)
+- [See also](#see-also)
+
+## Print the findings as agent instructions
+
+From inside the repo, on the branch you want reviewed:
+
+```bash
+lgtmaybe review \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434 \
+  --format agent
+```
+
+The output is directive rather than a bare listing:
+
+```text
+Code review findings for your local changes. Act as the developer and apply each
+correction below: open the file at the given path and line, fix the issue, and
+apply the suggested change where one is given.
+
+[1] src/app.py:42  (HIGH)  possible NPE
+    Issue: `user` may be None here.
+    Suggested fix:
+        if user is not None:
+            do_thing(user)
+
+1 finding(s) to address. After applying the fixes, re-run `lgtmaybe review` to
+confirm they are resolved.
+```
+
+## Hand it to the agent
+
+Save the instructions and point your agent at them:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.6:27b \
+  --api-base http://localhost:11434 --format agent > review.txt
+```
+
+Then ask the agent to work through `review.txt` — for example, in Claude Code:
+
+> Apply the corrections in review.txt, then delete it.
+
+Because each finding carries a path, a line, the issue, and (often) a suggested
+replacement, the agent has everything it needs to make the edit without guessing.
+
+## Close the loop
+
+Once the agent has applied the fixes, run the review again to confirm the
+findings are gone:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.6:27b \
+  --api-base http://localhost:11434 --format agent
+```
+
+A clean branch prints `No review findings — nothing to correct.` Repeat until
+you are happy, then open your PR. To post reviews on the PR itself, wire up the
+[GitHub Action](use-as-github-action.md).
+
+## See also
+
+- [Run locally with ollama](run-locally-with-ollama.md) — the local CLI setup
+- [What gets reviewed](../explanation/what-gets-reviewed.md) — scope, caps, and output formats
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-as-github-action/ -->
+
+# Use lgtmaybe as a GitHub Action
+
+Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
+that reviews pull requests automatically.
+
+Ready-to-copy workflows for every cloud and API-key provider live in
+[`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
+ollama runs the model on your own machine, so it is local-only — use the
+[CLI](run-locally-with-ollama.md) rather than a posting workflow.
+
+## Contents
+
+- [Security requirement: pull_request_target](#security-requirement-pull_request_target)
+- [Who can trigger a review](#who-can-trigger-a-review)
+- [Minimal workflow — openai](#minimal-workflow-openai)
+- [Other key-based providers](#other-key-based-providers)
+- [Keyless cloud workflows](#keyless-cloud-workflows)
+- [Action inputs](#action-inputs)
+- [Adding a config file](#adding-a-config-file)
+- [Pin to a specific version](#pin-to-a-specific-version)
+
+## Security requirement: pull_request_target
+
+All lgtmaybe workflows use the `pull_request_target` trigger, not
+`pull_request`. This is non-negotiable:
+
+- `pull_request_target` runs in the context of the **base branch**, so it can
+  access secrets and write to the PR.
+- lgtmaybe **never checks out or executes PR code** — it fetches the diff via
+  the GitHub API only. The PR author cannot inject code that runs in the
+  reviewer's environment.
+
+The action derives the PR from the triggering event, so there is no `pr-url`
+input to set. On an `issue_comment` event it routes the slash command
+(`/review`, `/ask`, `/describe`, `/improve`) to the same engine.
+
+> **Note on cost.** With ollama the model runs on your own hardware, so reviews
+> are free. On a hosted provider each run uses tokens you pay for, so it's worth
+> a moment's thought about who can trigger one (next section) — the default keeps
+> that to people you trust, and `max_files` / `max_input_tokens` keep any single
+> run modest.
+
+## Who can trigger a review
+
+You choose who reviews run for. The example workflows gate the `review` job on
+the triggering user's
+[author association](https://docs.github.com/en/graphql/reference/enums#commentauthorassociation)
+and default to **trusted contributors** — `OWNER`, `MEMBER`, and `COLLABORATOR`.
+A maintainer can also review an outside contributor's PR any time by commenting
+`/review` on it (their own association passes the gate).
+
+To change the policy, edit the `if:` on the `review` job:
+
+- **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
+  review (a friendly choice for an open project; on a hosted provider it means
+  anyone can start a run, so pick it deliberately).
+- **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
+  PR has merged before.
+- **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
+
+For extra guardrails, you can also require approval for fork-PR workflow runs in
+**Settings → Actions → General → Fork pull request workflows**, or move the
+provider key behind a protected `environment`. See
+[Trust and Cost](../explanation/trust-and-cost.md) for the reasoning behind these
+options.
+
+## Minimal workflow — openai
+
+```yaml
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # Only trusted authors (owner / member / collaborator) can trigger a review.
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6 # base repo only — for .lgtmaybe.yml config
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: openai
+          model: gpt-5.5
+          api_key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+## Other key-based providers
+
+Swap the `provider`, `model`, and `api_key` inputs:
+
+```yaml
+# anthropic
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+# openrouter
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4-6
+    api_key: ${{ secrets.OPENROUTER_API_KEY }}
+
+# zai (GLM / Zhipu AI)
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: zai
+    model: glm-4.6
+    api_key: ${{ secrets.ZAI_API_KEY }}
+```
+
+For these, the one-time setup is just: generate an API key in the provider's
+console and add it as a repo secret (Settings → Secrets and variables → Actions),
+then reference it as `api_key` above.
+
+## Keyless cloud workflows
+
+Bedrock (AWS OIDC), Vertex (GCP WIF), and Azure (Entra OIDC) need **no API keys
+in secrets** — the action performs the keyless token exchange for you when you
+pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
+`id-token: write` permission. See:
+
+- [Review with Bedrock OIDC](./review-with-bedrock-oidc.md)
+- [Review with Vertex WIF](./review-with-vertex-wif.md)
+- [Review with Azure OpenAI](./review-with-azure.md)
+
+## Action inputs
+
+| Input | Default | Description |
+|---|---|---|
+| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
+| `model` | — | Model identifier for the chosen provider |
+| `fallback_model` | — | Model to retry with if the primary model fails |
+| `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
+| `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
+| `timeout` | provider default (ollama 300s, cloud 60s) | Per-request timeout in seconds for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
+| `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
+| `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
+| `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
+| `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
+| `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
+| `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
+| `aws_region` | `us-east-1` | AWS region for bedrock |
+| `gcp_wif_provider` | — | Workload Identity Federation provider resource name for vertex |
+| `gcp_service_account` | — | GCP service account email to impersonate via WIF |
+| `azure_client_id` | — | Entra (Azure AD) client ID with a federated credential — keyless azure via OIDC |
+| `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
+| `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
+| `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
+| `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
+
+The action sets the `GITHUB_TOKEN` and provider credentials for the container
+itself — you do not pass them as `env`.
+
+## Adding a config file
+
+Place a `.lgtmaybe.yml` at the repo root to control severity thresholds, path
+filters, and cost caps. See
+[Configure .lgtmaybe.yml](./configure-lgtmaybe-yml.md) for all options.
+
+## Pin to a specific version
+
+`@v0` is a floating tag that tracks the latest `v0.x.x` release. To pin exactly,
+use a full version tag:
+
+```yaml
+uses: MattJColes/lgtmaybe@v0.1.0
+```
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/configure-lgtmaybe-yml/ -->
+
+# Configure .lgtmaybe.yml
+
+Place a `.lgtmaybe.yml` file at the root of your repository to control how
+lgtmaybe reviews pull requests. CLI flags override file values; the file
+provides defaults for all runs.
+
+## Contents
+
+- [Full example](#full-example)
+- [Field reference](#field-reference)
+  - [provider](#provider)
+  - [model](#model)
+  - [min_severity](#min_severity)
+  - [include_paths / exclude_paths](#include_paths-exclude_paths)
+  - [max_files](#max_files)
+  - [max_input_tokens](#max_input_tokens)
+  - [categories](#categories)
+  - [context_lines](#context_lines)
+  - [timeout](#timeout)
+  - [structured_output](#structured_output)
+  - [resolve_fixed](#resolve_fixed)
+  - [extra_lenses](#extra_lenses)
+  - [lens_paths](#lens_paths)
+- [CLI flag overrides](#cli-flag-overrides)
+
+## Full example
+
+```yaml
+provider: openai
+model: gpt-5.5
+min_severity: low
+include_paths:
+  - "src/**"
+  - "lib/**"
+exclude_paths:
+  - "**/__pycache__/**"
+  - "**/*.min.js"
+max_files: 30
+max_input_tokens: 80000
+categories:
+  - security
+  - correctness
+  - tests
+```
+
+## Field reference
+
+See [Reference: Config](../reference/config.md) for the full schema with
+types and defaults.
+
+### provider
+
+Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
+`bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
+
+```yaml
+provider: anthropic
+```
+
+### model
+
+The model identifier for the chosen provider. Format varies by provider:
+
+| Provider | Example model IDs |
+|---|---|
+| openai | `gpt-5.5` |
+| anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
+| openrouter | `anthropic/claude-sonnet-4-6` |
+| zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` pass through too) |
+| bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5` (prefer the cross-region inference profile; a non-Bedrock id like `openai.gpt-5.5` is invalid — see [Review with Bedrock](review-with-bedrock-oidc.md)) |
+| vertex | `gemini-3-pro`, `gemini-3.5-flash` |
+| azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
+| ollama | `qwen3.6:27b`, `gemma4:e4b` |
+| openai-compatible | the served model name, e.g. `deepseek-chat` or `meta-llama/Llama-3.1-8B-Instruct` (requires `api_base` — see [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md)) |
+
+### min_severity
+
+The minimum severity level to report. Findings below this threshold are
+suppressed. Ordered low to high: `info`, `low`, `medium`, `high`, `critical`.
+
+```yaml
+min_severity: medium   # suppresses info and low findings
+```
+
+Default: `low` (suppresses only `info` findings).
+
+### include_paths / exclude_paths
+
+Glob patterns to restrict which files in the diff are reviewed.
+`include_paths` acts as an allowlist; `exclude_paths` acts as a denylist applied
+after the allowlist. Both default to empty (all files included).
+
+```yaml
+include_paths:
+  - "src/**"
+exclude_paths:
+  - "src/generated/**"
+  - "**/*.lock"
+```
+
+### max_files
+
+Maximum number of changed files to include in the review. Files beyond this
+limit are skipped. Reduces token usage on large PRs.
+
+```yaml
+max_files: 30
+```
+
+Default: `50`.
+
+### max_input_tokens
+
+Token budget **per model call**. When the compressed diff exceeds this limit,
+lgtmaybe splits it across multiple batched calls (and, with `recursive` on,
+walks an over-budget single file hunk-by-hunk) — nothing is truncated or
+dropped.
+
+```yaml
+max_input_tokens: 80000
+```
+
+Default: `100000`.
+
+### categories
+
+Which review lenses to run. The reviewer asks for each category in its own
+concurrent model call and merges the findings, so a focused prompt concentrates
+on one concern at a time. One or more of `security`, `correctness`,
+`deprecation`, `tests`, `documentation`, `performance`, `complexity`, `intent`,
+`ponytail`. Narrowing the list trades thoroughness for fewer model calls (and
+lower token usage).
+
+The `ponytail` lens is the "lazy senior dev" check — *the best code is the code
+you never wrote* — flagging code that needn't exist at all (YAGNI, reach for the
+standard library, do it in fewer lines). See
+[What gets reviewed](../explanation/what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room).
+
+The `intent` lens checks the diff against the PR's stated intent — title,
+description, and commit names on GitHub; your `git log` commit names on the
+CLI (in both branch and `--working` mode). When nothing states an intent (e.g.
+no commits beyond the base branch yet), it is skipped automatically, so it
+never costs an extra call. It is also the only lens that sends the PR
+title/description/commit names to the provider — drop it from `categories` if
+you don't want that text sent at all.
+
+```yaml
+categories:
+  - security
+  - correctness
+```
+
+Default: all nine categories.
+
+### context_lines
+
+Ceiling on the number of unchanged lines added above and below each changed hunk,
+read from the head revision of the file so the model can review a change in the
+context of its surrounding code. The actual number used is the smaller of this
+ceiling and what the token budget allows, so it shrinks automatically on large
+PRs. Set it to `0` to disable context expansion and review the bare diff (no
+extra file content is fetched).
+
+```yaml
+context_lines: 10   # at most 10 lines either side of each hunk; 0 disables
+```
+
+Default: `20`.
+
+### timeout
+
+Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
+**provider-aware default**: **300 s for ollama** (local models are slow) and 60 s
+for cloud providers. Set it explicitly to raise it for a large local model.
+
+```yaml
+timeout: 900   # 15 minutes per call, e.g. for a big model on CPU
+```
+
+Default: auto (ollama 300 s, cloud 60 s). See
+[Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
+
+### structured_output
+
+Constrain the model to emit the findings JSON schema using the provider's native
+JSON mode (litellm `response_format`). This keeps models — especially local ones —
+from returning prose or reasoning instead of findings. Leave it on unless a
+particular model/provider **rejects** `response_format` (some `openai-compatible`
+gateways return a `400`), in which case turn it off; the lenient parser still
+strips fences and pulls JSON out of any surrounding prose. CLI: `--no-structured-output`.
+
+```yaml
+structured_output: false   # only if your gateway rejects JSON-schema mode
+```
+
+Default: `true`. See
+[Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
+
+### resolve_fixed
+
+Auto-resolve a review conversation once its finding is fixed. On a re-run, when a
+finding lgtmaybe raised is no longer produced **and** GitHub marks that thread
+outdated (the code under it changed), lgtmaybe posts a short `✅ Looks resolved.`
+reply and resolves the conversation. Both conditions must hold, so a thread is
+never collapsed just because nearby lines shifted. Set it to `false` to leave
+conversations for manual resolution.
+
+GitHub posting only — the local CLI review has no conversations to resolve, so it
+ignores this. Resolving a thread uses GitHub's GraphQL API; the default
+`GITHUB_TOKEN` (`pull-requests: write`, already needed to post the review) is
+sufficient.
+
+```yaml
+resolve_fixed: false   # leave fixed conversations open for manual resolution
+```
+
+Default: `true`.
+
+### extra_lenses
+
+Define your own review lenses ("BYO skills") that run **alongside** the built-in
+`categories`. Each one fans out as its own focused model call and its findings
+merge into the same review. A lens needs an `id` (unique, and not one of the
+built-in category names) and `instructions` describing what to look for; a
+`title`, plus a worked example (`example_diff` + `example_finding`, supplied
+together) are optional but sharply improve a small model's output.
+
+```yaml
+extra_lenses:
+  - id: simplify
+    title: Simplify or delete
+    instructions: |
+      Flag code that should not exist at all. The best code is the code you never
+      wrote: prefer the standard library, an existing dependency, or one line over
+      a new abstraction. Call out needless wrappers, premature generality, and
+      "just in case" code with no caller.
+    example_diff: |
+      --- a/util.py
+      +++ b/util.py
+      @@ -4,1 +4,3 @@
+       def get_name(user):
+      +    name = user.name
+      +    return name
+    example_finding:
+      path: util.py
+      line: 5
+      severity: low
+      title: Needless local variable
+      body: The temporary adds nothing; return user.name directly.
+      suggestion: "    return user.name"
+```
+
+Lens definitions are **trusted config**: they go into the system prompt, so only
+define them in files you control (committed `.lgtmaybe.yml` or repo skill files),
+never from PR-author content. See
+[Add a custom review lens](add-a-custom-lens.md) for a full walk-through.
+
+Default: none.
+
+### lens_paths
+
+Load `extra_lenses` from separate **skill files** instead of inlining them — handy
+for sharing a lens across repos or wiring lgtmaybe into an agent harness. Each
+entry is a YAML file (one lens, or a list of lenses) or a directory of `*.yml` /
+`*.yaml` lens files. Paths are resolved relative to where lgtmaybe runs (your repo
+root). Lenses loaded this way are appended to any inline `extra_lenses`.
+
+```yaml
+lens_paths:
+  - .lgtmaybe/skills            # a directory of one-lens-per-file skill files
+  - team-lenses/house-style.yml # or a single file
+```
+
+Default: none.
+
+## CLI flag overrides
+
+Every config field can be overridden at the command line:
+
+```bash
+lgtmaybe review \
+  --provider anthropic \
+  --model claude-sonnet-4-6 \
+  --min-severity high
+```
+
+Flags take precedence over `.lgtmaybe.yml`.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/add-a-custom-lens/ -->
+
+# Add a custom review lens (BYO skills)
+
+lgtmaybe ships nine built-in review lenses (security, correctness, deprecation,
+tests, documentation, performance, complexity, intent, and `ponytail` — the
+"lazy senior dev" / write-less-code lens). A **custom lens** lets you add your
+own — a "skill file" that runs alongside the built-ins, fans out as its own
+focused model call, and merges its findings into the same review. Use it to bake
+in a house style or a team convention the built-in lenses don't cover.
+
+## Contents
+
+- [How a lens works](#how-a-lens-works)
+- [Inline in `.lgtmaybe.yml`](#inline-in-lgtmaybeyml)
+- [As reusable skill files](#as-reusable-skill-files)
+- [Bundled lens packs (`pack:<name>`)](#bundled-lens-packs-packname)
+- [Run it](#run-it)
+- [Security: lenses are trusted input](#security-lenses-are-trusted-input)
+- [See also](#see-also)
+
+## How a lens works
+
+Every lens — built-in or custom — is the same shape: a focused instruction set and
+one worked example, sent as its own system prompt so the model concentrates on a
+single concern. A custom lens needs:
+
+| Field | Required | What it is |
+|---|---|---|
+| `id` | yes | A unique short name. Must not collide with a built-in category. |
+| `instructions` | yes | What to look for, in plain language. This is the lens. |
+| `title` | no | Human-readable heading (falls back to `id`). |
+| `example_diff` + `example_finding` | no (together) | A worked example: a hunk and the finding the model should return for it. Optional, but it sharply improves smaller models. |
+
+## Inline in `.lgtmaybe.yml`
+
+The quickest way — define the lens directly in your repo config:
+
+```yaml
+provider: ollama
+model: qwen3.6:27b
+extra_lenses:
+  - id: house-style
+    title: House style
+    instructions: |
+      Enforce our team conventions on changed code. Flag new public functions
+      that return bare dicts instead of a typed dataclass, and any logging at
+      WARNING or above that doesn't include a correlation id.
+    example_diff: |
+      --- a/api.py
+      +++ b/api.py
+      @@ -10,1 +10,2 @@
+       def make_user(name):
+      +    return {"name": name, "active": True}
+    example_finding:
+      path: api.py
+      line: 11
+      severity: low
+      title: Public function returns a bare dict
+      body: House style returns a typed dataclass from public functions, not a dict.
+      suggestion: "    return User(name=name, active=True)"
+```
+
+!!! note "The Ponytail lens is built in"
+    The "lazy senior dev / write less code" instinct from
+    [Ponytail](https://github.com/DietrichGebert/ponytail) ships as the built-in
+    `ponytail` lens — you don't need a custom lens for it. Reach for `extra_lenses`
+    when you want something the nine built-ins don't already cover, like the
+    house-style rule above.
+
+## As reusable skill files
+
+To share lenses across repos — or to let an agent harness drop its own lens in —
+put each one in its own file and point `lens_paths` at the file or a directory:
+
+```yaml
+# .lgtmaybe.yml
+provider: ollama
+model: qwen3.6:27b
+lens_paths:
+  - .lgtmaybe/skills
+```
+
+```yaml
+# .lgtmaybe/skills/house-style.yml
+id: house-style
+title: House style
+instructions: |
+  Flag new public functions that return bare dicts instead of a typed dataclass,
+  and WARNING+ logging without a correlation id.
+```
+
+A skill file may hold one lens (a mapping) or several (a list). Lenses loaded from
+`lens_paths` are appended to any inline `extra_lenses`; `id`s must be unique across
+the whole set.
+
+## Bundled lens packs (`pack:<name>`)
+
+lgtmaybe ships a curated, **opt-in** library of extra lenses — distilled from the
+wider engineering-review ecosystem (Ousterhout, Metz, Carmack, the NASA Power of
+Ten / TigerStyle, Google's eng-practices, and several skill/rule collections; see
+[ATTRIBUTION.md](https://github.com/MattJColes/lgtmaybe/blob/main/ATTRIBUTION.md)).
+They are **off by default** — they are more opinionated than the nine built-ins,
+and every lens you enable is another model call per review. Enable a pack by name
+with the `pack:` scheme in `lens_paths` (this works for a `pip install`, with no
+repo-relative path to point at):
+
+```yaml
+# .lgtmaybe.yml
+provider: ollama
+model: qwen3.6:27b
+lens_paths:
+  - pack:design       # combine as many as you like
+  - pack:robustness
+```
+
+| Pack | Lenses | Use it when |
+|---|---|---|
+| `pack:design` | `wrong-abstraction`, `shallow-module`, `information-leakage`, `errors-out-of-existence`, `hidden-state`, `naming` | You want taste/structure review (the "right abstraction", deep modules, explicit state). |
+| `pack:robustness` | `assertions`, `bounded`, `idempotency`, `migrations`, `portability`, `observability` | Operational safety: defensive invariants, bounded work, retry-safe side effects, safe migrations. |
+| `pack:interface` | `api-design`, `type-safety`, `magic-values`, `comment-why` | Contracts & clarity: backward compatibility, tight types, named constants, why-not-what comments. |
+| `pack:frontend` | `accessibility`, `i18n` | The diff touches UI / user-facing copy. |
+
+Each pack is a directory of skill files under the package, so you can also browse
+or copy any single lens from
+[`src/lgtmaybe/lenses/`](https://github.com/MattJColes/lgtmaybe/tree/main/src/lgtmaybe/lenses).
+An unknown `pack:` name fails loudly, listing the packs that exist.
+
+## Run it
+
+Custom lenses run automatically on every review — CLI or GitHub Action — once they
+are in your config. On the CLI you'll see findings titled by your lens just like
+the built-ins:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localhost:11434
+```
+
+To narrow a run to fewer **built-in** lenses while keeping your custom ones, set
+`categories` — the two lists are independent.
+
+## Security: lenses are trusted input
+
+A lens's `instructions` and example go straight into the model's system prompt, so
+treat a lens like code you run: **only define lenses in files you control.** Keep
+them in your committed `.lgtmaybe.yml` or repo skill files, never source them from
+a pull request's contents. On `pull_request_target` the Action reads config from
+the base repository, not the PR head, so a fork PR cannot introduce or alter a
+lens. Diff content itself is always treated as untrusted data, separately from
+your lenses.
+
+## See also
+
+- [Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md#extra_lenses) — the field reference.
+- [What gets reviewed](../explanation/what-gets-reviewed.md) — the built-in lenses.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/releasing/ -->
+
+# Releasing lgtmaybe (maintainers)
+
+Releases are automated by **release-please** (`.github/workflows/release-please.yml`).
+It reads the **conventional commits** merged to `main` and keeps a "Release PR"
+open that bumps the version and regenerates `CHANGELOG.md`. **Merging that PR** is
+the release: it cuts the tag and the GitHub release, then the same run publishes —
+**PyPI** via trusted publishing (OIDC) and the **GHCR image** + floating major
+tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
+(built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
+
+Commit messages must follow conventional-commit format — `.github/workflows/commitlint.yml`
+enforces it on PRs so release-please can compute the next version.
+
+The only human-only pieces:
+
+## Contents
+
+- [One-time setup](#one-time-setup)
+- [Each release](#each-release)
+- [Before going public](#before-going-public)
+
+## One-time setup
+
+- On PyPI, add a **trusted publisher** for this repo: workflow
+  **`release-please.yml`**, environment `pypi` (no `PYPI_TOKEN` secret — auth is
+  via OIDC). The publish job is inline in that workflow on purpose: PyPI trusted
+  publishing requires the OIDC `job_workflow_ref` to equal the top-level workflow.
+- Create the repo **environment** named `pypi` (Settings → Environments).
+- After the first release, set the **GHCR package visibility to public** so
+  consumers can `docker pull` the image (Packages → lgtmaybe → Package settings).
+- First release only: from the GitHub release page, tick **"Publish this Action
+  to the GitHub Marketplace"**, accept the terms, and pick the categories
+  `code-review` and `continuous-integration`.
+
+## Each release
+
+1. Merge feature/fix PRs to `main` using conventional-commit messages
+   (`feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:` for a major bump).
+2. release-please opens or updates the **Release PR** automatically. Review the
+   proposed version + changelog, then **merge it** to publish.
+3. To (re)publish an existing tag to PyPI without a new release, run the
+   `release-please` workflow via **workflow_dispatch** with the tag name.
+
+## Before going public
+
+- Dogfood lgtmaybe on its own PRs so the README example is real.
+- Re-check the least-privilege IAM/WIF scopes (see the
+  [Bedrock](./review-with-bedrock-oidc.md) and [Vertex](./review-with-vertex-wif.md)
+  guides) before the repo goes public.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/reference/config/ -->
+
+<!-- DO NOT EDIT — this file is generated by docs/generate_reference.py.
+     Run `uv run python docs/generate_reference.py` to regenerate.
+     CI will fail if this file is stale. -->
+
+# Configuration Reference
+
+This reference is generated from the pydantic schemas in `src/lgtmaybe/core/models.py`.
+
+## ReviewConfig
+
+The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys and CLI flags.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `api_base` | string / null | No | `null` | Api Base |
+| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
+| `context_lines` | integer | No | `20` | Context Lines |
+| `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
+| `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
+| `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
+| `include_paths` | list[string] | No | `[]` | Include Paths |
+| `max_files` | integer | No | `50` | Max Files |
+| `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
+| `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
+| `model` | string | Yes | — | Model |
+| `num_ctx` | integer / null | No | `null` | Num Ctx |
+| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
+| `recursive` | boolean | No | `True` | Recursive |
+| `reflect` | boolean | No | `True` | Reflect |
+| `reflect_model` | string / null | No | `null` | Reflect Model |
+| `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
+| `structured_output` | boolean | No | `True` | Structured Output |
+| `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
+| `temperature` | number | No | `0.0` | Temperature |
+| `timeout` | integer / null | No | `null` | Timeout |
+| `unanchored_min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `high` |  |
+
+## Enums
+
+### Provider
+
+LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azure`) use ambient credentials — `azure` also needs the resource endpoint (`--api-base`) and accepts a key as an alternative. `openai-compatible` points at any server speaking the OpenAI `/v1` wire format (DeepSeek, llama.cpp, LM Studio, vLLM) via `--api-base`; the key is optional so keyless local servers work.
+
+- `anthropic`
+- `azure`
+- `bedrock`
+- `ollama`
+- `openai`
+- `openai-compatible`
+- `openrouter`
+- `vertex`
+- `zai`
+
+### Severity
+
+Finding severity, ordered low to high. Use `min_severity` in config to suppress findings below a threshold.
+
+- `critical`
+- `high`
+- `info`
+- `low`
+- `medium`
+
+## ReviewFinding
+
+The structured output the model must return for each inline comment. All fields are validated by pydantic before anything is posted to GitHub.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `anchor` | string / null | No | `null` | Anchor |
+| `anchored` | boolean | No | `True` | Anchored |
+| `body` | string | Yes | — | Body |
+| `broad` | boolean | No | `False` | Broad |
+| `line` | integer | Yes | — | Line |
+| `path` | string | Yes | — | Path |
+| `severity` | `critical` / `high` / `info` / `low` / `medium` | Yes | — |  |
+| `side` | string | No | `RIGHT` | Side |
+| `suggestion` | string / null | No | `null` | Suggestion |
+| `title` | string | Yes | — | Title |
+
+## ProviderResult
+
+The normalised return value of one LLM completion, including token usage.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `input_tokens` | integer | Yes | — | Input Tokens |
+| `output_tokens` | integer | Yes | — | Output Tokens |
+| `text` | string | Yes | — | Text |
+
+## PRContext
+
+Everything the engine needs about a pull request. Fetched via the GitHub REST API — PR code is never checked out.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `base_sha` | string | Yes | — | Base Sha |
+| `changed_files` | list[string] | Yes | — | Changed Files |
+| `commit_messages` | list[string] | No | `[]` | Commit Messages |
+| `description` | string | No | `` | Description |
+| `diff` | string | Yes | — | Diff |
+| `file_contents` | object | No | — | File Contents |
+| `head_sha` | string | Yes | — | Head Sha |
+| `pr_number` | integer | Yes | — | Pr Number |
+| `repo` | string | Yes | — | Repo |
+| `title` | string | No | `` | Title |
+
+## Raw JSON schemas
+
+The canonical machine-readable schemas. These are the source of truth for provider output validation.
+
+### ReviewConfig
+
+```json
+{
+  "$defs": {
+    "CustomLens": {
+      "additionalProperties": false,
+      "description": "A user-defined review lens \u2014 a \"skill file\" run alongside the built-ins.\n\nThe engine fans it out as its own focused LLM call (same pipeline as a\nbuilt-in ``ReviewCategory``) and merges its findings with the rest. A lens is\ndeclared in **trusted** config (``.lgtmaybe.yml`` or a file referenced by\n``lens_paths``), never from PR-author content, so its text is safe to put in\nthe system prompt. Supplying a worked example (``example_diff`` +\n``example_finding``) is optional but sharply improves a small model's output.",
+      "properties": {
+        "example_diff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Example Diff"
+        },
+        "example_finding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewFinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "instructions": {
+          "title": "Instructions",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "instructions"
+      ],
+      "title": "CustomLens",
+      "type": "object"
+    },
+    "Provider": {
+      "description": "The backend selected by the `--provider` flag.",
+      "enum": [
+        "openai",
+        "openrouter",
+        "anthropic",
+        "bedrock",
+        "vertex",
+        "azure",
+        "ollama",
+        "openai-compatible",
+        "zai"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "ReviewCategory": {
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).",
+      "enum": [
+        "security",
+        "correctness",
+        "deprecation",
+        "tests",
+        "documentation",
+        "performance",
+        "complexity",
+        "intent",
+        "ponytail"
+      ],
+      "title": "ReviewCategory",
+      "type": "string"
+    },
+    "ReviewFinding": {
+      "additionalProperties": false,
+      "description": "A single inline review comment the model wants to post.",
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor"
+        },
+        "anchored": {
+          "default": true,
+          "title": "Anchored",
+          "type": "boolean"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "broad": {
+          "default": false,
+          "title": "Broad",
+          "type": "boolean"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "side": {
+          "default": "RIGHT",
+          "enum": [
+            "LEFT",
+            "RIGHT"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggestion"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "severity",
+        "title",
+        "body"
+      ],
+      "title": "ReviewFinding",
+      "type": "object"
+    },
+    "Severity": {
+      "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "How to run one review: provider/model, severity floor, filters, caps.",
+  "properties": {
+    "api_base": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Api Base"
+    },
+    "categories": {
+      "default": [
+        "security",
+        "correctness",
+        "deprecation",
+        "tests",
+        "documentation",
+        "performance",
+        "complexity",
+        "intent",
+        "ponytail"
+      ],
+      "items": {
+        "$ref": "#/$defs/ReviewCategory"
+      },
+      "title": "Categories",
+      "type": "array"
+    },
+    "context_lines": {
+      "default": 20,
+      "title": "Context Lines",
+      "type": "integer"
+    },
+    "exclude_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Exclude Paths",
+      "type": "array"
+    },
+    "extra_lenses": {
+      "items": {
+        "$ref": "#/$defs/CustomLens"
+      },
+      "title": "Extra Lenses",
+      "type": "array"
+    },
+    "ignore_fingerprints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Ignore Fingerprints",
+      "type": "array"
+    },
+    "include_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Include Paths",
+      "type": "array"
+    },
+    "max_files": {
+      "default": 50,
+      "title": "Max Files",
+      "type": "integer"
+    },
+    "max_input_tokens": {
+      "default": 100000,
+      "title": "Max Input Tokens",
+      "type": "integer"
+    },
+    "min_severity": {
+      "$ref": "#/$defs/Severity",
+      "default": "low"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "num_ctx": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Num Ctx"
+    },
+    "provider": {
+      "$ref": "#/$defs/Provider"
+    },
+    "recursive": {
+      "default": true,
+      "title": "Recursive",
+      "type": "boolean"
+    },
+    "reflect": {
+      "default": true,
+      "title": "Reflect",
+      "type": "boolean"
+    },
+    "reflect_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reflect Model"
+    },
+    "resolve_fixed": {
+      "default": true,
+      "title": "Resolve Fixed",
+      "type": "boolean"
+    },
+    "structured_output": {
+      "default": true,
+      "title": "Structured Output",
+      "type": "boolean"
+    },
+    "symbol_resolution": {
+      "default": true,
+      "title": "Symbol Resolution",
+      "type": "boolean"
+    },
+    "temperature": {
+      "default": 0.0,
+      "title": "Temperature",
+      "type": "number"
+    },
+    "timeout": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout"
+    },
+    "unanchored_min_severity": {
+      "$ref": "#/$defs/Severity",
+      "default": "high"
+    }
+  },
+  "required": [
+    "provider",
+    "model"
+  ],
+  "title": "ReviewConfig",
+  "type": "object"
+}
+```
+
+### ReviewFinding
+
+```json
+{
+  "$defs": {
+    "Severity": {
+      "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A single inline review comment the model wants to post.",
+  "properties": {
+    "anchor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Anchor"
+    },
+    "anchored": {
+      "default": true,
+      "title": "Anchored",
+      "type": "boolean"
+    },
+    "body": {
+      "title": "Body",
+      "type": "string"
+    },
+    "broad": {
+      "default": false,
+      "title": "Broad",
+      "type": "boolean"
+    },
+    "line": {
+      "title": "Line",
+      "type": "integer"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity"
+    },
+    "side": {
+      "default": "RIGHT",
+      "enum": [
+        "LEFT",
+        "RIGHT"
+      ],
+      "title": "Side",
+      "type": "string"
+    },
+    "suggestion": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Suggestion"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "line",
+    "severity",
+    "title",
+    "body"
+  ],
+  "title": "ReviewFinding",
+  "type": "object"
+}
+```
+
+### ProviderResult
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The normalised return of one LLM completion, with token usage.",
+  "properties": {
+    "input_tokens": {
+      "title": "Input Tokens",
+      "type": "integer"
+    },
+    "output_tokens": {
+      "title": "Output Tokens",
+      "type": "integer"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "text",
+    "input_tokens",
+    "output_tokens"
+  ],
+  "title": "ProviderResult",
+  "type": "object"
+}
+```
+
+### PRContext
+
+```json
+{
+  "additionalProperties": false,
+  "description": "Everything the engine needs about a PR \u2014 fetched via API, never checkout.",
+  "properties": {
+    "base_sha": {
+      "title": "Base Sha",
+      "type": "string"
+    },
+    "changed_files": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Changed Files",
+      "type": "array"
+    },
+    "commit_messages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Commit Messages",
+      "type": "array"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "diff": {
+      "title": "Diff",
+      "type": "string"
+    },
+    "file_contents": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "File Contents",
+      "type": "object"
+    },
+    "head_sha": {
+      "title": "Head Sha",
+      "type": "string"
+    },
+    "pr_number": {
+      "title": "Pr Number",
+      "type": "integer"
+    },
+    "repo": {
+      "title": "Repo",
+      "type": "string"
+    },
+    "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "diff",
+    "changed_files",
+    "base_sha",
+    "head_sha",
+    "repo",
+    "pr_number"
+  ],
+  "title": "PRContext",
+  "type": "object"
+}
+```
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/what-gets-reviewed/ -->
+
+# What gets reviewed
+
+This page explains what lgtmaybe looks at, how it bounds the work, and what the
+output looks like — on a GitHub PR and on the command line.
+
+## What it looks at
+
+lgtmaybe reviews the **diff of a pull request** — the lines the PR adds or
+changes — not the whole repository. It fetches that diff from the GitHub REST
+API and **never checks out or executes your code**, so a malicious PR can't run
+anything in the reviewer's environment. The diff is treated as untrusted input
+throughout, including against prompt-injection attempts hidden in PR text.
+
+To review changes in context rather than in isolation, lgtmaybe also pads each
+changed hunk with a few **surrounding lines** read from the head revision of the
+changed file. The model uses these to understand the change — the enclosing
+function, nearby definitions — but only ever comments on the changed lines. How
+many lines are added is budget-scaled and capped by `context_lines` (default 20,
+`0` disables it). This content is fetched read-only via the API and redacted
+like the diff.
+
+Before the diff reaches the model it is cleaned:
+
+- **Non-reviewable files are skipped** — lockfiles, minified/bundled assets,
+  vendored directories, and binaries. Reviewing them is noise and wastes tokens.
+- **Secrets are redacted** — anything that looks like a key or token is stripped
+  from the diff before it leaves your environment for the provider.
+
+## Correctness & logic
+
+The substance of a change, not just style. The model is prompted to actively
+hunt the bugs a change introduces and grade them by impact:
+
+- **Null / None dereferences** — a value that can be empty used without a guard.
+- **Off-by-one & boundary errors** — `<` vs `<=`, fencepost mistakes, empty- and
+  single-element edge cases.
+- **Mismatched or inverted ranges** — `start`/`end` swapped, a lower bound above
+  its upper bound.
+- **Unhandled error / exception paths** — failures silently swallowed or state
+  left half-updated.
+- **Incorrect conditionals** — inverted booleans, `and`/`or` mix-ups, missing
+  branches.
+- **Resource leaks & ordering** — handles or locks not released, use-after-close,
+  bad concurrent sequencing.
+- **Races & concurrency** — check-then-act (TOCTOU), shared mutable state without
+  synchronisation, coroutines called without `await`, blocking calls in async paths.
+- **Numeric and date/time bugs** — overflow, float equality, division by zero,
+  money in binary floats; timezone-naive datetimes, epoch-unit confusion, DST.
+- **Aliasing & mutation** — mutable default arguments, mutating a collection while
+  iterating it, sharing a mutable value the caller still owns.
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging a [HIGH] possible None dereference, where get_user can return None but .email is accessed without a guard](../assets/review-correctness.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing a [HIGH] None-dereference finding for demo/orders.py](../assets/cli-correctness.png){ width="660" }
+
+## Security review
+
+Security findings are first-class. The model is prompted with an OWASP-aligned
+checklist and told to grade what it finds `high` or `critical` and name the
+vulnerability class in the title. It actively looks for:
+
+- **Injection** — SQL/NoSQL, OS command, and template/LDAP injection.
+- **Cross-site scripting (XSS)** — unescaped user input rendered into HTML/JS.
+- **CSRF & open redirect** — unprotected state-changing endpoints, user-controlled
+  redirect targets.
+- **Hardcoded secrets** — keys, tokens, passwords, or private keys in the diff.
+- **Broken authn / authz** — missing permission checks, IDOR, auth bypass, and JWT
+  or session pitfalls (unverified signatures, `alg` confusion, missing expiry).
+- **Path traversal / unsafe file access** — user input in file paths, `../`,
+  zip-slip extraction — plus unrestricted file uploads.
+- **SSRF** — server-side fetches of user-controlled URLs without allow-listing.
+- **Insecure deserialization & unsafe eval** — `pickle`/`yaml.load`/`eval` on
+  untrusted data, and XML parsed with external entities enabled (XXE).
+- **Mass assignment / over-posting** — request bodies bound straight onto models.
+- **Weak cryptography** — MD5/SHA1 for passwords, ECB mode, disabled TLS
+  verification, predictable randomness for security tokens.
+- **Sensitive-data exposure** — secrets or PII in logs, error responses, or
+  analytics: passwords, API keys, tokens/session IDs, SSNs, or payment-card data.
+- **CI / IaC misconfiguration** — untrusted input interpolated into workflow `run:`
+  steps, third-party actions not pinned to a SHA, overly broad IAM policies,
+  public buckets, privileged containers, secrets echoed into build logs.
+- **Resource / DoS safety** — missing timeouts, unbounded loops or allocations,
+  regexes vulnerable to catastrophic backtracking (ReDoS).
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability in a find_user function, explaining the unsafe string concatenation and suggesting a parameterized query](../assets/review-sql-injection.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing a [CRITICAL] SQL injection finding for demo/db_queries.py](../assets/cli-security.png){ width="660" }
+
+This shapes *what* the reviewer flags. It is separate from how lgtmaybe protects
+**itself** from a malicious PR — see
+[Data and Privacy](data-and-privacy.md) for secret redaction and prompt-injection
+defence.
+
+## Deprecation & dependency health
+
+Beyond bugs and vulnerabilities, the reviewer also flags **factually outdated**
+code when the diff shows it — these are objective, not stylistic:
+
+- deprecated language/framework APIs (with the modern replacement suggested when
+  known),
+- targeting an end-of-life runtime or language version,
+- adding or pinning an end-of-life / abandoned dependency,
+- pinning a dependency to a version with a known security advisory, and
+- a new dependency whose name looks like a typosquat of a popular package, or
+  whose license conflicts with the project's.
+
+The reviewer only raises these when the diff itself shows the change; it does not
+speculate about code it cannot see.
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging a [MEDIUM] deprecated datetime.utcnow() call and suggesting datetime.now(timezone.utc)](../assets/review-deprecation.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing a [MEDIUM] deprecated-API finding for demo/scheduler.py](../assets/cli-deprecation.png){ width="660" }
+
+## Test coverage & documentation
+
+Two lighter-weight checks round out a review:
+
+- **Missing or weak tests** — when the diff adds a new function, branch, or error
+  case with no accompanying test, the reviewer raises a `low`/`medium` finding and
+  puts a concrete, runnable test in the finding's `suggestion` field, matching
+  the project's existing test idiom. Tests added in the diff that don't really
+  test — assertion-free, over-mocked until only the mock is exercised, or flaky
+  (sleep-based waits, wall-clock or ordering dependence) — are flagged too.
+  Renames, comments, and trivial formatting changes are left alone.
+- **Documentation gaps and stale docs** — public/exported surfaces added without
+  a docstring, or a name or signature that contradicts what the code does, are
+  flagged at `info`/`low`; a docstring or comment the change just made wrong is
+  flagged up to `medium` (a comment that lies is worse than no comment). This is
+  deliberately restrained: private helpers and self-evident code are not nagged
+  about, so well-named code is left to document itself.
+
+A missing test — note the runnable test dropped into the suggestion:
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging a [LOW] new branch added without a test, with a runnable pytest suggestion](../assets/review-tests.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing a [LOW] missing-test finding for demo/discount.py](../assets/cli-tests.png){ width="660" }
+
+A documentation gap on a new public function:
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging an [INFO] public function missing a docstring, with a suggested docstring](../assets/review-documentation.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing an [INFO] missing-docstring finding for demo/client.py](../assets/cli-documentation.png){ width="660" }
+
+## Performance
+
+The reviewer also watches for performance regressions the change introduces,
+graded by impact (`low` up to `high` when the cost scales with input size or sits
+in a hot path):
+
+- **N+1 queries / calls in a loop** — a query, request, or other expensive call
+  issued once per iteration that could be batched or hoisted out.
+- **Inefficient algorithms** — accidentally quadratic (`O(n²)`) work where linear
+  is feasible, or a linear scan where a set/dict lookup would do.
+- **Redundant computation** — recomputing the same value inside a loop instead of
+  hoisting or memoising it.
+- **Unnecessary allocations & copies** — building large intermediates or copying
+  big buffers on a hot path when streaming or in-place work suffices.
+- **Blocking I/O on a hot path** — synchronous I/O, sleeps, or lock contention
+  where non-blocking handling is expected.
+- **Unbounded / over-fetching queries** — loading whole tables into memory or
+  missing pagination/limits.
+- **Unbounded growth & leaks** — caches without eviction, listeners or
+  subscriptions never removed, queues that only grow.
+
+It sticks to changes the diff actually shows and avoids micro-optimisations with
+no measurable impact.
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging a [HIGH] N+1 query inside a loop, suggesting a single batched query](../assets/review-performance.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing a [HIGH] N+1-query finding for demo/reports.py](../assets/cli-performance.png){ width="660" }
+
+## Complexity
+
+A lighter, restrained lens that flags code harder to read, test, or maintain than
+it needs to be (`info`/`medium`), preferring a concrete simplification in the
+`suggestion` field:
+
+- **High cyclomatic complexity / deep nesting** — many branches or deeply nested
+  conditionals and loops that would read better with early returns.
+- **Over-long, low-cohesion functions** — a function doing several unrelated
+  things that should be split apart.
+- **Duplicated logic** — non-trivial logic repeated in the diff that should be
+  extracted into a shared helper.
+- **Excessive parameters / boolean-flag arguments**, **convoluted expressions**,
+  and **dead / unreachable code**.
+
+Like the documentation lens, it stays quiet on self-evident, already-simple code.
+
+=== "On a GitHub PR"
+
+    ![An inline lgtmaybe review comment flagging a [MEDIUM] deeply nested conditional and suggesting guard clauses](../assets/review-complexity.png){ width="660" }
+
+=== "On the CLI"
+
+    ![The lgtmaybe CLI printing a [MEDIUM] deep-nesting finding for demo/router.py](../assets/cli-complexity.png){ width="660" }
+
+## Intent — does the PR do what it says?
+
+The intent lens compares the diff against the PR's **stated intent** and flags
+mismatches at `medium`, or `high` when the unexplained change is
+security-relevant:
+
+- **Out-of-scope changes** — a hunk unrelated to the stated intent, e.g. a "fix
+  typo" PR that also touches auth logic, CI workflows, dependency pins, or
+  permissions. Smuggled security-relevant changes are the highest-value catch.
+- **Contradictions** — the code does the opposite of, or something materially
+  different from, what the title or commits claim.
+- **Unfulfilled intent** — the PR promises behaviour the diff never implements.
+
+Where the stated intent comes from:
+
+- **On a GitHub PR** — the PR title, description, and the first line of each
+  commit message, fetched via the API.
+- **On the CLI** — the commit names from your local `git log` against the
+  remote primary branch, so the lens works without GitHub — in `--working`
+  mode too. With no commits beyond the base yet, nothing states an intent and
+  the lens is skipped.
+
+The intent text is attacker-controlled on a fork PR, so it is treated exactly
+like the diff: secrets are redacted, it is wrapped as untrusted data with
+neutralised delimiters, and the model is told never to follow instructions
+inside it. Only the intent lens's model call ever carries it. When a PR states
+no intent at all, the lens is skipped instead of burning a model call.
+
+## Ponytail — the laziest senior dev in the room
+
+The best code is the code you never wrote. Inspired by the
+[Ponytail](https://github.com/DietrichGebert/ponytail) skill, this lens reviews
+new code with a senior engineer's reflex to **not** add code, flagging what
+needn't exist at all (graded `info` to `medium`, and deliberately restrained):
+
+- **Needless code (YAGNI)** — speculative generality, "just in case" parameters,
+  an abstraction with a single caller, or scaffolding for a future that isn't here.
+- **Reinventing the standard library** — hand-rolled code a built-in, the standard
+  library, or an already-imported dependency does directly.
+- **Could be far shorter** — several lines doing what one clear expression would.
+- **Premature configurability** — flags, hooks, or options no caller uses yet.
+
+It prefers deleting or collapsing code over adding to it and puts the smaller
+replacement in the suggestion. It is distinct from the complexity lens (which asks
+"is this code hard to follow?"); Ponytail asks "should this code exist at all?"
+
+## How the scope is bounded
+
+Every run is bounded so a large PR can't run away on latency. All of these are
+configurable in `.lgtmaybe.yml` (see
+[Configure .lgtmaybe.yml](../how-to/configure-lgtmaybe-yml.md)):
+
+| Knob | Default | Effect |
+|---|---|---|
+| `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
+| `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
+| `categories` | all nine | Which review lenses to run; each runs as its own model call. Narrowing the list means fewer calls. |
+| `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
+| `min_severity` | `info` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`). |
+| `include_paths` / `exclude_paths` | — | Glob filters to focus the review. |
+
+> These bound a **single run**, not the number of runs. On a public repo, anyone
+> who can open a PR or comment can trigger a run, and each run calls your chosen
+> LLM provider — see the cost disclaimer in
+> [Use as a GitHub Action](../how-to/use-as-github-action.md).
+
+## What a finding contains
+
+Findings are structured data, not prose, so they render identically everywhere.
+Each finding has:
+
+| Field | Meaning |
+|---|---|
+| `path` | File the comment attaches to |
+| `line` | Line in the diff |
+| `side` | `RIGHT` (added/changed) or `LEFT` (removed) |
+| `severity` | `info` / `low` / `medium` / `high` / `critical` |
+| `title` | One-line summary |
+| `body` | The explanation |
+| `suggestion` | Optional suggested replacement code |
+
+Each review category (security, correctness, deprecation, tests, documentation,
+performance, complexity, intent, ponytail)
+runs as its own concurrent model call with a focused prompt and a worked example
+of its own finding type; their findings are merged and de-duplicated. A
+self-reflection pass then runs over the merged set and drops low-confidence
+findings, so the model's first guesses are filtered before anything is posted.
+
+The reviewer only ever sees the diff and a little surrounding context — a *slice*
+of the codebase, not the whole thing. So when a concern depends on code it can't
+see (a guard, a base class, an idempotency check that may live in an unshown
+file), it hedges and lowers the severity rather than asserting that the thing is
+missing, and the self-reflection pass drops findings that rest on such unseen-code
+assumptions. Genuine gaps in the diff itself — a changed path with no test, a new
+public surface left undocumented — are explicitly exempt and still raised.
+
+## What the response looks like
+
+### On a GitHub pull request
+
+lgtmaybe posts **one review** containing:
+
+- an **inline comment** on the exact changed line for each finding, and
+- a **summary comment** that names the model used.
+
+Each finding lands on the line that triggered it, with its severity in the title,
+the explanation in the body, and — where the fix is clear — a suggested change you
+can commit straight from the PR:
+
+![An inline lgtmaybe review comment flagging a [MEDIUM] server-side request forgery (SSRF) risk where a user_id is concatenated into a URL, with a suggested validation fix](../assets/review-ssrf.png){ width="660" }
+
+![An inline lgtmaybe review comment flagging a [CRITICAL] command injection vulnerability in an archive function using subprocess with shell=True, with a suggested fix that avoids the shell](../assets/review-command-injection.png){ width="660" }
+
+The summary carries a hidden marker (`<!-- lgtmaybe -->`), so re-running on the
+same PR **updates** the existing review instead of creating duplicates.
+
+### Resolving conversations once they're fixed
+
+Each inline comment also carries a hidden per-finding fingerprint. When you push
+a fix and lgtmaybe runs again, it looks at its own open conversations: if a
+finding it raised is **no longer produced** *and* GitHub marks that thread
+**outdated** (the code under it changed), lgtmaybe treats it as fixed — it posts
+a short `✅ Looks resolved.` reply and resolves the conversation. Both conditions
+must hold, so a thread is never collapsed just because the lines around it
+shifted, or because a single run happened not to re-flag it without the code
+changing.
+
+This is on by default. To leave conversations for manual resolution, set
+`resolve_fixed: false` in `.lgtmaybe.yml` (or the Action's `resolve_fixed` input).
+Resolving a thread uses GitHub's GraphQL API; the workflow's default
+`GITHUB_TOKEN` (with `pull-requests: write`, already needed to post the review)
+is sufficient. The step is best-effort — if it can't run, the review itself still
+posts normally.
+
+When a PR is clean (no findings, and every file was within the caps), the summary
+is a simple:
+
+```
+👍 LGTM!
+
+0 findings · provider anthropic · model claude-sonnet-4-6
+```
+
+If the file cap kicked in, the summary says so (e.g. "Reviewed the top 50 of 120
+changed files"). lgtmaybe never fails silently — any error is surfaced back to
+the PR as a short comment.
+
+### On the command line
+
+`lgtmaybe review` runs the same pipeline over your local `git` diff and prints
+the findings — it posts nothing and needs no GitHub token. By default it diffs
+the current branch against the remote primary branch (`origin/HEAD`, falling
+back to `origin/main`/`origin/master`, then a local `main`/`master`);
+`--working` reviews the whole worktree — branch commits plus uncommitted edits —
+against that same base, `--uncommitted` reviews only the uncommitted edits
+against HEAD, and `--base <ref>` picks a different base. The default output is a
+readable listing followed by the summary line:
+
+```console
+$ lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localhost:11434
+src/app.py:2  [MEDIUM] Import order
+  sys should be sorted before os
+
+1 finding · provider ollama · model qwen3.6:27b
+```
+
+![The lgtmaybe review command running in a terminal, printing a [MEDIUM] import-order finding with its file and line, then a summary line naming the model](../assets/cli-example.png){ width="660" }
+
+`--format` selects the output. `--json` is shorthand for `--format json`, which
+prints the findings as a JSON array so the same structured data can be piped into
+other tooling:
+
+```console
+$ lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localhost:11434 --json
+[{"path": "src/app.py", "line": 2, "side": "RIGHT", "severity": "medium",
+  "title": "Import order", "body": "sys should be sorted before os",
+  "suggestion": null}]
+```
+
+`--format agent` turns the findings into plain correction instructions an AI
+coding agent can read and apply — a local review-and-fix loop. See
+[Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
+
+## See also
+
+- [Getting Started](../tutorial/getting-started.md) — run your first review
+- [Architecture](architecture.md) — the fetch → compress → prompt → parse → post pipeline
+- [Data and Privacy](data-and-privacy.md) — what is sent where
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/architecture/ -->
+
+# Architecture
+
+lgtmaybe is built on **hexagonal architecture** (ports and adapters). The core
+never imports from the adapters; adapters implement abstract ports defined in
+`core/ports.py`. This lets the parallel build tracks evolve independently and
+lets tests swap in fakes without patching.
+
+## Ports and adapters
+
+```
+          ┌─────────────────────────────────────────┐
+          │               core                      │
+          │                                         │
+          │  ports.py: ProviderClient               │
+          │             GitHubGateway               │
+          │             ReviewEngine                │
+          │                                         │
+          │  models.py: ReviewConfig                │
+          │              ReviewFinding              │
+          │              ProviderResult             │
+          │              PRContext                  │
+          └───────────┬───────────────┬─────────────┘
+                      │               │
+          ┌───────────▼──┐    ┌───────▼──────────┐
+          │  providers/  │    │    github/       │
+          │  (litellm    │    │  (REST adapter)  │
+          │   adapter)   │    └──────────────────┘
+          └──────────────┘
+```
+
+**`core/ports.py`** — the seam. Three abstract base classes:
+
+- `ProviderClient` — one method: `complete(messages, model)` returns a
+  `ProviderResult` (text + token usage).
+- `GitHubGateway` — `get_pr_context()` fetches the PR diff and metadata;
+  `post_review()` posts batched inline comments and a summary.
+- `ReviewEngine` — `review(ctx, cfg)` returns `(findings, summary)`.
+
+The ports were frozen in the foundation step. Other tracks (providers, github,
+engine, CLI) build against these stable signatures. Changing a port requires
+consensus across all tracks.
+
+## Review pipeline
+
+The engine executes a pipeline of composable stages in sequence:
+
+```
+fetch → compress → prompt → parse → re-anchor → merge/dedupe → reflect → filter → post
+```
+
+1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
+   metadata from the GitHub REST API. No PR code is checked out or executed.
+   The diff is treated as untrusted input throughout.
+
+2. **compress** — the diff is filtered to remove generated files, lockfiles,
+   minified assets, and vendored code. Path filters from `ReviewConfig` are
+   applied. Each remaining hunk is then padded with surrounding context lines
+   from the head revision of the file (fetched by the gateway, never a
+   checkout), capped by `context_lines` and the remaining token budget. The
+   result is batched to fit `max_input_tokens` (and, when `recursive` is on, an
+   over-budget single file is walked hunk-by-hunk rather than sent whole). The
+   expanded diff is for the model only — inline-comment positions are always
+   rebuilt from the **real** diff at post time, so a finding on an added context
+   line maps to nothing and is dropped rather than mis-posted.
+
+3. **prompt + parse** — this stage **fans out one concurrent model call per
+   `ReviewCategory`** (a `ThreadPoolExecutor` over the sync provider port —
+   concurrent for cloud, serial for ollama). Each lens gets its own focused
+   structured prompt requesting JSON output with the `ReviewFinding` schema
+   (`path`, `line`, `side`, `severity`, `title`, `body`, `suggestion`, `anchor`)
+   and carries prompt-injection defense instructions. Each response is parsed
+   and validated against `ReviewFinding` using Pydantic; parse errors are logged
+   and surfaced in the summary rather than silently discarded.
+
+4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
+   changed line whose content matches the finding's verbatim `anchor`, rather
+   than trusting the model's line arithmetic. A finding whose anchor matches
+   nothing is marked `anchored=False` and later demoted to the review body
+   instead of being posted on a guessed line.
+
+5. **merge/dedupe** — findings from every lens are merged and de-duplicated
+   (`_dedupe`, keyed on path/line/side).
+
+6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
+   to audit its own findings and drops the ones it marks low-confidence
+   (keep-all safe default when the verdict can't be parsed; skippable with
+   `--no-reflect`). When the auditor would drop a finding *only* because it can't
+   see code outside the diff, it **defers** by naming what it needs — a file path
+   or a **symbol**. A path is fetched read-only (`get_file_contents`); a symbol is
+   located by **ast-grep** (`engine/astgrep.py`), which structurally searches a
+   corpus — the local worktree for the CLI, or a read-only shallow clone of the
+   trusted **base** branch for the GitHub path — for the file that *defines* it.
+   That file is then fetched through the same read-only boundary and the auditor
+   re-judges with the real definition in front of it, instead of guessing about an
+   unseen guard or base class. ast-grep only *parses* the corpus (never executes
+   it) and the base clone is never the PR head, so this stays inside the
+   fork-safety model. It needs the bundled `ast-grep` binary and a corpus;
+   without either it degrades to the path-only fetch (`--no-symbol-resolution`
+   disables it entirely). Bounded by the same hop/file caps as the path fetch.
+
+7. **filter** — findings below `min_severity` are dropped.
+
+8. **post** — findings are batched into a single GitHub review request.
+   The summary comment is updated idempotently using a hidden marker, so
+   re-running lgtmaybe on the same PR does not create duplicate comments. Each
+   inline comment is stamped with a hidden per-finding fingerprint; on a re-run,
+   conversations whose finding is gone and whose thread GitHub marks outdated are
+   replied to and resolved (`resolve_fixed`, default on). Resolving a review
+   thread is the one operation the REST review API can't do, so this step uses
+   GitHub's GraphQL API — best-effort, so a failure never blocks the review.
+
+## Provider strategy and factory
+
+Provider selection uses the **strategy pattern**: `--provider` picks a
+`ProviderClient` strategy; a small factory constructs it. litellm normalises
+all providers to one `completion()` call shape, so the factory is small and the
+engine is provider-agnostic.
+
+Credential resolution uses a **chain of responsibility**: each provider knows
+how to locate its own credentials (ambient cloud creds, env var API key, or
+none for ollama). lgtmaybe never stores or logs credentials.
+
+## Reliability: retries, timeouts, and concurrency
+
+The provider wrapper (`LiteLLMProvider`) and the engine cooperate so a flaky
+network recovers but a dead-end failure surfaces fast:
+
+- **Retries are classified, not blanket.** Transient failures — capacity rate
+  limits (`429 rate_limit_exceeded`), timeouts, connection errors (e.g. an
+  ollama server still warming up), 5xx — are retried with **exponential backoff
+  and jitter** (up to four attempts). **Permanent** failures are *not* retried:
+  bad credentials (`AuthenticationError`), malformed/unsupported requests
+  (`BadRequestError`, including content-policy blocks), unknown models
+  (`NotFoundError`), denied permissions, and **quota/billing** rate limits
+  (`429 insufficient_quota` — "you exceeded your current quota"). Retrying a
+  quota error can never succeed; stacked across every lens it only turns an
+  instant "out of credit" into many minutes of wasted runner time, so lgtmaybe
+  raises it immediately. An optional `fallback_model` is still tried once.
+
+- **One retry layer.** litellm's own internal retry loop is disabled
+  (`num_retries=0`) so failures aren't ground through two stacked backoff layers
+  — lgtmaybe owns the retry policy in one place.
+
+- **Per-request timeout.** Every model call carries a timeout: 60s for hosted
+  providers, 300s for local ones (ollama, openai-compatible), overridable via
+  `timeout` / `--timeout`. The posting workflows additionally set a job-level
+  `timeout-minutes` so a wedged run can't hold a runner for GitHub's six-hour
+  default.
+
+- **Bounded fan-out.** The per-category lenses run concurrently for hosted
+  providers, but the pool is **capped (4 workers)** so a single batch doesn't
+  burst the whole lens set at the provider at once and trip a capacity 429 on a
+  lower-tier account — the lenses run in a couple of waves instead, and per-call
+  latency dominates so the wall-clock cost is small. ollama runs **serially**
+  (one worker): a single local instance serves a model one request at a time, so
+  concurrent calls would only queue up and time out.
+
+## Dependency injection
+
+The engine receives its ports by injection. In production the CLI wires real
+adapters; in tests `tests/fakes/` provides drop-in fakes. No monkey-patching or
+`unittest.mock` is needed at the engine level.
+
+## Why not a plugin framework or event bus
+
+Both were considered and explicitly skipped. The current set of providers fits
+cleanly in a strategy + factory; a plugin registry would add indirection with no
+present benefit. An event bus would complicate the linear pipeline without
+enabling any feature the product needs. These can be revisited if a concrete
+requirement arises.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/auth-model/ -->
+
+# Auth Model
+
+lgtmaybe supports seven hosted providers plus local ollama, and an
+`openai-compatible` escape hatch for any server speaking the OpenAI `/v1` wire
+format (DeepSeek's API, llama.cpp, LM Studio, vLLM). The design principle is **no
+static cloud credentials**: cloud providers use ambient, short-lived tokens;
+key-based SaaS providers (openai, anthropic, openrouter, zai) require an API key that
+stays in secrets rather than being committed to config. Azure straddles both — it
+prefers ambient Azure AD (Entra) credentials but accepts a resource key — and
+always needs the resource endpoint (`AZURE_API_BASE`), since each Azure OpenAI
+deployment lives at its own URL.
+
+## Why keyless for cloud
+
+Static credentials — an AWS access key pair or a GCP service-account JSON file
+— have a fixed lifetime and broad scope. If they leak from a CI log, a secrets
+manager misconfiguration, or a compromised runner, an attacker retains access
+until the key is manually rotated.
+
+OIDC (AWS), Workload Identity Federation (GCP), and federated credentials on an
+Entra app (Azure) issue tokens that:
+
+- Expire in minutes, not years
+- Are scoped to a single workflow run
+- Cannot be extracted from CI logs (they are never set as static environment
+  variables)
+- Are tied to the specific repository and branch via the OIDC claim set
+
+For these reasons, lgtmaybe treats Bedrock and Vertex as **ambient-credential
+only** providers. There is no `--api-key` flag for them. Azure defaults to the
+same keyless path (GitHub OIDC → Entra, via `azure-identity`'s
+`DefaultAzureCredential`) but additionally accepts a resource key for teams that
+can't yet adopt federation.
+
+## Chain of responsibility
+
+When lgtmaybe starts, it resolves credentials for the selected provider using a
+chain:
+
+1. **Provider identity** — which provider was chosen?
+2. **Ambient cloud creds** — for Bedrock and Vertex, the chain stops here.
+   If no ambient creds exist, lgtmaybe fails immediately with a clear
+   "how to auth this provider" message. It does not fall back to a key.
+3. **API key** — for openai, anthropic, openrouter, and zai (GLM / Zhipu AI),
+   lgtmaybe reads the key from the environment (`OPENAI_API_KEY`,
+   `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`). The `--api-key` flag
+   can override this at the CLI. `zai` also accepts an optional `--api-base` /
+   `ZAI_API_BASE` override for the China / coding-plan GLM endpoint; without it
+   litellm's native `zai/` route targets the international endpoint.
+4. **Azure** — always needs the resource endpoint (`AZURE_API_BASE` or
+   `--api-base`). For the credential it prefers a key when one is present
+   (`AZURE_API_KEY` / `--api-key`); otherwise it goes **keyless**, minting an
+   Azure AD token from ambient creds (GitHub OIDC federation in CI, or a local
+   `az login` / managed identity). If neither a key nor an ambient credential is
+   available, lgtmaybe fails with a message naming both options.
+5. **None** — ollama requires no credentials. Only `--api-base` is needed
+   to reach the local or remote server.
+6. **openai-compatible** — always needs the endpoint (`--api-base` or
+   `OPENAI_COMPATIBLE_API_BASE`), since the whole point is to choose your own.
+   The key is **optional**: hosted endpoints like DeepSeek take one
+   (`--api-key` / `OPENAI_COMPATIBLE_API_KEY`), while local servers (llama.cpp,
+   LM Studio, vLLM) need none — lgtmaybe sends a harmless placeholder key when
+   you supply none, because the underlying OpenAI client rejects an empty one.
+
+## Provider auth summary
+
+| Provider | Credential type | How to supply |
+|---|---|---|
+| openai | API key | `OPENAI_API_KEY` env var or `--api-key` |
+| anthropic | API key | `ANTHROPIC_API_KEY` env var or `--api-key` |
+| openrouter | API key | `OPENROUTER_API_KEY` env var or `--api-key` |
+| zai | API key (+ optional endpoint) | `ZAI_API_KEY` env var or `--api-key` (GLM / Zhipu AI); optional `ZAI_API_BASE` / `--api-base` for the China / coding-plan endpoint |
+| bedrock | Ambient AWS creds | GitHub OIDC role or local `~/.aws`; IAM requires only `bedrock:InvokeModel*` |
+| vertex | Ambient GCP creds | GitHub WIF or local ADC (`gcloud auth application-default login`) |
+| azure | Ambient Azure AD creds (keyless) or API key, + endpoint | GitHub OIDC → Entra federated credential, or local `az login` / managed identity; or `AZURE_API_KEY`. Always with `AZURE_API_BASE` / `--api-base` |
+| ollama | None | `--api-base` pointing to the local or remote server |
+| openai-compatible | Optional key, + endpoint | `--api-base` / `OPENAI_COMPATIBLE_API_BASE` (e.g. `https://api.deepseek.com/v1` or `http://localhost:8000/v1`); key via `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for keyless local servers |
+
+## Least-privilege IAM
+
+For Bedrock, the minimum IAM policy is `bedrock:InvokeModel` and (if streaming)
+`bedrock:InvokeModelWithResponseStream` on the specific model ARN. No other AWS
+permissions are needed or requested.
+
+For Vertex, `roles/aiplatform.user` on the project is sufficient.
+`roles/editor` or `roles/owner` must not be used.
+
+For Azure (keyless), the Entra app needs only the **Cognitive Services OpenAI
+User** role on the Azure OpenAI resource — enough to call deployments, not to
+manage them — plus a federated credential scoped to your repository. No owner or
+contributor role is required.
+
+## API keys in secrets, not config
+
+For openai, anthropic, and openrouter, the key must live in a GitHub Actions
+secret (or an equivalent secret store). It must never be committed to
+`.lgtmaybe.yml` or any other file in the repository. lgtmaybe does not log or
+display key values.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/data-and-privacy/ -->
+
+# Data and Privacy
+
+This document states precisely what data lgtmaybe sends to external services,
+what is redacted before egress, which providers are fully local, and how
+credentials are handled. No data flows occur beyond what is described here.
+
+## What is sent to the LLM provider
+
+lgtmaybe sends one model call per review lens (the categories fan out as
+separate concurrent calls), plus a self-reflection call. Each call contains
+some subset of:
+
+- The **compressed PR diff** — the unified diff of changed files, after
+  generated files, lockfiles, minified assets, and vendored code have been
+  stripped.
+- **Surrounding context lines** — a budget-scaled number of unchanged lines
+  immediately above and below each changed hunk, read from the head revision of
+  the **changed files only**. This gives the model the surrounding function and
+  definitions so it makes fewer false-positive findings. The amount is capped by
+  `context_lines` (default 20, `0` disables it) and shrinks as the diff grows;
+  this content is redacted just like the diff. It is fetched read-only via the
+  GitHub API — your code is never checked out or executed.
+- **PR metadata** — the repository name, PR number, base and head SHAs, and
+  the list of changed file paths.
+- **The PR's stated intent** — the PR title, description, and the first line of
+  each commit message (on the CLI: the commit names from your local `git log`).
+  This feeds the **intent lens** ("does the PR do what it says?"). It is
+  redacted exactly like the diff, wrapped as untrusted data, and sent **only on
+  the intent lens's model call** — drop `intent` from `categories` in
+  `.lgtmaybe.yml` and it is never sent at all.
+- A **system prompt** — the fixed instructions that tell the model to return
+  structured JSON findings.
+
+Nothing else is sent. lgtmaybe does not send:
+
+- PR comments or review threads
+- Commit message bodies (only the first line of each message)
+- Repository contents beyond the changed files (only their hunks plus the
+  surrounding context lines described above)
+- Committer identity or email addresses
+- Any other data from the repository's git history
+
+## Secret redaction before egress
+
+Before the diff is sent to any external provider, lgtmaybe scans it for
+patterns that resemble secrets and replaces the matched values with
+`[REDACTED]`. The same scrub is applied to the surrounding context lines read
+from changed files and to the stated-intent text (PR title, description, commit
+names). Recognised formats include:
+
+- **Cloud / provider keys** — AWS access key IDs (`AKIA…`), OpenAI keys
+  (`sk-…`), Stripe secret keys (`sk_live_…`), and Google API keys (`AIza…`).
+- **Source-control / chat / registry tokens** — GitHub classic tokens
+  (`ghp_`, `gho_`, …), GitHub fine-grained PATs (`github_pat_…`), Slack tokens
+  (`xoxb-…`), npm tokens (`npm_…`), and PyPI tokens (`pypi-…`).
+- **JSON Web Tokens** — `eyJ….eyJ….…` (the whole token, since the payload
+  carries claims/PII).
+- **Private keys** — PEM `-----BEGIN … PRIVATE KEY-----` blocks.
+- **Generic credentials** — `api_key`/`token`/`secret = "…"` assignments,
+  quoted `password`/`passphrase` literals, `Authorization: Bearer/Basic …`
+  headers, passwords embedded in connection-string URLs
+  (`scheme://user:secret@host`), and Azure storage / Cosmos connection-string
+  keys (`AccountKey=…` / `SharedAccessKey=…`).
+
+For credential assignments only the value is replaced — the key name or URL host
+stays readable so the reviewer can still reason about the change.
+
+This happens as the **first** pipeline stage, before the diff is compressed or
+the prompt is built, so redacted values never reach the LLM or appear in logs.
+
+Redaction is a best-effort defence. Do not commit real secrets to your
+repository and rely on this alone.
+
+## Prompt-injection defence
+
+PR diff content is treated as untrusted input throughout the pipeline. lgtmaybe
+defends in depth (OWASP LLM01):
+
+1. The diff is wrapped in explicit `DIFF_START`/`DIFF_END` delimiters and labelled
+   as untrusted data; the stated-intent text gets its own
+   `INTENT_START`/`INTENT_END` block with the same labelling.
+2. Any forged delimiter markers smuggled inside the diff or the intent text are
+   **neutralised** before wrapping — both marker families in both blocks — so a
+   malicious PR cannot close a data block early, append its own instructions, or
+   fake an intent block from inside the diff.
+3. The system prompt instructs the model to ignore any instructions embedded in
+   the diff or the intent text that attempt to alter reviewer behaviour.
+4. The model's response must validate against a strict JSON schema
+   (`extra="forbid"`); drifted or injected fields are rejected rather than acted
+   on.
+
+lgtmaybe does not execute any code from the PR.
+
+## Ollama: fully local, zero egress
+
+When `--provider ollama` is used, the diff and all other data are sent only to
+the ollama server you specify via `--api-base`. If that server is
+`http://localhost:11434`, no data leaves your machine. If it is a remote host
+(Tailscale peer, self-hosted VM), data is sent only to that host.
+
+Ollama itself is not operated by lgtmaybe. Review ollama's own documentation
+for its data handling.
+
+## Cloud providers: data handling
+
+When using Bedrock or Vertex, the compressed and redacted diff is sent over
+HTTPS to the respective cloud provider's inference endpoint. Review each
+provider's data handling policies:
+
+- **AWS Bedrock** — [AWS Bedrock data protection](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html)
+- **Google Vertex AI** — [Vertex AI data governance](https://cloud.google.com/vertex-ai/docs/general/data-governance)
+- **OpenAI** — [OpenAI API data privacy](https://openai.com/policies/api-data-privacy)
+- **Anthropic** — [Anthropic usage policy](https://www.anthropic.com/legal/aup)
+- **OpenRouter** — [OpenRouter privacy policy](https://openrouter.ai/privacy)
+
+## Credentials
+
+lgtmaybe never logs, stores, or transmits API keys. For Bedrock and Vertex,
+short-lived ambient credentials are used and are never written to disk by
+lgtmaybe. See [Auth Model](./auth-model.md) for details.
+
+## GitHub token
+
+`GITHUB_TOKEN` is used to:
+
+1. Read the PR diff and metadata via the GitHub REST API.
+2. Post the review (inline comments + summary) back to the PR.
+
+The token is not sent to any LLM provider. It requires the minimum scopes:
+`contents: read` and `pull-requests: write`.
+
+## Fork pull requests
+
+lgtmaybe uses the `pull_request_target` trigger, which runs in the context of
+the **base branch**. PR code from the fork is never checked out or executed.
+The diff is fetched exclusively through the GitHub API. This prevents a
+malicious PR from gaining access to repository secrets.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/trust-and-cost/ -->
+
+# Trust and Cost
+
+lgtmaybe lets you decide **who can trigger a review**. This document explains that
+choice and the small cost angle behind it, so you can pick the setting that fits
+your repo. The step-by-step setup is in
+[Use as a GitHub Action](../how-to/use-as-github-action.md).
+
+## Who do you want reviews to run for?
+
+There's no single right answer — it depends on your repo and provider:
+
+- **Everyone**, including strangers opening fork PRs — great for a welcoming
+  open-source project where you want every contributor to get feedback.
+- **Trusted contributors** — members and collaborators, the people who already
+  have a relationship with the repo. This is the default.
+- **Admins / owners only** — the tightest setting, handy while you're trying
+  lgtmaybe out.
+
+The example workflows ship with the **trusted contributors** setting, and it's a
+one-line change to widen or narrow it.
+
+## The small cost angle
+
+The only reason this is worth a thought at all is that hosted providers bill per
+run:
+
+- **ollama is free** — it runs the model on your own hardware, so trigger it for
+  whoever you like; there's no per-run cost.
+- **Hosted providers** (OpenAI, Anthropic, OpenRouter, Bedrock, Vertex, Azure)
+  charge for the tokens each review uses.
+
+So if you're on a hosted provider and your repo is public, "everyone" means
+anyone can start a run. That's perfectly fine for plenty of projects — just pick
+it deliberately rather than by accident. The default keeps reviews to people you
+already trust, which is a sensible starting point you can open up whenever you
+want.
+
+Two built-in caps also keep any single run modest regardless of who starts it:
+`max_files` (default 50) and `max_input_tokens` (default 100k). See
+[What gets reviewed](what-gets-reviewed.md) for how the diff is bounded.
+
+## How the choice is expressed
+
+The example workflows gate the `review` job on the triggering user's
+[author association](https://docs.github.com/en/graphql/reference/enums#commentauthorassociation)
+— GitHub's classification of a user's relationship to the repo. By default the
+job runs when that association is `OWNER`, `MEMBER`, or `COLLABORATOR`:
+
+```yaml
+if: >-
+  (github.event_name == 'pull_request_target' &&
+   contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+  (github.event.issue.pull_request &&
+   contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+```
+
+A maintainer can still review an outside contributor's PR any time by commenting
+`/review` on it — their own association passes the gate. To change the policy,
+edit the list:
+
+- **Open it up to everyone** — drop the `if:` so any PR or `/review` comment runs
+  a review.
+- **Welcome returning contributors** — add `CONTRIBUTOR` to auto-review anyone
+  whose PR has merged before.
+- **Tighten to admins** — keep just `OWNER` (and `MEMBER` for your org).
+
+Because the gate lives in the workflow YAML, not in the action's code, the policy
+is entirely yours.
+
+## If you want extra guardrails
+
+Optional, for repos where you want belt-and-braces:
+
+- Require approval for fork-PR workflow runs in
+  **Settings → Actions → General → Fork pull request workflows**.
+- Put the provider key behind a protected `environment`.
+- Set a spending limit in your provider console.
+
+## Reviews are safe to run for anyone
+
+Whoever triggers a review, a malicious PR can't use it to do harm: lgtmaybe
+triggers on `pull_request_target` (so it has the secrets it needs) but **never
+checks out or executes PR code** — it fetches the diff through the GitHub API and
+treats it as untrusted input. So opening the gate wide is a cost decision, not a
+security one. The full boundary — secret redaction, prompt-injection defence, and
+fork safety — is in [Data and Privacy](data-and-privacy.md).

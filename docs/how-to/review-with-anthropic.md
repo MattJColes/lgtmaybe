@@ -1,3 +1,7 @@
+---
+description: Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
+---
+
 # Review with Claude (Anthropic)
 
 Anthropic is a key-based provider: add an `ANTHROPIC_API_KEY` and pick a Claude

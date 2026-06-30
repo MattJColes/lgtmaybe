@@ -1,3 +1,9 @@
+---
+description: Maintainer guide to cutting and publishing a new lgtmaybe release with release-please, PyPI trusted publishing, and GHCR.
+search:
+  exclude: true
+---
+
 # Releasing lgtmaybe (maintainers)
 
 Releases are automated by **release-please** (`.github/workflows/release-please.yml`).

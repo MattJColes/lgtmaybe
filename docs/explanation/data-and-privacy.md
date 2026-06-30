@@ -1,3 +1,7 @@
+---
+description: Exactly what data lgtmaybe sends where — diffs only, secret redaction before egress, no code checkout, fully local with ollama.
+---
+
 # Data and Privacy
 
 This document states precisely what data lgtmaybe sends to external services,

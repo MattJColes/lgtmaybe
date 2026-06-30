@@ -6,10 +6,11 @@ repo_name: MattJColes/lgtmaybe
 edit_uri: edit/main/docs/
 
 docs_dir: docs
-# generate_reference.py lives in docs/ as the source for reference/config.md;
-# keep it out of the built site.
+# The generator scripts live in docs/ as the source for their generated files;
+# keep them out of the built site.
 exclude_docs: |
   generate_reference.py
+  generate_llms_txt.py
 
 theme:
   name: material

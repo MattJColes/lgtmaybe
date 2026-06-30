@@ -1,3 +1,7 @@
+---
+description: lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
+---
+
 # Architecture
 
 lgtmaybe is built on **hexagonal architecture** (ports and adapters). The core

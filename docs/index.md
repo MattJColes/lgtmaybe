@@ -1,3 +1,7 @@
+---
+description: Provider-agnostic AI pull-request reviewer — seven hosted providers, local ollama, any OpenAI-compatible endpoint. Inline review comments, keyless cloud auth.
+---
+
 <div class="hero" markdown>
 
 ![lgtmaybe logo — a shrugging face with curly-brace arms](assets/logo.svg){ width="128" }
@@ -60,3 +64,9 @@ before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
 | `ollama` | None — local only, zero cost |
 | `openai-compatible` | `--api-base` to any OpenAI `/v1` endpoint; key optional (placeholder for keyless local servers) |
+
+## For AI agents
+
+A curated [`llms.txt`](llms.txt) index of these docs — and a whole-corpus
+[`llms-full.txt`](llms-full.txt) — are published at the site root for LLM
+crawlers and coding agents.
