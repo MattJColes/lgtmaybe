@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.2...lgtmaybe-v0.9.0) (2026-06-30)
+
+
+### Features
+
+* **homebrew:** install lgtmaybe + deps from PyPI wheels (preserve_rpath) ([#157](https://github.com/MattJColes/lgtmaybe/issues/157)) ([fe10d12](https://github.com/MattJColes/lgtmaybe/commit/fe10d12810a37e057f743a0bbbb0699c6fc87173))
+
 ## [0.8.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.1...lgtmaybe-v0.8.2) (2026-06-30)
 
 
