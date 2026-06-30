@@ -261,7 +261,7 @@ Every config field can be overridden at the command line:
 ```bash
 lgtmaybe review \
   --provider anthropic \
-  --model claude-haiku-4-5 \
+  --model claude-sonnet-4-6 \
   --min-severity high
 ```
 
