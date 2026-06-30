@@ -4,6 +4,25 @@ Place a `.lgtmaybe.yml` file at the root of your repository to control how
 lgtmaybe reviews pull requests. CLI flags override file values; the file
 provides defaults for all runs.
 
+## Contents
+
+- [Full example](#full-example)
+- [Field reference](#field-reference)
+  - [provider](#provider)
+  - [model](#model)
+  - [min_severity](#min_severity)
+  - [include_paths / exclude_paths](#include_paths-exclude_paths)
+  - [max_files](#max_files)
+  - [max_input_tokens](#max_input_tokens)
+  - [categories](#categories)
+  - [context_lines](#context_lines)
+  - [timeout](#timeout)
+  - [structured_output](#structured_output)
+  - [resolve_fixed](#resolve_fixed)
+  - [extra_lenses](#extra_lenses)
+  - [lens_paths](#lens_paths)
+- [CLI flag overrides](#cli-flag-overrides)
+
 ## Full example
 
 ```yaml
@@ -261,7 +280,7 @@ Every config field can be overridden at the command line:
 ```bash
 lgtmaybe review \
   --provider anthropic \
-  --model claude-haiku-4-5 \
+  --model claude-sonnet-4-6 \
   --min-severity high
 ```
 

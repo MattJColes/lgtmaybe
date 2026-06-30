@@ -8,6 +8,13 @@ review-and-fix loop on your own machine before you ever open a pull request.
 This works with any provider. ollama keeps it local and free; a cloud provider
 gives you a stronger reviewer at a small cost.
 
+## Contents
+
+- [Print the findings as agent instructions](#print-the-findings-as-agent-instructions)
+- [Hand it to the agent](#hand-it-to-the-agent)
+- [Close the loop](#close-the-loop)
+- [See also](#see-also)
+
 ## Print the findings as agent instructions
 
 From inside the repo, on the branch you want reviewed:

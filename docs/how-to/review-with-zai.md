@@ -5,6 +5,15 @@ first-class provider: add a `ZAI_API_KEY` and pick a model. lgtmaybe reaches the
 through litellm's native `zai/` route — no `api_base` needed for the
 international endpoint.
 
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [China / coding-plan endpoint](#china-coding-plan-endpoint)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
 ## Get an API key
 
 Create a key in the [z.ai developer console](https://z.ai/) (see the

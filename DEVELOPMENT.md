@@ -7,7 +7,7 @@ see [CLAUDE.md](CLAUDE.md).
 
 ## Prerequisites
 
-- **Python 3.12+**
+- **Python 3.11+**
 - **[uv](https://github.com/astral-sh/uv)** — the project's package manager and
   task runner. Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 - **Docker** — only if you want to build/run the container action image locally.

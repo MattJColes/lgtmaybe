@@ -3,6 +3,15 @@
 Anthropic is a key-based provider: add an `ANTHROPIC_API_KEY` and pick a Claude
 model. No OIDC, no endpoint to configure.
 
+## Contents
+
+- [Get an API key](#get-an-api-key)
+- [GitHub Action](#github-action)
+- [Run locally](#run-locally)
+- [Choosing the model](#choosing-the-model)
+- [Want it through a gateway instead?](#want-it-through-a-gateway-instead)
+- [Persist non-secret defaults](#persist-non-secret-defaults)
+
 ## Get an API key
 
 Create a key in the [Anthropic Console](https://console.anthropic.com/). In your

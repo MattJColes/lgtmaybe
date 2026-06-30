@@ -3,6 +3,15 @@
 Use this guide to run lgtmaybe with **AWS Bedrock** using GitHub's OIDC token
 — no static AWS credentials stored in secrets.
 
+## Contents
+
+- [How it works](#how-it-works)
+- [One-time AWS setup](#one-time-aws-setup)
+- [Workflow example](#workflow-example)
+- [Choosing a Bedrock model ID](#choosing-a-bedrock-model-id)
+- [Running locally with ambient AWS credentials](#running-locally-with-ambient-aws-credentials)
+- [Troubleshooting](#troubleshooting)
+
 ## How it works
 
 GitHub Actions issues a short-lived OIDC token. AWS STS exchanges that token
@@ -119,10 +128,18 @@ pip install 'lgtmaybe[bedrock]'
 
 lgtmaybe review \
   --provider bedrock \
-  --model us.anthropic.claude-haiku-4-5
+  --model us.anthropic.claude-sonnet-4-6
 ```
 
 lgtmaybe does not require or accept a static API key for Bedrock.
+
+> **`No matching distribution found for lgtmaybe[bedrock]`** (`from versions:
+> none`) — this is not a packaging problem; the `bedrock` extra is published on
+> PyPI. It means `pip` found no version compatible with your environment. The
+> usual cause is an interpreter older than the required **Python 3.11+** (check
+> with `python --version`); install under 3.11+ (e.g. via `pipx`/`uv`). If your
+> Python is fine, your `pip` can't reach PyPI — check your network/proxy or
+> `--index-url`.
 
 ## Troubleshooting
 

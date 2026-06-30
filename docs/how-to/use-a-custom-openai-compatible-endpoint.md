@@ -13,6 +13,17 @@ anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag
 > instead — use it for less setup: [z.ai / GLM](review-with-zai.md) (`zai`) and
 > [ollama](run-locally-with-ollama.md) (`ollama`).
 
+## Contents
+
+- [Local models at a glance](#local-models-at-a-glance)
+- [How it works](#how-it-works)
+- [DeepSeek (hosted, keyed)](#deepseek-hosted-keyed)
+- [llama.cpp (local, keyless)](#llamacpp-local-keyless)
+- [LM Studio (local, keyless)](#lm-studio-local-keyless)
+- [vLLM (local or self-hosted, keyless)](#vllm-local-or-self-hosted-keyless)
+- [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
+- [Gateways that don't support JSON mode (`response_format`)](#gateways-that-dont-support-json-mode-response_format)
+
 ## Local models at a glance
 
 Run a model on your own hardware — zero cost, no key, nothing leaves the machine:
