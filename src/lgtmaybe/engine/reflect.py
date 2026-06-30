@@ -314,7 +314,12 @@ def _head_tail(text: str, max_tokens: int) -> str:
         return text
 
     marker = "… [truncated] …"
-    half = max(1, (max_tokens - count_tokens(marker)) // 2)
+    half = (max_tokens - count_tokens(marker)) // 2
+    if half <= 0:
+        # Budget too small to hold the marker plus any head/tail — flooring the
+        # per-end budget to 1 here would push the result over *max_tokens*, so
+        # attach nothing rather than overflow.
+        return ""
 
     head: list[str] = []
     used = 0
