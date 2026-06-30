@@ -14,12 +14,31 @@ the release: it cuts the tag and the GitHub release, then the same run publishes
 tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
-A third workflow, `.github/workflows/homebrew.yml`, fires on the published
-release and regenerates the **Homebrew formula** in the tap repo
-(`MattJColes/homebrew-lgtmaybe`) so `brew install MattJColes/lgtmaybe/lgtmaybe`
-tracks the latest version. It regenerates the whole formula — including every
-PyPI resource stanza via `scripts/update-homebrew-formula.sh` — so a dependency
-bump is picked up too.
+A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
+formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
+`brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version. It
+regenerates the whole formula — including every PyPI resource stanza via
+`scripts/update-homebrew-formula.sh` — so a dependency bump is picked up too.
+
+Two things make the Homebrew publish less direct than PyPI/GHCR, and the
+workflow is built around both:
+
+- A `release: published` event is **not** delivered for a release that
+  release-please cuts, because it is created with the built-in `GITHUB_TOKEN`
+  (GitHub suppresses downstream workflow triggers from `GITHUB_TOKEN` to prevent
+  recursion). So `release-please.yml` **calls** `homebrew.yml` directly
+  (`workflow_call`) instead of relying on the event.
+- Homebrew's `brew update-python-resources` hardcodes a 24-hour PyPI cooldown
+  (`RELEASE_COOLDOWN_SECONDS`) and refuses to resolve a version published in the
+  last day — a supply-chain guard with no opt-out. A brand-new release therefore
+  **cannot** be turned into a formula immediately. The release-time call detects
+  this and defers; a **daily scheduled run** in `homebrew.yml` is the workhorse
+  that publishes the formula once the version has aged past the cooldown
+  (idempotent — a no-op when the tap is already current). Net effect: a new
+  version lands in the tap within roughly a day of release, not instantly. To
+  publish sooner, re-run `homebrew.yml` via **workflow_dispatch** with the
+  version once it is >24h old, or run `scripts/update-homebrew-formula.sh`
+  locally on a Mac.
 
 Commit messages must follow conventional-commit format — `.github/workflows/commitlint.yml`
 enforces it on PRs so release-please can compute the next version.

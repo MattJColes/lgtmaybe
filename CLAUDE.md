@@ -14,10 +14,18 @@ variants:
 - **Homebrew CLI** — `brew install MattJColes/lgtmaybe/lgtmaybe`, from the
   `MattJColes/homebrew-lgtmaybe` tap. The formula installs the core deps (covers
   the API-key + local providers; keyless cloud needs the `pip` extras), and is
-  regenerated from the published PyPI release on each release by
-  `.github/workflows/homebrew.yml` + `scripts/update-homebrew-formula.sh` (full
-  resource stanzas via `brew update-python-resources`, so dep bumps are picked
-  up — never hand-maintained)
+  regenerated from the published PyPI release by `.github/workflows/homebrew.yml`
+  + `scripts/update-homebrew-formula.sh` (full resource stanzas via
+  `brew update-python-resources`, so dep bumps are picked up — never
+  hand-maintained). Two wrinkles shape how it runs: (1) `release-please.yml`
+  **calls** `homebrew.yml` directly (`workflow_call`) because a `release:
+  published` event isn't delivered for a release cut by the built-in
+  `GITHUB_TOKEN`; (2) `brew update-python-resources` hardcodes a 24h PyPI
+  cooldown (`RELEASE_COOLDOWN_SECONDS`, no opt-out) so a just-published version
+  can't be resolved yet — the release-time call defers (script exits `75`) and a
+  **daily scheduled run** publishes once the version ages past the cooldown
+  (idempotent, no-ops when the tap is current). A new version lands in the tap
+  within ~a day, not instantly
 - **GitHub Action** — composite action (`action.yml`) that does keyless OIDC/WIF
   auth, then runs a GHCR image via the `action` entrypoint
 
