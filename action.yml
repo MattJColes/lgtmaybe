@@ -7,7 +7,7 @@ branding:
 
 inputs:
   provider:
-    description: "LLM provider: openai, anthropic, openrouter, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
+    description: "LLM provider: openai, anthropic, openrouter, zai, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
     required: false
     default: ""
   model:
