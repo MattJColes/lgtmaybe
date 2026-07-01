@@ -1,11 +1,34 @@
 ---
-description: Install the lgtmaybe CLI on macOS or Linuxbrew from the project's Homebrew tap instead of pip.
+description: Install the lgtmaybe CLI with pip (any OS) or Homebrew (macOS/Linuxbrew), and add the cloud extras for keyless Bedrock/Vertex/Azure.
 ---
 
-# Install with Homebrew
+# Install the CLI
 
-On macOS (and Linuxbrew), you can install the `lgtmaybe` CLI from the project's
-[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`.
+Install the `lgtmaybe` command-line tool once; then point it at any provider. This
+page is only about **getting the CLI onto your machine** — choosing a model
+backend (a hosted API, keyless cloud, or a local model) comes after, in the
+[provider how-tos](../index.md#providers).
+
+## Install (pip)
+
+Works on any OS with Python 3.11+:
+
+```bash
+pip install lgtmaybe
+```
+
+Verify it:
+
+```bash
+lgtmaybe --help
+```
+
+Upgrade later with `pip install --upgrade lgtmaybe`.
+
+## Install on macOS (Homebrew)
+
+On macOS (and Linuxbrew) you can install from the project's
+[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`:
 
 ```bash
 brew tap MattJColes/lgtmaybe
@@ -24,17 +47,7 @@ Tapping and installing in one line (`brew install MattJColes/lgtmaybe/lgtmaybe`)
 works too, but still needs the `brew trust …` step first — otherwise the install
 stops at the untrusted-tap error.
 
-Verify it:
-
-```bash
-lgtmaybe --help
-```
-
-Upgrade later with:
-
-```bash
-brew upgrade lgtmaybe
-```
+Upgrade later with `brew upgrade lgtmaybe`.
 
 Homebrew installs lgtmaybe into its own isolated virtualenv, so it never touches
 your system or project Python. The formula creates the venv and installs
@@ -44,18 +57,19 @@ architecture and macOS version — there's no prebuilt bottle to match. It also
 pulls the `ast-grep` formula, which lgtmaybe uses for cross-file symbol
 resolution during review.
 
-## Which providers does the Homebrew build cover?
+## Cloud providers need extras
 
-The formula installs the core dependencies, which covers every **API-key** and
-**local** provider:
+The base install (either method) covers every **API-key** and **local** provider:
 
-- `openai`, `anthropic`, `openrouter`, `zai` — set the provider's API key in your
-  environment.
-- `ollama` and `openai-compatible` — fully local, point `--api-base` at the server.
+| Providers | Covered by base install? |
+|---|---|
+| `openai`, `anthropic`, `openrouter`, `zai` — set the provider's API key in your environment | ✅ Yes |
+| `ollama`, `openai-compatible` — fully local, point `--api-base` at the server | ✅ Yes |
+| `bedrock`, `vertex`, `azure` — keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
-The **keyless cloud** providers — `bedrock`, `vertex`, `azure` — need extra cloud
-SDKs that the Homebrew formula does not bundle. For those, install the CLI from
-PyPI with the matching extra, e.g.:
+The **keyless cloud** providers need extra cloud SDKs that the base install (and
+the Homebrew formula) does not bundle. Install the CLI from PyPI with the matching
+extra:
 
 ```bash
 pip install 'lgtmaybe[bedrock]'   # or [vertex] / [azure]
