@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.9.0...lgtmaybe-v0.9.1) (2026-07-01)
+
+
+### Documentation
+
+* streamline install + local-model guides ([#160](https://github.com/MattJColes/lgtmaybe/issues/160)) ([6425ad3](https://github.com/MattJColes/lgtmaybe/commit/6425ad30e2adc866fb5001d4a8a0c3ae791ecea4))
+
 ## [0.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.2...lgtmaybe-v0.9.0) (2026-06-30)
 
 
