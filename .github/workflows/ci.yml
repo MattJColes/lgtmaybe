@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
 
@@ -40,8 +40,8 @@ jobs:
         run: uv run pytest -q
 
   # Single, matrix-independent status for branch protection to require. The `test`
-  # job above runs once per Python version, so it reports as `test (3.11)` /
-  # `test (3.12)` — names that change whenever the matrix does. This gate reports a
+  # job above runs once per Python version, so it reports as `test (3.11)` …
+  # `test (3.14)` — names that change whenever the matrix does. This gate reports a
   # stable `check` context that is green only when every `test` leg passed, so the
   # required check never dangles as "Expected" when the matrix is edited.
   check:

@@ -50,11 +50,33 @@ _QUOTA_MARKERS = (
     "check your plan and billing",
 )
 
+# An expired/invalid cloud credential is permanent — a retry can't refresh it, so
+# storming the backoff over every lens just delays an inevitable failure (the same
+# wasted-runner-time trap as a quota error). Unlike a bad *static* key (which
+# litellm raises as AuthenticationError, already caught above), an expired ambient
+# token (Bedrock STS, Vertex ADC) comes back as a 403 that litellm maps to a
+# generic APIConnectionError — indistinguishable by type from a transient ollama
+# "connection refused" that must still be retried. So we tell them apart by
+# message, exactly as with quota vs. capacity above.
+_EXPIRED_CREDENTIAL_MARKERS = (
+    "security token included in the request is expired",
+    "security token included in the request is invalid",
+    "expiredtoken",
+    "expired credential",
+    "the credential provided is expired",
+)
+
 
 def _is_quota_rate_limit(exc: BaseException) -> bool:
     """True for a quota/billing 429 (permanent), False for a capacity 429."""
     msg = str(exc).lower()
     return any(marker in msg for marker in _QUOTA_MARKERS)
+
+
+def _is_expired_credential(exc: BaseException) -> bool:
+    """True when *exc* is an expired/invalid ambient cloud credential (permanent)."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _EXPIRED_CREDENTIAL_MARKERS)
 
 
 def _is_permanent(exc: BaseException) -> bool:
@@ -63,7 +85,7 @@ def _is_permanent(exc: BaseException) -> bool:
         return True
     if isinstance(exc, RateLimitError):
         return _is_quota_rate_limit(exc)
-    return False
+    return _is_expired_credential(exc)
 
 
 def _rejects_temperature(exc: Exception) -> bool:
