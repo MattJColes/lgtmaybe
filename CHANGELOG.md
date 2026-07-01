@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.9.1...lgtmaybe-v0.9.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **provider:** fail fast on expired cloud credentials ([#162](https://github.com/MattJColes/lgtmaybe/issues/162)) ([c56fa7d](https://github.com/MattJColes/lgtmaybe/commit/c56fa7d39a8468127b55c9288926befa9d5c9eb8))
+
 ## [0.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.9.0...lgtmaybe-v0.9.1) (2026-07-01)
 
 
