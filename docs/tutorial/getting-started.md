@@ -29,8 +29,8 @@ brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-part
 brew install lgtmaybe
 ```
 
-See [Install with Homebrew](../how-to/install-with-homebrew.md) for details (the
-`brew trust` step, and that the Homebrew build covers the API-key and local
+See [Install the CLI](../how-to/install-the-cli.md) for details (the
+`brew trust` step, and that the base install covers the API-key and local
 providers while keyless cloud providers need the `pip` extras).
 
 Verify the install:

@@ -108,8 +108,8 @@ brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-part
 brew install lgtmaybe
 ```
 
-See [Install with Homebrew](../how-to/install-with-homebrew.md) for details (the
-`brew trust` step, and that the Homebrew build covers the API-key and local
+See [Install the CLI](../how-to/install-the-cli.md) for details (the
+`brew trust` step, and that the base install covers the API-key and local
 providers while keyless cloud providers need the `pip` extras).
 
 Verify the install:
@@ -195,12 +195,35 @@ lgtmaybe ran its pipeline over your local diff:
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/install-with-homebrew/ -->
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/install-the-cli/ -->
 
-# Install with Homebrew
+# Install the CLI
 
-On macOS (and Linuxbrew), you can install the `lgtmaybe` CLI from the project's
-[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`.
+Install the `lgtmaybe` command-line tool once; then point it at any provider. This
+page is only about **getting the CLI onto your machine** — choosing a model
+backend (a hosted API, keyless cloud, or a local model) comes after, in the
+[provider how-tos](../index.md#providers).
+
+## Install (pip)
+
+Works on any OS with Python 3.11+:
+
+```bash
+pip install lgtmaybe
+```
+
+Verify it:
+
+```bash
+lgtmaybe --help
+```
+
+Upgrade later with `pip install --upgrade lgtmaybe`.
+
+## Install on macOS (Homebrew)
+
+On macOS (and Linuxbrew) you can install from the project's
+[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`:
 
 ```bash
 brew tap MattJColes/lgtmaybe
@@ -219,17 +242,7 @@ Tapping and installing in one line (`brew install MattJColes/lgtmaybe/lgtmaybe`)
 works too, but still needs the `brew trust …` step first — otherwise the install
 stops at the untrusted-tap error.
 
-Verify it:
-
-```bash
-lgtmaybe --help
-```
-
-Upgrade later with:
-
-```bash
-brew upgrade lgtmaybe
-```
+Upgrade later with `brew upgrade lgtmaybe`.
 
 Homebrew installs lgtmaybe into its own isolated virtualenv, so it never touches
 your system or project Python. The formula creates the venv and installs
@@ -239,18 +252,19 @@ architecture and macOS version — there's no prebuilt bottle to match. It also
 pulls the `ast-grep` formula, which lgtmaybe uses for cross-file symbol
 resolution during review.
 
-## Which providers does the Homebrew build cover?
+## Cloud providers need extras
 
-The formula installs the core dependencies, which covers every **API-key** and
-**local** provider:
+The base install (either method) covers every **API-key** and **local** provider:
 
-- `openai`, `anthropic`, `openrouter`, `zai` — set the provider's API key in your
-  environment.
-- `ollama` and `openai-compatible` — fully local, point `--api-base` at the server.
+| Providers | Covered by base install? |
+|---|---|
+| `openai`, `anthropic`, `openrouter`, `zai` — set the provider's API key in your environment | ✅ Yes |
+| `ollama`, `openai-compatible` — fully local, point `--api-base` at the server | ✅ Yes |
+| `bedrock`, `vertex`, `azure` — keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
-The **keyless cloud** providers — `bedrock`, `vertex`, `azure` — need extra cloud
-SDKs that the Homebrew formula does not bundle. For those, install the CLI from
-PyPI with the matching extra, e.g.:
+The **keyless cloud** providers need extra cloud SDKs that the base install (and
+the Homebrew formula) does not bundle. Install the CLI from PyPI with the matching
+extra:
 
 ```bash
 pip install 'lgtmaybe[bedrock]'   # or [vertex] / [azure]
@@ -263,6 +277,194 @@ bundles all three and wires up the OIDC/WIF auth for you.
 
 - Run your first local review: [Getting started](../tutorial/getting-started.md).
 - Post reviews on real pull requests: [Use as a GitHub Action](use-as-github-action.md).
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-as-github-action/ -->
+
+# Use lgtmaybe as a GitHub Action
+
+Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
+that reviews pull requests automatically.
+
+Ready-to-copy workflows for every cloud and API-key provider live in
+[`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
+ollama runs the model on your own machine, so it is local-only — use the
+[CLI](run-locally-with-ollama.md) rather than a posting workflow.
+
+## Contents
+
+- [Security requirement: pull_request_target](#security-requirement-pull_request_target)
+- [Who can trigger a review](#who-can-trigger-a-review)
+- [Minimal workflow — openai](#minimal-workflow-openai)
+- [Other key-based providers](#other-key-based-providers)
+- [Keyless cloud workflows](#keyless-cloud-workflows)
+- [Action inputs](#action-inputs)
+- [Adding a config file](#adding-a-config-file)
+- [Pin to a specific version](#pin-to-a-specific-version)
+
+## Security requirement: pull_request_target
+
+All lgtmaybe workflows use the `pull_request_target` trigger, not
+`pull_request`. This is non-negotiable:
+
+- `pull_request_target` runs in the context of the **base branch**, so it can
+  access secrets and write to the PR.
+- lgtmaybe **never checks out or executes PR code** — it fetches the diff via
+  the GitHub API only. The PR author cannot inject code that runs in the
+  reviewer's environment.
+
+The action derives the PR from the triggering event, so there is no `pr-url`
+input to set. On an `issue_comment` event it routes the slash command
+(`/review`, `/ask`, `/describe`, `/improve`) to the same engine.
+
+> **Note on cost.** With ollama the model runs on your own hardware, so reviews
+> are free. On a hosted provider each run uses tokens you pay for, so it's worth
+> a moment's thought about who can trigger one (next section) — the default keeps
+> that to people you trust, and `max_files` / `max_input_tokens` keep any single
+> run modest.
+
+## Who can trigger a review
+
+You choose who reviews run for. The example workflows gate the `review` job on
+the triggering user's
+[author association](https://docs.github.com/en/graphql/reference/enums#commentauthorassociation)
+and default to **trusted contributors** — `OWNER`, `MEMBER`, and `COLLABORATOR`.
+A maintainer can also review an outside contributor's PR any time by commenting
+`/review` on it (their own association passes the gate).
+
+To change the policy, edit the `if:` on the `review` job:
+
+- **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
+  review (a friendly choice for an open project; on a hosted provider it means
+  anyone can start a run, so pick it deliberately).
+- **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
+  PR has merged before.
+- **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
+
+For extra guardrails, you can also require approval for fork-PR workflow runs in
+**Settings → Actions → General → Fork pull request workflows**, or move the
+provider key behind a protected `environment`. See
+[Trust and Cost](../explanation/trust-and-cost.md) for the reasoning behind these
+options.
+
+## Minimal workflow — openai
+
+```yaml
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    # Only trusted authors (owner / member / collaborator) can trigger a review.
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6 # base repo only — for .lgtmaybe.yml config
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: openai
+          model: gpt-5.5
+          api_key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+## Other key-based providers
+
+Swap the `provider`, `model`, and `api_key` inputs:
+
+```yaml
+# anthropic
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+# openrouter
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4-6
+    api_key: ${{ secrets.OPENROUTER_API_KEY }}
+
+# zai (GLM / Zhipu AI)
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: zai
+    model: glm-4.6
+    api_key: ${{ secrets.ZAI_API_KEY }}
+```
+
+For these, the one-time setup is just: generate an API key in the provider's
+console and add it as a repo secret (Settings → Secrets and variables → Actions),
+then reference it as `api_key` above.
+
+## Keyless cloud workflows
+
+Bedrock (AWS OIDC), Vertex (GCP WIF), and Azure (Entra OIDC) need **no API keys
+in secrets** — the action performs the keyless token exchange for you when you
+pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
+`id-token: write` permission. See:
+
+- [Review with Bedrock OIDC](./review-with-bedrock-oidc.md)
+- [Review with Vertex WIF](./review-with-vertex-wif.md)
+- [Review with Azure OpenAI](./review-with-azure.md)
+
+## Action inputs
+
+| Input | Default | Description |
+|---|---|---|
+| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
+| `model` | — | Model identifier for the chosen provider |
+| `fallback_model` | — | Model to retry with if the primary model fails |
+| `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
+| `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
+| `timeout` | provider default (ollama 300s, cloud 60s) | Per-request timeout in seconds for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
+| `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
+| `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
+| `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
+| `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
+| `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
+| `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
+| `aws_region` | `us-east-1` | AWS region for bedrock |
+| `gcp_wif_provider` | — | Workload Identity Federation provider resource name for vertex |
+| `gcp_service_account` | — | GCP service account email to impersonate via WIF |
+| `azure_client_id` | — | Entra (Azure AD) client ID with a federated credential — keyless azure via OIDC |
+| `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
+| `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
+| `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
+| `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
+
+The action sets the `GITHUB_TOKEN` and provider credentials for the container
+itself — you do not pass them as `env`.
+
+## Adding a config file
+
+Place a `.lgtmaybe.yml` at the repo root to control severity thresholds, path
+filters, and cost caps. See
+[Configure .lgtmaybe.yml](./configure-lgtmaybe-yml.md) for all options.
+
+## Pin to a specific version
+
+`@v0` is a floating tag that tracks the latest `v0.x.x` release. To pin exactly,
+use a full version tag:
+
+```yaml
+uses: MattJColes/lgtmaybe@v0.1.0
+```
 
 ---
 
@@ -1040,6 +1242,13 @@ cost, zero egress, no keys required. The CLI reviews your `git` diff and prints
 the findings; to post reviews on real pull requests, use the
 [GitHub Action](use-as-github-action.md).
 
+> **ollama is the easiest local start.** Running a different local server —
+> **vLLM, llama.cpp, or LM Studio** — or a hosted OpenAI-compatible API like
+> DeepSeek? Use the `openai-compatible` provider instead:
+> [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md).
+> The [model-choice and hardware guidance below](#which-model-and-will-it-fit)
+> applies to any local runtime.
+
 ## Contents
 
 - [Prerequisites](#prerequisites)
@@ -1340,6 +1549,12 @@ start), so it gets its [own guide](run-locally-with-ollama.md). vLLM, llama.cpp,
 and LM Studio are reached through `openai-compatible` and the `--api-base` of
 their local server, as shown below.
 
+**Which model, and will it fit?** The same model-choice and hardware guidance
+applies to any local runtime — pick a coding model, bigger and newer is more
+accurate, and size it to your RAM/VRAM. See
+[Which model, and will it fit?](run-locally-with-ollama.md#which-model-and-will-it-fit)
+in the ollama guide.
+
 ## How it works
 
 `--provider openai-compatible` routes through litellm's OpenAI client, but sends
@@ -1471,279 +1686,6 @@ Persist it as `structured_output: false` in `.lgtmaybe.yml`, or set the
 [lmstudio]: https://lmstudio.ai/
 [vllm]: https://docs.vllm.ai/
 [ollama]: https://ollama.com/
-
----
-
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/fix-findings-with-an-ai-agent/ -->
-
-# Fix findings with an AI agent
-
-`lgtmaybe review` runs locally and prints findings; it never posts anywhere. The
-`--format agent` output turns those findings into plain correction instructions
-an AI coding agent (such as Claude Code) can read and apply, so you get a
-review-and-fix loop on your own machine before you ever open a pull request.
-
-This works with any provider. ollama keeps it local and free; a cloud provider
-gives you a stronger reviewer at a small cost.
-
-## Contents
-
-- [Print the findings as agent instructions](#print-the-findings-as-agent-instructions)
-- [Hand it to the agent](#hand-it-to-the-agent)
-- [Close the loop](#close-the-loop)
-- [See also](#see-also)
-
-## Print the findings as agent instructions
-
-From inside the repo, on the branch you want reviewed:
-
-```bash
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434 \
-  --format agent
-```
-
-The output is directive rather than a bare listing:
-
-```text
-Code review findings for your local changes. Act as the developer and apply each
-correction below: open the file at the given path and line, fix the issue, and
-apply the suggested change where one is given.
-
-[1] src/app.py:42  (HIGH)  possible NPE
-    Issue: `user` may be None here.
-    Suggested fix:
-        if user is not None:
-            do_thing(user)
-
-1 finding(s) to address. After applying the fixes, re-run `lgtmaybe review` to
-confirm they are resolved.
-```
-
-## Hand it to the agent
-
-Save the instructions and point your agent at them:
-
-```bash
-lgtmaybe review --provider ollama --model qwen3.6:27b \
-  --api-base http://localhost:11434 --format agent > review.txt
-```
-
-Then ask the agent to work through `review.txt` — for example, in Claude Code:
-
-> Apply the corrections in review.txt, then delete it.
-
-Because each finding carries a path, a line, the issue, and (often) a suggested
-replacement, the agent has everything it needs to make the edit without guessing.
-
-## Close the loop
-
-Once the agent has applied the fixes, run the review again to confirm the
-findings are gone:
-
-```bash
-lgtmaybe review --provider ollama --model qwen3.6:27b \
-  --api-base http://localhost:11434 --format agent
-```
-
-A clean branch prints `No review findings — nothing to correct.` Repeat until
-you are happy, then open your PR. To post reviews on the PR itself, wire up the
-[GitHub Action](use-as-github-action.md).
-
-## See also
-
-- [Run locally with ollama](run-locally-with-ollama.md) — the local CLI setup
-- [What gets reviewed](../explanation/what-gets-reviewed.md) — scope, caps, and output formats
-
----
-
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-as-github-action/ -->
-
-# Use lgtmaybe as a GitHub Action
-
-Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
-that reviews pull requests automatically.
-
-Ready-to-copy workflows for every cloud and API-key provider live in
-[`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
-ollama runs the model on your own machine, so it is local-only — use the
-[CLI](run-locally-with-ollama.md) rather than a posting workflow.
-
-## Contents
-
-- [Security requirement: pull_request_target](#security-requirement-pull_request_target)
-- [Who can trigger a review](#who-can-trigger-a-review)
-- [Minimal workflow — openai](#minimal-workflow-openai)
-- [Other key-based providers](#other-key-based-providers)
-- [Keyless cloud workflows](#keyless-cloud-workflows)
-- [Action inputs](#action-inputs)
-- [Adding a config file](#adding-a-config-file)
-- [Pin to a specific version](#pin-to-a-specific-version)
-
-## Security requirement: pull_request_target
-
-All lgtmaybe workflows use the `pull_request_target` trigger, not
-`pull_request`. This is non-negotiable:
-
-- `pull_request_target` runs in the context of the **base branch**, so it can
-  access secrets and write to the PR.
-- lgtmaybe **never checks out or executes PR code** — it fetches the diff via
-  the GitHub API only. The PR author cannot inject code that runs in the
-  reviewer's environment.
-
-The action derives the PR from the triggering event, so there is no `pr-url`
-input to set. On an `issue_comment` event it routes the slash command
-(`/review`, `/ask`, `/describe`, `/improve`) to the same engine.
-
-> **Note on cost.** With ollama the model runs on your own hardware, so reviews
-> are free. On a hosted provider each run uses tokens you pay for, so it's worth
-> a moment's thought about who can trigger one (next section) — the default keeps
-> that to people you trust, and `max_files` / `max_input_tokens` keep any single
-> run modest.
-
-## Who can trigger a review
-
-You choose who reviews run for. The example workflows gate the `review` job on
-the triggering user's
-[author association](https://docs.github.com/en/graphql/reference/enums#commentauthorassociation)
-and default to **trusted contributors** — `OWNER`, `MEMBER`, and `COLLABORATOR`.
-A maintainer can also review an outside contributor's PR any time by commenting
-`/review` on it (their own association passes the gate).
-
-To change the policy, edit the `if:` on the `review` job:
-
-- **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review (a friendly choice for an open project; on a hosted provider it means
-  anyone can start a run, so pick it deliberately).
-- **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
-  PR has merged before.
-- **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
-
-For extra guardrails, you can also require approval for fork-PR workflow runs in
-**Settings → Actions → General → Fork pull request workflows**, or move the
-provider key behind a protected `environment`. See
-[Trust and Cost](../explanation/trust-and-cost.md) for the reasoning behind these
-options.
-
-## Minimal workflow — openai
-
-```yaml
-name: lgtmaybe
-
-on:
-  pull_request_target:
-  issue_comment:
-    types: [created]
-
-permissions:
-  contents: read
-  pull-requests: write
-
-jobs:
-  review:
-    # Only trusted authors (owner / member / collaborator) can trigger a review.
-    if: >-
-      (github.event_name == 'pull_request_target' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
-      (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6 # base repo only — for .lgtmaybe.yml config
-      - uses: MattJColes/lgtmaybe@v0
-        with:
-          provider: openai
-          model: gpt-5.5
-          api_key: ${{ secrets.OPENAI_API_KEY }}
-```
-
-## Other key-based providers
-
-Swap the `provider`, `model`, and `api_key` inputs:
-
-```yaml
-# anthropic
-- uses: MattJColes/lgtmaybe@v0
-  with:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-
-# openrouter
-- uses: MattJColes/lgtmaybe@v0
-  with:
-    provider: openrouter
-    model: anthropic/claude-sonnet-4-6
-    api_key: ${{ secrets.OPENROUTER_API_KEY }}
-
-# zai (GLM / Zhipu AI)
-- uses: MattJColes/lgtmaybe@v0
-  with:
-    provider: zai
-    model: glm-4.6
-    api_key: ${{ secrets.ZAI_API_KEY }}
-```
-
-For these, the one-time setup is just: generate an API key in the provider's
-console and add it as a repo secret (Settings → Secrets and variables → Actions),
-then reference it as `api_key` above.
-
-## Keyless cloud workflows
-
-Bedrock (AWS OIDC), Vertex (GCP WIF), and Azure (Entra OIDC) need **no API keys
-in secrets** — the action performs the keyless token exchange for you when you
-pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
-`id-token: write` permission. See:
-
-- [Review with Bedrock OIDC](./review-with-bedrock-oidc.md)
-- [Review with Vertex WIF](./review-with-vertex-wif.md)
-- [Review with Azure OpenAI](./review-with-azure.md)
-
-## Action inputs
-
-| Input | Default | Description |
-|---|---|---|
-| `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
-| `model` | — | Model identifier for the chosen provider |
-| `fallback_model` | — | Model to retry with if the primary model fails |
-| `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
-| `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
-| `timeout` | provider default (ollama 300s, cloud 60s) | Per-request timeout in seconds for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
-| `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
-| `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
-| `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
-| `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
-| `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
-| `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
-| `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
-| `aws_region` | `us-east-1` | AWS region for bedrock |
-| `gcp_wif_provider` | — | Workload Identity Federation provider resource name for vertex |
-| `gcp_service_account` | — | GCP service account email to impersonate via WIF |
-| `azure_client_id` | — | Entra (Azure AD) client ID with a federated credential — keyless azure via OIDC |
-| `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
-| `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
-| `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
-| `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
-
-The action sets the `GITHUB_TOKEN` and provider credentials for the container
-itself — you do not pass them as `env`.
-
-## Adding a config file
-
-Place a `.lgtmaybe.yml` at the repo root to control severity thresholds, path
-filters, and cost caps. See
-[Configure .lgtmaybe.yml](./configure-lgtmaybe-yml.md) for all options.
-
-## Pin to a specific version
-
-`@v0` is a floating tag that tracks the latest `v0.x.x` release. To pin exactly,
-use a full version tag:
-
-```yaml
-uses: MattJColes/lgtmaybe@v0.1.0
-```
 
 ---
 
@@ -2211,6 +2153,91 @@ your lenses.
 
 - [Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md#extra_lenses) — the field reference.
 - [What gets reviewed](../explanation/what-gets-reviewed.md) — the built-in lenses.
+
+---
+
+<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/fix-findings-with-an-ai-agent/ -->
+
+# Fix findings with an AI agent
+
+`lgtmaybe review` runs locally and prints findings; it never posts anywhere. The
+`--format agent` output turns those findings into plain correction instructions
+an AI coding agent (such as Claude Code) can read and apply, so you get a
+review-and-fix loop on your own machine before you ever open a pull request.
+
+This works with any provider. ollama keeps it local and free; a cloud provider
+gives you a stronger reviewer at a small cost.
+
+## Contents
+
+- [Print the findings as agent instructions](#print-the-findings-as-agent-instructions)
+- [Hand it to the agent](#hand-it-to-the-agent)
+- [Close the loop](#close-the-loop)
+- [See also](#see-also)
+
+## Print the findings as agent instructions
+
+From inside the repo, on the branch you want reviewed:
+
+```bash
+lgtmaybe review \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434 \
+  --format agent
+```
+
+The output is directive rather than a bare listing:
+
+```text
+Code review findings for your local changes. Act as the developer and apply each
+correction below: open the file at the given path and line, fix the issue, and
+apply the suggested change where one is given.
+
+[1] src/app.py:42  (HIGH)  possible NPE
+    Issue: `user` may be None here.
+    Suggested fix:
+        if user is not None:
+            do_thing(user)
+
+1 finding(s) to address. After applying the fixes, re-run `lgtmaybe review` to
+confirm they are resolved.
+```
+
+## Hand it to the agent
+
+Save the instructions and point your agent at them:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.6:27b \
+  --api-base http://localhost:11434 --format agent > review.txt
+```
+
+Then ask the agent to work through `review.txt` — for example, in Claude Code:
+
+> Apply the corrections in review.txt, then delete it.
+
+Because each finding carries a path, a line, the issue, and (often) a suggested
+replacement, the agent has everything it needs to make the edit without guessing.
+
+## Close the loop
+
+Once the agent has applied the fixes, run the review again to confirm the
+findings are gone:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.6:27b \
+  --api-base http://localhost:11434 --format agent
+```
+
+A clean branch prints `No review findings — nothing to correct.` Repeat until
+you are happy, then open your PR. To post reviews on the PR itself, wire up the
+[GitHub Action](use-as-github-action.md).
+
+## See also
+
+- [Run locally with ollama](run-locally-with-ollama.md) — the local CLI setup
+- [What gets reviewed](../explanation/what-gets-reviewed.md) — scope, caps, and output formats
 
 ---
 
