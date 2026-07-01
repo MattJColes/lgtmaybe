@@ -226,6 +226,36 @@ class TestFailFastOnPermanentErrors:
         assert result.text == "ok after backoff"
         assert calls == 2
 
+    def test_expired_cloud_credentials_is_not_retried(self) -> None:
+        """An expired AWS security token (Bedrock 403) reaches litellm as an
+        APIConnectionError, not an AuthenticationError — but retrying can't
+        refresh it, so it's a permanent failure: one attempt, then raise. The
+        message is what distinguishes it from a genuinely transient connection
+        error (ollama warming up), which must still be retried."""
+        calls = 0
+
+        def expired(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.APIConnectionError(
+                message=(
+                    "litellm.APIConnectionError: BedrockException - "
+                    '{"message":"The security token included in the request is expired"}'
+                ),
+                model="us.anthropic.claude-sonnet-4-6",
+                llm_provider="bedrock",
+            )
+
+        with patch("litellm.completion", side_effect=expired):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.APIConnectionError):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    "bedrock/us.anthropic.claude-sonnet-4-6",
+                )
+
+        assert calls == 1
+
     def test_authentication_error_is_not_retried(self) -> None:
         """A bad key won't become good on a retry — fail fast."""
         calls = 0
