@@ -6,7 +6,7 @@ that reviews pull requests automatically.
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
 ollama runs the model on your own machine, so it is local-only — use the
-[CLI](run-locally-with-ollama.md) rather than a posting workflow.
+[CLI](run-a-local-model.md) rather than a posting workflow.
 
 ## Security requirement: pull_request_target
 

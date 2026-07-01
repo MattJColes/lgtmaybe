@@ -17,6 +17,9 @@ and no pull request required.
 pip install lgtmaybe
 ```
 
+Prefer Homebrew, or want the cloud-provider extras? See
+[Install the CLI](../how-to/install.md).
+
 Verify the install:
 
 ```bash

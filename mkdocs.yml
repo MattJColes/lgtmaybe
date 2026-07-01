@@ -11,6 +11,12 @@ docs_dir: docs
 exclude_docs: |
   generate_reference.py
 
+# Redirect stubs for pages merged into run-a-local-model.md; kept to preserve
+# their published URLs, intentionally not in the nav.
+not_in_nav: |
+  how-to/run-locally-with-ollama.md
+  how-to/use-a-custom-openai-compatible-endpoint.md
+
 theme:
   name: material
   custom_dir: overrides
@@ -60,8 +66,8 @@ nav:
   - Tutorial:
       - Getting started: tutorial/getting-started.md
   - How-to:
-      - Run locally with ollama: how-to/run-locally-with-ollama.md
-      - Use a custom OpenAI-compatible endpoint: how-to/use-a-custom-openai-compatible-endpoint.md
+      - Install the CLI: how-to/install.md
+      - Run a local or OpenAI-compatible model: how-to/run-a-local-model.md
       - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
       - Review with Bedrock OIDC: how-to/review-with-bedrock-oidc.md
       - Review with Vertex WIF: how-to/review-with-vertex-wif.md

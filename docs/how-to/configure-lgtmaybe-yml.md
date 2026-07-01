@@ -156,7 +156,7 @@ timeout: 900   # 15 minutes per call, e.g. for a big model on CPU
 ```
 
 Default: auto (ollama 300 s, cloud 60 s). See
-[Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
+[Run a local or OpenAI-compatible model](run-a-local-model.md#slow-models-and-timeouts).
 
 ### structured_output
 

@@ -69,5 +69,5 @@ you are happy, then open your PR. To post reviews on the PR itself, wire up the
 
 ## See also
 
-- [Run locally with ollama](run-locally-with-ollama.md) — the local CLI setup
+- [Run a local or OpenAI-compatible model](run-a-local-model.md) — the local CLI setup
 - [What gets reviewed](../explanation/what-gets-reviewed.md) — scope, caps, and output formats

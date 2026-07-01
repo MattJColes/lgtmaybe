@@ -114,7 +114,7 @@ up the [GitHub Action](#use-as-a-github-action). See
 > **Picking a model:** use a **coding** model, and **bigger/newer is more
 > accurate**. Our benchmark numbers are for a small `qwen3.5:4b`; a larger,
 > current coding model catches more. See
-> [Which model?](docs/how-to/run-locally-with-ollama.md#which-model-and-will-it-fit).
+> [Which model?](docs/how-to/run-a-local-model.md#which-model-and-will-it-fit).
 
 ## Providers
 
@@ -140,8 +140,8 @@ Markdown sources below.
 
 **How-to guides** — task recipes
 
-- [Run locally with ollama](docs/how-to/run-locally-with-ollama.md)
-- [Use a custom OpenAI-compatible endpoint](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
+- [Install the CLI](docs/how-to/install.md)
+- [Run a local or OpenAI-compatible model](docs/how-to/run-a-local-model.md)
 - [Review with Bedrock OIDC](docs/how-to/review-with-bedrock-oidc.md)
 - [Review with Vertex WIF](docs/how-to/review-with-vertex-wif.md)
 - [Review with Azure OpenAI](docs/how-to/review-with-azure.md)
@@ -194,7 +194,7 @@ Azure) are **keyless** — pass `aws_role_arn` / `gcp_wif_provider` /
 `azure_client_id` and the action does the OIDC/WIF exchange for you (needs
 `id-token: write`). See
 [Use as a GitHub Action](docs/how-to/use-as-github-action.md). ollama is local
-only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instead.
+only — run it through the [CLI](docs/how-to/run-a-local-model.md) instead.
 
 > **🔧 Choose who can trigger reviews.** You decide who reviews run for —
 > everyone, trusted contributors, or just admins. The example workflows default
@@ -206,7 +206,7 @@ only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instea
 
 ## Distribution
 
-- **CLI** — `pip install lgtmaybe`
+- **CLI** — `pip install lgtmaybe` or `brew install mattjcoles/tap/lgtmaybe` (see [Install the CLI](docs/how-to/install.md))
 - **GitHub Action** — `uses: MattJColes/lgtmaybe@v0`
 
 ## Contributing
