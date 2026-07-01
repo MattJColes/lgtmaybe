@@ -26,7 +26,9 @@ use the [GitHub Action](use-as-github-action.md).
 === "Homebrew"
 
     ```bash
-    brew install mattjcoles/tap/lgtmaybe
+    brew tap MattJColes/lgtmaybe
+    brew trust MattJColes/lgtmaybe
+    brew install lgtmaybe
     ```
 
 ## Verify

@@ -206,7 +206,7 @@ only — run it through the [CLI](docs/how-to/run-a-local-model.md) instead.
 
 ## Distribution
 
-- **CLI** — `pip install lgtmaybe` or `brew install mattjcoles/tap/lgtmaybe` (see [Install the CLI](docs/how-to/install.md))
+- **CLI** — `pip install lgtmaybe` or Homebrew (`brew tap MattJColes/lgtmaybe`; see [Install the CLI](docs/how-to/install.md))
 - **GitHub Action** — `uses: MattJColes/lgtmaybe@v0`
 
 ## Contributing
