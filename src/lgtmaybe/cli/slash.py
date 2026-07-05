@@ -12,10 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
 
-from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
-from lgtmaybe.core.ports import ProviderClient, ReviewEngine
+from lgtmaybe.core.models import ReviewConfig
+from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine.injection import wrap_diff
 from lgtmaybe.engine.redact import redact
 
@@ -31,22 +30,6 @@ class SlashCommand(StrEnum):
 class ParsedCommand:
     name: SlashCommand
     arg: str
-
-
-class PRGateway(Protocol):
-    """The gateway surface a slash command needs.
-
-    Superset of the frozen GitHubGateway port: adds ``post_issue_comment`` for
-    in-thread replies. RestGitHubGateway satisfies this structurally.
-    """
-
-    def get_pr_context(self) -> PRContext: ...
-
-    def post_review(
-        self, findings: list[ReviewFinding], summary: str, diff: str | None = None
-    ) -> None: ...
-
-    def post_issue_comment(self, body: str) -> None: ...
 
 
 _ASK_SYSTEM = (
@@ -80,7 +63,7 @@ def parse_command(body: str) -> ParsedCommand | None:
 def dispatch(
     parsed: ParsedCommand | None,
     *,
-    github: PRGateway,
+    github: GitHubGateway,
     engine: ReviewEngine,
     provider: ProviderClient,
     cfg: ReviewConfig,
@@ -105,7 +88,7 @@ def dispatch(
 
 
 def _answer_question(
-    provider: ProviderClient, github: PRGateway, cfg: ReviewConfig, question: str
+    provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig, question: str
 ) -> str:
     ctx = github.get_pr_context()
     user = f"{wrap_diff(redact(ctx.diff))}\n\nQuestion: {question}"
@@ -116,7 +99,7 @@ def _answer_question(
     return result.text
 
 
-def _describe(provider: ProviderClient, github: PRGateway, cfg: ReviewConfig) -> str:
+def _describe(provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig) -> str:
     ctx = github.get_pr_context()
     user = wrap_diff(redact(ctx.diff))
     result = provider.complete(
