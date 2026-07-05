@@ -20,6 +20,7 @@ provides defaults for all runs.
   - [max_input_tokens](#max_input_tokens)
   - [categories](#categories)
   - [context_lines](#context_lines)
+  - [function_context](#function_context)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
   - [prompt_cache](#prompt_cache)
@@ -188,6 +189,22 @@ context_lines: 10   # at most 10 lines before each hunk (2 after); 0 disables
 
 Default: `20`.
 
+### function_context
+
+Extend each hunk's leading pad up to the **enclosing function or class
+signature** when it sits above the fixed `context_lines` window — the
+signature and setup explain a change better than an arbitrary cut. Boundaries
+are found structurally with ast-grep (already bundled for symbol resolution;
+parsing only, never executing) for Python, JS/TS/TSX, Go, Rust, Java, and
+Ruby, with a bounded reach so a distant definition can't drown the diff.
+Unsupported languages and any ast-grep failure keep the plain fixed-line pad.
+
+```yaml
+function_context: false   # fixed-line padding only
+```
+
+Default: `true`.
+
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
@@ -321,6 +338,8 @@ static_analysis:
   enabled: true
   tools: [ruff, bandit]        # default: ruff, bandit, semgrep
   min_severity: low            # floor on mapped tool severity (default info)
+  tool_min_severity:           # per-tool overrides of the global floor
+    ruff: medium               # only medium+ from ruff; bandit keeps `low`
   # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
 ```
 

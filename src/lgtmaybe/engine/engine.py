@@ -26,6 +26,7 @@ from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
+from .boundaries import definition_starts
 from .compress import (
     batch_files,
     context_lines_for_budget,
@@ -188,7 +189,17 @@ class LLMReviewEngine(ReviewEngine):
                 (
                     path,
                     expand_hunks(
-                        patch, redact(ctx.file_contents.get(path, "")), ctx_lines, after=after
+                        patch,
+                        redact(ctx.file_contents.get(path, "")),
+                        ctx_lines,
+                        after=after,
+                        # Enclosing function/class boundaries (ast-grep; [] on
+                        # any failure) so the leading pad reaches the signature.
+                        boundaries=(
+                            definition_starts(ctx.file_contents.get(path, ""), path)
+                            if cfg.function_context and ctx.file_contents.get(path)
+                            else None
+                        ),
                     ),
                 )
                 for path, patch in file_patches

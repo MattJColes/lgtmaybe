@@ -23,6 +23,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
+| `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
@@ -39,7 +40,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'tool_min_severity': {}, 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -454,6 +455,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "default": null,
           "title": "Semgrep Rules"
         },
+        "tool_min_severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Severity"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tool Min Severity",
+          "type": "object"
+        },
         "tools": {
           "default": [
             "ruff",
@@ -544,6 +555,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Finding Rules",
       "type": "array"
+    },
+    "function_context": {
+      "default": true,
+      "title": "Function Context",
+      "type": "boolean"
     },
     "ignore_fingerprints": {
       "items": {
@@ -654,6 +670,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
+        "tool_min_severity": {},
         "tools": [
           "ruff",
           "bandit",

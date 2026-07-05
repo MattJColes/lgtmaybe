@@ -323,6 +323,16 @@
           "default": null,
           "title": "Semgrep Rules"
         },
+        "tool_min_severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Severity"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tool Min Severity",
+          "type": "object"
+        },
         "tools": {
           "default": [
             "ruff",
@@ -413,6 +423,11 @@
       },
       "title": "Finding Rules",
       "type": "array"
+    },
+    "function_context": {
+      "default": true,
+      "title": "Function Context",
+      "type": "boolean"
     },
     "ignore_fingerprints": {
       "items": {
@@ -523,6 +538,7 @@
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
+        "tool_min_severity": {},
         "tools": [
           "ruff",
           "bandit",
