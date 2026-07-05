@@ -9,8 +9,10 @@ never touch real AWS/GCP.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.constants import (
@@ -41,8 +43,6 @@ def _default_aws_probe() -> bool:
     "credentials via ~/.aws" local flow is recognised even without
     ``AWS_PROFILE`` exported.
     """
-    import os
-    from pathlib import Path
 
     if (
         os.environ.get("AWS_ACCESS_KEY_ID")
@@ -70,8 +70,6 @@ def _default_gcp_probe() -> bool:
     ``gcloud auth application-default login`` — which sets no env var — so the
     documented local Vertex flow is recognised.
     """
-    import os
-    from pathlib import Path
 
     if (
         os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -148,8 +146,6 @@ def resolve_credentials(
         return AuthConfig()
 
     if provider is Provider.azure:
-        import os
-
         base = api_base or os.environ.get("AZURE_API_BASE")
         if not base:
             raise ValueError(
@@ -184,8 +180,6 @@ def resolve_credentials(
         return AuthConfig(api_base=api_base or DEFAULT_OLLAMA_BASE)
 
     if provider is Provider.zai:
-        import os
-
         key = api_key or os.environ.get("ZAI_API_KEY")
         if not key:
             raise ValueError(
@@ -198,8 +192,6 @@ def resolve_credentials(
         return AuthConfig(api_key=key, api_base=api_base or os.environ.get("ZAI_API_BASE"))
 
     if provider is Provider.openai_compatible:
-        import os
-
         base = api_base or os.environ.get("OPENAI_COMPATIBLE_API_BASE")
         if not base:
             raise ValueError(
@@ -227,8 +219,6 @@ def resolve_credentials(
 
     if api_key:
         return AuthConfig(api_key=api_key)
-
-    import os
 
     key_from_env = os.environ.get(env_var)
     if key_from_env:
