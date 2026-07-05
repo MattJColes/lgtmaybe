@@ -87,23 +87,28 @@ def dispatch(
         return
 
 
+def _reply(
+    provider: ProviderClient,
+    github: GitHubGateway,
+    cfg: ReviewConfig,
+    system: str,
+    user_extra: str = "",
+) -> str:
+    """Gather PR context, redact+wrap the diff, and return the provider's reply."""
+    ctx = github.get_pr_context()
+    user = wrap_diff(redact(ctx.diff)) + user_extra
+    result = provider.complete(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        model=cfg.model,
+    )
+    return result.text
+
+
 def _answer_question(
     provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig, question: str
 ) -> str:
-    ctx = github.get_pr_context()
-    user = f"{wrap_diff(redact(ctx.diff))}\n\nQuestion: {question}"
-    result = provider.complete(
-        [{"role": "system", "content": _ASK_SYSTEM}, {"role": "user", "content": user}],
-        model=cfg.model,
-    )
-    return result.text
+    return _reply(provider, github, cfg, _ASK_SYSTEM, f"\n\nQuestion: {question}")
 
 
 def _describe(provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig) -> str:
-    ctx = github.get_pr_context()
-    user = wrap_diff(redact(ctx.diff))
-    result = provider.complete(
-        [{"role": "system", "content": _DESCRIBE_SYSTEM}, {"role": "user", "content": user}],
-        model=cfg.model,
-    )
-    return result.text
+    return _reply(provider, github, cfg, _DESCRIBE_SYSTEM)

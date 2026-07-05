@@ -13,9 +13,9 @@ This package is split into three layers:
 
 from __future__ import annotations
 
-import json
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -221,7 +221,7 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
 
     if dry_run:
         click.echo(f"[dry-run] {summary}")
-        click.echo(json.dumps([f.model_dump(mode="json") for f in findings]))
+        click.echo(render_findings(findings, summary, fmt="json"))
 
 
 def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
@@ -247,7 +247,7 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         pr_number = issue["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    runtime = runtime.with_pr_url(f"https://github.com/{repo}/pull/{pr_number}")
+    runtime = replace(runtime, pr_url=f"https://github.com/{repo}/pull/{pr_number}")
 
     try:
         github, engine, provider_client = build_review_context(cfg, runtime)
