@@ -94,7 +94,12 @@ Default: `low` (suppresses only `info` findings).
 
 Glob patterns to restrict which files in the diff are reviewed.
 `include_paths` acts as an allowlist; `exclude_paths` acts as a denylist applied
-after the allowlist. Both default to empty (all files included).
+after the allowlist, so an exclude always wins. Both default to empty (all files
+included). Patterns match against the full repo-relative path, and a
+`**/`-prefixed pattern also matches at the repo root (so `**/*.lock` covers a
+root-level lockfile). The built-in skip filter for generated, vendored, and
+binary files runs first either way — an `include_paths` entry can't resurrect a
+lockfile.
 
 ```yaml
 include_paths:
