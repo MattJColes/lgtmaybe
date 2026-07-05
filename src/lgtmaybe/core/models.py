@@ -260,6 +260,29 @@ class ReflectionResult(_Strict):
     verdicts: list[Verdict]
 
 
+class FileWalkthrough(_Strict):
+    """One entry of a PR description's per-file walkthrough."""
+
+    path: str
+    summary: str = ""
+
+
+class DescribeResult(_Strict):
+    """Structured-output envelope for the describe pass.
+
+    A fixed-shape object so it can be enforced as a JSON schema via litellm
+    ``response_format``. Every field beyond the title is optional with an
+    empty default, so a model that answers partially still validates; a fully
+    unparseable answer falls back to the raw text.
+    """
+
+    title: str
+    change_type: str = ""
+    summary: str = ""
+    walkthrough: list[FileWalkthrough] = Field(default_factory=list)
+    intent_check: str = ""
+
+
 class TriageFileVerdict(_Strict):
     """One triage verdict: whether *path* needs the strong model, and how risky."""
 
@@ -371,6 +394,13 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Auto-describe: when the GitHub Action is triggered by a PR being opened
+    # (or reopened), post a structured description comment — title, change
+    # type, summary, per-file walkthrough, intent check — before the review
+    # runs. Idempotently updated in place on later /describe runs. A separate
+    # concern from the review (either can be enabled independently), and a
+    # describe failure never blocks the review. Default off.
+    auto_describe: bool = False
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the

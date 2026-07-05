@@ -158,8 +158,14 @@ pattern, event bus, plugin framework.
    - **`review` command** — full PR review, posts inline comments + summary.
    - **`comment` command** — handles the `issue_comment` event and routes slash
      commands to the same engine/provider: `/review` + `/improve` post a review,
-     `/ask <q>` + `/describe` reply in-thread (`post_issue_comment`, an
-     adapter-only method beyond the frozen port).
+     `/ask <q>` replies in-thread (`post_issue_comment`, an adapter-only method
+     beyond the frozen port), and `/describe` posts a **structured description**
+     (`engine/describe.py`: title, change type, summary, per-file walkthrough
+     table, intent check when the PR states one; structured output with a
+     raw-text fallback) via `post_describe_comment` — an idempotent upsert that
+     edits our previous description in place. `ReviewConfig.auto_describe`
+     (default off; Action input `auto_describe`) posts it automatically on a
+     freshly opened/reopened PR, best-effort, before the review.
    - **Guards (in the engine):** generated/binary files skipped via
      `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
      denylist globs applied right after it (`engine.passes_path_filters`;

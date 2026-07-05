@@ -28,6 +28,7 @@ provides defaults for all runs.
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
   - [triage_model](#triage_model)
+  - [auto_describe](#auto_describe)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -353,6 +354,22 @@ triage_model: claude-haiku-4-5   # cheap gatekeeper; unset = no triage
 
 Default: unset (no triage — every file gets the full review, exactly as
 before).
+
+### auto_describe
+
+Post a **structured PR description** as a comment when a PR is opened (or
+reopened), before the review runs: a suggested title, the change type, a short
+summary, a per-file walkthrough table, and — when the PR states an intent — a
+"does it do what it says" check. The comment is updated **in place** by later
+`/describe` runs, never duplicated, and a describe failure never blocks the
+review. `/describe` posts the same structured description on demand whether or
+not auto-describe is enabled.
+
+```yaml
+auto_describe: true
+```
+
+Default: `false`.
 
 ### resolve_fixed
 

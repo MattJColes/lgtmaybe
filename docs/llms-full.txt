@@ -1721,6 +1721,7 @@ provides defaults for all runs.
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
   - [triage_model](#triage_model)
+  - [auto_describe](#auto_describe)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -2046,6 +2047,22 @@ triage_model: claude-haiku-4-5   # cheap gatekeeper; unset = no triage
 
 Default: unset (no triage — every file gets the full review, exactly as
 before).
+
+### auto_describe
+
+Post a **structured PR description** as a comment when a PR is opened (or
+reopened), before the review runs: a suggested title, the change type, a short
+summary, a per-file walkthrough table, and — when the PR states an intent — a
+"does it do what it says" check. The comment is updated **in place** by later
+`/describe` runs, never duplicated, and a describe failure never blocks the
+review. `/describe` posts the same structured description on demand whether or
+not auto-describe is enabled.
+
+```yaml
+auto_describe: true
+```
+
+Default: `false`.
 
 ### resolve_fixed
 
@@ -2488,6 +2505,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `api_base` | string / null | No | `null` | Api Base |
+| `auto_describe` | boolean | No | `False` | Auto Describe |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -2847,6 +2865,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Api Base"
+    },
+    "auto_describe": {
+      "default": false,
+      "title": "Auto Describe",
+      "type": "boolean"
     },
     "categories": {
       "default": [

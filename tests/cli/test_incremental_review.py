@@ -214,3 +214,36 @@ def test_explicit_config_wins_over_auto() -> None:
     assert on.incremental is True
     off = resolve_auto_incremental(_cfg(incremental=False), event_action="synchronize")
     assert off.incremental is False
+
+
+# ---------------------------------------------------------------------------
+# auto-describe (F3): opt-in structured description on PR open
+# ---------------------------------------------------------------------------
+
+
+def test_auto_describe_only_on_open_events_when_enabled() -> None:
+    from lgtmaybe.cli import should_auto_describe
+
+    on = _cfg(auto_describe=True)
+    assert should_auto_describe(on, event_action="opened") is True
+    assert should_auto_describe(on, event_action="reopened") is True
+    assert should_auto_describe(on, event_action="synchronize") is False
+    assert should_auto_describe(_cfg(), event_action="opened") is False  # default off
+
+
+def test_run_describe_posts_via_the_idempotent_upsert() -> None:
+    import json as _json
+
+    from lgtmaybe.cli import run_describe
+    from lgtmaybe.core.models import ProviderResult
+    from tests.fakes import FakeGitHub, FakeProvider
+
+    github = FakeGitHub()
+    structured = _json.dumps({"title": "Add a thing", "summary": "Adds it."})
+    provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
+
+    run_describe(github, provider, _cfg())
+
+    assert len(github.described) == 1
+    assert github.described[0].startswith("## Add a thing")
+    assert github.comments == []
