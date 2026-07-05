@@ -19,14 +19,21 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from lgtmaybe.core.models import PRContext, Provider, ReviewCategory, ReviewConfig
+from lgtmaybe.core.models import Provider, ReviewCategory, ReviewConfig
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError, build_symbol_resolver
 from lgtmaybe.local import local_file_reader
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
 from .persist import RunRecord, write_run_record
-from .scorer import Fixture, FixtureScore, score_fixture
+from .scorer import (
+    Fixture,
+    FixtureScore,
+    _add_review_args,
+    _eval_ctx,
+    _sampling_extra,
+    score_fixture,
+)
 
 # Fixtures default to this checkout's, but EVALS_FIXTURES_DIR overrides them so the
 # A/B harness can point a baseline-ref worktree at the CURRENT tree's fixtures —
@@ -124,14 +131,7 @@ def _review(
     categories: list[ReviewCategory] | None = None,
     context_lines: int | None = None,
 ):
-    ctx = PRContext(
-        diff=diff,
-        changed_files=[manifest.changed_file],
-        base_sha="0",
-        head_sha="1",
-        repo="eval/eval",
-        pr_number=0,
-    )
+    ctx = _eval_ctx(diff, manifest)
     cfg_overrides: dict[str, object] = {}
     if max_input_tokens is not None:
         cfg_overrides["max_input_tokens"] = max_input_tokens
@@ -148,21 +148,10 @@ def _review(
         recursive=recursive,
         **cfg_overrides,
     )
-    # num_ctx is ollama's context window — litellm rejects it for hosted providers,
-    # so only forward it on the ollama path.
-    extra: dict[str, object] = (
-        {"num_ctx": num_ctx} if (num_ctx is not None and provider is Provider.ollama) else {}
+    # Sampling params + ollama's num_ctx reach the model via build_provider → litellm.
+    extra = _sampling_extra(
+        provider, num_ctx=num_ctx, temperature=temperature, top_p=top_p, top_k=top_k
     )
-    # Sampling params reach the model via the provider's default_opts → litellm.
-    # Only forward the ones explicitly given so an unset flag keeps the model's own
-    # default rather than pinning it to something. litellm.drop_params handles a
-    # param a given provider can't take (e.g. top_k on an OpenAI-compat endpoint).
-    if temperature is not None:
-        extra["temperature"] = temperature
-    if top_p is not None:
-        extra["top_p"] = top_p
-    if top_k is not None:
-        extra["top_k"] = top_k
     # Resolve credentials the same way the CLI does, so the harness works against
     # a keyless openai-compatible endpoint (LM Studio / llama.cpp / vLLM) — which
     # needs the placeholder key the OpenAI client demands — and reads provider env
@@ -267,9 +256,7 @@ def pooled_metrics(scores: list[FixtureScore]) -> dict[str, float]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run lgtmaybe review evals against a model.")
-    ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--api-base", default=None)
+    _add_review_args(ap)
     ap.add_argument(
         "--api-key",
         default=None,
@@ -281,12 +268,6 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=0.6,
         help="fail below this recall, pooled across fixtures (total caught / total planted)",
-    )
-    ap.add_argument(
-        "--timeout",
-        type=int,
-        default=None,
-        help="per-request timeout (seconds); raise for slow local models on big diffs",
     )
     ap.add_argument(
         "--num-ctx",
@@ -329,38 +310,6 @@ def main(argv: list[str] | None = None) -> int:
         help="for fixtures with an on-disk corpus, let ast-grep resolve a deferred "
         "symbol to its defining file (default on); --no-symbol-resolution pins the "
         "path-only fetch so a run can A/B the cross-file false-positive rate",
-    )
-    ap.add_argument(
-        "--temperature",
-        type=float,
-        default=None,
-        help="sampling temperature forwarded to the model (default: the model's own)",
-    )
-    ap.add_argument(
-        "--top-p",
-        type=float,
-        default=None,
-        help="nucleus-sampling top_p forwarded to the model",
-    )
-    ap.add_argument(
-        "--top-k",
-        type=int,
-        default=None,
-        help="top_k forwarded to the model (ollama/qwen3.x recommend 20 with thinking off)",
-    )
-    ap.add_argument(
-        "--categories",
-        default=None,
-        help="comma-separated review lenses to run (default: all). Cuts the per-category "
-        "fan-out for a fast CI smoke, e.g. 'security,correctness'.",
-    )
-    ap.add_argument(
-        "--fixture",
-        action="append",
-        dest="fixtures",
-        metavar="NAME",
-        help="only run the named fixture(s); repeatable. Default: all. Lets CI run a fast "
-        "single-fixture subset while the full set stays available on demand.",
     )
     ap.add_argument(
         "--json",

@@ -38,9 +38,10 @@ def _sample(recall: float, tokens: int = 100, parsed_ok: bool = True) -> RunSamp
 def test_report_aggregates_recall_spread_across_repeats() -> None:
     report = StrategyReport(name="recursive", samples=[_sample(0.5), _sample(1.0), _sample(0.75)])
     assert report.mean_recall == 0.75
-    assert report.min_recall == 0.5
-    assert report.max_recall == 1.0
-    assert report.spread == 0.5  # max − min: how noisy the result is
+    recalls = report.recalls
+    assert min(recalls) == 0.5
+    assert max(recalls) == 1.0
+    assert max(recalls) - min(recalls) == 0.5  # max − min: how noisy the result is
     assert report.all_parsed
 
 
