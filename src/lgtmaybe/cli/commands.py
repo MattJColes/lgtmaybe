@@ -152,6 +152,13 @@ from lgtmaybe.config.loader import load_config
     "(--no-reflect keeps them all; useful for weaker models)",
 )
 @click.option(
+    "--min-confidence",
+    default=None,
+    type=click.IntRange(0, 10),
+    help="Drop findings the reflection auditor scores below this confidence "
+    "(0-10; default 0 = no numeric filtering, unscored findings always survive)",
+)
+@click.option(
     "--recursive/--no-recursive",
     default=None,
     help="Walk a file whose diff exceeds the token budget hunk-by-hunk (RLM-style) "
@@ -206,6 +213,7 @@ def review(
     timeout: int | None,
     temperature: float | None,
     reflect: bool | None,
+    min_confidence: int | None,
     recursive: bool | None,
     structured_output: bool | None,
     symbol_resolution: bool | None,
@@ -230,6 +238,7 @@ def review(
         timeout=timeout,
         temperature=temperature,
         reflect=reflect,
+        min_confidence=min_confidence,
         recursive=recursive,
         structured_output=structured_output,
         symbol_resolution=symbol_resolution,

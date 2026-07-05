@@ -25,6 +25,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
+| `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
@@ -76,6 +77,7 @@ The structured output the model must return for each inline comment. All fields 
 | `anchored` | boolean | No | `True` | Anchored |
 | `body` | string | Yes | — | Body |
 | `broad` | boolean | No | `False` | Broad |
+| `confidence` | integer / null | No | `null` | Confidence |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
 | `severity` | `critical` / `high` / `info` / `low` / `medium` | Yes | — |  |
@@ -231,6 +233,20 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Broad",
           "type": "boolean"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
         "line": {
           "minimum": 1,
           "title": "Line",
@@ -366,6 +382,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "max_input_tokens": {
       "default": 100000,
       "title": "Max Input Tokens",
+      "type": "integer"
+    },
+    "min_confidence": {
+      "default": 0,
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Min Confidence",
       "type": "integer"
     },
     "min_severity": {
@@ -510,6 +533,20 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": false,
       "title": "Broad",
       "type": "boolean"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
     },
     "line": {
       "minimum": 1,

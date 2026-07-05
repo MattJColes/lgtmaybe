@@ -110,6 +110,20 @@
           "title": "Broad",
           "type": "boolean"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
         "line": {
           "minimum": 1,
           "title": "Line",
@@ -245,6 +259,13 @@
     "max_input_tokens": {
       "default": 100000,
       "title": "Max Input Tokens",
+      "type": "integer"
+    },
+    "min_confidence": {
+      "default": 0,
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Min Confidence",
       "type": "integer"
     },
     "min_severity": {

@@ -118,6 +118,12 @@ class ReviewFinding(_Strict):
     # collapsed "Broader observations" section instead of inline, so the must-fix
     # list stays tight without dropping the observation.
     broad: bool = False
+    # Reflection-derived confidence that this finding is real (0 = certainly a
+    # false positive, 10 = certain), set by the self-reflection auditor's verdict
+    # — never self-reported by the reviewing model. None when reflection is off
+    # or the auditor omitted a score. Findings scoring below
+    # `ReviewConfig.min_confidence` are dropped; the score is surfaced in output.
+    confidence: int | None = Field(default=None, ge=0, le=10)
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -200,6 +206,11 @@ class Verdict(_Strict):
     # merely because the referenced code wasn't in the diff. Optional with a
     # back-compat default so a model that omits it still validates.
     needs: list[str] = Field(default_factory=list)
+    # The auditor's 0-10 confidence that a KEPT finding is real (0 = certainly a
+    # false positive, 10 = certain). Optional with a back-compat default so a
+    # model that omits it still validates; an unscored kept finding survives any
+    # `min_confidence` threshold (safe default — never drop for a missing score).
+    confidence: int | None = Field(default=None, ge=0, le=10)
 
 
 class ReflectionResult(_Strict):
@@ -305,6 +316,11 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Drop findings the reflection auditor scores below this confidence (0-10).
+    # 0 (the default) disables numeric filtering — reflection then prunes only
+    # via its keep/drop verdicts, exactly as before the score existed. Findings
+    # the auditor keeps but doesn't score always survive the threshold.
+    min_confidence: int = Field(default=0, ge=0, le=10)
     # Finding fingerprints to permanently suppress — a team dismissing a known-fine
     # pattern. Each entry is a finding_fingerprint(path, title) hex id (surfaced in
     # the inline comment's hidden marker). Findings matching one are dropped before

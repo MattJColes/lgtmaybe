@@ -624,3 +624,92 @@ def test_head_tail_truncates_within_budget() -> None:
     assert used == count_tokens(result)
     assert "[truncated]" in result
     assert result.startswith("line0")
+
+
+# ---------------------------------------------------------------------------
+# numeric confidence score (0-10) + min_confidence threshold
+# ---------------------------------------------------------------------------
+
+
+def _scored_envelope(verdicts: list[tuple[int, bool, int | None]]) -> str:
+    return json.dumps(
+        {
+            "verdicts": [
+                {"index": i, "keep": k, **({} if c is None else {"confidence": c})}
+                for i, k, c in verdicts
+            ]
+        }
+    )
+
+
+def _fake_with_text(text: str) -> FakeProvider:
+    return FakeProvider(result=ProviderResult(text=text, input_tokens=5, output_tokens=5))
+
+
+def test_confidence_is_copied_onto_the_surviving_finding() -> None:
+    provider = _fake_with_text(_scored_envelope([(0, True, 8)]))
+
+    kept = reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert len(kept) == 1
+    assert kept[0].confidence == 8
+
+
+def test_min_confidence_drops_kept_findings_scored_below_it() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", min_confidence=7)
+    provider = _fake_with_text(_scored_envelope([(0, True, 9), (1, True, 3)]))
+
+    kept = reflect_findings([_HIGH, _LOW_CONF], _CTX, cfg, provider)
+
+    assert [f.title for f in kept] == ["real bug"]
+
+
+def test_unscored_verdict_survives_any_threshold() -> None:
+    """A model that omits the score must not have its findings dropped — the
+    keep-all instinct applies to a missing confidence too."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", min_confidence=7)
+    provider = _fake_with_text(_scored_envelope([(0, True, None)]))
+
+    kept = reflect_findings([_HIGH], _CTX, cfg, provider)
+
+    assert len(kept) == 1
+    assert kept[0].confidence is None
+
+
+def test_default_min_confidence_keeps_even_a_zero_score() -> None:
+    """min_confidence defaults to 0 = no numeric filtering — current behaviour
+    is preserved byte-for-byte unless a threshold is configured."""
+    provider = _fake_with_text(_scored_envelope([(0, True, 0)]))
+
+    kept = reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert len(kept) == 1
+
+
+def test_garbage_confidence_is_treated_as_unscored() -> None:
+    text = json.dumps({"verdicts": [{"index": 0, "keep": True, "confidence": "very sure"}]})
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", min_confidence=7)
+    provider = _fake_with_text(text)
+
+    kept = reflect_findings([_HIGH], _CTX, cfg, provider)
+
+    assert len(kept) == 1
+    assert kept[0].confidence is None
+
+
+def test_out_of_range_confidence_is_clamped() -> None:
+    provider = _fake_with_text(_scored_envelope([(0, True, 15)]))
+
+    kept = reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    assert kept[0].confidence == 10
+
+
+def test_reflect_prompt_asks_for_a_confidence_score() -> None:
+    provider = _fake_with_text(_scored_envelope([(0, True, 8)]))
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"]
+    assert "confidence" in system
+    assert "0" in system and "10" in system

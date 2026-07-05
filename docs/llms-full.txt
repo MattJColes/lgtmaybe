@@ -1713,6 +1713,7 @@ provides defaults for all runs.
   - [structured_output](#structured_output)
   - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
+  - [min_confidence](#min_confidence)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -1936,6 +1937,23 @@ reflect: false   # keep every finding; skip the false-positive audit
 Default: `true`. To audit a weak reviewer's findings with a stronger model
 instead of disabling the pass, set `reflect_model` to that model id (it uses the
 same provider and credentials as `model`).
+
+### min_confidence
+
+During reflection the auditor also scores each kept finding's confidence from
+0 (certainly a false positive) to 10 (certain it is real), reached by actively
+trying to disprove the finding against the diff and the file text. Findings
+scored **below** `min_confidence` are dropped before posting; the surviving
+score is shown in the CLI output and the JSON export. A finding the auditor
+keeps but doesn't score always survives the threshold — a missing score never
+drops a real finding. CLI: `--min-confidence`.
+
+```yaml
+min_confidence: 5   # drop findings the auditor scores 0-4
+```
+
+Default: `0` (no numeric filtering — reflection prunes only via its keep/drop
+verdicts, as before the score existed).
 
 ### resolve_fixed
 
@@ -2386,6 +2404,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
+| `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
@@ -2437,6 +2456,7 @@ The structured output the model must return for each inline comment. All fields 
 | `anchored` | boolean | No | `True` | Anchored |
 | `body` | string | Yes | — | Body |
 | `broad` | boolean | No | `False` | Broad |
+| `confidence` | integer / null | No | `null` | Confidence |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
 | `severity` | `critical` / `high` / `info` / `low` / `medium` | Yes | — |  |
@@ -2592,6 +2612,20 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Broad",
           "type": "boolean"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
         "line": {
           "minimum": 1,
           "title": "Line",
@@ -2727,6 +2761,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "max_input_tokens": {
       "default": 100000,
       "title": "Max Input Tokens",
+      "type": "integer"
+    },
+    "min_confidence": {
+      "default": 0,
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Min Confidence",
       "type": "integer"
     },
     "min_severity": {
@@ -2871,6 +2912,20 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": false,
       "title": "Broad",
       "type": "boolean"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
     },
     "line": {
       "minimum": 1,

@@ -24,6 +24,7 @@ provides defaults for all runs.
   - [structured_output](#structured_output)
   - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
+  - [min_confidence](#min_confidence)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -247,6 +248,23 @@ reflect: false   # keep every finding; skip the false-positive audit
 Default: `true`. To audit a weak reviewer's findings with a stronger model
 instead of disabling the pass, set `reflect_model` to that model id (it uses the
 same provider and credentials as `model`).
+
+### min_confidence
+
+During reflection the auditor also scores each kept finding's confidence from
+0 (certainly a false positive) to 10 (certain it is real), reached by actively
+trying to disprove the finding against the diff and the file text. Findings
+scored **below** `min_confidence` are dropped before posting; the surviving
+score is shown in the CLI output and the JSON export. A finding the auditor
+keeps but doesn't score always survives the threshold — a missing score never
+drops a real finding. CLI: `--min-confidence`.
+
+```yaml
+min_confidence: 5   # drop findings the auditor scores 0-4
+```
+
+Default: `0` (no numeric filtering — reflection prunes only via its keep/drop
+verdicts, as before the score existed).
 
 ### resolve_fixed
 
