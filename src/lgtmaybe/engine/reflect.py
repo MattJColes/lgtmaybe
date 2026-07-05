@@ -18,7 +18,7 @@ from .astgrep import SymbolResolver
 from .compress import count_tokens
 from .parse import iter_json_values
 from .redact import redact
-from .retrieve import MAX_FETCH_FILES, MAX_HOPS, FileFetcher, hop_budget_tokens, resolve_needs
+from .retrieve import MAX_FETCH_FILES, MAX_HOPS, FileFetcher, resolve_needs
 
 _log = get_logger(__name__)
 
@@ -177,7 +177,7 @@ def _reflect_pass(
             deferred_needs,
             fetch_file,
             already=already,
-            budget_tokens=hop_budget_tokens(cfg.max_input_tokens),
+            budget_tokens=max(0, cfg.max_input_tokens // 4),  # 1/4 of input budget per fetch hop
             max_files=MAX_FETCH_FILES,
             resolve_symbol=resolve_symbol,
         )

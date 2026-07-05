@@ -84,13 +84,6 @@ class ReviewIncompleteError(Exception):
     """
 
 
-def _worker_count(cfg: ReviewConfig, lens_count: int) -> int:
-    """How many lens calls to run at once: 1 for ollama (serial backend)."""
-    if cfg.provider is Provider.ollama:
-        return 1
-    return min(lens_count, _MAX_WORKERS) or 1
-
-
 class LLMReviewEngine(ReviewEngine):
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
@@ -176,7 +169,7 @@ class LLMReviewEngine(ReviewEngine):
         # 5. For each batch, fan out one call per review category. Each category
         #    gets a focused prompt; their findings are merged. Concurrency is
         #    provider-aware — serial for ollama so calls don't queue and time out.
-        workers = _worker_count(cfg, len(lenses))
+        workers = 1 if cfg.provider is Provider.ollama else min(len(lenses), _MAX_WORKERS) or 1
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None

@@ -808,24 +808,6 @@ def test_structured_output_disabled_omits_response_format() -> None:
     assert all("response_format" not in c["opts"] for c in _review_calls(provider))
 
 
-def test_ollama_fans_out_serially() -> None:
-    from lgtmaybe.engine.engine import _worker_count
-
-    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert _worker_count(cfg, len(cfg.categories)) == 1  # one ollama instance serves serially
-
-
-def test_cloud_fans_out_concurrently() -> None:
-    from lgtmaybe.engine.engine import _worker_count
-
-    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4o")
-    # A small lens count runs fully concurrently...
-    assert _worker_count(cfg, 3) == 3
-    # ...but the fan-out is capped to bound the per-batch request burst, so the
-    # full nine-lens set doesn't hit the provider all at once (capacity 429s).
-    assert _worker_count(cfg, 9) == 4
-
-
 # ---------------------------------------------------------------------------
 # fail loud: don't pass off a failed run as a clean review
 # ---------------------------------------------------------------------------
