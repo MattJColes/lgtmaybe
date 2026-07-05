@@ -38,6 +38,33 @@ _log = get_logger(__name__)
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
 
 
+def should_auto_describe(cfg: ReviewConfig, *, event_action: str) -> bool:
+    """Whether the action run should post the structured description first.
+
+    Only when the user opted in (``auto_describe``) and the PR was just opened
+    or reopened — a synchronize push updates the review, not the description.
+    """
+    return cfg.auto_describe and event_action in ("opened", "reopened")
+
+
+def run_describe(github: GitHubGateway, provider: ProviderClient, cfg: ReviewConfig) -> None:
+    """Build the structured description and post it idempotently.
+
+    Pure function over injected ports, like ``run_review``. Prefers the
+    gateway's describe upsert; falls back to a plain issue comment.
+    """
+    from lgtmaybe.engine.describe import build_description
+
+    body = build_description(github.get_pr_context(), cfg, provider)
+    post_describe = getattr(github, "post_describe_comment", None)
+    if post_describe is not None:
+        post_describe(body)
+        return
+    post_comment = getattr(github, "post_issue_comment", None)
+    if post_comment is not None:
+        post_comment(body)
+
+
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
     """Resolve ``incremental=None`` (auto) against the triggering event's action.
 
@@ -286,6 +313,19 @@ def execute_local_review(
     click.echo(render_findings(findings, summary, fmt=fmt))
 
 
+def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+    """Post the structured PR description (auto-describe path). Best-effort.
+
+    The description is auxiliary: any failure is logged and swallowed so it
+    can never block the review that follows it.
+    """
+    try:
+        github, _engine, provider = build_review_context(cfg, runtime)
+        run_describe(github, provider, cfg)
+    except Exception:
+        _log.warning("auto-describe failed — continuing without it", exc_info=True)
+
+
 def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool) -> None:
     """Build adapters, run the review, surface failures back to the PR.
 
@@ -406,6 +446,7 @@ def action_inputs() -> dict[str, str | None]:
         "prompt_cache": get("PROMPT_CACHE"),
         "incremental": get("INCREMENTAL"),
         "static_analysis": get("STATIC_ANALYSIS"),
+        "auto_describe": get("AUTO_DESCRIBE"),
         "config_path": get("CONFIG_PATH"),
     }
 
@@ -432,6 +473,7 @@ __all__ = [
     "build_review_context",
     "config_cmd",
     "execute_comment",
+    "execute_describe",
     "execute_local_review",
     "execute_review",
     "main",
@@ -439,5 +481,7 @@ __all__ = [
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",
+    "run_describe",
     "run_review",
+    "should_auto_describe",
 ]

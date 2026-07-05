@@ -20,11 +20,13 @@ from lgtmaybe.cli import (
     action_inputs,
     config_cmd,
     execute_comment,
+    execute_describe,
     execute_local_review,
     execute_review,
     main,
     pr_url_from_event,
     resolve_auto_incremental,
+    should_auto_describe,
 )
 from lgtmaybe.config import store
 from lgtmaybe.config.loader import load_config
@@ -338,6 +340,7 @@ def action() -> None:
         symbol_resolution=inputs["symbol_resolution"],
         prompt_cache=inputs["prompt_cache"],
         incremental=inputs["incremental"],
+        auto_describe=inputs["auto_describe"],
     )
     raw_sa = inputs["static_analysis"]
     cfg = _apply_static_analysis_flag(
@@ -358,8 +361,13 @@ def action() -> None:
 
     # incremental=None (auto): review only the new commits on a synchronize
     # push, do a full review on open/reopen. Explicit config/input wins.
-    cfg = resolve_auto_incremental(cfg, event_action=str(event.get("action") or ""))
+    event_action = str(event.get("action") or "")
+    cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
+    # Auto-describe (opt-in): on a freshly opened PR, post the structured
+    # description first — best-effort, never blocks the review.
+    if should_auto_describe(cfg, event_action=event_action):
+        execute_describe(cfg, runtime)
     execute_review(cfg, runtime, dry_run=False)
 
 

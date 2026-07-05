@@ -113,7 +113,9 @@ class TestDispatch:
         sent = " ".join(m.get("content", "") for call in provider.calls for m in call["messages"])
         assert "what does this do?" in sent
 
-    def test_describe_posts_a_comment(self):
+    def test_describe_upserts_the_description_comment(self):
+        """/describe goes through the idempotent describe upsert, and an
+        unstructured model reply falls back to the raw text body."""
         github = FakeGitHub()
         provider = FakeProvider(
             result=ProviderResult(text="## Summary\nAdds a thing.", input_tokens=1, output_tokens=1)
@@ -127,8 +129,38 @@ class TestDispatch:
             cfg=_cfg(),
         )
 
-        assert len(github.comments) == 1
-        assert "Summary" in github.comments[0]
+        assert github.comments == []
+        assert len(github.described) == 1
+        assert "Summary" in github.described[0]
+
+    def test_describe_renders_structured_output(self):
+        import json as _json
+
+        github = FakeGitHub()
+        structured = _json.dumps(
+            {
+                "title": "Add a thing",
+                "change_type": "feature",
+                "summary": "Adds the thing.",
+                "walkthrough": [{"path": "a.py", "summary": "adds thing"}],
+            }
+        )
+        provider = FakeProvider(
+            result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)
+        )
+
+        dispatch(
+            parse_command("/describe"),
+            github=github,
+            engine=FakeEngine(provider),
+            provider=provider,
+            cfg=_cfg(),
+        )
+
+        body = github.described[0]
+        assert body.startswith("## Add a thing")
+        assert "**Change type:** feature" in body
+        assert "| `a.py` |" in body
 
     def test_dispatch_ignores_none(self):
         github = FakeGitHub()

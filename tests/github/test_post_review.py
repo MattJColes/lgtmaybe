@@ -706,3 +706,82 @@ def test_unanchored_finding_demoted_to_body_not_inline() -> None:
     assert "### Additional findings" in rendered
     assert "anchor" not in rendered.lower()
     assert "Couldn't anchor" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# describe comment: idempotent upsert
+# ---------------------------------------------------------------------------
+
+DESCRIBE_MARKER = "<!-- lgtmaybe-describe -->"
+
+
+@respx.mock
+def test_post_describe_comment_creates_with_marker() -> None:
+    respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
+    respx.route(method="POST", url=COMMENTS_URL).mock(side_effect=capture)
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.post_describe_comment("## Title\n\nBody")
+
+    body = str(captured["body"])
+    assert body.startswith("## Title")
+    assert DESCRIBE_MARKER in body
+
+
+@respx.mock
+def test_post_describe_comment_updates_existing_in_place() -> None:
+    existing = [
+        {"id": 7, "body": "unrelated comment"},
+        {"id": 9, "body": f"old description\n\n{DESCRIBE_MARKER}"},
+    ]
+    respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=existing)
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"id": 9})
+
+    patch_route = respx.route(
+        method="PATCH", url=f"{BASE_URL}/repos/{REPO}/issues/comments/9"
+    ).mock(side_effect=capture)
+    post_route = respx.route(method="POST", url=COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 99})
+    )
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.post_describe_comment("## New title")
+
+    assert patch_route.called
+    assert not post_route.called
+    assert "## New title" in str(captured["body"])
+
+
+@respx.mock
+def test_post_describe_comment_scoped_by_marker_key() -> None:
+    respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
+    respx.route(method="POST", url=COMMENTS_URL).mock(side_effect=capture)
+
+    gateway = RestGitHubGateway(
+        repo=REPO, pr_number=PR_NUMBER, token=TOKEN, marker_key="ollama/llama3"
+    )
+    gateway.post_describe_comment("body")
+
+    assert "<!-- lgtmaybe-describe:ollama/llama3 -->" in str(captured["body"])

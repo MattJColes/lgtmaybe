@@ -165,6 +165,13 @@ class RestGitHubGateway(GitHubGateway):
         # from different backends on one PR update their own comment instead of
         # clobbering each other. Unkeyed gateways keep the legacy marker.
         self._marker = f"<!-- lgtmaybe:{marker_key} -->" if marker_key else _MARKER
+        # Idempotency marker for the describe comment — its own family so a
+        # description update never clobbers the review summary (or vice versa).
+        self._describe_marker = (
+            f"<!-- lgtmaybe-describe:{marker_key} -->"
+            if marker_key
+            else "<!-- lgtmaybe-describe -->"
+        )
         self._resolve_fixed = resolve_fixed
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
         # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
@@ -370,6 +377,37 @@ class RestGitHubGateway(GitHubGateway):
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
+
+    def post_describe_comment(self, body: str) -> None:
+        """Post or update the structured PR-description comment, idempotently.
+
+        Finds our previous description by its hidden marker and edits it in
+        place, so a re-run (or auto-describe after new pushes) never stacks
+        duplicate description comments. Adapter-only, beyond the frozen port.
+        """
+        stamped = f"{body}\n\n{self._describe_marker}"
+        url = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}/comments"
+        for resp in self._paginate(f"{url}?per_page=100"):
+            for comment in resp.json():
+                if self._describe_marker in (comment.get("body") or ""):
+                    edit_url = (
+                        f"https://api.github.com/repos/{self._repo}/issues/comments/{comment['id']}"
+                    )
+                    patched = self._client.patch(
+                        edit_url,
+                        headers={**self._headers, "Accept": "application/vnd.github+json"},
+                        json={"body": stamped},
+                        timeout=_TIMEOUT,
+                    )
+                    patched.raise_for_status()
+                    return
+        created = self._client.post(
+            url,
+            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            json={"body": stamped},
+            timeout=_TIMEOUT,
+        )
+        created.raise_for_status()
 
     # ------------------------------------------------------------------
     # Incremental review (adapter-only methods, beyond the frozen port)
