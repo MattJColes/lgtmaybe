@@ -249,3 +249,55 @@ def test_trailing_context_lines_ratio() -> None:
     assert trailing_context_lines(4) == 1
     assert trailing_context_lines(1) == 1
     assert trailing_context_lines(0) == 0
+
+
+# ---------------------------------------------------------------------------
+# expand_hunks: boundary-aware leading pad (P4 remainder)
+# ---------------------------------------------------------------------------
+
+# 30 lines: a def on line 3, hunk will sit far below it.
+_FN_CONTENT = "\n".join(
+    ["import os", "", "def handler(req):"]
+    + [f"    step_{i}()" for i in range(1, 26)]
+    + ["    return done"]
+)
+
+
+def test_boundary_extends_the_leading_pad_to_the_enclosing_def() -> None:
+    # Hunk at new-file line 20 with a 2-line fixed pad; the enclosing def is on
+    # line 3 — well above the fixed window, within reach.
+    patch = "diff --git a/f.py b/f.py\n@@ -20,1 +20,1 @@\n step_17()\n"
+
+    expanded = expand_hunks(patch, _FN_CONTENT, 2, after=1, boundaries=[3])
+
+    assert "\ndef handler(req):\n" in expanded or "\n def handler(req):\n" in expanded
+    # Header start moved up to the boundary line.
+    assert "@@ -3," in expanded
+
+
+def test_boundary_inside_the_fixed_window_changes_nothing() -> None:
+    patch = "diff --git a/f.py b/f.py\n@@ -4,1 +4,1 @@\n step_1()\n"
+
+    with_boundary = expand_hunks(patch, _FN_CONTENT, 5, after=1, boundaries=[3])
+    without = expand_hunks(patch, _FN_CONTENT, 5, after=1)
+
+    # The def on line 3 is already inside the 5-line fixed pad — the boundary
+    # must never SHRINK the window.
+    assert with_boundary == without
+
+
+def test_boundary_beyond_reach_is_ignored() -> None:
+    lines = ["def far_away():"] + [f"    l{i}" for i in range(1, 400)]
+    content = "\n".join(lines)
+    patch = "diff --git a/f.py b/f.py\n@@ -300,1 +300,1 @@\n l299\n"
+
+    expanded = expand_hunks(patch, content, 2, after=1, boundaries=[1])
+
+    assert "def far_away" not in expanded  # 299 lines up: past the reach cap
+
+
+def test_no_boundaries_keeps_the_fixed_pad() -> None:
+    patch = "diff --git a/f.py b/f.py\n@@ -20,1 +20,1 @@\n step_17()\n"
+    assert expand_hunks(patch, _FN_CONTENT, 2, after=1, boundaries=[]) == expand_hunks(
+        patch, _FN_CONTENT, 2, after=1
+    )

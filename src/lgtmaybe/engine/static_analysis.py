@@ -91,7 +91,9 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         for tool in sa.tools:
             findings.extend(_run_tool(tool, root, cfg))
 
-    kept = [f for f in findings if f.severity >= sa.min_severity]
+    # Per-tool floors win over the global floor, in either direction.
+    floors = {tool.value: floor for tool, floor in sa.tool_min_severity.items()}
+    kept = [f for f in findings if f.severity >= floors.get(f.tool, sa.min_severity)]
     dropped = len(findings) - len(kept)
     if findings:
         _log.info(

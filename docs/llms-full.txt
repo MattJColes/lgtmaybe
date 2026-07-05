@@ -1713,6 +1713,7 @@ provides defaults for all runs.
   - [max_input_tokens](#max_input_tokens)
   - [categories](#categories)
   - [context_lines](#context_lines)
+  - [function_context](#function_context)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
   - [prompt_cache](#prompt_cache)
@@ -1881,6 +1882,22 @@ context_lines: 10   # at most 10 lines before each hunk (2 after); 0 disables
 
 Default: `20`.
 
+### function_context
+
+Extend each hunk's leading pad up to the **enclosing function or class
+signature** when it sits above the fixed `context_lines` window — the
+signature and setup explain a change better than an arbitrary cut. Boundaries
+are found structurally with ast-grep (already bundled for symbol resolution;
+parsing only, never executing) for Python, JS/TS/TSX, Go, Rust, Java, and
+Ruby, with a bounded reach so a distant definition can't drown the diff.
+Unsupported languages and any ast-grep failure keep the plain fixed-line pad.
+
+```yaml
+function_context: false   # fixed-line padding only
+```
+
+Default: `true`.
+
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
@@ -2014,6 +2031,8 @@ static_analysis:
   enabled: true
   tools: [ruff, bandit]        # default: ruff, bandit, semgrep
   min_severity: low            # floor on mapped tool severity (default info)
+  tool_min_severity:           # per-tool overrides of the global floor
+    ruff: medium               # only medium+ from ruff; bandit keeps `low`
   # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
 ```
 
@@ -2570,6 +2589,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
+| `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
@@ -2586,7 +2606,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'tool_min_severity': {}, 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -3001,6 +3021,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "default": null,
           "title": "Semgrep Rules"
         },
+        "tool_min_severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Severity"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tool Min Severity",
+          "type": "object"
+        },
         "tools": {
           "default": [
             "ruff",
@@ -3091,6 +3121,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Finding Rules",
       "type": "array"
+    },
+    "function_context": {
+      "default": true,
+      "title": "Function Context",
+      "type": "boolean"
     },
     "ignore_fingerprints": {
       "items": {
@@ -3201,6 +3236,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
+        "tool_min_severity": {},
         "tools": [
           "ruff",
           "bandit",

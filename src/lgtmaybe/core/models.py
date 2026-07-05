@@ -118,6 +118,10 @@ class StaticAnalysisConfig(_Strict):
     # LOW/MEDIUM/HIGH → low/medium/high; semgrep INFO/WARNING/ERROR →
     # info/medium/high). Hints below it are dropped before prompting.
     min_severity: Severity = Severity.info
+    # Per-tool overrides of `min_severity` — e.g. keep every bandit hit but
+    # take only medium+ from ruff. A tool without an entry uses the global
+    # floor; a tool's own entry always wins, in either direction.
+    tool_min_severity: dict[StaticAnalysisTool, Severity] = Field(default_factory=dict)
     # Local semgrep rules file/dir passed as --config. semgrep is SKIPPED when
     # unset: its registry configs (`--config auto`) fetch over the network,
     # which the sandbox forbids.
@@ -423,6 +427,12 @@ class ReviewConfig(_Strict):
     # Ceiling on surrounding context lines added around each hunk. The engine
     # uses min(context_lines, what the token budget allows); 0 disables it.
     context_lines: int = 20
+    # Extend each hunk's LEADING pad up to the enclosing function/class
+    # signature when ast-grep can cheaply find it (bounded reach; PR-Agent's
+    # enclosing-scope expansion) — the signature explains a change better than
+    # an arbitrary cut. Falls back to the fixed-line pad for unsupported
+    # languages or any ast-grep failure. Off = fixed-line padding only.
+    function_context: bool = True
     # Per-request timeout (seconds) for each provider completion call. None means
     # "auto": the factory picks a provider-aware default (ollama gets a long one,
     # since local models are slow; cloud providers a short one). An explicit value
