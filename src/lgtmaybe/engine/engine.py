@@ -303,10 +303,16 @@ class LLMReviewEngine(ReviewEngine):
         #    low-confidence guess, so surface it only when it's high/critical.
         filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
 
-        plural = "s" if len(filtered) != 1 else ""
-        summary_line = (
-            f"{len(filtered)} finding{plural} · provider {cfg.provider} · model {cfg.model}"
-        )
+        # 9b. Declarative post-processing (finding_rules, default none): the
+        #     team's drop / severity-remap rules, applied last so they see
+        #     exactly what would otherwise post. Imported lazily — rules.py
+        #     imports this module's glob matcher, so a top import would cycle.
+        if cfg.finding_rules:
+            from .rules import apply_finding_rules
+
+            filtered = apply_finding_rules(filtered, cfg)
+
+        summary_line = _summary_line(len(filtered), cfg)
 
         notices = []
         if capped_files:
@@ -388,8 +394,33 @@ class LLMReviewEngine(ReviewEngine):
         except ParseError:
             _log.warning("unparseable model output", extra={"lens": lens.id})
             return [], "unparseable model output"
+        # Stamp the originating lens (engine-derived — the model's own value is
+        # overwritten): it drives the security label and category-matched
+        # finding_rules, and surfaces in JSON output.
+        findings = [f.model_copy(update={"category": lens.id}) for f in findings]
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def _summary_line(count: int, cfg: ReviewConfig) -> str:
+    """The review summary line: the user's template, or the built-in default.
+
+    A template that fails to format (unknown placeholder, stray brace) is
+    logged and falls back to the default — a cosmetic option must never fail
+    a review.
+    """
+    if cfg.summary_template:
+        try:
+            return cfg.summary_template.format(
+                count=count, provider=cfg.provider.value, model=cfg.model
+            )
+        except (KeyError, IndexError, ValueError) as exc:
+            _log.warning(
+                "summary_template failed to format — using the default",
+                extra={"error": str(exc)},
+            )
+    plural = "s" if count != 1 else ""
+    return f"{count} finding{plural} · provider {cfg.provider} · model {cfg.model}"
 
 
 def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) -> bool:

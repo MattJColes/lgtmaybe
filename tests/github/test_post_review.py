@@ -785,3 +785,49 @@ def test_post_describe_comment_scoped_by_marker_key() -> None:
     gateway.post_describe_comment("body")
 
     assert "<!-- lgtmaybe-describe:ollama/llama3 -->" in str(captured["body"])
+
+
+# ---------------------------------------------------------------------------
+# PR labels: reconcile the managed set, best-effort
+# ---------------------------------------------------------------------------
+
+LABELS_URL = f"{BASE_URL}/repos/{REPO}/issues/{PR_NUMBER}/labels"
+
+
+@respx.mock
+def test_apply_pr_labels_reconciles_managed_labels_only() -> None:
+    current = [{"name": "review-effort/2"}, {"name": "bug"}, {"name": "possible-security-issue"}]
+    respx.route(method="GET", url__startswith=LABELS_URL).mock(
+        return_value=httpx.Response(200, json=current)
+    )
+    deleted: list[str] = []
+
+    def capture_delete(request: httpx.Request) -> httpx.Response:
+        # The label name is one URL-encoded path segment after /labels/.
+        deleted.append(request.url.raw_path.decode().rsplit("/", 1)[-1])
+        return httpx.Response(200, json=[])
+
+    respx.route(method="DELETE", url__startswith=LABELS_URL).mock(side_effect=capture_delete)
+    added: dict[str, object] = {}
+
+    def capture_post(request: httpx.Request) -> httpx.Response:
+        added.update(json.loads(request.content))
+        return httpx.Response(200, json=[])
+
+    respx.route(method="POST", url=LABELS_URL).mock(side_effect=capture_post)
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.apply_pr_labels(["review-effort/4", "possible-security-issue"])
+
+    # Stale managed label removed; the human's "bug" label untouched.
+    assert deleted == ["review-effort%2F2"]  # slash quoted: one path segment
+    # Only the genuinely new label is added (the security one already exists).
+    assert added == {"labels": ["review-effort/4"]}
+
+
+@respx.mock
+def test_apply_pr_labels_swallows_api_failures() -> None:
+    respx.route(method="GET", url__startswith=LABELS_URL).mock(return_value=httpx.Response(500))
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.apply_pr_labels(["review-effort/1"])  # must not raise

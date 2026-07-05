@@ -161,6 +161,11 @@ class ReviewFinding(_Strict):
     # or the auditor omitted a score. Findings scoring below
     # `ReviewConfig.min_confidence` are dropped; the score is surfaced in output.
     confidence: int | None = Field(default=None, ge=0, le=10)
+    # Engine-derived: the id of the lens (built-in ReviewCategory value or
+    # custom lens id) whose call produced this finding — the model's own value
+    # is overwritten. Drives the security label and category-matched
+    # finding_rules; surfaced in JSON output. None only for legacy inputs.
+    category: str | None = None
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -258,6 +263,46 @@ class ReflectionResult(_Strict):
     """
 
     verdicts: list[Verdict]
+
+
+class FindingRuleMatch(_Strict):
+    """The selector of a finding rule. Every specified field must match (AND).
+
+    An empty match selects every finding. ``path`` is an fnmatch glob against
+    the repo-relative path (a ``**/`` prefix also matches at the repo root,
+    like the path filters); ``category`` is the originating lens id;
+    ``title_contains`` is a case-insensitive substring; ``min_severity``
+    selects findings at or above that severity.
+    """
+
+    path: str | None = None
+    category: str | None = None
+    title_contains: str | None = None
+    min_severity: Severity | None = None
+
+
+class FindingRuleAction(_Strict):
+    """What a matched rule does: drop the finding, or remap its severity."""
+
+    drop: bool = False
+    set_severity: Severity | None = None
+
+    @model_validator(mode="after")
+    def _has_an_effect(self) -> FindingRuleAction:
+        if not self.drop and self.set_severity is None:
+            raise ValueError("a finding rule action must drop or set_severity")
+        return self
+
+
+class FindingRule(_Strict):
+    """One declarative post-processing rule, applied in list order.
+
+    The safe alternative to arbitrary user hooks: rules can only filter or
+    re-grade findings — no user code ever executes.
+    """
+
+    match: FindingRuleMatch = Field(default=FindingRuleMatch())
+    action: FindingRuleAction
 
 
 class FileWalkthrough(_Strict):
@@ -394,6 +439,23 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Declarative finding post-processing, applied in order just before
+    # posting: each rule's match (path glob / category / title substring /
+    # severity floor, ANDed) selects findings and its action drops them or
+    # remaps their severity. A safe alternative to arbitrary user hooks — no
+    # user code ever runs. Empty (default) = no post-processing.
+    finding_rules: list[FindingRule] = Field(default_factory=list)
+    # Custom template for the review summary line. Placeholders: {count}
+    # (findings posted), {provider}, {model}. None (default) keeps the built-in
+    # line; a template that fails to format falls back to it too.
+    summary_template: str | None = None
+    # PR labels (GitHub posting only): attach a review-effort/1-5 size
+    # estimate, a possible-security-issue flag when a high/critical
+    # security-lens finding posts, and a consider-splitting hint when the diff
+    # sprawls across many unrelated top-level directories. Derived entirely
+    # from data the review already computes — no extra model calls.
+    # Best-effort (a label failure never fails the review). Default off.
+    pr_labels: bool = False
     # Auto-describe: when the GitHub Action is triggered by a PR being opened
     # (or reopened), post a structured description comment — title, change
     # type, summary, per-file walkthrough, intent check — before the review

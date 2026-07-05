@@ -247,3 +247,44 @@ def test_run_describe_posts_via_the_idempotent_upsert() -> None:
     assert len(github.described) == 1
     assert github.described[0].startswith("## Add a thing")
     assert github.comments == []
+
+
+# ---------------------------------------------------------------------------
+# PR labels (F4): applied only when opted in, on capable gateways
+# ---------------------------------------------------------------------------
+
+
+class LabelFakeGitHub(FakeGitHub):
+    def __init__(self, ctx: PRContext | None = None) -> None:
+        super().__init__(ctx)
+        self.labels: list[list[str]] = []
+
+    def apply_pr_labels(self, labels: list[str]) -> None:
+        self.labels.append(labels)
+
+
+def test_pr_labels_applied_when_enabled() -> None:
+    github = LabelFakeGitHub(CTX)
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=False)
+
+    assert len(github.labels) == 1
+    assert any(label.startswith("review-effort/") for label in github.labels[0])
+
+
+def test_pr_labels_off_by_default() -> None:
+    github = LabelFakeGitHub(CTX)
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+
+    assert github.labels == []
+
+
+def test_pr_labels_skipped_on_dry_run_and_plain_gateway() -> None:
+    github = FakeGitHub(CTX)  # no apply_pr_labels — must not crash
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=True)

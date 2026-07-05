@@ -299,7 +299,20 @@ pattern, event bus, plugin framework.
      `--prompt-cache/--no-prompt-cache`, Action input `prompt_cache`);
      cache read/creation token counts land on `ProviderResult` and are logged.
    - **Summary line:** names the **model** used (no cost — lgtmaybe does not
-     compute or report cost).
+     compute or report cost). `ReviewConfig.summary_template` (default None)
+     lets teams restyle it with `{count}`/`{provider}`/`{model}` placeholders;
+     a bad template falls back to the built-in line.
+   - **Finding rules (F5b):** `ReviewConfig.finding_rules` — ordered
+     declarative match (path glob / lens `category` / `title_contains` /
+     `min_severity`, ANDed) → action (`drop` / `set_severity`), applied in
+     `engine/rules.py` just before posting. Deliberately NOT an arbitrary
+     hook: no user code ever runs. Findings carry an engine-stamped
+     `category` (the originating lens id) that rules and labels key on.
+   - **PR labels (F4):** `ReviewConfig.pr_labels` (default off; Action input
+     `pr_labels`) — `engine/labels.py` derives `review-effort/1-5`,
+     `possible-security-issue` (high/critical security-lens finding), and
+     `consider-splitting` (sprawling diff) from data already computed; the
+     gateway reconciles only lgtmaybe's own label families, best-effort.
    - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
      (comment only — no GitHub approval state) — still naming the model.
 4. **Packaging (sequential, last) — DONE:** the two distribution variants over

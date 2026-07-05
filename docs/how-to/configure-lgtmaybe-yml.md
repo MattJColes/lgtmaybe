@@ -29,6 +29,9 @@ provides defaults for all runs.
   - [static_analysis](#static_analysis)
   - [triage_model](#triage_model)
   - [auto_describe](#auto_describe)
+  - [pr_labels](#pr_labels)
+  - [finding_rules](#finding_rules)
+  - [summary_template](#summary_template)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -370,6 +373,62 @@ auto_describe: true
 ```
 
 Default: `false`.
+
+### pr_labels
+
+Attach labels derived from the finished review — **no extra model calls**:
+
+- `review-effort/1` … `review-effort/5` — a size estimate from the changed
+  lines, so reviewers can gauge the PR at a glance;
+- `possible-security-issue` — a high/critical finding from the security lens
+  was posted;
+- `consider-splitting` — the diff spans many unrelated top-level directories.
+
+Labels are reconciled on each run (a stale `review-effort/2` is removed when
+the score changes) and only lgtmaybe's own label families are ever touched.
+Best-effort: a labelling failure never fails the review.
+
+```yaml
+pr_labels: true
+```
+
+Default: `false`.
+
+### finding_rules
+
+Declarative post-processing applied to findings just before posting — the
+safe alternative to arbitrary post-processing hooks (rules can only filter or
+re-grade; **no user code ever runs**). Each rule has a `match` (all specified
+fields must match) and an `action`; rules apply in order.
+
+Match fields: `path` (glob, `**/`-prefix also matches at the repo root),
+`category` (the lens that produced the finding — `security`, `correctness`,
+…, or a custom lens id), `title_contains` (case-insensitive substring), and
+`min_severity` (at or above). Actions: `drop: true` or `set_severity`.
+
+```yaml
+finding_rules:
+  # complexity nits in tests aren't worth a comment
+  - match: {path: "tests/**", category: complexity}
+    action: {drop: true}
+  # documentation findings are informational for this repo
+  - match: {category: documentation}
+    action: {set_severity: info}
+```
+
+Default: no rules.
+
+### summary_template
+
+Custom template for the review summary line, for teams matching a house
+style. Placeholders: `{count}` (findings posted), `{provider}`, `{model}`. A
+template that fails to format falls back to the built-in line.
+
+```yaml
+summary_template: "🤖 {count} finding(s) · {model}"
+```
+
+Default: unset (the built-in `N findings · provider X · model Y` line).
 
 ### resolve_fixed
 

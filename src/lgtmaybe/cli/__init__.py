@@ -239,6 +239,14 @@ def run_review(
         # index is built from the diff the comments will anchor to — the
         # incremental diff's context lines aren't necessarily in the PR diff.
         github.post_review(findings, summary, diff=ctx.diff)
+        if cfg.pr_labels:
+            # Effort/risk labels from data already computed — best-effort,
+            # and only on gateways that support them (fakes don't).
+            apply_labels = getattr(github, "apply_pr_labels", None)
+            if apply_labels is not None:
+                from lgtmaybe.engine.labels import compute_labels
+
+                apply_labels(compute_labels(findings, ctx))
 
     return findings, summary
 
@@ -447,6 +455,7 @@ def action_inputs() -> dict[str, str | None]:
         "incremental": get("INCREMENTAL"),
         "static_analysis": get("STATIC_ANALYSIS"),
         "auto_describe": get("AUTO_DESCRIBE"),
+        "pr_labels": get("PR_LABELS"),
         "config_path": get("CONFIG_PATH"),
     }
 
