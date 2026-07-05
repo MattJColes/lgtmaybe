@@ -42,7 +42,7 @@ def _patch_local(monkeypatch, engine=None):
 
     engine = engine if engine is not None else FakeEngine(FakeProvider())
     monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: FakeProvider())
-    monkeypatch.setattr(cli_module, "LLMReviewEngine", lambda provider: engine)
+    monkeypatch.setattr(cli_module, "LLMReviewEngine", lambda provider, **kwargs: engine)
     monkeypatch.setattr(cli_module, "local_pr_context", lambda **kwargs: _LOCAL_CTX)
 
 
@@ -225,7 +225,9 @@ class TestLocalReviewErrors:
         import lgtmaybe.cli as cli_module
 
         monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: FakeProvider())
-        monkeypatch.setattr(cli_module, "LLMReviewEngine", lambda provider: FakeEngine(provider))
+        monkeypatch.setattr(
+            cli_module, "LLMReviewEngine", lambda provider, **kwargs: FakeEngine(provider)
+        )
 
         def boom(**kwargs):
             raise ValueError("not a git repository")

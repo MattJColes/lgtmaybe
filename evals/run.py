@@ -157,6 +157,18 @@ def _review(
     # needs the placeholder key the OpenAI client demands — and reads provider env
     # vars (OPENAI_API_KEY, OPENAI_COMPATIBLE_API_KEY, …) for hosted endpoints.
     auth = resolve_credentials(provider, api_key=api_key, api_base=api_base)
+    # When the fixture ships an on-disk corpus of its unshown files, wire the same
+    # read-only reader + ast-grep symbol resolver the CLI/Action use, rooted there.
+    # A cross-file deferral can then fetch the real definition (a path directly, or
+    # a symbol via ast-grep) and re-judge — the behaviour symbol resolution adds.
+    # Toggle it off to A/B the forbidden-FP rate with vs without resolution.
+    fetch_file = None
+    resolve_symbol = None
+    if manifest.corpus_root is not None:
+        fetch_file = local_file_reader(manifest.corpus_root)
+        if symbol_resolution:
+            root = manifest.corpus_root
+            resolve_symbol = build_symbol_resolver(lambda: root)
     engine = LLMReviewEngine(
         build_provider(
             provider,
@@ -166,18 +178,10 @@ def _review(
             azure_ad_token=auth.azure_ad_token,
             timeout=timeout,
             **extra,
-        )
+        ),
+        fetch_file=fetch_file,
+        resolve_symbol=resolve_symbol,
     )
-    # When the fixture ships an on-disk corpus of its unshown files, wire the same
-    # read-only reader + ast-grep symbol resolver the CLI/Action use, rooted there.
-    # A cross-file deferral can then fetch the real definition (a path directly, or
-    # a symbol via ast-grep) and re-judge — the behaviour symbol resolution adds.
-    # Toggle it off to A/B the forbidden-FP rate with vs without resolution.
-    if manifest.corpus_root is not None:
-        engine.set_fetch_file(local_file_reader(manifest.corpus_root))
-        if symbol_resolution:
-            root = manifest.corpus_root
-            engine.set_symbol_resolver(build_symbol_resolver(lambda: root))
     try:
         findings, _summary = engine.review(ctx, cfg)
         return score_fixture(

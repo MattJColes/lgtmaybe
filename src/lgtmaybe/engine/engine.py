@@ -94,7 +94,12 @@ def _worker_count(cfg: ReviewConfig, lens_count: int) -> int:
 class LLMReviewEngine(ReviewEngine):
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
-    def __init__(self, provider: ProviderClient, fetch_file: FileFetcher | None = None) -> None:
+    def __init__(
+        self,
+        provider: ProviderClient,
+        fetch_file: FileFetcher | None = None,
+        resolve_symbol: SymbolResolver | None = None,
+    ) -> None:
         self._provider = provider
         # Optional read-only file reader for the reflection pass's bounded retrieval
         # escalation: when the auditor defers a finding for lack of a referenced
@@ -105,24 +110,6 @@ class LLMReviewEngine(ReviewEngine):
         # Optional ast-grep symbol resolver: when the auditor defers by naming a
         # SYMBOL (not a path), this maps it to the file that defines it so the
         # fetcher above can pull it. None keeps the prior path-only behaviour.
-        self._resolve_symbol: SymbolResolver | None = None
-
-    def set_fetch_file(self, fetch_file: FileFetcher | None) -> None:
-        """Attach (or clear) the read-only file fetcher used by reflection.
-
-        A small setter so a caller that builds the engine before the gateway (the
-        GitHub path) can wire the gateway's read-only ``get_file_contents`` in after
-        the fact, without threading it through ``build_provider_engine``.
-        """
-        self._fetch_file = fetch_file
-
-    def set_symbol_resolver(self, resolve_symbol: SymbolResolver | None) -> None:
-        """Attach (or clear) the ast-grep symbol resolver used by reflection.
-
-        Mirrors :meth:`set_fetch_file` so the CLI/GitHub wiring can supply a corpus
-        (the local worktree, or a base checkout) after the engine is built. None is
-        a no-op clear — the reflection pass then resolves only path-named deferrals.
-        """
         self._resolve_symbol = resolve_symbol
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:

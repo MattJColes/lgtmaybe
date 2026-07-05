@@ -22,22 +22,8 @@ from lgtmaybe.github.rest_gateway import finding_fingerprint
 _PRAGMA = re.compile(r"#\s*lgtmaybe:\s*ignore\b", re.IGNORECASE)
 
 
-def is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, file_contents: dict[str, str]) -> bool:
-    """Whether *finding* should be dropped before reflection and posting.
-
-    Suppressed when its ``finding_fingerprint(path, title)`` is in
-    ``cfg.ignore_fingerprints``, OR when the finding's own line — or the line
-    immediately above it — in ``file_contents[finding.path]`` carries a
-    ``# lgtmaybe: ignore`` pragma. The line lookup is 1-based and bounds-checked,
-    so a finding whose line is past the file (or whose file has no fetched text)
-    simply isn't pragma-suppressed.
-    """
-    text = file_contents.get(finding.path)
-    return _is_suppressed(finding, cfg, text.split("\n") if text else None)
-
-
 def _is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, lines: list[str] | None) -> bool:
-    """``is_suppressed`` against a file's already-split lines (None if no text).
+    """Whether *finding* is suppressed, against a file's already-split lines (None if no text).
 
     Split out so ``apply_suppressions`` can split each file's head text once and
     reuse it across every finding on that file, rather than re-splitting per
