@@ -20,6 +20,7 @@ existing path-only behaviour.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
@@ -231,13 +232,11 @@ def build_symbol_resolver(
         _log.info("ast-grep not found — cross-file symbol resolution disabled")
         return None
     run = runner or _default_runner
-    cache: dict[str, Path | None] = {}
 
+    @functools.cache
     def _root() -> Path | None:
-        if "root" not in cache:
-            root = get_root()
-            cache["root"] = root.resolve() if root is not None else None
-        return cache["root"]
+        root = get_root()
+        return root.resolve() if root is not None else None
 
     def resolve(symbol: str) -> list[str]:
         name = _symbol_name(symbol)
