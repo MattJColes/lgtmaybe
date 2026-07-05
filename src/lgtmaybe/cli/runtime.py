@@ -20,4 +20,3 @@ class RuntimeOptions:
     api_base: str | None = None
     fallback_model: str | None = None
     pr_url: str | None = None
-

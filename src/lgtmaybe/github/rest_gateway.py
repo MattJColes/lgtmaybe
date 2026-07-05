@@ -428,9 +428,7 @@ class RestGitHubGateway(GitHubGateway):
         of reviews, and missing the marker there would duplicate the review
         instead of updating it.
         """
-        url = (
-            f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
-        )
+        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
         for resp in self._paginate(url):
             for review in resp.json():
                 body: str = review.get("body", "") or ""
