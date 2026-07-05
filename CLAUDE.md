@@ -213,6 +213,16 @@ pattern, event bus, plugin framework.
      discard"; raw tool findings are never posted. A missing tool is skipped
      silently. CLI `--static-analysis/--no-static-analysis`, Action input
      `static_analysis`.
+   - **Two-stage triage (default off):** with `triage_model` set, that cheap
+     model runs first (`engine/triage.py`) to skip plainly-non-substantive
+     files and rank the rest by risk; the strong `model` reviews only the
+     survivors, riskiest first. A deterministic security floor
+     (`triage.always_escalate`: security paths/tokens, static-analysis hits,
+     large hunks) always escalates past triage, any triage failure reviews
+     everything, skips are named in the summary, and `/review full` bypasses
+     both triage and incremental scoping. All model slots (`triage_model`,
+     `model`, `reflect_model`) share one provider/credentials. CLI
+     `--triage-model`, Action input `triage_model`.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`

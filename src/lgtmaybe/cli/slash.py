@@ -73,10 +73,10 @@ def dispatch(
         return
 
     if parsed.name in (SlashCommand.review, SlashCommand.improve):
-        # `/review full` forces a full re-review even when config enables
-        # incremental mode; a bare `/review` honours the configured mode.
+        # `/review full` forces a genuinely full re-review: no incremental
+        # scoping AND no triage skipping. A bare `/review` honours config.
         if parsed.arg.strip().lower() == "full":
-            cfg = cfg.model_copy(update={"incremental": False})
+            cfg = cfg.model_copy(update={"incremental": False, "triage_model": None})
         # Route through the shared pipeline so a slash-triggered review gets
         # the same incremental handling and reviewed-watermark stamping as an
         # event-triggered one. Imported lazily — lgtmaybe.cli imports this

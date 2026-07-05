@@ -260,6 +260,24 @@ class ReflectionResult(_Strict):
     verdicts: list[Verdict]
 
 
+class TriageFileVerdict(_Strict):
+    """One triage verdict: whether *path* needs the strong model, and how risky."""
+
+    path: str
+    review: bool = True
+    risk: int = Field(default=5, ge=0, le=10)
+
+
+class TriageResult(_Strict):
+    """Structured-output envelope for the triage pass: ``{"files": [...]}``.
+
+    A fixed-shape object so it can be enforced as a JSON schema via litellm
+    ``response_format``, the same way reviews and reflection verdicts are.
+    """
+
+    files: list[TriageFileVerdict]
+
+
 class ProviderResult(_Strict):
     """The normalised return of one LLM completion, with token usage."""
 
@@ -353,6 +371,18 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Two-stage triage routing: when set, this cheap model runs FIRST over the
+    # compressed per-file diffs, skipping files that plainly need no review
+    # (pure formatting, trivial renames, generated content that slipped the
+    # filter) and ranking the rest by risk — the strong `model` then reviews
+    # only the survivors, riskiest first. A deterministic floor always
+    # escalates security-relevant files (auth/crypto/IaC/CI paths, security
+    # tokens in the patch, static-analysis hits, large hunks) — triage can
+    # never skip them. Same provider/credentials as `model` (an all-ollama
+    # setup pays nothing). None (default) disables triage entirely.
+    # Trade-off: cheaper reviews at the risk of the triage model under-rating
+    # a subtle file; the floor + review-when-unsure prompt bound that risk.
+    triage_model: str | None = None
     # Drop findings the reflection auditor scores below this confidence (0-10).
     # 0 (the default) disables numeric filtering — reflection then prunes only
     # via its keep/drop verdicts, exactly as before the score existed. Findings

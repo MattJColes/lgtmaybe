@@ -27,6 +27,7 @@ provides defaults for all runs.
   - [min_confidence](#min_confidence)
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
+  - [triage_model](#triage_model)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -321,6 +322,37 @@ static_analysis:
 
 Default: `enabled: false` — no subprocess ever runs and behaviour is
 unchanged.
+
+### triage_model
+
+Two-stage model routing so routine PRs don't pay frontier prices while risky
+ones still get the strong model. When set, this **cheap** model runs first
+over the compressed per-file diffs, skipping files that plainly need no review
+(pure formatting, trivial renames, generated churn) and scoring the rest 0–10
+by risk; the strong `model` then does the deep per-lens review only on the
+survivors, riskiest first. Skipped files are listed in the review summary, and
+`/review full` reviews everything on demand.
+
+A deterministic **security floor** always escalates past triage, whatever the
+cheap model says: security-relevant paths (auth/crypto/session code,
+migrations, IaC, CI workflows, dependency manifests), patches carrying
+security-relevant tokens, files with static-analysis hits, and large hunks.
+Any triage failure — an unparseable verdict, a provider error — reviews
+everything.
+
+All three model slots (`triage_model`, `model`, `reflect_model`) resolve
+through the same provider and credentials, so pointing them all at one ollama
+model costs nothing. **Trade-off:** cheaper, faster reviews at the risk of the
+triage model under-rating a subtle change; the floor and the
+review-when-unsure prompt bound that risk, but for maximum recall leave triage
+off. CLI: `--triage-model`.
+
+```yaml
+triage_model: claude-haiku-4-5   # cheap gatekeeper; unset = no triage
+```
+
+Default: unset (no triage — every file gets the full review, exactly as
+before).
 
 ### resolve_fixed
 
