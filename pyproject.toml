@@ -34,6 +34,15 @@ bedrock = [
 vertex = [
     "google-auth>=2.0",
 ]
+# Static-analysis fusion (`static_analysis.enabled: true`): the tool binaries
+# the sandboxed runner invokes. Each is optional at run time too — an
+# uninstalled tool is skipped silently, so installs without this extra are
+# unaffected.
+static-analysis = [
+    "ruff>=0.5",
+    "bandit>=1.7",
+    "semgrep>=1.60",
+]
 
 [project.scripts]
 lgtmaybe = "lgtmaybe.cli:main"

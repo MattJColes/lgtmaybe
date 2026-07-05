@@ -1402,3 +1402,113 @@ def test_passes_path_filters_matches_root_level_with_leading_globstar() -> None:
     assert not passes_path_filters("sub/app.lock", include=[], exclude=["**/*.lock"])
     assert passes_path_filters("app.py", include=[], exclude=["**/*.lock"])
     assert passes_path_filters("deep/nested/file.py", include=["**/*.py"], exclude=[])
+
+
+# ---------------------------------------------------------------------------
+# static-analysis fusion: hints enter the prompt as untrusted grounding
+# ---------------------------------------------------------------------------
+
+
+def _sa_cfg(**overrides: object) -> ReviewConfig:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    sa = cfg.static_analysis.model_copy(update={"enabled": True, **overrides})
+    return cfg.model_copy(update={"static_analysis": sa})
+
+
+def _hint(path: str = "f.py", message: str = "eval is dangerous"):  # type: ignore[no-untyped-def]
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    return ToolFinding(
+        tool="bandit",
+        path=path,
+        line=1,
+        rule="B307",
+        message=message,
+        severity=Severity.medium,
+    )
+
+
+_HINT_CTX = PRContext(
+    diff="diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n",
+    changed_files=["f.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=3,
+    file_contents={"f.py": "old\nnew\n"},
+)
+
+
+def test_hints_enter_the_user_message_wrapped_as_untrusted(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_hint()])
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    engine.review(_HINT_CTX, _sa_cfg())
+
+    sent = _first_user_diff(provider)
+    assert "===HINTS_START===" in sent
+    assert "B307" in sent
+    assert "eval is dangerous" in sent
+    # The diff block is still present and separate.
+    assert "===DIFF_START===" in sent
+
+
+def test_hints_absent_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: calls.append(1) or [],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    engine.review(_HINT_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "HINTS" not in sent
+    assert calls == []  # disabled: the runner is never invoked
+
+
+def test_hints_are_redacted_before_prompting(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    secret = "AKIAIOSFODNN7EXAMPLE"
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_hint(message=f"hardcoded key {secret} found")],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    engine.review(_HINT_CTX, _sa_cfg())
+
+    sent = _first_user_diff(provider)
+    assert secret not in sent
+    assert REDACTED_PLACEHOLDER in sent
+
+
+def test_hints_filtered_to_the_batch_files(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_hint(path="unrelated.py", message="other-file hint")],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    engine.review(_HINT_CTX, _sa_cfg())
+
+    sent = _first_user_diff(provider)
+    assert "other-file hint" not in sent
+    assert "HINTS" not in sent  # no in-batch hints → no hints block at all
+
+
+def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Tool findings ground the model; they must not become review findings
+    unless the model itself reports them."""
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_hint()])
+    provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
+
+    assert findings == []

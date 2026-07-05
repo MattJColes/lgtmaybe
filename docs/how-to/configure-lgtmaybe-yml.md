@@ -26,6 +26,7 @@ provides defaults for all runs.
   - [reflect](#reflect)
   - [min_confidence](#min_confidence)
   - [incremental](#incremental)
+  - [static_analysis](#static_analysis)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -290,6 +291,36 @@ incremental: false   # every run reviews the whole PR
 Default: auto — incremental on a `synchronize` push (new commits on an
 already-reviewed PR), full review everywhere else (open/reopen, slash
 commands, and the local CLI, which never uses it).
+
+### static_analysis
+
+Static-analysis fusion: run fast, deterministic linters over the changed files
+and feed their findings to the model as **hints to confirm, contextualise, or
+discard** — raising recall on exactly the mechanical bugs LLMs miss, without
+posting raw linter noise (only findings the model itself confirms are
+reported). Supported tools: **ruff** and **bandit** (Python), and **semgrep**
+(multi-language) when you point `semgrep_rules` at local rules — semgrep's
+registry configs need the network, which the sandbox forbids.
+
+The tools run against the already-fetched file texts in a throwaway directory
+(never a checkout, never executing PR code), in a subprocess with a scrubbed
+environment (no proxy or credential variables) and a hard timeout. A tool that
+isn't installed is skipped silently — install them with
+`pip install lgtmaybe[static-analysis]`, or rely on whatever is already on
+PATH. Tool output is treated as untrusted text: redacted and
+injection-wrapped before it reaches the model. CLI:
+`--static-analysis/--no-static-analysis`.
+
+```yaml
+static_analysis:
+  enabled: true
+  tools: [ruff, bandit]        # default: ruff, bandit, semgrep
+  min_severity: low            # floor on mapped tool severity (default info)
+  # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
+```
+
+Default: `enabled: false` — no subprocess ever runs and behaviour is
+unchanged.
 
 ### resolve_fixed
 

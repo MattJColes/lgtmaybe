@@ -28,6 +28,21 @@ from lgtmaybe.cli import (
 )
 from lgtmaybe.config import store
 from lgtmaybe.config.loader import load_config
+from lgtmaybe.core.models import ReviewConfig
+
+
+def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewConfig:
+    """Overlay the --static-analysis on/off flag onto the nested config block.
+
+    The flag flips only ``static_analysis.enabled`` — the tool list and floors
+    keep whatever `.lgtmaybe.yml` configured. None (flag not given) leaves the
+    config untouched.
+    """
+    if flag is None:
+        return cfg
+    return cfg.model_copy(
+        update={"static_analysis": cfg.static_analysis.model_copy(update={"enabled": flag})}
+    )
 
 
 @main.command()
@@ -187,6 +202,14 @@ from lgtmaybe.config.loader import load_config
     "at a steep discount. Safe no-op elsewhere (--no-prompt-cache disables)",
 )
 @click.option(
+    "--static-analysis/--no-static-analysis",
+    default=None,
+    help="Run installed deterministic linters (ruff, bandit, semgrep with local "
+    "rules) over the changed files and feed their findings to the model as "
+    "untrusted hints to confirm or discard (default off; tools not installed "
+    "are skipped silently — pip install lgtmaybe[static-analysis])",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -219,6 +242,7 @@ def review(
     structured_output: bool | None,
     symbol_resolution: bool | None,
     prompt_cache: bool | None,
+    static_analysis: bool | None,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -245,6 +269,7 @@ def review(
         symbol_resolution=symbol_resolution,
         prompt_cache=prompt_cache,
     )
+    cfg = _apply_static_analysis_flag(cfg, static_analysis)
 
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
     fmt = output_format or ("json" if as_json else "human")
@@ -303,6 +328,10 @@ def action() -> None:
         symbol_resolution=inputs["symbol_resolution"],
         prompt_cache=inputs["prompt_cache"],
         incremental=inputs["incremental"],
+    )
+    raw_sa = inputs["static_analysis"]
+    cfg = _apply_static_analysis_flag(
+        cfg, None if raw_sa is None else raw_sa.strip().lower() in ("true", "1", "yes")
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

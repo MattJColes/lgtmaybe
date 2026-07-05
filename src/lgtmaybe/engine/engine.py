@@ -33,12 +33,13 @@ from .compress import (
     expand_hunks,
     trailing_context_lines,
 )
-from .injection import wrap_diff, wrap_intent
+from .injection import wrap_diff, wrap_hints, wrap_intent
 from .parse import ParseError, parse_findings
 from .prompt import build_lens_prompt, build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
 from .retrieve import FileFetcher
+from .static_analysis import ToolFinding, format_hints, run_static_analysis
 from .suppress import apply_suppressions
 
 _log = get_logger(__name__)
@@ -145,6 +146,18 @@ class LLMReviewEngine(ReviewEngine):
         if capped_files:
             file_patches = file_patches[: cfg.max_files]
 
+        # 3b. Static-analysis grounding (default off): deterministic tool
+        #     findings over the reviewed files' head texts, fed to each batch's
+        #     lens calls as untrusted hints to confirm or discard. Guarded here
+        #     so a disabled config never touches the runner (no temp dir, no
+        #     subprocess) — behaviour is byte-identical to before the feature.
+        sa_hints: list[ToolFinding] = []
+        if cfg.static_analysis.enabled and ctx.file_contents:
+            reviewed_paths = {path for path, _ in file_patches}
+            sa_hints = run_static_analysis(
+                {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
+            )
+
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
         #    capped by cfg.context_lines; the pad is asymmetric — the code
@@ -199,8 +212,14 @@ class LLMReviewEngine(ReviewEngine):
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
+            # Static-analysis hints for THIS batch's files only, redacted (tool
+            # messages can quote hostile file content — same posture as the
+            # diff) and wrapped as their own neutralised untrusted block.
+            batch_paths = {path for path, _ in batch}
+            batch_hints = [h for h in sa_hints if h.path in batch_paths]
+            hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
             review_one = partial(
-                self._review_lens, wrapped, intent_block, cfg.model, response_format
+                self._review_lens, wrapped, intent_block, hint_block, cfg.model, response_format
             )
             if len(batches) > 1:
                 _log.info(
@@ -303,6 +322,7 @@ class LLMReviewEngine(ReviewEngine):
         self,
         wrapped: str,
         intent_block: str | None,
+        hint_block: str | None,
         model: str,
         response_format: type[ReviewResult] | None,
         lens: _Lens,
@@ -319,6 +339,10 @@ class LLMReviewEngine(ReviewEngine):
             # Only the intent lens pays the intent-block tokens (and its
             # injection surface); the other lenses never see PR-authored prose.
             user_content = f"{intent_block}\n\n{wrapped}"
+        if hint_block is not None:
+            # Static-analysis grounding: every lens sees the hints (each judges
+            # relevance to its own concern) ahead of the diff they refer to.
+            user_content = f"{hint_block}\n\n{user_content}"
         messages: list[Message] = [
             {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},

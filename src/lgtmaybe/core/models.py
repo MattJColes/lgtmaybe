@@ -87,6 +87,43 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class StaticAnalysisTool(StrEnum):
+    """A deterministic linter/SAST tool whose findings ground the LLM review."""
+
+    ruff = "ruff"
+    bandit = "bandit"
+    semgrep = "semgrep"
+
+
+class StaticAnalysisConfig(_Strict):
+    """Static-analysis fusion: deterministic tool findings as LLM grounding.
+
+    When enabled, the installed tools run over the already-fetched changed-file
+    texts (sandboxed subprocess, scrubbed environment, no network, never a
+    checkout) and their findings enter each lens prompt as untrusted HINTS —
+    "confirm, contextualise, or discard" — raising recall on the deterministic
+    bugs models miss without posting raw linter noise. A tool that isn't
+    installed is skipped silently, so the feature degrades to nothing on a
+    minimal install.
+    """
+
+    # Global switch. Off by default: existing installs and zero-dependency
+    # setups see no behaviour change and no subprocess ever runs.
+    enabled: bool = False
+    # Tools to run when enabled (each skipped silently if not installed).
+    # `default=` (not default_factory) on purpose, like ReviewConfig.categories:
+    # pydantic copies it per instance and it reaches the generated docs schema.
+    tools: list[StaticAnalysisTool] = Field(default=list(StaticAnalysisTool))
+    # Floor on the MAPPED severity of tool findings (ruff → low; bandit
+    # LOW/MEDIUM/HIGH → low/medium/high; semgrep INFO/WARNING/ERROR →
+    # info/medium/high). Hints below it are dropped before prompting.
+    min_severity: Severity = Severity.info
+    # Local semgrep rules file/dir passed as --config. semgrep is SKIPPED when
+    # unset: its registry configs (`--config auto`) fetch over the network,
+    # which the sandbox forbids.
+    semgrep_rules: str | None = None
+
+
 class ReviewFinding(_Strict):
     """A single inline review comment the model wants to post."""
 
@@ -327,6 +364,11 @@ class ReviewConfig(_Strict):
     # reflection and posting. Set it in .lgtmaybe.yml; an inline `# lgtmaybe: ignore`
     # comment on (or just above) a flagged line suppresses that finding too.
     ignore_fingerprints: list[str] = Field(default_factory=list)
+    # Static-analysis fusion: run installed deterministic linters (ruff,
+    # bandit, semgrep-with-local-rules) over the changed files and feed their
+    # findings into the lens prompts as untrusted hints to confirm or discard.
+    # Default off — see StaticAnalysisConfig.
+    static_analysis: StaticAnalysisConfig = Field(default=StaticAnalysisConfig())
     # Commit-scoped incremental review: on a re-run, review only the diff of
     # the commits pushed since the last completed review (read back from a
     # hidden watermark in the summary comment) instead of the whole PR.
