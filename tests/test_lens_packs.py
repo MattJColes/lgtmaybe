@@ -69,16 +69,14 @@ def test_bundled_lens_ids_are_unique_and_dont_shadow_builtins() -> None:
     assert not (set(ids) & _BUILTIN_IDS), "a bundled lens id collides with a built-in category"
 
 
-def test_each_pack_loads_through_the_real_loader() -> None:
+def test_each_pack_loads_through_the_real_loader(tmp_path):
     """`lens_paths: [pack:<name>]` resolves and validates end-to-end via the loader."""
-    import io
-
     from lgtmaybe.config.loader import load_config
 
     packs = _packs()
     assert packs, "no bundled lens packs found"
     for pack in packs:
-        cfg = load_config(
-            config_stream=io.StringIO(f"provider: ollama\nmodel: m\nlens_paths:\n  - pack:{pack}\n")
-        )
+        cfg_file = tmp_path / ".lgtmaybe.yml"
+        cfg_file.write_text(f"provider: ollama\nmodel: m\nlens_paths:\n  - pack:{pack}\n")
+        cfg = load_config(config_path=cfg_file)
         assert cfg.extra_lenses, f"pack {pack!r} loaded no lenses"

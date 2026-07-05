@@ -29,57 +29,50 @@ def test_missing_file_yields_defaults(tmp_path):
     assert cfg.model == "llama3"
 
 
-def test_file_values_are_applied():
+def test_file_values_are_applied(tmp_path):
     """Values in the config file are reflected in the returned ReviewConfig."""
-    import io
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "provider: anthropic\nmodel: claude-3-5-sonnet-20241022\nmin_severity: medium\n"
+    )
 
-    yaml_content = "provider: anthropic\nmodel: claude-3-5-sonnet-20241022\nmin_severity: medium\n"
-
-    cfg = load_config(config_stream=io.StringIO(yaml_content))
+    cfg = load_config(config_path=cfg_file)
 
     assert cfg.provider == "anthropic"
     assert cfg.model == "claude-3-5-sonnet-20241022"
     assert cfg.min_severity == "medium"
 
 
-def test_resolve_fixed_round_trips_from_file():
+def test_resolve_fixed_round_trips_from_file(tmp_path):
     """resolve_fixed can be disabled in .lgtmaybe.yml (default stays on)."""
-    import io
-
-    cfg = load_config(config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\n"))
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    cfg = load_config(config_path=cfg_file)
     assert cfg.resolve_fixed is True
 
-    cfg = load_config(
-        config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\nresolve_fixed: false\n")
-    )
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nresolve_fixed: false\n")
+    cfg = load_config(config_path=cfg_file)
     assert cfg.resolve_fixed is False
 
 
-def test_reflect_model_round_trips_from_file_and_cli():
+def test_reflect_model_round_trips_from_file_and_cli(tmp_path):
     """reflect_model can be set in .lgtmaybe.yml and overridden via a CLI input."""
-    import io
-
-    cfg = load_config(
-        config_stream=io.StringIO(
-            "provider: openai\nmodel: gpt-4o\nreflect_model: gpt-4o-stronger\n"
-        )
-    )
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nreflect_model: gpt-4o-stronger\n")
+    cfg = load_config(config_path=cfg_file)
     assert cfg.reflect_model == "gpt-4o-stronger"
 
-    cfg = load_config(
-        config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\n"),
-        reflect_model="cli-judge",
-    )
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    cfg = load_config(config_path=cfg_file, reflect_model="cli-judge")
     assert cfg.reflect_model == "cli-judge"
 
 
-def test_cli_input_overrides_file_value():
+def test_cli_input_overrides_file_value(tmp_path):
     """An explicit CLI input takes precedence over the file's value."""
-    import io
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nmin_severity: low\n")
 
-    yaml_content = "provider: openai\nmodel: gpt-4o\nmin_severity: low\n"
-
-    cfg = load_config(config_stream=io.StringIO(yaml_content), min_severity="high")
+    cfg = load_config(config_path=cfg_file, min_severity="high")
 
     assert cfg.min_severity == "high"
     # File values still applied for keys not overridden
@@ -87,37 +80,31 @@ def test_cli_input_overrides_file_value():
     assert cfg.model == "gpt-4o"
 
 
-def test_context_lines_defaults_and_overrides():
+def test_context_lines_defaults_and_overrides(tmp_path):
     """context_lines defaults to 20, is read from file, and can be overridden (incl. 0)."""
-    import io
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    assert load_config(config_path=cfg_file).context_lines == 20
 
-    assert (
-        load_config(config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\n")).context_lines
-        == 20
-    )
-
-    from_file = load_config(
-        config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\ncontext_lines: 5\n")
-    )
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\ncontext_lines: 5\n")
+    from_file = load_config(config_path=cfg_file)
     assert from_file.context_lines == 5
 
-    overridden = load_config(
-        config_stream=io.StringIO("provider: openai\nmodel: gpt-4o\ncontext_lines: 5\n"),
-        context_lines=0,
-    )
+    overridden = load_config(config_path=cfg_file, context_lines=0)
     assert overridden.context_lines == 0
 
 
-def test_max_input_tokens_and_num_ctx_defaults_and_overrides():
+def test_max_input_tokens_and_num_ctx_defaults_and_overrides(tmp_path):
     """max_input_tokens (any provider) and num_ctx (ollama) load from file and CLI."""
-    import io
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: ollama\nmodel: llama3\n")
 
-    base = load_config(config_stream=io.StringIO("provider: ollama\nmodel: llama3\n"))
+    base = load_config(config_path=cfg_file)
     assert base.max_input_tokens == 100_000
     assert base.num_ctx is None
 
     overridden = load_config(
-        config_stream=io.StringIO("provider: ollama\nmodel: llama3\n"),
+        config_path=cfg_file,
         max_input_tokens=250_000,
         num_ctx=32768,
     )
@@ -125,25 +112,23 @@ def test_max_input_tokens_and_num_ctx_defaults_and_overrides():
     assert overridden.num_ctx == 32768
 
 
-def test_cli_input_overrides_provider():
+def test_cli_input_overrides_provider(tmp_path):
     """A CLI --provider overrides the file's provider."""
-    import io
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
 
-    yaml_content = "provider: openai\nmodel: gpt-4o\n"
-
-    cfg = load_config(config_stream=io.StringIO(yaml_content), provider="anthropic")
+    cfg = load_config(config_path=cfg_file, provider="anthropic")
 
     assert cfg.provider == "anthropic"
 
 
-def test_unknown_key_in_yaml_raises():
+def test_unknown_key_in_yaml_raises(tmp_path):
     """An unknown key in the YAML file is rejected with a clear error (extra=forbid)."""
-    import io
-
-    yaml_content = "provider: ollama\nmodel: llama3\nunknown_key: bad\n"
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: ollama\nmodel: llama3\nunknown_key: bad\n")
 
     with pytest.raises(Exception, match="unknown_key|extra"):
-        load_config(config_stream=io.StringIO(yaml_content))
+        load_config(config_path=cfg_file)
 
 
 def test_user_config_is_used_when_no_project_file(tmp_path):
@@ -182,14 +167,13 @@ def test_cli_overrides_user_and_project(tmp_path):
     assert cfg.model == "cli-model"
 
 
-def test_none_cli_inputs_do_not_override():
+def test_none_cli_inputs_do_not_override(tmp_path):
     """CLI inputs that are None (not passed) do not clobber file or default values."""
-    import io
-
-    yaml_content = "provider: openai\nmodel: gpt-4o\nmin_severity: high\n"
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nmin_severity: high\n")
 
     # Passing None explicitly — simulates a click option that wasn't supplied
-    cfg = load_config(config_stream=io.StringIO(yaml_content), provider=None, min_severity=None)
+    cfg = load_config(config_path=cfg_file, provider=None, min_severity=None)
 
     assert cfg.provider == "openai"
     assert cfg.min_severity == "high"
