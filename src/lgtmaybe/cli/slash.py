@@ -12,10 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
 
-from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
-from lgtmaybe.core.ports import ProviderClient, ReviewEngine
+from lgtmaybe.core.models import ReviewConfig
+from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine.injection import wrap_diff
 from lgtmaybe.engine.redact import redact
 
@@ -31,22 +30,6 @@ class SlashCommand(StrEnum):
 class ParsedCommand:
     name: SlashCommand
     arg: str
-
-
-class PRGateway(Protocol):
-    """The gateway surface a slash command needs.
-
-    Superset of the frozen GitHubGateway port: adds ``post_issue_comment`` for
-    in-thread replies. RestGitHubGateway satisfies this structurally.
-    """
-
-    def get_pr_context(self) -> PRContext: ...
-
-    def post_review(
-        self, findings: list[ReviewFinding], summary: str, diff: str | None = None
-    ) -> None: ...
-
-    def post_issue_comment(self, body: str) -> None: ...
 
 
 _ASK_SYSTEM = (
@@ -80,7 +63,7 @@ def parse_command(body: str) -> ParsedCommand | None:
 def dispatch(
     parsed: ParsedCommand | None,
     *,
-    github: PRGateway,
+    github: GitHubGateway,
     engine: ReviewEngine,
     provider: ProviderClient,
     cfg: ReviewConfig,
@@ -104,23 +87,28 @@ def dispatch(
         return
 
 
-def _answer_question(
-    provider: ProviderClient, github: PRGateway, cfg: ReviewConfig, question: str
+def _reply(
+    provider: ProviderClient,
+    github: GitHubGateway,
+    cfg: ReviewConfig,
+    system: str,
+    user_extra: str = "",
 ) -> str:
+    """Gather PR context, redact+wrap the diff, and return the provider's reply."""
     ctx = github.get_pr_context()
-    user = f"{wrap_diff(redact(ctx.diff))}\n\nQuestion: {question}"
+    user = wrap_diff(redact(ctx.diff)) + user_extra
     result = provider.complete(
-        [{"role": "system", "content": _ASK_SYSTEM}, {"role": "user", "content": user}],
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
         model=cfg.model,
     )
     return result.text
 
 
-def _describe(provider: ProviderClient, github: PRGateway, cfg: ReviewConfig) -> str:
-    ctx = github.get_pr_context()
-    user = wrap_diff(redact(ctx.diff))
-    result = provider.complete(
-        [{"role": "system", "content": _DESCRIBE_SYSTEM}, {"role": "user", "content": user}],
-        model=cfg.model,
-    )
-    return result.text
+def _answer_question(
+    provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig, question: str
+) -> str:
+    return _reply(provider, github, cfg, _ASK_SYSTEM, f"\n\nQuestion: {question}")
+
+
+def _describe(provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig) -> str:
+    return _reply(provider, github, cfg, _DESCRIBE_SYSTEM)

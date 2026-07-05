@@ -1,6 +1,6 @@
 """lgtmaybe.engine — the review pipeline (Track C)."""
 
-from .astgrep import SymbolResolver, ast_grep_available, build_symbol_resolver
+from .astgrep import SymbolResolver, build_symbol_resolver
 from .compress import batch_files, context_lines_for_budget, count_tokens
 from .engine import LLMReviewEngine, ReviewIncompleteError
 from .injection import wrap_diff
@@ -26,6 +26,5 @@ __all__ = [
     "FileFetcher",
     "resolve_needs",
     "SymbolResolver",
-    "ast_grep_available",
     "build_symbol_resolver",
 ]

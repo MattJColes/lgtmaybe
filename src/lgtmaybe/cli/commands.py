@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -295,7 +296,7 @@ def action() -> None:
         execute_comment(event, cfg, runtime)
         return
 
-    runtime = runtime.with_pr_url(pr_url_from_event(event))
+    runtime = replace(runtime, pr_url=pr_url_from_event(event))
     execute_review(cfg, runtime, dry_run=False)
 
 

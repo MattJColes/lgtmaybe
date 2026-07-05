@@ -47,10 +47,8 @@ dev = [
     "pytest>=8",
     "ruff>=0.5",
     "mypy>=1.10",
-    "pytest-asyncio>=1.4.0",
     "respx>=0.23.1",
     "types-pyyaml>=6.0.12.20260518",
-    "types-requests>=2.33.0.20260518",
 ]
 docs = [
     "mkdocs-material>=9.5",
@@ -77,8 +75,6 @@ known-first-party = ["lgtmaybe", "evals"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
 # Live e2e tests (tests/e2e/) drive the real CLI against a local model server, so
 # they need a running ollama/llama.cpp/vLLM and a downloaded model — never the
 # default gate. They are DESELECTED here and opted into with `pytest -m e2e`

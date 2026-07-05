@@ -13,9 +13,9 @@ This package is split into three layers:
 
 from __future__ import annotations
 
-import json
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
 from lgtmaybe.core.models import Provider, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
-from lgtmaybe.engine import LLMReviewEngine, build_symbol_resolver
+from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
@@ -49,7 +49,11 @@ def parse_pr_url(pr_url: str) -> tuple[str, int]:
 
 
 def build_provider_engine(
-    cfg: ReviewConfig, runtime: RuntimeOptions
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    *,
+    fetch_file: FileFetcher | None = None,
+    resolve_symbol: SymbolResolver | None = None,
 ) -> tuple[LLMReviewEngine, ProviderClient]:
     """Resolve credentials and build the provider + engine from config + runtime.
 
@@ -79,7 +83,8 @@ def build_provider_engine(
         temperature=cfg.temperature,
         **extra,
     )
-    return LLMReviewEngine(provider), provider
+    engine = LLMReviewEngine(provider, fetch_file=fetch_file, resolve_symbol=resolve_symbol)
+    return engine, provider
 
 
 def build_review_context(
@@ -103,7 +108,6 @@ def build_review_context(
             "Set it in the environment (the GitHub Action provides it automatically)."
         )
 
-    engine, provider = build_provider_engine(cfg, runtime)
     github = RestGitHubGateway(
         repo=repo,
         pr_number=pr_number,
@@ -114,13 +118,16 @@ def build_review_context(
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
     # deferred verdict (fetch a referenced file the auditor needs) instead of
     # dropping the finding. Read-only API fetch — never a checkout (fork-safe).
-    engine.set_fetch_file(github.get_file_contents)
     # Cross-file symbol resolution: when the auditor defers on a symbol (not a path),
     # ast-grep finds its defining file in a lazily-cloned checkout of the trusted base
     # branch. Read-only (clone + parse, never execute the PR head), and a no-op when
     # ast-grep is absent. The clone happens only on the first symbol deferral.
-    if cfg.symbol_resolution:
-        engine.set_symbol_resolver(build_symbol_resolver(github.base_checkout_root))
+    resolve_symbol = (
+        build_symbol_resolver(github.base_checkout_root) if cfg.symbol_resolution else None
+    )
+    engine, provider = build_provider_engine(
+        cfg, runtime, fetch_file=github.get_file_contents, resolve_symbol=resolve_symbol
+    )
     return github, engine, provider
 
 
@@ -172,14 +179,17 @@ def execute_local_review(
     surfaces as a clean CLI error — there is no PR to post a notice to.
     """
     try:
-        engine, _provider = build_provider_engine(cfg, runtime)
         # Wire a read-only working-tree reader so reflection can resolve a deferred
         # verdict against the user's own checkout (safe — their branch, not PR code).
-        engine.set_fetch_file(local_file_reader())
+        fetch_file = local_file_reader()
         # And let ast-grep resolve a deferred symbol to its defining file by searching
         # that same worktree — the corpus is already on disk, so no clone is needed.
-        if cfg.symbol_resolution:
-            engine.set_symbol_resolver(build_symbol_resolver(lambda: Path.cwd()))
+        resolve_symbol = (
+            build_symbol_resolver(lambda: Path.cwd()) if cfg.symbol_resolution else None
+        )
+        engine, _provider = build_provider_engine(
+            cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
+        )
         ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
         findings, summary = engine.review(ctx, cfg)
     except Exception as exc:
@@ -211,7 +221,7 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
 
     if dry_run:
         click.echo(f"[dry-run] {summary}")
-        click.echo(json.dumps([f.model_dump(mode="json") for f in findings]))
+        click.echo(render_findings(findings, summary, fmt="json"))
 
 
 def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
@@ -237,7 +247,7 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         pr_number = issue["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    runtime = runtime.with_pr_url(f"https://github.com/{repo}/pull/{pr_number}")
+    runtime = replace(runtime, pr_url=f"https://github.com/{repo}/pull/{pr_number}")
 
     try:
         github, engine, provider_client = build_review_context(cfg, runtime)

@@ -27,13 +27,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig
+from lgtmaybe.core.models import Provider, ProviderResult, ReviewConfig
 from lgtmaybe.core.ports import Message, ProviderClient
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.providers.factory import build_provider
 
 from .run import _load_fixtures, _parse_categories, _select_fixtures
-from .scorer import Fixture, score_fixture
+from .scorer import Fixture, _add_review_args, _eval_ctx, _sampling_extra, score_fixture
 
 # The fixtures purpose-built for this benchmark: each is a single multi-hunk file
 # big enough that a low --budget forces the over-budget split.
@@ -91,19 +91,6 @@ class StrategyReport(BaseModel):
         return statistics.fmean(self.recalls) if self.samples else 0.0
 
     @property
-    def min_recall(self) -> float:
-        return min(self.recalls) if self.samples else 0.0
-
-    @property
-    def max_recall(self) -> float:
-        return max(self.recalls) if self.samples else 0.0
-
-    @property
-    def spread(self) -> float:
-        """max − min recall: how much the result moves between runs (noise)."""
-        return self.max_recall - self.min_recall if self.samples else 0.0
-
-    @property
     def mean_total_tokens(self) -> float:
         return statistics.fmean([s.total_tokens for s in self.samples]) if self.samples else 0.0
 
@@ -134,17 +121,6 @@ def verdict(whole: StrategyReport, recursive: StrategyReport) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _ctx(diff: str, manifest: Fixture) -> PRContext:
-    return PRContext(
-        diff=diff,
-        changed_files=[manifest.changed_file],
-        base_sha="0",
-        head_sha="1",
-        repo="eval/eval",
-        pr_number=0,
-    )
-
-
 def _run_strategy_once(
     fixtures: list[tuple[str, Fixture]],
     make_provider: Any,
@@ -169,7 +145,7 @@ def _run_strategy_once(
     for diff, manifest in fixtures:
         cfg = ReviewConfig(provider=provider, model=model, **overrides)
         try:
-            findings, _ = engine.review(_ctx(diff, manifest), cfg)
+            findings, _ = engine.review(_eval_ctx(diff, manifest), cfg)
             score = score_fixture(manifest.name, findings, manifest.expected, parsed_ok=True)
         except ReviewIncompleteError:
             score = score_fixture(manifest.name, [], manifest.expected, parsed_ok=False)
@@ -188,11 +164,13 @@ def _run_strategy_once(
 
 def _print(report: StrategyReport) -> None:
     parsed = "ok" if report.all_parsed else "PARSE-FAIL"
+    recalls = report.recalls
+    lo = min(recalls) if recalls else 0.0
+    hi = max(recalls) if recalls else 0.0
     print(
         f"{report.name:10} parsed={parsed:10} "
         f"recall mean {report.mean_recall:4.0%} "
-        f"(min {report.min_recall:.0%}, max {report.max_recall:.0%}, "
-        f"spread {report.spread:.0%}) "
+        f"(min {lo:.0%}, max {hi:.0%}, spread {hi - lo:.0%}) "
         f"tokens ~{report.mean_total_tokens:.0f}  over {len(report.samples)} runs"
     )
 
@@ -201,10 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--api-base", default=None)
-    ap.add_argument("--timeout", type=int, default=None)
+    _add_review_args(ap)
     ap.add_argument("--num-ctx", type=int, default=None, help="ollama context window")
     ap.add_argument(
         "--budget",
@@ -227,17 +202,6 @@ def main(argv: list[str] | None = None) -> int:
         help="run just one strategy (lets a CI matrix parallelise the two legs)",
     )
     ap.add_argument("--no-reflect", dest="reflect", action="store_false")
-    ap.add_argument("--temperature", type=float, default=None)
-    ap.add_argument("--top-p", type=float, default=None)
-    ap.add_argument("--top-k", type=int, default=None)
-    ap.add_argument("--categories", default=None, help="comma-separated review lenses")
-    ap.add_argument(
-        "--fixture",
-        action="append",
-        dest="fixtures",
-        metavar="NAME",
-        help=f"fixture(s) to benchmark; repeatable. Default: {', '.join(_DEFAULT_FIXTURES)}.",
-    )
     args = ap.parse_args(argv)
 
     provider = Provider(args.provider)
@@ -245,15 +209,13 @@ def main(argv: list[str] | None = None) -> int:
     fixtures = _select_fixtures(_load_fixtures(), args.fixtures or _DEFAULT_FIXTURES)
 
     # Sampling + ollama context reach the model via build_provider → litellm.
-    extra: dict[str, Any] = {}
-    if args.num_ctx is not None and provider is Provider.ollama:
-        extra["num_ctx"] = args.num_ctx
-    if args.temperature is not None:
-        extra["temperature"] = args.temperature
-    if args.top_p is not None:
-        extra["top_p"] = args.top_p
-    if args.top_k is not None:
-        extra["top_k"] = args.top_k
+    extra = _sampling_extra(
+        provider,
+        num_ctx=args.num_ctx,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
+    )
 
     def make_provider() -> ProviderClient:
         return build_provider(

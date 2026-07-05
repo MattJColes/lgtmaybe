@@ -7,15 +7,9 @@ Provides a dynamic context-line calculator for the remaining budget.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING, Protocol
+from typing import Any
 
 from lgtmaybe.core.diffparse import parse_hunk_header
-
-if TYPE_CHECKING:
-
-    class _Encoder(Protocol):
-        def encode(self, text: str) -> list[int]: ...
-
 
 _MAX_CONTEXT_LINES = 20
 _MIN_CONTEXT_LINES = 0
@@ -26,7 +20,7 @@ _SCALE = 5_000
 
 
 @lru_cache(maxsize=1)
-def _token_encoder() -> _Encoder | None:
+def _token_encoder() -> Any | None:
     """Return a cached tiktoken encoder, or None if tiktoken is unavailable.
 
     Building the encoder is slow, and ``count_tokens`` runs once per file during

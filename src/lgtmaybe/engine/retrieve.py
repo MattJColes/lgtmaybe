@@ -32,19 +32,6 @@ FileFetcher = Callable[[str], "str | None"]
 MAX_HOPS = 2
 MAX_FETCH_FILES = 5
 
-# Fraction of the input-token budget a single hop's fetched files may occupy, so
-# the grounding text the auditor already carries plus the new files still fit.
-_HOP_BUDGET_FRACTION = 4
-
-
-def hop_budget_tokens(max_input_tokens: int) -> int:
-    """Per-hop token budget for newly fetched files, derived from the input budget.
-
-    A fraction of the configured ``max_input_tokens`` so a hop's extra files leave
-    room for the diff + findings + existing grounding already in the prompt.
-    """
-    return max(0, max_input_tokens // _HOP_BUDGET_FRACTION)
-
 
 def resolve_needs(
     needs: list[str],

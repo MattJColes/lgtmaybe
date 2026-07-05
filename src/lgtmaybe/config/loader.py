@@ -10,7 +10,7 @@ Precedence (highest to lowest):
 from __future__ import annotations
 
 from pathlib import Path
-from typing import IO, Any
+from typing import Any
 
 import yaml
 
@@ -32,7 +32,6 @@ _PACK_SCHEME = "pack:"
 def load_config(
     *,
     config_path: Path | None = None,
-    config_stream: IO[str] | None = None,
     user_config_path: Path | None = None,
     **cli_inputs: Any,
 ) -> ReviewConfig:
@@ -41,14 +40,13 @@ def load_config(
     Pass explicit CLI values as keyword arguments — only non-None values
     override lower-precedence layers.  Supply a ``config_path`` (repo file) and/or
     ``user_config_path`` (user-level file); the user layer sits below the repo
-    file. ``config_stream`` is an alternative repo-file source for testing.
     """
     merged: dict[str, Any] = dict(_DEFAULTS)
 
     if user_config_path is not None:
         merged.update(store.load(user_config_path))
 
-    file_data = _load_file(config_path, config_stream)
+    file_data = _load_file(config_path)
     merged.update(file_data)
 
     # CLI inputs win only when the caller actually supplied a value.
@@ -119,14 +117,11 @@ def _resolve_lens_path(raw_path: Any) -> Path:
 
 def _load_file(
     config_path: Path | None,
-    config_stream: IO[str] | None,
 ) -> dict[str, Any]:
-    """Parse YAML from a path or stream; return an empty dict when absent."""
+    """Parse YAML from a path; return an empty dict when absent."""
     raw: str | None = None
 
-    if config_stream is not None:
-        raw = config_stream.read()
-    elif config_path is not None and config_path.exists():
+    if config_path is not None and config_path.exists():
         raw = config_path.read_text()
 
     if not raw or not raw.strip():

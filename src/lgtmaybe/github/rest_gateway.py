@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -378,25 +379,18 @@ class RestGitHubGateway(GitHubGateway):
         degrades like file contents: any fetch error returns [] (the intent lens
         still has the PR title/description) rather than failing the review.
         """
-        url: str | None = (
+        url = (
             f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
             "/commits?per_page=100"
         )
         subjects: list[str] = []
         try:
-            while url is not None:
-                resp = self._client.get(
-                    url,
-                    headers={**self._headers, "Accept": "application/vnd.github+json"},
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
+            for resp in self._paginate(url):
                 for item in resp.json():
                     message: str = (item.get("commit") or {}).get("message") or ""
                     first_line = message.splitlines()[0].strip() if message else ""
                     if first_line:
                         subjects.append(first_line)
-                url = self._next_link(resp)
         except httpx.HTTPError:
             return []
         return subjects
@@ -404,17 +398,9 @@ class RestGitHubGateway(GitHubGateway):
     def _fetch_all_files(self, first_url: str) -> list[str]:
         """Follow Link rel=next pagination and collect all filenames."""
         files: list[str] = []
-        url: str | None = first_url
-        while url is not None:
-            resp = self._client.get(
-                url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
+        for resp in self._paginate(first_url):
             for item in resp.json():
                 files.append(item["filename"])
-            url = self._next_link(resp)
         return files
 
     @staticmethod
@@ -423,6 +409,18 @@ class RestGitHubGateway(GitHubGateway):
         m = _LINK_NEXT.search(link)
         return m.group(1) if m else None
 
+    def _paginate(self, url: str) -> Iterator[httpx.Response]:
+        next_url: str | None = url
+        while next_url is not None:
+            resp = self._client.get(
+                next_url,
+                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+            yield resp
+            next_url = self._next_link(resp)
+
     def _find_existing_review(self) -> int | None:
         """Return the ID of the first review whose body contains the marker, or None.
 
@@ -430,22 +428,13 @@ class RestGitHubGateway(GitHubGateway):
         of reviews, and missing the marker there would duplicate the review
         instead of updating it.
         """
-        url: str | None = (
-            f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
-        )
-        while url is not None:
-            resp = self._client.get(
-                url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
+        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
+        for resp in self._paginate(url):
             for review in resp.json():
                 body: str = review.get("body", "") or ""
                 if self._marker in body:
                     review_id: int = review["id"]
                     return review_id
-            url = self._next_link(resp)
         return None
 
     # ------------------------------------------------------------------

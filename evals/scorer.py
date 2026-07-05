@@ -7,11 +7,13 @@ model produced parseable output at all. No I/O, no model — unit-tested.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from lgtmaybe.core.models import ReviewFinding, Severity
+from lgtmaybe.core.models import PRContext, Provider, ReviewFinding, Severity
 
 # How far a reported line may drift from the expected line and still count. The
 # engine re-anchors findings to the exact changed line they quote (see
@@ -199,4 +201,98 @@ def score_fixture(
         adjudicable_count=adjudicable,
         forbidden_count=forbidden_count,
         unexpected_count=unexpected_count,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared eval-runner plumbing (used by both run.py and rlm.py); co-located
+# with Fixture, the manifest type they all take.
+# ---------------------------------------------------------------------------
+
+
+def _eval_ctx(diff: str, manifest: Fixture) -> PRContext:
+    """The synthetic PRContext every eval review runs against (no real PR)."""
+    return PRContext(
+        diff=diff,
+        changed_files=[manifest.changed_file],
+        base_sha="0",
+        head_sha="1",
+        repo="eval/eval",
+        pr_number=0,
+    )
+
+
+def _sampling_extra(
+    provider: Provider,
+    *,
+    num_ctx: int | None,
+    temperature: float | None,
+    top_p: float | None,
+    top_k: int | None,
+) -> dict[str, Any]:
+    """Forward only explicitly-given sampling params (plus ollama's num_ctx) to the model.
+
+    Only forward params explicitly given so an unset flag keeps the model's own
+    default rather than pinning it. litellm.drop_params drops a param a given
+    provider can't take (e.g. top_k on an OpenAI-compat endpoint). num_ctx is
+    ollama's context window — litellm rejects it for hosted providers.
+    """
+    extra: dict[str, Any] = {}
+    if num_ctx is not None and provider is Provider.ollama:
+        extra["num_ctx"] = num_ctx
+    if temperature is not None:
+        extra["temperature"] = temperature
+    if top_p is not None:
+        extra["top_p"] = top_p
+    if top_k is not None:
+        extra["top_k"] = top_k
+    return extra
+
+
+def _add_review_args(ap: argparse.ArgumentParser) -> None:
+    """The review-driver CLI flags shared by evals.run and evals.rlm.
+
+    Each runner adds its own extra flags around these (budget/repeats/only on
+    rlm; min-recall/json/save-results/... on run).
+    """
+    ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--api-base", default=None)
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="per-request timeout (seconds); raise for slow local models on big diffs",
+    )
+    ap.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="sampling temperature forwarded to the model (default: the model's own)",
+    )
+    ap.add_argument(
+        "--top-p",
+        type=float,
+        default=None,
+        help="nucleus-sampling top_p forwarded to the model",
+    )
+    ap.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="top_k forwarded to the model (ollama/qwen3.x recommend 20 with thinking off)",
+    )
+    ap.add_argument(
+        "--categories",
+        default=None,
+        help="comma-separated review lenses to run (default: all). Cuts the per-category "
+        "fan-out for a fast CI smoke, e.g. 'security,correctness'.",
+    )
+    ap.add_argument(
+        "--fixture",
+        action="append",
+        dest="fixtures",
+        metavar="NAME",
+        help="only run the named fixture(s); repeatable. Default: all. Lets CI run a fast "
+        "single-fixture subset while the full set stays available on demand.",
     )
