@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -408,6 +409,49 @@ class RestGitHubGateway(GitHubGateway):
             timeout=_TIMEOUT,
         )
         created.raise_for_status()
+
+    def apply_pr_labels(self, labels: list[str]) -> None:
+        """Reconcile our managed PR labels to exactly *labels*. Best-effort.
+
+        Only labels this tool owns (the ``review-effort/`` family,
+        ``possible-security-issue``, ``consider-splitting``) are ever removed —
+        anything a human applied is untouched. Any API failure is logged and
+        swallowed: a labelling hiccup must never fail an otherwise-successful
+        review. Adapter-only, beyond the frozen port.
+        """
+        try:
+            base = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}"
+            current: set[str] = {
+                item["name"]
+                for resp in self._paginate(f"{base}/labels?per_page=100")
+                for item in resp.json()
+            }
+            managed = {
+                name
+                for name in current
+                if name.startswith("review-effort/")
+                or name in ("possible-security-issue", "consider-splitting")
+            }
+            for stale in sorted(managed - set(labels)):
+                # The label name is a single path segment — quote it fully, or
+                # the slash in "review-effort/2" would read as a path separator.
+                resp = self._client.delete(
+                    f"{base}/labels/{quote(stale, safe='')}",
+                    headers={**self._headers, "Accept": "application/vnd.github+json"},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+            to_add = sorted(set(labels) - current)
+            if to_add:
+                resp = self._client.post(
+                    f"{base}/labels",
+                    headers={**self._headers, "Accept": "application/vnd.github+json"},
+                    json={"labels": to_add},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001 — labels are auxiliary, never fatal
+            _log.warning("applying PR labels failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Incremental review (adapter-only methods, beyond the frozen port)

@@ -341,6 +341,7 @@ def action() -> None:
         prompt_cache=inputs["prompt_cache"],
         incremental=inputs["incremental"],
         auto_describe=inputs["auto_describe"],
+        pr_labels=inputs["pr_labels"],
     )
     raw_sa = inputs["static_analysis"]
     cfg = _apply_static_analysis_flag(

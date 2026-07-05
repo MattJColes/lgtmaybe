@@ -1512,3 +1512,49 @@ def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: i
     findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
 
     assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# summary template (F5b)
+# ---------------------------------------------------------------------------
+
+
+def test_summary_template_formats_the_summary_line() -> None:
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        summary_template="{count} issue(s) — reviewed by {model} on {provider}",
+    )
+
+    _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert "issue(s) — reviewed by llama3 on ollama" in summary
+
+
+def test_bad_summary_template_falls_back_to_default() -> None:
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", summary_template="{nonsense}")
+
+    _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert "provider ollama · model llama3" in summary
+
+
+def test_finding_rules_run_before_the_summary_count(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from lgtmaybe.core.models import FindingRule
+
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        finding_rules=[FindingRule.model_validate({"action": {"drop": True}})],
+    )
+
+    findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert findings == []
+    assert "0 findings" in summary

@@ -42,6 +42,18 @@
       "title": "Broad",
       "type": "boolean"
     },
+    "category": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Category"
+    },
     "confidence": {
       "anyOf": [
         {
