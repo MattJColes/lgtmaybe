@@ -160,14 +160,19 @@ pattern, event bus, plugin framework.
      `/ask <q>` + `/describe` reply in-thread (`post_issue_comment`, an
      adapter-only method beyond the frozen port).
    - **Guards (in the engine):** generated/binary files skipped via
-     `is_reviewable`; **file cap** reviews the top-N and posts a "reviewed top N
-     of M" notice.
+     `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
+     denylist globs applied right after it (`engine.passes_path_filters`;
+     exclude wins, `**/`-prefixed patterns also match at the repo root);
+     **file cap** reviews the top-N and posts a "reviewed top N of M" notice.
    - **Context expansion:** `get_pr_context` also fetches the head text of
      reviewable files via the API (read-only, never a checkout) into
      `PRContext.file_contents`; the engine (`compress.expand_hunks`) pads each
      hunk with budget-scaled surrounding lines, capped by
      `ReviewConfig.context_lines` (default 20, `0` disables), redacted like the
-     diff. Inline positions stay bound to the **real** diff, so a finding on a
+     diff. The pad is **asymmetric** (`compress.trailing_context_lines`): the
+     full budget goes before each hunk, a quarter of it (floored at one line)
+     after — the enclosing signature/setup explains a change better than what
+     follows. Inline positions stay bound to the **real** diff, so a finding on a
      context-only line maps to nothing and is dropped — never mis-posted.
    - **Recursive walk (RLM):** when a single file's diff exceeds
      `max_input_tokens`, the engine **walks it hunk-by-hunk** instead of sending it
@@ -221,9 +226,14 @@ pattern, event bus, plugin framework.
    - **Self-reflection:** after merge/dedupe, `engine/reflect.py` asks the
      provider to audit its own findings for false positives and drops the ones it
      marks low-confidence. The verdict is structured (`ReflectionResult` —
-     `{"verdicts": [{"index", "keep"}]}`) with a lenient parser and a **keep-all
-     safe default** when it can't be parsed (never silently drop a real finding).
-     Skippable via `--no-reflect` for weaker models that over-prune. The auditor
+     `{"verdicts": [{"index", "keep", "confidence", "broad", "needs"}]}`) with a
+     lenient parser and a **keep-all safe default** when it can't be parsed
+     (never silently drop a real finding). Each kept verdict carries a **0–10
+     confidence score** (the auditor tries to disprove the finding to reach it);
+     `ReviewConfig.min_confidence` (default 0 = off, CLI `--min-confidence`)
+     drops findings scored below it, an unscored kept finding survives any
+     threshold, and the score lands on `ReviewFinding.confidence` in CLI/JSON
+     output. Skippable via `--no-reflect` for weaker models that over-prune. The auditor
      also drops **cross-file false positives** — findings whose validity hinges on
      an assumption about code outside the diff (a guard/field/handler that may live
      in an unshown file) — while **carving out gap findings** (a missing test/doc on
@@ -233,6 +243,17 @@ pattern, event bus, plugin framework.
    - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
      reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
      one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
+   - **Prompt caching:** on routes with an explicit cache breakpoint (anthropic
+     `cache_control`; bedrock, where litellm emits a Converse `cachePoint` for
+     Claude/Nova) the adapter marks the static system prompt as an
+     ephemeral-cache block, so the per-lens fan-out and reflection re-read the
+     shared prefix at the cached-input discount. Feature-detected per model
+     (litellm capability map + the 1,024-token minimum block); volatile content
+     (diff/intent/findings) always stays in the user message, outside the cached
+     region; byte-identical requests on every other provider.
+     `ReviewConfig.prompt_cache` (default **on**; CLI
+     `--prompt-cache/--no-prompt-cache`, Action input `prompt_cache`);
+     cache read/creation token counts land on `ProviderResult` and are logged.
    - **Summary line:** names the **model** used (no cost — lgtmaybe does not
      compute or report cost).
    - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
