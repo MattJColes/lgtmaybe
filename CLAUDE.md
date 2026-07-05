@@ -200,6 +200,19 @@ pattern, event bus, plugin framework.
      not the PR base). `ReviewConfig.incremental` (default None = auto: on for
      the Action's `synchronize` event, full elsewhere; Action input
      `incremental`); `/review full` forces a full re-review.
+   - **Static-analysis fusion (default off):** with `static_analysis.enabled`,
+     installed deterministic tools (ruff, bandit, semgrep-with-local-rules —
+     `pip install lgtmaybe[static-analysis]`) run over the already-fetched
+     changed-file texts in a temp dir (`engine/static_analysis.py`; sandboxed
+     subprocess: scrubbed env, no network — semgrep only ever runs with local
+     `semgrep_rules`, never `--config auto` — hard timeout, never a checkout).
+     Findings are mapped onto the shared Severity scale, floored by
+     `static_analysis.min_severity`, redacted, and wrapped as an untrusted
+     HINTS block (`injection.wrap_hints`, its own neutralised marker family)
+     prepended to each batch's lens calls — "confirm, contextualise, or
+     discard"; raw tool findings are never posted. A missing tool is skipped
+     silently. CLI `--static-analysis/--no-static-analysis`, Action input
+     `static_analysis`.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`

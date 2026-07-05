@@ -404,6 +404,7 @@ def action_inputs() -> dict[str, str | None]:
         "symbol_resolution": get("SYMBOL_RESOLUTION"),
         "prompt_cache": get("PROMPT_CACHE"),
         "incremental": get("INCREMENTAL"),
+        "static_analysis": get("STATIC_ANALYSIS"),
         "config_path": get("CONFIG_PATH"),
     }
 

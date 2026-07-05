@@ -223,6 +223,12 @@ verdicts carry a 0–10 confidence score, filtered by `min_confidence`), and
 loud failure surfacing (a "review failed" comment + non-zero exit) rather than
 silent passes.
 
+**Grounding** — optional static-analysis fusion (`static_analysis`, default
+off): installed deterministic linters (ruff, bandit, semgrep with local rules)
+run over the fetched changed-file texts in a sandboxed, network-less
+subprocess, and their findings enter each lens prompt as untrusted hints to
+confirm or discard — never posted verbatim.
+
 **Cost** — on providers with an explicit prompt-cache breakpoint (anthropic,
 bedrock Claude/Nova) the static system prompt is marked `cache_control` so the
 per-lens fan-out re-reads it at the cached-input discount (`prompt_cache`,

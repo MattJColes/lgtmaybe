@@ -1719,6 +1719,7 @@ provides defaults for all runs.
   - [reflect](#reflect)
   - [min_confidence](#min_confidence)
   - [incremental](#incremental)
+  - [static_analysis](#static_analysis)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -1983,6 +1984,36 @@ incremental: false   # every run reviews the whole PR
 Default: auto — incremental on a `synchronize` push (new commits on an
 already-reviewed PR), full review everywhere else (open/reopen, slash
 commands, and the local CLI, which never uses it).
+
+### static_analysis
+
+Static-analysis fusion: run fast, deterministic linters over the changed files
+and feed their findings to the model as **hints to confirm, contextualise, or
+discard** — raising recall on exactly the mechanical bugs LLMs miss, without
+posting raw linter noise (only findings the model itself confirms are
+reported). Supported tools: **ruff** and **bandit** (Python), and **semgrep**
+(multi-language) when you point `semgrep_rules` at local rules — semgrep's
+registry configs need the network, which the sandbox forbids.
+
+The tools run against the already-fetched file texts in a throwaway directory
+(never a checkout, never executing PR code), in a subprocess with a scrubbed
+environment (no proxy or credential variables) and a hard timeout. A tool that
+isn't installed is skipped silently — install them with
+`pip install lgtmaybe[static-analysis]`, or rely on whatever is already on
+PATH. Tool output is treated as untrusted text: redacted and
+injection-wrapped before it reaches the model. CLI:
+`--static-analysis/--no-static-analysis`.
+
+```yaml
+static_analysis:
+  enabled: true
+  tools: [ruff, bandit]        # default: ruff, bandit, semgrep
+  min_severity: low            # floor on mapped tool severity (default info)
+  # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
+```
+
+Default: `enabled: false` — no subprocess ever runs and behaviour is
+unchanged.
 
 ### resolve_fixed
 
@@ -2444,6 +2475,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
 | `temperature` | number | No | `0.0` | Temperature |
@@ -2715,6 +2747,57 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "title": "Severity",
       "type": "string"
+    },
+    "StaticAnalysisConfig": {
+      "additionalProperties": false,
+      "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nWhen enabled, the installed tools run over the already-fetched changed-file\ntexts (sandboxed subprocess, scrubbed environment, no network, never a\ncheckout) and their findings enter each lens prompt as untrusted HINTS \u2014\n\"confirm, contextualise, or discard\" \u2014 raising recall on the deterministic\nbugs models miss without posting raw linter noise. A tool that isn't\ninstalled is skipped silently, so the feature degrades to nothing on a\nminimal install.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "min_severity": {
+          "$ref": "#/$defs/Severity",
+          "default": "info"
+        },
+        "semgrep_rules": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semgrep Rules"
+        },
+        "tools": {
+          "default": [
+            "ruff",
+            "bandit",
+            "semgrep"
+          ],
+          "items": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "title": "StaticAnalysisConfig",
+      "type": "object"
+    },
+    "StaticAnalysisTool": {
+      "description": "A deterministic linter/SAST tool whose findings ground the LLM review.",
+      "enum": [
+        "ruff",
+        "bandit",
+        "semgrep"
+      ],
+      "title": "StaticAnalysisTool",
+      "type": "string"
     }
   },
   "additionalProperties": false,
@@ -2866,6 +2949,19 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": true,
       "title": "Resolve Fixed",
       "type": "boolean"
+    },
+    "static_analysis": {
+      "$ref": "#/$defs/StaticAnalysisConfig",
+      "default": {
+        "enabled": false,
+        "min_severity": "info",
+        "semgrep_rules": null,
+        "tools": [
+          "ruff",
+          "bandit",
+          "semgrep"
+        ]
+      }
     },
     "structured_output": {
       "default": true,
