@@ -152,6 +152,13 @@ from lgtmaybe.config.loader import load_config
     "(--no-reflect keeps them all; useful for weaker models)",
 )
 @click.option(
+    "--min-confidence",
+    default=None,
+    type=click.IntRange(0, 10),
+    help="Drop findings the reflection auditor scores below this confidence "
+    "(0-10; default 0 = no numeric filtering, unscored findings always survive)",
+)
+@click.option(
     "--recursive/--no-recursive",
     default=None,
     help="Walk a file whose diff exceeds the token budget hunk-by-hunk (RLM-style) "
@@ -170,6 +177,13 @@ from lgtmaybe.config.loader import load_config
     help="During reflection, use ast-grep to resolve a deferred finding's "
     "referenced symbol to the file that defines it (searched in your worktree) so "
     "the auditor re-judges with the real definition (--no-symbol-resolution disables)",
+)
+@click.option(
+    "--prompt-cache/--no-prompt-cache",
+    default=None,
+    help="Cache the static system prompt across the per-lens calls on providers "
+    "that support it (anthropic, bedrock Claude/Nova) — cached reads are billed "
+    "at a steep discount. Safe no-op elsewhere (--no-prompt-cache disables)",
 )
 @click.option(
     "--config",
@@ -199,9 +213,11 @@ def review(
     timeout: int | None,
     temperature: float | None,
     reflect: bool | None,
+    min_confidence: int | None,
     recursive: bool | None,
     structured_output: bool | None,
     symbol_resolution: bool | None,
+    prompt_cache: bool | None,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -222,9 +238,11 @@ def review(
         timeout=timeout,
         temperature=temperature,
         reflect=reflect,
+        min_confidence=min_confidence,
         recursive=recursive,
         structured_output=structured_output,
         symbol_resolution=symbol_resolution,
+        prompt_cache=prompt_cache,
     )
 
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
@@ -282,6 +300,7 @@ def action() -> None:
         recursive=inputs["recursive"],
         structured_output=inputs["structured_output"],
         symbol_resolution=inputs["symbol_resolution"],
+        prompt_cache=inputs["prompt_cache"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

@@ -2,6 +2,16 @@
   "additionalProperties": false,
   "description": "The normalised return of one LLM completion, with token usage.",
   "properties": {
+    "cache_creation_tokens": {
+      "default": 0,
+      "title": "Cache Creation Tokens",
+      "type": "integer"
+    },
+    "cache_read_tokens": {
+      "default": 0,
+      "title": "Cache Read Tokens",
+      "type": "integer"
+    },
     "input_tokens": {
       "title": "Input Tokens",
       "type": "integer"

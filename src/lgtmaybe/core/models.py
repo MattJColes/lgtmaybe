@@ -118,6 +118,12 @@ class ReviewFinding(_Strict):
     # collapsed "Broader observations" section instead of inline, so the must-fix
     # list stays tight without dropping the observation.
     broad: bool = False
+    # Reflection-derived confidence that this finding is real (0 = certainly a
+    # false positive, 10 = certain), set by the self-reflection auditor's verdict
+    # — never self-reported by the reviewing model. None when reflection is off
+    # or the auditor omitted a score. Findings scoring below
+    # `ReviewConfig.min_confidence` are dropped; the score is surfaced in output.
+    confidence: int | None = Field(default=None, ge=0, le=10)
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -200,6 +206,11 @@ class Verdict(_Strict):
     # merely because the referenced code wasn't in the diff. Optional with a
     # back-compat default so a model that omits it still validates.
     needs: list[str] = Field(default_factory=list)
+    # The auditor's 0-10 confidence that a KEPT finding is real (0 = certainly a
+    # false positive, 10 = certain). Optional with a back-compat default so a
+    # model that omits it still validates; an unscored kept finding survives any
+    # `min_confidence` threshold (safe default — never drop for a missing score).
+    confidence: int | None = Field(default=None, ge=0, le=10)
 
 
 class ReflectionResult(_Strict):
@@ -218,6 +229,11 @@ class ProviderResult(_Strict):
     text: str
     input_tokens: int
     output_tokens: int
+    # Prompt-cache accounting, when the provider reports it: tokens read from a
+    # previously cached prefix, and tokens written to create one. Zero on
+    # providers/models without prompt caching (back-compat default).
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 class PRContext(_Strict):
@@ -300,6 +316,11 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Drop findings the reflection auditor scores below this confidence (0-10).
+    # 0 (the default) disables numeric filtering — reflection then prunes only
+    # via its keep/drop verdicts, exactly as before the score existed. Findings
+    # the auditor keeps but doesn't score always survive the threshold.
+    min_confidence: int = Field(default=0, ge=0, le=10)
     # Finding fingerprints to permanently suppress — a team dismissing a known-fine
     # pattern. Each entry is a finding_fingerprint(path, title) hex id (surfaced in
     # the inline comment's hidden marker). Findings matching one are dropped before
@@ -327,6 +348,14 @@ class ReviewConfig(_Strict):
     # prose/reasoning instead of findings. Disable for a model/provider that
     # doesn't support it (the lenient parser is the fallback).
     structured_output: bool = True
+    # Cache the static system prompt across the per-lens fan-out and reflection
+    # call. On providers with an explicit cache breakpoint (anthropic, bedrock
+    # Claude/Nova) the adapter marks the system prompt with cache_control —
+    # every call after the first reads the shared prefix at the provider's
+    # cached-input discount. Feature-detected per model and a safe no-op
+    # everywhere else (ollama, openai-compatible, and providers that cache
+    # automatically server-side), so leaving it on costs nothing.
+    prompt_cache: bool = True
 
     @model_validator(mode="after")
     def _lens_ids_are_unique(self) -> ReviewConfig:

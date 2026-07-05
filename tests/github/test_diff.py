@@ -245,3 +245,24 @@ def test_no_newline_marker_does_not_shift_commentable_lines() -> None:
     assert ("f.txt", 2, "RIGHT") in index
     assert ("f.txt", 3, "RIGHT") not in index
     assert ("f.txt", 2, "LEFT") in index
+
+
+def test_is_reviewable_rejects_newer_lockfiles() -> None:
+    # Lockfiles from ecosystems that postdate the original list — all generated.
+    for path in (
+        "uv.lock",
+        "bun.lock",
+        "bun.lockb",
+        "deno.lock",
+        "flake.lock",
+        "mix.lock",
+        "Package.resolved",
+        "gradle.lockfile",
+        "backend/uv.lock",
+    ):
+        assert not is_reviewable(path), path
+
+
+def test_is_reviewable_rejects_sourcemaps() -> None:
+    assert not is_reviewable("assets/app.js.map")
+    assert not is_reviewable("assets/styles.css.map")

@@ -26,7 +26,8 @@ def render_findings(findings: list[ReviewFinding], summary: str, *, fmt: str = "
 
     lines: list[str] = []
     for f in findings:
-        lines.append(f"{f.path}:{f.line}  [{f.severity.upper()}] {f.title}")
+        score = f" (confidence {f.confidence}/10)" if f.confidence is not None else ""
+        lines.append(f"{f.path}:{f.line}  [{f.severity.upper()}] {f.title}{score}")
         lines.append(f"  {f.body}")
         if f.suggestion is not None:
             lines.append(f"  suggestion: {f.suggestion}")

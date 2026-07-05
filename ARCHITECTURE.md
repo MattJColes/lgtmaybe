@@ -218,9 +218,15 @@ agent can apply) formats.
 run; generated/binary files are skipped automatically.
 
 **Reliability** — provider retries with fallback, provider-aware timeouts, a
-self-reflection pass to cut false positives (toggle with `--no-reflect`), and
+self-reflection pass to cut false positives (toggle with `--no-reflect`; its
+verdicts carry a 0–10 confidence score, filtered by `min_confidence`), and
 loud failure surfacing (a "review failed" comment + non-zero exit) rather than
 silent passes.
+
+**Cost** — on providers with an explicit prompt-cache breakpoint (anthropic,
+bedrock Claude/Nova) the static system prompt is marked `cache_control` so the
+per-lens fan-out re-reads it at the cached-input discount (`prompt_cache`,
+default on; feature-detected, byte-identical requests elsewhere).
 
 **Distribution** — `pip install lgtmaybe` (PyPI CLI) and the composite GitHub
 Action (keyless OIDC/WIF cloud auth, then runs the GHCR image). Release is

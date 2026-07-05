@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from functools import partial
 
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
@@ -25,7 +26,13 @@ from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
-from .compress import batch_files, context_lines_for_budget, count_tokens, expand_hunks
+from .compress import (
+    batch_files,
+    context_lines_for_budget,
+    count_tokens,
+    expand_hunks,
+    trailing_context_lines,
+)
 from .injection import wrap_diff, wrap_intent
 from .parse import ParseError, parse_findings
 from .prompt import build_lens_prompt, build_system_prompt
@@ -121,9 +128,16 @@ class LLMReviewEngine(ReviewEngine):
             lenses = [lens for lens in lenses if not lens.carries_intent]
             _log.info("intent lens skipped — no stated intent (title/description/commits)")
 
-        # 2. Split into per-file patches and drop generated/binary/vendored noise.
+        # 2. Split into per-file patches and drop generated/binary/vendored noise,
+        #    then apply the user's path filters (include_paths allowlist, then
+        #    exclude_paths denylist).
         file_patches = split_by_file(clean_diff, ctx.changed_files)
-        file_patches = [(path, patch) for path, patch in file_patches if is_reviewable(path)]
+        file_patches = [
+            (path, patch)
+            for path, patch in file_patches
+            if is_reviewable(path)
+            and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
+        ]
 
         # 3. File cap: review only the first N reviewable files, note the rest.
         total_files = len(file_patches)
@@ -133,15 +147,24 @@ class LLMReviewEngine(ReviewEngine):
 
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
-        #    capped by cfg.context_lines; content is the head file text the
-        #    gateway fetched (redacted), and is for understanding only —
-        #    inline-comment positions are always built from the real diff.
+        #    capped by cfg.context_lines; the pad is asymmetric — the code
+        #    before a change explains it better than the code after, so the
+        #    trailing side gets a quarter of the leading budget. Content is the
+        #    head file text the gateway fetched (redacted), and is for
+        #    understanding only — inline-comment positions are always built
+        #    from the real diff.
         used_tokens = count_tokens(clean_diff)
         remaining = max(0, cfg.max_input_tokens - used_tokens)
         ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
         if ctx_lines > 0 and ctx.file_contents:
+            after = trailing_context_lines(ctx_lines)
             file_patches = [
-                (path, expand_hunks(patch, redact(ctx.file_contents.get(path, "")), ctx_lines))
+                (
+                    path,
+                    expand_hunks(
+                        patch, redact(ctx.file_contents.get(path, "")), ctx_lines, after=after
+                    ),
+                )
                 for path, patch in file_patches
             ]
 
@@ -321,6 +344,26 @@ class LLMReviewEngine(ReviewEngine):
             return [], "unparseable model output"
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) -> bool:
+    """Whether *path* survives the config's glob filters.
+
+    ``include`` is an allowlist (empty = everything included) and ``exclude`` a
+    denylist applied after it — so an exclude always wins. Patterns are fnmatch
+    globs matched against the full path, with one gitignore-style nicety: a
+    ``**/``-prefixed pattern also matches at the repo root (plain fnmatch would
+    demand a literal slash, silently missing ``**/*.lock`` on a root lockfile).
+    """
+    if include and not any(_matches_glob(path, pattern) for pattern in include):
+        return False
+    return not any(_matches_glob(path, pattern) for pattern in exclude)
+
+
+def _matches_glob(path: str, pattern: str) -> bool:
+    if fnmatch(path, pattern):
+        return True
+    return pattern.startswith("**/") and fnmatch(path, pattern[3:])
 
 
 def _intent_text(ctx: PRContext) -> str:

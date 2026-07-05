@@ -113,6 +113,14 @@ _SKIP_FILENAMES = frozenset(
         "Pipfile.lock",
         "composer.lock",
         "go.sum",
+        "uv.lock",
+        "bun.lock",
+        "bun.lockb",
+        "deno.lock",
+        "flake.lock",
+        "mix.lock",
+        "Package.resolved",
+        "gradle.lockfile",
     }
 )
 
@@ -136,6 +144,9 @@ _SKIP_GLOB_PATTERNS = (
     "*.generated.*",
     "__generated__/*",
     "*.d.ts",
+    # Sourcemaps are compiler output, never hand-written.
+    "*.js.map",
+    "*.css.map",
 )
 
 _SKIP_EXTENSIONS = frozenset(

@@ -103,3 +103,28 @@ def test_human_output_renders_every_finding_with_one_trailing_summary() -> None:
     assert "unused import" in out
     assert out.count("2 findings · llama3") == 1
     assert out.rstrip().endswith("2 findings · llama3")
+
+
+def test_human_format_shows_confidence_when_scored() -> None:
+    finding = ReviewFinding(
+        path="a.py",
+        line=3,
+        severity=Severity.high,
+        title="real bug",
+        body="broken",
+        confidence=8,
+    )
+
+    out = render_findings([finding], "1 finding", fmt="human")
+
+    assert "(confidence 8/10)" in out
+
+
+def test_human_format_omits_confidence_when_unscored() -> None:
+    finding = ReviewFinding(
+        path="a.py", line=3, severity=Severity.high, title="real bug", body="broken"
+    )
+
+    out = render_findings([finding], "1 finding", fmt="human")
+
+    assert "confidence" not in out

@@ -25,9 +25,11 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
+| `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
+| `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
@@ -75,6 +77,7 @@ The structured output the model must return for each inline comment. All fields 
 | `anchored` | boolean | No | `True` | Anchored |
 | `body` | string | Yes | — | Body |
 | `broad` | boolean | No | `False` | Broad |
+| `confidence` | integer / null | No | `null` | Confidence |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
 | `severity` | `critical` / `high` / `info` / `low` / `medium` | Yes | — |  |
@@ -88,6 +91,8 @@ The normalised return value of one LLM completion, including token usage.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
+| `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
 | `output_tokens` | integer | Yes | — | Output Tokens |
 | `text` | string | Yes | — | Text |
@@ -228,6 +233,20 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Broad",
           "type": "boolean"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
         "line": {
           "minimum": 1,
           "title": "Line",
@@ -365,6 +384,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Max Input Tokens",
       "type": "integer"
     },
+    "min_confidence": {
+      "default": 0,
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Min Confidence",
+      "type": "integer"
+    },
     "min_severity": {
       "$ref": "#/$defs/Severity",
       "default": "low"
@@ -384,6 +410,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Num Ctx"
+    },
+    "prompt_cache": {
+      "default": true,
+      "title": "Prompt Cache",
+      "type": "boolean"
     },
     "provider": {
       "$ref": "#/$defs/Provider"
@@ -503,6 +534,20 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Broad",
       "type": "boolean"
     },
+    "confidence": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
+    },
     "line": {
       "minimum": 1,
       "title": "Line",
@@ -560,6 +605,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "The normalised return of one LLM completion, with token usage.",
   "properties": {
+    "cache_creation_tokens": {
+      "default": 0,
+      "title": "Cache Creation Tokens",
+      "type": "integer"
+    },
+    "cache_read_tokens": {
+      "default": 0,
+      "title": "Cache Read Tokens",
+      "type": "integer"
+    },
     "input_tokens": {
       "title": "Input Tokens",
       "type": "integer"

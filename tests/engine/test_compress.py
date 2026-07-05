@@ -8,6 +8,7 @@ from lgtmaybe.engine.compress import (
     count_tokens,
     expand_hunks,
     split_patch_into_hunks,
+    trailing_context_lines,
 )
 
 # ---------------------------------------------------------------------------
@@ -218,3 +219,33 @@ def test_expand_hunks_clamps_at_file_edges() -> None:
     assert "@@ -1," in expanded
     # Trailing context is clamped to the last real line (j) — no over-read.
     assert expanded.rstrip().endswith(" j")
+
+
+def test_expand_hunks_asymmetric_pads_fewer_after() -> None:
+    # The code BEFORE a change (signature, setup) explains it better than the
+    # code after, so an explicit `after` pads the two sides differently.
+    patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
+
+    expanded = expand_hunks(patch, _CONTENT, 3, after=1)
+
+    # Three leading lines (b, c, d) and exactly one trailing line (g).
+    assert "\n b\n c\n d\n" in expanded
+    assert "\n g\n" in expanded
+    assert " h\n" not in expanded
+    # Header widened by 3 leading + 1 trailing = 4.
+    assert "@@ -2,6 +2,6 @@" in expanded
+
+
+def test_expand_hunks_default_stays_symmetric() -> None:
+    # Without an explicit `after`, both sides pad by n — the original contract.
+    patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
+    assert expand_hunks(patch, _CONTENT, 2) == expand_hunks(patch, _CONTENT, 2, after=2)
+
+
+def test_trailing_context_lines_ratio() -> None:
+    # PR-Agent-style asymmetry: roughly a quarter of the leading budget,
+    # floored at one line so the model still sees what follows the change.
+    assert trailing_context_lines(20) == 5
+    assert trailing_context_lines(4) == 1
+    assert trailing_context_lines(1) == 1
+    assert trailing_context_lines(0) == 0

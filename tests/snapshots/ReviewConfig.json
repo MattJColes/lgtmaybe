@@ -110,6 +110,20 @@
           "title": "Broad",
           "type": "boolean"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
         "line": {
           "minimum": 1,
           "title": "Line",
@@ -247,6 +261,13 @@
       "title": "Max Input Tokens",
       "type": "integer"
     },
+    "min_confidence": {
+      "default": 0,
+      "maximum": 10,
+      "minimum": 0,
+      "title": "Min Confidence",
+      "type": "integer"
+    },
     "min_severity": {
       "$ref": "#/$defs/Severity",
       "default": "low"
@@ -266,6 +287,11 @@
       ],
       "default": null,
       "title": "Num Ctx"
+    },
+    "prompt_cache": {
+      "default": true,
+      "title": "Prompt Cache",
+      "type": "boolean"
     },
     "provider": {
       "$ref": "#/$defs/Provider"

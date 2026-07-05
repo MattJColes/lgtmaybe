@@ -42,6 +42,20 @@
       "title": "Broad",
       "type": "boolean"
     },
+    "confidence": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
+    },
     "line": {
       "minimum": 1,
       "title": "Line",

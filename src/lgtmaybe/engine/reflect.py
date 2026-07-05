@@ -8,6 +8,7 @@ review calls are, with a lenient parser + keep-all safe default as fallback.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
@@ -33,8 +34,14 @@ You are a senior code reviewer auditing another reviewer's findings for false po
 
 Given a list of findings (as JSON) and the diff that generated them, return a JSON object \
 with a single key "verdicts": a list of \
-{"index": <finding index>, "keep": <true|false>, "broad": <true|false>, "needs": [<paths>]} \
-objects, one per finding.
+{"index": <finding index>, "keep": <true|false>, "confidence": <0-10>, "broad": <true|false>, \
+"needs": [<paths>]} objects, one per finding.
+
+"confidence" scores how confident you are that a KEPT finding is a real, correctly placed, \
+actionable issue: 0 means you are certain it is a false positive, 10 means you are certain \
+it is real. Score it by actively trying to DISPROVE the finding against the diff and the \
+file text provided below — a finding you cannot disprove but also cannot verify belongs in \
+the middle of the scale. For a dropped finding emit 0.
 
 If you would drop a finding ONLY because you cannot see a file or definition it depends on, \
 do NOT drop it — set "needs" to the file path(s) (and/or symbol names) you need to decide; \
@@ -84,8 +91,8 @@ patch target is wrong" — test-execution and mock/patch-target outcomes depend 
 test harness you cannot see, so such a claim is speculative.
 
 Return ONLY the JSON object, nothing else. Example:
-{"verdicts": [{"index": 0, "keep": true, "broad": false, "needs": []}, \
-{"index": 1, "keep": false, "broad": false, "needs": ["app/models.py"]}]}
+{"verdicts": [{"index": 0, "keep": true, "confidence": 9, "broad": false, "needs": []}, \
+{"index": 1, "keep": false, "confidence": 0, "broad": false, "needs": ["app/models.py"]}]}
 """
 
 
@@ -157,14 +164,35 @@ def _reflect_pass(
     deferred: list[ReviewFinding] = []
     deferred_needs: list[str] = []
     for i, finding in enumerate(findings):
-        keep, broad, needs = verdicts.get(i, (True, False, []))
-        if needs:
+        verdict = verdicts.get(i, _KEEP_VERDICT)
+        if verdict.needs:
             # The auditor can't decide without seeing more code — collect it for a
             # recheck rather than acting on this verdict's keep flag now.
             deferred.append(finding)
-            deferred_needs.extend(needs)
-        elif keep:
-            survivors.append(finding.model_copy(update={"broad": broad}))
+            deferred_needs.extend(verdict.needs)
+        elif verdict.keep:
+            if (
+                cfg.min_confidence > 0
+                and verdict.confidence is not None
+                and verdict.confidence < cfg.min_confidence
+            ):
+                # Kept but scored below the configured floor. An UNSCORED kept
+                # finding always survives — never drop for a missing score.
+                _log.info(
+                    "finding below min_confidence — dropping",
+                    extra={
+                        "path": finding.path,
+                        "title": finding.title,
+                        "confidence": verdict.confidence,
+                        "min_confidence": cfg.min_confidence,
+                    },
+                )
+                continue
+            survivors.append(
+                finding.model_copy(
+                    update={"broad": verdict.broad, "confidence": verdict.confidence}
+                )
+            )
 
     if not deferred:
         return survivors
@@ -217,7 +245,7 @@ def _audit(
     cfg: ReviewConfig,
     provider: ProviderClient,
     fetched_paths: list[str] | None = None,
-) -> dict[int, tuple[bool, bool, list[str]]]:
+) -> dict[int, _ParsedVerdict]:
     """Run one auditor completion over *findings* and return the parsed verdicts.
 
     Builds the grounded prompt (diff + redacted head text of flagged files, plus
@@ -361,37 +389,70 @@ def _head_tail(text: str, max_tokens: int, full_tokens: int | None = None) -> tu
     return result, count_tokens(result)
 
 
-def _parse_verdicts(raw: str) -> dict[int, tuple[bool, bool, list[str]]]:
-    """Parse the reflection verdict into an ``{index: (keep, broad, needs)}`` map.
+@dataclass(frozen=True)
+class _ParsedVerdict:
+    """One leniently parsed reflection verdict (see ``core.models.Verdict``).
+
+    A plain dataclass rather than the pydantic ``Verdict`` because parsing here
+    is forgiving — garbage values are coerced to safe defaults, never raised —
+    while the pydantic model stays strict for the ``response_format`` schema.
+    """
+
+    keep: bool
+    broad: bool = False
+    needs: tuple[str, ...] = ()
+    confidence: int | None = None
+
+
+# The safe default for a finding the auditor returned no verdict for: keep it,
+# non-broad, unscored — identical to the pre-verdict behaviour.
+_KEEP_VERDICT = _ParsedVerdict(keep=True)
+
+
+def _parse_verdicts(raw: str) -> dict[int, _ParsedVerdict]:
+    """Parse the reflection verdict into an ``{index: _ParsedVerdict}`` map.
 
     Accepts the structured ``{"verdicts": [{"index": i, "keep": bool, "broad":
-    bool, "needs": [...]}, ...]}`` envelope (``broad`` and ``needs`` optional,
-    defaulting to False / ``[]``), and (as a fallback for models that ignore the
-    schema) the legacy ``{"0": true, "1": false}`` index-to-bool map (no
-    actionability tier or deferral, so broad defaults False and needs empty).
-    Shares the findings parser's lenient extraction (:func:`iter_json_values`), so
-    reasoning blocks, code fences, and surrounding prose — including the
-    bracket-bearing prose that an ``openai-compatible`` gateway without JSON mode
-    emits — are tolerated.
+    bool, "needs": [...], "confidence": 0-10}, ...]}`` envelope (``broad``,
+    ``needs``, and ``confidence`` optional, defaulting to False / ``[]`` /
+    unscored), and (as a fallback for models that ignore the schema) the legacy
+    ``{"0": true, "1": false}`` index-to-bool map (no actionability tier,
+    deferral, or score). Shares the findings parser's lenient extraction
+    (:func:`iter_json_values`), so reasoning blocks, code fences, and
+    surrounding prose — including the bracket-bearing prose that an
+    ``openai-compatible`` gateway without JSON mode emits — are tolerated.
     """
     for data in iter_json_values(raw):
         if not isinstance(data, dict):
             continue
         if isinstance(data.get("verdicts"), list):
-            out: dict[int, tuple[bool, bool, list[str]]] = {}
+            out: dict[int, _ParsedVerdict] = {}
             for v in data["verdicts"]:
                 if isinstance(v, dict) and "index" in v and "keep" in v:
-                    out[int(v["index"])] = (
-                        bool(v["keep"]),
-                        bool(v.get("broad", False)),
-                        _coerce_needs(v.get("needs")),
+                    out[int(v["index"])] = _ParsedVerdict(
+                        keep=bool(v["keep"]),
+                        broad=bool(v.get("broad", False)),
+                        needs=tuple(_coerce_needs(v.get("needs"))),
+                        confidence=_coerce_confidence(v.get("confidence")),
                     )
             return out
         # legacy {"0": true, ...} — a dict of digit keys to bools (no broad/needs).
         if data and all(str(k).lstrip("-").isdigit() for k in data):
-            return {int(k): (bool(val), False, []) for k, val in data.items()}
+            return {int(k): _ParsedVerdict(keep=bool(val)) for k, val in data.items()}
 
     raise ValueError("unrecognised or unparseable verdict shape")
+
+
+def _coerce_confidence(value: object) -> int | None:
+    """Normalise a verdict's ``confidence`` into an int clamped to 0-10, or None.
+
+    Tolerates a model that omits it, emits a float, or emits garbage ("very
+    sure") — anything non-numeric means "unscored" (None), which survives every
+    threshold, so a sloppy score can never drop a finding.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0, min(10, int(value)))
 
 
 def _coerce_needs(value: object) -> list[str]:

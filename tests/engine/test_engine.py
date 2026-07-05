@@ -19,6 +19,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.engine.compress import count_tokens
+from lgtmaybe.engine.engine import passes_path_filters
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.fakes import FakeProvider
 
@@ -1304,3 +1305,100 @@ def test_engine_without_fetcher_drops_deferred_finding() -> None:
     out, _ = engine.review(_CTX, cfg)
 
     assert out == []
+
+
+def test_context_expansion_is_asymmetric() -> None:
+    """The engine pads more lines before each hunk than after it — the code
+    leading up to a change (signature, setup) explains it better than what
+    follows, so the trailing budget is a quarter of the leading one."""
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", context_lines=4)
+
+    engine.review(_CTX_WITH_CONTENT, cfg)
+
+    sent = _first_user_diff(provider)
+    # 4 lines before the hunk (lines 1..4 = a..d) …
+    assert "\n a\n" in sent
+    # … but only max(1, 4 // 4) = 1 line after (line 7 = g).
+    assert "\n g\n" in sent
+    assert "\n h\n" not in sent
+
+
+# ---------------------------------------------------------------------------
+# include_paths / exclude_paths filtering
+# ---------------------------------------------------------------------------
+
+_TWO_FILE_CTX = PRContext(
+    diff=(
+        "diff --git a/src/app.py b/src/app.py\n@@ -1,1 +1,1 @@\n+x = 1\n"
+        "diff --git a/scripts/tool.py b/scripts/tool.py\n@@ -1,1 +1,1 @@\n+y = 2\n"
+    ),
+    changed_files=["src/app.py", "scripts/tool.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=11,
+)
+
+
+def test_include_paths_reviews_only_matching_files() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", include_paths=["src/**"])
+
+    engine.review(_TWO_FILE_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "src/app.py" in sent
+    assert "scripts/tool.py" not in sent
+
+
+def test_exclude_paths_drops_matching_files() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", exclude_paths=["scripts/**"])
+
+    engine.review(_TWO_FILE_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "src/app.py" in sent
+    assert "scripts/tool.py" not in sent
+
+
+def test_exclude_paths_wins_over_include_paths() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        include_paths=["src/**", "scripts/**"],
+        exclude_paths=["scripts/**"],
+    )
+
+    engine.review(_TWO_FILE_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "src/app.py" in sent
+    assert "scripts/tool.py" not in sent
+
+
+def test_empty_path_filters_review_everything() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    engine.review(_TWO_FILE_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "src/app.py" in sent
+    assert "scripts/tool.py" in sent
+
+
+def test_passes_path_filters_matches_root_level_with_leading_globstar() -> None:
+    # `**/*.lock` should match a repo-root lockfile too, the way gitignore
+    # patterns behave — a plain fnmatch would demand a literal slash.
+    assert not passes_path_filters("app.lock", include=[], exclude=["**/*.lock"])
+    assert not passes_path_filters("sub/app.lock", include=[], exclude=["**/*.lock"])
+    assert passes_path_filters("app.py", include=[], exclude=["**/*.lock"])
+    assert passes_path_filters("deep/nested/file.py", include=["**/*.py"], exclude=[])
