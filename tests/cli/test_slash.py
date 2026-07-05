@@ -273,3 +273,42 @@ class TestReviewFull:
         )
 
         assert engine.reviewed_ctxs[0].diff == INC_DIFF
+
+    def test_review_full_also_bypasses_triage(self):
+        """The triage-skip notice points users at /review full, so it must
+        disable triage as well as incremental scoping."""
+        from lgtmaybe.core.models import PRContext
+        from tests.cli.test_incremental_review import IncrementalFakeGitHub, RecordingEngine
+
+        ctx = PRContext(
+            diff="diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n",
+            changed_files=["f.py"],
+            base_sha="b",
+            head_sha="h",
+            repo="o/r",
+            pr_number=1,
+        )
+        github = IncrementalFakeGitHub(ctx)
+
+        class _CfgRecorder(RecordingEngine):
+            def __init__(self) -> None:
+                super().__init__()
+                self.cfgs: list[ReviewConfig] = []
+
+            def review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+                self.cfgs.append(cfg)
+                return super().review(ctx, cfg)
+
+        engine = _CfgRecorder()
+        cfg = _cfg().model_copy(update={"triage_model": "tiny", "incremental": True})
+
+        dispatch(
+            parse_command("/review full"),
+            github=github,
+            engine=engine,
+            provider=FakeProvider(),
+            cfg=cfg,
+        )
+
+        assert engine.cfgs[0].triage_model is None
+        assert engine.cfgs[0].incremental is False

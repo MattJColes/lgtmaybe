@@ -41,6 +41,7 @@ from .reflect import reflect_findings
 from .retrieve import FileFetcher
 from .static_analysis import ToolFinding, format_hints, run_static_analysis
 from .suppress import apply_suppressions
+from .triage import triage_files
 
 _log = get_logger(__name__)
 
@@ -156,6 +157,18 @@ class LLMReviewEngine(ReviewEngine):
             reviewed_paths = {path for path, _ in file_patches}
             sa_hints = run_static_analysis(
                 {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
+            )
+
+        # 3c. Two-stage triage (default off): a cheap triage_model skips
+        #     plainly-non-substantive files and ranks the rest by risk, so the
+        #     strong model reviews only what deserves it. A deterministic
+        #     security floor (security paths/tokens, static-analysis hits,
+        #     large hunks) always escalates past triage, and any triage
+        #     failure reviews everything.
+        skipped_by_triage: list[str] = []
+        if cfg.triage_model and file_patches:
+            file_patches, skipped_by_triage = triage_files(
+                file_patches, sa_hints, cfg, self._provider
             )
 
         # 4. Pad each hunk with surrounding lines so the model sees the function
@@ -300,6 +313,15 @@ class LLMReviewEngine(ReviewEngine):
             notices.append(
                 f"⚠️ Reviewed the top {cfg.max_files} of {total_files} changed files "
                 f"(file cap {cfg.max_files}). Raise max_files to review them all."
+            )
+        if skipped_by_triage:
+            # Transparency: a triage skip must be visible, never silent.
+            plural_files = "s" if len(skipped_by_triage) != 1 else ""
+            listed = ", ".join(f"`{p}`" for p in skipped_by_triage[:10])
+            more = ", …" if len(skipped_by_triage) > 10 else ""
+            notices.append(
+                f"🔎 Triage skipped {len(skipped_by_triage)} low-risk file{plural_files}: "
+                f"{listed}{more} (`/review full` reviews everything)."
             )
         # Some — but not all — lenses failed: the result may be incomplete, so say
         # so and don't claim a clean bill of health.

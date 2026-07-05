@@ -392,6 +392,7 @@ def action_inputs() -> dict[str, str | None]:
         "model": get("MODEL"),
         "fallback_model": get("FALLBACK_MODEL"),
         "reflect_model": get("REFLECT_MODEL"),
+        "triage_model": get("TRIAGE_MODEL"),
         "api_key": get("API_KEY"),
         "api_base": get("API_BASE"),
         "timeout": get("TIMEOUT"),

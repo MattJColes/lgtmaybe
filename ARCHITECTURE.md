@@ -236,7 +236,12 @@ default on; feature-detected, byte-identical requests elsewhere). On a
 `synchronize` push the review is commit-scoped **incremental** by default:
 only the diff since the last completed review (a hidden watermark in the
 summary comment) is re-reviewed, falling back to a full review on a
-force-push or first run (`incremental`; `/review full` on demand).
+force-push or first run (`incremental`; `/review full` on demand). Optional
+two-stage **triage** (`triage_model`, default off): a cheap model skips
+plainly-non-substantive files and ranks the rest by risk before the strong
+model reviews the survivors — bounded by a deterministic security floor that
+always escalates auth/crypto/IaC/CI paths, security tokens, static-analysis
+hits, and large hunks.
 
 **Distribution** — `pip install lgtmaybe` (PyPI CLI) and the composite GitHub
 Action (keyless OIDC/WIF cloud auth, then runs the GHCR image). Release is

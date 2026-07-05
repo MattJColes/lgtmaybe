@@ -41,6 +41,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
 | `temperature` | number | No | `0.0` | Temperature |
 | `timeout` | integer / null | No | `null` | Timeout |
+| `triage_model` | string / null | No | `null` | Triage Model |
 | `unanchored_min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `high` |  |
 
 ## Enums
@@ -550,6 +551,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Timeout"
+    },
+    "triage_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Triage Model"
     },
     "unanchored_min_severity": {
       "$ref": "#/$defs/Severity",

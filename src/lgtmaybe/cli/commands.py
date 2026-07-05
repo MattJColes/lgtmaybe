@@ -65,6 +65,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     "--model. Point it at a stronger model to audit a weaker reviewer's findings",
 )
 @click.option(
+    "--triage-model",
+    default=None,
+    help="Cheap model that runs first to skip plainly-non-substantive files and "
+    "rank the rest by risk; the strong --model then reviews only the survivors. "
+    "Security-relevant files always escalate past triage. Unset = no triage",
+)
+@click.option(
     "--api-key",
     default=None,
     envvar="LGTMAYBE_API_KEY",
@@ -221,6 +228,7 @@ def review(
     model: str | None,
     fallback_model: str | None,
     reflect_model: str | None,
+    triage_model: str | None,
     api_key: str | None,
     api_base: str | None,
     min_severity: str | None,
@@ -254,6 +262,7 @@ def review(
         provider=provider,
         model=model,
         reflect_model=reflect_model,
+        triage_model=triage_model,
         min_severity=min_severity,
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
@@ -318,6 +327,7 @@ def action() -> None:
         provider=inputs["provider"],
         model=inputs["model"],
         reflect_model=inputs["reflect_model"],
+        triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],

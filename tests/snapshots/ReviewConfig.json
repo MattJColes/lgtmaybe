@@ -426,6 +426,18 @@
       "default": null,
       "title": "Timeout"
     },
+    "triage_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Triage Model"
+    },
     "unanchored_min_severity": {
       "$ref": "#/$defs/Severity",
       "default": "high"
