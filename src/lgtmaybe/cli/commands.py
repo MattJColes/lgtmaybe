@@ -24,6 +24,7 @@ from lgtmaybe.cli import (
     execute_review,
     main,
     pr_url_from_event,
+    resolve_auto_incremental,
 )
 from lgtmaybe.config import store
 from lgtmaybe.config.loader import load_config
@@ -301,6 +302,7 @@ def action() -> None:
         structured_output=inputs["structured_output"],
         symbol_resolution=inputs["symbol_resolution"],
         prompt_cache=inputs["prompt_cache"],
+        incremental=inputs["incremental"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],
@@ -315,6 +317,9 @@ def action() -> None:
         execute_comment(event, cfg, runtime)
         return
 
+    # incremental=None (auto): review only the new commits on a synchronize
+    # push, do a full review on open/reopen. Explicit config/input wins.
+    cfg = resolve_auto_incremental(cfg, event_action=str(event.get("action") or ""))
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
     execute_review(cfg, runtime, dry_run=False)
 

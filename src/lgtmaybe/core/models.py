@@ -327,6 +327,17 @@ class ReviewConfig(_Strict):
     # reflection and posting. Set it in .lgtmaybe.yml; an inline `# lgtmaybe: ignore`
     # comment on (or just above) a flagged line suppresses that finding too.
     ignore_fingerprints: list[str] = Field(default_factory=list)
+    # Commit-scoped incremental review: on a re-run, review only the diff of
+    # the commits pushed since the last completed review (read back from a
+    # hidden watermark in the summary comment) instead of the whole PR.
+    # None means auto: on when the GitHub Action is triggered by a synchronize
+    # push, off everywhere else (a from-scratch review is always full). Falls
+    # back to a full review when there is no watermark, the branch was
+    # force-pushed/rebased, or the compare fails. Findings on files outside
+    # the increment stay open — they are only resolved when a run that
+    # re-reviewed their file no longer produces them. `/review full` forces a
+    # full re-review on demand.
+    incremental: bool | None = None
     # Auto-resolve a previously-posted review conversation once its finding is
     # fixed: on a re-run, when a finding lgtmaybe flagged is no longer produced
     # and GitHub marks the thread outdated (the code under it changed), lgtmaybe

@@ -210,3 +210,66 @@ class TestCommentCommand:
         assert result.exit_code == 0, result.output
         assert github.posted == []
         assert github.comments == []
+
+
+class TestReviewFull:
+    def test_review_full_forces_a_full_review(self):
+        """`/review full` overrides `incremental: true` config — the engine
+        must see the whole PR diff, not an increment."""
+        from lgtmaybe.core.models import PRContext
+        from tests.cli.test_incremental_review import (
+            INC_DIFF,
+            IncrementalFakeGitHub,
+            RecordingEngine,
+        )
+
+        ctx = PRContext(
+            diff="diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n",
+            changed_files=["f.py"],
+            base_sha="b",
+            head_sha="head2222",
+            repo="o/r",
+            pr_number=1,
+        )
+        github = IncrementalFakeGitHub(ctx, last_sha="head1111", compare_result=INC_DIFF)
+        engine = RecordingEngine()
+
+        dispatch(
+            parse_command("/review full"),
+            github=github,
+            engine=engine,
+            provider=FakeProvider(),
+            cfg=_cfg().model_copy(update={"incremental": True}),
+        )
+
+        assert engine.reviewed_ctxs[0].diff == ctx.diff  # full, not INC_DIFF
+        assert github.last_reviewed_calls == 0
+
+    def test_bare_review_honours_incremental_config(self):
+        from lgtmaybe.core.models import PRContext
+        from tests.cli.test_incremental_review import (
+            INC_DIFF,
+            IncrementalFakeGitHub,
+            RecordingEngine,
+        )
+
+        ctx = PRContext(
+            diff="diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n",
+            changed_files=["f.py"],
+            base_sha="b",
+            head_sha="head2222",
+            repo="o/r",
+            pr_number=1,
+        )
+        github = IncrementalFakeGitHub(ctx, last_sha="head1111", compare_result=INC_DIFF)
+        engine = RecordingEngine()
+
+        dispatch(
+            parse_command("/review"),
+            github=github,
+            engine=engine,
+            provider=FakeProvider(),
+            cfg=_cfg().model_copy(update={"incremental": True}),
+        )
+
+        assert engine.reviewed_ctxs[0].diff == INC_DIFF

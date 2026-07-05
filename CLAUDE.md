@@ -61,7 +61,8 @@ so the provider list is never a cage.
   top adds retries / fallback.
 - **License:** MIT (already in `LICENSE`).
 - **Posting:** REST review API — batched inline comments + one summary.
-  Idempotent updates via a hidden marker comment. Each inline comment also carries
+  Idempotent updates via a hidden marker comment (which also carries the
+  last-reviewed-SHA watermark driving incremental review). Each inline comment also carries
   a hidden per-finding fingerprint (`finding_fingerprint(path, title)`); on a
   re-run, conversations whose finding is gone **and** whose thread GitHub marks
   outdated are replied to and resolved (`ReviewConfig.resolve_fixed`, default on).
@@ -185,6 +186,20 @@ pattern, event bus, plugin framework.
      `ReviewConfig.recursive` (default **on**; CLI `--recursive/--no-recursive`,
      Action input `recursive`); the on-demand A/B benchmark `python -m evals.rlm`
      measures recall + token cost of the walk vs sending whole against a live model.
+   - **Incremental review (commit-scoped):** on a re-run, `run_review` reads a
+     hidden watermark (`<!-- lgtmaybe-reviewed:<head_sha> -->`, stamped into the
+     summary comment by `mark_reviewed` on the success path only — a failure
+     never moves it) and reviews only the compare-API diff of the commits since
+     (`rest_gateway.compare_diff`, read-only). Falls back to a full review on
+     no-watermark / force-push (compare not "ahead") / same head / API failure.
+     New findings post as individual review comments (fingerprint-deduped —
+     the review-update endpoint can't add inline comments); resolve-on-fix is
+     scoped to the increment's files (`set_incremental_scope`) so an
+     un-re-reviewed finding is never spuriously resolved; LEFT-side findings
+     are dropped (their line numbers are relative to the last-reviewed head,
+     not the PR base). `ReviewConfig.incremental` (default None = auto: on for
+     the Action's `synchronize` event, full elsewhere; Action input
+     `incremental`); `/review full` forces a full re-review.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`

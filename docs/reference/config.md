@@ -23,6 +23,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
+| `incremental` | boolean / null | No | `null` | Incremental |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `min_confidence` | integer | No | `0` | Min Confidence |
@@ -373,6 +374,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Include Paths",
       "type": "array"
+    },
+    "incremental": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Incremental"
     },
     "max_files": {
       "default": 50,

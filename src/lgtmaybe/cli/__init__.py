@@ -23,7 +23,9 @@ import click
 
 from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
-from lgtmaybe.core.models import Provider, ReviewConfig, ReviewFinding
+from lgtmaybe.core.diffparse import FILE_HEADER_RE
+from lgtmaybe.core.logging import get_logger
+from lgtmaybe.core.models import PRContext, Provider, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
 from lgtmaybe.github import RestGitHubGateway
@@ -31,7 +33,22 @@ from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
+_log = get_logger(__name__)
+
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
+
+
+def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
+    """Resolve ``incremental=None`` (auto) against the triggering event's action.
+
+    Auto means: incremental on a ``synchronize`` push (the PR already had a
+    review to be incremental against, and only new commits landed), full
+    everywhere else (opened/reopened/manual). An explicit True/False from
+    config or the Action input always wins.
+    """
+    if cfg.incremental is not None:
+        return cfg
+    return cfg.model_copy(update={"incremental": event_action == "synchronize"})
 
 
 def parse_pr_url(pr_url: str) -> tuple[str, int]:
@@ -151,17 +168,87 @@ def run_review(
 
     Fetches PR context, runs the engine, and optionally posts the review.
     Returns (findings, summary) in all cases so callers can inspect output.
+
+    With ``cfg.incremental`` on and a gateway that supports it, only the diff
+    of the commits pushed since the last completed review is reviewed; every
+    degraded case (first review, force-push, compare failure, a gateway
+    without the adapter methods) falls back to the full review.
     """
     ctx = github.get_pr_context()
-    findings, summary = engine.review(ctx, cfg)
+    review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
+    findings, summary = engine.review(review_ctx, cfg)
+
+    if incremental_since is not None:
+        # LEFT-side line numbers in an incremental diff are relative to the
+        # last-reviewed head, not the PR base — posting them would mis-anchor,
+        # so a (rare) deleted-line finding is dropped rather than mis-posted.
+        dropped = [f for f in findings if f.side != "RIGHT"]
+        if dropped:
+            _log.info(
+                "dropped LEFT-side findings in incremental mode",
+                extra={"count": len(dropped)},
+            )
+        findings = [f for f in findings if f.side == "RIGHT"]
+        summary += (
+            f"\n\n_Incremental review of the changes since {incremental_since[:7]} — "
+            "earlier findings stay open until fixed._"
+        )
 
     if not dry_run:
-        # Pass the diff we already fetched so post_review doesn't re-fetch the
-        # whole PR context (diff + file list + every file's contents) just to
-        # rebuild the commentable-line index.
+        # Record the watermark: this run completed a review of the current
+        # head, so the NEXT run may review only what lands after it. Never set
+        # on the failure path (a failure notice posts via post_review without
+        # this) — an unreviewed commit must not be skipped.
+        mark_reviewed = getattr(github, "mark_reviewed", None)
+        if mark_reviewed is not None:
+            mark_reviewed(ctx.head_sha)
+        if incremental_since is not None:
+            set_scope = getattr(github, "set_incremental_scope", None)
+            if set_scope is not None:
+                # Resolve-on-fix may only touch threads on files this run
+                # actually re-reviewed — absence elsewhere proves nothing.
+                set_scope(_diff_paths(review_ctx.diff))
+        # Pass the FULL PR diff (already fetched) so the commentable-line
+        # index is built from the diff the comments will anchor to — the
+        # incremental diff's context lines aren't necessarily in the PR diff.
         github.post_review(findings, summary, diff=ctx.diff)
 
     return findings, summary
+
+
+def _incremental_context(
+    github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig
+) -> tuple[PRContext, str | None]:
+    """The context to review: ``(incremental ctx, last-reviewed sha)`` or ``(ctx, None)``.
+
+    Incremental only when ``cfg.incremental`` is truthy (None = auto resolves
+    upstream, and unresolved auto means full), the gateway has the adapter
+    methods (``last_reviewed_sha`` / ``compare_diff`` — fakes and the frozen
+    port don't), a watermark exists, head moved since, and the compare yields
+    a usable increment. Everything else returns the full context untouched.
+    """
+    if not cfg.incremental:
+        return ctx, None
+    last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
+    compare_diff = getattr(github, "compare_diff", None)
+    if last_reviewed_sha is None or compare_diff is None:
+        return ctx, None
+    last_sha = last_reviewed_sha()
+    if not last_sha or last_sha == ctx.head_sha:
+        return ctx, None
+    increment = compare_diff(last_sha, ctx.head_sha)
+    if not increment or not increment.strip():
+        return ctx, None
+    _log.info(
+        "incremental review",
+        extra={"since": last_sha, "head": ctx.head_sha},
+    )
+    return ctx.model_copy(update={"diff": increment}), last_sha
+
+
+def _diff_paths(diff: str) -> set[str]:
+    """The file paths named by a unified diff's ``diff --git`` headers."""
+    return set(FILE_HEADER_RE.findall(diff))
 
 
 def execute_local_review(
@@ -316,6 +403,7 @@ def action_inputs() -> dict[str, str | None]:
         "structured_output": get("STRUCTURED_OUTPUT"),
         "symbol_resolution": get("SYMBOL_RESOLUTION"),
         "prompt_cache": get("PROMPT_CACHE"),
+        "incremental": get("INCREMENTAL"),
         "config_path": get("CONFIG_PATH"),
     }
 
@@ -348,5 +436,6 @@ __all__ = [
     "parse_pr_url",
     "pr_url_from_event",
     "render_findings",
+    "resolve_auto_incremental",
     "run_review",
 ]

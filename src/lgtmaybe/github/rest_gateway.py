@@ -37,6 +37,11 @@ _GRAPHQL_URL = "https://api.github.com/graphql"
 # group is the finding fingerprint.
 _FINDING_MARKER = re.compile(r"<!-- lgtmaybe-finding:([0-9a-f]+) -->")
 
+# Hidden marker stamped into the summary review body recording the head SHA
+# this review covered, so the next run can review only the commits pushed
+# since (commit-scoped incremental review). The capture group is the SHA.
+_REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
+
 
 def finding_fingerprint(path: str, title: str) -> str:
     """Stable short id for a finding's identity (its file and what it flags).
@@ -168,6 +173,18 @@ class RestGitHubGateway(GitHubGateway):
         # and only if a symbol deferral actually needs it). _done guards the one-shot.
         self._base_root: Path | None = None
         self._base_root_done = False
+        # Incremental-review scope: when set (via set_incremental_scope), only
+        # this run's reviewed paths. Resolve-on-fix then skips threads on other
+        # paths — a finding absent merely because its file wasn't re-reviewed
+        # this run must never be spuriously resolved. None = full review.
+        self._incremental_paths: set[str] | None = None
+        # Head SHA this run actually reviewed (set via mark_reviewed by the
+        # orchestrator on the success path only). Drives the reviewed-SHA stamp
+        # and re-run inline-comment posting. Deliberately NOT inferred inside
+        # post_review: a failure notice posts through the same method and must
+        # never record "reviewed up to head" — the next run would then skip
+        # commits nobody reviewed.
+        self._reviewed_sha: str | None = None
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -248,6 +265,14 @@ class RestGitHubGateway(GitHubGateway):
         comments, demoted, broad = self._partition_findings(findings, commentable)
 
         body = f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
+        if self._reviewed_sha:
+            # Record how far this review got, so the next run can review only
+            # the commits pushed since (incremental review). Only stamped when
+            # the orchestrator marked this run as a completed review — a
+            # failure notice must not move the incremental watermark (and by
+            # replacing the body it clears any stale stamp, so the next run
+            # safely falls back to a full review).
+            body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
         existing_id = self._find_existing_review()
 
         reviews_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
@@ -263,6 +288,11 @@ class RestGitHubGateway(GitHubGateway):
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
+            # The review-update endpoint can't add inline comments, so post the
+            # NEW findings (fingerprints not already on the PR) as individual
+            # review comments — otherwise a re-run's fresh findings would only
+            # ever appear in the summary body, silently losing their line.
+            self._post_new_inline_comments(comments, self._reviewed_sha)
             # A re-run: any of our prior conversations whose finding is now gone
             # (and whose code changed) is fixed — collapse it. Best-effort, so a
             # GraphQL hiccup never fails an otherwise-successful review.
@@ -340,6 +370,120 @@ class RestGitHubGateway(GitHubGateway):
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
+
+    # ------------------------------------------------------------------
+    # Incremental review (adapter-only methods, beyond the frozen port)
+    # ------------------------------------------------------------------
+
+    def last_reviewed_sha(self) -> str | None:
+        """The head SHA covered by our previous review, or None.
+
+        Read back from the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
+        ``post_review`` stamps into the summary body. None when there is no
+        prior review, the review predates the marker, or the lookup fails —
+        the caller then runs a full review.
+        """
+        try:
+            entry = self._find_existing_review_entry()
+        except httpx.HTTPError:
+            return None
+        if entry is None:
+            return None
+        _review_id, body = entry
+        match = _REVIEWED_MARKER.search(body)
+        return match.group(1) if match else None
+
+    def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
+        """Unified diff of the commits between *base_sha* and *head_sha*, or None.
+
+        Uses the compare API (read-only — never a checkout). Returns the diff
+        only when head is strictly **ahead** of the last-reviewed SHA (a normal
+        push). A force-push/rebase (``diverged``/``behind``), an ``identical``
+        compare, and any API failure (e.g. a GC'd SHA 404ing after a
+        force-push) all return None — the caller falls back to a full review
+        rather than trusting a meaningless increment.
+        """
+        url = f"https://api.github.com/repos/{self._repo}/compare/{base_sha}...{head_sha}"
+        try:
+            status = self._get_json(url).get("status")
+            if status != "ahead":
+                _log.info(
+                    "incremental compare not usable — falling back to full review",
+                    extra={"status": status},
+                )
+                return None
+            resp = self._client.get(
+                url,
+                headers={**self._headers, "Accept": "application/vnd.github.v3.diff"},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            _log.info("incremental compare failed — falling back to full review: %s", exc)
+            return None
+        return resp.text
+
+    def set_incremental_scope(self, paths: set[str] | None) -> None:
+        """Restrict resolve-on-fix to threads on *paths* (None = no restriction).
+
+        Set by the incremental-review path with the files actually re-reviewed
+        this run: a finding on any other file is absent from this run's
+        findings only because its hunks weren't in the increment, so its
+        conversation must stay open rather than be spuriously resolved.
+        """
+        self._incremental_paths = paths
+
+    def mark_reviewed(self, head_sha: str) -> None:
+        """Declare that this run is a completed review of *head_sha*.
+
+        Called by the orchestrator on the success path, just before
+        ``post_review``. Enables the reviewed-SHA stamp (the incremental
+        watermark) and re-run inline-comment posting. Never called for a
+        failure notice — a failed run must not move the watermark.
+        """
+        self._reviewed_sha = head_sha
+
+    def _post_new_inline_comments(
+        self, comments: list[dict[str, Any]], head_sha: str | None
+    ) -> None:
+        """Post the inline comments whose finding isn't already on the PR.
+
+        The review-update endpoint only replaces the body, so on a re-run new
+        findings are posted as individual review comments (anchored to
+        *head_sha*). Each comment body already carries its hidden fingerprint;
+        comments whose fingerprint is already present on the PR are skipped, so
+        a re-run never duplicates an open conversation. Best-effort as a whole
+        — without a head SHA there is nothing to anchor to, so nothing posts.
+        """
+        if not comments or head_sha is None:
+            return
+        existing = self._existing_finding_fingerprints()
+        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/comments"
+        for comment in comments:
+            match = _FINDING_MARKER.search(comment.get("body", ""))
+            if match is not None and match.group(1) in existing:
+                continue
+            resp = self._client.post(
+                url,
+                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                json={**comment, "commit_id": head_sha},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+
+    def _existing_finding_fingerprints(self) -> set[str]:
+        """Fingerprints of every lgtmaybe finding already posted inline on the PR."""
+        url = (
+            f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
+            "/comments?per_page=100"
+        )
+        fingerprints: set[str] = set()
+        for resp in self._paginate(url):
+            for item in resp.json():
+                match = _FINDING_MARKER.search(item.get("body", "") or "")
+                if match is not None:
+                    fingerprints.add(match.group(1))
+        return fingerprints
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -422,7 +566,12 @@ class RestGitHubGateway(GitHubGateway):
             next_url = self._next_link(resp)
 
     def _find_existing_review(self) -> int | None:
-        """Return the ID of the first review whose body contains the marker, or None.
+        """Return the ID of the first review whose body contains the marker, or None."""
+        entry = self._find_existing_review_entry()
+        return entry[0] if entry is not None else None
+
+    def _find_existing_review_entry(self) -> tuple[int, str] | None:
+        """Return ``(id, body)`` of the first review carrying our marker, or None.
 
         Follows Link rel=next pagination — a busy PR can hold more than one page
         of reviews, and missing the marker there would duplicate the review
@@ -434,7 +583,7 @@ class RestGitHubGateway(GitHubGateway):
                 body: str = review.get("body", "") or ""
                 if self._marker in body:
                     review_id: int = review["id"]
-                    return review_id
+                    return review_id, body
         return None
 
     # ------------------------------------------------------------------
@@ -471,6 +620,7 @@ class RestGitHubGateway(GitHubGateway):
                   id
                   isResolved
                   isOutdated
+                  path
                   comments(first:1){ nodes{ body } }
                 }
               }
@@ -491,6 +641,13 @@ class RestGitHubGateway(GitHubGateway):
                 if node.get("isResolved"):
                     continue
                 if not node.get("isOutdated"):
+                    continue
+                if (
+                    self._incremental_paths is not None
+                    and node.get("path") not in self._incremental_paths
+                ):
+                    # Incremental run: this file wasn't re-reviewed, so its
+                    # finding's absence is no evidence it was fixed.
                     continue
                 comments = node.get("comments", {}).get("nodes", [])
                 first_body = comments[0].get("body", "") if comments else ""
