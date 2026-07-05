@@ -160,15 +160,17 @@ Default: all nine categories.
 
 ### context_lines
 
-Ceiling on the number of unchanged lines added above and below each changed hunk,
-read from the head revision of the file so the model can review a change in the
-context of its surrounding code. The actual number used is the smaller of this
-ceiling and what the token budget allows, so it shrinks automatically on large
-PRs. Set it to `0` to disable context expansion and review the bare diff (no
-extra file content is fetched).
+Ceiling on the number of unchanged lines added around each changed hunk, read
+from the head revision of the file so the model can review a change in the
+context of its surrounding code. The pad is **asymmetric**: the full budget goes
+before the hunk (the enclosing signature and setup explain a change best) and a
+quarter of it — at least one line — goes after. The actual number used is the
+smaller of this ceiling and what the token budget allows, so it shrinks
+automatically on large PRs. Set it to `0` to disable context expansion and
+review the bare diff (no extra file content is fetched).
 
 ```yaml
-context_lines: 10   # at most 10 lines either side of each hunk; 0 disables
+context_lines: 10   # at most 10 lines before each hunk (2 after); 0 disables
 ```
 
 Default: `20`.

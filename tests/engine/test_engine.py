@@ -1304,3 +1304,21 @@ def test_engine_without_fetcher_drops_deferred_finding() -> None:
     out, _ = engine.review(_CTX, cfg)
 
     assert out == []
+
+
+def test_context_expansion_is_asymmetric() -> None:
+    """The engine pads more lines before each hunk than after it — the code
+    leading up to a change (signature, setup) explains it better than what
+    follows, so the trailing budget is a quarter of the leading one."""
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", context_lines=4)
+
+    engine.review(_CTX_WITH_CONTENT, cfg)
+
+    sent = _first_user_diff(provider)
+    # 4 lines before the hunk (lines 1..4 = a..d) …
+    assert "\n a\n" in sent
+    # … but only max(1, 4 // 4) = 1 line after (line 7 = g).
+    assert "\n g\n" in sent
+    assert "\n h\n" not in sent

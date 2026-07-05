@@ -152,9 +152,25 @@ def context_lines_for_budget(remaining_tokens: int) -> int:
     return min(int(lines), _MAX_CONTEXT_LINES)
 
 
-def expand_hunks(patch: str, file_content: str | None, n: int) -> str:
-    """Pad each hunk in *patch* with up to *n* surrounding lines from *file_content*.
+def trailing_context_lines(before: int) -> int:
+    """The trailing pad for a leading pad of *before* lines (asymmetric context).
 
+    The code BEFORE a change — the enclosing signature, setup, and definitions —
+    explains it far better than the code after, so the trailing side gets roughly
+    a quarter of the leading budget (PR-Agent weights its dynamic context the
+    same way), floored at one line so the model still sees what follows. Zero
+    stays zero: no leading pad means expansion is off entirely.
+    """
+    if before <= 0:
+        return 0
+    return max(1, before // 4)
+
+
+def expand_hunks(patch: str, file_content: str | None, n: int, after: int | None = None) -> str:
+    """Pad each hunk in *patch* with surrounding lines from *file_content*.
+
+    Up to *n* lines are added before each hunk and up to *after* lines after it
+    (``after=None`` keeps the original symmetric contract: *n* on both sides).
     The extra lines are drawn from the head-revision file text and rendered as
     normal unchanged context (space-prefixed), giving the model the function and
     definitions around a change. Hunk headers are rewritten so each hunk's
@@ -166,6 +182,7 @@ def expand_hunks(patch: str, file_content: str | None, n: int) -> str:
     """
     if n <= 0 or not file_content:
         return patch
+    n_after = n if after is None else max(0, after)
 
     content_lines = file_content.splitlines()
     out: list[str] = []
@@ -191,7 +208,7 @@ def expand_hunks(patch: str, file_content: str | None, n: int) -> str:
         last_new = new_start + new_len - 1
         trailing = [
             content_lines[i - 1]
-            for i in range(last_new + 1, min(len(content_lines), last_new + n) + 1)
+            for i in range(last_new + 1, min(len(content_lines), last_new + n_after) + 1)
         ]
         pending_trailing = trailing
 

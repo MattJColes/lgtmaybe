@@ -25,7 +25,13 @@ from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
-from .compress import batch_files, context_lines_for_budget, count_tokens, expand_hunks
+from .compress import (
+    batch_files,
+    context_lines_for_budget,
+    count_tokens,
+    expand_hunks,
+    trailing_context_lines,
+)
 from .injection import wrap_diff, wrap_intent
 from .parse import ParseError, parse_findings
 from .prompt import build_lens_prompt, build_system_prompt
@@ -133,15 +139,24 @@ class LLMReviewEngine(ReviewEngine):
 
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
-        #    capped by cfg.context_lines; content is the head file text the
-        #    gateway fetched (redacted), and is for understanding only —
-        #    inline-comment positions are always built from the real diff.
+        #    capped by cfg.context_lines; the pad is asymmetric — the code
+        #    before a change explains it better than the code after, so the
+        #    trailing side gets a quarter of the leading budget. Content is the
+        #    head file text the gateway fetched (redacted), and is for
+        #    understanding only — inline-comment positions are always built
+        #    from the real diff.
         used_tokens = count_tokens(clean_diff)
         remaining = max(0, cfg.max_input_tokens - used_tokens)
         ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
         if ctx_lines > 0 and ctx.file_contents:
+            after = trailing_context_lines(ctx_lines)
             file_patches = [
-                (path, expand_hunks(patch, redact(ctx.file_contents.get(path, "")), ctx_lines))
+                (
+                    path,
+                    expand_hunks(
+                        patch, redact(ctx.file_contents.get(path, "")), ctx_lines, after=after
+                    ),
+                )
                 for path, patch in file_patches
             ]
 
