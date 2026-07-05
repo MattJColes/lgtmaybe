@@ -22,6 +22,7 @@ provides defaults for all runs.
   - [context_lines](#context_lines)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
+  - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
@@ -200,6 +201,29 @@ structured_output: false   # only if your gateway rejects JSON-schema mode
 
 Default: `true`. See
 [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
+
+### prompt_cache
+
+Cache the static system prompt across the per-lens review calls and the
+reflection call. lgtmaybe fans out one model call per lens, and every one of
+those calls shares the same large, static system prompt — on providers with an
+explicit cache breakpoint (**anthropic**, and **bedrock** Claude/Nova models)
+lgtmaybe marks that prompt with `cache_control` so every call after the first
+reads it from the provider's prompt cache at the cached-input discount instead
+of re-paying full input price. The diff and other per-PR content always stay
+outside the cached region.
+
+Support is feature-detected per model, and on every other provider (ollama,
+`openai-compatible`, and providers that cache automatically server-side like
+OpenAI) the request is sent unchanged — so leaving it on costs nothing. Turn it
+off only to rule caching out while debugging provider behaviour. CLI:
+`--no-prompt-cache`.
+
+```yaml
+prompt_cache: false   # send every call uncached, even on anthropic/bedrock
+```
+
+Default: `true`.
 
 ### reflect
 

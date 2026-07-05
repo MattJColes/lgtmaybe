@@ -267,6 +267,11 @@
       "default": null,
       "title": "Num Ctx"
     },
+    "prompt_cache": {
+      "default": true,
+      "title": "Prompt Cache",
+      "type": "boolean"
+    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },

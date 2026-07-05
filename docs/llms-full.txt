@@ -1711,6 +1711,7 @@ provides defaults for all runs.
   - [context_lines](#context_lines)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
+  - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
@@ -1889,6 +1890,29 @@ structured_output: false   # only if your gateway rejects JSON-schema mode
 
 Default: `true`. See
 [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
+
+### prompt_cache
+
+Cache the static system prompt across the per-lens review calls and the
+reflection call. lgtmaybe fans out one model call per lens, and every one of
+those calls shares the same large, static system prompt — on providers with an
+explicit cache breakpoint (**anthropic**, and **bedrock** Claude/Nova models)
+lgtmaybe marks that prompt with `cache_control` so every call after the first
+reads it from the provider's prompt cache at the cached-input discount instead
+of re-paying full input price. The diff and other per-PR content always stay
+outside the cached region.
+
+Support is feature-detected per model, and on every other provider (ollama,
+`openai-compatible`, and providers that cache automatically server-side like
+OpenAI) the request is sent unchanged — so leaving it on costs nothing. Turn it
+off only to rule caching out while debugging provider behaviour. CLI:
+`--no-prompt-cache`.
+
+```yaml
+prompt_cache: false   # send every call uncached, even on anthropic/bedrock
+```
+
+Default: `true`.
 
 ### reflect
 
@@ -2358,6 +2382,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
+| `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
@@ -2418,6 +2443,8 @@ The normalised return value of one LLM completion, including token usage.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
+| `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
 | `output_tokens` | integer | Yes | — | Output Tokens |
 | `text` | string | Yes | — | Text |
@@ -2715,6 +2742,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Num Ctx"
     },
+    "prompt_cache": {
+      "default": true,
+      "title": "Prompt Cache",
+      "type": "boolean"
+    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },
@@ -2890,6 +2922,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "The normalised return of one LLM completion, with token usage.",
   "properties": {
+    "cache_creation_tokens": {
+      "default": 0,
+      "title": "Cache Creation Tokens",
+      "type": "integer"
+    },
+    "cache_read_tokens": {
+      "default": 0,
+      "title": "Cache Read Tokens",
+      "type": "integer"
+    },
     "input_tokens": {
       "title": "Input Tokens",
       "type": "integer"

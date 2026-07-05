@@ -172,6 +172,13 @@ from lgtmaybe.config.loader import load_config
     "the auditor re-judges with the real definition (--no-symbol-resolution disables)",
 )
 @click.option(
+    "--prompt-cache/--no-prompt-cache",
+    default=None,
+    help="Cache the static system prompt across the per-lens calls on providers "
+    "that support it (anthropic, bedrock Claude/Nova) — cached reads are billed "
+    "at a steep discount. Safe no-op elsewhere (--no-prompt-cache disables)",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -202,6 +209,7 @@ def review(
     recursive: bool | None,
     structured_output: bool | None,
     symbol_resolution: bool | None,
+    prompt_cache: bool | None,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -225,6 +233,7 @@ def review(
         recursive=recursive,
         structured_output=structured_output,
         symbol_resolution=symbol_resolution,
+        prompt_cache=prompt_cache,
     )
 
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
@@ -282,6 +291,7 @@ def action() -> None:
         recursive=inputs["recursive"],
         structured_output=inputs["structured_output"],
         symbol_resolution=inputs["symbol_resolution"],
+        prompt_cache=inputs["prompt_cache"],
     )
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],

@@ -218,6 +218,11 @@ class ProviderResult(_Strict):
     text: str
     input_tokens: int
     output_tokens: int
+    # Prompt-cache accounting, when the provider reports it: tokens read from a
+    # previously cached prefix, and tokens written to create one. Zero on
+    # providers/models without prompt caching (back-compat default).
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 class PRContext(_Strict):
@@ -327,6 +332,14 @@ class ReviewConfig(_Strict):
     # prose/reasoning instead of findings. Disable for a model/provider that
     # doesn't support it (the lenient parser is the fallback).
     structured_output: bool = True
+    # Cache the static system prompt across the per-lens fan-out and reflection
+    # call. On providers with an explicit cache breakpoint (anthropic, bedrock
+    # Claude/Nova) the adapter marks the system prompt with cache_control —
+    # every call after the first reads the shared prefix at the provider's
+    # cached-input discount. Feature-detected per model and a safe no-op
+    # everywhere else (ollama, openai-compatible, and providers that cache
+    # automatically server-side), so leaving it on costs nothing.
+    prompt_cache: bool = True
 
     @model_validator(mode="after")
     def _lens_ids_are_unique(self) -> ReviewConfig:

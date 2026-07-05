@@ -20,13 +20,30 @@ from litellm.exceptions import (
     PermissionDeniedError,
     RateLimitError,
 )
+from litellm.utils import supports_prompt_caching
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
+from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ProviderResult
 from lgtmaybe.core.ports import Message, ProviderClient
 
+_log = get_logger(__name__)
+
 _DEFAULT_TIMEOUT = 60  # seconds
 _MAX_ATTEMPTS = 4
+
+# Prompt caching (of the static system prompt) is applied only on routes where
+# an EXPLICIT cache breakpoint is the mechanism: Anthropic direct (cache_control)
+# and Bedrock (litellm translates cache_control to a Converse cachePoint for
+# Claude and Nova). Other providers either cache automatically server-side with
+# no marker (OpenAI, Azure) or don't cache at all (ollama, most
+# openai-compatible servers) — for all of them the request is sent unchanged.
+_CACHE_CONTROL_PREFIXES = ("anthropic/", "bedrock/")
+
+# Anthropic's documented minimum cacheable block. A smaller prefix is silently
+# not cached (some models require even more), so below this the marker is pure
+# request-shape churn — skip it and send the message unchanged.
+_MIN_CACHEABLE_TOKENS = 1024
 
 # Errors that retrying cannot fix: bad credentials, a malformed/unsupported
 # request, an unknown model, a denied permission, and a content-policy block
@@ -118,10 +135,16 @@ class LiteLLMProvider(ProviderClient):
         *,
         model: str = "",
         fallback_model: str | None = None,
+        prompt_cache: bool = False,
         **default_opts: Any,
     ) -> None:
         self.model = model
         self.fallback_model = fallback_model
+        # Mark the static system prompt cacheable (cache_control) on routes that
+        # support an explicit cache breakpoint; a safe no-op everywhere else.
+        # A named constructor arg — NOT part of default_opts — so it can never
+        # leak into the litellm.completion call as an unknown parameter.
+        self.prompt_cache = prompt_cache
         self.default_opts: dict[str, Any] = default_opts
         # Set once a structured-output call comes back empty (see _call): the
         # backend's JSON-schema decoder is broken for this model, so every
@@ -149,6 +172,11 @@ class LiteLLMProvider(ProviderClient):
     def _complete_with_retry(
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> ProviderResult:
+        # Applied per effective model (the primary and the fallback can differ
+        # in cache support), and to a copy — the caller's messages are not ours
+        # to mutate.
+        messages = self._with_cache_control(messages, model)
+
         @retry(
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
             stop=stop_after_attempt(_MAX_ATTEMPTS),
@@ -190,15 +218,106 @@ class LiteLLMProvider(ProviderClient):
             response = litellm.completion(model=model, messages=messages, **kwargs)
         return self._map_response(response, model)
 
+    def _with_cache_control(self, messages: list[Message], model: str) -> list[Message]:
+        """Return *messages* with the system prompt marked cacheable, when it pays.
+
+        The system prompt is the static prefix (shared header + lens section +
+        worked example — identical across the per-lens fan-out and re-runs); the
+        volatile content (diff, intent, findings) is always in the user message,
+        so marking only the system message keeps the cached region stable. The
+        rewrite happens only when ALL of these hold — otherwise the request goes
+        out byte-for-byte unchanged:
+
+        - ``prompt_cache`` is enabled;
+        - the model rides a route where an explicit breakpoint is the caching
+          mechanism (:data:`_CACHE_CONTROL_PREFIXES`) AND litellm's capability
+          map says the model supports prompt caching;
+        - the system prompt clears Anthropic's 1,024-token minimum cacheable
+          block (a smaller block is silently not cached).
+        """
+        if not self.prompt_cache or not _supports_cache_control(model):
+            return messages
+        index = next(
+            (i for i, m in enumerate(messages) if m.get("role") == "system"),
+            None,
+        )
+        if index is None:
+            return messages
+        content = messages[index].get("content")
+        if not isinstance(content, str) or _count_tokens(content) < _MIN_CACHEABLE_TOKENS:
+            return messages
+        marked: Any = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+        out = list(messages)
+        out[index] = {**messages[index], "content": marked}
+        return out
+
     def _map_response(self, response: Any, model: str) -> ProviderResult:
         # Some providers return null content (e.g. a model that answered only via
         # a reasoning channel under JSON mode); treat that as empty, not a crash.
         text: str = response.choices[0].message.content or ""
-        input_tokens: int = response.usage.prompt_tokens
-        output_tokens: int = response.usage.completion_tokens
+        usage = response.usage
+        input_tokens: int = usage.prompt_tokens
+        output_tokens: int = usage.completion_tokens
+        cache_read, cache_creation = _cache_usage(usage)
+        if cache_read or cache_creation:
+            # Instrumentation: whether the static prefix hit or (re)wrote the
+            # cache — a run whose reads never climb has a busted prefix.
+            _log.info(
+                "prompt cache usage",
+                extra={
+                    "model": model,
+                    "cache_read_tokens": cache_read,
+                    "cache_creation_tokens": cache_creation,
+                },
+            )
 
         return ProviderResult(
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
+
+
+def _supports_cache_control(model: str) -> bool:
+    """Whether *model*'s route takes an explicit cache_control breakpoint.
+
+    Feature detection, not configuration: the route must be one where litellm
+    forwards ``cache_control`` (Anthropic direct; Bedrock, where it becomes a
+    Converse ``cachePoint``), and litellm's model-capability map must say the
+    model itself caches. Any lookup failure (an unknown or freshly released
+    model) means "don't mark" — caching is an optimisation, never worth an error.
+    """
+    if not model.startswith(_CACHE_CONTROL_PREFIXES):
+        return False
+    try:
+        return bool(supports_prompt_caching(model=model))
+    except Exception:
+        return False
+
+
+def _cache_usage(usage: Any) -> tuple[int, int]:
+    """Extract (cache_read, cache_creation) token counts from a usage object.
+
+    Anthropic/Bedrock report ``cache_read_input_tokens`` /
+    ``cache_creation_input_tokens``; OpenAI-style responses report reads under
+    ``prompt_tokens_details.cached_tokens``. All optional — absent means 0.
+    """
+    cache_read = getattr(usage, "cache_read_input_tokens", None)
+    if not cache_read:
+        details = getattr(usage, "prompt_tokens_details", None)
+        cache_read = getattr(details, "cached_tokens", None) if details is not None else None
+    cache_creation = getattr(usage, "cache_creation_input_tokens", None)
+    return int(cache_read or 0), int(cache_creation or 0)
+
+
+def _count_tokens(text: str) -> int:
+    """Token count for the minimum-cacheable-block check.
+
+    Reuses the engine's cached tiktoken encoder (len/4 fallback) — imported
+    lazily so building a provider never drags the engine in at import time.
+    """
+    from lgtmaybe.engine.compress import count_tokens
+
+    return count_tokens(text)

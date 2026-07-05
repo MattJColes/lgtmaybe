@@ -28,6 +28,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
+| `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
@@ -88,6 +89,8 @@ The normalised return value of one LLM completion, including token usage.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
+| `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
 | `output_tokens` | integer | Yes | — | Output Tokens |
 | `text` | string | Yes | — | Text |
@@ -385,6 +388,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Num Ctx"
     },
+    "prompt_cache": {
+      "default": true,
+      "title": "Prompt Cache",
+      "type": "boolean"
+    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },
@@ -560,6 +568,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "The normalised return of one LLM completion, with token usage.",
   "properties": {
+    "cache_creation_tokens": {
+      "default": 0,
+      "title": "Cache Creation Tokens",
+      "type": "integer"
+    },
+    "cache_read_tokens": {
+      "default": 0,
+      "title": "Cache Read Tokens",
+      "type": "integer"
+    },
     "input_tokens": {
       "title": "Input Tokens",
       "type": "integer"
