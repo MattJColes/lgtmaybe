@@ -25,6 +25,7 @@ provides defaults for all runs.
   - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
   - [min_confidence](#min_confidence)
+  - [incremental](#incremental)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -265,6 +266,30 @@ min_confidence: 5   # drop findings the auditor scores 0-4
 
 Default: `0` (no numeric filtering — reflection prunes only via its keep/drop
 verdicts, as before the score existed).
+
+### incremental
+
+Commit-scoped incremental review, for the GitHub posting path. On a re-run
+lgtmaybe reads a hidden watermark (the head SHA its last completed review
+covered) from its own summary comment and reviews **only the diff of the
+commits pushed since**, instead of the whole PR — faster, cheaper, and no
+re-noise on code that was already reviewed. New findings post as inline
+comments; findings on files outside the increment stay open, and are only
+auto-resolved by a run that actually re-reviewed their file.
+
+It always degrades to a **full review** when there is no watermark yet (first
+review), after a force-push/rebase (the increment would be meaningless), or if
+the compare fails. A failed review never moves the watermark, so no commit is
+ever silently skipped. Comment `/review full` on the PR to force a full
+re-review on demand.
+
+```yaml
+incremental: false   # every run reviews the whole PR
+```
+
+Default: auto — incremental on a `synchronize` push (new commits on an
+already-reviewed PR), full review everywhere else (open/reopen, slash
+commands, and the local CLI, which never uses it).
 
 ### resolve_fixed
 

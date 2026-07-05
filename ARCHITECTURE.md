@@ -226,7 +226,11 @@ silent passes.
 **Cost** — on providers with an explicit prompt-cache breakpoint (anthropic,
 bedrock Claude/Nova) the static system prompt is marked `cache_control` so the
 per-lens fan-out re-reads it at the cached-input discount (`prompt_cache`,
-default on; feature-detected, byte-identical requests elsewhere).
+default on; feature-detected, byte-identical requests elsewhere). On a
+`synchronize` push the review is commit-scoped **incremental** by default:
+only the diff since the last completed review (a hidden watermark in the
+summary comment) is re-reviewed, falling back to a full review on a
+force-push or first run (`incremental`; `/review full` on demand).
 
 **Distribution** — `pip install lgtmaybe` (PyPI CLI) and the composite GitHub
 Action (keyless OIDC/WIF cloud auth, then runs the GHCR image). Release is

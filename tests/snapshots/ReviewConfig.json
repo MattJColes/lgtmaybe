@@ -251,6 +251,18 @@
       "title": "Include Paths",
       "type": "array"
     },
+    "incremental": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Incremental"
+    },
     "max_files": {
       "default": 50,
       "title": "Max Files",

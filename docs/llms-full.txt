@@ -316,7 +316,11 @@ All lgtmaybe workflows use the `pull_request_target` trigger, not
 
 The action derives the PR from the triggering event, so there is no `pr-url`
 input to set. On an `issue_comment` event it routes the slash command
-(`/review`, `/ask`, `/describe`, `/improve`) to the same engine.
+(`/review`, `/ask`, `/describe`, `/improve`) to the same engine. On a
+`synchronize` push the review is **incremental** by default — only the commits
+added since the last completed review are re-reviewed, and earlier findings
+stay open until fixed; comment `/review full` for a full re-review on demand,
+or pin the behaviour with the `incremental` input / config key.
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
 > are free. On a hosted provider each run uses tokens you pay for, so it's worth
@@ -1714,6 +1718,7 @@ provides defaults for all runs.
   - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
   - [min_confidence](#min_confidence)
+  - [incremental](#incremental)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -1954,6 +1959,30 @@ min_confidence: 5   # drop findings the auditor scores 0-4
 
 Default: `0` (no numeric filtering — reflection prunes only via its keep/drop
 verdicts, as before the score existed).
+
+### incremental
+
+Commit-scoped incremental review, for the GitHub posting path. On a re-run
+lgtmaybe reads a hidden watermark (the head SHA its last completed review
+covered) from its own summary comment and reviews **only the diff of the
+commits pushed since**, instead of the whole PR — faster, cheaper, and no
+re-noise on code that was already reviewed. New findings post as inline
+comments; findings on files outside the increment stay open, and are only
+auto-resolved by a run that actually re-reviewed their file.
+
+It always degrades to a **full review** when there is no watermark yet (first
+review), after a force-push/rebase (the increment would be meaningless), or if
+the compare fails. A failed review never moves the watermark, so no commit is
+ever silently skipped. Comment `/review full` on the PR to force a full
+re-review on demand.
+
+```yaml
+incremental: false   # every run reviews the whole PR
+```
+
+Default: auto — incremental on a `synchronize` push (new commits on an
+already-reviewed PR), full review everywhere else (open/reopen, slash
+commands, and the local CLI, which never uses it).
 
 ### resolve_fixed
 
@@ -2402,6 +2431,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
+| `incremental` | boolean / null | No | `null` | Incremental |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `min_confidence` | integer | No | `0` | Min Confidence |
@@ -2752,6 +2782,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Include Paths",
       "type": "array"
+    },
+    "incremental": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Incremental"
     },
     "max_files": {
       "default": 50,

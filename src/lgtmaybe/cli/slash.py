@@ -73,9 +73,17 @@ def dispatch(
         return
 
     if parsed.name in (SlashCommand.review, SlashCommand.improve):
-        ctx = github.get_pr_context()
-        findings, summary = engine.review(ctx, cfg)
-        github.post_review(findings, summary, diff=ctx.diff)
+        # `/review full` forces a full re-review even when config enables
+        # incremental mode; a bare `/review` honours the configured mode.
+        if parsed.arg.strip().lower() == "full":
+            cfg = cfg.model_copy(update={"incremental": False})
+        # Route through the shared pipeline so a slash-triggered review gets
+        # the same incremental handling and reviewed-watermark stamping as an
+        # event-triggered one. Imported lazily — lgtmaybe.cli imports this
+        # module's callers, so a module-level import would be circular.
+        from lgtmaybe.cli import run_review
+
+        run_review(github=github, engine=engine, cfg=cfg, dry_run=False)
         return
 
     if parsed.name is SlashCommand.ask:
