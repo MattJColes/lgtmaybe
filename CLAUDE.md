@@ -11,21 +11,23 @@ OIDC/WIF for cloud providers), and gets a review. One core, three distribution
 variants:
 
 - **PyPI CLI** — `pip install lgtmaybe`
-- **Homebrew CLI** — `brew install MattJColes/lgtmaybe/lgtmaybe`, from the
-  `MattJColes/homebrew-lgtmaybe` tap. The formula installs the core deps (covers
-  the API-key + local providers; keyless cloud needs the `pip` extras), and is
-  regenerated from the published PyPI release by `.github/workflows/homebrew.yml`
-  + `scripts/update-homebrew-formula.sh` (full resource stanzas via
-  `brew update-python-resources`, so dep bumps are picked up — never
-  hand-maintained). Two wrinkles shape how it runs: (1) `release-please.yml`
-  **calls** `homebrew.yml` directly (`workflow_call`) because a `release:
-  published` event isn't delivered for a release cut by the built-in
-  `GITHUB_TOKEN`; (2) `brew update-python-resources` hardcodes a 24h PyPI
-  cooldown (`RELEASE_COOLDOWN_SECONDS`, no opt-out) so a just-published version
-  can't be resolved yet — the release-time call defers (script exits `75`) and a
-  **daily scheduled run** publishes once the version ages past the cooldown
-  (idempotent, no-ops when the tap is current). A new version lands in the tap
-  within ~a day, not instantly
+- **Homebrew CLI** — `brew install MattJColes/lgtmaybe/lgtmaybe` (after
+  `brew tap MattJColes/lgtmaybe` + `brew trust MattJColes/lgtmaybe` — current
+  Homebrew requires trusting third-party taps), from the
+  `MattJColes/homebrew-lgtmaybe` tap. The formula (`scripts/update-homebrew-formula.sh`)
+  creates a venv and `pip install`s lgtmaybe + deps from **PyPI wheels** — *not*
+  per-dependency source `resource` stanzas: litellm's tree includes Rust sdists
+  (tokenizers, hf-xet) that can't build in Homebrew's sandbox, and the wheel path
+  sidesteps that (and the 24h `brew update-python-resources` cooldown) entirely.
+  The one wrinkle: the wheels ship prebuilt extension dylibs with `@rpath` ids
+  that Homebrew can't rewrite, so the formula declares **`preserve_rpath`** to
+  keep them (without it `brew install` errors "Failed to fix install linkage" and
+  exits non-zero). It's a plain source formula — no bottle, works on any
+  arch/macOS. `.github/workflows/homebrew.yml` regenerates the formula on each
+  release (release-please **calls** it via `workflow_call`, since a `release:
+  published` event isn't delivered for a `GITHUB_TOKEN` release), **actually
+  `brew install`s it as a gate** (so a broken formula is never published), then
+  commits to the tap; a daily schedule + `force` dispatch are the safety nets
 - **GitHub Action** — composite action (`action.yml`) that does keyless OIDC/WIF
   auth, then runs a GHCR image via the `action` entrypoint
 

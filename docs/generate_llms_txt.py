@@ -87,9 +87,24 @@ def _sections() -> tuple[str | None, list[tuple[str, list[tuple[str, str]]]]]:
             else:
                 sections.append((label, [(label, value)]))
         else:
-            pages = [next(iter(sub.items())) for sub in value]
-            sections.append((label, pages))
+            sections.append((label, _leaf_pages(value)))
     return home_md, sections
+
+
+def _leaf_pages(value: list[Any]) -> list[tuple[str, str]]:
+    """Flatten a nav sub-tree into its leaf (title, md_rel) pages, in order.
+
+    Nav groups may nest (a labelled group whose value is itself a list), so
+    recurse and collect only the leaf entries that point at a page.
+    """
+    pages: list[tuple[str, str]] = []
+    for sub in value:
+        ((label, val),) = sub.items()
+        if isinstance(val, str):
+            pages.append((label, val))
+        else:
+            pages.extend(_leaf_pages(val))
+    return pages
 
 
 def generate_index() -> str:

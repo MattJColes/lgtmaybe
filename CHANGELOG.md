@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.9.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.9.1...lgtmaybe-v0.9.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **provider:** fail fast on expired cloud credentials ([#162](https://github.com/MattJColes/lgtmaybe/issues/162)) ([c56fa7d](https://github.com/MattJColes/lgtmaybe/commit/c56fa7d39a8468127b55c9288926befa9d5c9eb8))
+
+## [0.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.9.0...lgtmaybe-v0.9.1) (2026-07-01)
+
+
+### Documentation
+
+* streamline install + local-model guides ([#160](https://github.com/MattJColes/lgtmaybe/issues/160)) ([6425ad3](https://github.com/MattJColes/lgtmaybe/commit/6425ad30e2adc866fb5001d4a8a0c3ae791ecea4))
+
+## [0.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.2...lgtmaybe-v0.9.0) (2026-06-30)
+
+
+### Features
+
+* **homebrew:** install lgtmaybe + deps from PyPI wheels (preserve_rpath) ([#157](https://github.com/MattJColes/lgtmaybe/issues/157)) ([fe10d12](https://github.com/MattJColes/lgtmaybe/commit/fe10d12810a37e057f743a0bbbb0699c6fc87173))
+
+## [0.8.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.1...lgtmaybe-v0.8.2) (2026-06-30)
+
+
+### Documentation
+
+* **homebrew:** document the required `brew trust` step for the tap ([#155](https://github.com/MattJColes/lgtmaybe/issues/155)) ([5099cd3](https://github.com/MattJColes/lgtmaybe/commit/5099cd324247303263c6293e201a7c6a6e21a7dc))
+
+## [0.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.8.0...lgtmaybe-v0.8.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **homebrew:** make the tap actually publish (path, tap registration, first-publish commit) ([#154](https://github.com/MattJColes/lgtmaybe/issues/154)) ([4e71803](https://github.com/MattJColes/lgtmaybe/commit/4e718030197ec091367bc2fbec8e738b623818b6))
+* **homebrew:** make the tap publish reliably on release ([#152](https://github.com/MattJColes/lgtmaybe/issues/152)) ([b46619b](https://github.com/MattJColes/lgtmaybe/commit/b46619bc42a2e48d973b79d7977d0ad1f5a10dac))
+
 ## [0.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.7.2...lgtmaybe-v0.8.0) (2026-06-30)
 
 

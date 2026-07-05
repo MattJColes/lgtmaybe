@@ -9,6 +9,13 @@ cost, zero egress, no keys required. The CLI reviews your `git` diff and prints
 the findings; to post reviews on real pull requests, use the
 [GitHub Action](use-as-github-action.md).
 
+> **ollama is the easiest local start.** Running a different local server —
+> **vLLM, llama.cpp, or LM Studio** — or a hosted OpenAI-compatible API like
+> DeepSeek? Use the `openai-compatible` provider instead:
+> [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md).
+> The [model-choice and hardware guidance below](#which-model-and-will-it-fit)
+> applies to any local runtime.
+
 ## Contents
 
 - [Prerequisites](#prerequisites)

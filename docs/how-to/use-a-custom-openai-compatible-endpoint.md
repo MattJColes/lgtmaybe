@@ -44,6 +44,12 @@ start), so it gets its [own guide](run-locally-with-ollama.md). vLLM, llama.cpp,
 and LM Studio are reached through `openai-compatible` and the `--api-base` of
 their local server, as shown below.
 
+**Which model, and will it fit?** The same model-choice and hardware guidance
+applies to any local runtime — pick a coding model, bigger and newer is more
+accurate, and size it to your RAM/VRAM. See
+[Which model, and will it fit?](run-locally-with-ollama.md#which-model-and-will-it-fit)
+in the ollama guide.
+
 ## How it works
 
 `--provider openai-compatible` routes through litellm's OpenAI client, but sends
