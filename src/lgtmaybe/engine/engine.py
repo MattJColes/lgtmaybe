@@ -8,7 +8,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from functools import partial
@@ -38,7 +38,13 @@ from .compress import (
 from .injection import wrap_diff, wrap_hints, wrap_intent
 from .parse import ParseError, parse_findings
 from .profiling import profiler
-from .prompt import build_lens_prompt, build_system_prompt
+from .prompt import (
+    build_custom_lens_block,
+    build_lens_block,
+    build_lens_prompt,
+    build_shared_preamble,
+    build_system_prompt,
+)
 from .redact import redact
 from .reflect import reflect_findings
 from .retrieve import FileFetcher
@@ -62,6 +68,28 @@ _log = get_logger(__name__)
 _CLOUD_MAX_WORKERS = 8
 _SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
 
+# Providers whose litellm route takes an explicit cache_control breakpoint —
+# the ones where a batch's first call WRITES the shared preamble-plus-diff
+# prefix to the cache and the rest read it. Mirrors the adapter's
+# _CACHE_CONTROL_PREFIXES (providers/litellm_provider.py); keep the two in
+# sync. Provider-level only: whether the specific *model* caches is the
+# adapter's call, so warming here is an approximation — for a non-caching
+# model on these routes the primer costs one serialised call and buys nothing,
+# which the token floor below keeps cheap.
+_CACHE_BREAKPOINT_PROVIDERS = frozenset({Provider.anthropic, Provider.bedrock})
+
+# Don't warm the cache for a small diff. On wall-clock the primer is roughly
+# neutral — either the primer pays the one uncached pass and the rest read, or
+# a concurrent first wave all pays it in parallel — so the primer's real win
+# is cost and rate-limit headroom: N-1 concurrent misses each re-process the
+# full prefix uncached AND each pay the cache-write surcharge (1.25× input
+# price on anthropic), while the primer pays it once. That waste scales with
+# prefix size; the primer's worst case stays one call of lost parallelism.
+# Below ~2k tokens of wrapped diff the waste is too small to buy anything —
+# keep full concurrency. (Simulated A/B on a 5k-token prefix, 9 lenses:
+# warm-up ≈ +4s wall, −39k cache-write tokens.)
+_WARMUP_MIN_TOKENS = 2048
+
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
     """The fan-out pool size: the explicit cap, else the provider-aware default."""
@@ -76,14 +104,19 @@ def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
 class _Lens:
     """One review lens in the fan-out: a built-in category or a user-defined lens.
 
-    Holds the prebuilt system prompt so the fan-out is uniform — the engine no
-    longer cares whether a lens came from ``ReviewCategory`` or ``extra_lenses``.
+    Holds both prompt shapes so the fan-out is uniform — the engine no longer
+    cares whether a lens came from ``ReviewCategory`` or ``extra_lenses``.
+    ``system_prompt`` is the legacy monolithic shape (lens text in the system
+    message, used when ``prompt_cache`` is off); ``user_block`` is the split
+    (cache-shaped) layout's final user message (used when it is on — the
+    default), where the system message is the shared preamble instead.
     ``carries_intent`` is true only for the built-in intent lens, the one call
     that receives the stated-intent block.
     """
 
     id: str
     system_prompt: str
+    user_block: str
     carries_intent: bool = False
 
 
@@ -93,14 +126,25 @@ def _build_lenses(cfg: ReviewConfig) -> list[_Lens]:
         _Lens(
             id=category.value,
             system_prompt=build_system_prompt(category),
+            user_block=build_lens_block(category),
             carries_intent=category is ReviewCategory.intent,
         )
         for category in cfg.categories
     ]
     lenses += [
-        _Lens(id=lens.id, system_prompt=build_lens_prompt(lens)) for lens in cfg.extra_lenses
+        _Lens(
+            id=lens.id,
+            system_prompt=build_lens_prompt(lens),
+            user_block=build_custom_lens_block(lens),
+        )
+        for lens in cfg.extra_lenses
     ]
     return lenses
+
+
+# One prepared _review_lens call, ready to submit to the fan-out pool.
+_LensOutcome = tuple[list[ReviewFinding], str | None]
+_ReviewTask = partial[_LensOutcome]
 
 
 class ReviewIncompleteError(Exception):
@@ -260,7 +304,8 @@ class LLMReviewEngine(ReviewEngine):
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None
-        tasks: list[partial[tuple[list[ReviewFinding], str | None]]] = []
+        workers = _resolve_workers(cfg, len(batches) * len(lenses))
+        per_batch: list[tuple[bool, list[_ReviewTask]]] = []
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
@@ -270,7 +315,21 @@ class LLMReviewEngine(ReviewEngine):
             batch_paths = {path for path, _ in batch}
             batch_hints = [h for h in sa_hints if h.path in batch_paths]
             hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
-            tasks += [
+            # Warm the prompt cache for this batch: a fully concurrent first
+            # wave defeats it (every call misses and pays the cache write), so
+            # on breakpoint routes one lens is dispatched alone and the rest of
+            # the batch releases on its completion — reading the shared
+            # preamble-plus-diff prefix instead of re-writing it. Gated on diff
+            # size (see _WARMUP_MIN_TOKENS) so a small diff keeps full
+            # concurrency.
+            warm = (
+                cfg.prompt_cache
+                and cfg.provider in _CACHE_BREAKPOINT_PROVIDERS
+                and workers > 1
+                and len(lenses) > 1
+                and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS
+            )
+            batch_tasks = [
                 partial(
                     self._review_lens,
                     wrapped,
@@ -279,22 +338,23 @@ class LLMReviewEngine(ReviewEngine):
                     cfg.model,
                     response_format,
                     batch_num,
+                    cfg.prompt_cache,
                     lens,
                 )
                 for lens in lenses
             ]
+            per_batch.append((warm, batch_tasks))
 
-        workers = _resolve_workers(cfg, len(tasks))
         with profiler.stage("review"):
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                # pool.map keeps result order == task order, so findings stay
-                # deterministic (dedupe's first-wins tiebreak is order-sensitive).
-                for findings, error in pool.map(lambda task: task(), tasks):
-                    total_calls += 1
-                    if error is not None:
-                        failed_calls += 1
-                        errors.append(error)
-                    all_findings.extend(findings)
+            # Results keyed by task index and consumed in task order, so the
+            # findings stay deterministic (dedupe's first-wins tiebreak is
+            # order-sensitive) whatever order the futures complete in.
+            for findings, error in self._fan_out(per_batch, workers):
+                total_calls += 1
+                if error is not None:
+                    failed_calls += 1
+                    errors.append(error)
+                all_findings.extend(findings)
 
         # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
         #     have no signal — never pass that off as a clean review.
@@ -400,6 +460,48 @@ class LLMReviewEngine(ReviewEngine):
             return filtered, f"👍 LGTM!\n\n{summary_line}"
         return filtered, summary_line
 
+    def _fan_out(
+        self, per_batch: list[tuple[bool, list[_ReviewTask]]], workers: int
+    ) -> list[_LensOutcome]:
+        """Run every (batch, lens) task through one pool; results in task order.
+
+        Batches flagged for cache warm-up submit only their FIRST lens; the
+        rest of that batch is released when the primer completes (having
+        written the shared prefix to the provider's prompt cache). Unflagged
+        batches submit everything up front. Cross-batch work interleaves
+        freely — batch 2's primer runs while batch 1's followers are in
+        flight, so warming never re-serialises the whole review.
+        """
+        results: dict[int, _LensOutcome] = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending: dict[Future[_LensOutcome], int] = {}
+            primer_batch: dict[Future[_LensOutcome], int] = {}
+            deferred: dict[int, list[tuple[int, _ReviewTask]]] = {}
+            index = 0
+            for batch_index, (warm, batch_tasks) in enumerate(per_batch):
+                indexed = list(enumerate(batch_tasks, start=index))
+                index += len(batch_tasks)
+                if warm:
+                    primer_index, primer = indexed[0]
+                    future = pool.submit(primer)
+                    pending[future] = primer_index
+                    primer_batch[future] = batch_index
+                    deferred[batch_index] = indexed[1:]
+                else:
+                    for task_index, task in indexed:
+                        pending[pool.submit(task)] = task_index
+            while pending:
+                done, _ = wait(set(pending), return_when=FIRST_COMPLETED)
+                for future in done:
+                    results[pending.pop(future)] = future.result()
+                    batch_index = primer_batch.pop(future, -1)
+                    if batch_index >= 0:
+                        # Primer done (pass or fail — a failed primer must not
+                        # strand its batch): release the deferred lens calls.
+                        for task_index, task in deferred.pop(batch_index, []):
+                            pending[pool.submit(task)] = task_index
+        return [results[i] for i in sorted(results)]
+
     def _review_lens(
         self,
         wrapped: str,
@@ -408,6 +510,7 @@ class LLMReviewEngine(ReviewEngine):
         model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
+        split_prompt: bool,
         lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
@@ -416,7 +519,31 @@ class LLMReviewEngine(ReviewEngine):
         reason — the provider exception (e.g. a 429 quota error) or unparseable
         output — that the engine surfaces so a failure names its real cause instead
         of a generic "timeout". A failing lens never aborts the others.
+
+        ``split_prompt`` selects the message shape. True (``prompt_cache`` on —
+        the default): shared system preamble, then the shared prefix (hints +
+        diff) as one user message, then the lens block (intent + checklist +
+        example) as a final user message — every lens call shares the same
+        expensive prefix, which caching providers then serve from cache. False:
+        the legacy shape (lens text in the system prompt, one user message),
+        kept as the escape hatch for a model that reviews worse under the
+        split layout.
         """
+        if split_prompt:
+            prefix = wrapped if hint_block is None else f"{hint_block}\n\n{wrapped}"
+            suffix = lens.user_block
+            if lens.carries_intent and intent_block is not None:
+                # Only the intent lens pays the intent-block tokens (and its
+                # injection surface). It rides the lens block — NOT the shared
+                # prefix — so the other lenses' cached prefix stays identical.
+                suffix = f"{intent_block}\n\n{suffix}"
+            messages: list[Message] = [
+                {"role": "system", "content": build_shared_preamble()},
+                {"role": "user", "content": prefix},
+                {"role": "user", "content": suffix},
+            ]
+            return self._complete_lens(messages, model, response_format, batch_num, lens)
+
         user_content = wrapped
         if lens.carries_intent and intent_block is not None:
             # Only the intent lens pays the intent-block tokens (and its
@@ -426,10 +553,21 @@ class LLMReviewEngine(ReviewEngine):
             # Static-analysis grounding: every lens sees the hints (each judges
             # relevance to its own concern) ahead of the diff they refer to.
             user_content = f"{hint_block}\n\n{user_content}"
-        messages: list[Message] = [
+        messages = [
             {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},
         ]
+        return self._complete_lens(messages, model, response_format, batch_num, lens)
+
+    def _complete_lens(
+        self,
+        messages: list[Message],
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        lens: _Lens,
+    ) -> tuple[list[ReviewFinding], str | None]:
+        """The provider call + parse + stamp shared by both prompt shapes."""
         opts = {"response_format": response_format} if response_format is not None else {}
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.

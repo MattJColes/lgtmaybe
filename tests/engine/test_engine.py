@@ -38,6 +38,23 @@ def _reflection_calls(provider: FakeProvider) -> list[dict]:
     return [c for c in provider.calls if _is_reflection(c)]
 
 
+def _all_text(call: dict) -> str:
+    """Every message's content joined — prompt text wherever the shape put it.
+
+    The default (prompt_cache on) message shape is split: shared preamble in
+    the system message, diff in one user message, the lens block in another —
+    so assertions about "the prompt" search all of it.
+    """
+    return "\n".join(str(m.get("content", "")) for m in call["messages"])
+
+
+def _user_text(call: dict) -> str:
+    """All user-message content joined (the diff + lens block in split shape)."""
+    return "\n".join(
+        str(m.get("content", "")) for m in call["messages"] if m.get("role") == "user"
+    )
+
+
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
@@ -550,13 +567,15 @@ class _PerCategoryProvider(FakeProvider):
 
     def complete(self, messages, model, **opts):  # type: ignore[override]
         self.calls.append({"messages": messages, "model": model, "opts": opts})
-        system = messages[0]["content"].lower()
-        if _REFLECT_MARKER in system:
+        # The lens section lives in the system prompt (legacy shape) or the
+        # final user block (split shape) — search the whole prompt either way.
+        prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+        if _REFLECT_MARKER in prompt:
             return ProviderResult(
                 text=json.dumps({i: True for i in range(50)}), input_tokens=5, output_tokens=5
             )
         for marker, (title, line) in _CATEGORY_BY_MARKER.items():
-            if marker in system:
+            if marker in prompt:
                 finding = ReviewFinding(
                     path="a.py", line=line, severity=Severity.low, title=title, body="x"
                 )
@@ -711,11 +730,11 @@ def test_intent_category_receives_the_wrapped_intent_block() -> None:
     engine.review(_CTX_WITH_INTENT, cfg)
 
     [call] = _review_calls(provider)
-    user = call["messages"][1]["content"]
+    user = _user_text(call)
     assert "Fix typo in README" in user
     assert "fix: typo in README" in user
     assert "INTENT_START" in user  # wrapped as untrusted data, not raw text
-    assert "stated intent" in call["messages"][0]["content"].lower()
+    assert "stated intent" in _all_text(call).lower()
 
 
 def test_intent_category_skipped_when_nothing_is_stated() -> None:
@@ -733,7 +752,7 @@ def test_intent_category_skipped_when_nothing_is_stated() -> None:
 
     calls = _review_calls(provider)
     assert len(calls) == 1  # only security ran
-    assert "stated intent" not in calls[0]["messages"][0]["content"].lower()
+    assert "intent — does the change" not in _all_text(calls[0]).lower()
 
 
 def test_non_intent_categories_do_not_carry_the_intent_block() -> None:
@@ -747,7 +766,7 @@ def test_non_intent_categories_do_not_carry_the_intent_block() -> None:
     engine.review(_CTX_WITH_INTENT, cfg)
 
     [call] = _review_calls(provider)
-    assert "INTENT_START" not in call["messages"][1]["content"]
+    assert "INTENT_START" not in _user_text(call)
 
 
 def test_intent_block_is_redacted_before_egress() -> None:
@@ -881,8 +900,8 @@ def test_partial_failure_keeps_findings_with_a_notice_and_no_lgtm() -> None:
     class _MixedProvider(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[override]
             self.calls.append({"messages": messages, "model": model, "opts": opts})
-            system = messages[0]["content"].lower()
-            if "owasp" in system:
+            prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+            if "owasp" in prompt:
                 f = ReviewFinding(
                     path="a.py", line=1, severity=Severity.high, title="bug", body="x"
                 )
@@ -926,7 +945,8 @@ def test_partial_failure_notice_names_the_provider_error() -> None:
     class _MixedErrProvider(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[override]
             self.calls.append({"messages": messages, "model": model, "opts": opts})
-            if "owasp" in messages[0]["content"].lower():
+            prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+            if "owasp" in prompt:
                 f = ReviewFinding(
                     path="a.py", line=1, severity=Severity.high, title="bug", body="x"
                 )
@@ -1065,7 +1085,7 @@ def test_custom_lens_runs_as_an_extra_review_call() -> None:
     # _CTX states no intent, so the intent lens is skipped; the custom lens adds one.
     n_builtin = len([c for c in cfg.categories if c is not ReviewCategory.intent])
     assert len(review_calls) == n_builtin + 1
-    assert any("Simplify or delete" in c["messages"][0]["content"] for c in review_calls)
+    assert any("Simplify or delete" in _all_text(c) for c in review_calls)
     assert findings  # the custom lens's finding survived the pipeline
 
 

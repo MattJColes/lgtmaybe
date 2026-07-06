@@ -225,36 +225,55 @@ class LiteLLMProvider(ProviderClient):
         return self._map_response(response, model)
 
     def _with_cache_control(self, messages: list[Message], model: str) -> list[Message]:
-        """Return *messages* with the system prompt marked cacheable, when it pays.
+        """Return *messages* shaped for the model's caching route, when it pays.
 
-        The system prompt is the static prefix (shared header + lens section +
-        worked example — identical across the per-lens fan-out and re-runs); the
-        volatile content (diff, intent, findings) is always in the user message,
-        so marking only the system message keeps the cached region stable. The
-        rewrite happens only when ALL of these hold — otherwise the request goes
-        out byte-for-byte unchanged:
+        The engine sends the review prompt in a **split shape** when
+        ``prompt_cache`` is on: a lens-independent system preamble, then the
+        shared prefix (the wrapped diff, plus hints) as one user message, then
+        the lens-specific instruction as a final user message. This adapter is
+        where that shape meets each provider:
 
-        - ``prompt_cache`` is enabled;
-        - the model rides a route where an explicit breakpoint is the caching
-          mechanism (:data:`_CACHE_CONTROL_PREFIXES`) AND litellm's capability
-          map says the model supports prompt caching;
-        - the system prompt clears Anthropic's 1,024-token minimum cacheable
-          block (a smaller block is silently not cached).
+        - On a route with an explicit cache breakpoint (:data:`_CACHE_CONTROL_PREFIXES`,
+          confirmed by litellm's capability map): consecutive user messages are
+          merged into ONE user message of text blocks, with ``cache_control``
+          on the system prompt and on the last *prefix* block — so every call
+          in the fan-out after the first reads the whole preamble-plus-diff
+          prefix from cache. The final (lens) block stays uncached. A
+          breakpoint is only emitted once the prefix it closes clears the
+          1,024-token minimum cacheable block (smaller is silently not cached,
+          so the marker would be pure request-shape churn). litellm exposes no
+          per-model threshold (some Opus/Haiku-class models need 4,096), so
+          1,024 is used for all — a too-small block degrades to "not cached",
+          never to an error.
+        - Everywhere else (no breakpoint route, capability lookup failure, or
+          ``prompt_cache`` off): consecutive user messages are merged into one
+          plain string and no marker is attached — byte-identical to the single
+          user message these providers have always received.
         """
         if not self.prompt_cache or not _supports_cache_control(model):
-            return messages
-        index = next(
-            (i for i, m in enumerate(messages) if m.get("role") == "system"),
-            None,
-        )
-        if index is None:
-            return messages
-        content = messages[index].get("content")
-        if not isinstance(content, str) or _count_tokens(content) < _MIN_CACHEABLE_TOKENS:
-            return messages
-        marked: Any = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+            return _merge_user_messages(messages)
+
         out = list(messages)
-        out[index] = {**messages[index], "content": marked}
+        cumulative = 0
+        sys_index = next((i for i, m in enumerate(out) if m.get("role") == "system"), None)
+        if sys_index is not None and isinstance(out[sys_index].get("content"), str):
+            sys_text = out[sys_index]["content"]
+            cumulative = _count_tokens(sys_text)
+            if cumulative >= _MIN_CACHEABLE_TOKENS:
+                sys_marked: Any = [_cache_block(sys_text)]
+                out[sys_index] = {**out[sys_index], "content": sys_marked}
+
+        run_start, run = _trailing_user_run(out)
+        if len(run) >= 2:
+            # Split shape: every user message but the last is shared prefix.
+            prefix_texts = [str(m.get("content", "")) for m in run[:-1]]
+            cumulative += sum(_count_tokens(t) for t in prefix_texts)
+            blocks: list[dict[str, Any]] = [{"type": "text", "text": t} for t in prefix_texts]
+            if cumulative >= _MIN_CACHEABLE_TOKENS:
+                blocks[-1] = _cache_block(prefix_texts[-1])
+            blocks.append({"type": "text", "text": str(run[-1].get("content", ""))})
+            merged: Any = blocks
+            out[run_start:] = [{"role": "user", "content": merged}]
         return out
 
     def _map_response(self, response: Any, model: str) -> ProviderResult:
@@ -284,6 +303,36 @@ class LiteLLMProvider(ProviderClient):
             cache_read_tokens=cache_read,
             cache_creation_tokens=cache_creation,
         )
+
+
+def _cache_block(text: str) -> dict[str, Any]:
+    """A text content block carrying an ephemeral cache breakpoint."""
+    return {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+
+
+def _trailing_user_run(messages: list[Message]) -> tuple[int, list[Message]]:
+    """The trailing run of consecutive user messages: ``(start_index, run)``."""
+    end = len(messages)
+    start = end
+    while start > 0 and messages[start - 1].get("role") == "user":
+        start -= 1
+    return start, messages[start:end]
+
+
+def _merge_user_messages(messages: list[Message]) -> list[Message]:
+    """Collapse a trailing run of user messages into one plain-string message.
+
+    The engine's split prompt shape carries the shared prefix and the lens
+    instruction as separate user messages; providers that take no cache marker
+    get them joined back into the single user message they have always
+    received. Anything else (one user message, non-string content) passes
+    through untouched.
+    """
+    start, run = _trailing_user_run(messages)
+    if len(run) < 2 or not all(isinstance(m.get("content"), str) for m in run):
+        return messages
+    joined = "\n\n".join(str(m.get("content")) for m in run)
+    return [*messages[:start], {"role": "user", "content": joined}]
 
 
 def _supports_cache_control(model: str) -> bool:

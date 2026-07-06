@@ -133,10 +133,10 @@ class TestFlattenedFanOut:
 
         class _OneBadLens(FakeProvider):
             def complete(self, messages, model, **opts):  # type: ignore[override]
-                system = messages[0]["content"]
+                prompt = "\n".join(str(m.get("content", "")) for m in messages)
                 with lock:
-                    calls.append(system[:20])
-                if "Security review" in system:
+                    calls.append(prompt[:20])
+                if "Security review" in prompt:
                     raise RuntimeError("boom")
                 return ProviderResult(text='{"findings": []}', input_tokens=1, output_tokens=1)
 

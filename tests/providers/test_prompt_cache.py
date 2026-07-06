@@ -138,6 +138,72 @@ class TestCacheControlMarking:
         assert messages == _messages()
 
 
+_DIFF_PREFIX = "diff --git a/x b/x\n" + ("+some changed line of code\n" * 700)
+_LENS_BLOCK = "Review the diff above through the security lens only."
+
+
+def _split_messages(system: str = _BIG_SYSTEM, prefix: str = _DIFF_PREFIX) -> list[dict[str, str]]:
+    """The engine's split (cache-shaped) layout: preamble, shared prefix, lens block."""
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prefix},
+        {"role": "user", "content": _LENS_BLOCK},
+    ]
+
+
+def _sent_split(model: str, *, prompt_cache: bool, system: str = _BIG_SYSTEM) -> list[Any]:
+    with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
+        provider = LiteLLMProvider(model=model, prompt_cache=prompt_cache)
+        provider.complete(_split_messages(system), model)
+    return mock_completion.call_args.kwargs["messages"]
+
+
+class TestSplitShapeCacheMarking:
+    """The engine's split prompt shape: shared preamble + diff prefix + lens block.
+
+    On breakpoint routes the diff prefix must join the cached region (this is
+    the whole point — the diff is identical across every lens call in a batch);
+    on all other routes the user messages merge back into the single plain
+    message those providers have always received.
+    """
+
+    @pytest.mark.parametrize("model", _CACHEABLE_MODELS)
+    def test_prefix_block_carries_the_breakpoint_and_lens_block_does_not(
+        self, model: str
+    ) -> None:
+        sent = _sent_split(model, prompt_cache=True)
+        assert len(sent) == 2  # system + ONE merged user message
+        [sys_block] = sent[0]["content"]
+        assert sys_block["cache_control"] == {"type": "ephemeral"}
+        prefix_block, lens_block = sent[1]["content"]
+        assert prefix_block["text"] == _DIFF_PREFIX
+        assert prefix_block["cache_control"] == {"type": "ephemeral"}
+        assert lens_block["text"] == _LENS_BLOCK
+        assert "cache_control" not in lens_block
+
+    def test_small_system_still_caches_once_the_diff_crosses_the_minimum(self) -> None:
+        """The 1,024-token minimum applies to the cumulative prefix, not per
+        block: a small preamble plus a big diff still earns the diff breakpoint."""
+        sent = _sent_split(_CACHEABLE_MODELS[0], prompt_cache=True, system=_SMALL_SYSTEM)
+        # System alone is under the minimum → left as a plain string.
+        assert sent[0]["content"] == _SMALL_SYSTEM
+        prefix_block, lens_block = sent[1]["content"]
+        assert prefix_block["cache_control"] == {"type": "ephemeral"}
+        assert "cache_control" not in lens_block
+
+    @pytest.mark.parametrize("model", _UNCACHEABLE_MODELS)
+    def test_split_shape_merges_to_one_plain_user_message_elsewhere(self, model: str) -> None:
+        sent = _sent_split(model, prompt_cache=True)
+        assert len(sent) == 2
+        assert sent[0] == {"role": "system", "content": _BIG_SYSTEM}
+        assert sent[1] == {"role": "user", "content": f"{_DIFF_PREFIX}\n\n{_LENS_BLOCK}"}
+
+    def test_split_shape_merges_plain_when_prompt_cache_off(self) -> None:
+        sent = _sent_split(_CACHEABLE_MODELS[0], prompt_cache=False)
+        assert sent[1] == {"role": "user", "content": f"{_DIFF_PREFIX}\n\n{_LENS_BLOCK}"}
+        assert sent[0]["content"] == _BIG_SYSTEM
+
+
 class TestCacheUsageMapping:
     def test_cache_token_counts_mapped_from_usage(self) -> None:
         response = _fake_response(
