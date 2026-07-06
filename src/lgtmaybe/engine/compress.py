@@ -6,6 +6,7 @@ Provides a dynamic context-line calculator for the remaining budget.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from functools import lru_cache
 from typing import Any
 
@@ -152,6 +153,22 @@ def context_lines_for_budget(remaining_tokens: int) -> int:
     return min(int(lines), _MAX_CONTEXT_LINES)
 
 
+def _enclosing_boundary(boundaries: list[int], new_start: int) -> int | None:
+    """The nearest definition start at or above *new_start*, if within reach.
+
+    *boundaries* is sorted ascending; the enclosing candidate is the last one
+    ``<= new_start``. None when there is none, or when it sits more than
+    :data:`_MAX_BOUNDARY_REACH` lines above (padding to it would drown the diff).
+    """
+    idx = bisect_right(boundaries, new_start) - 1
+    if idx < 0:
+        return None
+    candidate = boundaries[idx]
+    if new_start - candidate > _MAX_BOUNDARY_REACH:
+        return None
+    return candidate
+
+
 def trailing_context_lines(before: int) -> int:
     """The trailing pad for a leading pad of *before* lines (asymmetric context).
 
@@ -166,7 +183,19 @@ def trailing_context_lines(before: int) -> int:
     return max(1, before // 4)
 
 
-def expand_hunks(patch: str, file_content: str | None, n: int, after: int | None = None) -> str:
+# How far above a hunk the enclosing-definition pad may reach (lines). Beyond
+# this the "enclosing function" is so far away that padding to it would drown
+# the diff; the fixed-line pad applies instead.
+_MAX_BOUNDARY_REACH = 120
+
+
+def expand_hunks(
+    patch: str,
+    file_content: str | None,
+    n: int,
+    after: int | None = None,
+    boundaries: list[int] | None = None,
+) -> str:
     """Pad each hunk in *patch* with surrounding lines from *file_content*.
 
     Up to *n* lines are added before each hunk and up to *after* lines after it
@@ -175,6 +204,13 @@ def expand_hunks(patch: str, file_content: str | None, n: int, after: int | None
     normal unchanged context (space-prefixed), giving the model the function and
     definitions around a change. Hunk headers are rewritten so each hunk's
     start/length still describes the lines it now contains.
+
+    ``boundaries`` (sorted 1-based definition start lines, from
+    :func:`~lgtmaybe.engine.boundaries.definition_starts`) extends the LEADING
+    pad up to the enclosing function/class signature when it sits above the
+    fixed window and within :data:`_MAX_BOUNDARY_REACH` lines — the enclosing
+    signature explains a change better than an arbitrary cut. A boundary can
+    only ever widen the window, never shrink it.
 
     This is best-effort: with ``n <= 0`` or no file content the patch is returned
     unchanged, and reads are clamped to the file's bounds. The result is for the
@@ -204,7 +240,14 @@ def expand_hunks(patch: str, file_content: str | None, n: int, after: int | None
         section = header.section
 
         # Lines immediately before the hunk and after its last new-file line.
-        leading = [content_lines[i - 1] for i in range(max(1, new_start - n), new_start)]
+        lead_start = max(1, new_start - n)
+        if boundaries:
+            enclosing = _enclosing_boundary(boundaries, new_start)
+            if enclosing is not None and enclosing < lead_start:
+                # The enclosing definition starts above the fixed window and
+                # within reach — widen the pad up to its signature line.
+                lead_start = enclosing
+        leading = [content_lines[i - 1] for i in range(lead_start, new_start)]
         last_new = new_start + new_len - 1
         trailing = [
             content_lines[i - 1]

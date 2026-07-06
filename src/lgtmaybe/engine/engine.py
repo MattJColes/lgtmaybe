@@ -26,6 +26,7 @@ from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
+from .boundaries import definition_starts
 from .compress import (
     batch_files,
     context_lines_for_budget,
@@ -41,6 +42,7 @@ from .reflect import reflect_findings
 from .retrieve import FileFetcher
 from .static_analysis import ToolFinding, format_hints, run_static_analysis
 from .suppress import apply_suppressions
+from .triage import triage_files
 
 _log = get_logger(__name__)
 
@@ -158,6 +160,18 @@ class LLMReviewEngine(ReviewEngine):
                 {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
             )
 
+        # 3c. Two-stage triage (default off): a cheap triage_model skips
+        #     plainly-non-substantive files and ranks the rest by risk, so the
+        #     strong model reviews only what deserves it. A deterministic
+        #     security floor (security paths/tokens, static-analysis hits,
+        #     large hunks) always escalates past triage, and any triage
+        #     failure reviews everything.
+        skipped_by_triage: list[str] = []
+        if cfg.triage_model and file_patches:
+            file_patches, skipped_by_triage = triage_files(
+                file_patches, sa_hints, cfg, self._provider
+            )
+
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
         #    capped by cfg.context_lines; the pad is asymmetric — the code
@@ -175,7 +189,17 @@ class LLMReviewEngine(ReviewEngine):
                 (
                     path,
                     expand_hunks(
-                        patch, redact(ctx.file_contents.get(path, "")), ctx_lines, after=after
+                        patch,
+                        redact(ctx.file_contents.get(path, "")),
+                        ctx_lines,
+                        after=after,
+                        # Enclosing function/class boundaries (ast-grep; [] on
+                        # any failure) so the leading pad reaches the signature.
+                        boundaries=(
+                            definition_starts(ctx.file_contents.get(path, ""), path)
+                            if cfg.function_context and ctx.file_contents.get(path)
+                            else None
+                        ),
                     ),
                 )
                 for path, patch in file_patches
@@ -290,16 +314,31 @@ class LLMReviewEngine(ReviewEngine):
         #    low-confidence guess, so surface it only when it's high/critical.
         filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
 
-        plural = "s" if len(filtered) != 1 else ""
-        summary_line = (
-            f"{len(filtered)} finding{plural} · provider {cfg.provider} · model {cfg.model}"
-        )
+        # 9b. Declarative post-processing (finding_rules, default none): the
+        #     team's drop / severity-remap rules, applied last so they see
+        #     exactly what would otherwise post. Imported lazily — rules.py
+        #     imports this module's glob matcher, so a top import would cycle.
+        if cfg.finding_rules:
+            from .rules import apply_finding_rules
+
+            filtered = apply_finding_rules(filtered, cfg)
+
+        summary_line = _summary_line(len(filtered), cfg)
 
         notices = []
         if capped_files:
             notices.append(
                 f"⚠️ Reviewed the top {cfg.max_files} of {total_files} changed files "
                 f"(file cap {cfg.max_files}). Raise max_files to review them all."
+            )
+        if skipped_by_triage:
+            # Transparency: a triage skip must be visible, never silent.
+            plural_files = "s" if len(skipped_by_triage) != 1 else ""
+            listed = ", ".join(f"`{p}`" for p in skipped_by_triage[:10])
+            more = ", …" if len(skipped_by_triage) > 10 else ""
+            notices.append(
+                f"🔎 Triage skipped {len(skipped_by_triage)} low-risk file{plural_files}: "
+                f"{listed}{more} (`/review full` reviews everything)."
             )
         # Some — but not all — lenses failed: the result may be incomplete, so say
         # so and don't claim a clean bill of health.
@@ -366,8 +405,33 @@ class LLMReviewEngine(ReviewEngine):
         except ParseError:
             _log.warning("unparseable model output", extra={"lens": lens.id})
             return [], "unparseable model output"
+        # Stamp the originating lens (engine-derived — the model's own value is
+        # overwritten): it drives the security label and category-matched
+        # finding_rules, and surfaces in JSON output.
+        findings = [f.model_copy(update={"category": lens.id}) for f in findings]
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def _summary_line(count: int, cfg: ReviewConfig) -> str:
+    """The review summary line: the user's template, or the built-in default.
+
+    A template that fails to format (unknown placeholder, stray brace) is
+    logged and falls back to the default — a cosmetic option must never fail
+    a review.
+    """
+    if cfg.summary_template:
+        try:
+            return cfg.summary_template.format(
+                count=count, provider=cfg.provider.value, model=cfg.model
+            )
+        except (KeyError, IndexError, ValueError) as exc:
+            _log.warning(
+                "summary_template failed to format — using the default",
+                extra={"error": str(exc)},
+            )
+    plural = "s" if count != 1 else ""
+    return f"{count} finding{plural} · provider {cfg.provider} · model {cfg.model}"
 
 
 def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) -> bool:

@@ -1,0 +1,29 @@
+{
+  "name": "static-hints",
+  "changed_file": "report.py",
+  "expected": [
+    {
+      "label": "unsafe yaml.load without SafeLoader (deserialization)",
+      "line": 10,
+      "keywords": ["yaml", "safe_load", "loader", "deserial", "unsafe"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "TLS certificate verification disabled (verify=False)",
+      "line": 14,
+      "keywords": ["verify", "tls", "ssl", "certificate", "insecure", "mitm"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "command injection via shell=True string concat",
+      "line": 18,
+      "keywords": ["shell", "injection", "command", "subprocess", "untrusted"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "weak hash md5",
+      "line": 22,
+      "keywords": ["md5", "weak", "hash", "sha-256", "sha256", "insecure", "collision"]
+    }
+  ]
+}

@@ -51,6 +51,12 @@ class Fixture(BaseModel):
     # reader + ast-grep symbol resolver rooted here, so a deferred cross-file verdict
     # can fetch the real definition — exactly the path symbol resolution adds.
     corpus_root: Path | None = Field(default=None, exclude=True)
+    # HEAD text of the fixture's changed files (a ``head/`` subdir next to
+    # ``diff.txt``), loader-populated like ``corpus_root``. When present it
+    # becomes ``PRContext.file_contents`` — the input static-analysis fusion,
+    # context expansion, and function-boundary padding all key on — so those
+    # features can be A/B-measured against fixtures instead of running dark.
+    head_root: Path | None = Field(default=None, exclude=True)
 
 
 class FixtureScore(BaseModel):
@@ -212,6 +218,16 @@ def score_fixture(
 
 def _eval_ctx(diff: str, manifest: Fixture) -> PRContext:
     """The synthetic PRContext every eval review runs against (no real PR)."""
+    file_contents: dict[str, str] = {}
+    if manifest.head_root is not None:
+        # The head/ dir mirrors the changed files' HEAD text — the same shape
+        # the GitHub gateway fetches — feeding static analysis, context
+        # expansion, and boundary padding during an eval run.
+        file_contents = {
+            str(p.relative_to(manifest.head_root)): p.read_text()
+            for p in sorted(manifest.head_root.rglob("*"))
+            if p.is_file()
+        }
     return PRContext(
         diff=diff,
         changed_files=[manifest.changed_file],
@@ -219,6 +235,7 @@ def _eval_ctx(diff: str, manifest: Fixture) -> PRContext:
         head_sha="1",
         repo="eval/eval",
         pr_number=0,
+        file_contents=file_contents,
     )
 
 

@@ -19,7 +19,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from lgtmaybe.core.models import Provider, ReviewCategory, ReviewConfig
+from lgtmaybe.core.models import Provider, ReviewCategory, ReviewConfig, StaticAnalysisConfig
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError, build_symbol_resolver
 from lgtmaybe.local import local_file_reader
 from lgtmaybe.providers.credentials import resolve_credentials
@@ -67,6 +67,12 @@ def _load_fixtures() -> list[tuple[str, Fixture]]:
         corpus = d / "repo"
         if corpus.is_dir():
             manifest.corpus_root = corpus
+        # A `head/` subdir carries the changed files' HEAD text (what the
+        # GitHub gateway would fetch), feeding static analysis and context
+        # expansion during the eval run.
+        head = d / "head"
+        if head.is_dir():
+            manifest.head_root = head
         out.append((diff, manifest))
     return out
 
@@ -130,6 +136,8 @@ def _review(
     top_k: int | None = None,
     categories: list[ReviewCategory] | None = None,
     context_lines: int | None = None,
+    static_analysis: bool = False,
+    triage_model: str | None = None,
 ):
     ctx = _eval_ctx(diff, manifest)
     cfg_overrides: dict[str, object] = {}
@@ -139,6 +147,12 @@ def _review(
         cfg_overrides["categories"] = categories
     if context_lines is not None:
         cfg_overrides["context_lines"] = context_lines
+    if static_analysis:
+        # A/B the F1 fusion: installed tools run over the fixture's head/ text
+        # and their findings ground the lens prompts, exactly as in production.
+        cfg_overrides["static_analysis"] = StaticAnalysisConfig(enabled=True)
+    if triage_model is not None:
+        cfg_overrides["triage_model"] = triage_model
     cfg = ReviewConfig(
         provider=provider,
         model=model,
@@ -316,6 +330,21 @@ def main(argv: list[str] | None = None) -> int:
         "path-only fetch so a run can A/B the cross-file false-positive rate",
     )
     ap.add_argument(
+        "--static-analysis",
+        dest="static_analysis",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="enable static-analysis fusion (F1) so installed tools (ruff/bandit) "
+        "ground the review with hints over the fixtures' head/ text — run the same "
+        "model with and without to measure the fusion's recall delta",
+    )
+    ap.add_argument(
+        "--triage-model",
+        default=None,
+        help="cheap triage model (P3) run before the strong --model, so a run can "
+        "measure what two-stage routing costs in recall on the fixture set",
+    )
+    ap.add_argument(
         "--json",
         dest="json_out",
         action="store_true",
@@ -351,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
             top_k=args.top_k,
             categories=categories,
             context_lines=args.context_lines,
+            static_analysis=args.static_analysis,
+            triage_model=args.triage_model,
         )
         for diff, m in fixtures
     ]

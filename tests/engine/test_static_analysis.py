@@ -261,3 +261,41 @@ def test_format_hints_renders_tool_rule_path_line() -> None:
     assert "B307" in text
     assert "src/app.py:2" in text
     assert "eval" in text
+
+
+def test_per_tool_severity_floor_overrides_the_global_floor(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """tool_min_severity floors one tool without touching the others: ruff's
+    low-grade hits are dropped while bandit's medium hit survives."""
+    run = _FakeRun(outputs={"ruff": _ruff_output("/r"), "bandit": _bandit_output()})
+
+    class _Run(_FakeRun):
+        def __call__(self, argv, **kwargs):  # type: ignore[no-untyped-def]
+            tool = Path(str(argv[0])).name
+            self.calls.append({"argv": argv, **kwargs})
+            out = _ruff_output(str(kwargs["cwd"])) if tool == "ruff" else _bandit_output()
+            return SimpleNamespace(stdout=out, stderr="", returncode=0)
+
+    run = _Run()
+    _patch_tools(monkeypatch, run, present={"ruff", "bandit"})
+
+    findings = run_static_analysis(
+        FILES,
+        _cfg(tool_min_severity={StaticAnalysisTool.ruff: Severity.medium}),
+    )
+
+    assert [f.tool for f in findings] == ["bandit"]
+
+
+def test_per_tool_floor_defaults_to_the_global_floor(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"bandit": _bandit_output()})
+    _patch_tools(monkeypatch, run, present={"bandit"})
+
+    findings = run_static_analysis(
+        FILES,
+        _cfg(
+            min_severity=Severity.high,  # global floor drops bandit's medium…
+            tool_min_severity={StaticAnalysisTool.bandit: Severity.low},  # …but its own floor wins
+        ),
+    )
+
+    assert [f.tool for f in findings] == ["bandit"]

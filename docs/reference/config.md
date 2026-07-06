@@ -17,10 +17,13 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `api_base` | string / null | No | `null` | Api Base |
+| `auto_describe` | boolean | No | `False` | Auto Describe |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
+| `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
+| `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
@@ -30,17 +33,20 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
+| `pr_labels` | boolean | No | `False` | Pr Labels |
 | `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'tool_min_severity': {}, 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
+| `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
 | `temperature` | number | No | `0.0` | Temperature |
 | `timeout` | integer / null | No | `null` | Timeout |
+| `triage_model` | string / null | No | `null` | Triage Model |
 | `unanchored_min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `high` |  |
 
 ## Enums
@@ -79,6 +85,7 @@ The structured output the model must return for each inline comment. All fields 
 | `anchored` | boolean | No | `True` | Anchored |
 | `body` | string | Yes | — | Body |
 | `broad` | boolean | No | `False` | Broad |
+| `category` | string / null | No | `null` | Category |
 | `confidence` | integer / null | No | `null` | Confidence |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
@@ -173,6 +180,108 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "CustomLens",
       "type": "object"
     },
+    "FindingRule": {
+      "additionalProperties": false,
+      "description": "One declarative post-processing rule, applied in list order.\n\nThe safe alternative to arbitrary user hooks: rules can only filter or\nre-grade findings \u2014 no user code ever executes.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/FindingRuleAction"
+        },
+        "match": {
+          "$ref": "#/$defs/FindingRuleMatch",
+          "default": {
+            "category": null,
+            "min_severity": null,
+            "path": null,
+            "title_contains": null
+          }
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "FindingRule",
+      "type": "object"
+    },
+    "FindingRuleAction": {
+      "additionalProperties": false,
+      "description": "What a matched rule does: drop the finding, or remap its severity.",
+      "properties": {
+        "drop": {
+          "default": false,
+          "title": "Drop",
+          "type": "boolean"
+        },
+        "set_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "FindingRuleAction",
+      "type": "object"
+    },
+    "FindingRuleMatch": {
+      "additionalProperties": false,
+      "description": "The selector of a finding rule. Every specified field must match (AND).\n\nAn empty match selects every finding. ``path`` is an fnmatch glob against\nthe repo-relative path (a ``**/`` prefix also matches at the repo root,\nlike the path filters); ``category`` is the originating lens id;\n``title_contains`` is a case-insensitive substring; ``min_severity``\nselects findings at or above that severity.",
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "min_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "title_contains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title Contains"
+        }
+      },
+      "title": "FindingRuleMatch",
+      "type": "object"
+    },
     "Provider": {
       "description": "The backend selected by the `--provider` flag.",
       "enum": [
@@ -234,6 +343,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "default": false,
           "title": "Broad",
           "type": "boolean"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
         },
         "confidence": {
           "anyOf": [
@@ -334,6 +455,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "default": null,
           "title": "Semgrep Rules"
         },
+        "tool_min_severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Severity"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tool Min Severity",
+          "type": "object"
+        },
         "tools": {
           "default": [
             "ruff",
@@ -376,6 +507,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Api Base"
     },
+    "auto_describe": {
+      "default": false,
+      "title": "Auto Describe",
+      "type": "boolean"
+    },
     "categories": {
       "default": [
         "security",
@@ -412,6 +548,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Extra Lenses",
       "type": "array"
+    },
+    "finding_rules": {
+      "items": {
+        "$ref": "#/$defs/FindingRule"
+      },
+      "title": "Finding Rules",
+      "type": "array"
+    },
+    "function_context": {
+      "default": true,
+      "title": "Function Context",
+      "type": "boolean"
     },
     "ignore_fingerprints": {
       "items": {
@@ -476,6 +624,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Num Ctx"
     },
+    "pr_labels": {
+      "default": false,
+      "title": "Pr Labels",
+      "type": "boolean"
+    },
     "prompt_cache": {
       "default": true,
       "title": "Prompt Cache",
@@ -517,6 +670,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
+        "tool_min_severity": {},
         "tools": [
           "ruff",
           "bandit",
@@ -528,6 +682,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": true,
       "title": "Structured Output",
       "type": "boolean"
+    },
+    "summary_template": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Template"
     },
     "symbol_resolution": {
       "default": true,
@@ -550,6 +716,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Timeout"
+    },
+    "triage_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Triage Model"
     },
     "unanchored_min_severity": {
       "$ref": "#/$defs/Severity",
@@ -611,6 +789,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": false,
       "title": "Broad",
       "type": "boolean"
+    },
+    "category": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Category"
     },
     "confidence": {
       "anyOf": [

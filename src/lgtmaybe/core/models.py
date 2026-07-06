@@ -118,6 +118,10 @@ class StaticAnalysisConfig(_Strict):
     # LOW/MEDIUM/HIGH → low/medium/high; semgrep INFO/WARNING/ERROR →
     # info/medium/high). Hints below it are dropped before prompting.
     min_severity: Severity = Severity.info
+    # Per-tool overrides of `min_severity` — e.g. keep every bandit hit but
+    # take only medium+ from ruff. A tool without an entry uses the global
+    # floor; a tool's own entry always wins, in either direction.
+    tool_min_severity: dict[StaticAnalysisTool, Severity] = Field(default_factory=dict)
     # Local semgrep rules file/dir passed as --config. semgrep is SKIPPED when
     # unset: its registry configs (`--config auto`) fetch over the network,
     # which the sandbox forbids.
@@ -161,6 +165,11 @@ class ReviewFinding(_Strict):
     # or the auditor omitted a score. Findings scoring below
     # `ReviewConfig.min_confidence` are dropped; the score is surfaced in output.
     confidence: int | None = Field(default=None, ge=0, le=10)
+    # Engine-derived: the id of the lens (built-in ReviewCategory value or
+    # custom lens id) whose call produced this finding — the model's own value
+    # is overwritten. Drives the security label and category-matched
+    # finding_rules; surfaced in JSON output. None only for legacy inputs.
+    category: str | None = None
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -260,6 +269,87 @@ class ReflectionResult(_Strict):
     verdicts: list[Verdict]
 
 
+class FindingRuleMatch(_Strict):
+    """The selector of a finding rule. Every specified field must match (AND).
+
+    An empty match selects every finding. ``path`` is an fnmatch glob against
+    the repo-relative path (a ``**/`` prefix also matches at the repo root,
+    like the path filters); ``category`` is the originating lens id;
+    ``title_contains`` is a case-insensitive substring; ``min_severity``
+    selects findings at or above that severity.
+    """
+
+    path: str | None = None
+    category: str | None = None
+    title_contains: str | None = None
+    min_severity: Severity | None = None
+
+
+class FindingRuleAction(_Strict):
+    """What a matched rule does: drop the finding, or remap its severity."""
+
+    drop: bool = False
+    set_severity: Severity | None = None
+
+    @model_validator(mode="after")
+    def _has_an_effect(self) -> FindingRuleAction:
+        if not self.drop and self.set_severity is None:
+            raise ValueError("a finding rule action must drop or set_severity")
+        return self
+
+
+class FindingRule(_Strict):
+    """One declarative post-processing rule, applied in list order.
+
+    The safe alternative to arbitrary user hooks: rules can only filter or
+    re-grade findings — no user code ever executes.
+    """
+
+    match: FindingRuleMatch = Field(default=FindingRuleMatch())
+    action: FindingRuleAction
+
+
+class FileWalkthrough(_Strict):
+    """One entry of a PR description's per-file walkthrough."""
+
+    path: str
+    summary: str = ""
+
+
+class DescribeResult(_Strict):
+    """Structured-output envelope for the describe pass.
+
+    A fixed-shape object so it can be enforced as a JSON schema via litellm
+    ``response_format``. Every field beyond the title is optional with an
+    empty default, so a model that answers partially still validates; a fully
+    unparseable answer falls back to the raw text.
+    """
+
+    title: str
+    change_type: str = ""
+    summary: str = ""
+    walkthrough: list[FileWalkthrough] = Field(default_factory=list)
+    intent_check: str = ""
+
+
+class TriageFileVerdict(_Strict):
+    """One triage verdict: whether *path* needs the strong model, and how risky."""
+
+    path: str
+    review: bool = True
+    risk: int = Field(default=5, ge=0, le=10)
+
+
+class TriageResult(_Strict):
+    """Structured-output envelope for the triage pass: ``{"files": [...]}``.
+
+    A fixed-shape object so it can be enforced as a JSON schema via litellm
+    ``response_format``, the same way reviews and reflection verdicts are.
+    """
+
+    files: list[TriageFileVerdict]
+
+
 class ProviderResult(_Strict):
     """The normalised return of one LLM completion, with token usage."""
 
@@ -337,6 +427,12 @@ class ReviewConfig(_Strict):
     # Ceiling on surrounding context lines added around each hunk. The engine
     # uses min(context_lines, what the token budget allows); 0 disables it.
     context_lines: int = 20
+    # Extend each hunk's LEADING pad up to the enclosing function/class
+    # signature when ast-grep can cheaply find it (bounded reach; PR-Agent's
+    # enclosing-scope expansion) — the signature explains a change better than
+    # an arbitrary cut. Falls back to the fixed-line pad for unsupported
+    # languages or any ast-grep failure. Off = fixed-line padding only.
+    function_context: bool = True
     # Per-request timeout (seconds) for each provider completion call. None means
     # "auto": the factory picks a provider-aware default (ollama gets a long one,
     # since local models are slow; cloud providers a short one). An explicit value
@@ -353,6 +449,42 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Declarative finding post-processing, applied in order just before
+    # posting: each rule's match (path glob / category / title substring /
+    # severity floor, ANDed) selects findings and its action drops them or
+    # remaps their severity. A safe alternative to arbitrary user hooks — no
+    # user code ever runs. Empty (default) = no post-processing.
+    finding_rules: list[FindingRule] = Field(default_factory=list)
+    # Custom template for the review summary line. Placeholders: {count}
+    # (findings posted), {provider}, {model}. None (default) keeps the built-in
+    # line; a template that fails to format falls back to it too.
+    summary_template: str | None = None
+    # PR labels (GitHub posting only): attach a review-effort/1-5 size
+    # estimate, a possible-security-issue flag when a high/critical
+    # security-lens finding posts, and a consider-splitting hint when the diff
+    # sprawls across many unrelated top-level directories. Derived entirely
+    # from data the review already computes — no extra model calls.
+    # Best-effort (a label failure never fails the review). Default off.
+    pr_labels: bool = False
+    # Auto-describe: when the GitHub Action is triggered by a PR being opened
+    # (or reopened), post a structured description comment — title, change
+    # type, summary, per-file walkthrough, intent check — before the review
+    # runs. Idempotently updated in place on later /describe runs. A separate
+    # concern from the review (either can be enabled independently), and a
+    # describe failure never blocks the review. Default off.
+    auto_describe: bool = False
+    # Two-stage triage routing: when set, this cheap model runs FIRST over the
+    # compressed per-file diffs, skipping files that plainly need no review
+    # (pure formatting, trivial renames, generated content that slipped the
+    # filter) and ranking the rest by risk — the strong `model` then reviews
+    # only the survivors, riskiest first. A deterministic floor always
+    # escalates security-relevant files (auth/crypto/IaC/CI paths, security
+    # tokens in the patch, static-analysis hits, large hunks) — triage can
+    # never skip them. Same provider/credentials as `model` (an all-ollama
+    # setup pays nothing). None (default) disables triage entirely.
+    # Trade-off: cheaper reviews at the risk of the triage model under-rating
+    # a subtle file; the floor + review-when-unsure prompt bound that risk.
+    triage_model: str | None = None
     # Drop findings the reflection auditor scores below this confidence (0-10).
     # 0 (the default) disables numeric filtering — reflection then prunes only
     # via its keep/drop verdicts, exactly as before the score existed. Findings

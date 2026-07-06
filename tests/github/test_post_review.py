@@ -706,3 +706,128 @@ def test_unanchored_finding_demoted_to_body_not_inline() -> None:
     assert "### Additional findings" in rendered
     assert "anchor" not in rendered.lower()
     assert "Couldn't anchor" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# describe comment: idempotent upsert
+# ---------------------------------------------------------------------------
+
+DESCRIBE_MARKER = "<!-- lgtmaybe-describe -->"
+
+
+@respx.mock
+def test_post_describe_comment_creates_with_marker() -> None:
+    respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
+    respx.route(method="POST", url=COMMENTS_URL).mock(side_effect=capture)
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.post_describe_comment("## Title\n\nBody")
+
+    body = str(captured["body"])
+    assert body.startswith("## Title")
+    assert DESCRIBE_MARKER in body
+
+
+@respx.mock
+def test_post_describe_comment_updates_existing_in_place() -> None:
+    existing = [
+        {"id": 7, "body": "unrelated comment"},
+        {"id": 9, "body": f"old description\n\n{DESCRIBE_MARKER}"},
+    ]
+    respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=existing)
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"id": 9})
+
+    patch_route = respx.route(
+        method="PATCH", url=f"{BASE_URL}/repos/{REPO}/issues/comments/9"
+    ).mock(side_effect=capture)
+    post_route = respx.route(method="POST", url=COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 99})
+    )
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.post_describe_comment("## New title")
+
+    assert patch_route.called
+    assert not post_route.called
+    assert "## New title" in str(captured["body"])
+
+
+@respx.mock
+def test_post_describe_comment_scoped_by_marker_key() -> None:
+    respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
+    respx.route(method="POST", url=COMMENTS_URL).mock(side_effect=capture)
+
+    gateway = RestGitHubGateway(
+        repo=REPO, pr_number=PR_NUMBER, token=TOKEN, marker_key="ollama/llama3"
+    )
+    gateway.post_describe_comment("body")
+
+    assert "<!-- lgtmaybe-describe:ollama/llama3 -->" in str(captured["body"])
+
+
+# ---------------------------------------------------------------------------
+# PR labels: reconcile the managed set, best-effort
+# ---------------------------------------------------------------------------
+
+LABELS_URL = f"{BASE_URL}/repos/{REPO}/issues/{PR_NUMBER}/labels"
+
+
+@respx.mock
+def test_apply_pr_labels_reconciles_managed_labels_only() -> None:
+    current = [{"name": "review-effort/2"}, {"name": "bug"}, {"name": "possible-security-issue"}]
+    respx.route(method="GET", url__startswith=LABELS_URL).mock(
+        return_value=httpx.Response(200, json=current)
+    )
+    deleted: list[str] = []
+
+    def capture_delete(request: httpx.Request) -> httpx.Response:
+        # The label name is one URL-encoded path segment after /labels/.
+        deleted.append(request.url.raw_path.decode().rsplit("/", 1)[-1])
+        return httpx.Response(200, json=[])
+
+    respx.route(method="DELETE", url__startswith=LABELS_URL).mock(side_effect=capture_delete)
+    added: dict[str, object] = {}
+
+    def capture_post(request: httpx.Request) -> httpx.Response:
+        added.update(json.loads(request.content))
+        return httpx.Response(200, json=[])
+
+    respx.route(method="POST", url=LABELS_URL).mock(side_effect=capture_post)
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.apply_pr_labels(["review-effort/4", "possible-security-issue"])
+
+    # Stale managed label removed; the human's "bug" label untouched.
+    assert deleted == ["review-effort%2F2"]  # slash quoted: one path segment
+    # Only the genuinely new label is added (the security one already exists).
+    assert added == {"labels": ["review-effort/4"]}
+
+
+@respx.mock
+def test_apply_pr_labels_swallows_api_failures() -> None:
+    respx.route(method="GET", url__startswith=LABELS_URL).mock(return_value=httpx.Response(500))
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+    gateway.apply_pr_labels(["review-effort/1"])  # must not raise

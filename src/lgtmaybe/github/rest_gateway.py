@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -165,6 +166,13 @@ class RestGitHubGateway(GitHubGateway):
         # from different backends on one PR update their own comment instead of
         # clobbering each other. Unkeyed gateways keep the legacy marker.
         self._marker = f"<!-- lgtmaybe:{marker_key} -->" if marker_key else _MARKER
+        # Idempotency marker for the describe comment — its own family so a
+        # description update never clobbers the review summary (or vice versa).
+        self._describe_marker = (
+            f"<!-- lgtmaybe-describe:{marker_key} -->"
+            if marker_key
+            else "<!-- lgtmaybe-describe -->"
+        )
         self._resolve_fixed = resolve_fixed
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
         # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
@@ -370,6 +378,80 @@ class RestGitHubGateway(GitHubGateway):
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
+
+    def post_describe_comment(self, body: str) -> None:
+        """Post or update the structured PR-description comment, idempotently.
+
+        Finds our previous description by its hidden marker and edits it in
+        place, so a re-run (or auto-describe after new pushes) never stacks
+        duplicate description comments. Adapter-only, beyond the frozen port.
+        """
+        stamped = f"{body}\n\n{self._describe_marker}"
+        url = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}/comments"
+        for resp in self._paginate(f"{url}?per_page=100"):
+            for comment in resp.json():
+                if self._describe_marker in (comment.get("body") or ""):
+                    edit_url = (
+                        f"https://api.github.com/repos/{self._repo}/issues/comments/{comment['id']}"
+                    )
+                    patched = self._client.patch(
+                        edit_url,
+                        headers={**self._headers, "Accept": "application/vnd.github+json"},
+                        json={"body": stamped},
+                        timeout=_TIMEOUT,
+                    )
+                    patched.raise_for_status()
+                    return
+        created = self._client.post(
+            url,
+            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            json={"body": stamped},
+            timeout=_TIMEOUT,
+        )
+        created.raise_for_status()
+
+    def apply_pr_labels(self, labels: list[str]) -> None:
+        """Reconcile our managed PR labels to exactly *labels*. Best-effort.
+
+        Only labels this tool owns (the ``review-effort/`` family,
+        ``possible-security-issue``, ``consider-splitting``) are ever removed —
+        anything a human applied is untouched. Any API failure is logged and
+        swallowed: a labelling hiccup must never fail an otherwise-successful
+        review. Adapter-only, beyond the frozen port.
+        """
+        try:
+            base = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}"
+            current: set[str] = {
+                item["name"]
+                for resp in self._paginate(f"{base}/labels?per_page=100")
+                for item in resp.json()
+            }
+            managed = {
+                name
+                for name in current
+                if name.startswith("review-effort/")
+                or name in ("possible-security-issue", "consider-splitting")
+            }
+            for stale in sorted(managed - set(labels)):
+                # The label name is a single path segment — quote it fully, or
+                # the slash in "review-effort/2" would read as a path separator.
+                resp = self._client.delete(
+                    f"{base}/labels/{quote(stale, safe='')}",
+                    headers={**self._headers, "Accept": "application/vnd.github+json"},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+            to_add = sorted(set(labels) - current)
+            if to_add:
+                resp = self._client.post(
+                    f"{base}/labels",
+                    headers={**self._headers, "Accept": "application/vnd.github+json"},
+                    json={"labels": to_add},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001 — labels are auxiliary, never fatal
+            _log.warning("applying PR labels failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Incremental review (adapter-only methods, beyond the frozen port)

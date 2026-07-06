@@ -48,6 +48,108 @@
       "title": "CustomLens",
       "type": "object"
     },
+    "FindingRule": {
+      "additionalProperties": false,
+      "description": "One declarative post-processing rule, applied in list order.\n\nThe safe alternative to arbitrary user hooks: rules can only filter or\nre-grade findings \u2014 no user code ever executes.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/FindingRuleAction"
+        },
+        "match": {
+          "$ref": "#/$defs/FindingRuleMatch",
+          "default": {
+            "category": null,
+            "min_severity": null,
+            "path": null,
+            "title_contains": null
+          }
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "FindingRule",
+      "type": "object"
+    },
+    "FindingRuleAction": {
+      "additionalProperties": false,
+      "description": "What a matched rule does: drop the finding, or remap its severity.",
+      "properties": {
+        "drop": {
+          "default": false,
+          "title": "Drop",
+          "type": "boolean"
+        },
+        "set_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "FindingRuleAction",
+      "type": "object"
+    },
+    "FindingRuleMatch": {
+      "additionalProperties": false,
+      "description": "The selector of a finding rule. Every specified field must match (AND).\n\nAn empty match selects every finding. ``path`` is an fnmatch glob against\nthe repo-relative path (a ``**/`` prefix also matches at the repo root,\nlike the path filters); ``category`` is the originating lens id;\n``title_contains`` is a case-insensitive substring; ``min_severity``\nselects findings at or above that severity.",
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "min_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "title_contains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title Contains"
+        }
+      },
+      "title": "FindingRuleMatch",
+      "type": "object"
+    },
     "Provider": {
       "description": "The backend selected by the `--provider` flag.",
       "enum": [
@@ -109,6 +211,18 @@
           "default": false,
           "title": "Broad",
           "type": "boolean"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
         },
         "confidence": {
           "anyOf": [
@@ -209,6 +323,16 @@
           "default": null,
           "title": "Semgrep Rules"
         },
+        "tool_min_severity": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Severity"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tool Min Severity",
+          "type": "object"
+        },
         "tools": {
           "default": [
             "ruff",
@@ -251,6 +375,11 @@
       "default": null,
       "title": "Api Base"
     },
+    "auto_describe": {
+      "default": false,
+      "title": "Auto Describe",
+      "type": "boolean"
+    },
     "categories": {
       "default": [
         "security",
@@ -287,6 +416,18 @@
       },
       "title": "Extra Lenses",
       "type": "array"
+    },
+    "finding_rules": {
+      "items": {
+        "$ref": "#/$defs/FindingRule"
+      },
+      "title": "Finding Rules",
+      "type": "array"
+    },
+    "function_context": {
+      "default": true,
+      "title": "Function Context",
+      "type": "boolean"
     },
     "ignore_fingerprints": {
       "items": {
@@ -351,6 +492,11 @@
       "default": null,
       "title": "Num Ctx"
     },
+    "pr_labels": {
+      "default": false,
+      "title": "Pr Labels",
+      "type": "boolean"
+    },
     "prompt_cache": {
       "default": true,
       "title": "Prompt Cache",
@@ -392,6 +538,7 @@
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
+        "tool_min_severity": {},
         "tools": [
           "ruff",
           "bandit",
@@ -403,6 +550,18 @@
       "default": true,
       "title": "Structured Output",
       "type": "boolean"
+    },
+    "summary_template": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary Template"
     },
     "symbol_resolution": {
       "default": true,
@@ -425,6 +584,18 @@
       ],
       "default": null,
       "title": "Timeout"
+    },
+    "triage_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Triage Model"
     },
     "unanchored_min_severity": {
       "$ref": "#/$defs/Severity",

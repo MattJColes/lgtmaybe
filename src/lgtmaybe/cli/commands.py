@@ -20,11 +20,13 @@ from lgtmaybe.cli import (
     action_inputs,
     config_cmd,
     execute_comment,
+    execute_describe,
     execute_local_review,
     execute_review,
     main,
     pr_url_from_event,
     resolve_auto_incremental,
+    should_auto_describe,
 )
 from lgtmaybe.config import store
 from lgtmaybe.config.loader import load_config
@@ -63,6 +65,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     default=None,
     help="Model for the self-reflection (false-positive audit) pass; defaults to "
     "--model. Point it at a stronger model to audit a weaker reviewer's findings",
+)
+@click.option(
+    "--triage-model",
+    default=None,
+    help="Cheap model that runs first to skip plainly-non-substantive files and "
+    "rank the rest by risk; the strong --model then reviews only the survivors. "
+    "Security-relevant files always escalate past triage. Unset = no triage",
 )
 @click.option(
     "--api-key",
@@ -221,6 +230,7 @@ def review(
     model: str | None,
     fallback_model: str | None,
     reflect_model: str | None,
+    triage_model: str | None,
     api_key: str | None,
     api_base: str | None,
     min_severity: str | None,
@@ -254,6 +264,7 @@ def review(
         provider=provider,
         model=model,
         reflect_model=reflect_model,
+        triage_model=triage_model,
         min_severity=min_severity,
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
@@ -318,6 +329,7 @@ def action() -> None:
         provider=inputs["provider"],
         model=inputs["model"],
         reflect_model=inputs["reflect_model"],
+        triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
@@ -328,6 +340,8 @@ def action() -> None:
         symbol_resolution=inputs["symbol_resolution"],
         prompt_cache=inputs["prompt_cache"],
         incremental=inputs["incremental"],
+        auto_describe=inputs["auto_describe"],
+        pr_labels=inputs["pr_labels"],
     )
     raw_sa = inputs["static_analysis"]
     cfg = _apply_static_analysis_flag(
@@ -348,8 +362,13 @@ def action() -> None:
 
     # incremental=None (auto): review only the new commits on a synchronize
     # push, do a full review on open/reopen. Explicit config/input wins.
-    cfg = resolve_auto_incremental(cfg, event_action=str(event.get("action") or ""))
+    event_action = str(event.get("action") or "")
+    cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
+    # Auto-describe (opt-in): on a freshly opened PR, post the structured
+    # description first — best-effort, never blocks the review.
+    if should_auto_describe(cfg, event_action=event_action):
+        execute_describe(cfg, runtime)
     execute_review(cfg, runtime, dry_run=False)
 
 

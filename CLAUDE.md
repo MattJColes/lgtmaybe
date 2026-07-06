@@ -158,8 +158,14 @@ pattern, event bus, plugin framework.
    - **`review` command** — full PR review, posts inline comments + summary.
    - **`comment` command** — handles the `issue_comment` event and routes slash
      commands to the same engine/provider: `/review` + `/improve` post a review,
-     `/ask <q>` + `/describe` reply in-thread (`post_issue_comment`, an
-     adapter-only method beyond the frozen port).
+     `/ask <q>` replies in-thread (`post_issue_comment`, an adapter-only method
+     beyond the frozen port), and `/describe` posts a **structured description**
+     (`engine/describe.py`: title, change type, summary, per-file walkthrough
+     table, intent check when the PR states one; structured output with a
+     raw-text fallback) via `post_describe_comment` — an idempotent upsert that
+     edits our previous description in place. `ReviewConfig.auto_describe`
+     (default off; Action input `auto_describe`) posts it automatically on a
+     freshly opened/reopened PR, best-effort, before the review.
    - **Guards (in the engine):** generated/binary files skipped via
      `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
      denylist globs applied right after it (`engine.passes_path_filters`;
@@ -213,6 +219,16 @@ pattern, event bus, plugin framework.
      discard"; raw tool findings are never posted. A missing tool is skipped
      silently. CLI `--static-analysis/--no-static-analysis`, Action input
      `static_analysis`.
+   - **Two-stage triage (default off):** with `triage_model` set, that cheap
+     model runs first (`engine/triage.py`) to skip plainly-non-substantive
+     files and rank the rest by risk; the strong `model` reviews only the
+     survivors, riskiest first. A deterministic security floor
+     (`triage.always_escalate`: security paths/tokens, static-analysis hits,
+     large hunks) always escalates past triage, any triage failure reviews
+     everything, skips are named in the summary, and `/review full` bypasses
+     both triage and incremental scoping. All model slots (`triage_model`,
+     `model`, `reflect_model`) share one provider/credentials. CLI
+     `--triage-model`, Action input `triage_model`.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`
@@ -283,7 +299,20 @@ pattern, event bus, plugin framework.
      `--prompt-cache/--no-prompt-cache`, Action input `prompt_cache`);
      cache read/creation token counts land on `ProviderResult` and are logged.
    - **Summary line:** names the **model** used (no cost — lgtmaybe does not
-     compute or report cost).
+     compute or report cost). `ReviewConfig.summary_template` (default None)
+     lets teams restyle it with `{count}`/`{provider}`/`{model}` placeholders;
+     a bad template falls back to the built-in line.
+   - **Finding rules (F5b):** `ReviewConfig.finding_rules` — ordered
+     declarative match (path glob / lens `category` / `title_contains` /
+     `min_severity`, ANDed) → action (`drop` / `set_severity`), applied in
+     `engine/rules.py` just before posting. Deliberately NOT an arbitrary
+     hook: no user code ever runs. Findings carry an engine-stamped
+     `category` (the originating lens id) that rules and labels key on.
+   - **PR labels (F4):** `ReviewConfig.pr_labels` (default off; Action input
+     `pr_labels`) — `engine/labels.py` derives `review-effort/1-5`,
+     `possible-security-issue` (high/critical security-lens finding), and
+     `consider-splitting` (sprawling diff) from data already computed; the
+     gateway reconciles only lgtmaybe's own label families, best-effort.
    - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
      (comment only — no GitHub approval state) — still naming the model.
 4. **Packaging (sequential, last) — DONE:** the two distribution variants over

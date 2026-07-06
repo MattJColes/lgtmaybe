@@ -1512,3 +1512,92 @@ def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: i
     findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
 
     assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# summary template (F5b)
+# ---------------------------------------------------------------------------
+
+
+def test_summary_template_formats_the_summary_line() -> None:
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        summary_template="{count} issue(s) — reviewed by {model} on {provider}",
+    )
+
+    _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert "issue(s) — reviewed by llama3 on ollama" in summary
+
+
+def test_bad_summary_template_falls_back_to_default() -> None:
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", summary_template="{nonsense}")
+
+    _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert "provider ollama · model llama3" in summary
+
+
+def test_finding_rules_run_before_the_summary_count(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from lgtmaybe.core.models import FindingRule
+
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        finding_rules=[FindingRule.model_validate({"action": {"drop": True}})],
+    )
+
+    findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert findings == []
+    assert "0 findings" in summary
+
+
+# ---------------------------------------------------------------------------
+# function-boundary context expansion (P4 remainder)
+# ---------------------------------------------------------------------------
+
+_FN_FILE = "\n".join(["def enclosing():"] + [f"    step_{i}()" for i in range(1, 30)])
+
+_FN_CTX = PRContext(
+    diff="diff --git a/f.py b/f.py\n@@ -20,1 +20,1 @@\n step_19()\n",
+    changed_files=["f.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=6,
+    file_contents={"f.py": _FN_FILE},
+)
+
+
+def test_function_context_pads_to_the_enclosing_def(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("lgtmaybe.engine.engine.definition_starts", lambda text, path: [1])
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", context_lines=3)
+
+    engine.review(_FN_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "def enclosing():" in sent  # 19 lines above the hunk — beyond the fixed pad
+
+
+def test_function_context_off_keeps_the_fixed_pad(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("lgtmaybe.engine.engine.definition_starts", lambda text, path: [1])
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama, model="llama3", context_lines=3, function_context=False
+    )
+
+    engine.review(_FN_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "def enclosing():" not in sent

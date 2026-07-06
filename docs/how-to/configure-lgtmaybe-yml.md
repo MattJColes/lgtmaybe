@@ -20,6 +20,7 @@ provides defaults for all runs.
   - [max_input_tokens](#max_input_tokens)
   - [categories](#categories)
   - [context_lines](#context_lines)
+  - [function_context](#function_context)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
   - [prompt_cache](#prompt_cache)
@@ -27,6 +28,11 @@ provides defaults for all runs.
   - [min_confidence](#min_confidence)
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
+  - [triage_model](#triage_model)
+  - [auto_describe](#auto_describe)
+  - [pr_labels](#pr_labels)
+  - [finding_rules](#finding_rules)
+  - [summary_template](#summary_template)
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
@@ -183,6 +189,22 @@ context_lines: 10   # at most 10 lines before each hunk (2 after); 0 disables
 
 Default: `20`.
 
+### function_context
+
+Extend each hunk's leading pad up to the **enclosing function or class
+signature** when it sits above the fixed `context_lines` window — the
+signature and setup explain a change better than an arbitrary cut. Boundaries
+are found structurally with ast-grep (already bundled for symbol resolution;
+parsing only, never executing) for Python, JS/TS/TSX, Go, Rust, Java, and
+Ruby, with a bounded reach so a distant definition can't drown the diff.
+Unsupported languages and any ast-grep failure keep the plain fixed-line pad.
+
+```yaml
+function_context: false   # fixed-line padding only
+```
+
+Default: `true`.
+
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
@@ -316,11 +338,116 @@ static_analysis:
   enabled: true
   tools: [ruff, bandit]        # default: ruff, bandit, semgrep
   min_severity: low            # floor on mapped tool severity (default info)
+  tool_min_severity:           # per-tool overrides of the global floor
+    ruff: medium               # only medium+ from ruff; bandit keeps `low`
   # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
 ```
 
 Default: `enabled: false` — no subprocess ever runs and behaviour is
 unchanged.
+
+### triage_model
+
+Two-stage model routing so routine PRs don't pay frontier prices while risky
+ones still get the strong model. When set, this **cheap** model runs first
+over the compressed per-file diffs, skipping files that plainly need no review
+(pure formatting, trivial renames, generated churn) and scoring the rest 0–10
+by risk; the strong `model` then does the deep per-lens review only on the
+survivors, riskiest first. Skipped files are listed in the review summary, and
+`/review full` reviews everything on demand.
+
+A deterministic **security floor** always escalates past triage, whatever the
+cheap model says: security-relevant paths (auth/crypto/session code,
+migrations, IaC, CI workflows, dependency manifests), patches carrying
+security-relevant tokens, files with static-analysis hits, and large hunks.
+Any triage failure — an unparseable verdict, a provider error — reviews
+everything.
+
+All three model slots (`triage_model`, `model`, `reflect_model`) resolve
+through the same provider and credentials, so pointing them all at one ollama
+model costs nothing. **Trade-off:** cheaper, faster reviews at the risk of the
+triage model under-rating a subtle change; the floor and the
+review-when-unsure prompt bound that risk, but for maximum recall leave triage
+off. CLI: `--triage-model`.
+
+```yaml
+triage_model: claude-haiku-4-5   # cheap gatekeeper; unset = no triage
+```
+
+Default: unset (no triage — every file gets the full review, exactly as
+before).
+
+### auto_describe
+
+Post a **structured PR description** as a comment when a PR is opened (or
+reopened), before the review runs: a suggested title, the change type, a short
+summary, a per-file walkthrough table, and — when the PR states an intent — a
+"does it do what it says" check. The comment is updated **in place** by later
+`/describe` runs, never duplicated, and a describe failure never blocks the
+review. `/describe` posts the same structured description on demand whether or
+not auto-describe is enabled.
+
+```yaml
+auto_describe: true
+```
+
+Default: `false`.
+
+### pr_labels
+
+Attach labels derived from the finished review — **no extra model calls**:
+
+- `review-effort/1` … `review-effort/5` — a size estimate from the changed
+  lines, so reviewers can gauge the PR at a glance;
+- `possible-security-issue` — a high/critical finding from the security lens
+  was posted;
+- `consider-splitting` — the diff spans many unrelated top-level directories.
+
+Labels are reconciled on each run (a stale `review-effort/2` is removed when
+the score changes) and only lgtmaybe's own label families are ever touched.
+Best-effort: a labelling failure never fails the review.
+
+```yaml
+pr_labels: true
+```
+
+Default: `false`.
+
+### finding_rules
+
+Declarative post-processing applied to findings just before posting — the
+safe alternative to arbitrary post-processing hooks (rules can only filter or
+re-grade; **no user code ever runs**). Each rule has a `match` (all specified
+fields must match) and an `action`; rules apply in order.
+
+Match fields: `path` (glob, `**/`-prefix also matches at the repo root),
+`category` (the lens that produced the finding — `security`, `correctness`,
+…, or a custom lens id), `title_contains` (case-insensitive substring), and
+`min_severity` (at or above). Actions: `drop: true` or `set_severity`.
+
+```yaml
+finding_rules:
+  # complexity nits in tests aren't worth a comment
+  - match: {path: "tests/**", category: complexity}
+    action: {drop: true}
+  # documentation findings are informational for this repo
+  - match: {category: documentation}
+    action: {set_severity: info}
+```
+
+Default: no rules.
+
+### summary_template
+
+Custom template for the review summary line, for teams matching a house
+style. Placeholders: `{count}` (findings posted), `{provider}`, `{model}`. A
+template that fails to format falls back to the built-in line.
+
+```yaml
+summary_template: "🤖 {count} finding(s) · {model}"
+```
+
+Default: unset (the built-in `N findings · provider X · model Y` line).
 
 ### resolve_fixed
 

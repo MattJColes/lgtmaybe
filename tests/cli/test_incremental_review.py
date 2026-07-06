@@ -214,3 +214,77 @@ def test_explicit_config_wins_over_auto() -> None:
     assert on.incremental is True
     off = resolve_auto_incremental(_cfg(incremental=False), event_action="synchronize")
     assert off.incremental is False
+
+
+# ---------------------------------------------------------------------------
+# auto-describe (F3): opt-in structured description on PR open
+# ---------------------------------------------------------------------------
+
+
+def test_auto_describe_only_on_open_events_when_enabled() -> None:
+    from lgtmaybe.cli import should_auto_describe
+
+    on = _cfg(auto_describe=True)
+    assert should_auto_describe(on, event_action="opened") is True
+    assert should_auto_describe(on, event_action="reopened") is True
+    assert should_auto_describe(on, event_action="synchronize") is False
+    assert should_auto_describe(_cfg(), event_action="opened") is False  # default off
+
+
+def test_run_describe_posts_via_the_idempotent_upsert() -> None:
+    import json as _json
+
+    from lgtmaybe.cli import run_describe
+    from lgtmaybe.core.models import ProviderResult
+    from tests.fakes import FakeGitHub, FakeProvider
+
+    github = FakeGitHub()
+    structured = _json.dumps({"title": "Add a thing", "summary": "Adds it."})
+    provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
+
+    run_describe(github, provider, _cfg())
+
+    assert len(github.described) == 1
+    assert github.described[0].startswith("## Add a thing")
+    assert github.comments == []
+
+
+# ---------------------------------------------------------------------------
+# PR labels (F4): applied only when opted in, on capable gateways
+# ---------------------------------------------------------------------------
+
+
+class LabelFakeGitHub(FakeGitHub):
+    def __init__(self, ctx: PRContext | None = None) -> None:
+        super().__init__(ctx)
+        self.labels: list[list[str]] = []
+
+    def apply_pr_labels(self, labels: list[str]) -> None:
+        self.labels.append(labels)
+
+
+def test_pr_labels_applied_when_enabled() -> None:
+    github = LabelFakeGitHub(CTX)
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=False)
+
+    assert len(github.labels) == 1
+    assert any(label.startswith("review-effort/") for label in github.labels[0])
+
+
+def test_pr_labels_off_by_default() -> None:
+    github = LabelFakeGitHub(CTX)
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+
+    assert github.labels == []
+
+
+def test_pr_labels_skipped_on_dry_run_and_plain_gateway() -> None:
+    github = FakeGitHub(CTX)  # no apply_pr_labels — must not crash
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=True)

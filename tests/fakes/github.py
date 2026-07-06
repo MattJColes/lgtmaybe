@@ -23,6 +23,7 @@ class FakeGitHub(GitHubGateway):
         self.posted: list[tuple[list[ReviewFinding], str]] = []
         self.posted_diffs: list[str | None] = []
         self.comments: list[str] = []
+        self.described: list[str] = []
 
     def get_pr_context(self) -> PRContext:
         return self._ctx
@@ -36,3 +37,7 @@ class FakeGitHub(GitHubGateway):
     def post_issue_comment(self, body: str) -> None:
         """In-thread reply — beyond the frozen port, used by slash commands."""
         self.comments.append(body)
+
+    def post_describe_comment(self, body: str) -> None:
+        """Idempotent PR-description upsert — beyond the frozen port."""
+        self.described.append(body)

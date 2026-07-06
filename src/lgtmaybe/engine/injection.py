@@ -72,6 +72,16 @@ INTENT_PREAMBLE = (
 )
 
 
+def neutralise(text: str) -> str:
+    """Public marker neutralisation for auxiliary untrusted blocks.
+
+    For callers (e.g. the triage pass) that build their own labelled block but
+    must still keep untrusted content from forging any of the sentinel marker
+    families used elsewhere in the prompt.
+    """
+    return _neutralise_markers(text)
+
+
 def _neutralise_markers(diff: str) -> str:
     """Defang any forged delimiter tokens in *diff* so it can't close the block early.
 

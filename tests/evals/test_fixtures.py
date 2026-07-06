@@ -262,3 +262,59 @@ def test_fixtures_cover_performance_and_complexity_lenses() -> None:
         assert "complexity" in keywords and "cyclomatic" in keywords, (
             f"{name}: no complexity finding"
         )
+
+
+# ---------------------------------------------------------------------------
+# static-hints fixture (F1 A/B) + head/ loading
+# ---------------------------------------------------------------------------
+
+
+def test_static_hints_head_matches_the_diff() -> None:
+    """The head/ text must be exactly what the diff adds — a drifted copy would
+    lint different code than the model reviews."""
+    diff, manifest = _fixture("static-hints")
+
+    assert manifest.head_root is not None
+    head = (manifest.head_root / "report.py").read_text()
+    added = [
+        line[1:] for line in diff.splitlines() if line.startswith("+") and line != "+++ b/report.py"
+    ]
+    assert added == head.splitlines()
+
+
+def test_static_hints_plants_tool_detectable_bugs() -> None:
+    """Each planted bug is a pattern bandit fires on deterministically, so an
+    A/B run (--static-analysis on/off) measures the fusion's recall delta."""
+    _diff, manifest = _fixture("static-hints")
+    head = (manifest.head_root / "report.py").read_text()  # type: ignore[union-attr]
+
+    for marker in ("yaml.load", "verify=False", "shell=True", "hashlib.md5"):
+        assert marker in head, marker
+    # Every expected finding sits on a real added line of the diff.
+    lines = head.splitlines()
+    for exp in manifest.expected:
+        assert 1 <= exp.line <= len(lines)
+
+
+def test_head_root_set_only_for_fixtures_with_a_head_dir() -> None:
+    fixtures = run_mod._load_fixtures()
+    by_name = {m.name: m for _d, m in fixtures}
+    assert by_name["static-hints"].head_root is not None
+    assert by_name["badcode"].head_root is None
+
+
+def test_eval_ctx_loads_head_files_as_file_contents() -> None:
+    from evals.scorer import _eval_ctx
+
+    diff, manifest = _fixture("static-hints")
+    ctx = _eval_ctx(diff, manifest)
+
+    assert "report.py" in ctx.file_contents
+    assert "yaml.load" in ctx.file_contents["report.py"]
+
+
+def test_eval_ctx_without_head_dir_has_no_file_contents() -> None:
+    from evals.scorer import _eval_ctx
+
+    diff, manifest = _fixture("badcode")
+    assert _eval_ctx(diff, manifest).file_contents == {}
