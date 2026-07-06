@@ -67,14 +67,27 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
    rebuilt from the **real** diff at post time, so a finding on an added context
    line maps to nothing and is dropped rather than mis-posted.
 
-3. **prompt + parse** — this stage **fans out one concurrent model call per
-   `ReviewCategory`** (a `ThreadPoolExecutor` over the sync provider port —
-   concurrent for cloud, serial for ollama). Each lens gets its own focused
-   structured prompt requesting JSON output with the `ReviewFinding` schema
-   (`path`, `line`, `side`, `severity`, `title`, `body`, `suggestion`, `anchor`)
-   and carries prompt-injection defense instructions. Each response is parsed
-   and validated against `ReviewFinding` using Pydantic; parse errors are logged
-   and surfaced in the summary rather than silently discarded.
+3. **prompt + parse** — this stage **fans out one model call per review
+   lens**, with the lens set decided by the `preset`: `fast` (the default)
+   covers the nine built-in categories in **four calls** — dedicated security
+   and correctness calls (the stated intent folds into correctness when
+   present), plus merged code-health (performance/complexity/ponytail/
+   deprecation) and artefacts (tests/documentation) calls, each demanding a
+   per-finding `category` — while `full` runs one call per category. Every
+   (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
+   provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
+   ollama and openai-compatible), so batches never wait on each other. With
+   `prompt_cache` on, each call is shaped as a shared cacheable prefix —
+   lens-independent system preamble, then the wrapped diff — followed by the
+   lens-specific instruction as the final user block, so on anthropic/bedrock
+   every call after a batch's first (a warm-up primer runs it alone on big
+   diffs) reads the preamble-plus-diff prefix from cache. Each lens's focused
+   structured prompt requests JSON output with the `ReviewFinding` schema
+   (`path`, `line`, `side`, `severity`, `title`, `body`, `suggestion`,
+   `anchor`) and carries prompt-injection defense instructions. Each response
+   is parsed and validated against `ReviewFinding` using Pydantic; parse
+   errors are logged and surfaced in the summary rather than silently
+   discarded.
 
 4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
    changed line whose content matches the finding's verbatim `anchor`, rather
@@ -145,19 +158,29 @@ network recovers but a dead-end failure surfaces fast:
   (`num_retries=0`) so failures aren't ground through two stacked backoff layers
   — lgtmaybe owns the retry policy in one place.
 
-- **Per-request timeout.** Every model call carries a timeout: 60s for hosted
-  providers, 300s for local ones (ollama, openai-compatible), overridable via
-  `timeout` / `--timeout`. The posting workflows additionally set a job-level
-  `timeout-minutes` so a wedged run can't hold a runner for GitHub's six-hour
-  default.
+- **Per-request timeout and a shared retry budget.** Every model call carries a
+  timeout: 60s for hosted providers, 300s for local ones (ollama,
+  openai-compatible), overridable via `timeout` / `--timeout`. All attempts for
+  one call additionally share a wall-clock budget of **2.5× that timeout**, so
+  a flaky model can't burn four full timeouts plus backoff per lens. The
+  posting workflows additionally set a job-level `timeout-minutes` so a wedged
+  run can't hold a runner for GitHub's six-hour default.
 
-- **Bounded fan-out.** The per-category lenses run concurrently for hosted
-  providers, but the pool is **capped (4 workers)** so a single batch doesn't
-  burst the whole lens set at the provider at once and trip a capacity 429 on a
-  lower-tier account — the lenses run in a couple of waves instead, and per-call
-  latency dominates so the wall-clock cost is small. ollama runs **serially**
-  (one worker): a single local instance serves a model one request at a time, so
-  concurrent calls would only queue up and time out.
+- **A whole-review deadline.** `max_review_seconds` (default 600, `0` disables)
+  is a soft ceiling on the run: once it passes, queued model calls are skipped
+  — in-flight ones finish and their findings post — and the summary carries an
+  explicit incomplete-results notice. It can never produce a silent LGTM: a
+  run where every call failed or was skipped still fails loud.
+
+- **One global fan-out pool.** Every (batch, lens) call runs through a single
+  `ThreadPoolExecutor` sized by `max_concurrency` — default **8 workers** for
+  hosted providers (the classified retry backoff absorbs a capacity 429 on a
+  lower-tier account), **1** for ollama (a single local instance serves a model
+  one request at a time, so concurrent calls would only queue up and time out)
+  and **1** for openai-compatible (honest about a single-slot llama.cpp/LM
+  Studio server; raise it explicitly for a batching vLLM server). Flattening
+  the pool across batches means wall time is `ceil(batches × lenses / workers)`
+  call-latencies rather than `batches × ceil(lenses / workers)`.
 
 ## Dependency injection
 

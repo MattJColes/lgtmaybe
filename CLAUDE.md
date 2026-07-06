@@ -231,15 +231,23 @@ pattern, event bus, plugin framework.
      `--triage-model`, Action input `triage_model`.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
-   - **Per-category fan-out:** the system prompt is composed per `ReviewCategory`
-     (security, correctness, deprecation, tests, documentation, performance,
-     complexity, intent, ponytail; `engine/prompt.py`) — each lens gets its **own
-     worked example** (with a real hunk header, teaching the line-number arithmetic) —
-     and the engine runs each category as its own **concurrent** `provider.complete`
-     call per batch (a `ThreadPoolExecutor` over the sync port — concurrent for
-     cloud, serial for ollama), then **merges and de-dupes** the findings
-     (`engine._dedupe`, keyed on path/line/side) before reflection.
-     `ReviewConfig.categories` selects the lenses (default: all nine).
+   - **Per-lens fan-out (preset-shaped):** the prompt is composed per lens
+     (`engine/prompt.py`) — each lens gets a **worked example** (with a real
+     hunk header, teaching the line-number arithmetic). `ReviewConfig.preset`
+     picks the lens set: **`fast` (default)** covers the nine `ReviewCategory`
+     lenses in **four calls** (dedicated security + correctness — stated intent
+     folds into correctness with per-finding `category` attribution — plus
+     merged code-health and artefacts calls, `prompt.FAST_GROUPS`); **`full`**
+     runs one call per category. An explicit `categories` list overrides the
+     grouping. Every (batch, lens) call runs through **one global
+     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
+     cloud, 1 ollama/openai-compatible), then the findings are **merged and
+     de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
+     A soft whole-review deadline (`max_review_seconds`, default 600s, 0 = off)
+     skips still-queued calls once passed — partial results with a notice,
+     never a silent LGTM. Every stage and call is timed
+     (`engine/profiling.py`); `--profile` / Action input `profile` prints the
+     breakdown.
    - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
      their own lenses via `ReviewConfig.extra_lenses` (a `CustomLens`: `id` +
      `instructions`, optional `title` and a worked `example_diff`/`example_finding`)
@@ -287,17 +295,25 @@ pattern, event bus, plugin framework.
    - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
      reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
      one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
-   - **Prompt caching:** on routes with an explicit cache breakpoint (anthropic
-     `cache_control`; bedrock, where litellm emits a Converse `cachePoint` for
-     Claude/Nova) the adapter marks the static system prompt as an
-     ephemeral-cache block, so the per-lens fan-out and reflection re-read the
-     shared prefix at the cached-input discount. Feature-detected per model
-     (litellm capability map + the 1,024-token minimum block); volatile content
-     (diff/intent/findings) always stays in the user message, outside the cached
-     region; byte-identical requests on every other provider.
-     `ReviewConfig.prompt_cache` (default **on**; CLI
-     `--prompt-cache/--no-prompt-cache`, Action input `prompt_cache`);
-     cache read/creation token counts land on `ProviderResult` and are logged.
+   - **Prompt caching (split prefix):** with `prompt_cache` on (default) every
+     review call is shaped as a shared cacheable prefix — a lens-independent
+     system preamble (`prompt.build_shared_preamble`), then the wrapped diff
+     (+hints) as the first user block — with the lens checklist + example as
+     the final uncached user block. On routes with an explicit cache breakpoint
+     (anthropic `cache_control`; bedrock, where litellm emits a Converse
+     `cachePoint` for Claude/Nova) the adapter merges the user blocks into
+     content blocks with breakpoints on the system prompt and the last prefix
+     block (cumulative 1,024-token minimum), so lenses 2..N read the whole
+     preamble-plus-diff from cache; a per-batch **warm-up primer** (gated at
+     ~2k diff tokens) runs one lens alone so a concurrent first wave doesn't
+     pay N cache writes. Reflection splits the same way, so deferral re-judges
+     read the audit's system+diff prefix. Feature-detected per model (litellm
+     capability map); every other provider gets the user blocks joined back
+     into the single plain message it always received. `prompt_cache: false`
+     restores the legacy lens-in-system shape byte-for-byte.
+     `ReviewConfig.prompt_cache` (CLI `--prompt-cache/--no-prompt-cache`,
+     Action input `prompt_cache`); cache read/creation token counts land on
+     `ProviderResult` and are logged.
    - **Summary line:** names the **model** used (no cost — lgtmaybe does not
      compute or report cost). `ReviewConfig.summary_template` (default None)
      lets teams restyle it with `{count}`/`{provider}`/`{model}` placeholders;

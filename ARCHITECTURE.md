@@ -26,7 +26,9 @@ noticing — and tests inject fakes instead of patching.
    ┌──────────────────────┴───────────────────────┐
    │                    engine                      │   depends only on ports
    │   redact → split → cap → expand → batch        │
-   │        → fan-out per category → parse          │
+   │        → fan-out per lens (preset: fast=4      │
+   │          calls / full=9; one global pool,      │
+   │          cached preamble+diff prefix) → parse  │
    │        → merge/dedupe → reflect → filter       │
    └───────┬───────────────────────────┬───────────┘
            │ ProviderClient            │ GitHubGateway
@@ -130,10 +132,17 @@ reviews need no static keys in GitHub secrets. The `LiteLLMProvider` adds retrie
 
 **Engine (`engine/`)** — the pipeline, as composable stages:
 `redact → split per file → drop non-reviewable → file-cap → expand hunks with
-budget-scaled context → batch to token budget → fan out one concurrent call per
-review category → parse → merge & dedupe → self-reflect → filter by severity →
-findings + summary`. It fails loud (`ReviewIncompleteError`) rather than report a
-false "clean" when every model call fails.
+budget-scaled context → batch to token budget → fan out one call per review
+lens → parse → merge & dedupe → self-reflect → filter by severity →
+findings + summary`. The lens set follows the `preset` — `fast` (default)
+covers the nine categories in four calls, `full` runs one per category — and
+every (batch, lens) call shares one pool (`max_concurrency`: 8 cloud, 1
+ollama/openai-compatible) with a cacheable preamble-plus-diff prompt prefix on
+anthropic/bedrock. A soft whole-review deadline (`max_review_seconds`) degrades
+an overrunning review to partial-with-a-notice, and every stage and model call
+is timed (`--profile` prints the breakdown). It fails loud
+(`ReviewIncompleteError`) rather than report a false "clean" when every model
+call fails.
 
 **Provider adapter (`providers/`)** — strategy + factory over litellm, with the
 credential chain of responsibility and a provider-aware timeout (ollama gets a
@@ -160,8 +169,12 @@ to the same engine/provider.
 
 ## Features
 
-**Review intelligence** — per-category fan-out across nine lenses (each its own
-concurrent model call with a lens-matched worked example, merged & de-duped):
+**Review intelligence** — nine review lenses, fanned out per the `preset`:
+`fast` (default) covers them in four concurrent calls — dedicated security and
+correctness calls (the stated intent folds into correctness), plus merged
+code-health and artefacts calls with per-finding category attribution — while
+`full` runs each lens as its own focused call with a lens-matched worked
+example. Findings from every call are merged & de-duped:
 - **Security** — OWASP-aligned checklist: injection, XSS, CSRF/open redirect,
   hardcoded secrets, broken authn/authz (incl. JWT pitfalls), path traversal,
   unrestricted upload, SSRF, insecure deserialization/XXE, mass assignment, weak
@@ -217,11 +230,14 @@ agent can apply) formats.
 `min_severity`, `include_paths`/`exclude_paths`, and `categories` bound every
 run; generated/binary files are skipped automatically.
 
-**Reliability** — provider retries with fallback, provider-aware timeouts, a
-self-reflection pass to cut false positives (toggle with `--no-reflect`; its
-verdicts carry a 0–10 confidence score, filtered by `min_confidence`), and
-loud failure surfacing (a "review failed" comment + non-zero exit) rather than
-silent passes.
+**Reliability** — provider retries with fallback (all attempts for one call
+share a 2.5×-timeout budget), provider-aware timeouts, a soft whole-review
+deadline (`max_review_seconds`, default 600s) that degrades an overrunning run
+to partial results with an explicit notice, a self-reflection pass to cut
+false positives (toggle with `--no-reflect`; its verdicts carry a 0–10
+confidence score, filtered by `min_confidence`), and loud failure surfacing (a
+"review failed" comment + non-zero exit) rather than silent passes. Every
+stage and model call is timed; `--profile` prints the breakdown.
 
 **Grounding** — optional static-analysis fusion (`static_analysis`, default
 off): installed deterministic linters (ruff, bandit, semgrep with local rules)
@@ -230,9 +246,13 @@ subprocess, and their findings enter each lens prompt as untrusted hints to
 confirm or discard — never posted verbatim.
 
 **Cost** — on providers with an explicit prompt-cache breakpoint (anthropic,
-bedrock Claude/Nova) the static system prompt is marked `cache_control` so the
-per-lens fan-out re-reads it at the cached-input discount (`prompt_cache`,
-default on; feature-detected, byte-identical requests elsewhere). On a
+bedrock Claude/Nova) every review call shares a cacheable prefix: the
+lens-independent system preamble plus the wrapped diff, with the lens-specific
+instruction as the final uncached user block — so the fan-out re-reads the
+whole preamble-plus-diff at the cached-input discount instead of re-processing
+the diff once per lens, and a per-batch warm-up primer writes the prefix once
+before the rest of the batch dispatches (`prompt_cache`, default on;
+feature-detected, plain merged requests elsewhere). On a
 `synchronize` push the review is commit-scoped **incremental** by default:
 only the diff since the last completed review (a hidden watermark in the
 summary comment) is re-reviewed, falling back to a full review on a

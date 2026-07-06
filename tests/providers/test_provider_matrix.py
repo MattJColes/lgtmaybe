@@ -166,6 +166,54 @@ class TestHybridProviderCredentials:
         assert built.default_opts.get("api_base") == _AZURE_BASE
 
 
+class TestEngineBehaviourMatrix:
+    """Engine behaviour that keys off the provider, asserted for EVERY Provider.
+
+    Same spirit as the auth matrix above: a new provider can't be merged
+    without deciding its fan-out concurrency, and the preset/deadline
+    behaviour must hold whatever the backend is.
+    """
+
+    # Auto max_concurrency per provider: 1 for single-stream backends (ollama
+    # serves serially; openai-compatible may front a single-slot llama.cpp/LM
+    # Studio server), 8 for hosted cloud.
+    SINGLE_STREAM = (Provider.ollama, Provider.openai_compatible)
+
+    @pytest.mark.parametrize("provider", list(Provider))
+    def test_auto_concurrency_default(self, provider: Provider) -> None:
+        from lgtmaybe.core.models import ReviewConfig
+        from lgtmaybe.engine.engine import _resolve_workers
+
+        cfg = ReviewConfig(provider=provider, model="m")
+        expected = 1 if provider in self.SINGLE_STREAM else 8
+        assert _resolve_workers(cfg, task_count=99) == expected
+
+    @pytest.mark.parametrize("provider", list(Provider))
+    def test_fast_preset_runs_four_calls_on_every_provider(self, provider: Provider) -> None:
+        from lgtmaybe.core.models import PRContext, ReviewConfig
+        from lgtmaybe.engine import LLMReviewEngine
+        from tests.fakes import FakeProvider
+
+        ctx = PRContext(
+            diff="@@ -1,1 +1,2 @@\n context\n+new line\n",
+            changed_files=["a.py"],
+            base_sha="a",
+            head_sha="b",
+            repo="o/r",
+            pr_number=1,
+        )
+        cfg = ReviewConfig(provider=provider, model="m", reflect=False)
+        fake = FakeProvider()
+        LLMReviewEngine(fake).review(ctx, cfg)
+        assert len(fake.calls) == 4
+
+    @pytest.mark.parametrize("provider", list(Provider))
+    def test_review_deadline_field_defaults_on_every_provider(self, provider: Provider) -> None:
+        from lgtmaybe.core.models import ReviewConfig
+
+        assert ReviewConfig(provider=provider, model="m").max_review_seconds == 600
+
+
 _CUSTOM_BASE = "https://api.deepseek.com/v1"
 
 
