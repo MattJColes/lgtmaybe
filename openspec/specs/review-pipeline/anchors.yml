@@ -1,0 +1,75 @@
+# ast-grep anchors for review-pipeline — see "Living specs" in CLAUDE.md.
+
+engine.review:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^review$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^LLMReviewEngine$' }
+      stopBy: end
+  files: [src/lgtmaybe/engine/**/*.py]
+
+engine.fan-out:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fan_out$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+engine.dedupe:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_dedupe$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+engine.snap:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_snap_findings$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^changed_line_index$' }
+    files: [src/lgtmaybe/core/**/*.py]
+
+engine.path-filters:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^passes_path_filters$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+engine.recursive-walk:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^split_patch_into_hunks$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^batch_files$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+engine.context-expansion:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^expand_hunks$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^trailing_context_lines$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+engine.triage:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^triage_files$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^always_escalate$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+engine.static-analysis:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^run_static_analysis$' }
+  files: [src/lgtmaybe/engine/**/*.py]

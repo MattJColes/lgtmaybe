@@ -1,0 +1,46 @@
+# ast-grep anchors for core-contracts — see "Living specs" in CLAUDE.md.
+# Rules match code shape (kind + name), never paths/lines or `pattern:`.
+
+core.provider-port:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^ProviderClient$' }
+  files: [src/lgtmaybe/**/*.py]
+
+core.gateway-port:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^GitHubGateway$' }
+  files: [src/lgtmaybe/**/*.py]
+
+core.engine-port:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^ReviewEngine$' }
+  files: [src/lgtmaybe/core/**/*.py]
+
+core.finding:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^ReviewFinding$' }
+  files: [src/lgtmaybe/**/*.py]
+
+core.config:
+  - rule:
+      kind: class_definition
+      has: { field: name, regex: '^ReviewConfig$' }
+    files: [src/lgtmaybe/**/*.py]
+  - rule:
+      kind: class_definition
+      has: { field: name, regex: '^Severity$' }
+    files: [src/lgtmaybe/**/*.py]
+
+core.lenses:
+  - rule:
+      kind: class_definition
+      has: { field: name, regex: '^ReviewCategory$' }
+    files: [src/lgtmaybe/**/*.py]
+  - rule:
+      kind: class_definition
+      has: { field: name, regex: '^ReviewPreset$' }
+    files: [src/lgtmaybe/**/*.py]

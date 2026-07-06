@@ -1,0 +1,65 @@
+# ast-grep anchors for github-posting — see "Living specs" in CLAUDE.md.
+
+github.context:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^get_pr_context$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^RestGitHubGateway$' }
+      stopBy: end
+  files: [src/lgtmaybe/github/**/*.py]
+
+github.post-review:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^post_review$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^RestGitHubGateway$' }
+      stopBy: end
+  files: [src/lgtmaybe/github/**/*.py]
+
+github.fingerprint:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^finding_fingerprint$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
+github.demote:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_render_demoted$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
+github.incremental:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^compare_diff$' }
+    files: [src/lgtmaybe/github/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^mark_reviewed$' }
+    files: [src/lgtmaybe/github/**/*.py]
+
+github.resolve-fixed:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_resolve_fixed_threads$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
+github.reviewable:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^is_reviewable$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
+github.labels:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^compute_labels$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^apply_pr_labels$' }
+    files: [src/lgtmaybe/github/**/*.py]

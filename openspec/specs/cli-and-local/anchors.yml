@@ -1,0 +1,39 @@
+# ast-grep anchors for cli-and-local — see "Living specs" in CLAUDE.md.
+
+cli.review-command:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^review$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+cli.run-review:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^run_review$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+cli.slash:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^parse_command$' }
+    files: [src/lgtmaybe/cli/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^dispatch$' }
+    files: [src/lgtmaybe/cli/**/*.py]
+
+cli.local-context:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^local_pr_context$' }
+  files: [src/lgtmaybe/local/**/*.py]
+
+cli.config:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^load_config$' }
+    files: [src/lgtmaybe/config/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^set_key$' }
+    files: [src/lgtmaybe/config/**/*.py]

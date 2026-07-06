@@ -1,0 +1,25 @@
+schema: spec-driven
+
+# Project context — shown to AI when creating artifacts.
+context: |
+  lgtmaybe: a provider-agnostic PR reviewer (Python 3.11+, litellm spine,
+  hexagonal ports & adapters, uv-managed). Read CLAUDE.md first — it encodes
+  decisions that are made, not options. TDD is non-negotiable: acceptance test
+  first, red -> green -> refactor; CI rejects code without tests.
+  Conventional commits (commitlint gates PR titles/commits).
+
+  Living specs: openspec/specs/<capability>/spec.md. Every requirement section
+  carries an anchor id (`<!-- anchor: ... -->`) bound to code by ast-grep rules
+  in the co-located anchors.yml sidecar (kind + name regex, never `pattern:`).
+  tests/specs/test_anchors.py enforces hygiene (each rule resolves to exactly
+  one place); scripts/check_spec_drift.py warns on PRs when anchored code
+  changes without its spec section. See "Living specs" in CLAUDE.md.
+
+# Per-artifact rules.
+rules:
+  specs:
+    - Every requirement heading is immediately followed by its anchor comment
+    - Keep each requirement section under 40 lines; split instead of appending
+    - Describe current behavior; never invent aspirational requirements
+  proposal:
+    - Proposals are disposable; durable knowledge folds back into openspec/specs/

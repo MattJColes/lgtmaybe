@@ -8,7 +8,10 @@ This document is the high-level orientation: the project layout, the LLM
 providers, the components inside the application, and the user-facing features.
 For the *why* behind the design (ports & adapters, the pipeline, the patterns),
 see [`docs/explanation/architecture.md`](docs/explanation/architecture.md); for
-the decisions that are settled, see [`CLAUDE.md`](CLAUDE.md).
+the decisions that are settled, see [`CLAUDE.md`](CLAUDE.md). Per-capability
+behavior lives in the living specs under [`openspec/specs/`](openspec/specs/),
+each requirement bound to the code it describes by ast-grep anchors (see
+"Living specs" in `CLAUDE.md`).
 
 ## Design in one breath
 

@@ -1,0 +1,33 @@
+# ast-grep anchors for prompt-and-lenses — see "Living specs" in CLAUDE.md.
+
+prompt.shared-preamble:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_shared_preamble$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+prompt.system:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_system_prompt$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+prompt.custom-lens:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^build_lens_prompt$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_build_lenses$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+prompt.groups:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^build_group_prompt$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^build_correctness_prompt$' }
+    files: [src/lgtmaybe/engine/**/*.py]

@@ -1,0 +1,44 @@
+# Non-blocking spec-drift gate for the living specs (openspec/specs/).
+#
+# Warns — never fails — when code under an ast-grep anchor changed while its
+# spec section sat still (drift), or a rule that matched at the merge-base now
+# matches nothing (dangling, i.e. a rename nobody re-pointed). A blocking doc
+# check just gets gamed; this one names the anchor in a PR annotation and the
+# step summary and stays out of branch protection. The deterministic anchor
+# invariants (bijection, exactly-one-match) are a hard gate in
+# tests/specs/test_anchors.py, which runs in ci.yml.
+
+name: spec-drift
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    continue-on-error: true # belt and braces — the script itself always exits 0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the dangling check scans a merge-base worktree
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Sync (with dev deps)
+        run: uv sync --dev
+
+      - name: Check spec drift
+        run: uv run python scripts/check_spec_drift.py --base "origin/${{ github.base_ref }}"
+
+      # Advisory shape check with the real OpenSpec CLI. The equivalent
+      # structural rules are enforced deterministically (node-free) in
+      # tests/specs/test_anchors.py; this catches divergence from upstream.
+      - name: openspec validate (advisory)
+        run: npx -y @fission-ai/openspec@latest validate --specs
+        continue-on-error: true
