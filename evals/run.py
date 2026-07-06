@@ -163,6 +163,12 @@ def _review(
         timeout=timeout,
         reflect=reflect,
         recursive=recursive,
+        # Evals measure model quality, never wall-clock discipline: the
+        # production review deadline (max_review_seconds, default 600s) would
+        # skip calls mid-eval on a slow local model — a full-preset run on a
+        # big fixture easily exceeds 600s serially — and silently melt the
+        # recall it exists to measure. Always off here.
+        max_review_seconds=0,
         **cfg_overrides,
     )
     # Sampling params + ollama's num_ctx reach the model via build_provider → litellm.

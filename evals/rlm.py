@@ -137,7 +137,14 @@ def _run_strategy_once(
     engine = LLMReviewEngine(tracker)
     matched = expected = 0
     parsed_all = True
-    overrides: dict[str, Any] = {"recursive": recursive, "reflect": reflect}
+    # No review deadline in a benchmark: the production ceiling would skip
+    # calls on a slow local model and corrupt the recall being measured
+    # (same reasoning as evals.run).
+    overrides: dict[str, Any] = {
+        "recursive": recursive,
+        "reflect": reflect,
+        "max_review_seconds": 0,
+    }
     if budget is not None:
         overrides["max_input_tokens"] = budget
     if categories is not None:
