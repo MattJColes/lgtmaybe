@@ -1,0 +1,35 @@
+# ast-grep anchors for finding-quality — see "Living specs" in CLAUDE.md.
+
+quality.reflect:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^reflect_findings$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+quality.verdicts:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_parse_verdicts$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+quality.suppress:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^apply_suppressions$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+quality.rules:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^apply_finding_rules$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+quality.symbol-resolution:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^resolve_needs$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^build_symbol_resolver$' }
+    files: [src/lgtmaybe/engine/**/*.py]

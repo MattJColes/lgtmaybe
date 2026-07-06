@@ -214,6 +214,10 @@ LLM or the GitHub API. Test layout mirrors `src/`:
 - `tests/core/`, `tests/local/` — diff parsing, local git context
 - `tests/docs/` + `tests/snapshots/` — committed schema snapshots and the
   generated-reference freshness check (see below)
+- `tests/specs/` — the living-spec anchor hygiene gate: every requirement in
+  `openspec/specs/*/spec.md` has an ast-grep anchor in its `anchors.yml` that
+  resolves to exactly one place in `src/` (see "Living specs" in `CLAUDE.md`;
+  the non-blocking PR drift warning is `scripts/check_spec_drift.py`)
 - `tests/e2e/` — live end-to-end against a local model server (deselected by
   default; see below)
 

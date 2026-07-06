@@ -1,0 +1,35 @@
+# ast-grep anchors for hardening — see "Living specs" in CLAUDE.md.
+
+hardening.wrap-diff:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^wrap_diff$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^neutralise$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+hardening.wrap-intent:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^wrap_intent$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+hardening.wrap-hints:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^wrap_hints$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+hardening.redact:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^redact$' }
+  files: [src/lgtmaybe/engine/redact.py]
+
+hardening.parse:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^parse_findings$' }
+  files: [src/lgtmaybe/engine/**/*.py]

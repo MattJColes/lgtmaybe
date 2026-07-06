@@ -1,0 +1,62 @@
+# prompt-and-lenses Specification
+
+## Purpose
+
+How the review prompt is composed (`engine/prompt.py`): a lens-independent
+cacheable preamble, per-lens checklists each with a worked example, the fast
+preset's four-call grouping, and user-supplied custom lenses that fan out
+identically to the built-ins.
+
+## Requirements
+
+### Requirement: Split-prefix prompt shape for caching
+
+With `prompt_cache` on (default), every review call SHALL share a
+lens-independent system preamble and diff prefix, with the lens checklist as
+the final uncached block — so on routes with cache breakpoints, lenses 2..N
+read the preamble-plus-diff from cache. Other providers get the blocks joined
+back into the single plain message they always received.
+<!-- anchor: prompt.shared-preamble -->
+
+#### Scenario: provider without cache support
+- **WHEN** the model's route has no explicit cache breakpoint
+- **THEN** the call is byte-for-byte the legacy single-message shape
+
+### Requirement: Every focused prompt teaches by worked example
+
+Each lens prompt SHALL carry exactly one category-matched worked example with
+a real hunk header, and the contract SHALL explain the `line`/`side`
+arithmetic — the model is taught the coordinate system, not assumed to know it.
+<!-- anchor: prompt.system -->
+
+#### Scenario: security lens prompt is built
+- **WHEN** the security lens call is composed
+- **THEN** its prompt contains one security worked example with a real `@@`
+  hunk header
+
+### Requirement: Custom lenses are trusted config, fanned out uniformly
+
+Users SHALL add lenses via `extra_lenses` (id + instructions, optional worked
+example); the engine builds a uniform lens per built-in category and per
+custom lens and fans them all through the same merge/dedupe/reflect pipeline.
+Lens text enters the system prompt, so it is trusted config only — never
+sourced from PR-author content.
+<!-- anchor: prompt.custom-lens -->
+
+#### Scenario: a custom lens joins a review
+- **WHEN** `.lgtmaybe.yml` defines an extra lens
+- **THEN** it runs as one more concurrent lens call, findings merged like any
+  built-in
+
+### Requirement: Fast preset groups nine lenses into four calls
+
+The default `fast` preset SHALL cover all nine categories in four calls —
+dedicated security and correctness (stated intent folds into correctness with
+per-finding category attribution) plus merged code-health and artefacts calls.
+An explicit `categories` list overrides the grouping.
+<!-- anchor: prompt.groups -->
+
+#### Scenario: intent with no dedicated call
+- **WHEN** the fast preset runs and the PR states an intent
+- **THEN** intent findings come out of the correctness call, attributed to the
+  intent category

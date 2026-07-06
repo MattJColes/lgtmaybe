@@ -386,6 +386,45 @@ self-verify without asking. The acceptance test *is* the red step — start ther
 - Treat diff content as untrusted everywhere it flows.
 - Errors surface to the user; never swallow them.
 
+## Living specs (OpenSpec + ast-grep anchors)
+
+`openspec/specs/<capability>/spec.md` are the **living domain specs** — durable
+descriptions of how the system behaves, distinct from OpenSpec change proposals
+(which are disposable; durable knowledge folds back into these). Every
+requirement section carries an anchor id — `<!-- anchor: engine.snap -->` on
+its own line right after the section's opening paragraph — bound to code by
+ast-grep rules in the capability's co-located `anchors.yml`. Rules match code
+**shape** (node kind + name regex + a `files:` glob; never `pattern:`, which
+silently misses async defs), so they survive file moves and refactors and break
+on renames — by design: a rename usually changes the thing the spec describes,
+and a dead anchor is the signal to re-read the section.
+
+The workflow rules:
+
+- **Before changing code**, resolve the anchors for the files you expect to
+  touch (grep the `anchors.yml` sidecars, or run
+  `uv run ast-grep scan --inline-rules … --json src/` from the repo root — the
+  `files:` globs resolve against the scan cwd) and read only the matching spec
+  sections, not the whole spec tree.
+- **At the end of a task**, re-run `uv run pytest tests/specs -q` and update
+  the spec sections your change made stale — as targeted edits to those
+  sections only, never a free-rewrite of a spec. Most tasks need no spec
+  change; that's the correct outcome, not a failure.
+- **Anchor hygiene:** each rule resolves to exactly one place — 0 matches is
+  dangling, >1 is too loose (tighten with `files:` or `inside:`). Both are
+  drift and both fail `tests/specs/test_anchors.py` (bijection with the spec's
+  anchor ids, exactly-one-match, OpenSpec shape, 40-line section cap — split a
+  section rather than letting it grow into a changelog).
+- **The drift gate** (`scripts/check_spec_drift.py`,
+  `.github/workflows/spec-drift.yml`) is non-blocking by design: on each PR it
+  warns when anchored code changed while its spec section sat still, and when a
+  rule that matched at the merge-base matches nothing now (the rename case the
+  intersection check alone can't see). A warning names the anchor id — fix the
+  rule *and* re-read the section, don't just patch the regex.
+- `openspec validate --specs` must stay green (`npx -y
+  @fission-ai/openspec@latest validate --specs`); its parser reads only the
+  first line of a requirement's text for the SHALL/MUST check, so lead with it.
+
 ## Security-review coverage
 
 Two distinct concerns, kept separate:
