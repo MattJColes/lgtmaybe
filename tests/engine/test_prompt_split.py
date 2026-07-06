@@ -230,9 +230,7 @@ class TestReflectionSplitShape:
                 self.calls.append({"messages": messages, "model": model, "opts": opts})
                 if "auditing another reviewer" in messages[0]["content"]:
                     return ProviderResult(text='{"0": true}', input_tokens=1, output_tokens=1)
-                return ProviderResult(
-                    text=json.dumps([finding]), input_tokens=1, output_tokens=1
-                )
+                return ProviderResult(text=json.dumps([finding]), input_tokens=1, output_tokens=1)
 
         provider = _Reviewer()
         LLMReviewEngine(provider).review(_CTX, _cfg(reflect=True))

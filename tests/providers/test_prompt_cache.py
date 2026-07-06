@@ -168,9 +168,7 @@ class TestSplitShapeCacheMarking:
     """
 
     @pytest.mark.parametrize("model", _CACHEABLE_MODELS)
-    def test_prefix_block_carries_the_breakpoint_and_lens_block_does_not(
-        self, model: str
-    ) -> None:
+    def test_prefix_block_carries_the_breakpoint_and_lens_block_does_not(self, model: str) -> None:
         sent = _sent_split(model, prompt_cache=True)
         assert len(sent) == 2  # system + ONE merged user message
         [sys_block] = sent[0]["content"]

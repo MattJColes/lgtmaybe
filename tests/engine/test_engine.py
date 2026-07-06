@@ -50,9 +50,7 @@ def _all_text(call: dict) -> str:
 
 def _user_text(call: dict) -> str:
     """All user-message content joined (the diff + lens block in split shape)."""
-    return "\n".join(
-        str(m.get("content", "")) for m in call["messages"] if m.get("role") == "user"
-    )
+    return "\n".join(str(m.get("content", "")) for m in call["messages"] if m.get("role") == "user")
 
 
 # ---------------------------------------------------------------------------

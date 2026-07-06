@@ -19,9 +19,7 @@ from lgtmaybe.engine.compress import count_tokens
 from lgtmaybe.engine.engine import _resolve_workers
 from tests.fakes import FakeProvider
 
-_CLOUD_PROVIDERS = [
-    p for p in Provider if p not in (Provider.ollama, Provider.openai_compatible)
-]
+_CLOUD_PROVIDERS = [p for p in Provider if p not in (Provider.ollama, Provider.openai_compatible)]
 
 
 def _cfg(provider: Provider, **overrides: object) -> ReviewConfig:
@@ -33,9 +31,7 @@ class TestResolveWorkers:
     def test_cloud_defaults_to_eight(self, provider: Provider) -> None:
         assert _resolve_workers(_cfg(provider), task_count=100) == 8
 
-    @pytest.mark.parametrize(
-        "provider", [Provider.ollama, Provider.openai_compatible]
-    )
+    @pytest.mark.parametrize("provider", [Provider.ollama, Provider.openai_compatible])
     def test_single_stream_providers_default_to_one(self, provider: Provider) -> None:
         """ollama serves serially; openai-compatible may front a single-slot
         llama.cpp server, so the honest default is 1 (vLLM users raise it)."""

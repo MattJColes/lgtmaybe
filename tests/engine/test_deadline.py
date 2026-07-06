@@ -63,9 +63,7 @@ class TestReviewDeadline:
         """First call overruns the 1s ceiling; the queued rest must be skipped
         (in-flight finishes, its findings post) and the summary must say so."""
         provider = _SlowProvider(delay=1.2)
-        findings, summary = LLMReviewEngine(provider).review(
-            _CTX, _cfg(max_review_seconds=1)
-        )
+        findings, summary = LLMReviewEngine(provider).review(_CTX, _cfg(max_review_seconds=1))
         assert len(provider.calls) == 1  # only the in-flight call ran
         assert findings, "the completed call's findings still post"
         assert "review calls failed" in summary and "deadline" in summary

@@ -42,9 +42,8 @@ def _user_text(call: dict) -> str:
     user message, grounding + findings in another — so assertions about "the
     user content" search both.
     """
-    return "\n".join(
-        str(m.get("content", "")) for m in call["messages"] if m.get("role") == "user"
-    )
+    return "\n".join(str(m.get("content", "")) for m in call["messages"] if m.get("role") == "user")
+
 
 _HIGH = ReviewFinding(
     path="a.py", line=1, severity=Severity.high, title="real bug", body="definitely broken"

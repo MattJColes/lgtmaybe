@@ -151,9 +151,7 @@ class Profiler:
 
         read = sum(c.cache_read_tokens for c in calls)
         created = sum(c.cache_creation_tokens for c in calls)
-        lines.append(
-            f"cache: {read} tokens read / {created} created across {len(calls)} calls"
-        )
+        lines.append(f"cache: {read} tokens read / {created} created across {len(calls)} calls")
         return "\n".join(lines)
 
 

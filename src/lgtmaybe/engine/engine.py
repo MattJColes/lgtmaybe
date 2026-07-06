@@ -258,9 +258,7 @@ class LLMReviewEngine(ReviewEngine):
                 (path, patch)
                 for path, patch in file_patches
                 if is_reviewable(path)
-                and passes_path_filters(
-                    path, include=cfg.include_paths, exclude=cfg.exclude_paths
-                )
+                and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
             ]
 
             # 3. File cap: review only the first N reviewable files, note the rest.
