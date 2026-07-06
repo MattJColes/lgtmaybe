@@ -48,13 +48,28 @@ from .triage import triage_files
 
 _log = get_logger(__name__)
 
-# A single ollama instance serves a model serially, so concurrent calls only
-# queue up and time out; every other provider parallelises across categories.
-# The ceiling is kept modest so the per-batch fan-out doesn't burst the whole
-# lens set at a provider at once and trip a capacity rate-limit (429) on
-# lower-tier accounts — the lenses just run in a couple of waves instead, and
-# per-call latency dominates so the wall-clock cost is small.
-_MAX_WORKERS = 4
+# Auto concurrency (cfg.max_concurrency=None), resolved per provider:
+#
+# - Cloud providers get 8. The adapter's exponential backoff absorbs a capacity
+#   429 on a lower-tier account, and on bedrock cache reads don't count against
+#   rate limits — so bursting the fan-out is safe, and every extra worker cuts
+#   a full-latency wave off the wall clock.
+# - A single ollama instance serves a model serially, so concurrent calls only
+#   queue up and time out: 1.
+# - openai-compatible is honest about the worst case: a llama.cpp / LM Studio
+#   single-slot server wants 1, while a vLLM server batches happily at 8 —
+#   default to 1 and let --max-concurrency raise it for batching servers.
+_CLOUD_MAX_WORKERS = 8
+_SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
+
+
+def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
+    """The fan-out pool size: the explicit cap, else the provider-aware default."""
+    if cfg.max_concurrency is not None:
+        return max(1, min(cfg.max_concurrency, task_count))
+    if cfg.provider in _SINGLE_STREAM_PROVIDERS:
+        return 1
+    return min(_CLOUD_MAX_WORKERS, task_count) or 1
 
 
 @dataclass(frozen=True)
@@ -236,26 +251,27 @@ class LLMReviewEngine(ReviewEngine):
         failed_calls = 0
         errors: list[str] = []
 
-        # 5. For each batch, fan out one call per review category. Each category
-        #    gets a focused prompt; their findings are merged. Concurrency is
-        #    provider-aware — serial for ollama so calls don't queue and time out.
-        workers = 1 if cfg.provider is Provider.ollama else min(len(lenses), _MAX_WORKERS) or 1
+        # 5. Fan out one call per (batch, lens) through ONE global pool. The old
+        #    shape — a fresh pool per batch, joined before the next batch starts —
+        #    cost `batches × ceil(lenses / workers)` sequential full-latency
+        #    waves; flattened, it is `ceil(batches × lenses / workers)`. Each
+        #    lens gets a focused prompt; findings are merged afterwards.
+        #    Concurrency is provider-aware (see _resolve_workers).
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None
-        with profiler.stage("review"):
-            for batch_num, batch in enumerate(batches, start=1):
-                batch_diff = "\n".join(patch for _, patch in batch)
-                wrapped = wrap_diff(batch_diff)
-                # Static-analysis hints for THIS batch's files only, redacted (tool
-                # messages can quote hostile file content — same posture as the
-                # diff) and wrapped as their own neutralised untrusted block.
-                batch_paths = {path for path, _ in batch}
-                batch_hints = [h for h in sa_hints if h.path in batch_paths]
-                hint_block = (
-                    wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
-                )
-                review_one = partial(
+        tasks: list[partial[tuple[list[ReviewFinding], str | None]]] = []
+        for batch_num, batch in enumerate(batches, start=1):
+            batch_diff = "\n".join(patch for _, patch in batch)
+            wrapped = wrap_diff(batch_diff)
+            # Static-analysis hints for THIS batch's files only, redacted (tool
+            # messages can quote hostile file content — same posture as the
+            # diff) and wrapped as their own neutralised untrusted block.
+            batch_paths = {path for path, _ in batch}
+            batch_hints = [h for h in sa_hints if h.path in batch_paths]
+            hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
+            tasks += [
+                partial(
                     self._review_lens,
                     wrapped,
                     intent_block,
@@ -263,19 +279,22 @@ class LLMReviewEngine(ReviewEngine):
                     cfg.model,
                     response_format,
                     batch_num,
+                    lens,
                 )
-                if len(batches) > 1:
-                    _log.info(
-                        "reviewing batch",
-                        extra={"batch": batch_num, "batches": len(batches)},
-                    )
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    for findings, error in pool.map(review_one, lenses):
-                        total_calls += 1
-                        if error is not None:
-                            failed_calls += 1
-                            errors.append(error)
-                        all_findings.extend(findings)
+                for lens in lenses
+            ]
+
+        workers = _resolve_workers(cfg, len(tasks))
+        with profiler.stage("review"):
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                # pool.map keeps result order == task order, so findings stay
+                # deterministic (dedupe's first-wins tiebreak is order-sensitive).
+                for findings, error in pool.map(lambda task: task(), tasks):
+                    total_calls += 1
+                    if error is not None:
+                        failed_calls += 1
+                        errors.append(error)
+                    all_findings.extend(findings)
 
         # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
         #     have no signal — never pass that off as a clean review.

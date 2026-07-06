@@ -455,6 +455,7 @@ def action_inputs() -> dict[str, str | None]:
         "temperature": get("TEMPERATURE"),
         "num_ctx": get("NUM_CTX"),
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
+        "max_concurrency": get("MAX_CONCURRENCY"),
         "resolve_fixed": get("RESOLVE_FIXED"),
         "recursive": get("RECURSIVE"),
         "structured_output": get("STRUCTURED_OUTPUT"),

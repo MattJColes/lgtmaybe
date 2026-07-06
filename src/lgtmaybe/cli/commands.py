@@ -159,6 +159,15 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     help="Max unchanged lines added around each hunk for context (0 disables)",
 )
 @click.option(
+    "--max-concurrency",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Concurrent review calls across the whole fan-out (all batches and "
+    "lenses share one pool). Default: 8 for cloud providers, 1 for ollama, and "
+    "1 for openai-compatible — a llama.cpp/LM Studio single-slot server wants 1, "
+    "while a vLLM server batches happily at 8; raise it there explicitly",
+)
+@click.option(
     "--timeout",
     default=None,
     type=int,
@@ -245,6 +254,7 @@ def review(
     max_files: int | None,
     max_input_tokens: int | None,
     num_ctx: int | None,
+    max_concurrency: int | None,
     base: str | None,
     working: bool,
     uncommitted: bool,
@@ -278,6 +288,7 @@ def review(
         max_files=max_files,
         max_input_tokens=max_input_tokens,
         num_ctx=num_ctx,
+        max_concurrency=max_concurrency,
         context_lines=context_lines,
         timeout=timeout,
         temperature=temperature,
@@ -344,6 +355,7 @@ def action() -> None:
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],
+        max_concurrency=inputs["max_concurrency"],
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],
         structured_output=inputs["structured_output"],

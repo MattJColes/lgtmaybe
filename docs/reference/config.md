@@ -27,6 +27,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
+| `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `min_confidence` | integer | No | `0` | Min Confidence |
@@ -587,6 +588,19 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Incremental"
+    },
+    "max_concurrency": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrency"
     },
     "max_files": {
       "default": 50,

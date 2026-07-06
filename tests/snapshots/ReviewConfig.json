@@ -455,6 +455,19 @@
       "default": null,
       "title": "Incremental"
     },
+    "max_concurrency": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrency"
+    },
     "max_files": {
       "default": 50,
       "title": "Max Files",

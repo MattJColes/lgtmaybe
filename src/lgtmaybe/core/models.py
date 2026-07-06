@@ -532,6 +532,14 @@ class ReviewConfig(_Strict):
     # fans out as its own focused call and merges into the same findings. Loaded
     # from .lgtmaybe.yml (inline) or skill files via the loader's `lens_paths`.
     extra_lenses: list[CustomLens] = Field(default_factory=list)
+    # Ceiling on concurrent review calls across the WHOLE fan-out (every
+    # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
+    # providers (their retry layer absorbs a capacity 429, and on bedrock cache
+    # reads don't count against rate limits), 1 for ollama (a single instance
+    # serves a model serially — concurrent calls just queue and time out), and
+    # 1 for openai-compatible (a llama.cpp/LM Studio single-slot server wants
+    # 1; a vLLM server batches happily at 8 — raise it explicitly for those).
+    max_concurrency: int | None = Field(default=None, ge=1)
     # Constrain model output to the findings JSON schema via litellm
     # response_format (provider-native JSON mode). Keeps models from returning
     # prose/reasoning instead of findings. Disable for a model/provider that
