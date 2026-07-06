@@ -534,3 +534,40 @@ def test_reflect_defaults_on_and_no_reflect_disables_it(monkeypatch: pytest.Monk
     seen.clear()
     run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0", "--no-reflect"])
     assert seen and all(v is False for v in seen)
+
+
+def _capture_cfg(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> list:
+    """Run main with *argv* and return the ReviewConfig objects the engine saw."""
+    seen: list = []
+    real_review = run_mod.LLMReviewEngine.review
+
+    def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+        seen.append(cfg)
+        return real_review(self, ctx, cfg)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    monkeypatch.setattr(run_mod.LLMReviewEngine, "review", spy_review)
+    run_mod.main(argv)
+    return seen
+
+
+_BASE_ARGV = ["--provider", "ollama", "--model", "x", "--min-recall", "0.0"]
+
+
+def test_review_deadline_is_disabled_for_evals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The production max_review_seconds ceiling must never apply in an eval:
+    on a slow local model it would skip calls mid-fixture and silently melt the
+    recall the run exists to measure."""
+    seen = _capture_cfg(monkeypatch, [*_BASE_ARGV, "--fixture", "badcode"])
+    assert seen and all(cfg.max_review_seconds == 0 for cfg in seen)
+
+
+def test_preset_flag_threads_to_review_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture_cfg(monkeypatch, [*_BASE_ARGV, "--fixture", "badcode", "--preset", "full"])
+    assert seen and all(cfg.preset.value == "full" for cfg in seen)
+
+
+def test_preset_defaults_to_the_production_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without --preset the eval measures what production ships: fast."""
+    seen = _capture_cfg(monkeypatch, [*_BASE_ARGV, "--fixture", "badcode"])
+    assert seen and all(cfg.preset.value == "fast" for cfg in seen)

@@ -241,13 +241,43 @@ def main(argv: list[str] | None = None) -> int:
         "this comma-separated list on the CURRENT tree (e.g. 20,40,0) — a config A/B "
         "axis for the hunk-context window width",
     )
+    ap.add_argument(
+        "--preset",
+        default=None,
+        help="review preset. A comma-separated list (e.g. 'full,fast') sweeps the "
+        "preset on the CURRENT tree — the one-command full-vs-fast recall A/B, first "
+        "value as baseline. A single value applies to both legs of a --baseline-ref "
+        "comparison (the baseline ref must already know the flag, i.e. >= 0.10.0; "
+        "for older refs omit it and compare via --categories instead).",
+    )
     args = ap.parse_args(argv)
 
     fixtures_dir = Path(__file__).parent / "fixtures"
     passthrough = _provider_passthrough(args)
+    preset_values = [v.strip() for v in (args.preset or "").split(",") if v.strip()]
+    if len(preset_values) > 1 and args.context_lines is not None:
+        ap.error("sweep one config axis at a time: --preset list OR --context-lines")
+    if len(preset_values) == 1:
+        # A pinned preset is provider passthrough, not an axis: both legs get it.
+        passthrough += ["--preset", preset_values[0]]
 
     # Config axis: sweep one ReviewConfig setting on the current tree. Each value is
     # its own leg; we report each against the first as baseline.
+    if len(preset_values) > 1:
+        legs = [
+            _current_leg(
+                fixtures_dir,
+                provider=args.provider,
+                model=args.model,
+                extra_args=passthrough + ["--preset", v],
+                label=f"preset={v}",
+            )
+            for v in preset_values
+        ]
+        for leg in legs[1:]:
+            _print_report(ABReport(baseline=legs[0], current=leg))
+        return 0
+
     if args.context_lines is not None:
         values = [v.strip() for v in args.context_lines.split(",") if v.strip()]
         legs = [
@@ -266,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.baseline_ref:
-        ap.error("either --baseline-ref or --context-lines is required")
+        ap.error("either --baseline-ref, --context-lines, or a --preset list is required")
 
     baseline = _baseline_leg(
         args.baseline_ref,

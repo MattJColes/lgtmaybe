@@ -324,6 +324,30 @@ typically cross-file false positives where the relevant guard lives in a file th
 reviewer can't see. The `cross-file-fp` fixture is the worked example: one genuine
 in-diff catch alongside three forbidden cross-file claims.
 
+### Measuring what the fast preset trades away
+
+The default `fast` preset covers the nine lenses in four grouped calls;
+`--preset full` runs one call per lens. What that grouping costs in recall is a
+per-model question, so measure it on the model you actually run rather than
+trusting a generic claim. `evals/ab.py` sweeps the preset on the current tree
+in one command — first value is the baseline:
+
+```bash
+# Needs a live model — full-vs-fast recall/precision on the fixture set:
+uv run python -m evals.ab --provider ollama --model qwen3.6:35b \
+  --api-base http://localhost:11434 --preset full,fast --timeout 900
+```
+
+Each leg reviews every fixture through the real engine; only the preset varies
+(temperature pinned to 0, fixtures fixed). The report is the pooled
+recall/precision delta of `fast` against `full`. On a slow local model expect a
+`full` leg to take `~9 × per-call time` per big fixture — the eval harness
+disables the production `max_review_seconds` ceiling so a slow run measures
+recall, not the deadline. A single `--preset full` (no comma) instead pins the
+preset on both legs of a `--baseline-ref` comparison, for "did this change
+regress the full preset?" A/Bs between refs (both refs must be ≥ 0.10.0, where
+the flag exists).
+
 ### Benchmarking the recursive (RLM) walk
 
 `ReviewConfig.recursive` (default on) decides what happens when a single file's
