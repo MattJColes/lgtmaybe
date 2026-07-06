@@ -142,14 +142,32 @@ max_input_tokens: 80000
 
 Default: `100000`.
 
+### preset
+
+How many model calls the review spends. `fast` (the default) covers all nine
+lenses in **four calls**: security and correctness keep dedicated calls (the
+stated intent folds into the correctness prompt when the PR states one), and
+the rest merge into a code-health call (performance, complexity, ponytail,
+deprecation) and an artefacts call (tests, documentation), with each finding
+attributed to its category. `full` runs one call per lens — more per-lens
+focus for release branches and deep audits, at roughly twice the calls and
+wall time.
+
+```yaml
+preset: full
+```
+
+Default: `fast`. CLI: `--preset fast|full` (`--full` is shorthand). An explicit
+`categories` list (below) overrides the preset grouping.
+
 ### categories
 
-Which review lenses to run. The reviewer asks for each category in its own
-concurrent model call and merges the findings, so a focused prompt concentrates
-on one concern at a time. One or more of `security`, `correctness`,
-`deprecation`, `tests`, `documentation`, `performance`, `complexity`, `intent`,
-`ponytail`. Narrowing the list trades thoroughness for fewer model calls (and
-lower token usage).
+Which review lenses to run. An explicit list disables the preset grouping: the
+reviewer asks for each listed category in its own concurrent model call and
+merges the findings, so a focused prompt concentrates on one concern at a
+time. One or more of `security`, `correctness`, `deprecation`, `tests`,
+`documentation`, `performance`, `complexity`, `intent`, `ponytail`. Narrowing
+the list trades thoroughness for fewer model calls (and lower token usage).
 
 The `ponytail` lens is the "lazy senior dev" check — *the best code is the code
 you never wrote* — flagging code that needn't exist at all (YAGNI, reach for the
@@ -160,9 +178,10 @@ The `intent` lens checks the diff against the PR's stated intent — title,
 description, and commit names on GitHub; your `git log` commit names on the
 CLI (in both branch and `--working` mode). When nothing states an intent (e.g.
 no commits beyond the base branch yet), it is skipped automatically, so it
-never costs an extra call. It is also the only lens that sends the PR
-title/description/commit names to the provider — drop it from `categories` if
-you don't want that text sent at all.
+never costs an extra call (under the `fast` preset it shares correctness's
+call). It is also the only lens that sends the PR title/description/commit
+names to the provider — drop it from `categories` if you don't want that text
+sent at all.
 
 ```yaml
 categories:

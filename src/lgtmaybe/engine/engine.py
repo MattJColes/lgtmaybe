@@ -7,7 +7,8 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from functools import partial
@@ -20,6 +21,7 @@ from lgtmaybe.core.models import (
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
+    ReviewPreset,
     ReviewResult,
 )
 from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
@@ -36,7 +38,19 @@ from .compress import (
 )
 from .injection import wrap_diff, wrap_hints, wrap_intent
 from .parse import ParseError, parse_findings
-from .prompt import build_lens_prompt, build_system_prompt
+from .profiling import profiler
+from .prompt import (
+    FAST_GROUPS,
+    build_correctness_block,
+    build_correctness_prompt,
+    build_custom_lens_block,
+    build_group_block,
+    build_group_prompt,
+    build_lens_block,
+    build_lens_prompt,
+    build_shared_preamble,
+    build_system_prompt,
+)
 from .redact import redact
 from .reflect import reflect_findings
 from .retrieve import FileFetcher
@@ -46,44 +60,142 @@ from .triage import triage_files
 
 _log = get_logger(__name__)
 
-# A single ollama instance serves a model serially, so concurrent calls only
-# queue up and time out; every other provider parallelises across categories.
-# The ceiling is kept modest so the per-batch fan-out doesn't burst the whole
-# lens set at a provider at once and trip a capacity rate-limit (429) on
-# lower-tier accounts — the lenses just run in a couple of waves instead, and
-# per-call latency dominates so the wall-clock cost is small.
-_MAX_WORKERS = 4
+# Auto concurrency (cfg.max_concurrency=None), resolved per provider:
+#
+# - Cloud providers get 8. The adapter's exponential backoff absorbs a capacity
+#   429 on a lower-tier account, and on bedrock cache reads don't count against
+#   rate limits — so bursting the fan-out is safe, and every extra worker cuts
+#   a full-latency wave off the wall clock.
+# - A single ollama instance serves a model serially, so concurrent calls only
+#   queue up and time out: 1.
+# - openai-compatible is honest about the worst case: a llama.cpp / LM Studio
+#   single-slot server wants 1, while a vLLM server batches happily at 8 —
+#   default to 1 and let --max-concurrency raise it for batching servers.
+_CLOUD_MAX_WORKERS = 8
+_SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
+
+# Providers whose litellm route takes an explicit cache_control breakpoint —
+# the ones where a batch's first call WRITES the shared preamble-plus-diff
+# prefix to the cache and the rest read it. Mirrors the adapter's
+# _CACHE_CONTROL_PREFIXES (providers/litellm_provider.py); keep the two in
+# sync. Provider-level only: whether the specific *model* caches is the
+# adapter's call, so warming here is an approximation — for a non-caching
+# model on these routes the primer costs one serialised call and buys nothing,
+# which the token floor below keeps cheap.
+_CACHE_BREAKPOINT_PROVIDERS = frozenset({Provider.anthropic, Provider.bedrock})
+
+# Don't warm the cache for a small diff. On wall-clock the primer is roughly
+# neutral — either the primer pays the one uncached pass and the rest read, or
+# a concurrent first wave all pays it in parallel — so the primer's real win
+# is cost and rate-limit headroom: N-1 concurrent misses each re-process the
+# full prefix uncached AND each pay the cache-write surcharge (1.25× input
+# price on anthropic), while the primer pays it once. That waste scales with
+# prefix size; the primer's worst case stays one call of lost parallelism.
+# Below ~2k tokens of wrapped diff the waste is too small to buy anything —
+# keep full concurrency. (Simulated A/B on a 5k-token prefix, 9 lenses:
+# warm-up ≈ +4s wall, −39k cache-write tokens.)
+_WARMUP_MIN_TOKENS = 2048
+
+
+def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
+    """The fan-out pool size: the explicit cap, else the provider-aware default."""
+    if cfg.max_concurrency is not None:
+        return max(1, min(cfg.max_concurrency, task_count))
+    if cfg.provider in _SINGLE_STREAM_PROVIDERS:
+        return 1
+    return min(_CLOUD_MAX_WORKERS, task_count) or 1
 
 
 @dataclass(frozen=True)
 class _Lens:
     """One review lens in the fan-out: a built-in category or a user-defined lens.
 
-    Holds the prebuilt system prompt so the fan-out is uniform — the engine no
-    longer cares whether a lens came from ``ReviewCategory`` or ``extra_lenses``.
+    Holds both prompt shapes so the fan-out is uniform — the engine no longer
+    cares whether a lens came from ``ReviewCategory`` or ``extra_lenses``.
+    ``system_prompt`` is the legacy monolithic shape (lens text in the system
+    message, used when ``prompt_cache`` is off); ``user_block`` is the split
+    (cache-shaped) layout's final user message (used when it is on — the
+    default), where the system message is the shared preamble instead.
     ``carries_intent`` is true only for the built-in intent lens, the one call
     that receives the stated-intent block.
     """
 
     id: str
     system_prompt: str
+    user_block: str
     carries_intent: bool = False
+    # For a merged (fast-preset) lens: the category values the model may stamp
+    # on its findings. The engine keeps a model-supplied category in this set
+    # and falls back to the lens id otherwise; None (a focused lens) means the
+    # lens id is always stamped — the model's value is ignored, as before.
+    allowed_categories: frozenset[str] | None = None
 
 
-def _build_lenses(cfg: ReviewConfig) -> list[_Lens]:
-    """All lenses to run: built-in categories first, then user-defined lenses."""
-    lenses = [
-        _Lens(
-            id=category.value,
-            system_prompt=build_system_prompt(category),
-            carries_intent=category is ReviewCategory.intent,
-        )
-        for category in cfg.categories
-    ]
+def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
+    """All lenses to run: built-ins (grouped per the preset), then user lenses.
+
+    The fast preset groups the nine built-ins into four calls — but only when
+    ``categories`` is the untouched default: a user who explicitly listed
+    lenses asked for exactly those, so the preset never regroups them. The
+    full preset (and any explicit list) runs one call per category, skipping
+    the intent lens when nothing states an intent.
+    """
+    fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
+    if fast:
+        lenses = [
+            _Lens(
+                id=ReviewCategory.security.value,
+                system_prompt=build_system_prompt(ReviewCategory.security),
+                user_block=build_lens_block(ReviewCategory.security),
+            ),
+            _Lens(
+                id=ReviewCategory.correctness.value,
+                system_prompt=build_correctness_prompt(has_intent),
+                user_block=build_correctness_block(has_intent),
+                carries_intent=has_intent,
+                allowed_categories=(
+                    frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
+                    if has_intent
+                    else None
+                ),
+            ),
+        ]
+        lenses += [
+            _Lens(
+                id=group.id,
+                system_prompt=build_group_prompt(group),
+                user_block=build_group_block(group),
+                allowed_categories=frozenset(c.value for c in group.members),
+            )
+            for group in FAST_GROUPS
+        ]
+    else:
+        lenses = [
+            _Lens(
+                id=category.value,
+                system_prompt=build_system_prompt(category),
+                user_block=build_lens_block(category),
+                carries_intent=category is ReviewCategory.intent,
+            )
+            for category in cfg.categories
+        ]
+        if not has_intent and any(lens.carries_intent for lens in lenses):
+            lenses = [lens for lens in lenses if not lens.carries_intent]
+            _log.info("intent lens skipped — no stated intent (title/description/commits)")
     lenses += [
-        _Lens(id=lens.id, system_prompt=build_lens_prompt(lens)) for lens in cfg.extra_lenses
+        _Lens(
+            id=lens.id,
+            system_prompt=build_lens_prompt(lens),
+            user_block=build_custom_lens_block(lens),
+        )
+        for lens in cfg.extra_lenses
     ]
     return lenses
+
+
+# One prepared _review_lens call, ready to submit to the fan-out pool.
+_LensOutcome = tuple[list[ReviewFinding], str | None]
+_ReviewTask = partial[_LensOutcome]
 
 
 class ReviewIncompleteError(Exception):
@@ -117,36 +229,43 @@ class LLMReviewEngine(ReviewEngine):
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
-        # 1. Redact secrets from the diff before it leaves this process.
-        clean_diff = redact(ctx.diff)
+        # Soft whole-review deadline: model calls reaching execution after this
+        # instant are skipped (in-flight ones finish), so a pathological run
+        # degrades to partial-with-a-notice instead of grinding on. Measured
+        # from here so every stage — not just the model calls — counts.
+        deadline_at = (
+            time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
+        )
 
-        # 1b. Stated intent (PR title/description/commit names) for the intent
-        #     lens: redacted like the diff, wrapped as untrusted data, and only
-        #     ever sent on the intent call. No stated intent → skip that lens
-        #     rather than burn a model call judging the diff against nothing.
-        intent_text = _intent_text(ctx)
-        intent_block = wrap_intent(redact(intent_text)) if intent_text else None
-        lenses = _build_lenses(cfg)
-        if intent_block is None and any(lens.carries_intent for lens in lenses):
-            lenses = [lens for lens in lenses if not lens.carries_intent]
-            _log.info("intent lens skipped — no stated intent (title/description/commits)")
+        # 1. Redact secrets from the diff before it leaves this process.
+        with profiler.stage("redact"):
+            clean_diff = redact(ctx.diff)
+
+            # 1b. Stated intent (PR title/description/commit names) for the intent
+            #     lens: redacted like the diff, wrapped as untrusted data, and only
+            #     ever sent on the intent call. No stated intent → skip that lens
+            #     rather than burn a model call judging the diff against nothing.
+            intent_text = _intent_text(ctx)
+            intent_block = wrap_intent(redact(intent_text)) if intent_text else None
+        lenses = _build_lenses(cfg, has_intent=intent_block is not None)
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
         #    then apply the user's path filters (include_paths allowlist, then
         #    exclude_paths denylist).
-        file_patches = split_by_file(clean_diff, ctx.changed_files)
-        file_patches = [
-            (path, patch)
-            for path, patch in file_patches
-            if is_reviewable(path)
-            and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
-        ]
+        with profiler.stage("split"):
+            file_patches = split_by_file(clean_diff, ctx.changed_files)
+            file_patches = [
+                (path, patch)
+                for path, patch in file_patches
+                if is_reviewable(path)
+                and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
+            ]
 
-        # 3. File cap: review only the first N reviewable files, note the rest.
-        total_files = len(file_patches)
-        capped_files = total_files > cfg.max_files
-        if capped_files:
-            file_patches = file_patches[: cfg.max_files]
+            # 3. File cap: review only the first N reviewable files, note the rest.
+            total_files = len(file_patches)
+            capped_files = total_files > cfg.max_files
+            if capped_files:
+                file_patches = file_patches[: cfg.max_files]
 
         # 3b. Static-analysis grounding (default off): deterministic tool
         #     findings over the reviewed files' head texts, fed to each batch's
@@ -155,10 +274,11 @@ class LLMReviewEngine(ReviewEngine):
         #     subprocess) — behaviour is byte-identical to before the feature.
         sa_hints: list[ToolFinding] = []
         if cfg.static_analysis.enabled and ctx.file_contents:
-            reviewed_paths = {path for path, _ in file_patches}
-            sa_hints = run_static_analysis(
-                {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
-            )
+            with profiler.stage("static_analysis"):
+                reviewed_paths = {path for path, _ in file_patches}
+                sa_hints = run_static_analysis(
+                    {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
+                )
 
         # 3c. Two-stage triage (default off): a cheap triage_model skips
         #     plainly-non-substantive files and ranks the rest by risk, so the
@@ -168,9 +288,10 @@ class LLMReviewEngine(ReviewEngine):
         #     failure reviews everything.
         skipped_by_triage: list[str] = []
         if cfg.triage_model and file_patches:
-            file_patches, skipped_by_triage = triage_files(
-                file_patches, sa_hints, cfg, self._provider
-            )
+            with profiler.stage("triage"):
+                file_patches, skipped_by_triage = triage_files(
+                    file_patches, sa_hints, cfg, self._provider
+                )
 
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
@@ -180,34 +301,36 @@ class LLMReviewEngine(ReviewEngine):
         #    head file text the gateway fetched (redacted), and is for
         #    understanding only — inline-comment positions are always built
         #    from the real diff.
-        used_tokens = count_tokens(clean_diff)
-        remaining = max(0, cfg.max_input_tokens - used_tokens)
-        ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
-        if ctx_lines > 0 and ctx.file_contents:
-            after = trailing_context_lines(ctx_lines)
-            file_patches = [
-                (
-                    path,
-                    expand_hunks(
-                        patch,
-                        redact(ctx.file_contents.get(path, "")),
-                        ctx_lines,
-                        after=after,
-                        # Enclosing function/class boundaries (ast-grep; [] on
-                        # any failure) so the leading pad reaches the signature.
-                        boundaries=(
-                            definition_starts(ctx.file_contents.get(path, ""), path)
-                            if cfg.function_context and ctx.file_contents.get(path)
-                            else None
+        with profiler.stage("expand"):
+            used_tokens = count_tokens(clean_diff)
+            remaining = max(0, cfg.max_input_tokens - used_tokens)
+            ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
+            if ctx_lines > 0 and ctx.file_contents:
+                after = trailing_context_lines(ctx_lines)
+                file_patches = [
+                    (
+                        path,
+                        expand_hunks(
+                            patch,
+                            redact(ctx.file_contents.get(path, "")),
+                            ctx_lines,
+                            after=after,
+                            # Enclosing function/class boundaries (ast-grep; [] on
+                            # any failure) so the leading pad reaches the signature.
+                            boundaries=(
+                                definition_starts(ctx.file_contents.get(path, ""), path)
+                                if cfg.function_context and ctx.file_contents.get(path)
+                                else None
+                            ),
                         ),
-                    ),
-                )
-                for path, patch in file_patches
-            ]
+                    )
+                    for path, patch in file_patches
+                ]
 
-        batches = batch_files(
-            file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
-        )
+        with profiler.stage("batch"):
+            batches = batch_files(
+                file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
+            )
 
         # Announce the queued work before any model call returns, so a long run
         # on a slow provider shows up immediately in the Action log instead of
@@ -226,13 +349,17 @@ class LLMReviewEngine(ReviewEngine):
         failed_calls = 0
         errors: list[str] = []
 
-        # 5. For each batch, fan out one call per review category. Each category
-        #    gets a focused prompt; their findings are merged. Concurrency is
-        #    provider-aware — serial for ollama so calls don't queue and time out.
-        workers = 1 if cfg.provider is Provider.ollama else min(len(lenses), _MAX_WORKERS) or 1
+        # 5. Fan out one call per (batch, lens) through ONE global pool. The old
+        #    shape — a fresh pool per batch, joined before the next batch starts —
+        #    cost `batches × ceil(lenses / workers)` sequential full-latency
+        #    waves; flattened, it is `ceil(batches × lenses / workers)`. Each
+        #    lens gets a focused prompt; findings are merged afterwards.
+        #    Concurrency is provider-aware (see _resolve_workers).
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None
+        workers = _resolve_workers(cfg, len(batches) * len(lenses))
+        per_batch: list[tuple[bool, list[_ReviewTask]]] = []
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
@@ -242,21 +369,47 @@ class LLMReviewEngine(ReviewEngine):
             batch_paths = {path for path, _ in batch}
             batch_hints = [h for h in sa_hints if h.path in batch_paths]
             hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
-            review_one = partial(
-                self._review_lens, wrapped, intent_block, hint_block, cfg.model, response_format
+            # Warm the prompt cache for this batch: a fully concurrent first
+            # wave defeats it (every call misses and pays the cache write), so
+            # on breakpoint routes one lens is dispatched alone and the rest of
+            # the batch releases on its completion — reading the shared
+            # preamble-plus-diff prefix instead of re-writing it. Gated on diff
+            # size (see _WARMUP_MIN_TOKENS) so a small diff keeps full
+            # concurrency.
+            warm = (
+                cfg.prompt_cache
+                and cfg.provider in _CACHE_BREAKPOINT_PROVIDERS
+                and workers > 1
+                and len(lenses) > 1
+                and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS
             )
-            if len(batches) > 1:
-                _log.info(
-                    "reviewing batch",
-                    extra={"batch": batch_num, "batches": len(batches)},
+            batch_tasks = [
+                partial(
+                    self._review_lens,
+                    wrapped,
+                    intent_block,
+                    hint_block,
+                    cfg.model,
+                    response_format,
+                    batch_num,
+                    cfg.prompt_cache,
+                    deadline_at,
+                    lens,
                 )
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                for findings, error in pool.map(review_one, lenses):
-                    total_calls += 1
-                    if error is not None:
-                        failed_calls += 1
-                        errors.append(error)
-                    all_findings.extend(findings)
+                for lens in lenses
+            ]
+            per_batch.append((warm, batch_tasks))
+
+        with profiler.stage("review"):
+            # Results keyed by task index and consumed in task order, so the
+            # findings stay deterministic (dedupe's first-wins tiebreak is
+            # order-sensitive) whatever order the futures complete in.
+            for findings, error in self._fan_out(per_batch, workers):
+                total_calls += 1
+                if error is not None:
+                    failed_calls += 1
+                    errors.append(error)
+                all_findings.extend(findings)
 
         # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
         #     have no signal — never pass that off as a clean review.
@@ -275,53 +428,69 @@ class LLMReviewEngine(ReviewEngine):
         #    changed line whose content matches its verbatim `anchor`, so comments
         #    land on the code they describe. Done before dedupe so findings the
         #    model placed on slightly different wrong lines collapse correctly.
-        all_findings = _snap_findings(all_findings, reviewed_diff)
+        with profiler.stage("snap"):
+            all_findings = _snap_findings(all_findings, reviewed_diff)
 
         # 7. Merge: a finding can surface under more than one lens (a shell
         #    injection is both a security and a correctness issue), so collapse
         #    duplicates before reflecting.
-        all_findings = _dedupe(all_findings)
+        with profiler.stage("dedupe"):
+            all_findings = _dedupe(all_findings)
 
         # 7b. Suppression: drop findings a team has marked known-fine — by
         #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
         #     ignore` pragma on/above the flagged line. Done before reflection so a
         #     suppressed finding costs no reflection tokens and never posts.
-        before_suppress = len(all_findings)
-        all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
-        suppressed = before_suppress - len(all_findings)
+        with profiler.stage("suppress"):
+            before_suppress = len(all_findings)
+            all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+            suppressed = before_suppress - len(all_findings)
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
 
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
+        reflection_skipped_by_deadline = False
         if cfg.reflect and all_findings:
-            _log.info("reflecting on findings", extra={"findings": len(all_findings)})
-            # model_copy keeps file_contents — reflection now grounds itself on the
-            # (redacted) head text of flagged files to verify whole-file claims.
-            clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
-            all_findings = reflect_findings(
-                all_findings,
-                clean_ctx,
-                cfg,
-                self._provider,
-                fetch_file=self._fetch_file,
-                resolve_symbol=self._resolve_symbol,
-            )
+            if deadline_at is not None and time.perf_counter() >= deadline_at:
+                # Better unaudited findings with an honest notice than more
+                # minutes past the ceiling — and never a silent quality drop.
+                reflection_skipped_by_deadline = True
+                _log.warning(
+                    "review deadline reached — skipping reflection",
+                    extra={"findings": len(all_findings)},
+                )
+            else:
+                _log.info("reflecting on findings", extra={"findings": len(all_findings)})
+                # model_copy keeps file_contents — reflection now grounds itself
+                # on the (redacted) head text of flagged files to verify
+                # whole-file claims.
+                clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
+                with profiler.stage("reflect"):
+                    all_findings = reflect_findings(
+                        all_findings,
+                        clean_ctx,
+                        cfg,
+                        self._provider,
+                        fetch_file=self._fetch_file,
+                        resolve_symbol=self._resolve_symbol,
+                    )
 
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a
         #    low-confidence guess, so surface it only when it's high/critical.
-        filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
+        with profiler.stage("filter"):
+            filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
 
-        # 9b. Declarative post-processing (finding_rules, default none): the
-        #     team's drop / severity-remap rules, applied last so they see
-        #     exactly what would otherwise post. Imported lazily — rules.py
-        #     imports this module's glob matcher, so a top import would cycle.
-        if cfg.finding_rules:
-            from .rules import apply_finding_rules
+            # 9b. Declarative post-processing (finding_rules, default none): the
+            #     team's drop / severity-remap rules, applied last so they see
+            #     exactly what would otherwise post. Imported lazily — rules.py
+            #     imports this module's glob matcher, so a top import would cycle.
+            if cfg.finding_rules:
+                from .rules import apply_finding_rules
 
-            filtered = apply_finding_rules(filtered, cfg)
+                filtered = apply_finding_rules(filtered, cfg)
 
         summary_line = _summary_line(len(filtered), cfg)
 
@@ -348,6 +517,12 @@ class LLMReviewEngine(ReviewEngine):
                 f"⚠️ {failed_calls} of {total_calls} review calls failed "
                 f"({detail}); results may be incomplete."
             )
+        if reflection_skipped_by_deadline:
+            notices.append(
+                f"⚠️ Review deadline ({cfg.max_review_seconds}s) reached — the "
+                "self-reflection audit was skipped, so findings may include "
+                "false positives."
+            )
 
         if notices:
             return filtered, "\n\n".join([*notices, summary_line])
@@ -357,6 +532,48 @@ class LLMReviewEngine(ReviewEngine):
             return filtered, f"👍 LGTM!\n\n{summary_line}"
         return filtered, summary_line
 
+    def _fan_out(
+        self, per_batch: list[tuple[bool, list[_ReviewTask]]], workers: int
+    ) -> list[_LensOutcome]:
+        """Run every (batch, lens) task through one pool; results in task order.
+
+        Batches flagged for cache warm-up submit only their FIRST lens; the
+        rest of that batch is released when the primer completes (having
+        written the shared prefix to the provider's prompt cache). Unflagged
+        batches submit everything up front. Cross-batch work interleaves
+        freely — batch 2's primer runs while batch 1's followers are in
+        flight, so warming never re-serialises the whole review.
+        """
+        results: dict[int, _LensOutcome] = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending: dict[Future[_LensOutcome], int] = {}
+            primer_batch: dict[Future[_LensOutcome], int] = {}
+            deferred: dict[int, list[tuple[int, _ReviewTask]]] = {}
+            index = 0
+            for batch_index, (warm, batch_tasks) in enumerate(per_batch):
+                indexed = list(enumerate(batch_tasks, start=index))
+                index += len(batch_tasks)
+                if warm:
+                    primer_index, primer = indexed[0]
+                    future = pool.submit(primer)
+                    pending[future] = primer_index
+                    primer_batch[future] = batch_index
+                    deferred[batch_index] = indexed[1:]
+                else:
+                    for task_index, task in indexed:
+                        pending[pool.submit(task)] = task_index
+            while pending:
+                done, _ = wait(set(pending), return_when=FIRST_COMPLETED)
+                for future in done:
+                    results[pending.pop(future)] = future.result()
+                    batch_index = primer_batch.pop(future, -1)
+                    if batch_index >= 0:
+                        # Primer done (pass or fail — a failed primer must not
+                        # strand its batch): release the deferred lens calls.
+                        for task_index, task in deferred.pop(batch_index, []):
+                            pending[pool.submit(task)] = task_index
+        return [results[i] for i in sorted(results)]
+
     def _review_lens(
         self,
         wrapped: str,
@@ -364,6 +581,9 @@ class LLMReviewEngine(ReviewEngine):
         hint_block: str | None,
         model: str,
         response_format: type[ReviewResult] | None,
+        batch_num: int,
+        split_prompt: bool,
+        deadline_at: float | None,
         lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
@@ -372,7 +592,37 @@ class LLMReviewEngine(ReviewEngine):
         reason — the provider exception (e.g. a 429 quota error) or unparseable
         output — that the engine surfaces so a failure names its real cause instead
         of a generic "timeout". A failing lens never aborts the others.
+
+        ``split_prompt`` selects the message shape. True (``prompt_cache`` on —
+        the default): shared system preamble, then the shared prefix (hints +
+        diff) as one user message, then the lens block (intent + checklist +
+        example) as a final user message — every lens call shares the same
+        expensive prefix, which caching providers then serve from cache. False:
+        the legacy shape (lens text in the system prompt, one user message),
+        kept as the escape hatch for a model that reviews worse under the
+        split layout.
         """
+        # The whole-review deadline is checked at EXECUTION time (tasks queue in
+        # the pool long before a worker picks them up): past it, skip the model
+        # call and surface the skip through the incomplete-results notice.
+        if deadline_at is not None and time.perf_counter() >= deadline_at:
+            _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
+            return [], "review deadline (max_review_seconds) reached — call skipped"
+        if split_prompt:
+            prefix = wrapped if hint_block is None else f"{hint_block}\n\n{wrapped}"
+            suffix = lens.user_block
+            if lens.carries_intent and intent_block is not None:
+                # Only the intent lens pays the intent-block tokens (and its
+                # injection surface). It rides the lens block — NOT the shared
+                # prefix — so the other lenses' cached prefix stays identical.
+                suffix = f"{intent_block}\n\n{suffix}"
+            messages: list[Message] = [
+                {"role": "system", "content": build_shared_preamble()},
+                {"role": "user", "content": prefix},
+                {"role": "user", "content": suffix},
+            ]
+            return self._complete_lens(messages, model, response_format, batch_num, lens)
+
         user_content = wrapped
         if lens.carries_intent and intent_block is not None:
             # Only the intent lens pays the intent-block tokens (and its
@@ -382,33 +632,81 @@ class LLMReviewEngine(ReviewEngine):
             # Static-analysis grounding: every lens sees the hints (each judges
             # relevance to its own concern) ahead of the diff they refer to.
             user_content = f"{hint_block}\n\n{user_content}"
-        messages: list[Message] = [
+        messages = [
             {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},
         ]
+        return self._complete_lens(messages, model, response_format, batch_num, lens)
+
+    def _complete_lens(
+        self,
+        messages: list[Message],
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        lens: _Lens,
+    ) -> tuple[list[ReviewFinding], str | None]:
+        """The provider call + parse + stamp shared by both prompt shapes."""
         opts = {"response_format": response_format} if response_format is not None else {}
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.
         _log.info("reviewing lens", extra={"lens": lens.id})
+        started = time.perf_counter()
         try:
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
             reason = _error_reason(exc)
+            profiler.record_call(
+                label=lens.id,
+                batch=batch_num,
+                elapsed=time.perf_counter() - started,
+                # The exception path carries no attempt count — 0 means unknown
+                # (the adapter may have burned its whole retry budget in here).
+                attempts=0,
+                input_tokens=0,
+                output_tokens=0,
+                cache_read_tokens=0,
+                cache_creation_tokens=0,
+                error=reason,
+            )
             _log.warning(
                 "review call failed",
                 extra={"lens": lens.id, "reason": reason},
                 exc_info=True,
             )
             return [], reason
+        profiler.record_call(
+            label=lens.id,
+            batch=batch_num,
+            elapsed=time.perf_counter() - started,
+            attempts=result.attempts,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cache_read_tokens=result.cache_read_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+        )
         try:
             findings = parse_findings(result.text)
         except ParseError:
             _log.warning("unparseable model output", extra={"lens": lens.id})
             return [], "unparseable model output"
-        # Stamp the originating lens (engine-derived — the model's own value is
-        # overwritten): it drives the security label and category-matched
-        # finding_rules, and surfaces in JSON output.
-        findings = [f.model_copy(update={"category": lens.id}) for f in findings]
+        # Stamp the originating lens (engine-derived): it drives the security
+        # label and category-matched finding_rules, and surfaces in JSON output.
+        # A focused lens overwrites the model's value outright; a merged
+        # (fast-preset) lens covers several categories, so a model-supplied
+        # value from its member set is kept and anything else falls back to
+        # the lens id.
+        allowed = lens.allowed_categories
+        findings = [
+            f.model_copy(
+                update={
+                    "category": (
+                        f.category if allowed is not None and f.category in allowed else lens.id
+                    )
+                }
+            )
+            for f in findings
+        ]
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
 

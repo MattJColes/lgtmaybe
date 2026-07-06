@@ -34,6 +34,17 @@ _CTX = PRContext(
 
 _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
+
+def _user_text(call: dict) -> str:
+    """All user-message content joined.
+
+    With prompt_cache on (the default) the audit prompt is split — diff in one
+    user message, grounding + findings in another — so assertions about "the
+    user content" search both.
+    """
+    return "\n".join(str(m.get("content", "")) for m in call["messages"] if m.get("role") == "user")
+
+
 _HIGH = ReviewFinding(
     path="a.py", line=1, severity=Severity.high, title="real bug", body="definitely broken"
 )
@@ -266,7 +277,7 @@ def test_grounding_includes_head_text_of_flagged_file() -> None:
 
     reflect_findings([_HIGH], ctx, _CFG, provider)
 
-    user = provider.calls[0]["messages"][1]["content"]
+    user = _user_text(provider.calls[0])
     assert "import sys" in user  # the file head text was attached
     assert "def f():" in user
 
@@ -280,7 +291,7 @@ def test_grounding_redacts_secret_in_file_contents() -> None:
 
     reflect_findings([_HIGH], ctx, _CFG, provider)
 
-    user = provider.calls[0]["messages"][1]["content"]
+    user = _user_text(provider.calls[0])
     assert secret not in user
     assert "[REDACTED]" in user
 
@@ -368,7 +379,7 @@ def test_grounding_truncates_huge_file_within_budget() -> None:
 
     reflect_findings([_HIGH], ctx, cfg, provider)
 
-    user = provider.calls[0]["messages"][1]["content"]
+    user = _user_text(provider.calls[0])
     # The whole file (~120k tokens) would blow the 4k budget; truncation keeps it bounded.
     assert count_tokens(user) <= cfg.max_input_tokens * 2
 
@@ -462,7 +473,7 @@ def test_defer_fetches_and_recheck_keeps_finding() -> None:
 
     assert fetcher.calls == ["other.py"]
     # The recheck (2nd) call's user message carried the fetched text.
-    recheck_user = provider.calls[1]["messages"][1]["content"]
+    recheck_user = _user_text(provider.calls[1])
     assert "def referenced():" in recheck_user
     assert _HIGH in survivors
 
@@ -540,7 +551,7 @@ def test_symbol_deferral_resolves_via_ast_grep_resolver() -> None:
 
     # The bare name is tried as a path first (miss), then resolved to its file.
     assert fetcher.calls == ["already_applied", "pkg/ledger.py"]
-    recheck_user = provider.calls[1]["messages"][1]["content"]
+    recheck_user = _user_text(provider.calls[1])
     assert "def already_applied(run_id):" in recheck_user
     assert survivors == []  # recheck saw the guard and dropped the cross-file FP
 
@@ -553,7 +564,7 @@ def test_fetched_file_secret_never_reaches_recheck_prompt() -> None:
 
     reflect_findings([_HIGH], _CTX, _CFG, provider, fetch_file=fetcher)
 
-    recheck_user = provider.calls[1]["messages"][1]["content"]
+    recheck_user = _user_text(provider.calls[1])
     assert secret not in recheck_user
     assert "[REDACTED]" in recheck_user
 

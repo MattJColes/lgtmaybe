@@ -20,3 +20,7 @@ class RuntimeOptions:
     api_base: str | None = None
     fallback_model: str | None = None
     pr_url: str | None = None
+    # Print the timing profile (per-stage + per-call tables, cache totals) at
+    # the end of the run. Presentation only — it never changes review behaviour
+    # — which is why it lives here and not on ReviewConfig.
+    profile: bool = False

@@ -39,6 +39,14 @@ class TestRetry:
 
         assert result.text == "retried ok"
         assert call_count == 2
+        # The retry is visible on the result, for the timing instrumentation.
+        assert result.attempts == 2
+
+    def test_first_try_success_reports_one_attempt(self) -> None:
+        with patch("litellm.completion", return_value=_fake_response("ok")):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+        assert result.attempts == 1
 
     def test_all_retries_exhausted_raises(self) -> None:
         """When all retries are exhausted the error propagates."""
@@ -332,6 +340,28 @@ class TestFailFastOnPermanentErrors:
                 provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
         assert calls == _MAX_ATTEMPTS
+
+    def test_attempts_share_a_wall_clock_budget_derived_from_the_timeout(self) -> None:
+        """Retries stop once 2.5× the per-request timeout is spent, even before
+        the attempt cap — a flaky model must not burn attempts × timeout +
+        backoff per call. With a 0.05s timeout the budget is 0.125s, which one
+        slow failing attempt plus the first backoff already exceeds."""
+        import time
+
+        calls = 0
+
+        def slow_transient(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            time.sleep(0.06)
+            raise RuntimeError("transient")
+
+        with patch("litellm.completion", side_effect=slow_transient):
+            provider = LiteLLMProvider(timeout=0.05)
+            with pytest.raises(RuntimeError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls < _MAX_ATTEMPTS
 
     def test_quota_error_does_not_storm_the_fallback_either(self) -> None:
         """Fail-fast applies to the fallback leg too: each model is tried once,

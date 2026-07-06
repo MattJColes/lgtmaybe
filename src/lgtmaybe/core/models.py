@@ -65,6 +65,23 @@ class ReviewCategory(StrEnum):
     ponytail = "ponytail"
 
 
+class ReviewPreset(StrEnum):
+    """How many model calls a review spends: the everyday path or the deep audit.
+
+    ``fast`` (the default) covers all nine built-in lenses in four calls:
+    security and correctness keep dedicated calls (they earn it; the stated
+    intent, when present, merges into correctness), while the remaining six
+    fold into two combined calls — code health (performance, complexity,
+    ponytail, deprecation) and supporting artefacts (tests, documentation).
+    ``full`` runs each of the nine lenses as its own call — more per-lens
+    focus for release branches and deep audits, at ~2× the calls and wall
+    time. An explicit ``categories`` list always wins over the preset.
+    """
+
+    fast = "fast"
+    full = "full"
+
+
 class Provider(StrEnum):
     """The backend selected by the `--provider` flag."""
 
@@ -361,6 +378,10 @@ class ProviderResult(_Strict):
     # providers/models without prompt caching (back-compat default).
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Completion attempts the adapter made to produce this result (1 = first try).
+    # Feeds the timing instrumentation so a call that burned its retry budget is
+    # distinguishable from one that was merely slow.
+    attempts: int = Field(default=1, ge=1)
 
 
 class PRContext(_Strict):
@@ -518,16 +539,38 @@ class ReviewConfig(_Strict):
     # replies and resolves the conversation. GitHub posting only — ignored by the
     # local CLI review, which has no conversations to resolve.
     resolve_fixed: bool = True
+    # Call-count preset (see ReviewPreset): `fast` (default) covers all nine
+    # built-in lenses in four calls; `full` runs one call per lens for release
+    # branches and deep audits. An explicit `categories` list overrides it.
+    preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
-    # findings are merged + deduped. Defaults to all of them; narrow it to trade
-    # thoroughness for fewer calls. `default=` (not default_factory) on purpose:
-    # pydantic copies it per instance, and only a plain default reaches the JSON
-    # schema that docs/generate_reference.py renders.
+    # findings are merged + deduped. Defaults to all of them (grouped per the
+    # preset above); narrowing it to an explicit list disables the preset
+    # grouping and runs exactly those lenses, one call each. `default=` (not
+    # default_factory) on purpose: pydantic copies it per instance, and only a
+    # plain default reaches the JSON schema that docs/generate_reference.py
+    # renders.
     categories: list[ReviewCategory] = Field(default=list(ReviewCategory))
     # User-defined ("BYO") lenses run alongside the built-in categories — each
     # fans out as its own focused call and merges into the same findings. Loaded
     # from .lgtmaybe.yml (inline) or skill files via the loader's `lens_paths`.
     extra_lenses: list[CustomLens] = Field(default_factory=list)
+    # Soft wall-clock ceiling for one review run, in seconds. Once it passes,
+    # no further model calls are dispatched: in-flight calls finish, their
+    # findings post, and the summary carries the existing "results may be
+    # incomplete" notice naming the skipped calls. It can never turn a total
+    # failure into a silent LGTM — a run where every call failed or was
+    # skipped still fails loud. Generous by default (10 minutes); 0 disables
+    # the ceiling entirely.
+    max_review_seconds: int = Field(default=600, ge=0)
+    # Ceiling on concurrent review calls across the WHOLE fan-out (every
+    # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
+    # providers (their retry layer absorbs a capacity 429, and on bedrock cache
+    # reads don't count against rate limits), 1 for ollama (a single instance
+    # serves a model serially — concurrent calls just queue and time out), and
+    # 1 for openai-compatible (a llama.cpp/LM Studio single-slot server wants
+    # 1; a vLLM server batches happily at 8 — raise it explicitly for those).
+    max_concurrency: int | None = Field(default=None, ge=1)
     # Constrain model output to the findings JSON schema via litellm
     # response_format (provider-native JSON mode). Keeps models from returning
     # prose/reasoning instead of findings. Disable for a model/provider that

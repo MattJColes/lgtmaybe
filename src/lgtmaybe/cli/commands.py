@@ -56,6 +56,22 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
 )
 @click.option("--model", default=None, help="Model name understood by the chosen provider")
 @click.option(
+    "--preset",
+    default=None,
+    type=click.Choice(["fast", "full"]),
+    help="Review preset: fast (default) covers all nine lenses in four model "
+    "calls — dedicated security and correctness calls (stated intent folds "
+    "into correctness), plus merged code-health and artefacts calls; full runs "
+    "one call per lens for release branches and deep audits (~2x the calls)",
+)
+@click.option(
+    "--full",
+    "full_preset",
+    is_flag=True,
+    default=False,
+    help="Shorthand for --preset full",
+)
+@click.option(
     "--fallback-model",
     default=None,
     help="Model to retry with if the primary model fails",
@@ -159,10 +175,27 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     help="Max unchanged lines added around each hunk for context (0 disables)",
 )
 @click.option(
+    "--max-concurrency",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Concurrent review calls across the whole fan-out (all batches and "
+    "lenses share one pool). Default: 8 for cloud providers, 1 for ollama, and "
+    "1 for openai-compatible — a llama.cpp/LM Studio single-slot server wants 1, "
+    "while a vLLM server batches happily at 8; raise it there explicitly",
+)
+@click.option(
     "--timeout",
     default=None,
     type=int,
     help="Per-request timeout in seconds for each model call (raise for slow local models)",
+)
+@click.option(
+    "--max-review-seconds",
+    default=None,
+    type=click.IntRange(min=0),
+    help="Soft wall-clock ceiling for the whole review (default 600). Past it, "
+    "no further model calls are dispatched — in-flight calls finish and the "
+    "review returns partial results with an incomplete-results notice. 0 disables",
 )
 @click.option(
     "--temperature",
@@ -219,6 +252,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     "are skipped silently — pip install lgtmaybe[static-analysis])",
 )
 @click.option(
+    "--profile",
+    is_flag=True,
+    default=False,
+    help="Print a timing profile at the end of the run: total wall time, "
+    "per-stage and per-call tables, and prompt-cache hit totals",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -228,6 +268,8 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
 def review(
     provider: str | None,
     model: str | None,
+    preset: str | None,
+    full_preset: bool,
     fallback_model: str | None,
     reflect_model: str | None,
     triage_model: str | None,
@@ -238,6 +280,7 @@ def review(
     max_files: int | None,
     max_input_tokens: int | None,
     num_ctx: int | None,
+    max_concurrency: int | None,
     base: str | None,
     working: bool,
     uncommitted: bool,
@@ -245,6 +288,7 @@ def review(
     as_json: bool,
     context_lines: int | None,
     timeout: int | None,
+    max_review_seconds: int | None,
     temperature: float | None,
     reflect: bool | None,
     min_confidence: int | None,
@@ -253,16 +297,20 @@ def review(
     symbol_resolution: bool | None,
     prompt_cache: bool | None,
     static_analysis: bool | None,
+    profile: bool,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
     if working and uncommitted:
         raise click.UsageError("--working and --uncommitted are mutually exclusive")
+    if full_preset and preset == "fast":
+        raise click.UsageError("--full contradicts --preset fast")
     cfg = load_config(
         config_path=Path(config_path),
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
+        preset="full" if full_preset else preset,
         reflect_model=reflect_model,
         triage_model=triage_model,
         min_severity=min_severity,
@@ -270,8 +318,10 @@ def review(
         max_files=max_files,
         max_input_tokens=max_input_tokens,
         num_ctx=num_ctx,
+        max_concurrency=max_concurrency,
         context_lines=context_lines,
         timeout=timeout,
+        max_review_seconds=max_review_seconds,
         temperature=temperature,
         reflect=reflect,
         min_confidence=min_confidence,
@@ -282,7 +332,9 @@ def review(
     )
     cfg = _apply_static_analysis_flag(cfg, static_analysis)
 
-    runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
+    runtime = RuntimeOptions(
+        api_key=api_key, api_base=api_base, fallback_model=fallback_model, profile=profile
+    )
     fmt = output_format or ("json" if as_json else "human")
     execute_local_review(cfg, runtime, base=base, working=working, uncommitted=uncommitted, fmt=fmt)
 
@@ -328,12 +380,15 @@ def action() -> None:
         config_path=Path(inputs["config_path"] or ".lgtmaybe.yml"),
         provider=inputs["provider"],
         model=inputs["model"],
+        preset=inputs["preset"],
         reflect_model=inputs["reflect_model"],
         triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
+        max_review_seconds=inputs["max_review_seconds"],
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],
+        max_concurrency=inputs["max_concurrency"],
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],
         structured_output=inputs["structured_output"],
@@ -347,10 +402,12 @@ def action() -> None:
     cfg = _apply_static_analysis_flag(
         cfg, None if raw_sa is None else raw_sa.strip().lower() in ("true", "1", "yes")
     )
+    raw_profile = inputs["profile"]
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],
         api_base=inputs["api_base"],
         fallback_model=inputs["fallback_model"],
+        profile=raw_profile is not None and raw_profile.strip().lower() in ("true", "1", "yes"),
     )
 
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())

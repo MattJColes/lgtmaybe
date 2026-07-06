@@ -12,12 +12,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReflectionResult, ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import (
+    PRContext,
+    ReflectionResult,
+    ReviewConfig,
+    ReviewFinding,
+    ReviewPreset,
+)
 from lgtmaybe.core.ports import ProviderClient
 
 from .astgrep import SymbolResolver
 from .compress import count_tokens
 from .parse import iter_json_values
+from .profiling import timed_complete
 from .redact import redact
 from .retrieve import MAX_FETCH_FILES, MAX_HOPS, FileFetcher, resolve_needs
 
@@ -260,22 +267,44 @@ def _audit(
     # finding so it can verify a whole-file claim — that an import/symbol IS
     # present, that a duplicate isn't real — instead of guessing about unseen code.
     reserve = cfg.max_input_tokens - count_tokens(ctx.diff) - count_tokens(findings_json)
+    if cfg.preset is ReviewPreset.fast:
+        # The everyday path trades some grounding depth for a faster, cheaper
+        # audit: cap the head-text budget at a quarter of the input budget
+        # (the full preset still hands the auditor everything that fits).
+        reserve = min(reserve, cfg.max_input_tokens // 4)
     grounding = _grounding_block(findings, ctx, reserve, extra_paths=fetched_paths)
 
-    user_content = (
-        f"Diff:\n{ctx.diff}\n\n"
+    diff_part = f"Diff:\n{ctx.diff}"
+    rest_part = (
         f"{grounding}"
         f"Findings (indexed from 0):\n{findings_json}\n\n"
         "Return the confidence verdict JSON object."
     )
+    if cfg.prompt_cache:
+        # Split shape, mirroring the review calls: the diff — identical across
+        # the audit call and every deferral re-judge — rides its own leading
+        # user block, so on breakpoint routes the re-judges read the
+        # system-plus-diff prefix from cache instead of re-paying for it. (The
+        # review calls' prefix can't be reused here: the auditor needs its own
+        # system prompt, and the cache is a strict prefix over system →
+        # messages.) The grounding/findings vary per pass and stay outside.
+        messages = [
+            {"role": "system", "content": _REFLECT_SYSTEM},
+            {"role": "user", "content": diff_part},
+            {"role": "user", "content": rest_part},
+        ]
+    else:
+        messages = [
+            {"role": "system", "content": _REFLECT_SYSTEM},
+            {"role": "user", "content": f"{diff_part}\n\n{rest_part}"},
+        ]
 
     opts: dict[str, Any] = {"response_format": ReflectionResult} if cfg.structured_output else {}
-    result = provider.complete(
-        messages=[
-            {"role": "system", "content": _REFLECT_SYSTEM},
-            {"role": "user", "content": user_content},
-        ],
+    result = timed_complete(
+        provider,
+        messages,
         model=cfg.reflect_model or cfg.model,
+        label="reflect",
         **opts,
     )
     return _parse_verdicts(result.text)

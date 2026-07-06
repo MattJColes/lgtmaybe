@@ -138,6 +138,7 @@ def _review(
     context_lines: int | None = None,
     static_analysis: bool = False,
     triage_model: str | None = None,
+    preset: str | None = None,
 ):
     ctx = _eval_ctx(diff, manifest)
     cfg_overrides: dict[str, object] = {}
@@ -153,6 +154,8 @@ def _review(
         cfg_overrides["static_analysis"] = StaticAnalysisConfig(enabled=True)
     if triage_model is not None:
         cfg_overrides["triage_model"] = triage_model
+    if preset is not None:
+        cfg_overrides["preset"] = preset
     cfg = ReviewConfig(
         provider=provider,
         model=model,
@@ -382,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             context_lines=args.context_lines,
             static_analysis=args.static_analysis,
             triage_model=args.triage_model,
+            preset=args.preset,
         )
         for diff, m in fixtures
     ]

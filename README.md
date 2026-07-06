@@ -52,13 +52,29 @@ forged delimiter break-out attempts), and redacts a broad set of secret formats
 credentials in connection strings) before anything leaves your environment. See
 [Data and Privacy](docs/explanation/data-and-privacy.md).
 
+**Fast by default.** Reviews now run the **`fast` preset** by default: the nine
+lenses are covered in **four model calls** instead of nine — security and
+correctness keep dedicated calls (the stated intent folds into correctness when
+the PR states one), and the rest merge into a code-health call
+(performance/complexity/ponytail/deprecation) and an artefacts call
+(tests/documentation). That's roughly **half the calls and wall time**, trading
+some recall on the softer lenses; `--preset full` (or `preset: full` in
+`.lgtmaybe.yml`) restores the one-call-per-lens deep audit for release branches.
+On top of that, all calls across all batches share **one concurrency pool**
+(`max_concurrency`, default 8 on cloud providers) and share a **cached
+preamble-plus-diff prefix** on anthropic/bedrock, so the diff is processed once
+per batch, not once per lens. Add `--profile` to any run to see exactly where
+the time and tokens went.
+
 **How the scope is bounded.** Every run is capped so a large PR can't blow up
 latency:
 
+- `preset` (default `fast`) — four grouped lens calls; `full` runs one call per lens.
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
+- `max_concurrency` (default 8 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.
 - `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
-- `categories` (default all nine) — which review lenses to run; each is a concurrent model call, so narrowing the list means fewer calls.
+- `categories` (default all nine) — which review lenses to run; an explicit list overrides the preset grouping and runs exactly those lenses, one call each.
 - `min_severity` (default `low`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.

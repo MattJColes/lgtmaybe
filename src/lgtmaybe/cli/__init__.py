@@ -25,13 +25,20 @@ from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
 from lgtmaybe.core.diffparse import FILE_HEADER_RE
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, Provider, ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import (
+    PRContext,
+    Provider,
+    ReviewConfig,
+    ReviewFinding,
+    ReviewPreset,
+)
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
+from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
-from lgtmaybe.providers.factory import build_provider
+from lgtmaybe.providers.factory import build_provider, cheaper_reflect_sibling
 
 _log = get_logger(__name__)
 
@@ -106,6 +113,16 @@ def build_provider_engine(
     options stay in exactly one place. Raises ValueError with an actionable
     message when a required credential is missing.
     """
+    # Fast preset: default the reflection audit to a cheaper sibling of the
+    # review model when one is confidently resolvable (anthropic/openai only —
+    # see cheaper_reflect_sibling). An explicit reflect_model always wins, and
+    # the full preset keeps auditing with the review model as before.
+    if cfg.preset is ReviewPreset.fast and cfg.reflect_model is None:
+        sibling = cheaper_reflect_sibling(cfg.provider, cfg.model)
+        if sibling is not None:
+            _log.info("fast preset: reflecting with a cheaper sibling", extra={"model": sibling})
+            cfg = cfg.model_copy(update={"reflect_model": sibling})
+
     auth = resolve_credentials(
         cfg.provider,
         api_key=runtime.api_key,
@@ -238,7 +255,8 @@ def run_review(
         # Pass the FULL PR diff (already fetched) so the commentable-line
         # index is built from the diff the comments will anchor to — the
         # incremental diff's context lines aren't necessarily in the PR diff.
-        github.post_review(findings, summary, diff=ctx.diff)
+        with profiler.stage("post"):
+            github.post_review(findings, summary, diff=ctx.diff)
         if cfg.pr_labels:
             # Effort/risk labels from data already computed — best-effort,
             # and only on gateways that support them (fakes don't).
@@ -301,6 +319,7 @@ def execute_local_review(
     runs the engine over the local diff, and prints the result. Any failure
     surfaces as a clean CLI error — there is no PR to post a notice to.
     """
+    profiler.reset()
     try:
         # Wire a read-only working-tree reader so reflection can resolve a deferred
         # verdict against the user's own checkout (safe — their branch, not PR code).
@@ -319,6 +338,8 @@ def execute_local_review(
         raise click.ClickException(str(exc)) from exc
 
     click.echo(render_findings(findings, summary, fmt=fmt))
+    if runtime.profile:
+        click.echo(profiler.render())
 
 
 def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
@@ -339,6 +360,7 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
 
     Shared by the ``review`` command and the ``action`` entrypoint.
     """
+    profiler.reset()
     # Adapter construction can fail before we have any way to post (bad URL,
     # missing token/credentials). Surface those as a clean CLI error.
     try:
@@ -358,6 +380,8 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
     if dry_run:
         click.echo(f"[dry-run] {summary}")
         click.echo(render_findings(findings, summary, fmt="json"))
+    if runtime.profile:
+        click.echo(profiler.render())
 
 
 def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
@@ -438,15 +462,18 @@ def action_inputs() -> dict[str, str | None]:
     return {
         "provider": get("PROVIDER"),
         "model": get("MODEL"),
+        "preset": get("PRESET"),
         "fallback_model": get("FALLBACK_MODEL"),
         "reflect_model": get("REFLECT_MODEL"),
         "triage_model": get("TRIAGE_MODEL"),
         "api_key": get("API_KEY"),
         "api_base": get("API_BASE"),
         "timeout": get("TIMEOUT"),
+        "max_review_seconds": get("MAX_REVIEW_SECONDS"),
         "temperature": get("TEMPERATURE"),
         "num_ctx": get("NUM_CTX"),
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
+        "max_concurrency": get("MAX_CONCURRENCY"),
         "resolve_fixed": get("RESOLVE_FIXED"),
         "recursive": get("RECURSIVE"),
         "structured_output": get("STRUCTURED_OUTPUT"),
@@ -456,6 +483,7 @@ def action_inputs() -> dict[str, str | None]:
         "static_analysis": get("STATIC_ANALYSIS"),
         "auto_describe": get("AUTO_DESCRIBE"),
         "pr_labels": get("PR_LABELS"),
+        "profile": get("PROFILE"),
         "config_path": get("CONFIG_PATH"),
     }
 

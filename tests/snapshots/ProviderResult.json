@@ -2,6 +2,12 @@
   "additionalProperties": false,
   "description": "The normalised return of one LLM completion, with token usage.",
   "properties": {
+    "attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Attempts",
+      "type": "integer"
+    },
     "cache_creation_tokens": {
       "default": 0,
       "title": "Cache Creation Tokens",

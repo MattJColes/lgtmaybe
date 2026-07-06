@@ -286,6 +286,15 @@
       "title": "ReviewFinding",
       "type": "object"
     },
+    "ReviewPreset": {
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in lenses in four calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while the remaining six\nfold into two combined calls \u2014 code health (performance, complexity,\nponytail, deprecation) and supporting artefacts (tests, documentation).\n``full`` runs each of the nine lenses as its own call \u2014 more per-lens\nfocus for release branches and deep audits, at ~2\u00d7 the calls and wall\ntime. An explicit ``categories`` list always wins over the preset.",
+      "enum": [
+        "fast",
+        "full"
+      ],
+      "title": "ReviewPreset",
+      "type": "string"
+    },
     "Severity": {
       "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
       "enum": [
@@ -455,6 +464,19 @@
       "default": null,
       "title": "Incremental"
     },
+    "max_concurrency": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Concurrency"
+    },
     "max_files": {
       "default": 50,
       "title": "Max Files",
@@ -463,6 +485,12 @@
     "max_input_tokens": {
       "default": 100000,
       "title": "Max Input Tokens",
+      "type": "integer"
+    },
+    "max_review_seconds": {
+      "default": 600,
+      "minimum": 0,
+      "title": "Max Review Seconds",
       "type": "integer"
     },
     "min_confidence": {
@@ -496,6 +524,10 @@
       "default": false,
       "title": "Pr Labels",
       "type": "boolean"
+    },
+    "preset": {
+      "$ref": "#/$defs/ReviewPreset",
+      "default": "fast"
     },
     "prompt_cache": {
       "default": true,
