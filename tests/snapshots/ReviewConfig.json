@@ -487,6 +487,12 @@
       "title": "Max Input Tokens",
       "type": "integer"
     },
+    "max_review_seconds": {
+      "default": 600,
+      "minimum": 0,
+      "title": "Max Review Seconds",
+      "type": "integer"
+    },
     "min_confidence": {
       "default": 0,
       "maximum": 10,

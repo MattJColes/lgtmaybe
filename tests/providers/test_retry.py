@@ -341,6 +341,28 @@ class TestFailFastOnPermanentErrors:
 
         assert calls == _MAX_ATTEMPTS
 
+    def test_attempts_share_a_wall_clock_budget_derived_from_the_timeout(self) -> None:
+        """Retries stop once 2.5× the per-request timeout is spent, even before
+        the attempt cap — a flaky model must not burn attempts × timeout +
+        backoff per call. With a 0.05s timeout the budget is 0.125s, which one
+        slow failing attempt plus the first backoff already exceeds."""
+        import time
+
+        calls = 0
+
+        def slow_transient(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            time.sleep(0.06)
+            raise RuntimeError("transient")
+
+        with patch("litellm.completion", side_effect=slow_transient):
+            provider = LiteLLMProvider(timeout=0.05)
+            with pytest.raises(RuntimeError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls < _MAX_ATTEMPTS
+
     def test_quota_error_does_not_storm_the_fallback_either(self) -> None:
         """Fail-fast applies to the fallback leg too: each model is tried once,
         no per-model retry storm."""

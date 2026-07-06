@@ -229,6 +229,14 @@ class LLMReviewEngine(ReviewEngine):
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
+        # Soft whole-review deadline: model calls reaching execution after this
+        # instant are skipped (in-flight ones finish), so a pathological run
+        # degrades to partial-with-a-notice instead of grinding on. Measured
+        # from here so every stage — not just the model calls — counts.
+        deadline_at = (
+            time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
+        )
+
         # 1. Redact secrets from the diff before it leaves this process.
         with profiler.stage("redact"):
             clean_diff = redact(ctx.diff)
@@ -387,6 +395,7 @@ class LLMReviewEngine(ReviewEngine):
                     response_format,
                     batch_num,
                     cfg.prompt_cache,
+                    deadline_at,
                     lens,
                 )
                 for lens in lenses
@@ -444,20 +453,31 @@ class LLMReviewEngine(ReviewEngine):
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
+        reflection_skipped_by_deadline = False
         if cfg.reflect and all_findings:
-            _log.info("reflecting on findings", extra={"findings": len(all_findings)})
-            # model_copy keeps file_contents — reflection now grounds itself on the
-            # (redacted) head text of flagged files to verify whole-file claims.
-            clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
-            with profiler.stage("reflect"):
-                all_findings = reflect_findings(
-                    all_findings,
-                    clean_ctx,
-                    cfg,
-                    self._provider,
-                    fetch_file=self._fetch_file,
-                    resolve_symbol=self._resolve_symbol,
+            if deadline_at is not None and time.perf_counter() >= deadline_at:
+                # Better unaudited findings with an honest notice than more
+                # minutes past the ceiling — and never a silent quality drop.
+                reflection_skipped_by_deadline = True
+                _log.warning(
+                    "review deadline reached — skipping reflection",
+                    extra={"findings": len(all_findings)},
                 )
+            else:
+                _log.info("reflecting on findings", extra={"findings": len(all_findings)})
+                # model_copy keeps file_contents — reflection now grounds itself
+                # on the (redacted) head text of flagged files to verify
+                # whole-file claims.
+                clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
+                with profiler.stage("reflect"):
+                    all_findings = reflect_findings(
+                        all_findings,
+                        clean_ctx,
+                        cfg,
+                        self._provider,
+                        fetch_file=self._fetch_file,
+                        resolve_symbol=self._resolve_symbol,
+                    )
 
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a
@@ -498,6 +518,12 @@ class LLMReviewEngine(ReviewEngine):
             notices.append(
                 f"⚠️ {failed_calls} of {total_calls} review calls failed "
                 f"({detail}); results may be incomplete."
+            )
+        if reflection_skipped_by_deadline:
+            notices.append(
+                f"⚠️ Review deadline ({cfg.max_review_seconds}s) reached — the "
+                "self-reflection audit was skipped, so findings may include "
+                "false positives."
             )
 
         if notices:
@@ -559,6 +585,7 @@ class LLMReviewEngine(ReviewEngine):
         response_format: type[ReviewResult] | None,
         batch_num: int,
         split_prompt: bool,
+        deadline_at: float | None,
         lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
@@ -577,6 +604,12 @@ class LLMReviewEngine(ReviewEngine):
         kept as the escape hatch for a model that reviews worse under the
         split layout.
         """
+        # The whole-review deadline is checked at EXECUTION time (tasks queue in
+        # the pool long before a worker picks them up): past it, skip the model
+        # call and surface the skip through the incomplete-results notice.
+        if deadline_at is not None and time.perf_counter() >= deadline_at:
+            _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
+            return [], "review deadline (max_review_seconds) reached — call skipped"
         if split_prompt:
             prefix = wrapped if hint_block is None else f"{hint_block}\n\n{wrapped}"
             suffix = lens.user_block

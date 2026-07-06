@@ -190,6 +190,14 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     help="Per-request timeout in seconds for each model call (raise for slow local models)",
 )
 @click.option(
+    "--max-review-seconds",
+    default=None,
+    type=click.IntRange(min=0),
+    help="Soft wall-clock ceiling for the whole review (default 600). Past it, "
+    "no further model calls are dispatched — in-flight calls finish and the "
+    "review returns partial results with an incomplete-results notice. 0 disables",
+)
+@click.option(
     "--temperature",
     default=None,
     type=float,
@@ -280,6 +288,7 @@ def review(
     as_json: bool,
     context_lines: int | None,
     timeout: int | None,
+    max_review_seconds: int | None,
     temperature: float | None,
     reflect: bool | None,
     min_confidence: int | None,
@@ -312,6 +321,7 @@ def review(
         max_concurrency=max_concurrency,
         context_lines=context_lines,
         timeout=timeout,
+        max_review_seconds=max_review_seconds,
         temperature=temperature,
         reflect=reflect,
         min_confidence=min_confidence,
@@ -374,6 +384,7 @@ def action() -> None:
         reflect_model=inputs["reflect_model"],
         triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
+        max_review_seconds=inputs["max_review_seconds"],
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],

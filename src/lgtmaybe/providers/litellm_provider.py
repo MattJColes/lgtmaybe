@@ -21,7 +21,13 @@ from litellm.exceptions import (
     RateLimitError,
 )
 from litellm.utils import supports_prompt_caching
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    stop_after_delay,
+    wait_exponential_jitter,
+)
 
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ProviderResult
@@ -31,6 +37,14 @@ _log = get_logger(__name__)
 
 _DEFAULT_TIMEOUT = 60  # seconds
 _MAX_ATTEMPTS = 4
+
+# All attempts for one completion share a total wall-clock budget of this many
+# times the per-request timeout, so a flaky model can't burn
+# attempts × timeout + backoff per call (four 60s timeouts plus waits is over
+# four minutes — per lens). 2.5× leaves room for one full-length failure, a
+# retry, and the backoff between them; a call that needs more than that is
+# better failed and surfaced than ground on.
+_CALL_BUDGET_MULTIPLIER = 2.5
 
 # Prompt caching (of the static system prompt) is applied only on routes where
 # an EXPLICIT cache breakpoint is the mechanism: Anthropic direct (cache_control)
@@ -179,10 +193,15 @@ class LiteLLMProvider(ProviderClient):
         # Counted here (not read from tenacity's statistics) so the number lands
         # on the result even when the mocked/fake retry layer changes shape.
         attempts = 0
+        # Attempts share one deadline derived from the per-request timeout (the
+        # fallback model, when configured, gets its own fresh budget — it is a
+        # separate recovery path, not another attempt).
+        timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
 
         @retry(
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
-            stop=stop_after_attempt(_MAX_ATTEMPTS),
+            stop=stop_after_attempt(_MAX_ATTEMPTS)
+            | stop_after_delay(timeout * _CALL_BUDGET_MULTIPLIER),
             wait=wait_exponential_jitter(initial=0.1, max=5),
             reraise=True,
         )

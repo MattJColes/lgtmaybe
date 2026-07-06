@@ -555,6 +555,14 @@ class ReviewConfig(_Strict):
     # fans out as its own focused call and merges into the same findings. Loaded
     # from .lgtmaybe.yml (inline) or skill files via the loader's `lens_paths`.
     extra_lenses: list[CustomLens] = Field(default_factory=list)
+    # Soft wall-clock ceiling for one review run, in seconds. Once it passes,
+    # no further model calls are dispatched: in-flight calls finish, their
+    # findings post, and the summary carries the existing "results may be
+    # incomplete" notice naming the skipped calls. It can never turn a total
+    # failure into a silent LGTM — a run where every call failed or was
+    # skipped still fails loud. Generous by default (10 minutes); 0 disables
+    # the ceiling entirely.
+    max_review_seconds: int = Field(default=600, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
     # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
     # providers (their retry layer absorbs a capacity 429, and on bedrock cache

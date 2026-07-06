@@ -469,6 +469,7 @@ def action_inputs() -> dict[str, str | None]:
         "api_key": get("API_KEY"),
         "api_base": get("API_BASE"),
         "timeout": get("TIMEOUT"),
+        "max_review_seconds": get("MAX_REVIEW_SECONDS"),
         "temperature": get("TEMPERATURE"),
         "num_ctx": get("NUM_CTX"),
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
