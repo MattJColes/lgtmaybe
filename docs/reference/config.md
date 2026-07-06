@@ -35,6 +35,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `model` | string | Yes | — | Model |
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `pr_labels` | boolean | No | `False` | Pr Labels |
+| `preset` | `fast` / `full` | No | `fast` |  |
 | `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `recursive` | boolean | No | `True` | Recursive |
@@ -420,6 +421,15 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "ReviewFinding",
       "type": "object"
     },
+    "ReviewPreset": {
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in lenses in four calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while the remaining six\nfold into two combined calls \u2014 code health (performance, complexity,\nponytail, deprecation) and supporting artefacts (tests, documentation).\n``full`` runs each of the nine lenses as its own call \u2014 more per-lens\nfocus for release branches and deep audits, at ~2\u00d7 the calls and wall\ntime. An explicit ``categories`` list always wins over the preset.",
+      "enum": [
+        "fast",
+        "full"
+      ],
+      "title": "ReviewPreset",
+      "type": "string"
+    },
     "Severity": {
       "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
       "enum": [
@@ -643,6 +653,10 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": false,
       "title": "Pr Labels",
       "type": "boolean"
+    },
+    "preset": {
+      "$ref": "#/$defs/ReviewPreset",
+      "default": "fast"
     },
     "prompt_cache": {
       "default": true,

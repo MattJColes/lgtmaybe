@@ -21,6 +21,7 @@ from lgtmaybe.core.models import (
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
+    ReviewPreset,
     ReviewResult,
 )
 from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
@@ -39,7 +40,12 @@ from .injection import wrap_diff, wrap_hints, wrap_intent
 from .parse import ParseError, parse_findings
 from .profiling import profiler
 from .prompt import (
+    FAST_GROUPS,
+    build_correctness_block,
+    build_correctness_prompt,
     build_custom_lens_block,
+    build_group_block,
+    build_group_prompt,
     build_lens_block,
     build_lens_prompt,
     build_shared_preamble,
@@ -118,19 +124,64 @@ class _Lens:
     system_prompt: str
     user_block: str
     carries_intent: bool = False
+    # For a merged (fast-preset) lens: the category values the model may stamp
+    # on its findings. The engine keeps a model-supplied category in this set
+    # and falls back to the lens id otherwise; None (a focused lens) means the
+    # lens id is always stamped — the model's value is ignored, as before.
+    allowed_categories: frozenset[str] | None = None
 
 
-def _build_lenses(cfg: ReviewConfig) -> list[_Lens]:
-    """All lenses to run: built-in categories first, then user-defined lenses."""
-    lenses = [
-        _Lens(
-            id=category.value,
-            system_prompt=build_system_prompt(category),
-            user_block=build_lens_block(category),
-            carries_intent=category is ReviewCategory.intent,
-        )
-        for category in cfg.categories
-    ]
+def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
+    """All lenses to run: built-ins (grouped per the preset), then user lenses.
+
+    The fast preset groups the nine built-ins into four calls — but only when
+    ``categories`` is the untouched default: a user who explicitly listed
+    lenses asked for exactly those, so the preset never regroups them. The
+    full preset (and any explicit list) runs one call per category, skipping
+    the intent lens when nothing states an intent.
+    """
+    fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
+    if fast:
+        lenses = [
+            _Lens(
+                id=ReviewCategory.security.value,
+                system_prompt=build_system_prompt(ReviewCategory.security),
+                user_block=build_lens_block(ReviewCategory.security),
+            ),
+            _Lens(
+                id=ReviewCategory.correctness.value,
+                system_prompt=build_correctness_prompt(has_intent),
+                user_block=build_correctness_block(has_intent),
+                carries_intent=has_intent,
+                allowed_categories=(
+                    frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
+                    if has_intent
+                    else None
+                ),
+            ),
+        ]
+        lenses += [
+            _Lens(
+                id=group.id,
+                system_prompt=build_group_prompt(group),
+                user_block=build_group_block(group),
+                allowed_categories=frozenset(c.value for c in group.members),
+            )
+            for group in FAST_GROUPS
+        ]
+    else:
+        lenses = [
+            _Lens(
+                id=category.value,
+                system_prompt=build_system_prompt(category),
+                user_block=build_lens_block(category),
+                carries_intent=category is ReviewCategory.intent,
+            )
+            for category in cfg.categories
+        ]
+        if not has_intent and any(lens.carries_intent for lens in lenses):
+            lenses = [lens for lens in lenses if not lens.carries_intent]
+            _log.info("intent lens skipped — no stated intent (title/description/commits)")
     lenses += [
         _Lens(
             id=lens.id,
@@ -188,10 +239,7 @@ class LLMReviewEngine(ReviewEngine):
             #     rather than burn a model call judging the diff against nothing.
             intent_text = _intent_text(ctx)
             intent_block = wrap_intent(redact(intent_text)) if intent_text else None
-        lenses = _build_lenses(cfg)
-        if intent_block is None and any(lens.carries_intent for lens in lenses):
-            lenses = [lens for lens in lenses if not lens.carries_intent]
-            _log.info("intent lens skipped — no stated intent (title/description/commits)")
+        lenses = _build_lenses(cfg, has_intent=intent_block is not None)
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
         #    then apply the user's path filters (include_paths allowlist, then
@@ -611,10 +659,23 @@ class LLMReviewEngine(ReviewEngine):
         except ParseError:
             _log.warning("unparseable model output", extra={"lens": lens.id})
             return [], "unparseable model output"
-        # Stamp the originating lens (engine-derived — the model's own value is
-        # overwritten): it drives the security label and category-matched
-        # finding_rules, and surfaces in JSON output.
-        findings = [f.model_copy(update={"category": lens.id}) for f in findings]
+        # Stamp the originating lens (engine-derived): it drives the security
+        # label and category-matched finding_rules, and surfaces in JSON output.
+        # A focused lens overwrites the model's value outright; a merged
+        # (fast-preset) lens covers several categories, so a model-supplied
+        # value from its member set is kept and anything else falls back to
+        # the lens id.
+        allowed = lens.allowed_categories
+        findings = [
+            f.model_copy(
+                update={
+                    "category": (
+                        f.category if allowed is not None and f.category in allowed else lens.id
+                    )
+                }
+            )
+            for f in findings
+        ]
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
 

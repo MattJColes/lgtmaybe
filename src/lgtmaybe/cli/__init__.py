@@ -25,14 +25,20 @@ from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
 from lgtmaybe.core.diffparse import FILE_HEADER_RE
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, Provider, ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import (
+    PRContext,
+    Provider,
+    ReviewConfig,
+    ReviewFinding,
+    ReviewPreset,
+)
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
 from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
-from lgtmaybe.providers.factory import build_provider
+from lgtmaybe.providers.factory import build_provider, cheaper_reflect_sibling
 
 _log = get_logger(__name__)
 
@@ -107,6 +113,16 @@ def build_provider_engine(
     options stay in exactly one place. Raises ValueError with an actionable
     message when a required credential is missing.
     """
+    # Fast preset: default the reflection audit to a cheaper sibling of the
+    # review model when one is confidently resolvable (anthropic/openai only —
+    # see cheaper_reflect_sibling). An explicit reflect_model always wins, and
+    # the full preset keeps auditing with the review model as before.
+    if cfg.preset is ReviewPreset.fast and cfg.reflect_model is None:
+        sibling = cheaper_reflect_sibling(cfg.provider, cfg.model)
+        if sibling is not None:
+            _log.info("fast preset: reflecting with a cheaper sibling", extra={"model": sibling})
+            cfg = cfg.model_copy(update={"reflect_model": sibling})
+
     auth = resolve_credentials(
         cfg.provider,
         api_key=runtime.api_key,
@@ -446,6 +462,7 @@ def action_inputs() -> dict[str, str | None]:
     return {
         "provider": get("PROVIDER"),
         "model": get("MODEL"),
+        "preset": get("PRESET"),
         "fallback_model": get("FALLBACK_MODEL"),
         "reflect_model": get("REFLECT_MODEL"),
         "triage_model": get("TRIAGE_MODEL"),

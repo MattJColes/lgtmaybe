@@ -14,6 +14,10 @@ inputs:
     description: "Model name understood by the chosen provider (e.g. gpt-5.5, claude-sonnet-4-6)."
     required: false
     default: ""
+  preset:
+    description: "Review preset. fast (the default) covers all nine lenses in four model calls: dedicated security and correctness calls (the stated intent folds into correctness), plus merged code-health (performance/complexity/ponytail/deprecation) and artefacts (tests/documentation) calls — roughly half the calls and wall time, trading some recall on the softer lenses. full runs one call per lens, for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
+    required: false
+    default: ""
   fallback_model:
     description: "Model to retry with if the primary model fails."
     required: false
@@ -177,6 +181,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         INPUT_PROVIDER: ${{ inputs.provider }}
         INPUT_MODEL: ${{ inputs.model }}
+        INPUT_PRESET: ${{ inputs.preset }}
         INPUT_FALLBACK_MODEL: ${{ inputs.fallback_model }}
         INPUT_REFLECT_MODEL: ${{ inputs.reflect_model }}
         INPUT_TRIAGE_MODEL: ${{ inputs.triage_model }}
@@ -205,7 +210,8 @@ runs:
           -e GITHUB_TOKEN \
           -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH \
           -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL \
-          -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_FALLBACK_MODEL -e INPUT_REFLECT_MODEL \
+          -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_PRESET \
+          -e INPUT_FALLBACK_MODEL -e INPUT_REFLECT_MODEL \
           -e INPUT_TRIAGE_MODEL \
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
           -e INPUT_TIMEOUT -e INPUT_TEMPERATURE \

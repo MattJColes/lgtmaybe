@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReflectionResult, ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import (
+    PRContext,
+    ReflectionResult,
+    ReviewConfig,
+    ReviewFinding,
+    ReviewPreset,
+)
 from lgtmaybe.core.ports import ProviderClient
 
 from .astgrep import SymbolResolver
@@ -261,6 +267,11 @@ def _audit(
     # finding so it can verify a whole-file claim — that an import/symbol IS
     # present, that a duplicate isn't real — instead of guessing about unseen code.
     reserve = cfg.max_input_tokens - count_tokens(ctx.diff) - count_tokens(findings_json)
+    if cfg.preset is ReviewPreset.fast:
+        # The everyday path trades some grounding depth for a faster, cheaper
+        # audit: cap the head-text budget at a quarter of the input budget
+        # (the full preset still hands the auditor everything that fits).
+        reserve = min(reserve, cfg.max_input_tokens // 4)
     grounding = _grounding_block(findings, ctx, reserve, extra_paths=fetched_paths)
 
     diff_part = f"Diff:\n{ctx.diff}"

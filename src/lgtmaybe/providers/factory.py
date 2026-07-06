@@ -59,6 +59,33 @@ def default_timeout_for(provider: Provider) -> int:
     return _LOCAL_TIMEOUT if provider in _LOCAL_CAPABLE else _CLOUD_TIMEOUT
 
 
+def cheaper_reflect_sibling(provider: Provider, model: str) -> str | None:
+    """A cheaper, faster sibling of *model* to default ``reflect_model`` to.
+
+    Used by the fast preset: the reflection audit re-reads the diff plus every
+    finding, and a small sibling judges keep/drop well — the strong model's
+    depth is spent on finding, not re-checking. Deliberately conservative:
+    only providers whose small-model naming is stable get a mapping (anthropic
+    haiku, openai mini), matched on the family name so a dated or versioned id
+    still resolves. Everything else — bedrock/vertex model ids embed
+    region/version schemes that drift, ollama is whatever the user pulled —
+    returns None and reflection keeps using the review model, exactly as when
+    the flag is unset. A wrong guess here would 404 every reflection pass, so
+    "no mapping" beats a clever one.
+    """
+    name = model.lower()
+    if provider is Provider.anthropic and ("sonnet" in name or "opus" in name):
+        return "claude-haiku-4-5"
+    if (
+        provider is Provider.openai
+        and name.startswith("gpt-5")
+        and "mini" not in name
+        and "nano" not in name
+    ):
+        return "gpt-5-mini"
+    return None
+
+
 def litellm_model_string(provider: Provider, model: str) -> str:
     """Return the litellm model string for the given provider and model name."""
     return f"{_PREFIXES[provider]}/{model}"

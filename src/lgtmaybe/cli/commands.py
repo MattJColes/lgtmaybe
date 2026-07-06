@@ -56,6 +56,22 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
 )
 @click.option("--model", default=None, help="Model name understood by the chosen provider")
 @click.option(
+    "--preset",
+    default=None,
+    type=click.Choice(["fast", "full"]),
+    help="Review preset: fast (default) covers all nine lenses in four model "
+    "calls — dedicated security and correctness calls (stated intent folds "
+    "into correctness), plus merged code-health and artefacts calls; full runs "
+    "one call per lens for release branches and deep audits (~2x the calls)",
+)
+@click.option(
+    "--full",
+    "full_preset",
+    is_flag=True,
+    default=False,
+    help="Shorthand for --preset full",
+)
+@click.option(
     "--fallback-model",
     default=None,
     help="Model to retry with if the primary model fails",
@@ -244,6 +260,8 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
 def review(
     provider: str | None,
     model: str | None,
+    preset: str | None,
+    full_preset: bool,
     fallback_model: str | None,
     reflect_model: str | None,
     triage_model: str | None,
@@ -276,11 +294,14 @@ def review(
     """Review local git changes and print findings — no GitHub needed."""
     if working and uncommitted:
         raise click.UsageError("--working and --uncommitted are mutually exclusive")
+    if full_preset and preset == "fast":
+        raise click.UsageError("--full contradicts --preset fast")
     cfg = load_config(
         config_path=Path(config_path),
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
+        preset="full" if full_preset else preset,
         reflect_model=reflect_model,
         triage_model=triage_model,
         min_severity=min_severity,
@@ -349,6 +370,7 @@ def action() -> None:
         config_path=Path(inputs["config_path"] or ".lgtmaybe.yml"),
         provider=inputs["provider"],
         model=inputs["model"],
+        preset=inputs["preset"],
         reflect_model=inputs["reflect_model"],
         triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],

@@ -405,9 +405,8 @@ def test_reflect_true_runs_the_reflection_pass() -> None:
     engine.review(_CTX, cfg)
 
     assert len(_reflection_calls(provider)) == 1  # exactly one reflection pass
-    # One review call per category — minus intent, which is skipped because _CTX
-    # carries no stated intent (no title/description/commit messages).
-    assert len(_review_calls(provider)) == len(cfg.categories) - 1
+    # The default fast preset covers the nine lenses in four grouped calls.
+    assert len(_review_calls(provider)) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +589,7 @@ class _PerCategoryProvider(FakeProvider):
 def test_fans_out_one_call_per_category_and_merges_findings() -> None:
     provider = _PerCategoryProvider()
     engine = LLMReviewEngine(provider)
-    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False, preset="full")
 
     findings, _ = engine.review(_CTX, cfg)
 
@@ -1012,7 +1011,8 @@ def test_review_logs_an_upfront_work_summary(engine_logs) -> None:
 
     starting = [r for r in engine_logs if "review starting" in r.getMessage()]
     assert starting, "expected an up-front 'review starting' log"
-    assert getattr(starting[0], "lenses", None) == len(cfg.categories) - 1  # intent skipped
+    # The default fast preset queues four grouped lens calls.
+    assert getattr(starting[0], "lenses", None) == 4
 
 
 def test_review_logs_a_heartbeat_as_each_lens_runs(engine_logs) -> None:
@@ -1082,9 +1082,9 @@ def test_custom_lens_runs_as_an_extra_review_call() -> None:
     findings, _ = engine.review(_CTX, cfg)
 
     review_calls = _review_calls(provider)
-    # _CTX states no intent, so the intent lens is skipped; the custom lens adds one.
-    n_builtin = len([c for c in cfg.categories if c is not ReviewCategory.intent])
-    assert len(review_calls) == n_builtin + 1
+    # The default fast preset runs four grouped built-in calls; the custom
+    # lens always adds its own focused call on top.
+    assert len(review_calls) == 4 + 1
     assert any("Simplify or delete" in _all_text(c) for c in review_calls)
     assert findings  # the custom lens's finding survived the pipeline
 
