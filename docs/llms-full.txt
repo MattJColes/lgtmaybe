@@ -215,8 +215,11 @@ pip install lgtmaybe
 Verify it:
 
 ```bash
-lgtmaybe --help
+lgtmaybe help
 ```
+
+That prints the command list with usage examples; `lgtmaybe help <command>`
+(e.g. `lgtmaybe help review`) shows the full option reference for one command.
 
 Upgrade later with `pip install --upgrade lgtmaybe`.
 

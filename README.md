@@ -123,8 +123,10 @@ lgtmaybe review \
 ```
 
 No GitHub token and no pull request needed — `lgtmaybe review` reads your local
-`git` diff and prints the findings. To post reviews on real pull requests, wire
-up the [GitHub Action](#use-as-a-github-action). See
+`git` diff and prints the findings. `lgtmaybe help` lists every command with
+usage examples; `lgtmaybe help review` shows the full option reference. To post
+reviews on real pull requests, wire up the
+[GitHub Action](#use-as-a-github-action). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
 
 > **Picking a model:** use a **coding** model, and **bigger/newer is more

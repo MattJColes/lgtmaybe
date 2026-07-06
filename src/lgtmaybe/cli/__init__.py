@@ -488,7 +488,21 @@ def action_inputs() -> dict[str, str | None]:
     }
 
 
-@click.group()
+_EPILOG = """\
+\b
+Examples:
+  lgtmaybe review                          Review your branch vs the default branch
+  lgtmaybe review --working                Include uncommitted edits too
+  lgtmaybe review --provider ollama --model qwen3:27b
+  lgtmaybe review --format json            Machine-readable findings
+  lgtmaybe config init                     One-time provider/model setup
+  lgtmaybe help COMMAND                    Detailed help for any command
+\b
+Docs: https://mattjcoles.github.io/lgtmaybe/
+"""
+
+
+@click.group(epilog=_EPILOG)
 def main() -> None:
     """lgtmaybe — provider-agnostic PR reviewer."""
 
