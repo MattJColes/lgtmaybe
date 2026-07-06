@@ -7,6 +7,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -36,6 +37,7 @@ from .compress import (
 )
 from .injection import wrap_diff, wrap_hints, wrap_intent
 from .parse import ParseError, parse_findings
+from .profiling import profiler
 from .prompt import build_lens_prompt, build_system_prompt
 from .redact import redact
 from .reflect import reflect_findings
@@ -118,14 +120,15 @@ class LLMReviewEngine(ReviewEngine):
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
         # 1. Redact secrets from the diff before it leaves this process.
-        clean_diff = redact(ctx.diff)
+        with profiler.stage("redact"):
+            clean_diff = redact(ctx.diff)
 
-        # 1b. Stated intent (PR title/description/commit names) for the intent
-        #     lens: redacted like the diff, wrapped as untrusted data, and only
-        #     ever sent on the intent call. No stated intent → skip that lens
-        #     rather than burn a model call judging the diff against nothing.
-        intent_text = _intent_text(ctx)
-        intent_block = wrap_intent(redact(intent_text)) if intent_text else None
+            # 1b. Stated intent (PR title/description/commit names) for the intent
+            #     lens: redacted like the diff, wrapped as untrusted data, and only
+            #     ever sent on the intent call. No stated intent → skip that lens
+            #     rather than burn a model call judging the diff against nothing.
+            intent_text = _intent_text(ctx)
+            intent_block = wrap_intent(redact(intent_text)) if intent_text else None
         lenses = _build_lenses(cfg)
         if intent_block is None and any(lens.carries_intent for lens in lenses):
             lenses = [lens for lens in lenses if not lens.carries_intent]
@@ -134,19 +137,22 @@ class LLMReviewEngine(ReviewEngine):
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
         #    then apply the user's path filters (include_paths allowlist, then
         #    exclude_paths denylist).
-        file_patches = split_by_file(clean_diff, ctx.changed_files)
-        file_patches = [
-            (path, patch)
-            for path, patch in file_patches
-            if is_reviewable(path)
-            and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
-        ]
+        with profiler.stage("split"):
+            file_patches = split_by_file(clean_diff, ctx.changed_files)
+            file_patches = [
+                (path, patch)
+                for path, patch in file_patches
+                if is_reviewable(path)
+                and passes_path_filters(
+                    path, include=cfg.include_paths, exclude=cfg.exclude_paths
+                )
+            ]
 
-        # 3. File cap: review only the first N reviewable files, note the rest.
-        total_files = len(file_patches)
-        capped_files = total_files > cfg.max_files
-        if capped_files:
-            file_patches = file_patches[: cfg.max_files]
+            # 3. File cap: review only the first N reviewable files, note the rest.
+            total_files = len(file_patches)
+            capped_files = total_files > cfg.max_files
+            if capped_files:
+                file_patches = file_patches[: cfg.max_files]
 
         # 3b. Static-analysis grounding (default off): deterministic tool
         #     findings over the reviewed files' head texts, fed to each batch's
@@ -155,10 +161,11 @@ class LLMReviewEngine(ReviewEngine):
         #     subprocess) — behaviour is byte-identical to before the feature.
         sa_hints: list[ToolFinding] = []
         if cfg.static_analysis.enabled and ctx.file_contents:
-            reviewed_paths = {path for path, _ in file_patches}
-            sa_hints = run_static_analysis(
-                {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
-            )
+            with profiler.stage("static_analysis"):
+                reviewed_paths = {path for path, _ in file_patches}
+                sa_hints = run_static_analysis(
+                    {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
+                )
 
         # 3c. Two-stage triage (default off): a cheap triage_model skips
         #     plainly-non-substantive files and ranks the rest by risk, so the
@@ -168,9 +175,10 @@ class LLMReviewEngine(ReviewEngine):
         #     failure reviews everything.
         skipped_by_triage: list[str] = []
         if cfg.triage_model and file_patches:
-            file_patches, skipped_by_triage = triage_files(
-                file_patches, sa_hints, cfg, self._provider
-            )
+            with profiler.stage("triage"):
+                file_patches, skipped_by_triage = triage_files(
+                    file_patches, sa_hints, cfg, self._provider
+                )
 
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
@@ -180,34 +188,36 @@ class LLMReviewEngine(ReviewEngine):
         #    head file text the gateway fetched (redacted), and is for
         #    understanding only — inline-comment positions are always built
         #    from the real diff.
-        used_tokens = count_tokens(clean_diff)
-        remaining = max(0, cfg.max_input_tokens - used_tokens)
-        ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
-        if ctx_lines > 0 and ctx.file_contents:
-            after = trailing_context_lines(ctx_lines)
-            file_patches = [
-                (
-                    path,
-                    expand_hunks(
-                        patch,
-                        redact(ctx.file_contents.get(path, "")),
-                        ctx_lines,
-                        after=after,
-                        # Enclosing function/class boundaries (ast-grep; [] on
-                        # any failure) so the leading pad reaches the signature.
-                        boundaries=(
-                            definition_starts(ctx.file_contents.get(path, ""), path)
-                            if cfg.function_context and ctx.file_contents.get(path)
-                            else None
+        with profiler.stage("expand"):
+            used_tokens = count_tokens(clean_diff)
+            remaining = max(0, cfg.max_input_tokens - used_tokens)
+            ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
+            if ctx_lines > 0 and ctx.file_contents:
+                after = trailing_context_lines(ctx_lines)
+                file_patches = [
+                    (
+                        path,
+                        expand_hunks(
+                            patch,
+                            redact(ctx.file_contents.get(path, "")),
+                            ctx_lines,
+                            after=after,
+                            # Enclosing function/class boundaries (ast-grep; [] on
+                            # any failure) so the leading pad reaches the signature.
+                            boundaries=(
+                                definition_starts(ctx.file_contents.get(path, ""), path)
+                                if cfg.function_context and ctx.file_contents.get(path)
+                                else None
+                            ),
                         ),
-                    ),
-                )
-                for path, patch in file_patches
-            ]
+                    )
+                    for path, patch in file_patches
+                ]
 
-        batches = batch_files(
-            file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
-        )
+        with profiler.stage("batch"):
+            batches = batch_files(
+                file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
+            )
 
         # Announce the queued work before any model call returns, so a long run
         # on a slow provider shows up immediately in the Action log instead of
@@ -233,30 +243,39 @@ class LLMReviewEngine(ReviewEngine):
         # Constrain output to the findings schema (provider-native JSON mode) per
         # review call — NOT globally, so the reflection call keeps its own format.
         response_format = ReviewResult if cfg.structured_output else None
-        for batch_num, batch in enumerate(batches, start=1):
-            batch_diff = "\n".join(patch for _, patch in batch)
-            wrapped = wrap_diff(batch_diff)
-            # Static-analysis hints for THIS batch's files only, redacted (tool
-            # messages can quote hostile file content — same posture as the
-            # diff) and wrapped as their own neutralised untrusted block.
-            batch_paths = {path for path, _ in batch}
-            batch_hints = [h for h in sa_hints if h.path in batch_paths]
-            hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
-            review_one = partial(
-                self._review_lens, wrapped, intent_block, hint_block, cfg.model, response_format
-            )
-            if len(batches) > 1:
-                _log.info(
-                    "reviewing batch",
-                    extra={"batch": batch_num, "batches": len(batches)},
+        with profiler.stage("review"):
+            for batch_num, batch in enumerate(batches, start=1):
+                batch_diff = "\n".join(patch for _, patch in batch)
+                wrapped = wrap_diff(batch_diff)
+                # Static-analysis hints for THIS batch's files only, redacted (tool
+                # messages can quote hostile file content — same posture as the
+                # diff) and wrapped as their own neutralised untrusted block.
+                batch_paths = {path for path, _ in batch}
+                batch_hints = [h for h in sa_hints if h.path in batch_paths]
+                hint_block = (
+                    wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
                 )
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                for findings, error in pool.map(review_one, lenses):
-                    total_calls += 1
-                    if error is not None:
-                        failed_calls += 1
-                        errors.append(error)
-                    all_findings.extend(findings)
+                review_one = partial(
+                    self._review_lens,
+                    wrapped,
+                    intent_block,
+                    hint_block,
+                    cfg.model,
+                    response_format,
+                    batch_num,
+                )
+                if len(batches) > 1:
+                    _log.info(
+                        "reviewing batch",
+                        extra={"batch": batch_num, "batches": len(batches)},
+                    )
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    for findings, error in pool.map(review_one, lenses):
+                        total_calls += 1
+                        if error is not None:
+                            failed_calls += 1
+                            errors.append(error)
+                        all_findings.extend(findings)
 
         # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
         #     have no signal — never pass that off as a clean review.
@@ -275,20 +294,23 @@ class LLMReviewEngine(ReviewEngine):
         #    changed line whose content matches its verbatim `anchor`, so comments
         #    land on the code they describe. Done before dedupe so findings the
         #    model placed on slightly different wrong lines collapse correctly.
-        all_findings = _snap_findings(all_findings, reviewed_diff)
+        with profiler.stage("snap"):
+            all_findings = _snap_findings(all_findings, reviewed_diff)
 
         # 7. Merge: a finding can surface under more than one lens (a shell
         #    injection is both a security and a correctness issue), so collapse
         #    duplicates before reflecting.
-        all_findings = _dedupe(all_findings)
+        with profiler.stage("dedupe"):
+            all_findings = _dedupe(all_findings)
 
         # 7b. Suppression: drop findings a team has marked known-fine — by
         #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
         #     ignore` pragma on/above the flagged line. Done before reflection so a
         #     suppressed finding costs no reflection tokens and never posts.
-        before_suppress = len(all_findings)
-        all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
-        suppressed = before_suppress - len(all_findings)
+        with profiler.stage("suppress"):
+            before_suppress = len(all_findings)
+            all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+            suppressed = before_suppress - len(all_findings)
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
 
@@ -300,28 +322,30 @@ class LLMReviewEngine(ReviewEngine):
             # model_copy keeps file_contents — reflection now grounds itself on the
             # (redacted) head text of flagged files to verify whole-file claims.
             clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
-            all_findings = reflect_findings(
-                all_findings,
-                clean_ctx,
-                cfg,
-                self._provider,
-                fetch_file=self._fetch_file,
-                resolve_symbol=self._resolve_symbol,
-            )
+            with profiler.stage("reflect"):
+                all_findings = reflect_findings(
+                    all_findings,
+                    clean_ctx,
+                    cfg,
+                    self._provider,
+                    fetch_file=self._fetch_file,
+                    resolve_symbol=self._resolve_symbol,
+                )
 
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a
         #    low-confidence guess, so surface it only when it's high/critical.
-        filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
+        with profiler.stage("filter"):
+            filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
 
-        # 9b. Declarative post-processing (finding_rules, default none): the
-        #     team's drop / severity-remap rules, applied last so they see
-        #     exactly what would otherwise post. Imported lazily — rules.py
-        #     imports this module's glob matcher, so a top import would cycle.
-        if cfg.finding_rules:
-            from .rules import apply_finding_rules
+            # 9b. Declarative post-processing (finding_rules, default none): the
+            #     team's drop / severity-remap rules, applied last so they see
+            #     exactly what would otherwise post. Imported lazily — rules.py
+            #     imports this module's glob matcher, so a top import would cycle.
+            if cfg.finding_rules:
+                from .rules import apply_finding_rules
 
-            filtered = apply_finding_rules(filtered, cfg)
+                filtered = apply_finding_rules(filtered, cfg)
 
         summary_line = _summary_line(len(filtered), cfg)
 
@@ -364,6 +388,7 @@ class LLMReviewEngine(ReviewEngine):
         hint_block: str | None,
         model: str,
         response_format: type[ReviewResult] | None,
+        batch_num: int,
         lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
@@ -390,16 +415,40 @@ class LLMReviewEngine(ReviewEngine):
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.
         _log.info("reviewing lens", extra={"lens": lens.id})
+        started = time.perf_counter()
         try:
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
             reason = _error_reason(exc)
+            profiler.record_call(
+                label=lens.id,
+                batch=batch_num,
+                elapsed=time.perf_counter() - started,
+                # The exception path carries no attempt count — 0 means unknown
+                # (the adapter may have burned its whole retry budget in here).
+                attempts=0,
+                input_tokens=0,
+                output_tokens=0,
+                cache_read_tokens=0,
+                cache_creation_tokens=0,
+                error=reason,
+            )
             _log.warning(
                 "review call failed",
                 extra={"lens": lens.id, "reason": reason},
                 exc_info=True,
             )
             return [], reason
+        profiler.record_call(
+            label=lens.id,
+            batch=batch_num,
+            elapsed=time.perf_counter() - started,
+            attempts=result.attempts,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cache_read_tokens=result.cache_read_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+        )
         try:
             findings = parse_findings(result.text)
         except ParseError:

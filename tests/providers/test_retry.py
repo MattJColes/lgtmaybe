@@ -39,6 +39,14 @@ class TestRetry:
 
         assert result.text == "retried ok"
         assert call_count == 2
+        # The retry is visible on the result, for the timing instrumentation.
+        assert result.attempts == 2
+
+    def test_first_try_success_reports_one_attempt(self) -> None:
+        with patch("litellm.completion", return_value=_fake_response("ok")):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+        assert result.attempts == 1
 
     def test_all_retries_exhausted_raises(self) -> None:
         """When all retries are exhausted the error propagates."""

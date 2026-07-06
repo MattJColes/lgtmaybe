@@ -28,6 +28,7 @@ from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, Provider, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
+from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
@@ -238,7 +239,8 @@ def run_review(
         # Pass the FULL PR diff (already fetched) so the commentable-line
         # index is built from the diff the comments will anchor to — the
         # incremental diff's context lines aren't necessarily in the PR diff.
-        github.post_review(findings, summary, diff=ctx.diff)
+        with profiler.stage("post"):
+            github.post_review(findings, summary, diff=ctx.diff)
         if cfg.pr_labels:
             # Effort/risk labels from data already computed — best-effort,
             # and only on gateways that support them (fakes don't).
@@ -301,6 +303,7 @@ def execute_local_review(
     runs the engine over the local diff, and prints the result. Any failure
     surfaces as a clean CLI error — there is no PR to post a notice to.
     """
+    profiler.reset()
     try:
         # Wire a read-only working-tree reader so reflection can resolve a deferred
         # verdict against the user's own checkout (safe — their branch, not PR code).
@@ -319,6 +322,8 @@ def execute_local_review(
         raise click.ClickException(str(exc)) from exc
 
     click.echo(render_findings(findings, summary, fmt=fmt))
+    if runtime.profile:
+        click.echo(profiler.render())
 
 
 def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
@@ -339,6 +344,7 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
 
     Shared by the ``review`` command and the ``action`` entrypoint.
     """
+    profiler.reset()
     # Adapter construction can fail before we have any way to post (bad URL,
     # missing token/credentials). Surface those as a clean CLI error.
     try:
@@ -358,6 +364,8 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
     if dry_run:
         click.echo(f"[dry-run] {summary}")
         click.echo(render_findings(findings, summary, fmt="json"))
+    if runtime.profile:
+        click.echo(profiler.render())
 
 
 def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
@@ -456,6 +464,7 @@ def action_inputs() -> dict[str, str | None]:
         "static_analysis": get("STATIC_ANALYSIS"),
         "auto_describe": get("AUTO_DESCRIBE"),
         "pr_labels": get("PR_LABELS"),
+        "profile": get("PROFILE"),
         "config_path": get("CONFIG_PATH"),
     }
 

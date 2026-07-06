@@ -18,6 +18,7 @@ from lgtmaybe.core.ports import ProviderClient
 from .astgrep import SymbolResolver
 from .compress import count_tokens
 from .parse import iter_json_values
+from .profiling import timed_complete
 from .redact import redact
 from .retrieve import MAX_FETCH_FILES, MAX_HOPS, FileFetcher, resolve_needs
 
@@ -270,12 +271,14 @@ def _audit(
     )
 
     opts: dict[str, Any] = {"response_format": ReflectionResult} if cfg.structured_output else {}
-    result = provider.complete(
-        messages=[
+    result = timed_complete(
+        provider,
+        [
             {"role": "system", "content": _REFLECT_SYSTEM},
             {"role": "user", "content": user_content},
         ],
         model=cfg.reflect_model or cfg.model,
+        label="reflect",
         **opts,
     )
     return _parse_verdicts(result.text)

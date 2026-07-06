@@ -176,6 +176,9 @@ class LiteLLMProvider(ProviderClient):
         # in cache support), and to a copy — the caller's messages are not ours
         # to mutate.
         messages = self._with_cache_control(messages, model)
+        # Counted here (not read from tenacity's statistics) so the number lands
+        # on the result even when the mocked/fake retry layer changes shape.
+        attempts = 0
 
         @retry(
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
@@ -184,6 +187,8 @@ class LiteLLMProvider(ProviderClient):
             reraise=True,
         )
         def _call() -> ProviderResult:
+            nonlocal attempts
+            attempts += 1
             # A prior call already proved this model's JSON-schema mode returns
             # empty, so don't pay the wasted round-trip again — drop it up front.
             if self._skip_response_format:
@@ -201,7 +206,8 @@ class LiteLLMProvider(ProviderClient):
                 result = self._raw_completion(model, messages, kwargs)
             return result
 
-        return _call()
+        result = _call()
+        return result.model_copy(update={"attempts": attempts})
 
     def _raw_completion(
         self, model: str, messages: list[Message], kwargs: dict[str, Any]

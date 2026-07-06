@@ -100,6 +100,7 @@ The normalised return value of one LLM completion, including token usage.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `attempts` | integer | No | `1` | Attempts |
 | `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
 | `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
@@ -873,6 +874,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "The normalised return of one LLM completion, with token usage.",
   "properties": {
+    "attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Attempts",
+      "type": "integer"
+    },
     "cache_creation_tokens": {
       "default": 0,
       "title": "Cache Creation Tokens",

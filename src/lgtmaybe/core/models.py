@@ -361,6 +361,10 @@ class ProviderResult(_Strict):
     # providers/models without prompt caching (back-compat default).
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Completion attempts the adapter made to produce this result (1 = first try).
+    # Feeds the timing instrumentation so a call that burned its retry budget is
+    # distinguishable from one that was merely slow.
+    attempts: int = Field(default=1, ge=1)
 
 
 class PRContext(_Strict):

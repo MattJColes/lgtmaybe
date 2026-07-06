@@ -26,6 +26,7 @@ from lgtmaybe.core.ports import ProviderClient
 
 from .injection import neutralise
 from .parse import iter_json_values
+from .profiling import timed_complete
 from .static_analysis import ToolFinding
 
 _log = get_logger(__name__)
@@ -160,12 +161,14 @@ def _ask_triage(
     user = neutralise("\n\n".join(blocks)) + "\n\nReturn the triage verdict JSON object."
 
     opts: dict[str, Any] = {"response_format": TriageResult} if cfg.structured_output else {}
-    result = provider.complete(
-        messages=[
+    result = timed_complete(
+        provider,
+        [
             {"role": "system", "content": _TRIAGE_SYSTEM},
             {"role": "user", "content": user},
         ],
         model=cfg.triage_model or cfg.model,
+        label="triage",
         **opts,
     )
     return _parse_triage(result.text)

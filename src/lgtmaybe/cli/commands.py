@@ -219,6 +219,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     "are skipped silently — pip install lgtmaybe[static-analysis])",
 )
 @click.option(
+    "--profile",
+    is_flag=True,
+    default=False,
+    help="Print a timing profile at the end of the run: total wall time, "
+    "per-stage and per-call tables, and prompt-cache hit totals",
+)
+@click.option(
     "--config",
     "config_path",
     default=".lgtmaybe.yml",
@@ -253,6 +260,7 @@ def review(
     symbol_resolution: bool | None,
     prompt_cache: bool | None,
     static_analysis: bool | None,
+    profile: bool,
     config_path: str,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
@@ -282,7 +290,9 @@ def review(
     )
     cfg = _apply_static_analysis_flag(cfg, static_analysis)
 
-    runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
+    runtime = RuntimeOptions(
+        api_key=api_key, api_base=api_base, fallback_model=fallback_model, profile=profile
+    )
     fmt = output_format or ("json" if as_json else "human")
     execute_local_review(cfg, runtime, base=base, working=working, uncommitted=uncommitted, fmt=fmt)
 
@@ -347,10 +357,12 @@ def action() -> None:
     cfg = _apply_static_analysis_flag(
         cfg, None if raw_sa is None else raw_sa.strip().lower() in ("true", "1", "yes")
     )
+    raw_profile = inputs["profile"]
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],
         api_base=inputs["api_base"],
         fallback_model=inputs["fallback_model"],
+        profile=raw_profile is not None and raw_profile.strip().lower() in ("true", "1", "yes"),
     )
 
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
