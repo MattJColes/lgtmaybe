@@ -10,7 +10,11 @@ dependencies = [
     "ast-grep-cli>=0.44.0",
     "click>=8.4.1",
     "httpx>=0.28.1",
-    "litellm>=1.87.1",
+    # litellm 1.92.0 ships only cp311–cp313 compiled wheels; its sdist needs
+    # pyo3 0.23 (max Python 3.13), so 3.14 installs fail. Cap it there until
+    # upstream publishes cp314 wheels or a pyo3 with 3.14 support.
+    "litellm>=1.87.1; python_version < '3.14'",
+    "litellm>=1.87.1,<1.92; python_version >= '3.14'",
     "pydantic>=2.7",
     "pyyaml>=6.0.3",
     "tenacity>=9.1.4",
