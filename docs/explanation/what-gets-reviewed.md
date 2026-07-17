@@ -308,11 +308,11 @@ Each finding has:
 
 The nine review categories (security, correctness, deprecation, tests,
 documentation, performance, complexity, intent, ponytail) fan out as concurrent
-model calls per the `preset`: the default `fast` preset covers them in four
-calls — dedicated security and correctness calls (the stated intent folds into
+model calls per the `preset`. The default `fast` preset covers them in four
+calls: dedicated security and correctness calls (the stated intent folds into
 correctness), plus a merged code-health call
 (performance/complexity/ponytail/deprecation) and a merged artefacts call
-(tests/documentation), each finding attributed to its category — while
+(tests/documentation), with each finding attributed to its category.
 `preset: full` runs each category as its own focused call with a worked example
 of its own finding type. Their findings are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
@@ -382,9 +382,9 @@ the PR as a short comment.
 `lgtmaybe review` runs the same pipeline over your local `git` diff and prints
 the findings — it posts nothing and needs no GitHub token. By default it diffs
 the current branch against the remote primary branch (`origin/HEAD`, falling
-back to `origin/main`/`origin/master`, then a local `main`/`master`);
+back to `origin/main`/`origin/master`, then a local `main`/`master`).
 `--working` reviews the whole worktree — branch commits plus uncommitted edits —
-against that same base, `--uncommitted` reviews only the uncommitted edits
+against that same base. `--uncommitted` reviews only the uncommitted edits
 against HEAD, and `--base <ref>` picks a different base. The default output is a
 readable listing followed by the summary line:
 

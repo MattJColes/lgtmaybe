@@ -20,13 +20,13 @@ Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
 posts inline comments and a summary straight onto the pull request.
 
-lgtmaybe reviews the lines a change touches, and it runs in two places: as a
+lgtmaybe reviews the lines a change touches. It runs in two places: as a
 GitHub Action on a pull request, or locally from the command line against your
 `git` diff before you push. As an Action it fetches the diff from the GitHub API
-and never checks out or runs your code; locally it reads your working branch.
+and never checks out or runs your code. Locally it reads your working branch.
 Either way it pads each change with a few surrounding lines, so a finding lands
-with the function around it in view, but it only ever comments on the lines that
-actually changed.
+with the function around it in view — but it only ever comments on the lines
+that actually changed.
 
 Reviews surface the things you'd want a careful reviewer to catch:
 
@@ -35,16 +35,16 @@ Reviews surface the things you'd want a careful reviewer to catch:
 - **Missing or weak tests** — changed code paths shipped without a test (flagged with a suggested test to drop in), and tests that don't really test: assertion-free, over-mocked, or sleep-based.
 - **Documentation gaps and stale docs** — public APIs added without a docstring, names that contradict what the code does, and docstrings or comments the change just made wrong.
 - **Deprecated and end-of-life code** — deprecated APIs, end-of-life or vulnerable dependencies, and typosquat-looking additions, flagged when the diff shows them (with the modern replacement suggested where known).
-- **Intent** — does the PR do what it says? The PR title, description, and commit names (or your local `git log` commit names on the CLI) are compared against the diff, flagging out-of-scope hunks, contradictions, and promised behaviour that never lands.
+- **Intent** — does the PR do what it says? lgtmaybe compares the PR title, description, and commit names (or your local `git log` commit names on the CLI) against the diff, and flags out-of-scope hunks, contradictions, and promised behaviour that never lands.
 - **Ponytail** — the "lazy senior dev" lens: the best code is the code you never wrote. Flags code that needn't exist at all — YAGNI, reaching for the standard library, doing it in fewer lines.
 
 Every finding is graded from `info` up to `critical`, so you can set the
-severity floor that matters to you, and each one lands as an inline comment on
+severity floor that matters to you. Each one lands as an inline comment on
 the exact line where the problem is, with a single summary at the top. On the CLI
 the same findings print to your terminal — ready to read, or to hand to an AI
-agent to apply. Generated files and binaries are skipped, secrets are redacted
-and the diff is treated as untrusted input (hardened against prompt injection)
-before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
+agent to apply. Before anything leaves for the model, generated files and
+binaries are skipped, secrets are redacted, and the diff is treated as untrusted
+input, hardened against prompt injection. A clean PR just gets a 👍 **LGTM!**.
 
 ## Start here
 
@@ -73,9 +73,9 @@ before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
 
 ## For AI agents
 
-A curated [`llms.txt`](llms.txt) index of these docs — and a whole-corpus
-[`llms-full.txt`](llms-full.txt) — are published at the site root for LLM
-crawlers and coding agents.
+The site root publishes a curated [`llms.txt`](llms.txt) index of these docs,
+plus a whole-corpus [`llms-full.txt`](llms-full.txt), for LLM crawlers and
+coding agents.
 
 ---
 
@@ -108,9 +108,9 @@ brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-part
 brew install lgtmaybe
 ```
 
-See [Install the CLI](../how-to/install-the-cli.md) for details (the
-`brew trust` step, and that the base install covers the API-key and local
-providers while keyless cloud providers need the `pip` extras).
+See [Install the CLI](../how-to/install-the-cli.md) for details. It explains
+the `brew trust` step, and which providers the base install covers: API-key and
+local ones. Keyless cloud providers need the `pip` extras.
 
 Verify the install:
 
@@ -150,8 +150,8 @@ src/app.py:2  [MEDIUM] Import order
 ```
 
 To review the whole worktree — your branch's commits plus uncommitted edits —
-add `--working`; for only the uncommitted edits, add `--uncommitted`; to diff
-against a different base, pass `--base main`.
+add `--working`. To review only the uncommitted edits, add `--uncommitted`. To
+diff against a different base, pass `--base main`.
 
 ## Step 4 — Change the output format
 
@@ -199,9 +199,9 @@ lgtmaybe ran its pipeline over your local diff:
 
 # Install the CLI
 
-Install the `lgtmaybe` command-line tool once; then point it at any provider. This
-page is only about **getting the CLI onto your machine** — choosing a model
-backend (a hosted API, keyless cloud, or a local model) comes after, in the
+Install the `lgtmaybe` command-line tool once; then point it at any provider.
+This page is only about **getting the CLI onto your machine**. Choosing a model
+backend — a hosted API, keyless cloud, or a local model — comes after, in the
 [provider how-tos](../index.md#providers).
 
 ## Install (pip)
@@ -320,9 +320,9 @@ All lgtmaybe workflows use the `pull_request_target` trigger, not
 The action derives the PR from the triggering event, so there is no `pr-url`
 input to set. On an `issue_comment` event it routes the slash command
 (`/review`, `/ask`, `/describe`, `/improve`) to the same engine. On a
-`synchronize` push the review is **incremental** by default — only the commits
+`synchronize` push the review is **incremental** by default: only the commits
 added since the last completed review are re-reviewed, and earlier findings
-stay open until fixed; comment `/review full` for a full re-review on demand,
+stay open until fixed. Comment `/review full` for a full re-review on demand,
 or pin the behaviour with the `incremental` input / config key.
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
@@ -343,8 +343,8 @@ A maintainer can also review an outside contributor's PR any time by commenting
 To change the policy, edit the `if:` on the `review` job:
 
 - **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review (a friendly choice for an open project; on a hosted provider it means
-  anyone can start a run, so pick it deliberately).
+  review. A friendly choice for an open project — just remember that on a
+  hosted provider it means anyone can start a paid run, so pick it deliberately.
 - **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
   PR has merged before.
 - **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
@@ -510,7 +510,7 @@ Copy [`examples/workflows/review-openai.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -528,9 +528,9 @@ config.
 
 ## Choosing the model
 
-Use any chat model your key can access — e.g. `gpt-5.5` for the strongest
-reviews or a smaller/cheaper model to cut cost. Pass the model litellm's native
-OpenAI name (the same string you'd send to the API).
+Use any chat model your key can access: `gpt-5.5` for the strongest reviews, or
+a smaller model to cut cost. Pass litellm's native OpenAI name — the same string
+you'd send to the API.
 
 ## Persist non-secret defaults
 
@@ -585,7 +585,7 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -603,9 +603,9 @@ config.
 
 ## Choosing the model
 
-Pass the model litellm's native Anthropic name. `claude-sonnet-4-6` is a strong
-default; reach for a larger Opus-class model when you want the deepest review and
-are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
+strong default. Reach for an Opus-class model when you want the deepest review
+and are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
 
 ## Want it through a gateway instead?
 
@@ -666,7 +666,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -747,7 +747,7 @@ Copy [`examples/workflows/review-zai.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -852,10 +852,10 @@ The role needs only:
 (the `us.`/`eu.`/`apac.`-prefixed ids below). A cross-region inference profile
 fans the call out to the foundation model in several regions, so the role needs
 `bedrock:InvokeModel*` on **both** the `inference-profile/*` ARN **and** the
-underlying `foundation-model/*` ARN — granting only one of them still fails with
-`AccessDeniedException`. (A bare `anthropic.…` model id needs only the
+underlying `foundation-model/*` ARN. Granting only one of them still fails with
+`AccessDeniedException`. A bare `anthropic.…` model id needs only the
 `foundation-model/*` ARN, but most current Claude models are invocable only
-through an inference profile — see the model table below.)
+through an inference profile — see the model table below.
 
 Scope each `Resource` to specific model / inference-profile ARNs for tighter
 least-privilege once it works, e.g.
@@ -1051,9 +1051,9 @@ jobs:
 
 ## Running locally with ADC
 
-If your local shell has application default credentials (`gcloud auth
-application-default login`). Vertex token minting needs `google-auth`, so install
-the extra (the Action image already bundles it):
+Sign in with `gcloud auth application-default login` so your shell has
+Application Default Credentials. Vertex token minting needs `google-auth`, so
+install the extra (the Action image already bundles it):
 
 ```bash
 pip install 'lgtmaybe[vertex]'
@@ -1107,12 +1107,12 @@ key-based fallback is covered at the end.
 
 ## How it works
 
-GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it —
-via a **federated credential** on an app registration or managed identity — for
-an Azure AD access token scoped to your Azure OpenAI resource. The action does
-that exchange for you (pass `azure_client_id` / `azure_tenant_id`) and lgtmaybe
-picks up the ambient token through `azure-identity`'s `DefaultAzureCredential` —
-no `AZURE_API_KEY` in your secrets.
+GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it
+for an access token scoped to your Azure OpenAI resource, via a **federated
+credential** on an app registration or managed identity. The action does that
+exchange for you (pass `azure_client_id` / `azure_tenant_id`), and lgtmaybe
+picks up the ambient token through `azure-identity`'s `DefaultAzureCredential`.
+No `AZURE_API_KEY` in your secrets.
 
 Azure still needs two non-secret values: the **deployment name** (`model`) and
 the **resource endpoint** (`api_base`, `https://<resource>.openai.azure.com`).
@@ -1444,16 +1444,18 @@ timeout: 900
 
 The review fans out one call per lens — **four calls** under the default `fast`
 preset (nine under `--preset full`). lgtmaybe runs those **serially for
-ollama** (a single ollama instance serves one request at a time, so firing them
-concurrently would only make each wait and time out). The trade-off is
-wall-clock time — a slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default: four serial calls instead of nine is the
-single biggest local speed-up. To go faster still, narrow the lenses with
-`categories:` in `.lgtmaybe.yml` (e.g. just `security` and `correctness`), use a
-smaller model, or give ollama more GPU. If you have the VRAM to truly serve
-requests in parallel, raise `OLLAMA_NUM_PARALLEL` on the **ollama server** and
-raise `--max-concurrency` to match — by default lgtmaybe issues ollama calls one
-at a time. Add `--profile` to any run to see the per-call breakdown.
+ollama**: a single ollama instance serves one request at a time, so firing them
+concurrently would only make each wait and time out. The trade-off is
+wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
+is exactly why `fast` is the default — four serial calls instead of nine is the
+single biggest local speed-up.
+
+To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
+(e.g. just `security` and `correctness`), use a smaller model, or give ollama
+more GPU. If you have the VRAM to truly serve requests in parallel, raise
+`OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
+match — by default lgtmaybe issues ollama calls one at a time. Add `--profile`
+to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
@@ -1659,10 +1661,10 @@ secret for hosted endpoints; leave it empty for keyless local servers reached at
 
 To keep models returning clean findings instead of prose, lgtmaybe asks for
 structured output via the OpenAI `response_format` parameter (JSON mode). Most
-endpoints honour it. Some enterprise gateways and custom proxies don't — they
-either **ignore** it (the model then answers with the JSON wrapped in a
-```` ```json ```` fence or surrounded by conversational prose) or **reject** the
-request outright with a `400 Bad Request`.
+endpoints honour it. Some enterprise gateways and custom proxies don't. They
+either **ignore** it — the model then answers with the JSON wrapped in a
+```` ```json ```` fence or surrounded by conversational prose — or **reject**
+the request outright with a `400 Bad Request`.
 
 lgtmaybe handles the first case for you: the parser strips fences and pulls the
 JSON out of surrounding prose, so a gateway that merely ignores `response_format`
@@ -1892,9 +1894,9 @@ Default: all nine categories.
 
 ### context_lines
 
-Ceiling on the number of unchanged lines added around each changed hunk, read
-from the head revision of the file so the model can review a change in the
-context of its surrounding code. The pad is **asymmetric**: the full budget goes
+Ceiling on the number of unchanged lines added around each changed hunk. The
+lines are read from the head revision of the file, so the model reviews a
+change in the context of its surrounding code. The pad is **asymmetric**: the full budget goes
 before the hunk (the enclosing signature and setup explain a change best) and a
 quarter of it — at least one line — goes after. The actual number used is the
 smaller of this ceiling and what the token budget allows, so it shrinks
@@ -2036,9 +2038,9 @@ commands, and the local CLI, which never uses it).
 
 Static-analysis fusion: run fast, deterministic linters over the changed files
 and feed their findings to the model as **hints to confirm, contextualise, or
-discard** — raising recall on exactly the mechanical bugs LLMs miss, without
-posting raw linter noise (only findings the model itself confirms are
-reported). Supported tools: **ruff** and **bandit** (Python), and **semgrep**
+discard**. This raises recall on exactly the mechanical bugs LLMs miss without
+posting raw linter noise — only findings the model itself confirms are
+reported. Supported tools: **ruff** and **bandit** (Python), and **semgrep**
 (multi-language) when you point `semgrep_rules` at local rules — semgrep's
 registry configs need the network, which the sandbox forbids.
 
@@ -2068,8 +2070,8 @@ unchanged.
 
 Two-stage model routing so routine PRs don't pay frontier prices while risky
 ones still get the strong model. When set, this **cheap** model runs first
-over the compressed per-file diffs, skipping files that plainly need no review
-(pure formatting, trivial renames, generated churn) and scoring the rest 0–10
+over the compressed per-file diffs. It skips files that plainly need no review
+(pure formatting, trivial renames, generated churn) and scores the rest 0–10
 by risk; the strong `model` then does the deep per-lens review only on the
 survivors, riskiest first. Skipped files are listed in the review summary, and
 `/review full` reviews everything on demand.
@@ -2518,10 +2520,10 @@ A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
 formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
 `brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version.
 `scripts/update-homebrew-formula.sh` writes a small formula that creates a venv
-and `pip install`s lgtmaybe + its dependencies from **PyPI wheels** (no
-per-dependency `resource` stanzas): litellm's tree includes Rust sdists
-(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so the source-build
-approach is a dead end — the wheels work. The formula declares **`preserve_rpath`**
+and `pip install`s lgtmaybe + its dependencies from **PyPI wheels**, with no
+per-dependency `resource` stanzas. litellm's tree includes Rust sdists
+(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so building from
+source is a dead end — the wheels work. The formula declares **`preserve_rpath`**
 so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
 rewrite them ("Failed to fix install linkage"). It's a plain source formula —
 no bottle — so it installs on any architecture and macOS version.
@@ -3921,11 +3923,11 @@ Each finding has:
 
 The nine review categories (security, correctness, deprecation, tests,
 documentation, performance, complexity, intent, ponytail) fan out as concurrent
-model calls per the `preset`: the default `fast` preset covers them in four
-calls — dedicated security and correctness calls (the stated intent folds into
+model calls per the `preset`. The default `fast` preset covers them in four
+calls: dedicated security and correctness calls (the stated intent folds into
 correctness), plus a merged code-health call
 (performance/complexity/ponytail/deprecation) and a merged artefacts call
-(tests/documentation), each finding attributed to its category — while
+(tests/documentation), with each finding attributed to its category.
 `preset: full` runs each category as its own focused call with a worked example
 of its own finding type. Their findings are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
@@ -3995,9 +3997,9 @@ the PR as a short comment.
 `lgtmaybe review` runs the same pipeline over your local `git` diff and prints
 the findings — it posts nothing and needs no GitHub token. By default it diffs
 the current branch against the remote primary branch (`origin/HEAD`, falling
-back to `origin/main`/`origin/master`, then a local `main`/`master`);
+back to `origin/main`/`origin/master`, then a local `main`/`master`).
 `--working` reviews the whole worktree — branch commits plus uncommitted edits —
-against that same base, `--uncommitted` reviews only the uncommitted edits
+against that same base. `--uncommitted` reviews only the uncommitted edits
 against HEAD, and `--base <ref>` picks a different base. The default output is a
 readable listing followed by the summary line:
 
@@ -4102,26 +4104,27 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
    line maps to nothing and is dropped rather than mis-posted.
 
 3. **prompt + parse** — this stage **fans out one model call per review
-   lens**, with the lens set decided by the `preset`: `fast` (the default)
-   covers the nine built-in categories in **four calls** — dedicated security
-   and correctness calls (the stated intent folds into correctness when
-   present), plus merged code-health (performance/complexity/ponytail/
-   deprecation) and artefacts (tests/documentation) calls, each demanding a
-   per-finding `category` — while `full` runs one call per category. Every
+   lens**. The `preset` decides the lens set. `fast` (the default) covers the
+   nine built-in categories in **four calls**: dedicated security and
+   correctness calls (the stated intent folds into correctness when present),
+   plus a merged code-health call (performance/complexity/ponytail/
+   deprecation) and an artefacts call (tests/documentation), each demanding a
+   per-finding `category`. `full` runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
-   ollama and openai-compatible), so batches never wait on each other. With
-   `prompt_cache` on, each call is shaped as a shared cacheable prefix —
-   lens-independent system preamble, then the wrapped diff — followed by the
-   lens-specific instruction as the final user block, so on anthropic/bedrock
-   every call after a batch's first (a warm-up primer runs it alone on big
-   diffs) reads the preamble-plus-diff prefix from cache. Each lens's focused
-   structured prompt requests JSON output with the `ReviewFinding` schema
-   (`path`, `line`, `side`, `severity`, `title`, `body`, `suggestion`,
-   `anchor`) and carries prompt-injection defense instructions. Each response
-   is parsed and validated against `ReviewFinding` using Pydantic; parse
-   errors are logged and surfaced in the summary rather than silently
-   discarded.
+   ollama and openai-compatible), so batches never wait on each other.
+
+   With `prompt_cache` on, each call is shaped as a shared cacheable prefix —
+   a lens-independent system preamble, then the wrapped diff — followed by
+   the lens-specific instruction as the final user block. On anthropic and
+   bedrock, every call after a batch's first reads that preamble-plus-diff
+   prefix from cache (on big diffs a warm-up primer runs the first lens
+   alone). Each lens's focused structured prompt requests JSON output with
+   the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,
+   `body`, `suggestion`, `anchor`) and carries prompt-injection defense
+   instructions. Each response is parsed and validated against
+   `ReviewFinding` using Pydantic; parse errors are logged and surfaced in
+   the summary rather than silently discarded.
 
 4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
    changed line whose content matches the finding's verbatim `anchor`, rather
@@ -4135,19 +4138,22 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
 6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings and drops the ones it marks low-confidence
    (keep-all safe default when the verdict can't be parsed; skippable with
-   `--no-reflect`). When the auditor would drop a finding *only* because it can't
-   see code outside the diff, it **defers** by naming what it needs — a file path
-   or a **symbol**. A path is fetched read-only (`get_file_contents`); a symbol is
-   located by **ast-grep** (`engine/astgrep.py`), which structurally searches a
-   corpus — the local worktree for the CLI, or a read-only shallow clone of the
-   trusted **base** branch for the GitHub path — for the file that *defines* it.
-   That file is then fetched through the same read-only boundary and the auditor
-   re-judges with the real definition in front of it, instead of guessing about an
-   unseen guard or base class. ast-grep only *parses* the corpus (never executes
-   it) and the base clone is never the PR head, so this stays inside the
-   fork-safety model. It needs the bundled `ast-grep` binary and a corpus;
-   without either it degrades to the path-only fetch (`--no-symbol-resolution`
-   disables it entirely). Bounded by the same hop/file caps as the path fetch.
+   `--no-reflect`). When the auditor would drop a finding *only* because it
+   can't see code outside the diff, it **defers** by naming what it needs — a
+   file path or a **symbol**. A path is fetched read-only
+   (`get_file_contents`). A symbol is located by **ast-grep**
+   (`engine/astgrep.py`), which structurally searches a corpus — the local
+   worktree for the CLI, or a read-only shallow clone of the trusted **base**
+   branch for the GitHub path — for the file that *defines* it. That file is
+   then fetched through the same read-only boundary, and the auditor re-judges
+   with the real definition in front of it instead of guessing about an unseen
+   guard or base class.
+
+   This stays inside the fork-safety model: ast-grep only *parses* the corpus
+   (never executes it), and the base clone is never the PR head. Symbol
+   resolution needs the bundled `ast-grep` binary and a corpus; without either
+   it degrades to the path-only fetch (`--no-symbol-resolution` disables it
+   entirely). It is bounded by the same hop/file caps as the path fetch.
 
 7. **filter** — findings below `min_severity` are dropped.
 
@@ -4241,8 +4247,8 @@ lgtmaybe supports seven hosted providers plus local ollama, and an
 format (DeepSeek's API, llama.cpp, LM Studio, vLLM). The design principle is **no
 static cloud credentials**: cloud providers use ambient, short-lived tokens;
 key-based SaaS providers (openai, anthropic, openrouter, zai) require an API key that
-stays in secrets rather than being committed to config. Azure straddles both — it
-prefers ambient Azure AD (Entra) credentials but accepts a resource key — and
+stays in secrets rather than being committed to config. Azure straddles both:
+it prefers ambient Azure AD (Entra) credentials but accepts a resource key. It
 always needs the resource endpoint (`AZURE_API_BASE`), since each Azure OpenAI
 deployment lives at its own URL.
 

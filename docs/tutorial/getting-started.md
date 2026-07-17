@@ -29,9 +29,9 @@ brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-part
 brew install lgtmaybe
 ```
 
-See [Install the CLI](../how-to/install-the-cli.md) for details (the
-`brew trust` step, and that the base install covers the API-key and local
-providers while keyless cloud providers need the `pip` extras).
+See [Install the CLI](../how-to/install-the-cli.md) for details. It explains
+the `brew trust` step, and which providers the base install covers: API-key and
+local ones. Keyless cloud providers need the `pip` extras.
 
 Verify the install:
 
@@ -71,8 +71,8 @@ src/app.py:2  [MEDIUM] Import order
 ```
 
 To review the whole worktree — your branch's commits plus uncommitted edits —
-add `--working`; for only the uncommitted edits, add `--uncommitted`; to diff
-against a different base, pass `--base main`.
+add `--working`. To review only the uncommitted edits, add `--uncommitted`. To
+diff against a different base, pass `--base main`.
 
 ## Step 4 — Change the output format
 

@@ -20,12 +20,12 @@ key-based fallback is covered at the end.
 
 ## How it works
 
-GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it —
-via a **federated credential** on an app registration or managed identity — for
-an Azure AD access token scoped to your Azure OpenAI resource. The action does
-that exchange for you (pass `azure_client_id` / `azure_tenant_id`) and lgtmaybe
-picks up the ambient token through `azure-identity`'s `DefaultAzureCredential` —
-no `AZURE_API_KEY` in your secrets.
+GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it
+for an access token scoped to your Azure OpenAI resource, via a **federated
+credential** on an app registration or managed identity. The action does that
+exchange for you (pass `azure_client_id` / `azure_tenant_id`), and lgtmaybe
+picks up the ambient token through `azure-identity`'s `DefaultAzureCredential`.
+No `AZURE_API_KEY` in your secrets.
 
 Azure still needs two non-secret values: the **deployment name** (`model`) and
 the **resource endpoint** (`api_base`, `https://<resource>.openai.azure.com`).

@@ -36,7 +36,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
