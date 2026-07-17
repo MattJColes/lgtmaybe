@@ -432,7 +432,7 @@ def action() -> None:
     # description first — best-effort, never blocks the review.
     if should_auto_describe(cfg, event_action=event_action):
         execute_describe(cfg, runtime)
-    execute_review(cfg, runtime, dry_run=False)
+    execute_review(cfg, runtime)
 
 
 @config_cmd.command("path")

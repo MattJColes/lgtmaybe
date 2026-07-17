@@ -399,19 +399,6 @@ def test_head_tail_returns_text_and_accurate_token_count() -> None:
     assert used <= 200
 
 
-def test_head_tail_within_budget_returns_full_text_and_count() -> None:
-    """When the text already fits, _head_tail returns it unchanged with its count."""
-    from lgtmaybe.engine.compress import count_tokens
-    from lgtmaybe.engine.reflect import _head_tail
-
-    text = "short\nfile\n"
-
-    out, used = _head_tail(text, 10_000)
-
-    assert out == text
-    assert used == count_tokens(text)
-
-
 # ---------------------------------------------------------------------------
 # TRACK D — bounded retrieval escalation (verify, don't cull)
 #

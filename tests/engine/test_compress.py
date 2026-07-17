@@ -190,7 +190,7 @@ def test_expand_hunks_adds_surrounding_lines() -> None:
     # Hunk covers new-file lines 5..6 (e, E2); ask for 2 lines either side.
     patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
 
-    expanded = expand_hunks(patch, _CONTENT, 2)
+    expanded = expand_hunks(patch, _CONTENT, 2, after=2)
 
     # Two leading lines (c, d) and two trailing lines (g, h) are added as context.
     assert "\n c\n d\n" in expanded
@@ -201,19 +201,19 @@ def test_expand_hunks_adds_surrounding_lines() -> None:
 
 def test_expand_hunks_noop_when_n_zero() -> None:
     patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
-    assert expand_hunks(patch, _CONTENT, 0) == patch
+    assert expand_hunks(patch, _CONTENT, 0, after=0) == patch
 
 
 def test_expand_hunks_noop_when_no_content() -> None:
     patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
-    assert expand_hunks(patch, None, 5) == patch
+    assert expand_hunks(patch, None, 5, after=1) == patch
 
 
 def test_expand_hunks_clamps_at_file_edges() -> None:
     # Hunk at the very top of the file: no leading context possible, and a huge
     # n must not read past either end.
     patch = "diff --git a/f.py b/f.py\n@@ -1,1 +1,1 @@\n a\n"
-    expanded = expand_hunks(patch, _CONTENT, 100)
+    expanded = expand_hunks(patch, _CONTENT, 100, after=100)
 
     # No phantom lines before line 1.
     assert "@@ -1," in expanded
@@ -234,12 +234,6 @@ def test_expand_hunks_asymmetric_pads_fewer_after() -> None:
     assert " h\n" not in expanded
     # Header widened by 3 leading + 1 trailing = 4.
     assert "@@ -2,6 +2,6 @@" in expanded
-
-
-def test_expand_hunks_default_stays_symmetric() -> None:
-    # Without an explicit `after`, both sides pad by n — the original contract.
-    patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
-    assert expand_hunks(patch, _CONTENT, 2) == expand_hunks(patch, _CONTENT, 2, after=2)
 
 
 def test_trailing_context_lines_ratio() -> None:

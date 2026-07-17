@@ -812,23 +812,17 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     return f"{_LENS_LEAD_IN}\n\n{body}\n\n{example}"
 
 
-@lru_cache(maxsize=len(ReviewCategory) + 1)
-def build_system_prompt(category: ReviewCategory | None = None) -> str:
-    """Return the system message for the review LLM.
+@lru_cache(maxsize=len(ReviewCategory))
+def build_system_prompt(category: ReviewCategory) -> str:
+    """Return the system message for the review LLM's *category* lens.
 
-    With a ``category``, the prompt carries only that lens's section and a
-    matching worked example; with no category, it carries the union of every
-    section (the monolithic prompt) and a generic example.
+    The prompt carries only that lens's section and a matching worked example.
 
     Cached: the prompts are deterministic, and the engine rebuilds one per
     category on every batch — caching makes those rebuilds free.
     """
-    if category is None:
-        example = _GENERIC_EXAMPLE
-        body = "\n\n".join(_CATEGORY_SECTIONS[c] for c in ReviewCategory)
-    else:
-        example = _CATEGORY_EXAMPLES[category]
-        body = _CATEGORY_SECTIONS[category]
+    example = _CATEGORY_EXAMPLES[category]
+    body = _CATEGORY_SECTIONS[category]
     return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
 
 

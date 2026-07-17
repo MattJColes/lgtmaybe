@@ -52,7 +52,7 @@ def _render_agent(findings: list[ReviewFinding], summary: str) -> str:
         lines.append(f"    Issue: {f.body}")
         if f.suggestion is not None:
             lines.append("    Suggested fix:")
-            lines.extend(f"        {s}" for s in f.suggestion.splitlines() or [f.suggestion])
+            lines.extend(f"        {s}" for s in f.suggestion.splitlines())
         lines.append("")
     lines.append(
         f"{len(findings)} finding(s) to address. After applying the fixes, re-run "

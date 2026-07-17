@@ -56,17 +56,14 @@ def parse_command(body: str) -> ParsedCommand | None:
 
 
 def dispatch(
-    parsed: ParsedCommand | None,
+    parsed: ParsedCommand,
     *,
     github: GitHubGateway,
     engine: ReviewEngine,
     provider: ProviderClient,
     cfg: ReviewConfig,
 ) -> None:
-    """Route a parsed slash command to the engine or provider. No-op for None."""
-    if parsed is None:
-        return
-
+    """Route a parsed slash command to the engine or provider."""
     if parsed.name in (SlashCommand.review, SlashCommand.improve):
         # `/review full` forces a genuinely full re-review: no incremental
         # scoping AND no triage skipping. A bare `/review` honours config.
@@ -86,37 +83,21 @@ def dispatch(
         return
 
     if parsed.name is SlashCommand.describe:
-        from lgtmaybe.engine.describe import build_description
+        # Same lazy import as run_review above, for the same circularity reason.
+        from lgtmaybe.cli import run_describe
 
-        body = build_description(github.get_pr_context(), cfg, provider)
-        # Prefer the idempotent upsert (edits our previous description in
-        # place); fall back to a plain comment on a gateway without it.
-        post_describe = getattr(github, "post_describe_comment", None)
-        if post_describe is not None:
-            post_describe(body)
-        else:
-            github.post_issue_comment(body)
+        run_describe(github, provider, cfg)
         return
-
-
-def _reply(
-    provider: ProviderClient,
-    github: GitHubGateway,
-    cfg: ReviewConfig,
-    system: str,
-    user_extra: str = "",
-) -> str:
-    """Gather PR context, redact+wrap the diff, and return the provider's reply."""
-    ctx = github.get_pr_context()
-    user = wrap_diff(redact(ctx.diff)) + user_extra
-    result = provider.complete(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        model=cfg.model,
-    )
-    return result.text
 
 
 def _answer_question(
     provider: ProviderClient, github: GitHubGateway, cfg: ReviewConfig, question: str
 ) -> str:
-    return _reply(provider, github, cfg, _ASK_SYSTEM, f"\n\nQuestion: {question}")
+    """Redact+wrap the diff and ask the provider the user's question over it."""
+    ctx = github.get_pr_context()
+    user = wrap_diff(redact(ctx.diff)) + f"\n\nQuestion: {question}"
+    result = provider.complete(
+        [{"role": "system", "content": _ASK_SYSTEM}, {"role": "user", "content": user}],
+        model=cfg.model,
+    )
+    return result.text

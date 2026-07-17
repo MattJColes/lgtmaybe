@@ -21,7 +21,13 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReviewFinding
+from lgtmaybe.core.models import (
+    EFFORT_PREFIX,
+    SECURITY_LABEL,
+    SPLITTING_LABEL,
+    PRContext,
+    ReviewFinding,
+)
 from lgtmaybe.core.ports import GitHubGateway
 
 from .checkout import clone_base_tree
@@ -263,13 +269,16 @@ class RestGitHubGateway(GitHubGateway):
         the body), it is updated in-place rather than creating a duplicate.
 
         The ``diff`` parameter is optional; when omitted the method fetches the
-        PR diff to build the commentable-line index.
+        PR diff to build the commentable-line index. With no findings there is
+        nothing to anchor, so the fetch is skipped — a failure notice must not
+        re-fetch the whole PR context (and must still post when that fetch is
+        exactly what failed).
         """
-        if diff is None:
+        if diff is None and findings:
             ctx = self.get_pr_context()
             diff = ctx.diff
 
-        commentable: CommentableLines = build_commentable_lines(diff)
+        commentable: CommentableLines = build_commentable_lines(diff or "")
         comments, demoted, broad = self._partition_findings(findings, commentable)
 
         body = f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
@@ -429,8 +438,7 @@ class RestGitHubGateway(GitHubGateway):
             managed = {
                 name
                 for name in current
-                if name.startswith("review-effort/")
-                or name in ("possible-security-issue", "consider-splitting")
+                if name.startswith(EFFORT_PREFIX) or name in (SECURITY_LABEL, SPLITTING_LABEL)
             }
             for stale in sorted(managed - set(labels)):
                 # The label name is a single path segment — quote it fully, or

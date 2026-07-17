@@ -212,7 +212,7 @@ class TestGitHubReviewErrorSurfacing:
         )
 
         with pytest.raises(click.ClickException):
-            cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"), dry_run=False)
+            cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"))
 
         assert len(github.posted) == 1
         posted_findings, posted_summary = github.posted[0]

@@ -251,7 +251,7 @@ def _audit(
     ctx: PRContext,
     cfg: ReviewConfig,
     provider: ProviderClient,
-    fetched_paths: list[str] | None = None,
+    fetched_paths: list[str],
 ) -> dict[int, _ParsedVerdict]:
     """Run one auditor completion over *findings* and return the parsed verdicts.
 
@@ -314,7 +314,7 @@ def _grounding_block(
     findings: list[ReviewFinding],
     ctx: PRContext,
     budget_tokens: int,
-    extra_paths: list[str] | None = None,
+    extra_paths: list[str],
 ) -> str:
     """Redacted head text of the files carrying a finding, fit into *budget_tokens*.
 
@@ -336,7 +336,7 @@ def _grounding_block(
     # Most-flagged first; stable on ties by first appearance order of the path.
     order = sorted(counts, key=lambda p: counts[p], reverse=True)
     # Then the deferral-fetched files (not a finding's own path), de-duplicated.
-    for path in extra_paths or []:
+    for path in extra_paths:
         if path not in counts:
             order.append(path)
             counts[path] = 0
@@ -350,7 +350,7 @@ def _grounding_block(
         text = redact(raw)
         full = count_tokens(text)
         if full > remaining:
-            text, used = _head_tail(text, remaining, full)
+            text, used = _head_tail(text, remaining)
         else:
             used = full
         if used <= 0:
@@ -366,24 +366,15 @@ def _grounding_block(
     return f"Full head text of the changed files (for verification only):\n{body}\n\n"
 
 
-def _head_tail(text: str, max_tokens: int, full_tokens: int | None = None) -> tuple[str, int]:
+def _head_tail(text: str, max_tokens: int) -> tuple[str, int]:
     """Keep the head and tail of *text* so its token count fits within *max_tokens*.
 
     Whole-file claims hinge on imports (top of file) and the symbol/usage near the
     flagged code, so keeping both ends — with a marker where the middle was cut —
-    is more useful for verification than a head-only truncation.
-
-    Returns ``(text, token_count)`` so the caller reuses the count instead of
-    recounting. Pass ``full_tokens`` (a count of *text* the caller already has) to
-    skip recomputing it here.
+    is more useful for verification than a head-only truncation. The caller only
+    invokes this for over-budget text; returns ``(text, token_count)`` so the
+    caller reuses the count instead of recounting.
     """
-    if max_tokens <= 0:
-        return "", 0
-    if full_tokens is None:
-        full_tokens = count_tokens(text)
-    if full_tokens <= max_tokens:
-        return text, full_tokens
-
     lines = text.split("\n")
     marker = "… [truncated] …"
     half = (max_tokens - count_tokens(marker)) // 2

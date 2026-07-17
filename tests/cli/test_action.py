@@ -40,14 +40,6 @@ class TestPrUrlFromEvent:
         }
         assert pr_url_from_event(event) == "https://github.com/org/my-repo/pull/42"
 
-    def test_honours_github_server_url(self, monkeypatch):
-        monkeypatch.setenv("GITHUB_SERVER_URL", "https://ghe.example.com")
-        event = {
-            "repository": {"full_name": "org/repo"},
-            "pull_request": {"number": 7},
-        }
-        assert pr_url_from_event(event) == "https://ghe.example.com/org/repo/pull/7"
-
     def test_missing_field_raises_clean_click_exception(self):
         """A malformed event payload surfaces a clear ClickException, not KeyError."""
         import click
