@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.12.0...lgtmaybe-v0.12.1) (2026-07-17)
+
+
+### Performance Improvements
+
+* cut redundant work in the pipeline and trim prompt token waste ([#185](https://github.com/MattJColes/lgtmaybe/issues/185)) ([c2ebd97](https://github.com/MattJColes/lgtmaybe/commit/c2ebd970301cfff63335c1ac4be0d39156d06084))
+
 ## [0.12.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.11.0...lgtmaybe-v0.12.0) (2026-07-17)
 
 
