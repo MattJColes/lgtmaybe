@@ -277,8 +277,8 @@ def test_focused_prompt_excludes_other_categories(category: ReviewCategory) -> N
             assert marker not in prompt, f"{category.value} prompt leaked {other.value} section"
 
 
-def test_full_prompt_still_contains_every_category() -> None:
-    """The no-arg call is the union of all sections (backward compatible)."""
+def test_union_of_focused_prompts_contains_every_category() -> None:
+    """Every category's signature section appears in some focused prompt."""
     prompt = _union_prompt().lower()
     for marker in _SIGNATURE.values():
         assert marker in prompt

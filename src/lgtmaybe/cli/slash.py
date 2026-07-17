@@ -87,7 +87,6 @@ def dispatch(
         from lgtmaybe.cli import run_describe
 
         run_describe(github, provider, cfg)
-        return
 
 
 def _answer_question(

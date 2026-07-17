@@ -7,8 +7,7 @@ complexity, intent) plus a category-appropriate worked example. The engine asks
 for each ``ReviewCategory`` in its own LLM call, so each call concentrates on a
 single lens — and sees a few-shot example of *its own* finding type, not a
 security one (a pickle example on the docs lens anchors the model to the wrong
-finding type). ``build_system_prompt()`` with no category returns the union of
-every section (the original monolithic prompt) with a generic example.
+finding type).
 """
 
 from __future__ import annotations
