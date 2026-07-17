@@ -68,26 +68,27 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
    line maps to nothing and is dropped rather than mis-posted.
 
 3. **prompt + parse** — this stage **fans out one model call per review
-   lens**, with the lens set decided by the `preset`: `fast` (the default)
-   covers the nine built-in categories in **four calls** — dedicated security
-   and correctness calls (the stated intent folds into correctness when
-   present), plus merged code-health (performance/complexity/ponytail/
-   deprecation) and artefacts (tests/documentation) calls, each demanding a
-   per-finding `category` — while `full` runs one call per category. Every
+   lens**. The `preset` decides the lens set. `fast` (the default) covers the
+   nine built-in categories in **four calls**: dedicated security and
+   correctness calls (the stated intent folds into correctness when present),
+   plus a merged code-health call (performance/complexity/ponytail/
+   deprecation) and an artefacts call (tests/documentation), each demanding a
+   per-finding `category`. `full` runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
-   ollama and openai-compatible), so batches never wait on each other. With
-   `prompt_cache` on, each call is shaped as a shared cacheable prefix —
-   lens-independent system preamble, then the wrapped diff — followed by the
-   lens-specific instruction as the final user block, so on anthropic/bedrock
-   every call after a batch's first (a warm-up primer runs it alone on big
-   diffs) reads the preamble-plus-diff prefix from cache. Each lens's focused
-   structured prompt requests JSON output with the `ReviewFinding` schema
-   (`path`, `line`, `side`, `severity`, `title`, `body`, `suggestion`,
-   `anchor`) and carries prompt-injection defense instructions. Each response
-   is parsed and validated against `ReviewFinding` using Pydantic; parse
-   errors are logged and surfaced in the summary rather than silently
-   discarded.
+   ollama and openai-compatible), so batches never wait on each other.
+
+   With `prompt_cache` on, each call is shaped as a shared cacheable prefix —
+   a lens-independent system preamble, then the wrapped diff — followed by
+   the lens-specific instruction as the final user block. On anthropic and
+   bedrock, every call after a batch's first reads that preamble-plus-diff
+   prefix from cache (on big diffs a warm-up primer runs the first lens
+   alone). Each lens's focused structured prompt requests JSON output with
+   the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,
+   `body`, `suggestion`, `anchor`) and carries prompt-injection defense
+   instructions. Each response is parsed and validated against
+   `ReviewFinding` using Pydantic; parse errors are logged and surfaced in
+   the summary rather than silently discarded.
 
 4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
    changed line whose content matches the finding's verbatim `anchor`, rather
@@ -101,19 +102,22 @@ fetch → compress → prompt → parse → re-anchor → merge/dedupe → refle
 6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings and drops the ones it marks low-confidence
    (keep-all safe default when the verdict can't be parsed; skippable with
-   `--no-reflect`). When the auditor would drop a finding *only* because it can't
-   see code outside the diff, it **defers** by naming what it needs — a file path
-   or a **symbol**. A path is fetched read-only (`get_file_contents`); a symbol is
-   located by **ast-grep** (`engine/astgrep.py`), which structurally searches a
-   corpus — the local worktree for the CLI, or a read-only shallow clone of the
-   trusted **base** branch for the GitHub path — for the file that *defines* it.
-   That file is then fetched through the same read-only boundary and the auditor
-   re-judges with the real definition in front of it, instead of guessing about an
-   unseen guard or base class. ast-grep only *parses* the corpus (never executes
-   it) and the base clone is never the PR head, so this stays inside the
-   fork-safety model. It needs the bundled `ast-grep` binary and a corpus;
-   without either it degrades to the path-only fetch (`--no-symbol-resolution`
-   disables it entirely). Bounded by the same hop/file caps as the path fetch.
+   `--no-reflect`). When the auditor would drop a finding *only* because it
+   can't see code outside the diff, it **defers** by naming what it needs — a
+   file path or a **symbol**. A path is fetched read-only
+   (`get_file_contents`). A symbol is located by **ast-grep**
+   (`engine/astgrep.py`), which structurally searches a corpus — the local
+   worktree for the CLI, or a read-only shallow clone of the trusted **base**
+   branch for the GitHub path — for the file that *defines* it. That file is
+   then fetched through the same read-only boundary, and the auditor re-judges
+   with the real definition in front of it instead of guessing about an unseen
+   guard or base class.
+
+   This stays inside the fork-safety model: ast-grep only *parses* the corpus
+   (never executes it), and the base clone is never the PR head. Symbol
+   resolution needs the bundled `ast-grep` binary and a corpus; without either
+   it degrades to the path-only fetch (`--no-symbol-resolution` disables it
+   entirely). It is bounded by the same hop/file caps as the path fetch.
 
 7. **filter** — findings below `min_severity` are dropped.
 

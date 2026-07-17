@@ -4,9 +4,9 @@ description: Install the lgtmaybe CLI with pip (any OS) or Homebrew (macOS/Linux
 
 # Install the CLI
 
-Install the `lgtmaybe` command-line tool once; then point it at any provider. This
-page is only about **getting the CLI onto your machine** — choosing a model
-backend (a hosted API, keyless cloud, or a local model) comes after, in the
+Install the `lgtmaybe` command-line tool once; then point it at any provider.
+This page is only about **getting the CLI onto your machine**. Choosing a model
+backend — a hosted API, keyless cloud, or a local model — comes after, in the
 [provider how-tos](../index.md#providers).
 
 ## Install (pip)

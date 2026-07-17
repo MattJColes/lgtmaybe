@@ -36,7 +36,7 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -54,9 +54,9 @@ config.
 
 ## Choosing the model
 
-Pass the model litellm's native Anthropic name. `claude-sonnet-4-6` is a strong
-default; reach for a larger Opus-class model when you want the deepest review and
-are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
+strong default. Reach for an Opus-class model when you want the deepest review
+and are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
 
 ## Want it through a gateway instead?
 

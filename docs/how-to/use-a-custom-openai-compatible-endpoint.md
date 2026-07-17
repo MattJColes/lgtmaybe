@@ -144,10 +144,10 @@ secret for hosted endpoints; leave it empty for keyless local servers reached at
 
 To keep models returning clean findings instead of prose, lgtmaybe asks for
 structured output via the OpenAI `response_format` parameter (JSON mode). Most
-endpoints honour it. Some enterprise gateways and custom proxies don't — they
-either **ignore** it (the model then answers with the JSON wrapped in a
-```` ```json ```` fence or surrounded by conversational prose) or **reject** the
-request outright with a `400 Bad Request`.
+endpoints honour it. Some enterprise gateways and custom proxies don't. They
+either **ignore** it — the model then answers with the JSON wrapped in a
+```` ```json ```` fence or surrounded by conversational prose — or **reject**
+the request outright with a `400 Bad Request`.
 
 lgtmaybe handles the first case for you: the parser strips fences and pulls the
 JSON out of surrounding prose, so a gateway that merely ignores `response_format`

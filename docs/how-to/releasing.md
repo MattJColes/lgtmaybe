@@ -18,10 +18,10 @@ A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
 formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
 `brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version.
 `scripts/update-homebrew-formula.sh` writes a small formula that creates a venv
-and `pip install`s lgtmaybe + its dependencies from **PyPI wheels** (no
-per-dependency `resource` stanzas): litellm's tree includes Rust sdists
-(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so the source-build
-approach is a dead end — the wheels work. The formula declares **`preserve_rpath`**
+and `pip install`s lgtmaybe + its dependencies from **PyPI wheels**, with no
+per-dependency `resource` stanzas. litellm's tree includes Rust sdists
+(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so building from
+source is a dead end — the wheels work. The formula declares **`preserve_rpath`**
 so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
 rewrite them ("Failed to fix install linkage"). It's a plain source formula —
 no bottle — so it installs on any architecture and macOS version.
