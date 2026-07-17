@@ -214,7 +214,6 @@ runs:
         docker run --rm \
           -e GITHUB_TOKEN \
           -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH \
-          -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL \
           -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_PRESET \
           -e INPUT_FALLBACK_MODEL -e INPUT_REFLECT_MODEL \
           -e INPUT_TRIAGE_MODEL \

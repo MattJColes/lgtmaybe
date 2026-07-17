@@ -16,14 +16,14 @@ best-effort by the GitHub adapter — a labelling failure never fails a review.
 
 from __future__ import annotations
 
-from lgtmaybe.core.models import PRContext, ReviewFinding, Severity
-
-# The label families this module owns. The adapter removes stale labels with
-# these shapes before adding the fresh set, so an effort score that drops
-# between pushes doesn't leave both labels behind.
-EFFORT_PREFIX = "review-effort/"
-SECURITY_LABEL = "possible-security-issue"
-SPLITTING_LABEL = "consider-splitting"
+from lgtmaybe.core.models import (
+    EFFORT_PREFIX,
+    SECURITY_LABEL,
+    SPLITTING_LABEL,
+    PRContext,
+    ReviewFinding,
+    Severity,
+)
 
 # Changed-line thresholds for effort scores 2..5 (score 1 = below the first).
 _EFFORT_THRESHOLDS = (50, 200, 500, 1000)

@@ -9,6 +9,7 @@ ollama e2e run.
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 
@@ -16,7 +17,7 @@ from evals import run as run_mod
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import ProviderClient
-from lgtmaybe.engine.astgrep import ast_grep_available, build_symbol_resolver
+from lgtmaybe.engine.astgrep import build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
 from lgtmaybe.engine.reflect import reflect_findings
 from lgtmaybe.github import is_reviewable
@@ -169,7 +170,7 @@ def test_loader_sets_corpus_root_only_for_fixtures_with_a_repo_dir() -> None:
     assert by_name["badcode"].corpus_root is None
 
 
-@pytest.mark.skipif(not ast_grep_available(), reason="ast-grep binary not installed")
+@pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep binary not installed")
 def test_real_ast_grep_resolves_cross_file_symbols_in_the_corpus() -> None:
     """Real ast-grep, rooted at the fixture corpus, maps each deferred symbol to the
     file that defines it — the resolution the auditor relies on."""
@@ -194,7 +195,7 @@ class _ScriptedProvider(ProviderClient):
         return ProviderResult(text=self._texts[idx], input_tokens=5, output_tokens=5)
 
 
-@pytest.mark.skipif(not ast_grep_available(), reason="ast-grep binary not installed")
+@pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep binary not installed")
 def test_end_to_end_symbol_deferral_drops_forbidden_finding_with_real_ast_grep() -> None:
     """The whole chain, no fakes in the resolution path: a finding is deferred on a
     SYMBOL; real ast-grep finds its file in the corpus; the real read-only reader

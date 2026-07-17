@@ -16,20 +16,15 @@ fixed-line pad.
 
 from __future__ import annotations
 
-import json
-import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from lgtmaybe.core.logging import get_logger
 
-from .astgrep import _find_binary
+from .astgrep import _default_runner, _find_binary, iter_matches
 
 _log = get_logger(__name__)
-
-# One file parse is tens of milliseconds; the timeout only caps pathology.
-_SCAN_TIMEOUT = 10
 
 # Abstracts the ast-grep subprocess: (binary, rule_yaml, file) -> stdout ("" on
 # failure). Injected so tests don't have to shell out.
@@ -85,32 +80,10 @@ def definition_starts(
     return _parse_starts(stdout)
 
 
-def _default_runner(binary: str, rule_yaml: str, target: Path) -> str:
-    try:
-        proc = subprocess.run(
-            [binary, "scan", "--inline-rules", rule_yaml, "--json=compact", str(target)],
-            capture_output=True,
-            text=True,
-            timeout=_SCAN_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return proc.stdout or ""
-
-
 def _parse_starts(stdout: str) -> list[int]:
     """1-based, de-duplicated, sorted start lines from ast-grep's match array."""
-    try:
-        data = json.loads(stdout or "[]")
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
-        return []
     starts: set[int] = set()
-    for match in data:
-        if not isinstance(match, dict):
-            continue
+    for match in iter_matches(stdout):
         line = match.get("range", {}).get("start", {}).get("line")
         if isinstance(line, int) and line >= 0:
             starts.add(line + 1)  # ast-grep lines are 0-based

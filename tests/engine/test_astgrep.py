@@ -8,6 +8,7 @@ shapes and JSON parsing are verified end to end.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -16,16 +17,10 @@ from lgtmaybe.engine.astgrep import (
     _rule_yaml as rule_yaml,
 )
 from lgtmaybe.engine.astgrep import (
-    ast_grep_available,
     build_symbol_resolver,
 )
 
 _HAVE_BINARY = "ast-grep"  # any non-None string stands in for "binary present"
-
-
-def test_available_reflects_binary_presence() -> None:
-    assert ast_grep_available(find_binary=lambda: "/usr/bin/ast-grep") is True
-    assert ast_grep_available(find_binary=lambda: None) is False
 
 
 def test_build_returns_none_without_binary() -> None:
@@ -102,10 +97,9 @@ def test_resolver_caps_candidates(tmp_path: Path) -> None:
         lambda: tmp_path,
         runner=lambda *_: payload,
         find_binary=lambda: _HAVE_BINARY,
-        max_candidates=2,
     )
     assert resolve is not None
-    assert len(resolve("x")) == 2
+    assert len(resolve("x")) == 3
 
 
 def test_resolver_returns_empty_when_no_corpus_root() -> None:
@@ -140,7 +134,7 @@ def test_malformed_runner_output_is_tolerated(tmp_path: Path) -> None:
     assert resolve("foo") == []
 
 
-@pytest.mark.skipif(not ast_grep_available(), reason="ast-grep binary not installed")
+@pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep binary not installed")
 def test_real_ast_grep_finds_definitions_across_languages(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
