@@ -57,10 +57,10 @@ The role needs only:
 (the `us.`/`eu.`/`apac.`-prefixed ids below). A cross-region inference profile
 fans the call out to the foundation model in several regions, so the role needs
 `bedrock:InvokeModel*` on **both** the `inference-profile/*` ARN **and** the
-underlying `foundation-model/*` ARN — granting only one of them still fails with
-`AccessDeniedException`. (A bare `anthropic.…` model id needs only the
+underlying `foundation-model/*` ARN. Granting only one of them still fails with
+`AccessDeniedException`. A bare `anthropic.…` model id needs only the
 `foundation-model/*` ARN, but most current Claude models are invocable only
-through an inference profile — see the model table below.)
+through an inference profile — see the model table below.
 
 Scope each `Resource` to specific model / inference-profile ARNs for tighter
 least-privilege once it works, e.g.

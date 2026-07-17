@@ -193,9 +193,9 @@ Default: all nine categories.
 
 ### context_lines
 
-Ceiling on the number of unchanged lines added around each changed hunk, read
-from the head revision of the file so the model can review a change in the
-context of its surrounding code. The pad is **asymmetric**: the full budget goes
+Ceiling on the number of unchanged lines added around each changed hunk. The
+lines are read from the head revision of the file, so the model reviews a
+change in the context of its surrounding code. The pad is **asymmetric**: the full budget goes
 before the hunk (the enclosing signature and setup explain a change best) and a
 quarter of it — at least one line — goes after. The actual number used is the
 smaller of this ceiling and what the token budget allows, so it shrinks
@@ -337,9 +337,9 @@ commands, and the local CLI, which never uses it).
 
 Static-analysis fusion: run fast, deterministic linters over the changed files
 and feed their findings to the model as **hints to confirm, contextualise, or
-discard** — raising recall on exactly the mechanical bugs LLMs miss, without
-posting raw linter noise (only findings the model itself confirms are
-reported). Supported tools: **ruff** and **bandit** (Python), and **semgrep**
+discard**. This raises recall on exactly the mechanical bugs LLMs miss without
+posting raw linter noise — only findings the model itself confirms are
+reported. Supported tools: **ruff** and **bandit** (Python), and **semgrep**
 (multi-language) when you point `semgrep_rules` at local rules — semgrep's
 registry configs need the network, which the sandbox forbids.
 
@@ -369,8 +369,8 @@ unchanged.
 
 Two-stage model routing so routine PRs don't pay frontier prices while risky
 ones still get the strong model. When set, this **cheap** model runs first
-over the compressed per-file diffs, skipping files that plainly need no review
-(pure formatting, trivial renames, generated churn) and scoring the rest 0–10
+over the compressed per-file diffs. It skips files that plainly need no review
+(pure formatting, trivial renames, generated churn) and scores the rest 0–10
 by risk; the strong `model` then does the deep per-lens review only on the
 survivors, riskiest first. Skipped files are listed in the review summary, and
 `/review full` reviews everything on demand.

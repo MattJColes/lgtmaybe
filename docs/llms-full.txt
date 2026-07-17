@@ -320,9 +320,9 @@ All lgtmaybe workflows use the `pull_request_target` trigger, not
 The action derives the PR from the triggering event, so there is no `pr-url`
 input to set. On an `issue_comment` event it routes the slash command
 (`/review`, `/ask`, `/describe`, `/improve`) to the same engine. On a
-`synchronize` push the review is **incremental** by default — only the commits
+`synchronize` push the review is **incremental** by default: only the commits
 added since the last completed review are re-reviewed, and earlier findings
-stay open until fixed; comment `/review full` for a full re-review on demand,
+stay open until fixed. Comment `/review full` for a full re-review on demand,
 or pin the behaviour with the `incremental` input / config key.
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
@@ -343,8 +343,8 @@ A maintainer can also review an outside contributor's PR any time by commenting
 To change the policy, edit the `if:` on the `review` job:
 
 - **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review (a friendly choice for an open project; on a hosted provider it means
-  anyone can start a run, so pick it deliberately).
+  review. A friendly choice for an open project — just remember that on a
+  hosted provider it means anyone can start a paid run, so pick it deliberately.
 - **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
   PR has merged before.
 - **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
@@ -852,10 +852,10 @@ The role needs only:
 (the `us.`/`eu.`/`apac.`-prefixed ids below). A cross-region inference profile
 fans the call out to the foundation model in several regions, so the role needs
 `bedrock:InvokeModel*` on **both** the `inference-profile/*` ARN **and** the
-underlying `foundation-model/*` ARN — granting only one of them still fails with
-`AccessDeniedException`. (A bare `anthropic.…` model id needs only the
+underlying `foundation-model/*` ARN. Granting only one of them still fails with
+`AccessDeniedException`. A bare `anthropic.…` model id needs only the
 `foundation-model/*` ARN, but most current Claude models are invocable only
-through an inference profile — see the model table below.)
+through an inference profile — see the model table below.
 
 Scope each `Resource` to specific model / inference-profile ARNs for tighter
 least-privilege once it works, e.g.
@@ -1051,9 +1051,9 @@ jobs:
 
 ## Running locally with ADC
 
-If your local shell has application default credentials (`gcloud auth
-application-default login`). Vertex token minting needs `google-auth`, so install
-the extra (the Action image already bundles it):
+Sign in with `gcloud auth application-default login` so your shell has
+Application Default Credentials. Vertex token minting needs `google-auth`, so
+install the extra (the Action image already bundles it):
 
 ```bash
 pip install 'lgtmaybe[vertex]'
@@ -1107,12 +1107,12 @@ key-based fallback is covered at the end.
 
 ## How it works
 
-GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it —
-via a **federated credential** on an app registration or managed identity — for
-an Azure AD access token scoped to your Azure OpenAI resource. The action does
-that exchange for you (pass `azure_client_id` / `azure_tenant_id`) and lgtmaybe
-picks up the ambient token through `azure-identity`'s `DefaultAzureCredential` —
-no `AZURE_API_KEY` in your secrets.
+GitHub Actions issues a short-lived OIDC token. Entra (Azure AD) exchanges it
+for an access token scoped to your Azure OpenAI resource, via a **federated
+credential** on an app registration or managed identity. The action does that
+exchange for you (pass `azure_client_id` / `azure_tenant_id`), and lgtmaybe
+picks up the ambient token through `azure-identity`'s `DefaultAzureCredential`.
+No `AZURE_API_KEY` in your secrets.
 
 Azure still needs two non-secret values: the **deployment name** (`model`) and
 the **resource endpoint** (`api_base`, `https://<resource>.openai.azure.com`).
@@ -1444,16 +1444,18 @@ timeout: 900
 
 The review fans out one call per lens — **four calls** under the default `fast`
 preset (nine under `--preset full`). lgtmaybe runs those **serially for
-ollama** (a single ollama instance serves one request at a time, so firing them
-concurrently would only make each wait and time out). The trade-off is
-wall-clock time — a slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default: four serial calls instead of nine is the
-single biggest local speed-up. To go faster still, narrow the lenses with
-`categories:` in `.lgtmaybe.yml` (e.g. just `security` and `correctness`), use a
-smaller model, or give ollama more GPU. If you have the VRAM to truly serve
-requests in parallel, raise `OLLAMA_NUM_PARALLEL` on the **ollama server** and
-raise `--max-concurrency` to match — by default lgtmaybe issues ollama calls one
-at a time. Add `--profile` to any run to see the per-call breakdown.
+ollama**: a single ollama instance serves one request at a time, so firing them
+concurrently would only make each wait and time out. The trade-off is
+wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
+is exactly why `fast` is the default — four serial calls instead of nine is the
+single biggest local speed-up.
+
+To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
+(e.g. just `security` and `correctness`), use a smaller model, or give ollama
+more GPU. If you have the VRAM to truly serve requests in parallel, raise
+`OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
+match — by default lgtmaybe issues ollama calls one at a time. Add `--profile`
+to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
@@ -1659,10 +1661,10 @@ secret for hosted endpoints; leave it empty for keyless local servers reached at
 
 To keep models returning clean findings instead of prose, lgtmaybe asks for
 structured output via the OpenAI `response_format` parameter (JSON mode). Most
-endpoints honour it. Some enterprise gateways and custom proxies don't — they
-either **ignore** it (the model then answers with the JSON wrapped in a
-```` ```json ```` fence or surrounded by conversational prose) or **reject** the
-request outright with a `400 Bad Request`.
+endpoints honour it. Some enterprise gateways and custom proxies don't. They
+either **ignore** it — the model then answers with the JSON wrapped in a
+```` ```json ```` fence or surrounded by conversational prose — or **reject**
+the request outright with a `400 Bad Request`.
 
 lgtmaybe handles the first case for you: the parser strips fences and pulls the
 JSON out of surrounding prose, so a gateway that merely ignores `response_format`
@@ -1892,9 +1894,9 @@ Default: all nine categories.
 
 ### context_lines
 
-Ceiling on the number of unchanged lines added around each changed hunk, read
-from the head revision of the file so the model can review a change in the
-context of its surrounding code. The pad is **asymmetric**: the full budget goes
+Ceiling on the number of unchanged lines added around each changed hunk. The
+lines are read from the head revision of the file, so the model reviews a
+change in the context of its surrounding code. The pad is **asymmetric**: the full budget goes
 before the hunk (the enclosing signature and setup explain a change best) and a
 quarter of it — at least one line — goes after. The actual number used is the
 smaller of this ceiling and what the token budget allows, so it shrinks
@@ -2036,9 +2038,9 @@ commands, and the local CLI, which never uses it).
 
 Static-analysis fusion: run fast, deterministic linters over the changed files
 and feed their findings to the model as **hints to confirm, contextualise, or
-discard** — raising recall on exactly the mechanical bugs LLMs miss, without
-posting raw linter noise (only findings the model itself confirms are
-reported). Supported tools: **ruff** and **bandit** (Python), and **semgrep**
+discard**. This raises recall on exactly the mechanical bugs LLMs miss without
+posting raw linter noise — only findings the model itself confirms are
+reported. Supported tools: **ruff** and **bandit** (Python), and **semgrep**
 (multi-language) when you point `semgrep_rules` at local rules — semgrep's
 registry configs need the network, which the sandbox forbids.
 
@@ -2068,8 +2070,8 @@ unchanged.
 
 Two-stage model routing so routine PRs don't pay frontier prices while risky
 ones still get the strong model. When set, this **cheap** model runs first
-over the compressed per-file diffs, skipping files that plainly need no review
-(pure formatting, trivial renames, generated churn) and scoring the rest 0–10
+over the compressed per-file diffs. It skips files that plainly need no review
+(pure formatting, trivial renames, generated churn) and scores the rest 0–10
 by risk; the strong `model` then does the deep per-lens review only on the
 survivors, riskiest first. Skipped files are listed in the review summary, and
 `/review full` reviews everything on demand.
@@ -2518,10 +2520,10 @@ A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
 formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
 `brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version.
 `scripts/update-homebrew-formula.sh` writes a small formula that creates a venv
-and `pip install`s lgtmaybe + its dependencies from **PyPI wheels** (no
-per-dependency `resource` stanzas): litellm's tree includes Rust sdists
-(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so the source-build
-approach is a dead end — the wheels work. The formula declares **`preserve_rpath`**
+and `pip install`s lgtmaybe + its dependencies from **PyPI wheels**, with no
+per-dependency `resource` stanzas. litellm's tree includes Rust sdists
+(tokenizers, hf-xet) that can't build in Homebrew's sandbox, so building from
+source is a dead end — the wheels work. The formula declares **`preserve_rpath`**
 so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
 rewrite them ("Failed to fix install linkage"). It's a plain source formula —
 no bottle — so it installs on any architecture and macOS version.
