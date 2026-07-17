@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.12.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.11.0...lgtmaybe-v0.12.0) (2026-07-17)
+
+
+### Features
+
+* add openspec living specs anchored to code with ast-grep ([#178](https://github.com/MattJColes/lgtmaybe/issues/178)) ([b61813f](https://github.com/MattJColes/lgtmaybe/commit/b61813fd274240b54d36460a3642422d38c0a2cf))
+
+
+### Bug Fixes
+
+* **deps:** cap litellm below 1.92 on Python 3.14 ([#181](https://github.com/MattJColes/lgtmaybe/issues/181)) ([0add942](https://github.com/MattJColes/lgtmaybe/commit/0add942b9a7accbc129b88208df97dfdbc59e50a))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 5 updates ([#180](https://github.com/MattJColes/lgtmaybe/issues/180)) ([33d8ba0](https://github.com/MattJColes/lgtmaybe/commit/33d8ba0495bbc13d98cb730a9d3857a1dde04687))
+
+
+### Documentation
+
+* make the docs read more human and easier ([#183](https://github.com/MattJColes/lgtmaybe/issues/183)) ([137fb4a](https://github.com/MattJColes/lgtmaybe/commit/137fb4a49ab325819b6cac4be6f3af59119835ce))
+* product spec for simplifying end-user CLI configuration ([#182](https://github.com/MattJColes/lgtmaybe/issues/182)) ([25f6979](https://github.com/MattJColes/lgtmaybe/commit/25f6979e0a25c8429d0b3b2aa771eedaf4b7b088))
+
 ## [0.11.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.10.0...lgtmaybe-v0.11.0) (2026-07-06)
 
 
