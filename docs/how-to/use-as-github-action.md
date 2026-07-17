@@ -37,9 +37,9 @@ All lgtmaybe workflows use the `pull_request_target` trigger, not
 The action derives the PR from the triggering event, so there is no `pr-url`
 input to set. On an `issue_comment` event it routes the slash command
 (`/review`, `/ask`, `/describe`, `/improve`) to the same engine. On a
-`synchronize` push the review is **incremental** by default — only the commits
+`synchronize` push the review is **incremental** by default: only the commits
 added since the last completed review are re-reviewed, and earlier findings
-stay open until fixed; comment `/review full` for a full re-review on demand,
+stay open until fixed. Comment `/review full` for a full re-review on demand,
 or pin the behaviour with the `incremental` input / config key.
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
@@ -60,8 +60,8 @@ A maintainer can also review an outside contributor's PR any time by commenting
 To change the policy, edit the `if:` on the `review` job:
 
 - **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review (a friendly choice for an open project; on a hosted provider it means
-  anyone can start a run, so pick it deliberately).
+  review. A friendly choice for an open project — just remember that on a
+  hosted provider it means anyone can start a paid run, so pick it deliberately.
 - **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
   PR has merged before.
 - **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).

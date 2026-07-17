@@ -59,7 +59,9 @@ The fan-out is the key non-obvious bit: the system prompt is composed per
 performance, complexity, intent, ponytail), and
 the engine issues **one concurrent model call per category per batch** (a
 `ThreadPoolExecutor` over the synchronous provider port), then merges and
-de-duplicates the findings before the reflection pass. `ReviewConfig.categories`
+de-duplicates the findings before the reflection pass.
+
+`ReviewConfig.categories`
 selects which lenses run (default: all nine) — it's a `.lgtmaybe.yml` knob, not a
 CLI flag. Narrowing it means fewer model calls. The `intent` lens reads the PR's
 stated intent (title/description/commit names on GitHub; local `git log` commit

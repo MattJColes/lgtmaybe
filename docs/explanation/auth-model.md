@@ -9,8 +9,8 @@ lgtmaybe supports seven hosted providers plus local ollama, and an
 format (DeepSeek's API, llama.cpp, LM Studio, vLLM). The design principle is **no
 static cloud credentials**: cloud providers use ambient, short-lived tokens;
 key-based SaaS providers (openai, anthropic, openrouter, zai) require an API key that
-stays in secrets rather than being committed to config. Azure straddles both — it
-prefers ambient Azure AD (Entra) credentials but accepts a resource key — and
+stays in secrets rather than being committed to config. Azure straddles both:
+it prefers ambient Azure AD (Entra) credentials but accepts a resource key. It
 always needs the resource endpoint (`AZURE_API_BASE`), since each Azure OpenAI
 deployment lives at its own URL.
 
