@@ -15,6 +15,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # Side of the diff a comment attaches to, matching the GitHub review API.
 Side = Literal["LEFT", "RIGHT"]
 
+# The PR-label families lgtmaybe owns (F4). Shared vocabulary between the engine
+# (which computes the labels) and the GitHub adapter (which reconciles them,
+# removing stale labels with these shapes) — one definition so a renamed family
+# can't silently break the reconcile.
+EFFORT_PREFIX = "review-effort/"
+SECURITY_LABEL = "possible-security-issue"
+SPLITTING_LABEL = "consider-splitting"
+
 
 class Severity(StrEnum):
     """Finding severity, ordered low → high for `min_severity` filtering."""

@@ -73,24 +73,16 @@ INTENT_PREAMBLE = (
 
 
 def neutralise(text: str) -> str:
-    """Public marker neutralisation for auxiliary untrusted blocks.
-
-    For callers (e.g. the triage pass) that build their own labelled block but
-    must still keep untrusted content from forging any of the sentinel marker
-    families used elsewhere in the prompt.
-    """
-    return _neutralise_markers(text)
-
-
-def _neutralise_markers(diff: str) -> str:
-    """Defang any forged delimiter tokens in *diff* so it can't close the block early.
+    """Defang any forged delimiter tokens in *text* so it can't close a block early.
 
     We swap the underscore for a hyphen (``DIFF_END`` → ``DIFF-END``): the literal
     sentinel no longer appears in the content, while the text stays readable to the
     model as plain data. Matching is case-insensitive (the original case is
-    preserved bar the underscore) so cased variants are defanged too.
+    preserved bar the underscore) so cased variants are defanged too. Also for
+    callers (e.g. the triage pass) that build their own labelled block but must
+    still keep untrusted content from forging any sentinel marker family.
     """
-    return _MARKER_RE.sub(lambda m: m.group(0).replace("_", "-"), diff)
+    return _MARKER_RE.sub(lambda m: m.group(0).replace("_", "-"), text)
 
 
 def wrap_diff(diff: str) -> str:
@@ -99,7 +91,7 @@ def wrap_diff(diff: str) -> str:
     The diff is neutralised first so a forged delimiter can't close the data
     block early, then the review task is restated after the block.
     """
-    safe = _neutralise_markers(diff)
+    safe = neutralise(diff)
     return f"{INJECTION_PREAMBLE}{_START}\n{safe}\n{_END}{_TASK_SUFFIX}"
 
 
@@ -119,7 +111,7 @@ def wrap_hints(hints: str) -> str:
     message (which can quote hostile code) can't close the block early or fake
     a diff/intent block.
     """
-    safe = _neutralise_markers(hints)
+    safe = neutralise(hints)
     return f"{HINTS_PREAMBLE}{_HINTS_START}\n{safe}\n{_HINTS_END}"
 
 
@@ -129,5 +121,5 @@ def wrap_intent(intent: str) -> str:
     Neutralised like the diff: a forged delimiter in a PR description can't close
     the block early, and intent text can't forge a diff block either.
     """
-    safe = _neutralise_markers(intent)
+    safe = neutralise(intent)
     return f"{INTENT_PREAMBLE}{_INTENT_START}\n{safe}\n{_INTENT_END}"

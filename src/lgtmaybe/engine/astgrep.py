@@ -25,8 +25,9 @@ import json
 import re
 import shutil
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 from lgtmaybe.core.logging import get_logger
 
@@ -46,7 +47,7 @@ AstGrepRunner = Callable[[str, str, Path], str]
 # A structural scan of one repo is sub-second (validated at ~20ms over this repo);
 # the timeout only caps a pathological run, never a normal one.
 _SCAN_TIMEOUT = 20
-_DEFAULT_MAX_CANDIDATES = 3
+_MAX_CANDIDATES = 3
 # Only resolve identifier-shaped names. This both filters out path-shaped `needs`
 # (handled by the path fetcher) and keeps the symbol safe to drop into the rule's
 # ``regex: ^<name>$`` — an identifier carries no regex or YAML metacharacters.
@@ -136,11 +137,6 @@ def _find_binary() -> str | None:
     return shutil.which("ast-grep")
 
 
-def ast_grep_available(*, find_binary: Callable[[], str | None] = _find_binary) -> bool:
-    """True when the ast-grep binary is on PATH."""
-    return find_binary() is not None
-
-
 def _rule_yaml(language: str, kinds: tuple[str, ...], symbol: str) -> str:
     """An inline ast-grep rule: a definition node of *language* named *symbol*.
 
@@ -159,7 +155,7 @@ def _rule_yaml(language: str, kinds: tuple[str, ...], symbol: str) -> str:
     )
 
 
-def _default_runner(binary: str, rule_yaml: str, root: Path) -> str:
+def _default_runner(binary: str, rule_yaml: str, target: Path) -> str:
     """Run ``ast-grep scan`` with an inline rule, returning stdout (or "").
 
     Exit codes are ignored on purpose: a no-match scan exits 0 with ``[]`` and a
@@ -169,7 +165,7 @@ def _default_runner(binary: str, rule_yaml: str, root: Path) -> str:
     """
     try:
         proc = subprocess.run(
-            [binary, "scan", "--inline-rules", rule_yaml, "--json=compact", str(root)],
+            [binary, "scan", "--inline-rules", rule_yaml, "--json=compact", str(target)],
             capture_output=True,
             text=True,
             timeout=_SCAN_TIMEOUT,
@@ -180,23 +176,31 @@ def _default_runner(binary: str, rule_yaml: str, root: Path) -> str:
     return proc.stdout or ""
 
 
-def _parse_paths(stdout: str, root: Path) -> list[str]:
-    """Repo-relative file paths from ast-grep's compact JSON match array.
+def iter_matches(stdout: str) -> Iterator[dict[str, Any]]:
+    """The dict entries of ast-grep's compact JSON match array.
 
-    Tolerates empty or malformed output (returns []). A path that doesn't sit under
-    *root* (shouldn't happen — we scan *root*) is skipped rather than leaked as an
-    absolute path.
+    Tolerates empty or malformed output (yields nothing) — shared guard
+    scaffolding for every ast-grep output parser.
     """
     try:
         data = json.loads(stdout or "[]")
     except json.JSONDecodeError:
-        return []
+        return
     if not isinstance(data, list):
-        return []
-    out: list[str] = []
+        return
     for match in data:
-        if not isinstance(match, dict):
-            continue
+        if isinstance(match, dict):
+            yield match
+
+
+def _parse_paths(stdout: str, root: Path) -> list[str]:
+    """Repo-relative file paths from ast-grep's compact JSON match array.
+
+    A path that doesn't sit under *root* (shouldn't happen — we scan *root*) is
+    skipped rather than leaked as an absolute path.
+    """
+    out: list[str] = []
+    for match in iter_matches(stdout):
         file = match.get("file")
         if not isinstance(file, str) or not file:
             continue
@@ -213,7 +217,6 @@ def build_symbol_resolver(
     *,
     runner: AstGrepRunner | None = None,
     find_binary: Callable[[], str | None] = _find_binary,
-    max_candidates: int = _DEFAULT_MAX_CANDIDATES,
 ) -> SymbolResolver | None:
     """A resolver mapping a symbol name to the file(s) defining it — or None.
 
@@ -221,7 +224,8 @@ def build_symbol_resolver(
     reflection pass on its existing path-only fetch (no behaviour change).
     Otherwise returns a callable that, given a symbol the auditor deferred on,
     structurally searches the corpus (``get_root()``, resolved and cached on first
-    use) for its definition and returns up to *max_candidates* repo-relative paths.
+    use) for its definition and returns up to :data:`_MAX_CANDIDATES`
+    repo-relative paths.
 
     Best-effort throughout: a non-identifier symbol, an absent corpus, an
     unsupported language, or any ast-grep failure yields [] so the deferral falls
@@ -248,7 +252,7 @@ def build_symbol_resolver(
         found: list[str] = []
         seen: set[str] = set()
         for language, kinds in _LANG_KINDS.items():
-            if len(found) >= max_candidates:
+            if len(found) >= _MAX_CANDIDATES:
                 break
             stdout = run(binary, _rule_yaml(language, kinds, name), root)
             for rel in _parse_paths(stdout, root):
@@ -256,7 +260,7 @@ def build_symbol_resolver(
                     continue
                 seen.add(rel)
                 found.append(rel)
-                if len(found) >= max_candidates:
+                if len(found) >= _MAX_CANDIDATES:
                     break
         if found:
             _log.info(

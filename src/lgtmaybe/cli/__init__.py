@@ -355,7 +355,7 @@ def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
         _log.warning("auto-describe failed — continuing without it", exc_info=True)
 
 
-def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool) -> None:
+def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
     """Build adapters, run the review, surface failures back to the PR.
 
     Shared by the ``review`` command and the ``action`` entrypoint.
@@ -371,15 +371,11 @@ def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions, *, dry_run: bool)
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
     try:
-        findings, summary = run_review(github=github, engine=engine, cfg=cfg, dry_run=dry_run)
+        run_review(github=github, engine=engine, cfg=cfg, dry_run=False)
     except Exception as exc:
-        if not dry_run:
-            _post_failure(github, exc)
+        _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
 
-    if dry_run:
-        click.echo(f"[dry-run] {summary}")
-        click.echo(render_findings(findings, summary, fmt="json"))
     if runtime.profile:
         click.echo(profiler.render())
 
@@ -435,17 +431,15 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
 def pr_url_from_event(event: dict[str, Any]) -> str:
     """Build the PR URL from a pull_request(_target) event payload.
 
-    Honours ``GITHUB_SERVER_URL`` for the link, though only github.com is
-    supported end to end — the URL parser and the REST gateway both speak to
-    api.github.com.
+    Only github.com is supported end to end — the URL parser and the REST
+    gateway both speak to api.github.com.
     """
-    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     try:
         repo = event["repository"]["full_name"]
         number = event["pull_request"]["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    return f"{server}/{repo}/pull/{number}"
+    return f"https://github.com/{repo}/pull/{number}"
 
 
 def action_inputs() -> dict[str, str | None]:

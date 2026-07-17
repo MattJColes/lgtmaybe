@@ -162,18 +162,6 @@ class TestDispatch:
         assert "**Change type:** feature" in body
         assert "| `a.py` |" in body
 
-    def test_dispatch_ignores_none(self):
-        github = FakeGitHub()
-        dispatch(
-            None,
-            github=github,
-            engine=FakeEngine(FakeProvider()),
-            provider=FakeProvider(),
-            cfg=_cfg(),
-        )
-        assert github.posted == []
-        assert github.comments == []
-
 
 def _write_event(tmp_path: Path, body: str) -> Path:
     event = {

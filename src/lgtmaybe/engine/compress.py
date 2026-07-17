@@ -13,7 +13,7 @@ from typing import Any
 from lgtmaybe.core.diffparse import parse_hunk_header
 
 _MAX_CONTEXT_LINES = 20
-_MIN_CONTEXT_LINES = 0
+
 # Scale: remaining_tokens / _SCALE gives context lines, capped at _MAX_CONTEXT_LINES.
 # At 100k budget with 500 tokens used → 99,500 / 5000 = 19 lines.
 # At 100k budget with 90k tokens used → 10,000 / 5000 = 2 lines.
@@ -144,13 +144,9 @@ def context_lines_for_budget(remaining_tokens: int) -> int:
     A larger remaining budget yields more context; a smaller one yields less.
     The result is capped between 0 and _MAX_CONTEXT_LINES.
     """
-    if remaining_tokens <= 0:
-        return _MIN_CONTEXT_LINES
-
     # Scale: every _SCALE remaining tokens buys one context line,
     # up to _MAX_CONTEXT_LINES.
-    lines = remaining_tokens // _SCALE
-    return min(int(lines), _MAX_CONTEXT_LINES)
+    return max(0, min(remaining_tokens // _SCALE, _MAX_CONTEXT_LINES))
 
 
 def _enclosing_boundary(boundaries: list[int], new_start: int) -> int | None:
@@ -193,13 +189,12 @@ def expand_hunks(
     patch: str,
     file_content: str | None,
     n: int,
-    after: int | None = None,
+    after: int,
     boundaries: list[int] | None = None,
 ) -> str:
     """Pad each hunk in *patch* with surrounding lines from *file_content*.
 
-    Up to *n* lines are added before each hunk and up to *after* lines after it
-    (``after=None`` keeps the original symmetric contract: *n* on both sides).
+    Up to *n* lines are added before each hunk and up to *after* lines after it.
     The extra lines are drawn from the head-revision file text and rendered as
     normal unchanged context (space-prefixed), giving the model the function and
     definitions around a change. Hunk headers are rewritten so each hunk's
@@ -218,7 +213,7 @@ def expand_hunks(
     """
     if n <= 0 or not file_content:
         return patch
-    n_after = n if after is None else max(0, after)
+    n_after = max(0, after)
 
     content_lines = file_content.splitlines()
     out: list[str] = []
