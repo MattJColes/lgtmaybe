@@ -165,6 +165,11 @@ class LiteLLMProvider(ProviderClient):
         # subsequent call skips response_format up front instead of paying a
         # wasted empty round-trip first. Sticky for the life of this provider.
         self._skip_response_format = False
+        # Memoized supports-cache-control answers: the review fans out many
+        # completions on the same model string, and the capability lookup is a
+        # pure function of it. Instance-scoped (not lru_cache) so tests that
+        # patch the litellm lookup stay isolated.
+        self._cache_capable: dict[str, bool] = {}
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
@@ -269,7 +274,11 @@ class LiteLLMProvider(ProviderClient):
           plain string and no marker is attached — byte-identical to the single
           user message these providers have always received.
         """
-        if not self.prompt_cache or not _supports_cache_control(model):
+        if not self.prompt_cache:
+            return _merge_user_messages(messages)
+        if model not in self._cache_capable:
+            self._cache_capable[model] = _supports_cache_control(model)
+        if not self._cache_capable[model]:
             return _merge_user_messages(messages)
 
         out = list(messages)

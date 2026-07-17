@@ -563,7 +563,9 @@ class LLMReviewEngine(ReviewEngine):
                     for task_index, task in indexed:
                         pending[pool.submit(task)] = task_index
             while pending:
-                done, _ = wait(set(pending), return_when=FIRST_COMPLETED)
+                # wait() copies its argument internally, so passing the dict's
+                # keys directly avoids building a second throwaway set per loop.
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
                 for future in done:
                     results[pending.pop(future)] = future.result()
                     batch_index = primer_batch.pop(future, -1)

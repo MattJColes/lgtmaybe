@@ -36,8 +36,15 @@ def _token_encoder() -> Any | None:
         return None
 
 
+@lru_cache(maxsize=256)
 def count_tokens(text: str) -> int:
-    """Return the token count for *text* using tiktoken, with a len/4 fallback."""
+    """Return the token count for *text* using tiktoken, with a len/4 fallback.
+
+    Memoized: the same text is counted repeatedly across a review — each
+    over-budget patch twice during recursive batching, the whole diff once per
+    reflection deferral hop — and encoding is O(len) each time. Bounded so the
+    cache can't retain an unbounded number of large diff strings.
+    """
     enc = _token_encoder()
     if enc is not None:
         return len(enc.encode(text))

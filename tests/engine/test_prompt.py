@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from lgtmaybe.core.models import CustomLens, ReviewCategory, ReviewFinding, Severity
-from lgtmaybe.engine.prompt import build_lens_prompt, build_system_prompt
+from lgtmaybe.engine.prompt import build_lens_prompt, build_shared_preamble, build_system_prompt
 
 
 def _union_prompt() -> str:
@@ -475,3 +475,34 @@ def test_prompt_intent_fulfilment_is_not_a_defect() -> None:
     prompt = build_system_prompt(ReviewCategory.intent).lower()
     assert "fulfils the stated intent" in prompt or "fulfils the intent" in prompt
     assert "deliberate removal" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Token hygiene — shared instructions are stated once, not per lens/example
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("category", list(ReviewCategory))
+def test_empty_review_shape_stated_once(category: ReviewCategory) -> None:
+    """`{"findings": []}` is stated once (in the shared rules), not repeated in
+    every worked example — the examples ride the uncached per-lens block, so a
+    per-example restatement is paid on every fan-out call."""
+    assert build_system_prompt(category).count('{"findings": []}') == 1
+
+
+@pytest.mark.parametrize("category", list(ReviewCategory))
+def test_lens_sections_do_not_restate_the_changed_lines_rule(category: ReviewCategory) -> None:
+    """The changed-lines-only rule lives in the shared rules (cached preamble);
+    per-lens restatements ride the uncached suffix on every call."""
+    prompt = build_system_prompt(category)
+    assert "only raise findings on changed lines" not in prompt
+    # The authoritative shared-rules statement remains.
+    assert "Comment ONLY on changed lines" in prompt
+
+
+def test_json_only_rule_not_duplicated_in_shared_rules() -> None:
+    """The output contract's 'Return ONLY a JSON object' is not restated as a
+    second shared-rules bullet."""
+    preamble = build_shared_preamble()
+    assert "Return ONLY a JSON object" in preamble
+    assert "Never output anything other than" not in preamble
