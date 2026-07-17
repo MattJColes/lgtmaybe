@@ -9,6 +9,7 @@ guarantee; it complements, never replaces, keeping real secrets out of git.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 REDACTED_PLACEHOLDER = "[REDACTED]"
 
@@ -87,8 +88,15 @@ def _replace_value(m: re.Match[str]) -> str:
     return full.replace(value, REDACTED_PLACEHOLDER, 1)
 
 
+@lru_cache(maxsize=128)
 def redact(text: str) -> str:
-    """Return *text* with known secret patterns replaced by REDACTED_PLACEHOLDER."""
+    """Return *text* with known secret patterns replaced by REDACTED_PLACEHOLDER.
+
+    Memoized: the same file head text is redacted at several pipeline stages
+    (hunk expansion, reflection grounding, every deferral re-judge), and each
+    pass runs the full pattern battery over the whole input. Bounded so the
+    cache can't retain an unbounded number of large file texts.
+    """
     for pattern in _SIMPLE_PATTERNS:
         text = pattern.sub(REDACTED_PLACEHOLDER, text)
     for pattern in _VALUE_PATTERNS:

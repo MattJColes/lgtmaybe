@@ -711,3 +711,44 @@ def test_reflect_prompt_asks_for_a_confidence_score() -> None:
     system = provider.calls[0]["messages"][0]["content"]
     assert "confidence" in system
     assert "0" in system and "10" in system
+
+
+def test_auditor_findings_json_excludes_engine_stamped_fields() -> None:
+    """The findings JSON sent to the auditor carries only audit-relevant fields.
+
+    ``anchored``, ``broad``, and ``confidence`` are engine-stamped AFTER the
+    audit — at audit time they are always their placeholder defaults, and a
+    ``"confidence": null`` is actively confusing when the auditor is the party
+    asked to produce the confidence score.
+    """
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    user = _user_text(provider.calls[0])
+    assert '"anchored"' not in user
+    assert '"broad"' not in user
+    assert '"confidence"' not in user
+    # The audit-relevant fields still travel.
+    assert '"path"' in user
+    assert '"title"' in user
+    assert '"severity"' in user
+
+
+def test_reflect_example_never_pairs_drop_with_needs() -> None:
+    """The worked example must not contradict the deferral instruction.
+
+    The prompt says: when more code is needed, do NOT drop — set ``needs``.
+    An example verdict pairing keep:false with a non-empty needs trains the
+    model to emit exactly the contradiction the lenient parser has to absorb.
+    """
+    from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
+
+    start = _REFLECT_SYSTEM.rindex('{"verdicts"')
+    example = json.loads(_REFLECT_SYSTEM[start:].strip())
+    for verdict in example["verdicts"]:
+        if verdict.get("needs"):
+            assert verdict.get("keep") is True, (
+                "example defers (non-empty needs) with keep:false — "
+                "the instructions say a deferral must not be a drop"
+            )

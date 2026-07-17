@@ -831,3 +831,63 @@ def test_apply_pr_labels_swallows_api_failures() -> None:
 
     gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
     gateway.apply_pr_labels(["review-effort/1"])  # must not raise
+
+
+@respx.mock
+def test_post_review_empty_findings_skips_diff_fetch() -> None:
+    """A findings-free post (e.g. the failure notice) must not fetch the PR.
+
+    With nothing to place inline there is no commentable-line index to build,
+    so the full get_pr_context fan-out (metadata, diff, per-file contents,
+    commits) would be pure waste on every failure path.
+    """
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    pr_fetches: list[httpx.Request] = []
+
+    def capture_pr(request: httpx.Request) -> httpx.Response:
+        pr_fetches.append(request)
+        return httpx.Response(200, json=_pr_detail())
+
+    respx.route(method="GET", url__startswith=PR_URL).mock(side_effect=capture_pr)
+    respx.route(method="POST", url=REVIEWS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([], "review failed: provider quota exceeded")  # diff omitted
+
+    assert pr_fetches == [], "empty-findings post_review must not fetch the PR diff/context"
+
+
+@respx.mock
+def test_reviews_list_fetched_once_per_run() -> None:
+    """last_reviewed_sha + post_review share one paginated reviews lookup.
+
+    Both walk the reviews list for the same marker review; on an incremental
+    run they used to paginate the identical, unchanged list twice.
+    """
+    existing_review_id = 99
+    reviews_calls: list[httpx.Request] = []
+
+    def capture_reviews(request: httpx.Request) -> httpx.Response:
+        reviews_calls.append(request)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": existing_review_id,
+                    "body": f"Old summary {MARKER}\n<!-- lgtmaybe-reviewed:def5678 -->",
+                }
+            ],
+        )
+
+    respx.route(method="GET", url=REVIEWS_URL).mock(side_effect=capture_reviews)
+    respx.route(method="PUT", url=f"{REVIEWS_URL}/{existing_review_id}").mock(
+        return_value=httpx.Response(200, json={"id": existing_review_id})
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    assert gw.last_reviewed_sha() == "def5678"
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert len(reviews_calls) == 1, "the unchanged reviews list must not be re-paginated"

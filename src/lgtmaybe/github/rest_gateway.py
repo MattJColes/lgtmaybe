@@ -15,7 +15,7 @@ import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
@@ -199,6 +199,12 @@ class RestGitHubGateway(GitHubGateway):
         # never record "reviewed up to head" — the next run would then skip
         # commits nobody reviewed.
         self._reviewed_sha: str | None = None
+        # Memoized marker-review lookup: last_reviewed_sha (incremental) and
+        # post_review both walk the full paginated reviews list for the same
+        # marker, and nothing posts a review between the two reads within one
+        # run — so the second walk is always identical. False = not looked up
+        # yet (None is a valid "no marker review" result).
+        self._existing_review_entry: tuple[int, str] | None | Literal[False] = False
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -665,15 +671,20 @@ class RestGitHubGateway(GitHubGateway):
 
         Follows Link rel=next pagination — a busy PR can hold more than one page
         of reviews, and missing the marker there would duplicate the review
-        instead of updating it.
+        instead of updating it. Memoized for the run: the incremental watermark
+        read and the post both need it, and no review is posted in between.
         """
+        if self._existing_review_entry is not False:
+            return self._existing_review_entry
         url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
         for resp in self._paginate(url):
             for review in resp.json():
                 body: str = review.get("body", "") or ""
                 if self._marker in body:
                     review_id: int = review["id"]
-                    return review_id, body
+                    self._existing_review_entry = (review_id, body)
+                    return self._existing_review_entry
+        self._existing_review_entry = None
         return None
 
     # ------------------------------------------------------------------

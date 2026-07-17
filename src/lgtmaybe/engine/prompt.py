@@ -81,8 +81,7 @@ def _example_block(
         f"{lead_in}\n\n"
         "```\n" + diff + "```\n\n"
         "a correct response is:\n\n"
-        "```json\n" + findings_json + "\n```\n\n"
-        'When there are no issues, return `{"findings": []}`.'
+        "```json\n" + findings_json + "\n```"
     )
 
 
@@ -301,10 +300,7 @@ graded `high` or `critical` when they cause wrong results, crashes, or data loss
 - **Aliasing & mutation** — mutable default arguments, storing a mutable value
   the caller still owns, mutating a collection while iterating over it.
 - **Wrong validation anchoring** — a regex anchored with `match` where full-match
-  semantics are needed, letting bad input through.
-
-Reason about the surrounding context lines, but only raise findings on changed
-lines."""
+  semantics are needed, letting bad input through."""
 
 _SECURITY_SECTION = """\
 ## Security review (be thorough — these are high-value findings)
@@ -429,7 +425,6 @@ Flag performance regressions the change introduces, graded by impact (`low` to
 - **Unbounded growth & leaks** — caches without eviction, listeners or
   subscriptions registered but never removed, queues or buffers that only grow.
 
-Reason about the surrounding context, but only raise findings on changed lines.
 Do not speculate about micro-optimisations with no measurable impact."""
 
 _COMPLEXITY_SECTION = """\
@@ -564,8 +559,7 @@ higher when a security advisory is involved):
 - abandoned, yanked, or known-vulnerable dependency versions;
 - typosquat-looking or incompatibly-licensed additions.
 
-Do NOT nag about self-evident, already-simple, or already-minimal code. Reason from
-the surrounding context, but only raise findings on changed lines."""
+Do NOT nag about self-evident, already-simple, or already-minimal code."""
 
 _ARTEFACTS_SECTION = """\
 ## Supporting artefacts (tests · documentation)
@@ -755,8 +749,7 @@ verify (hedge, lower the severity), never as confident `high`/`critical` fixes �
   ("X was removed", "Y now takes a new parameter", "this method is now async") — narration
   that restates the diff is not a finding. If the content is only a restatement of the
   change with no problem attached, omit it entirely.
-- Return `{"findings": []}` only when there are genuinely no issues.
-- Never output anything other than the JSON object."""
+- Return `{"findings": []}` only when there are genuinely no issues."""
 
 
 @lru_cache(maxsize=1)

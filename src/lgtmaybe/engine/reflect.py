@@ -99,7 +99,7 @@ test harness you cannot see, so such a claim is speculative.
 
 Return ONLY the JSON object, nothing else. Example:
 {"verdicts": [{"index": 0, "keep": true, "confidence": 9, "broad": false, "needs": []}, \
-{"index": 1, "keep": false, "confidence": 0, "broad": false, "needs": ["app/models.py"]}]}
+{"index": 1, "keep": true, "confidence": 5, "broad": false, "needs": ["app/models.py"]}]}
 """
 
 
@@ -260,7 +260,15 @@ def _audit(
     verdict map. Raises on an unparseable verdict so the caller can apply its
     keep-all safe default.
     """
-    findings_json = json.dumps([f.model_dump(mode="json") for f in findings], indent=2)
+    # Engine-stamped fields are excluded: at audit time `anchored`/`broad`/
+    # `confidence` are always their placeholder defaults (they are populated
+    # AFTER the audit, from this very verdict), so serializing them is token
+    # noise — and a `"confidence": null` is actively confusing when the auditor
+    # is the party asked to produce the confidence score.
+    findings_json = json.dumps(
+        [f.model_dump(mode="json", exclude={"anchored", "broad", "confidence"}) for f in findings],
+        indent=2,
+    )
 
     # Asymmetric grounding: the reviews ran per-batch on slices; here the auditor
     # gets the full (redacted) head text of every file carrying a surviving

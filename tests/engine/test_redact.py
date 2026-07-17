@@ -248,3 +248,16 @@ def test_connection_string_pattern_is_not_quadratic() -> None:
     start = time.perf_counter()
     redact(pathological)
     assert time.perf_counter() - start < 2.0
+
+
+def test_redact_memoizes_repeated_text() -> None:
+    """The same file head text is redacted at several pipeline stages (hunk
+    expansion, reflection grounding, every deferral hop) — repeats must hit a
+    cache instead of re-running the whole pattern battery."""
+    redact.cache_clear()
+    text = 'api_key = "abcdefghijklmnop1234"\n' + ("plain line\n" * 50)
+    first = redact(text)
+    assert redact(text) == first
+    info = redact.cache_info()
+    assert info.hits >= 1
+    assert info.misses == 1

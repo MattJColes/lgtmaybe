@@ -295,3 +295,16 @@ def test_no_boundaries_keeps_the_fixed_pad() -> None:
     assert expand_hunks(patch, _FN_CONTENT, 2, after=1, boundaries=[]) == expand_hunks(
         patch, _FN_CONTENT, 2, after=1
     )
+
+
+def test_count_tokens_memoizes_repeated_text() -> None:
+    """The same text is token-counted many times per review (batching, the
+    reflection reserve on every deferral hop) — repeats must hit a cache, not
+    re-encode the whole string."""
+    count_tokens.cache_clear()
+    text = "some diff text " * 200
+    first = count_tokens(text)
+    assert count_tokens(text) == first
+    info = count_tokens.cache_info()
+    assert info.hits >= 1
+    assert info.misses == 1

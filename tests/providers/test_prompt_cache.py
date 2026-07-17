@@ -267,3 +267,24 @@ class TestProviderMatrix:
         sent = mock_completion.call_args.kwargs["messages"]
         # Whatever a provider does, the volatile user content is never marked.
         assert isinstance(sent[-1]["content"], str)
+
+
+def test_capability_lookup_memoized_per_model() -> None:
+    """The litellm capability map is consulted once per model, not per call.
+
+    A review fans out many completions on the same model string; the
+    supports-caching answer is a pure function of that string, so the
+    adapter memoizes it on the instance.
+    """
+    model = _CACHEABLE_MODELS[0]
+    with (
+        patch("litellm.completion", return_value=_fake_response()),
+        patch(
+            "lgtmaybe.providers.litellm_provider.supports_prompt_caching",
+            return_value=True,
+        ) as lookup,
+    ):
+        provider = LiteLLMProvider(model=model, prompt_cache=True)
+        for _ in range(3):
+            provider.complete(_messages(), model)
+    assert lookup.call_count == 1

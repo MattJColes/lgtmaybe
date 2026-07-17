@@ -14,11 +14,13 @@ litellm model-string conventions:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.constants import DEFAULT_OLLAMA_BASE
-from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+if TYPE_CHECKING:
+    from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
 _PREFIXES: dict[Provider, str] = {
     Provider.openai: "openai",
@@ -109,6 +111,10 @@ def build_provider(
     (:func:`default_timeout_for`) — so ollama always gets a long timeout without
     the caller having to ask. An explicit value is honoured as-is.
     """
+    # litellm's import is multi-second; deferring it here keeps `import
+    # lgtmaybe.cli` fast for commands that never build a provider (config, help).
+    from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
     resolved_model = litellm_model_string(provider, model)
     resolved_fallback = litellm_model_string(provider, fallback_model) if fallback_model else None
     opts: dict[str, Any] = dict(extra_opts)
