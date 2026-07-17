@@ -14,7 +14,7 @@ inline review comments and a summary.
 
 lgtmaybe fetches the PR diff from the GitHub API and reviews the lines a pull
 request changes. It never checks out or runs your code. To judge each change in
-context it also reads a few surrounding lines from the file, but it only ever
+context it also reads a few surrounding lines from the file. It only ever
 comments on what the PR actually changed, not the whole repository.
 
 Reviews surface the kind of thing a careful reviewer would flag, each graded from

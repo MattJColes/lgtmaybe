@@ -14,13 +14,13 @@ Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
 posts inline comments and a summary straight onto the pull request.
 
-lgtmaybe reviews the lines a change touches, and it runs in two places: as a
+lgtmaybe reviews the lines a change touches. It runs in two places: as a
 GitHub Action on a pull request, or locally from the command line against your
 `git` diff before you push. As an Action it fetches the diff from the GitHub API
-and never checks out or runs your code; locally it reads your working branch.
+and never checks out or runs your code. Locally it reads your working branch.
 Either way it pads each change with a few surrounding lines, so a finding lands
-with the function around it in view, but it only ever comments on the lines that
-actually changed.
+with the function around it in view — but it only ever comments on the lines
+that actually changed.
 
 Reviews surface the things you'd want a careful reviewer to catch:
 
@@ -29,16 +29,16 @@ Reviews surface the things you'd want a careful reviewer to catch:
 - **Missing or weak tests** — changed code paths shipped without a test (flagged with a suggested test to drop in), and tests that don't really test: assertion-free, over-mocked, or sleep-based.
 - **Documentation gaps and stale docs** — public APIs added without a docstring, names that contradict what the code does, and docstrings or comments the change just made wrong.
 - **Deprecated and end-of-life code** — deprecated APIs, end-of-life or vulnerable dependencies, and typosquat-looking additions, flagged when the diff shows them (with the modern replacement suggested where known).
-- **Intent** — does the PR do what it says? The PR title, description, and commit names (or your local `git log` commit names on the CLI) are compared against the diff, flagging out-of-scope hunks, contradictions, and promised behaviour that never lands.
+- **Intent** — does the PR do what it says? lgtmaybe compares the PR title, description, and commit names (or your local `git log` commit names on the CLI) against the diff, and flags out-of-scope hunks, contradictions, and promised behaviour that never lands.
 - **Ponytail** — the "lazy senior dev" lens: the best code is the code you never wrote. Flags code that needn't exist at all — YAGNI, reaching for the standard library, doing it in fewer lines.
 
 Every finding is graded from `info` up to `critical`, so you can set the
-severity floor that matters to you, and each one lands as an inline comment on
+severity floor that matters to you. Each one lands as an inline comment on
 the exact line where the problem is, with a single summary at the top. On the CLI
 the same findings print to your terminal — ready to read, or to hand to an AI
-agent to apply. Generated files and binaries are skipped, secrets are redacted
-and the diff is treated as untrusted input (hardened against prompt injection)
-before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
+agent to apply. Before anything leaves for the model, generated files and
+binaries are skipped, secrets are redacted, and the diff is treated as untrusted
+input, hardened against prompt injection. A clean PR just gets a 👍 **LGTM!**.
 
 ## Start here
 
@@ -67,6 +67,6 @@ before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
 
 ## For AI agents
 
-A curated [`llms.txt`](llms.txt) index of these docs — and a whole-corpus
-[`llms-full.txt`](llms-full.txt) — are published at the site root for LLM
-crawlers and coding agents.
+The site root publishes a curated [`llms.txt`](llms.txt) index of these docs,
+plus a whole-corpus [`llms-full.txt`](llms-full.txt), for LLM crawlers and
+coding agents.

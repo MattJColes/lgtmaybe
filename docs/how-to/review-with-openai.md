@@ -35,7 +35,7 @@ Copy [`examples/workflows/review-openai.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -53,9 +53,9 @@ config.
 
 ## Choosing the model
 
-Use any chat model your key can access — e.g. `gpt-5.5` for the strongest
-reviews or a smaller/cheaper model to cut cost. Pass the model litellm's native
-OpenAI name (the same string you'd send to the API).
+Use any chat model your key can access: `gpt-5.5` for the strongest reviews, or
+a smaller model to cut cost. Pass litellm's native OpenAI name — the same string
+you'd send to the API.
 
 ## Persist non-secret defaults
 

@@ -20,13 +20,13 @@ Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
 posts inline comments and a summary straight onto the pull request.
 
-lgtmaybe reviews the lines a change touches, and it runs in two places: as a
+lgtmaybe reviews the lines a change touches. It runs in two places: as a
 GitHub Action on a pull request, or locally from the command line against your
 `git` diff before you push. As an Action it fetches the diff from the GitHub API
-and never checks out or runs your code; locally it reads your working branch.
+and never checks out or runs your code. Locally it reads your working branch.
 Either way it pads each change with a few surrounding lines, so a finding lands
-with the function around it in view, but it only ever comments on the lines that
-actually changed.
+with the function around it in view — but it only ever comments on the lines
+that actually changed.
 
 Reviews surface the things you'd want a careful reviewer to catch:
 
@@ -35,16 +35,16 @@ Reviews surface the things you'd want a careful reviewer to catch:
 - **Missing or weak tests** — changed code paths shipped without a test (flagged with a suggested test to drop in), and tests that don't really test: assertion-free, over-mocked, or sleep-based.
 - **Documentation gaps and stale docs** — public APIs added without a docstring, names that contradict what the code does, and docstrings or comments the change just made wrong.
 - **Deprecated and end-of-life code** — deprecated APIs, end-of-life or vulnerable dependencies, and typosquat-looking additions, flagged when the diff shows them (with the modern replacement suggested where known).
-- **Intent** — does the PR do what it says? The PR title, description, and commit names (or your local `git log` commit names on the CLI) are compared against the diff, flagging out-of-scope hunks, contradictions, and promised behaviour that never lands.
+- **Intent** — does the PR do what it says? lgtmaybe compares the PR title, description, and commit names (or your local `git log` commit names on the CLI) against the diff, and flags out-of-scope hunks, contradictions, and promised behaviour that never lands.
 - **Ponytail** — the "lazy senior dev" lens: the best code is the code you never wrote. Flags code that needn't exist at all — YAGNI, reaching for the standard library, doing it in fewer lines.
 
 Every finding is graded from `info` up to `critical`, so you can set the
-severity floor that matters to you, and each one lands as an inline comment on
+severity floor that matters to you. Each one lands as an inline comment on
 the exact line where the problem is, with a single summary at the top. On the CLI
 the same findings print to your terminal — ready to read, or to hand to an AI
-agent to apply. Generated files and binaries are skipped, secrets are redacted
-and the diff is treated as untrusted input (hardened against prompt injection)
-before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
+agent to apply. Before anything leaves for the model, generated files and
+binaries are skipped, secrets are redacted, and the diff is treated as untrusted
+input, hardened against prompt injection. A clean PR just gets a 👍 **LGTM!**.
 
 ## Start here
 
@@ -73,9 +73,9 @@ before anything leaves for the model, and a clean PR just gets a 👍 **LGTM!**.
 
 ## For AI agents
 
-A curated [`llms.txt`](llms.txt) index of these docs — and a whole-corpus
-[`llms-full.txt`](llms-full.txt) — are published at the site root for LLM
-crawlers and coding agents.
+The site root publishes a curated [`llms.txt`](llms.txt) index of these docs,
+plus a whole-corpus [`llms-full.txt`](llms-full.txt), for LLM crawlers and
+coding agents.
 
 ---
 
@@ -108,9 +108,9 @@ brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-part
 brew install lgtmaybe
 ```
 
-See [Install the CLI](../how-to/install-the-cli.md) for details (the
-`brew trust` step, and that the base install covers the API-key and local
-providers while keyless cloud providers need the `pip` extras).
+See [Install the CLI](../how-to/install-the-cli.md) for details. It explains
+the `brew trust` step, and which providers the base install covers: API-key and
+local ones. Keyless cloud providers need the `pip` extras.
 
 Verify the install:
 
@@ -150,8 +150,8 @@ src/app.py:2  [MEDIUM] Import order
 ```
 
 To review the whole worktree — your branch's commits plus uncommitted edits —
-add `--working`; for only the uncommitted edits, add `--uncommitted`; to diff
-against a different base, pass `--base main`.
+add `--working`. To review only the uncommitted edits, add `--uncommitted`. To
+diff against a different base, pass `--base main`.
 
 ## Step 4 — Change the output format
 
@@ -199,9 +199,9 @@ lgtmaybe ran its pipeline over your local diff:
 
 # Install the CLI
 
-Install the `lgtmaybe` command-line tool once; then point it at any provider. This
-page is only about **getting the CLI onto your machine** — choosing a model
-backend (a hosted API, keyless cloud, or a local model) comes after, in the
+Install the `lgtmaybe` command-line tool once; then point it at any provider.
+This page is only about **getting the CLI onto your machine**. Choosing a model
+backend — a hosted API, keyless cloud, or a local model — comes after, in the
 [provider how-tos](../index.md#providers).
 
 ## Install (pip)
@@ -510,7 +510,7 @@ Copy [`examples/workflows/review-openai.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -528,9 +528,9 @@ config.
 
 ## Choosing the model
 
-Use any chat model your key can access — e.g. `gpt-5.5` for the strongest
-reviews or a smaller/cheaper model to cut cost. Pass the model litellm's native
-OpenAI name (the same string you'd send to the API).
+Use any chat model your key can access: `gpt-5.5` for the strongest reviews, or
+a smaller model to cut cost. Pass litellm's native OpenAI name — the same string
+you'd send to the API.
 
 ## Persist non-secret defaults
 
@@ -585,7 +585,7 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -603,9 +603,9 @@ config.
 
 ## Choosing the model
 
-Pass the model litellm's native Anthropic name. `claude-sonnet-4-6` is a strong
-default; reach for a larger Opus-class model when you want the deepest review and
-are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
+strong default. Reach for an Opus-class model when you want the deepest review
+and are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
 
 ## Want it through a gateway instead?
 
@@ -666,7 +666,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
@@ -747,7 +747,7 @@ Copy [`examples/workflows/review-zai.yml`][wf] to
 ```
 
 That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out — lgtmaybe only reads the diff via the API. See
+code is **never** checked out. lgtmaybe only reads the diff via the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
