@@ -18,32 +18,40 @@ context it also reads a few surrounding lines from the file. It only ever
 comments on what the PR actually changed, not the whole repository.
 
 Reviews surface the kind of thing a careful reviewer would flag, each graded from
-`info` up to `critical`: **logic and correctness bugs** (edge cases, null
-dereferences, off-by-one and boundary errors, mismatched ranges, unhandled error
-paths, races and TOCTOU, missed `await`s, numeric and timezone bugs), **missing
-or weak tests** for changed code paths (with a suggested test to drop in), and
-**undocumented public APIs or stale docs** the change just made wrong. The model
-is prompted with an **OWASP-aligned security checklist** — injection, XSS, CSRF
-and open redirects, hardcoded secrets, broken authn/authz (including JWT
-pitfalls), path traversal, unrestricted uploads, SSRF, insecure deserialization
-and XXE, mass assignment, weak crypto, resource/DoS safety (including ReDoS),
-secrets or PII (passwords, tokens, SSNs, card data) leaking into logs, and CI/IaC
-misconfiguration (workflow script injection, unpinned actions, broad IAM, public
-buckets) — so security findings are first-class, not an afterthought. It also
-flags **factually outdated** code — deprecated APIs, end-of-life or vulnerable
-dependencies, typosquat-looking additions — when the diff shows them,
-**performance regressions** (N+1 queries, accidentally quadratic work, redundant
-computation, allocations or blocking I/O on hot paths, unbounded queries, caches
-that never evict), and needless **complexity** (deep nesting / high cyclomatic
-complexity, over-long functions, duplicated logic). An **intent lens** checks
-that the PR does what it says: it reads the PR title, description, and commit
-names (or your `git log` commit names on the CLI) and flags out-of-scope hunks,
-code that contradicts the stated intent, and promised behaviour the diff never
-implements. A **ponytail lens** — the "lazy senior dev" (the best code is the
-code you never wrote) — flags code that needn't exist at all: YAGNI, reach for
-the standard library, do it in fewer lines. Generated and non-reviewable files (lockfiles, minified bundles,
-vendored directories, binaries) are skipped automatically, and secrets are
-redacted from the diff before it is sent to the model.
+`info` up to `critical`:
+
+- **Logic and correctness bugs** — edge cases, null dereferences, off-by-one and
+  boundary errors, mismatched ranges, unhandled error paths, races and TOCTOU,
+  missed `await`s, numeric and timezone bugs.
+- **Security vulnerabilities** — the model is prompted with an **OWASP-aligned
+  checklist**: injection, XSS, CSRF and open redirects, hardcoded secrets,
+  broken authn/authz (including JWT pitfalls), path traversal, unrestricted
+  uploads, SSRF, insecure deserialization and XXE, mass assignment, weak crypto,
+  resource/DoS safety (including ReDoS), secrets or PII (passwords, tokens,
+  SSNs, card data) leaking into logs, and CI/IaC misconfiguration (workflow
+  script injection, unpinned actions, broad IAM, public buckets). Security
+  findings are first-class, not an afterthought.
+- **Missing or weak tests** for changed code paths, with a suggested test to
+  drop in.
+- **Undocumented public APIs or stale docs** the change just made wrong.
+- **Factually outdated code** — deprecated APIs, end-of-life or vulnerable
+  dependencies, typosquat-looking additions — when the diff shows them.
+- **Performance regressions** — N+1 queries, accidentally quadratic work,
+  redundant computation, allocations or blocking I/O on hot paths, unbounded
+  queries, caches that never evict.
+- **Needless complexity** — deep nesting / high cyclomatic complexity, over-long
+  functions, duplicated logic.
+- **Intent** — does the PR do what it says? lgtmaybe reads the PR title,
+  description, and commit names (or your `git log` commit names on the CLI) and
+  flags out-of-scope hunks, code that contradicts the stated intent, and
+  promised behaviour the diff never implements.
+- **Ponytail** — the "lazy senior dev" lens: the best code is the code you never
+  wrote. Flags code that needn't exist at all — YAGNI, reach for the standard
+  library, do it in fewer lines.
+
+Generated and non-reviewable files (lockfiles, minified bundles, vendored
+directories, binaries) are skipped automatically, and secrets are redacted from
+the diff before it is sent to the model.
 
 **Hardened against malicious PRs.** lgtmaybe never checks out or runs PR code,
 treats the diff as untrusted input, defends against prompt injection (including
@@ -52,8 +60,8 @@ forged delimiter break-out attempts), and redacts a broad set of secret formats
 credentials in connection strings) before anything leaves your environment. See
 [Data and Privacy](docs/explanation/data-and-privacy.md).
 
-**Fast by default.** Reviews now run the **`fast` preset** by default: the nine
-lenses are covered in **four model calls** instead of nine — security and
+**Fast by default.** Reviews run the **`fast` preset** by default: the nine
+lenses are covered in **four model calls** instead of nine. Security and
 correctness keep dedicated calls (the stated intent folds into correctness when
 the PR states one), and the rest merge into a code-health call
 (performance/complexity/ponytail/deprecation) and an artefacts call
