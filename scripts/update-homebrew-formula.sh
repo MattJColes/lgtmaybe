@@ -79,12 +79,17 @@ class Lgtmaybe < Formula
   depends_on "python@3.12"
 
   def install
-    # lgtmaybe's dependency tree includes Rust extensions (tokenizers, hf-xet)
-    # whose sdists cannot build inside Homebrew's sandbox, so install lgtmaybe and
-    # its dependencies from upstream PyPI wheels into an isolated virtualenv. The
-    # venv is created plainly so ensurepip provides pip.
+    # lgtmaybe's dependency tree includes Rust extensions (tokenizers, hf-xet,
+    # and litellm >= 1.92, which ships only manylinux wheels) whose sdists
+    # cannot build inside Homebrew's sandbox (no Cargo), so install lgtmaybe
+    # and its dependencies from upstream PyPI wheels into an isolated
+    # virtualenv. --prefer-binary makes pip back off to the newest version
+    # that has a macOS-compatible wheel instead of grabbing a newer sdist it
+    # would then fail to compile. The venv is created plainly so ensurepip
+    # provides pip.
     system "python3.12", "-m", "venv", libexec
-    system libexec/"bin/python", "-m", "pip", "install", "lgtmaybe==#{version}"
+    system libexec/"bin/python", "-m", "pip", "install", "--prefer-binary",
+           "lgtmaybe==#{version}"
     bin.install_symlink libexec/"bin/lgtmaybe"
   end
 
