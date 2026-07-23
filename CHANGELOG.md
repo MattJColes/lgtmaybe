@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.12.1...lgtmaybe-v0.12.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **homebrew:** prefer wheels so litellm &gt;=1.92 sdist never builds in the sandbox ([#189](https://github.com/MattJColes/lgtmaybe/issues/189)) ([df6e7e1](https://github.com/MattJColes/lgtmaybe/commit/df6e7e1cc417bce46f8cb0823315b7af31df37b8))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 6 updates ([#187](https://github.com/MattJColes/lgtmaybe/issues/187)) ([5615a79](https://github.com/MattJColes/lgtmaybe/commit/5615a792c64c760e88cb230aef73aac4b5335197))
+
 ## [0.12.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.12.0...lgtmaybe-v0.12.1) (2026-07-17)
 
 
