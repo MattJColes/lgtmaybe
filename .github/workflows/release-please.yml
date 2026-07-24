@@ -74,9 +74,9 @@ jobs:
 
   # Homebrew tap — call it directly, because a `release: published` event is NOT
   # delivered for a release that release-please cuts with the built-in
-  # GITHUB_TOKEN. The freshly-published version is still inside Homebrew's 24h
-  # PyPI cooldown, so this call usually defers (no-op); homebrew.yml's daily
-  # schedule then publishes the formula once the version ages past the cooldown.
+  # GITHUB_TOKEN. The formula installs from PyPI wheels (no
+  # `update-python-resources`, so no 24h PyPI cooldown) and publishes
+  # immediately; homebrew.yml's daily schedule is only a safety net.
   homebrew:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}

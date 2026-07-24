@@ -18,6 +18,7 @@ provides defaults for all runs.
   - [include_paths / exclude_paths](#include_paths-exclude_paths)
   - [max_files](#max_files)
   - [max_input_tokens](#max_input_tokens)
+  - [preset](#preset)
   - [categories](#categories)
   - [context_lines](#context_lines)
   - [function_context](#function_context)
@@ -227,14 +228,14 @@ Default: `true`.
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
-**provider-aware default**: **300 s for ollama** (local models are slow) and 60 s
-for cloud providers. Set it explicitly to raise it for a large local model.
+**provider-aware default**: **300 s for ollama and openai-compatible** (local
+models are slow) and 60 s for cloud providers. Set it explicitly to raise it for a large local model.
 
 ```yaml
 timeout: 900   # 15 minutes per call, e.g. for a big model on CPU
 ```
 
-Default: auto (ollama 300 s, cloud 60 s). See
+Default: auto (ollama/openai-compatible 300 s, cloud 60 s). See
 [Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
 
 ### structured_output

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="lgtmaybe logo: a shrugging face">
+  <title>lgtmaybe</title>
+
+  <!-- Header variant: the site header is slate (#2f3b45), the same colour as the
+       primary logo's strokes — so the arms and outline switch to off-white here.
+       Features on the mint face stay slate for contrast. -->
+
+  <!-- bracket arms, raised in a shrug -->
+  <g fill="none" stroke="#eceff1" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <!-- left arm: { -->
+    <path d="M58 92 C40 92 48 116 30 128 C48 140 40 164 58 164"/>
+    <!-- right arm: } -->
+    <path d="M198 92 C216 92 208 116 226 128 C208 140 216 164 198 164"/>
+  </g>
+
+  <!-- face -->
+  <circle cx="128" cy="128" r="64" fill="#54d090" stroke="#eceff1" stroke-width="8"/>
+
+  <!-- eyes -->
+  <circle cx="107" cy="123" r="8" fill="#2f3b45"/>
+  <circle cx="149" cy="123" r="8" fill="#2f3b45"/>
+
+  <!-- one flat brow (left), one raised brow (right) -->
+  <g fill="none" stroke="#2f3b45" stroke-width="7" stroke-linecap="round">
+    <path d="M95 105 q12 -3 24 0"/>
+    <path d="M137 97 q12 -7 24 -2"/>
+  </g>
+
+  <!-- unsure, wavy mouth -->
+  <path d="M101 154 q9 9 18 0 q9 -9 18 0 q9 9 18 0"
+        fill="none" stroke="#2f3b45" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

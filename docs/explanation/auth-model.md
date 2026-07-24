@@ -30,6 +30,22 @@ Entra app (Azure) issue tokens that:
   variables)
 - Are tied to the specific repository and branch via the OIDC claim set
 
+The exchange is the same shape on all three clouds — no secret ever enters the
+workflow:
+
+```mermaid
+sequenceDiagram
+    participant W as GitHub Actions run
+    participant O as GitHub OIDC issuer
+    participant STS as Cloud token service<br/>(AWS STS / GCP STS / Entra)
+    participant M as Model API<br/>(Bedrock / Vertex / Azure OpenAI)
+    W->>O: request identity token (id-token: write)
+    O-->>W: signed JWT with repo + branch claims
+    W->>STS: exchange JWT for cloud credentials
+    STS-->>W: short-lived, scoped credentials
+    W->>M: lgtmaybe review calls with ambient creds
+```
+
 For these reasons, lgtmaybe treats Bedrock and Vertex as **ambient-credential
 only** providers. There is no `--api-key` flag for them. Azure defaults to the
 same keyless path (GitHub OIDC → Entra, via `azure-identity`'s

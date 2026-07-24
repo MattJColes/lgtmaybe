@@ -75,7 +75,7 @@ reflection pass over-prunes on a weak model).
 |---|---|
 | **< 32 GB** RAM/VRAM | Drop to a smaller model (`gemma4:e4b`) or route to a hosted provider — 27B at a usable quant won't leave room for the diff. |
 | **32 GB** RAM/VRAM | The practical floor. Run `qwen3.6:27b` at a 4-bit quant (≈16–18 GB of weights) with a modest context window. Keep `num_ctx` conservative so the model plus the diff and findings fit. |
-| **48 GB+** RAM/VRAM (preferred) | Comfortable. Room for the weights plus a generous `--num-ctx` (32k) for big multi-file diffs, with headroom for the KV cache. |
+| **48 GB+** RAM/VRAM (preferred) | Comfortable. Room for the weights plus the default `--num-ctx` (32k) — or a raised 64k window for very large diffs, with headroom for the KV cache. |
 
 This applies to both discrete VRAM and Apple-Silicon unified memory. A bigger
 context window costs memory on top of the weights, so if you bump `--num-ctx` for
@@ -242,9 +242,10 @@ context window with `--num-ctx` so the whole diff and the findings fit — this 
 ignore it):
 
 ```bash
-# A large multi-file diff on a local model — more time and more context:
+# A large multi-file diff on a local model — more time and more context
+# (32768 is already the default; go above it for very large diffs):
 lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 900 --num-ctx 32768
+  --api-base http://localhost:11434 --timeout 900 --num-ctx 65536
 ```
 
 ```yaml
@@ -252,7 +253,7 @@ lgtmaybe review --provider ollama --model qwen3.6:35b \
 provider: ollama
 model: qwen3.6:35b
 timeout: 900
-num_ctx: 32768
+num_ctx: 65536
 ```
 
 `--num-ctx` needs enough RAM/VRAM on the ollama host — a bigger window costs

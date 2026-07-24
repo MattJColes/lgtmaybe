@@ -96,7 +96,7 @@ jobs:
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6 # base repo only — for .lgtmaybe.yml config
+      - uses: actions/checkout@v7 # base repo only — for .lgtmaybe.yml config
       - uses: MattJColes/lgtmaybe@v0
         with:
           provider: openai
@@ -155,13 +155,26 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
-| `timeout` | provider default (ollama 300s, cloud 60s) | Per-request timeout in seconds for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `timeout` | provider default (ollama/openai-compatible 300s, cloud 60s) | Per-request timeout in seconds for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
 | `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
 | `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
 | `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
 | `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
 | `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
+| `preset` | `fast` | Lens grouping: `fast` covers all nine lenses in four model calls; `full` runs one call per lens (an explicit `categories` list in `.lgtmaybe.yml` overrides it) |
+| `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
+| `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
+| `max_review_seconds` | `600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
+| `max_concurrency` | auto (8 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
+| `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
+| `prompt_cache` | `true` | Shape calls as a shared cacheable prefix on providers with an explicit cache breakpoint (anthropic, bedrock Claude/Nova); safe no-op elsewhere |
+| `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
+| `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
+| `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
+| `auto_diagram` | `false` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review |
+| `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
+| `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
 | `aws_region` | `us-east-1` | AWS region for bedrock |
 | `gcp_wif_provider` | — | Workload Identity Federation provider resource name for vertex |

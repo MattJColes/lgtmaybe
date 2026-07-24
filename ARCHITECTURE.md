@@ -40,8 +40,9 @@ noticing — and tests inject fakes instead of patching.
            │                           │
            ▼                           ▼
    OpenAI · Anthropic ·         GitHub PR: inline
-   OpenRouter · Bedrock ·       comments + summary
-   Vertex · Azure · Ollama      (or CLI stdout)
+   OpenRouter · z.ai ·          comments + summary
+   Bedrock · Vertex · Azure ·   (or CLI stdout)
+   Ollama · OpenAI-compatible
 ```
 
 ## Project layout
@@ -103,7 +104,7 @@ lgtmaybe/
 
 ## LLM providers
 
-One `--provider` flag, one [litellm] `completion()` call shape underneath. Eight
+One `--provider` flag, one [litellm] `completion()` call shape underneath. Nine
 backends, each with its own native auth (resolved by the credential chain in
 `providers/credentials.py`):
 
@@ -112,6 +113,7 @@ backends, each with its own native auth (resolved by the credential chain in
 | `openai`     | `openai/`      | API key (`--api-key` / `OPENAI_API_KEY`)                          |
 | `anthropic`  | `anthropic/`   | API key (`--api-key` / `ANTHROPIC_API_KEY`)                       |
 | `openrouter` | `openrouter/`  | API key (`--api-key` / `OPENROUTER_API_KEY`)                      |
+| `zai`        | `zai/`         | API key (`--api-key` / `ZAI_API_KEY`); optional `api_base` for the China / coding-plan endpoint |
 | `bedrock`    | `bedrock/`     | **ambient AWS creds** (GitHub OIDC role or local `~/.aws`) — no static key |
 | `vertex`     | `vertex_ai/`   | **ambient GCP creds** (Workload Identity Federation or local ADC) — no static key |
 | `azure`      | `azure/`       | API key **or** keyless Azure AD/Entra token (OIDC); needs the resource endpoint |
