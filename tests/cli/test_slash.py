@@ -169,7 +169,7 @@ class TestDispatch:
         """/diagram goes through the idempotent diagram upsert with a mermaid block."""
         github = FakeGitHub()
         structured = json.dumps(
-            {"title": "Change map", "mermaid": "C4Container\n    Container(a, \"A\")"}
+            {"title": "Change map", "mermaid": 'C4Container\n    Container(a, "A")'}
         )
         provider = FakeProvider(
             result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)

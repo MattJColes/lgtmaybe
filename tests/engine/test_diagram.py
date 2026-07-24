@@ -37,7 +37,7 @@ _NO_INTENT_CTX = _CTX.model_copy(update={"title": "", "description": "", "commit
 
 _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
-_MERMAID = "C4Container\n    title Retry flow\n    Container(app, \"App\", \"Python\")"
+_MERMAID = 'C4Container\n    title Retry flow\n    Container(app, "App", "Python")'
 
 
 def _structured_provider(**overrides: object) -> FakeProvider:

@@ -182,9 +182,7 @@ class RestGitHubGateway(GitHubGateway):
         # Idempotency marker for the change-diagram comment — its own family so a
         # diagram update never clobbers the description or the review summary.
         self._diagram_marker = (
-            f"<!-- lgtmaybe-diagram:{marker_key} -->"
-            if marker_key
-            else "<!-- lgtmaybe-diagram -->"
+            f"<!-- lgtmaybe-diagram:{marker_key} -->" if marker_key else "<!-- lgtmaybe-diagram -->"
         )
         self._resolve_fixed = resolve_fixed
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),

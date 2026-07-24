@@ -192,7 +192,7 @@ class TestDiagramCommand:
         payload = json.dumps(
             {
                 "title": "Change map",
-                "mermaid": "C4Container\n    Container(app, \"App\")",
+                "mermaid": 'C4Container\n    Container(app, "App")',
                 "ascii": "[Client] --> [App]",
             }
         )
