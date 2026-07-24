@@ -54,6 +54,16 @@ github.feedback:
     has: { field: name, regex: '^list_downvoted_fingerprints$' }
   files: [src/lgtmaybe/github/**/*.py]
 
+github.reply-in-thread:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^reply_in_thread$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^RestGitHubGateway$' }
+      stopBy: end
+  files: [src/lgtmaybe/github/**/*.py]
+
 github.reviewable:
   rule:
     kind: function_definition

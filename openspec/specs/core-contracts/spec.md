@@ -76,6 +76,10 @@ driving the merge-gate Check Run.
 - **WHEN** a `ReviewConfig` is built without `fail_on`
 - **THEN** `fail_on` is `None` and no check run is created
 
+#### Scenario: a posting toggle defaults on
+- **WHEN** `answer_replies` is unset
+- **THEN** it defaults to `true`, enabling finding-thread replies
+
 ### Requirement: Nine built-in lenses, preset-shaped fan-out
 
 `ReviewCategory` SHALL enumerate the nine built-in lenses (security,

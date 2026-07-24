@@ -47,6 +47,24 @@ C4-style change diagram — all dispatched to the same engine and provider stack
 - **WHEN** the comment body is `/diagram`
 - **THEN** a C4-style change diagram is upserted as its own comment
 
+### Requirement: Finding-thread replies are answered in-thread
+
+A `pull_request_review_comment` reply in a finding thread lgtmaybe opened SHALL
+be answered in that same thread — using the finding and its surrounding diff
+hunk as context, the reply treated as untrusted input — only when it is a
+freshly *created* reply from a non-bot author whose thread root carries the
+finding marker, and gated on `answer_replies`; every other case posts nothing so
+the reviewer never answers itself.
+<!-- anchor: cli.review-reply -->
+
+#### Scenario: PR author replies in a finding thread
+- **WHEN** the author replies to a lgtmaybe finding comment and `answer_replies` is on
+- **THEN** lgtmaybe answers in that thread using the finding + hunk as context
+
+#### Scenario: a bot reply arrives
+- **WHEN** the review-comment author is a bot, or it is not a freshly created reply
+- **THEN** nothing is posted, so the reviewer never loops on its own replies
+
 ### Requirement: Local review needs no GitHub
 
 `lgtmaybe review` in a repo SHALL build the context from git alone: branch

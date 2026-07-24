@@ -22,6 +22,12 @@ cli.slash:
       has: { field: name, regex: '^dispatch$' }
     files: [src/lgtmaybe/cli/**/*.py]
 
+cli.review-reply:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^execute_review_reply$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.local-context:
   rule:
     kind: function_definition

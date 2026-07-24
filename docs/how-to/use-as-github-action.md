@@ -52,6 +52,16 @@ added since the last completed review are re-reviewed, and earlier findings
 stay open until fixed. Comment `/review full` for a full re-review on demand,
 or pin the behaviour with the `incremental` input / config key.
 
+On a `pull_request_review_comment` event lgtmaybe **answers replies in finding
+threads**: when a PR author replies inside a review conversation it opened on a
+finding, it responds in that same thread, using the finding and its surrounding
+diff hunk as context (the reply text is treated as untrusted input, exactly like
+the diff). This needs the `pull_request_review_comment` trigger in your workflow
+(the example workflows include it), and it never answers itself — only a freshly
+created reply from a human author, on a thread lgtmaybe started, is answered. It
+is on by default; set `answer_replies: false` to leave finding threads
+unanswered.
+
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
 > are free. On a hosted provider each run uses tokens you pay for, so it's worth
 > a moment's thought about who can trigger one (next section) — the default keeps
@@ -91,6 +101,8 @@ on:
   pull_request_target:
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -103,6 +115,8 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     steps:
@@ -210,6 +224,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
 | `auto_diagram` | `false` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review |
+| `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |

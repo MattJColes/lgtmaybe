@@ -93,6 +93,19 @@ reaction and a resolved thread are not.
 - **WHEN** the opening comment carries our finding marker and a write-access user's 👎
 - **THEN** its fingerprint is returned, to be suppressed next run
 
+### Requirement: Replying in a finding thread is GraphQL
+
+`reply_in_thread` SHALL post a reply on a review thread via the GraphQL
+`addPullRequestReviewThreadReply` mutation — its node id resolved from an inbound
+review-comment id by `find_review_thread`, matching the thread whose comments
+carry that id — the primitive that answers a PR author in a finding conversation
+and the same reply the resolve-on-fix path uses.
+<!-- anchor: github.reply-in-thread -->
+
+#### Scenario: author replies in a finding thread
+- **WHEN** `reply_in_thread` is called with a thread node id and a body
+- **THEN** the reply is posted to that thread via GraphQL
+
 ### Requirement: Generated and binary files are skipped
 
 Lockfiles, minified bundles, vendored trees, binary files, and generated LLM-index corpora (`llms.txt` / `llms-full.txt`) SHALL be excluded from review

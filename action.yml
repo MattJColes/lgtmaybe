@@ -102,6 +102,10 @@ inputs:
     description: "On a freshly opened (or reopened) PR, post a C4-style change diagram comment — a Mermaid C4 diagram of the components the PR touches (rendered natively by GitHub), with an ASCII fallback — before the review runs, updated in place by later /diagram runs. Off by default."
     required: false
     default: ""
+  answer_replies:
+    description: "Answer a PR author who replies inside a review conversation lgtmaybe opened on a finding: the reply is answered in that same thread, using the finding and its surrounding diff hunk as context (the reply text is treated as untrusted input). Needs the pull_request_review_comment trigger. On by default; set to false to leave finding threads unanswered."
+    required: false
+    default: ""
   pr_labels:
     description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, and consider-splitting when the diff spans many unrelated directories. Best-effort; off by default."
     required: false
@@ -255,6 +259,7 @@ runs:
         INPUT_STATIC_ANALYSIS: ${{ inputs.static_analysis }}
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}
+        INPUT_ANSWER_REPLIES: ${{ inputs.answer_replies }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
         INPUT_LEARN_FEEDBACK: ${{ inputs.learn_feedback }}
         INPUT_FAIL_ON: ${{ inputs.fail_on }}
@@ -280,8 +285,8 @@ runs:
           -e INPUT_RESOLVE_FIXED \
           -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \
           -e INPUT_PROMPT_CACHE -e INPUT_INCREMENTAL -e INPUT_STATIC_ANALYSIS \
-          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_PR_LABELS \
-          -e INPUT_LEARN_FEEDBACK -e INPUT_FAIL_ON -e INPUT_PROFILE \
+          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_ANSWER_REPLIES \
+          -e INPUT_PR_LABELS -e INPUT_LEARN_FEEDBACK -e INPUT_FAIL_ON -e INPUT_PROFILE \
           -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
           -e AWS_REGION -e AWS_DEFAULT_REGION \
           -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

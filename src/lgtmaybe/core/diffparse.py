@@ -98,6 +98,41 @@ def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]
     return index
 
 
+def hunk_for_line(diff: str, path: str, line: int, side: str = "RIGHT") -> str | None:
+    """Return the single hunk (with its file header) covering ``(path, line, side)``.
+
+    ``line`` is the new-file line for side ``"RIGHT"`` and the old-file line for
+    ``"LEFT"`` — the same coordinates a review comment anchors by. Coverage uses
+    the hunk header's ranges (``new_start..new_start+new_len-1`` on the right,
+    the old counterpart on the left), so the first hunk whose range contains
+    ``line`` is returned verbatim, prefixed with the file's diff header.
+
+    Returns ``None`` when *path* is not in the diff or no hunk covers the line
+    (e.g. a comment on a line outside the current diff). Used to give a
+    finding-thread reply the surrounding changed code as grounding context.
+    """
+    for patch_path, patch in split_by_file(diff, [path]):
+        if patch_path != path:
+            continue
+        lines = patch.splitlines()
+        hunk_starts = [i for i, raw in enumerate(lines) if parse_hunk_header(raw) is not None]
+        if not hunk_starts:
+            return None
+        header = lines[: hunk_starts[0]]
+        for idx, start in enumerate(hunk_starts):
+            end = hunk_starts[idx + 1] if idx + 1 < len(hunk_starts) else len(lines)
+            hunk = parse_hunk_header(lines[start])
+            assert hunk is not None  # guaranteed by hunk_starts membership
+            if side == "LEFT":
+                lo, hi = hunk.old_start, hunk.old_start + hunk.old_len - 1
+            else:
+                lo, hi = hunk.new_start, hunk.new_start + hunk.new_len - 1
+            if lo <= line <= hi:
+                return "\n".join(header + lines[start:end])
+        return None
+    return None
+
+
 def split_by_file(diff: str, changed_files: list[str]) -> list[tuple[str, str]]:
     """Split a unified diff into per-file ``(path, patch)`` pairs.
 

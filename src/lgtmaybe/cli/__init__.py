@@ -25,7 +25,7 @@ import click
 
 from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
-from lgtmaybe.core.diffparse import FILE_HEADER_RE
+from lgtmaybe.core.diffparse import FILE_HEADER_RE, hunk_for_line
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
@@ -596,6 +596,104 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         raise click.ClickException(f"/{parsed.name} failed: {exc}") from exc
 
 
+def execute_review_reply(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+    """Answer a PR author's reply inside a finding conversation lgtmaybe opened.
+
+    Handles a ``pull_request_review_comment`` event. It acts **only** when every
+    loop-safety condition holds — ``answer_replies`` on, a freshly *created*
+    reply (``in_reply_to_id`` present), from a non-bot author, whose thread's
+    root comment carries our finding marker — and answers in that same thread,
+    using the finding and its surrounding diff hunk as context. Every other case
+    returns without posting, so the reviewer never answers its own replies in a
+    loop. The reply body is untrusted input (redacted + delimiter-neutralised
+    before it reaches the model); the model's answer is fence-defanged before it
+    is posted.
+    """
+    from lgtmaybe.cli.slash import _answer_reply
+    from lgtmaybe.github.rest_gateway import _defang_fences
+
+    # Loop-safety gates — all checked before any network call. A failure here is
+    # a silent no-op: the event simply isn't one we answer.
+    if not cfg.answer_replies:
+        click.echo("answer_replies is off; ignoring review comment.")
+        return
+    if event.get("action") != "created":
+        return
+    comment = event.get("comment") or {}
+    in_reply_to = comment.get("in_reply_to_id")
+    if not in_reply_to:
+        click.echo("Review comment is not a reply; ignoring.")
+        return
+    if (comment.get("user") or {}).get("type") == "Bot":
+        # Never answer a bot (including ourselves) — that is the reply loop.
+        return
+
+    try:
+        repo = event["repository"]["full_name"]
+        pr_number = event["pull_request"]["number"]
+    except (KeyError, TypeError) as exc:
+        raise click.ClickException(f"event payload missing required field: {exc}") from exc
+    runtime = replace(runtime, pr_url=f"https://github.com/{repo}/pull/{pr_number}")
+
+    try:
+        github, _engine, provider = build_review_context(cfg, runtime)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        thread = github.find_review_thread(int(in_reply_to))
+        if thread is None:
+            click.echo("Reply is not in a review thread we can resolve; ignoring.")
+            return
+        thread_id, root_body = thread
+        finding = _finding_from_comment(root_body)
+        if finding is None:
+            # The thread's root is not one of ours — do not answer.
+            click.echo("Reply thread was not opened by lgtmaybe; ignoring.")
+            return
+        answer = _answer_reply(
+            provider,
+            cfg,
+            finding=finding,
+            hunk=_reply_hunk(github, comment),
+            reply=comment.get("body") or "",
+        )
+        github.reply_in_thread(thread_id, _defang_fences(answer))
+    except Exception as exc:
+        _post_failure(github, exc)
+        raise click.ClickException(f"answering the review reply failed: {exc}") from exc
+
+
+def _finding_from_comment(root_body: str) -> str | None:
+    """The visible finding text of a lgtmaybe inline comment, or None if not ours.
+
+    Our inline finding comments carry a hidden ``lgtmaybe-finding`` marker; a
+    thread whose root lacks it was not opened by us and must not be answered.
+    The fingerprint is a one-way hash, so the finding is recovered from the
+    visible title/body text (marker stripped), never by reversing the hash.
+    """
+    from lgtmaybe.github.rest_gateway import _FINDING_MARKER
+
+    if _FINDING_MARKER.search(root_body) is None:
+        return None
+    return _FINDING_MARKER.sub("", root_body).strip()
+
+
+def _reply_hunk(github: GitHubGateway, comment: dict[str, Any]) -> str:
+    """The diff hunk covering the replied-to comment's line, or "" if none.
+
+    Reads the comment's ``path``/``line`` (falling back to ``original_line`` for
+    an outdated position) off the review-comment payload and slices the covering
+    hunk out of the already-fetched PR diff — grounding context for the answer.
+    """
+    path = comment.get("path") or ""
+    line = comment.get("line") or comment.get("original_line") or 0
+    if not path or not line:
+        return ""
+    hunk = hunk_for_line(github.get_pr_context().diff, path, int(line))
+    return hunk or ""
+
+
 def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     """Post a short failure notice to the PR; never raise from here."""
     notice = f"⚠️ lgtmaybe review failed: {exc}"
@@ -663,6 +761,7 @@ def action_inputs() -> dict[str, str | None]:
         "static_analysis": get("STATIC_ANALYSIS"),
         "auto_describe": get("AUTO_DESCRIBE"),
         "auto_diagram": get("AUTO_DIAGRAM"),
+        "answer_replies": get("ANSWER_REPLIES"),
         "pr_labels": get("PR_LABELS"),
         "learn_feedback": get("LEARN_FEEDBACK"),
         "fail_on": get("FAIL_ON"),
@@ -710,6 +809,7 @@ __all__ = [
     "execute_describe",
     "execute_local_review",
     "execute_review",
+    "execute_review_reply",
     "main",
     "parse_pr_url",
     "pr_url_from_event",
