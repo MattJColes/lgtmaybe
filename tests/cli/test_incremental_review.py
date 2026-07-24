@@ -249,6 +249,74 @@ def test_run_describe_posts_via_the_idempotent_upsert() -> None:
     assert github.comments == []
 
 
+def test_auto_diagram_only_on_open_events_when_enabled() -> None:
+    from lgtmaybe.cli import should_auto_diagram
+
+    on = _cfg(auto_diagram=True)
+    assert should_auto_diagram(on, event_action="opened") is True
+    assert should_auto_diagram(on, event_action="reopened") is True
+    assert should_auto_diagram(on, event_action="synchronize") is False
+    assert should_auto_diagram(_cfg(), event_action="opened") is False  # default off
+
+
+def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
+    import json as _json
+
+    from lgtmaybe.cli import run_diagram
+    from lgtmaybe.core.models import ProviderResult
+    from tests.fakes import FakeGitHub, FakeProvider
+
+    github = FakeGitHub()
+    structured = _json.dumps({"title": "Change map", "mermaid": "C4Container"})
+    provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
+
+    run_diagram(github, provider, _cfg())
+
+    assert len(github.diagrams) == 1
+    assert "```mermaid" in github.diagrams[0]
+    assert github.comments == []
+
+
+def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
+    """A gateway lacking post_diagram_comment still gets the body via a plain comment."""
+    import json as _json
+
+    from lgtmaybe.cli import run_diagram
+    from lgtmaybe.core.models import PRContext, ProviderResult
+    from lgtmaybe.core.ports import GitHubGateway
+
+    class PlainGateway(GitHubGateway):
+        def __init__(self) -> None:
+            self.comments: list[str] = []
+
+        def get_pr_context(self) -> PRContext:
+            return PRContext(
+                diff="diff --git a/a b/a\n@@ -1 +1 @@\n-x\n+y\n",
+                changed_files=["a"],
+                base_sha="b",
+                head_sha="h",
+                repo="o/r",
+                pr_number=1,
+            )
+
+        def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover - unused
+            pass
+
+        def post_issue_comment(self, body: str) -> None:
+            self.comments.append(body)
+
+    from tests.fakes import FakeProvider
+
+    github = PlainGateway()
+    structured = _json.dumps({"title": "Change map", "mermaid": "C4Container"})
+    provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
+
+    run_diagram(github, provider, _cfg())
+
+    assert len(github.comments) == 1
+    assert "```mermaid" in github.comments[0]
+
+
 # ---------------------------------------------------------------------------
 # PR labels (F4): applied only when opted in, on capable gateways
 # ---------------------------------------------------------------------------

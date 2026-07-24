@@ -389,6 +389,11 @@
       "title": "Auto Describe",
       "type": "boolean"
     },
+    "auto_diagram": {
+      "default": false,
+      "title": "Auto Diagram",
+      "type": "boolean"
+    },
     "categories": {
       "default": [
         "security",

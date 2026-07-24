@@ -357,6 +357,23 @@ class DescribeResult(_Strict):
     intent_check: str = ""
 
 
+class DiagramResult(_Strict):
+    """Structured-output envelope for the change-diagram pass.
+
+    The model returns a C4-style Mermaid diagram of what the PR changes plus a
+    plain-text ASCII rendering of the same graph. Mermaid renders natively in a
+    GitHub comment; the ASCII is the terminal view for the local CLI and the
+    fallback the comment shows when the Mermaid can't be rendered. Every field
+    defaults empty so a partial answer still validates; a fully unparseable
+    answer falls back to the raw text.
+    """
+
+    title: str = ""
+    mermaid: str = ""
+    ascii: str = ""
+    notes: str = ""
+
+
 class TriageFileVerdict(_Strict):
     """One triage verdict: whether *path* needs the strong model, and how risky."""
 
@@ -502,6 +519,12 @@ class ReviewConfig(_Strict):
     # concern from the review (either can be enabled independently), and a
     # describe failure never blocks the review. Default off.
     auto_describe: bool = False
+    # Auto-diagram: like auto_describe, but posts a C4-style change diagram —
+    # a Mermaid C4 diagram of the components the PR touches (with an ASCII
+    # fallback), rendered natively in the comment — when a PR is opened or
+    # reopened. Its own comment, updated in place on later /diagram runs.
+    # Best-effort; a diagram failure never blocks the review. Default off.
+    auto_diagram: bool = False
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the

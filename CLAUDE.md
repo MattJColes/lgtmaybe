@@ -165,7 +165,17 @@ pattern, event bus, plugin framework.
      raw-text fallback) via `post_describe_comment` — an idempotent upsert that
      edits our previous description in place. `ReviewConfig.auto_describe`
      (default off; Action input `auto_describe`) posts it automatically on a
-     freshly opened/reopened PR, best-effort, before the review.
+     freshly opened/reopened PR, best-effort, before the review. `/diagram`
+     posts a **C4-style change diagram** (`engine/diagram.py`: a Mermaid C4
+     diagram of the components the PR touches — rendered natively by GitHub —
+     plus an ASCII rendering that is both the terminal view and the fallback
+     when the Mermaid can't render; one structured call, `_mermaid_ok` prefix
+     check, raw-text fallback) via `post_diagram_comment` — its own idempotent
+     upsert with a disjoint marker family. `ReviewConfig.auto_diagram` (default
+     off; Action input `auto_diagram`) posts it automatically alongside
+     auto-describe. The local `lgtmaybe diagram` command prints the same body
+     (no GitHub) — a terminal can't render Mermaid, which is what the ASCII is
+     for. **No D2:** GitHub doesn't render it in Markdown.
    - **Guards (in the engine):** generated/binary files skipped via
      `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
      denylist globs applied right after it (`engine.passes_path_filters`;

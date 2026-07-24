@@ -44,6 +44,11 @@ Nothing else is sent. lgtmaybe does not send:
 - Committer identity or email addresses
 - Any other data from the repository's git history
 
+The optional **description** (`/describe`, `auto_describe`) and **change
+diagram** (`/diagram`, `auto_diagram`) features send exactly the same inputs —
+the redacted diff and, when present, the redacted stated intent. They add no new
+data flows; they only ask the model for a different output.
+
 ## Secret redaction before egress
 
 Before the diff is sent to any external provider, lgtmaybe scans it for

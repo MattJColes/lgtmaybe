@@ -79,6 +79,7 @@ nav:
       - Configure & extend:
           - Configure .lgtmaybe.yml: how-to/configure-lgtmaybe-yml.md
           - Add a custom review lens: how-to/add-a-custom-lens.md
+          - Generate a change diagram: how-to/generate-a-change-diagram.md
           - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
       - Maintainers:
           - Releasing: how-to/releasing.md

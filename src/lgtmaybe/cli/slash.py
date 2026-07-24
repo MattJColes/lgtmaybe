@@ -3,7 +3,8 @@
 A PR comment like ``/review`` or ``/ask why is this slow?`` routes to the same
 engine and provider as the main CLI. ``/review`` and ``/improve`` post a review;
 ``/ask`` replies in-thread with an issue comment; ``/describe`` posts (or
-updates in place) the structured PR-description comment.
+updates in place) the structured PR-description comment; ``/diagram`` posts (or
+updates in place) a C4-style change diagram.
 
 The diff is always redacted and wrapped as untrusted input before it reaches the
 provider — a PR comment is no more trusted than the diff itself.
@@ -25,6 +26,7 @@ class SlashCommand(StrEnum):
     improve = "improve"
     ask = "ask"
     describe = "describe"
+    diagram = "diagram"
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,13 @@ def dispatch(
         from lgtmaybe.cli import run_describe
 
         run_describe(github, provider, cfg)
+        return
+
+    if parsed.name is SlashCommand.diagram:
+        # No arguments — the diagram is always a C4 Mermaid + ASCII of the change.
+        from lgtmaybe.cli import run_diagram
+
+        run_diagram(github, provider, cfg)
 
 
 def _answer_question(
