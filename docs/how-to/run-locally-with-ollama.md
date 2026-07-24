@@ -202,12 +202,12 @@ model: qwen3.6:35b
 timeout: 900
 ```
 
-The review fans out one call per lens — **four calls** under the default `fast`
-preset (nine under `--preset full`). lgtmaybe runs those **serially for
+The review fans out **three calls** under the default `fast` preset (nine under
+`--preset full`). lgtmaybe runs those **serially for
 ollama**: a single ollama instance serves one request at a time, so firing them
 concurrently would only make each wait and time out. The trade-off is
 wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — four serial calls instead of nine is the
+is exactly why `fast` is the default — three serial calls instead of nine is the
 single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`

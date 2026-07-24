@@ -145,14 +145,10 @@ Default: `100000`.
 
 ### preset
 
-How many model calls the review spends. `fast` (the default) covers all nine
-lenses in **four calls**: security and correctness keep dedicated calls (the
-stated intent folds into the correctness prompt when the PR states one), and
-the rest merge into a code-health call (performance, complexity, ponytail,
-deprecation) and an artefacts call (tests, documentation), with each finding
-attributed to its category. `full` runs one call per lens — more per-lens
-focus for release branches and deep audits, at roughly twice the calls and
-wall time.
+How many model calls the review spends. `fast` (the default) covers security,
+correctness and stated intent, performance, complexity, ponytail, and
+deprecation in **three calls**. `full` restores tests and documentation and
+runs one focused call per lens for release branches and deep audits.
 
 ```yaml
 preset: full

@@ -277,7 +277,7 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` covers the nine lenses in four grouped model calls; `full` runs one call per lens for deep audits. |
+| `preset` | `fast` | `fast` covers seven code-focused lenses in three model calls; `full` restores tests/documentation and runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
@@ -307,15 +307,14 @@ Each finding has:
 | `body` | The explanation |
 | `suggestion` | Optional suggested replacement code |
 
-The nine review categories (security, correctness, deprecation, tests,
-documentation, performance, complexity, intent, ponytail) fan out as concurrent
-model calls per the `preset`. The default `fast` preset covers them in four
-calls: dedicated security and correctness calls (the stated intent folds into
-correctness), plus a merged code-health call
-(performance/complexity/ponytail/deprecation) and a merged artefacts call
-(tests/documentation), with each finding attributed to its category.
-`preset: full` runs each category as its own focused call with a worked example
-of its own finding type. Their findings are merged and de-duplicated. A
+The nine review categories are security, correctness, deprecation, tests,
+documentation, performance, complexity, intent, and ponytail. The default
+`fast` preset runs seven of them in three concurrent calls: dedicated security
+and correctness calls (the stated intent folds into correctness), plus a merged
+code-health call (performance/complexity/ponytail/deprecation). `preset: full`
+restores tests and documentation and runs each category as its own focused call
+with a worked example of its own finding type. Their findings are merged and
+de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 

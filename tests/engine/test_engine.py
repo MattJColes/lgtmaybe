@@ -391,7 +391,7 @@ def test_reflect_false_skips_the_reflection_pass() -> None:
 
     findings, _ = engine.review(_CTX, cfg)
 
-    assert [f.title for f in findings] == ["real bug"]  # 5 category copies deduped to one
+    assert [f.title for f in findings] == ["real bug"]  # 3 lens copies deduped to one
     assert _reflection_calls(provider) == []  # no reflection pass ran
 
 
@@ -403,8 +403,8 @@ def test_reflect_true_runs_the_reflection_pass() -> None:
     engine.review(_CTX, cfg)
 
     assert len(_reflection_calls(provider)) == 1  # exactly one reflection pass
-    # The default fast preset covers the nine lenses in four grouped calls.
-    assert len(_review_calls(provider)) == 4
+    # The default fast preset covers seven lenses in three grouped calls.
+    assert len(_review_calls(provider)) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1009,8 +1009,8 @@ def test_review_logs_an_upfront_work_summary(engine_logs) -> None:
 
     starting = [r for r in engine_logs if "review starting" in r.getMessage()]
     assert starting, "expected an up-front 'review starting' log"
-    # The default fast preset queues four grouped lens calls.
-    assert getattr(starting[0], "lenses", None) == 4
+    # The default fast preset queues three grouped lens calls.
+    assert getattr(starting[0], "lenses", None) == 3
 
 
 def test_review_logs_a_heartbeat_as_each_lens_runs(engine_logs) -> None:
@@ -1080,9 +1080,9 @@ def test_custom_lens_runs_as_an_extra_review_call() -> None:
     findings, _ = engine.review(_CTX, cfg)
 
     review_calls = _review_calls(provider)
-    # The default fast preset runs four grouped built-in calls; the custom
+    # The default fast preset runs three grouped built-in calls; the custom
     # lens always adds its own focused call on top.
-    assert len(review_calls) == 4 + 1
+    assert len(review_calls) == 3 + 1
     assert any("Simplify or delete" in _all_text(c) for c in review_calls)
     assert findings  # the custom lens's finding survived the pipeline
 

@@ -6,6 +6,9 @@ optional fallback model.
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 import litellm
@@ -238,14 +241,14 @@ class LiteLLMProvider(ProviderClient):
     ) -> ProviderResult:
         """One litellm call, with the temperature-value-rejection fallback applied."""
         try:
-            response = litellm.completion(model=model, messages=messages, **kwargs)
+            response = _completion_with_wall_timeout(model, messages, kwargs)
         except Exception as exc:
             if "temperature" not in kwargs or not _rejects_temperature(exc):
                 raise
             # Drop temperature for this and every subsequent retry, letting the
             # model use its only supported value (its default).
             kwargs.pop("temperature")
-            response = litellm.completion(model=model, messages=messages, **kwargs)
+            response = _completion_with_wall_timeout(model, messages, kwargs)
         return self._map_response(response, model)
 
     def _with_cache_control(self, messages: list[Message], model: str) -> list[Message]:
@@ -336,6 +339,26 @@ class LiteLLMProvider(ProviderClient):
 def _cache_block(text: str) -> dict[str, Any]:
     """A text content block carrying an ephemeral cache breakpoint."""
     return {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+
+
+def _completion_with_wall_timeout(
+    model: str, messages: list[Message], kwargs: dict[str, Any]
+) -> Any:
+    """Call LiteLLM with a real wall-clock bound even if its transport hangs."""
+    timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
+    future: Future[Any] = Future()
+
+    def complete() -> None:
+        try:
+            future.set_result(litellm.completion(model=model, messages=messages, **kwargs))
+        except BaseException as exc:
+            future.set_exception(exc)
+
+    threading.Thread(target=complete, name="lgtmaybe-provider", daemon=True).start()
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeoutError as exc:
+        raise TimeoutError(f"provider request exceeded {timeout:g}s") from exc
 
 
 def _trailing_user_run(messages: list[Message]) -> tuple[int, list[Message]]:

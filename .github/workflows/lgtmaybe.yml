@@ -49,4 +49,5 @@ jobs:
           provider: openrouter
           model: deepseek/deepseek-v4-pro
           auto_diagram: true
+          profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}

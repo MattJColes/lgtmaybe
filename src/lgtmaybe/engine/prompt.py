@@ -499,7 +499,7 @@ keep this lens to "should this exist at all?" — leave readability nits to othe
 
 # ---------------------------------------------------------------------------
 # Fast-preset merged lenses. Written as integrated checklists (not a paste-up
-# of the per-lens sections): four calls must cover what nine did, so each
+# of the per-lens sections): three calls cover the everyday concerns, so each
 # merged prompt condenses its members to their high-signal items and demands
 # the per-finding `category` field so downstream rules/labels keep working.
 # ---------------------------------------------------------------------------
@@ -616,12 +616,10 @@ class LensGroup:
 # The fast preset's grouping (a judgement call the profile can't settle, so
 # here is the reasoning): security and correctness are the two lenses whose
 # recall is worth a dedicated, focused call — they find the merge-blocking
-# bugs. The other six split by what the reviewer is looking AT: code health
-# reads the changed code itself (how it performs, how complex it is, whether
-# it should exist, what it depends on), artefacts reads what should accompany
-# the code (tests, docs). Members that grade similarly and share framing merge
-# well; splitting differently (e.g. perf+tests) would force one call to switch
-# between unrelated rubrics.
+# bugs. Code health keeps the lower-cost concerns that inspect the changed code
+# itself. Tests and documentation are reserved for full/explicit reviews: the
+# default artefacts call was the slowest call in production while yielding no
+# findings, so it did not earn a place in the everyday path.
 CODE_HEALTH_GROUP = LensGroup(
     id="code-health",
     members=(
@@ -633,13 +631,7 @@ CODE_HEALTH_GROUP = LensGroup(
     section=_CODE_HEALTH_SECTION,
     example=_PERFORMANCE_EXAMPLE,
 )
-ARTEFACTS_GROUP = LensGroup(
-    id="artefacts",
-    members=(ReviewCategory.tests, ReviewCategory.documentation),
-    section=_ARTEFACTS_SECTION,
-    example=_TESTS_EXAMPLE,
-)
-FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
+FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP,)
 
 
 def build_group_prompt(group: LensGroup) -> str:

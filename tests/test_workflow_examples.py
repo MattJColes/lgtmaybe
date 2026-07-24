@@ -23,3 +23,14 @@ def test_supplied_workflows_enable_auto_diagram() -> None:
         assert all(step.get("with", {}).get("auto_diagram") is True for step in action_steps), (
             f"{workflow} must enable automatic diagrams for new repositories"
         )
+
+
+def test_dogfood_workflow_prints_the_timing_profile() -> None:
+    workflow = yaml.safe_load(_DOGFOOD_WORKFLOW.read_text(encoding="utf-8"))
+    [action_step] = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("uses") == "./"
+    ]
+    assert action_step.get("with", {}).get("profile") is True

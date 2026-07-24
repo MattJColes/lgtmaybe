@@ -62,10 +62,9 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     "--preset",
     default=None,
     type=click.Choice(["fast", "full"]),
-    help="Review preset: fast (default) covers all nine lenses in four model "
-    "calls — dedicated security and correctness calls (stated intent folds "
-    "into correctness), plus merged code-health and artefacts calls; full runs "
-    "one call per lens for release branches and deep audits (~2x the calls)",
+    help="Review preset: fast (default) covers security, correctness/intent, "
+    "performance, complexity, ponytail, and deprecation in three calls; full "
+    "restores tests/documentation and runs one call per lens for deep audits",
 )
 @click.option(
     "--full",
