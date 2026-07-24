@@ -9,6 +9,9 @@ rendering and renders them as a Markdown comment. Contracts:
 - invalid Mermaid (not a diagram) drops to an ASCII-only plain fence — never a
   broken Mermaid block;
 - unparseable model output falls back to the raw text;
+- C4 relationship lines get an ``UpdateRelStyle`` in a mid-grey readable on
+  both GitHub themes (the renderer's near-black default vanishes in dark mode),
+  without duplicating styles the model already emitted;
 - the diff is redacted before it leaves, and wrapped as untrusted data;
 - the intent block is sent only when the PR states an intent;
 - the diagram prompt carries no findings-JSON task restatement.
@@ -88,6 +91,56 @@ def test_invalid_mermaid_falls_back_to_ascii_only() -> None:
     assert "```mermaid" not in body
     assert "<details>" not in body
     assert "[Client] --> [App] (changed)" in body
+
+
+def test_c4_rels_get_dark_mode_safe_styles() -> None:
+    mermaid = (
+        "C4Container\n"
+        '    Container(api, "API")\n'
+        '    ContainerDb(db, "DB")\n'
+        '    Rel(client, api, "GET /users")\n'
+        '    BiRel_D(api, db, "query")\n'
+    )
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    assert 'UpdateRelStyle(client, api, $textColor="#767676", $lineColor="#767676")' in body
+    assert 'UpdateRelStyle(api, db, $textColor="#767676", $lineColor="#767676")' in body
+
+
+def test_rel_styles_land_inside_the_mermaid_fence() -> None:
+    mermaid = 'C4Container\n    Rel(a, b, "calls")'
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
+    assert "UpdateRelStyle(a, b," in fence
+
+
+def test_model_supplied_rel_style_is_not_duplicated() -> None:
+    mermaid = (
+        "C4Container\n"
+        '    Rel(a, b, "calls")\n'
+        '    Rel(b, c, "calls")\n'
+        '    UpdateRelStyle(a, b, $textColor="red", $lineColor="red")\n'
+    )
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    # The model's own style for (a, b) is kept; only (b, c) gets ours.
+    assert body.count("UpdateRelStyle(a, b,") == 1
+    assert '$textColor="red"' in body
+    assert 'UpdateRelStyle(b, c, $textColor="#767676"' in body
+
+
+def test_repeated_rel_pair_styled_once() -> None:
+    mermaid = 'C4Container\n    Rel(a, b, "calls")\n    Rel(a, b, "calls again")'
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    assert body.count("UpdateRelStyle(a, b,") == 1
+
+
+def test_non_c4_mermaid_is_left_unstyled() -> None:
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid="flowchart LR\n    a --> b"))
+
+    assert "UpdateRelStyle" not in body
 
 
 def test_unparseable_output_falls_back_to_raw_text() -> None:
