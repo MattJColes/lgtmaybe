@@ -1,18 +1,22 @@
-# Dogfood: lgtmaybe reviews its own PRs with OpenAI gpt-5.5.
+# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (deepseek/deepseek-v4-pro).
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
-# Add an OPENAI_API_KEY repo secret.
+# Add an OPENROUTER_API_KEY repo secret.
 #
-# ON DEMAND ONLY: a real provider review costs money + runs a live model, so this
-# does NOT fire automatically on every PR. A maintainer triggers it by commenting
-# a slash command (/review, /improve, /ask, /describe) on the PR.
+# Reviews run automatically on PRs from trusted authors (owner / member /
+# collaborator), and on demand via slash commands (/review, /improve, /ask,
+# /describe, /diagram) — a maintainer can opt an external PR in by commenting
+# /review on it. deepseek-v4-pro is cheap enough to run per-PR; on a
+# `synchronize` push the review is incremental (only the new commits).
 name: lgtmaybe
 
 on:
+  pull_request_target:
   issue_comment:
     types: [created]
 
-# issue_comment runs against the BASE repo (secrets available); the action only
-# ever reads the diff via the API and never checks out PR code.
+# pull_request_target and issue_comment run against the BASE repo (secrets
+# available); the action only ever reads the diff via the API and never checks
+# out PR code.
 permissions:
   contents: read
   pull-requests: write
@@ -23,13 +27,15 @@ concurrency:
 
 jobs:
   review:
-    # Comment-triggered only, and only on a PR: a slash command from a trusted
-    # author (repo owner / org member / collaborator). This keeps a drive-by /ask
-    # or /review from a stranger from spending the provider budget, and skips
-    # comments that aren't on a pull request.
+    # Only trusted authors (repo owner / org member / collaborator) trigger a
+    # review — automatically on their PRs, or via a slash command. This keeps a
+    # drive-by /ask or /review from a stranger from spending the provider
+    # budget, and skips comments that aren't on a pull request.
     if: >-
-      github.event.issue.pull_request &&
-      contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+      (github.event_name == 'pull_request_target' &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     # A healthy full review runs in a handful of minutes; cap it so a wedged
     # model call can't sit on the runner for GitHub's 6-hour default. Fail-fast on
@@ -40,6 +46,6 @@ jobs:
       - uses: actions/checkout@v7 # base repo only — for action.yml + .lgtmaybe.yml config
       - uses: ./
         with:
-          provider: openai
-          model: gpt-5.4-mini
-          api_key: ${{ secrets.OPENAI_API_KEY }}
+          provider: openrouter
+          model: deepseek/deepseek-v4-pro
+          api_key: ${{ secrets.OPENROUTER_API_KEY }}
