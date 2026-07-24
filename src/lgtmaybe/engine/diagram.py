@@ -23,17 +23,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import DiagramResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
 
-from .describe import _fit_diff  # same head-truncation the describe pass uses
-from .engine import _intent_text  # the one canonical intent extractor
-from .injection import neutralise, wrap_intent
-from .parse import iter_json_values
-from .redact import redact
-
-_log = get_logger(__name__)
+from .describe import structured_comment  # the shared one-call scaffold
 
 _DIAGRAM_SYSTEM = """\
 You are a software architect drawing a C4-style diagram of what a pull request \
@@ -93,47 +86,23 @@ def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -
     parsed the raw model text is returned as-is, so a weak model still yields a
     usable comment.
     """
-    intent = _intent_text(ctx)
-    parts: list[str] = []
-    if intent:
-        parts.append(wrap_intent(redact(intent)))
-    diff = _fit_diff(redact(ctx.diff), cfg.max_input_tokens)
-    parts.append(f"{_DIFF_PREAMBLE}===DIFF_START===\n{neutralise(diff)}\n===DIFF_END===")
-    user = "\n\n".join(parts) + _TASK_SUFFIX
-
-    opts: dict[str, Any] = {"response_format": DiagramResult} if cfg.structured_output else {}
-    result = provider.complete(
-        messages=[
-            {"role": "system", "content": _DIAGRAM_SYSTEM},
-            {"role": "user", "content": user},
-        ],
-        model=cfg.model,
-        **opts,
+    return structured_comment(
+        ctx,
+        cfg,
+        provider,
+        system=_DIAGRAM_SYSTEM,
+        diff_preamble=_DIFF_PREAMBLE,
+        task_suffix=_TASK_SUFFIX,
+        result_model=DiagramResult,
+        wanted=_has_diagram,
+        render=lambda diagram, _has_intent: _render(diagram),
+        label="diagram",
     )
-    parsed = _parse_diagram(result.text)
-    if parsed is None:
-        _log.info("diagram output unstructured — posting raw text")
-        return result.text
-    return _render(parsed)
 
 
-def _parse_diagram(raw: str) -> DiagramResult | None:
-    """Leniently extract a diagram object from *raw*; None when it has no diagram."""
-    for data in iter_json_values(raw):
-        if not isinstance(data, dict):
-            continue
-        has_diagram = any(
-            isinstance(data.get(k), str) and data[k].strip() for k in ("mermaid", "ascii")
-        )
-        if not has_diagram:
-            continue
-        try:
-            return DiagramResult.model_validate(
-                {k: v for k, v in data.items() if k in DiagramResult.model_fields}
-            )
-        except Exception:  # noqa: BLE001 — fall through to the raw-text fallback
-            continue
-    return None
+def _has_diagram(data: dict[str, Any]) -> bool:
+    """Whether a parsed JSON object carries a non-empty mermaid or ascii diagram."""
+    return any(isinstance(data.get(k), str) and data[k].strip() for k in ("mermaid", "ascii"))
 
 
 def _strip_fence(source: str) -> str:

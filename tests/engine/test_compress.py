@@ -245,6 +245,45 @@ def test_trailing_context_lines_ratio() -> None:
     assert trailing_context_lines(0) == 0
 
 
+def test_expand_hunks_header_old_start_never_below_one() -> None:
+    """When earlier hunks net-add lines, a later hunk's old_start sits far below
+    its new_start; the leading pad must be clamped so the rewritten old start
+    stays >= 1 — a negative old start yields a header parse_hunk_header rejects,
+    which mis-numbers every line downstream in _snap_findings."""
+    from lgtmaybe.core.diffparse import parse_hunk_header
+
+    added = "\n".join(f"+line{i}" for i in range(1, 101))
+    patch = (
+        "diff --git a/f.py b/f.py\n"
+        "@@ -1,1 +1,101 @@\n old_first\n" + added + "\n"
+        "@@ -5,2 +105,2 @@\n ctx\n+added\n"
+    )
+    content = "\n".join(f"c{i}" for i in range(1, 200))  # 199 lines
+
+    expanded = expand_hunks(patch, content, 20, after=5)
+
+    headers = [ln for ln in expanded.splitlines() if ln.startswith("@@")]
+    assert len(headers) == 2
+    for line in headers:
+        header = parse_hunk_header(line)
+        assert header is not None, f"unparseable rewritten header: {line!r}"
+        assert header.old_start >= 1
+        assert header.new_start >= 1
+
+
+def test_expand_hunks_never_raises_when_content_shorter_than_hunk() -> None:
+    """Redaction (or stale head text) can leave the file shorter than the hunk
+    positions; reads must be clamped to the file's bounds — degrade to less
+    padding, never an IndexError that fails the whole review."""
+    content = "\n".join(f"l{i}" for i in range(1, 101))  # 100 lines
+    patch = "diff --git a/f.py b/f.py\n@@ -125,2 +125,2 @@\n ctx\n+added\n"
+
+    expanded = expand_hunks(patch, content, 20, after=5)  # must not raise
+
+    assert "@@" in expanded
+    assert "+added" in expanded
+
+
 # ---------------------------------------------------------------------------
 # expand_hunks: boundary-aware leading pad (P4 remainder)
 # ---------------------------------------------------------------------------

@@ -309,9 +309,10 @@ def _add_review_args(ap: argparse.ArgumentParser) -> None:
         "--preset",
         default=None,
         choices=["fast", "full"],
-        help="review preset to run under (fast = 4 grouped calls, full = one call per "
-        "lens). Default: the production default (fast). Run the same model under both "
-        "to measure what the fast grouping trades away.",
+        help="review preset to run under (fast = 4 grouped calls when the provider can "
+        "overlap work, 3 with one worker; full = one call per lens). Default: the "
+        "production default (fast). Run the same model under both to measure what the "
+        "fast grouping trades away.",
     )
     ap.add_argument(
         "--fixture",

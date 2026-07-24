@@ -167,6 +167,14 @@ def test_is_reviewable_rejects_generated_globs() -> None:
     assert not is_reviewable("__generated__/foo.py")
 
 
+def test_is_reviewable_rejects_nested_generated_dirs() -> None:
+    """A __generated__ tree is skipped anywhere in the path, not just at the
+    repo root — fnmatch("src/__generated__/api.ts", "__generated__/*") is False,
+    so a glob-only rule let nested generated trees through."""
+    assert not is_reviewable("src/__generated__/api.ts")
+    assert not is_reviewable("packages/app/src/__generated__/types.ts")
+
+
 def test_is_reviewable_rejects_generated_llms_files() -> None:
     """llms.txt / llms-full.txt (the llmstxt.org convention) are generated
     whole-docs corpora — skip them by exact name, at the root or nested."""

@@ -33,6 +33,18 @@ def test_wrapped_diff_contains_original_content() -> None:
     assert "new line" in wrapped
 
 
+def test_public_delimiter_constants_frame_the_diff_block() -> None:
+    """DIFF_START/DIFF_END are the public names other modules must use so a
+    marker rename can never desync from what ``neutralise`` defangs."""
+    from lgtmaybe.engine.injection import DIFF_END, DIFF_START
+
+    assert DIFF_START == _START
+    assert DIFF_END == _END
+    wrapped = wrap_diff("+x\n")
+    assert f"{DIFF_START}\n" in wrapped
+    assert f"\n{DIFF_END}" in wrapped
+
+
 def test_wrap_diff_returns_string() -> None:
     assert isinstance(wrap_diff("some diff"), str)
 

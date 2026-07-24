@@ -37,6 +37,24 @@ class Severity(StrEnum):
     def rank(self) -> int:
         return _SEVERITY_ORDER.index(self)
 
+    # All four order comparisons rank by severity. Defined explicitly (not via
+    # functools.total_ordering, which skips operators str already defines) so
+    # none can fall back to str's alphabetical order, where "critical" < "high".
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, Severity):
+            return self.rank < other.rank
+        return NotImplemented
+
+    def __le__(self, other: object) -> bool:
+        if isinstance(other, Severity):
+            return self.rank <= other.rank
+        return NotImplemented
+
+    def __gt__(self, other: object) -> bool:
+        if isinstance(other, Severity):
+            return self.rank > other.rank
+        return NotImplemented
+
     def __ge__(self, other: object) -> bool:
         if isinstance(other, Severity):
             return self.rank >= other.rank
@@ -570,8 +588,9 @@ class ReviewConfig(_Strict):
     # local CLI review, which has no conversations to resolve.
     resolve_fixed: bool = True
     # Call-count preset (see ReviewPreset): `fast` (default) covers seven
-    # built-in lenses in three calls; `full` restores tests/documentation and
-    # runs one call per lens. An explicit `categories` list overrides it.
+    # built-in lenses in four calls when the provider can overlap work (three
+    # with one worker); `full` restores tests/documentation and runs one call
+    # per lens. An explicit `categories` list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the

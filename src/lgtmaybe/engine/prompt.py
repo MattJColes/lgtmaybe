@@ -39,7 +39,7 @@ path (string), line (integer), side ("LEFT" or "RIGHT", default "RIGHT"), severi
 the levels above), title (string ≤ 80 chars), body (string), suggestion (string or null), \
 anchor (string — the verbatim flagged line, see below).
 
-Report each distinct issue as its own finding — several findings may share a line.
+Report each distinct issue as its own finding.
 
 ### How to fill `body` and `suggestion`
 

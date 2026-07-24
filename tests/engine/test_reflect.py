@@ -465,6 +465,53 @@ def test_defer_fetches_and_recheck_keeps_finding() -> None:
     assert _HIGH in survivors
 
 
+def test_defer_on_changed_file_absent_from_grounding_still_fetches() -> None:
+    """A deferral naming a changed-but-unflagged file must fetch it and re-judge.
+
+    ``ctx.file_contents`` lists every reviewable changed file, but the auditor
+    only saw the grounding block built from FLAGGED files — so a changed file
+    absent from that block was never shown. Treating it as "already grounded"
+    skips the fetch, resolution comes back empty, and the finding is silently
+    dropped as unverifiable."""
+    ctx = _CTX.model_copy(
+        update={
+            "changed_files": ["a.py", "other.py"],
+            "file_contents": {
+                "a.py": "x = 1\n",
+                "other.py": "def guard():\n    return True\n",
+            },
+        }
+    )
+    provider = _ScriptedProvider(
+        [
+            _needs_envelope(0, ["other.py"]),  # defer on the unshown changed file
+            _envelope([(0, True)]),  # recheck with it in front: keep
+        ]
+    )
+    fetcher = _RecordingFetcher({"other.py": "def guard():\n    return True\n"})
+
+    survivors = reflect_findings([_HIGH], ctx, _CFG, provider, fetch_file=fetcher)
+
+    assert fetcher.calls == ["other.py"]
+    recheck_user = _user_text(provider.calls[1])
+    assert "def guard():" in recheck_user
+    assert _HIGH in survivors
+
+
+def test_defer_on_file_already_in_grounding_is_not_refetched() -> None:
+    """The flagged file's head text WAS rendered into the grounding block, so a
+    deferral naming it has nothing new to fetch — the deferral stays unresolved
+    and the finding is dropped without a redundant fetch."""
+    ctx = _CTX.model_copy(update={"file_contents": {"a.py": "x = 1\n"}})
+    provider = _ScriptedProvider([_needs_envelope(0, ["a.py"])])
+    fetcher = _RecordingFetcher({"a.py": "x = 1\n"})
+
+    survivors = reflect_findings([_HIGH], ctx, _CFG, provider, fetch_file=fetcher)
+
+    assert fetcher.calls == []
+    assert survivors == []
+
+
 def test_defer_then_confirm_drops_finding() -> None:
     """Same defer, but the recheck (with the file) confirms it's a false positive."""
     provider = _ScriptedProvider(

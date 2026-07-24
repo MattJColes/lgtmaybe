@@ -14,8 +14,13 @@ from __future__ import annotations
 
 import re
 
-_START = "===DIFF_START==="
-_END = "===DIFF_END==="
+# Public names: other modules (describe, diagram) build their own diff blocks
+# with these so a marker rename here can never desync from `neutralise`.
+DIFF_START = "===DIFF_START==="
+DIFF_END = "===DIFF_END==="
+# Private aliases kept for existing references.
+_START = DIFF_START
+_END = DIFF_END
 
 # Delimiters for the stated-intent block (PR title / description / commit
 # messages) — attacker-controlled on a fork PR, exactly like the diff.

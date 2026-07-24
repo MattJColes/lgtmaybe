@@ -42,13 +42,24 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"npm_[A-Za-z0-9]{36,}"),
     # PyPI API tokens: pypi- followed by a long base64 macaroon.
     re.compile(r"pypi-[A-Za-z0-9_-]{16,}"),
-    # PEM private-key blocks (RSA/EC/OPENSSH/generic) — match the whole block.
-    re.compile(
-        r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"
-        r".*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
-        re.DOTALL,
-    ),
 ]
+
+# PEM private-key blocks (RSA/EC/OPENSSH/generic) — the one multi-line pattern,
+# kept out of _SIMPLE_PATTERNS because its replacement must be line-count
+# preserving: hunk expansion and diff hunk headers index into the redacted text
+# by line number, so collapsing an N-line block into one placeholder desyncs
+# (and can crash) everything downstream that counts lines.
+_PEM_PATTERN = re.compile(
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"
+    r".*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
+    re.DOTALL,
+)
+
+
+def _replace_pem(m: re.Match[str]) -> str:
+    """One placeholder per matched line, so the block's line count is preserved."""
+    return "\n".join([REDACTED_PLACEHOLDER] * (m.group(0).count("\n") + 1))
+
 
 # Capturing-group patterns — only the named ``secret`` group is replaced, so the
 # surrounding key name / scheme stays readable in the diff.
@@ -97,6 +108,7 @@ def redact(text: str) -> str:
     pass runs the full pattern battery over the whole input. Bounded so the
     cache can't retain an unbounded number of large file texts.
     """
+    text = _PEM_PATTERN.sub(_replace_pem, text)
     for pattern in _SIMPLE_PATTERNS:
         text = pattern.sub(REDACTED_PLACEHOLDER, text)
     for pattern in _VALUE_PATTERNS:
