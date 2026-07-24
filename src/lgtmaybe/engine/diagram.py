@@ -12,6 +12,11 @@ since a terminal can't render Mermaid). If the Mermaid fails a cheap validity
 check the comment shows the ASCII alone — a reviewer never sees GitHub's red
 "unable to render" box.
 
+C4 output is post-processed for dark mode: Mermaid's C4 renderer draws
+relationship lines and labels in a hardcoded near-black that disappears on
+GitHub's dark theme, so ``_restyle_rels`` appends an ``UpdateRelStyle`` per
+relationship in a mid-grey legible on both themes.
+
 Like describe, the diff and stated intent are untrusted: both are redacted
 before egress and the diff enters its own neutralised block with a
 diagram-specific task statement (never ``wrap_diff``'s findings-JSON
@@ -78,6 +83,40 @@ _MERMAID_START = re.compile(
     r"^(C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|flowchart|graph)\b"
 )
 
+# A C4 relationship call — Rel, BiRel, and the directional/back variants — whose
+# first two arguments are the endpoint aliases.
+_REL_CALL = re.compile(r"^\s*(?:Bi)?Rel(?:_\w+)?\(\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*,")
+_REL_STYLE = re.compile(r"^\s*UpdateRelStyle\(\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*[,)]")
+
+# Mermaid's C4 renderer hardcodes near-black relationship lines and labels
+# regardless of theme, so they vanish on GitHub's dark background. This
+# mid-grey keeps ≥4:1 contrast on both GitHub themes (#ffffff and #0d1117).
+_REL_COLOR = "#767676"
+
+
+def _restyle_rels(mermaid: str) -> str:
+    """Append an ``UpdateRelStyle`` per C4 relationship so it survives dark mode.
+
+    Best-effort and additive: pairs the model already styled are left alone,
+    each pair is styled once, and non-C4 diagrams (which GitHub themes
+    properly) pass through untouched.
+    """
+    lines = mermaid.splitlines()
+    first = next((line.strip() for line in lines if line.strip()), "")
+    if not first.startswith("C4"):
+        return mermaid
+
+    styled = {m.groups() for line in lines if (m := _REL_STYLE.match(line))}
+    additions = []
+    for line in lines:
+        if (m := _REL_CALL.match(line)) and m.groups() not in styled:
+            styled.add(m.groups())
+            additions.append(
+                f"    UpdateRelStyle({m[1]}, {m[2]}, "
+                f'$textColor="{_REL_COLOR}", $lineColor="{_REL_COLOR}")'
+            )
+    return "\n".join(lines + additions)
+
 
 def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
     """One provider call → the Markdown body of the change-diagram comment.
@@ -138,7 +177,7 @@ def _render(diagram: DiagramResult) -> str:
     ascii_art = diagram.ascii.strip()
 
     if _mermaid_ok(mermaid):
-        lines += _fenced(mermaid, "mermaid")
+        lines += _fenced(_restyle_rels(mermaid), "mermaid")
         if ascii_art:
             # Collapsed so the rendered diagram leads; expandable text fallback.
             lines += ["", "<details><summary>Text version</summary>", ""]
