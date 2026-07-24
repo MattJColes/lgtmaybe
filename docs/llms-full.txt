@@ -16,7 +16,7 @@ Source: https://mattjcoles.github.io/lgtmaybe/ — generated from the docs/ tree
 
 </div>
 
-Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
+Provider-agnostic AI PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
 posts inline comments and a summary straight onto the pull request.
 
