@@ -4016,7 +4016,8 @@ like the diff.
 Before the diff reaches the model it is cleaned:
 
 - **Non-reviewable files are skipped** — lockfiles, minified/bundled assets,
-  vendored directories, and binaries. Reviewing them is noise and wastes tokens.
+  vendored directories, generated LLM-index corpora (`llms.txt` / `llms-full.txt`),
+  and binaries. Reviewing them is noise and wastes tokens.
 - **Secrets are redacted** — anything that looks like a key or token is stripped
   from the diff before it leaves your environment for the provider.
 
