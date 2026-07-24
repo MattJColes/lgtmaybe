@@ -39,6 +39,7 @@ jobs:
         with:
           provider: openai-compatible
           model: deepseek-chat
+          auto_diagram: true
           api_base: https://api.deepseek.com/v1
           # Hosted endpoints need a key; omit api_key for keyless self-hosted servers.
           api_key: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
