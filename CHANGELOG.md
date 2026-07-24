@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.12.2...lgtmaybe-v0.13.0) (2026-07-24)
+
+
+### Features
+
+* C4-style change diagram (/diagram, auto_diagram, lgtmaybe diagram) ([#191](https://github.com/MattJColes/lgtmaybe/issues/191)) ([4d99649](https://github.com/MattJColes/lgtmaybe/commit/4d996493d73d38a9be5dfb79f849c2177e3928c7))
+
 ## [0.12.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.12.1...lgtmaybe-v0.12.2) (2026-07-22)
 
 
