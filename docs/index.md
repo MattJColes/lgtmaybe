@@ -10,35 +10,32 @@ description: Provider-agnostic AI code review for pull requests — OpenAI, Clau
 
 </div>
 
-Provider-agnostic AI PR reviewer. Seven hosted providers, local ollama, and any
-OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
-posts inline comments and a summary straight onto the pull request.
+lgtmaybe reviews the code a pull request changes. Pick OpenAI, Claude, Bedrock,
+Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it as a
+GitHub Action or from your terminal. GitHub gets inline comments and one
+summary; locally, you get the same findings before you push.
 
-lgtmaybe reviews the lines a change touches. It runs in two places: as a
-GitHub Action on a pull request, or locally from the command line against your
-`git` diff before you push. As an Action it fetches the diff from the GitHub API
-and never checks out or runs your code. Locally it reads your working branch.
-Either way it pads each change with a few surrounding lines, so a finding lands
-with the function around it in view — but it only ever comments on the lines
-that actually changed.
+It reads the diff and a little surrounding code, but only comments on changed
+lines. On GitHub it never checks out or runs the pull request. Generated files
+and binaries are skipped, secrets are redacted, and all PR text is treated as
+untrusted.
 
-Reviews surface the things you'd want a careful reviewer to catch:
+It checks for:
 
-- **Logic and correctness bugs** — edge cases, null/None dereferences, off-by-one and boundary errors, mismatched or inverted ranges, unhandled error paths, races and TOCTOU, missed `await`s, and numeric or timezone bugs.
-- **Security vulnerabilities** — an OWASP-aligned sweep: injection, XSS, CSRF and open redirects, hardcoded secrets, broken authn/authz (including JWT pitfalls), path traversal, unrestricted uploads, SSRF, insecure deserialization and XXE, mass assignment, weak crypto, resource/DoS safety (including ReDoS), secrets or PII (passwords, tokens, SSNs, card data) leaking into logs, and CI/IaC misconfiguration.
-- **Missing or weak tests** — changed code paths shipped without a test (flagged with a suggested test to drop in), and tests that don't really test: assertion-free, over-mocked, or sleep-based.
-- **Documentation gaps and stale docs** — public APIs added without a docstring, names that contradict what the code does, and docstrings or comments the change just made wrong.
-- **Deprecated and end-of-life code** — deprecated APIs, end-of-life or vulnerable dependencies, and typosquat-looking additions, flagged when the diff shows them (with the modern replacement suggested where known).
-- **Intent** — does the PR do what it says? lgtmaybe compares the PR title, description, and commit names (or your local `git log` commit names on the CLI) against the diff, and flags out-of-scope hunks, contradictions, and promised behaviour that never lands.
-- **Ponytail** — the "lazy senior dev" lens: the best code is the code you never wrote. Flags code that needn't exist at all — YAGNI, reaching for the standard library, doing it in fewer lines.
+- **Correctness and security** — logic errors, missed `await`s, injection, auth mistakes, and leaked secrets.
+- **Code health** — performance problems, needless complexity, deprecations, and risky dependencies.
+- **Tests and documentation** — missing or weak tests, stale comments, and undocumented APIs.
+- **Intent** — whether the change does what its title, description, and commits say it does.
+- **Ponytail** — code you don't need, standard-library opportunities, and simpler ways to get the job done.
 
-Beyond the review itself, slash commands on the PR keep the reviewer's mental
-model of the code intact: **`/describe`** posts a structured description of the
-change (title, change type, per-file walkthrough, intent check), **`/diagram`**
-posts a [C4-style Mermaid diagram of the components the PR touches](how-to/generate-a-change-diagram.md)
-— a visual map of where the change sits in the system, rendered natively by
-GitHub — and **`/ask <question>`** answers questions about the change in-thread.
-`lgtmaybe diagram` prints the same change diagram locally, before you push.
+Findings are graded from `info` to `critical` and land on the exact changed
+line. A clean change just gets a 👍 **LGTM!**.
+
+Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
+**`/describe`** writes a structured overview, **`/diagram`** draws a
+[C4-style map of the change](how-to/generate-a-change-diagram.md), and
+**`/ask <question>`** answers in the PR. Run `lgtmaybe diagram` to draw the same
+map locally before you push.
 
 ```mermaid
 C4Container
@@ -57,14 +54,6 @@ C4Container
     Rel(queue, worker, "delivers event (new)")
     Rel(worker, email, "sends confirmation (new)")
 ```
-
-Every finding is graded from `info` up to `critical`, so you can set the
-severity floor that matters to you. Each one lands as an inline comment on
-the exact line where the problem is, with a single summary at the top. On the CLI
-the same findings print to your terminal — ready to read, or to hand to an AI
-agent to apply. Before anything leaves for the model, generated files and
-binaries are skipped, secrets are redacted, and the diff is treated as untrusted
-input, hardened against prompt injection. A clean PR just gets a 👍 **LGTM!**.
 
 ## Start here
 

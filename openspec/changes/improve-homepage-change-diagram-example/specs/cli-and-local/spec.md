@@ -11,3 +11,14 @@ multiple cooperating containers.
 - **WHEN** a visitor views the homepage change-diagram example
 - **THEN** they can see changed and new elements connected across application,
   asynchronous, data, and external-service boundaries
+
+### Requirement: Homepage overview stays concise
+<!-- anchor: cli.docs-homepage-overview -->
+
+The main documentation homepage SHALL introduce every review category, its
+trust boundaries, and its pull-request commands in no more than 400 source words
+before the "Start here" section.
+
+#### Scenario: Visitor scans the homepage
+- **WHEN** a visitor reads from the hero to the "Start here" section
+- **THEN** they reach the commands and diagram without losing any review category
