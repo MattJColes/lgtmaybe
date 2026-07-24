@@ -114,3 +114,20 @@ best-effort, never failing the review.
 #### Scenario: repo has unrelated labels
 - **WHEN** labels are reconciled
 - **THEN** labels outside lgtmaybe's families are never added or removed
+
+### Requirement: Merge-gate rides a Check Run, never approval state
+
+With `fail_on` set, after posting the review the adapter SHALL create a
+completed Check Run on the PR head SHA whose conclusion is `failure` when any
+surviving finding is at or above `fail_on`, else `success` — so teams can make
+it a required check in branch protection. Enforcement rides the Check Run;
+approval state is never set. `fail_on` unset (default) creates no check run.
+<!-- anchor: github.check-run -->
+
+#### Scenario: a blocking finding is present
+- **WHEN** `fail_on` is `high` and a finding is `high` or above
+- **THEN** the Check Run is created with conclusion `failure`
+
+#### Scenario: no finding meets the threshold
+- **WHEN** `fail_on` is set and no surviving finding reaches it
+- **THEN** the Check Run is created with conclusion `success`

@@ -211,6 +211,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
 | `auto_diagram` | `false` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
+| `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
 | `aws_region` | `us-east-1` | AWS region for bedrock |
@@ -228,6 +229,36 @@ App, grant those permissions, install it, and store the ID and key) is in
 
 The action sets the `GITHUB_TOKEN` and provider credentials for the container
 itself — you do not pass them as `env`.
+
+## Gate merges on findings
+
+Set `fail_on` to a severity to turn the review into a merge gate. After posting
+the review, lgtmaybe creates a **Check Run** named `lgtmaybe` whose conclusion is
+`failure` when any surviving finding is at or above that severity, and `success`
+otherwise. Enforcement rides the Check Run — lgtmaybe never sets PR approval
+state, so a clean review stays comment-only.
+
+```yaml
+- uses: MattJColes/lgtmaybe@v1
+  with:
+    provider: openai
+    model: gpt-4o
+    api_key: ${{ secrets.OPENAI_API_KEY }}
+    fail_on: high   # block merge on any high/critical finding
+```
+
+To make it block merges, mark the check as required in **branch protection**:
+
+1. Open **Settings → Branches → Branch protection rules** (or a ruleset) for the
+   target branch.
+2. Enable **Require status checks to pass before merging**.
+3. Search for and add the **`lgtmaybe`** check. It appears in the list once the
+   Action has run at least once with `fail_on` set on a PR against that branch.
+
+A PR with a finding at or above the threshold then shows a failing `lgtmaybe`
+check and cannot merge until the finding is resolved (or `fail_on` is lowered).
+Leave `fail_on` unset to keep reviews advisory (the default) — no check run is
+created.
 
 ## Adding a config file
 

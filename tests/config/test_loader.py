@@ -69,6 +69,25 @@ def test_learn_feedback_round_trips_from_file(tmp_path):
     assert load_config(config_path=cfg_file, learn_feedback=False).learn_feedback is False
 
 
+def test_fail_on_round_trips_from_file_and_cli(tmp_path):
+    """fail_on can be set in .lgtmaybe.yml and overridden via a CLI input."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nfail_on: high\n")
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.fail_on == "high"
+
+    cfg = load_config(config_path=cfg_file, fail_on="critical")
+    assert cfg.fail_on == "critical"
+
+
+def test_fail_on_defaults_off(tmp_path):
+    """With nothing set, the merge-gate stays off (fail_on is None)."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.fail_on is None
+
+
 def test_reflect_model_round_trips_from_file_and_cli(tmp_path):
     """reflect_model can be set in .lgtmaybe.yml and overridden via a CLI input."""
     cfg_file = tmp_path / ".lgtmaybe.yml"

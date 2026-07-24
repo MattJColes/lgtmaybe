@@ -470,6 +470,13 @@ class ReviewConfig(_Strict):
     # high/critical guess is worth surfacing (demoted to the review body, never
     # posted on a line we can't stand behind); anything weaker is dropped.
     unanchored_min_severity: Severity = Severity.high
+    # Merge-gate threshold. When set, after posting the review the GitHub adapter
+    # creates a Check Run whose conclusion is `failure` if any surviving finding
+    # is at or above this severity, else `success` — so a team can make lgtmaybe a
+    # required check in branch protection. Enforcement rides the Check Run, never
+    # PR approval state (lgtmaybe never sets approval state). None (default) = off,
+    # non-breaking: no check run is created.
+    fail_on: Severity | None = None
     include_paths: list[str] = Field(default_factory=list)
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50

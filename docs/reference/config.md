@@ -23,6 +23,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
+| `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
@@ -569,6 +570,17 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Extra Lenses",
       "type": "array"
+    },
+    "fail_on": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Severity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "finding_rules": {
       "items": {

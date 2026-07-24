@@ -69,3 +69,13 @@ github.labels:
       kind: function_definition
       has: { field: name, regex: '^apply_pr_labels$' }
     files: [src/lgtmaybe/github/**/*.py]
+
+github.check-run:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^create_check_run$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^RestGitHubGateway$' }
+      stopBy: end
+  files: [src/lgtmaybe/github/**/*.py]

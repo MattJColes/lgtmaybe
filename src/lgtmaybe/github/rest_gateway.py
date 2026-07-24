@@ -39,6 +39,10 @@ _TIMEOUT = httpx.Timeout(30.0)
 _MARKER = "<!-- lgtmaybe -->"
 _GRAPHQL_URL = "https://api.github.com/graphql"
 
+# Stable name for the merge-gate Check Run (`fail_on`). Teams mark this exact
+# name as a required status check in branch protection, so it must not change.
+_CHECK_RUN_NAME = "lgtmaybe"
+
 # Hidden marker stamped into every inline comment so a later run can match an
 # existing review conversation back to the finding that opened it. The capture
 # group is the finding fingerprint.
@@ -490,6 +494,29 @@ class RestGitHubGateway(GitHubGateway):
                 resp.raise_for_status()
         except Exception as exc:  # noqa: BLE001 — labels are auxiliary, never fatal
             _log.warning("applying PR labels failed: %s", exc)
+
+    def create_check_run(self, head_sha: str, conclusion: str, title: str, summary: str) -> None:
+        """Create a completed Check Run on *head_sha* — the merge-gate (`fail_on`).
+
+        POSTs a `completed` check run whose *conclusion* (`failure`/`success`)
+        a team can require in branch protection, so a blocking finding stops the
+        merge. Enforcement rides the Check Run, never PR approval state (lgtmaybe
+        never sets approval state). Adapter-only, beyond the frozen port.
+        """
+        url = f"https://api.github.com/repos/{self._repo}/check-runs"
+        resp = self._client.post(
+            url,
+            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            json={
+                "name": _CHECK_RUN_NAME,
+                "head_sha": head_sha,
+                "status": "completed",
+                "conclusion": conclusion,
+                "output": {"title": title, "summary": summary},
+            },
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
 
     # ------------------------------------------------------------------
     # Incremental review (adapter-only methods, beyond the frozen port)
