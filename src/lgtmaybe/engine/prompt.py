@@ -126,6 +126,26 @@ _CORRECTNESS_EXAMPLE = _example_block(
     },
 )
 
+_CORRECTNESS_STATE_EXAMPLE = _example_block(
+    "--- a/cache.py\n"
+    "+++ b/cache.py\n"
+    "@@ -8,1 +8,3 @@\n"
+    " def get_or_create(key):\n"
+    "+    if key not in cache:\n"
+    "+        cache[key] = create_value(key)\n",
+    {
+        "path": "cache.py",
+        "line": 9,
+        "side": "RIGHT",
+        "severity": "high",
+        "title": "Check-then-act race can create the value twice",
+        "body": "Concurrent callers can both observe a missing key and run create_value. "
+        "Protect the read-modify-write sequence or use an atomic cache operation.",
+        "suggestion": None,
+        "anchor": "    if key not in cache:",
+    },
+)
+
 _DEPRECATION_EXAMPLE = _example_block(
     "--- a/clock.py\n"
     "+++ b/clock.py\n"
@@ -271,12 +291,11 @@ _INTENT_EXAMPLE = _example_block(
 # The monolithic (no-category) prompt keeps a single generic example.
 _GENERIC_EXAMPLE = _SECURITY_EXAMPLE
 
-_CORRECTNESS_SECTION = """\
-## Correctness & logic (the substance of the change)
-
+_CORRECTNESS_INTRO = """\
 Actively hunt for bugs the change introduces — these are high-value findings,
-graded `high` or `critical` when they cause wrong results, crashes, or data loss:
+graded `high` or `critical` when they cause wrong results, crashes, or data loss."""
 
+_CORRECTNESS_FLOW_CHECKS = """\
 - **Null / None dereferences** — a value that can be `null`/`None`/undefined used
   without a guard; an Optional unwrapped on a path where it may be empty.
 - **Off-by-one & boundary errors** — `<` vs `<=`, fencepost mistakes, indexing
@@ -287,20 +306,44 @@ graded `high` or `critical` when they cause wrong results, crashes, or data loss
   swallowed, a result/error left unchecked, a path that leaves state half-updated.
 - **Incorrect conditionals** — inverted booleans, `and`/`or` mix-ups, missing
   branches, comparisons against the wrong variable.
+- **Numeric errors** — integer overflow or truncation, float equality
+  comparisons, division by zero, money handled in binary floats, precision loss.
+- **Wrong validation anchoring** — a regex anchored with `match` where full-match
+  semantics are needed, letting bad input through."""
+
+_CORRECTNESS_STATE_CHECKS = """\
 - **Resource leaks & ordering** — handles/locks/connections not released,
   use-after-close, or operations sequenced so a concurrent caller sees a bad state.
 - **Races & concurrency** — check-then-act (TOCTOU) sequences, shared mutable
   state read or written without synchronisation, non-atomic read-modify-write,
   and async mistakes: a coroutine called without `await`, blocking calls inside
   an async path.
-- **Numeric errors** — integer overflow or truncation, float equality
-  comparisons, division by zero, money handled in binary floats, precision loss.
 - **Date & time bugs** — timezone-naive datetimes mixed with aware ones,
   seconds/milliseconds epoch confusion, DST-unsafe date arithmetic.
 - **Aliasing & mutation** — mutable default arguments, storing a mutable value
-  the caller still owns, mutating a collection while iterating over it.
-- **Wrong validation anchoring** — a regex anchored with `match` where full-match
-  semantics are needed, letting bad input through."""
+  the caller still owns, mutating a collection while iterating over it."""
+
+_CORRECTNESS_FLOW_SECTION = f"""\
+## Correctness & control/data flow
+
+{_CORRECTNESS_INTRO}
+
+{_CORRECTNESS_FLOW_CHECKS}"""
+
+_CORRECTNESS_STATE_SECTION = f"""\
+## Correctness & state/lifecycle
+
+{_CORRECTNESS_INTRO}
+
+{_CORRECTNESS_STATE_CHECKS}"""
+
+_CORRECTNESS_SECTION = f"""\
+## Correctness & logic (the substance of the change)
+
+{_CORRECTNESS_INTRO}
+
+{_CORRECTNESS_FLOW_CHECKS}
+{_CORRECTNESS_STATE_CHECKS}"""
 
 _SECURITY_SECTION = """\
 ## Security review (be thorough — these are high-value findings)
@@ -499,9 +542,10 @@ keep this lens to "should this exist at all?" — leave readability nits to othe
 
 # ---------------------------------------------------------------------------
 # Fast-preset merged lenses. Written as integrated checklists (not a paste-up
-# of the per-lens sections): three calls cover the everyday concerns, so each
-# merged prompt condenses its members to their high-signal items and demands
-# the per-finding `category` field so downstream rules/labels keep working.
+# of the per-lens sections): the bounded pool runs four calls when parallelism
+# is available, or three combined calls with one worker. Each merged prompt
+# condenses its members to their high-signal items and demands the per-finding
+# `category` field so downstream rules/labels keep working.
 # ---------------------------------------------------------------------------
 
 _CODE_HEALTH_SECTION = """\
@@ -663,6 +707,40 @@ def build_correctness_prompt(include_intent: bool) -> str:
 def build_correctness_block(include_intent: bool) -> str:
     """The fast preset's correctness call, user-block (split) shape."""
     return f"{_LENS_LEAD_IN}\n\n{_correctness_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
+
+
+@lru_cache(maxsize=2)
+def _correctness_flow_section(include_intent: bool) -> str:
+    """The parallel fast preset's flow section, optionally carrying intent."""
+    if not include_intent:
+        return _CORRECTNESS_FLOW_SECTION
+    return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_FLOW_SECTION}\n\n{_INTENT_SECTION}"
+
+
+def build_correctness_flow_prompt(include_intent: bool) -> str:
+    """The parallel fast preset's correctness-flow system prompt."""
+    section = _correctness_flow_section(include_intent)
+    return f"{_SHARED_HEADER}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
+
+
+def build_correctness_flow_block(include_intent: bool) -> str:
+    """The parallel fast preset's correctness-flow split block."""
+    return (
+        f"{_LENS_LEAD_IN}\n\n{_correctness_flow_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
+    )
+
+
+def build_correctness_state_prompt() -> str:
+    """The parallel fast preset's correctness-state system prompt."""
+    return (
+        f"{_SHARED_HEADER}\n{_CORRECTNESS_STATE_EXAMPLE}\n\n"
+        f"{_CORRECTNESS_STATE_SECTION}\n\n{_SHARED_RULES}\n"
+    )
+
+
+def build_correctness_state_block() -> str:
+    """The parallel fast preset's correctness-state split block."""
+    return f"{_LENS_LEAD_IN}\n\n{_CORRECTNESS_STATE_SECTION}\n\n{_CORRECTNESS_STATE_EXAMPLE}"
 
 
 _CATEGORY_SECTIONS: dict[ReviewCategory, str] = {

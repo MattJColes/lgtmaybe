@@ -498,7 +498,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
 | `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
 | `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
-| `preset` | `fast` | `fast` covers seven code-focused lenses in three calls; `full` restores tests/documentation and runs one call per lens |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens |
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
 | `max_review_seconds` | `600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
@@ -1705,8 +1705,10 @@ To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
 `OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — by default lgtmaybe issues ollama calls one at a time. Add `--profile`
-to any run to see the per-call breakdown.
+match. With more than one worker, lgtmaybe splits correctness into focused flow
+and state/lifecycle calls, making four parallel fast-preset tasks instead of
+three combined serial tasks. By default lgtmaybe issues ollama calls one at a
+time. Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
@@ -2100,8 +2102,10 @@ Default: `100000`.
 
 How many model calls the review spends. `fast` (the default) covers security,
 correctness and stated intent, performance, complexity, ponytail, and
-deprecation in **three calls**. `full` restores tests and documentation and
-runs one focused call per lens for release branches and deep audits.
+deprecation in **four calls when parallelism is available**: correctness splits
+into flow/intent and state/lifecycle tasks. With one worker it stays combined
+for three calls. `full` restores tests and documentation and runs one focused
+call per lens for release branches and deep audits.
 
 ```yaml
 preset: full
@@ -3402,7 +3406,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in three calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while performance,\ncomplexity, ponytail, and deprecation fold into one code-health call.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in four calls when the\nprovider can overlap work: security, correctness flow/intent, correctness\nstate/lifecycle, and code health. With one worker, correctness stays\ncombined for three calls.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
       "enum": [
         "fast",
         "full"
@@ -4283,7 +4287,7 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` covers seven code-focused lenses in three model calls; `full` restores tests/documentation and runs one call per lens. |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
@@ -4315,12 +4319,13 @@ Each finding has:
 
 The nine review categories are security, correctness, deprecation, tests,
 documentation, performance, complexity, intent, and ponytail. The default
-`fast` preset runs seven of them in three concurrent calls: dedicated security
-and correctness calls (the stated intent folds into correctness), plus a merged
-code-health call (performance/complexity/ponytail/deprecation). `preset: full`
-restores tests and documentation and runs each category as its own focused call
-with a worked example of its own finding type. Their findings are merged and
-de-duplicated. A
+`fast` preset covers seven of them in four concurrent calls when parallelism is
+available: security, correctness flow/intent, correctness state/lifecycle, and
+merged code health (performance/complexity/ponytail/deprecation). With one
+worker, correctness stays combined and the preset uses three calls.
+`preset: full` restores tests and documentation and runs each category as its
+own focused call with a worked example of its own finding type. Their findings
+are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 
@@ -4477,16 +4482,19 @@ call per review lens — before the findings funnel back into a single stream:
 flowchart TD
     fetch["fetch<br/>diff via API — never a checkout"] --> compress["compress<br/>skip generated files · pad context · batch to budget"]
     compress --> security["security lens"]
-    compress --> correctness["correctness + intent lens"]
+    compress --> correctnessflow["correctness flow + intent lens"]
+    compress --> correctnessstate["correctness state/lifecycle lens"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
-    correctness --> anchor
+    correctnessflow --> anchor
+    correctnessstate --> anchor
     codehealth --> anchor
     anchor --> dedupe["merge / dedupe"] --> reflect["reflect<br/>self-audit, drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-(The three lens calls shown are the `fast` preset's grouping; the `full` preset
-fans out one call per category, and custom lenses join the same fan-out.)
+(The four lens calls shown are the parallel-capable `fast` grouping. A
+single-worker configuration combines the two correctness calls; the `full`
+preset fans out one call per category, and custom lenses join the same fan-out.)
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
    metadata from the GitHub REST API. No PR code is checked out or executed.
@@ -4505,11 +4513,12 @@ fans out one call per category, and custom lenses join the same fan-out.)
 
 3. **prompt + parse** — this stage **fans out one model call per review
    lens**. The `preset` decides the lens set. `fast` (the default) covers the
-   seven code-focused categories in **three calls**: dedicated security and
-   correctness calls (the stated intent folds into correctness when present),
-   plus a merged code-health call (performance/complexity/ponytail/
-   deprecation), each demanding a per-finding `category`. `full` restores tests
-   and documentation and runs one call per category. Every
+   seven code-focused categories in **four calls** when parallelism is
+   available: security, correctness flow (with stated intent when present),
+   correctness state/lifecycle, and merged code health (performance/
+   complexity/ponytail/deprecation). With one worker the two correctness tasks
+   stay combined, keeping the three-call serial path. `full` restores tests and
+   documentation and runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
    ollama and openai-compatible), so batches never wait on each other.
@@ -4767,9 +4776,10 @@ credentials are handled. No data flows occur beyond what is described here.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends three grouped model calls under the default `fast` preset, one
-per category under `full`, fanned out concurrently — plus a self-reflection
-call. Each call contains some subset of:
+lgtmaybe sends four grouped model calls under the default `fast` preset when
+the provider can overlap work, or three combined calls with one worker. `full`
+sends one per category. The review calls fan out through one bounded pool and
+are followed by a self-reflection call. Each call contains some subset of:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been
@@ -4787,9 +4797,10 @@ call. Each call contains some subset of:
   each commit message (on the CLI: the commit names from your local `git log`).
   This feeds the **intent lens** ("does the PR do what it says?"). It is
   redacted exactly like the diff, wrapped as untrusted data, and sent **only on
-  the single lens call that carries the intent** (the correctness call under
-  the default `fast` preset, or the dedicated intent lens under `full`) — drop
-  `intent` from `categories` in `.lgtmaybe.yml` and it is never sent at all.
+  the single lens call that carries the intent** (the correctness-flow or
+  combined correctness call under the default `fast` preset, or the dedicated
+  intent lens under `full`) — drop `intent` from `categories` in
+  `.lgtmaybe.yml` and it is never sent at all.
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
 

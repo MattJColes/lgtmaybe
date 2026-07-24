@@ -42,7 +42,11 @@ from .profiling import profiler
 from .prompt import (
     FAST_GROUPS,
     build_correctness_block,
+    build_correctness_flow_block,
+    build_correctness_flow_prompt,
     build_correctness_prompt,
+    build_correctness_state_block,
+    build_correctness_state_prompt,
     build_custom_lens_block,
     build_group_block,
     build_group_prompt,
@@ -129,16 +133,27 @@ class _Lens:
     # and falls back to the lens id otherwise; None (a focused lens) means the
     # lens id is always stamped — the model's value is ignored, as before.
     allowed_categories: frozenset[str] | None = None
+    # A split task can keep a distinct profiler label while attributing its
+    # findings to an existing public category.
+    finding_category: str | None = None
+
+
+def _parallel_fast_enabled(cfg: ReviewConfig) -> bool:
+    """Whether the fast preset can overlap its two correctness tasks."""
+    if cfg.max_concurrency is not None:
+        return cfg.max_concurrency > 1
+    return cfg.provider not in _SINGLE_STREAM_PROVIDERS
 
 
 def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
-    The fast preset runs seven built-ins in three calls — but only when
-    ``categories`` is the untouched default: a user who explicitly listed
-    lenses asked for exactly those, so the preset never regroups them. The
-    full preset runs every category; an explicit list runs exactly its selected
-    categories. Both skip intent when nothing states an intent.
+    The fast preset runs seven built-ins in four calls when the provider can
+    overlap work, or three combined calls with one worker. This grouping applies
+    only when ``categories`` is the untouched default: a user who explicitly
+    listed lenses asked for exactly those, so the preset never regroups them.
+    The full preset runs every category; an explicit list runs exactly its
+    selected categories. Both skip intent when nothing states an intent.
     """
     fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
     if fast:
@@ -148,18 +163,40 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
                 system_prompt=build_system_prompt(ReviewCategory.security),
                 user_block=build_lens_block(ReviewCategory.security),
             ),
-            _Lens(
-                id=ReviewCategory.correctness.value,
-                system_prompt=build_correctness_prompt(has_intent),
-                user_block=build_correctness_block(has_intent),
-                carries_intent=has_intent,
-                allowed_categories=(
-                    frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
-                    if has_intent
-                    else None
-                ),
-            ),
         ]
+        correctness_categories = (
+            frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
+            if has_intent
+            else frozenset({ReviewCategory.correctness.value})
+        )
+        if _parallel_fast_enabled(cfg):
+            lenses += [
+                _Lens(
+                    id="correctness-flow",
+                    system_prompt=build_correctness_flow_prompt(has_intent),
+                    user_block=build_correctness_flow_block(has_intent),
+                    carries_intent=has_intent,
+                    allowed_categories=correctness_categories,
+                    finding_category=ReviewCategory.correctness.value,
+                ),
+                _Lens(
+                    id="correctness-state",
+                    system_prompt=build_correctness_state_prompt(),
+                    user_block=build_correctness_state_block(),
+                    allowed_categories=frozenset({ReviewCategory.correctness.value}),
+                    finding_category=ReviewCategory.correctness.value,
+                ),
+            ]
+        else:
+            lenses.append(
+                _Lens(
+                    id=ReviewCategory.correctness.value,
+                    system_prompt=build_correctness_prompt(has_intent),
+                    user_block=build_correctness_block(has_intent),
+                    carries_intent=has_intent,
+                    allowed_categories=correctness_categories if has_intent else None,
+                )
+            )
         lenses += [
             _Lens(
                 id=group.id,
@@ -699,11 +736,14 @@ class LLMReviewEngine(ReviewEngine):
         # value from its member set is kept and anything else falls back to
         # the lens id.
         allowed = lens.allowed_categories
+        fallback_category = lens.finding_category or lens.id
         findings = [
             f.model_copy(
                 update={
                     "category": (
-                        f.category if allowed is not None and f.category in allowed else lens.id
+                        f.category
+                        if allowed is not None and f.category in allowed
+                        else fallback_category
                     )
                 }
             )

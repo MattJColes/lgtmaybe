@@ -424,7 +424,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in three calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while performance,\ncomplexity, ponytail, and deprecation fold into one code-health call.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in four calls when the\nprovider can overlap work: security, correctness flow/intent, correctness\nstate/lifecycle, and code health. With one worker, correctness stays\ncombined for three calls.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
       "enum": [
         "fast",
         "full"

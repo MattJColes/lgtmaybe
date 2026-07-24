@@ -76,10 +76,10 @@ class ReviewCategory(StrEnum):
 class ReviewPreset(StrEnum):
     """How many model calls a review spends: the everyday path or the deep audit.
 
-    ``fast`` (the default) covers seven built-in lenses in three calls:
-    security and correctness keep dedicated calls (they earn it; the stated
-    intent, when present, merges into correctness), while performance,
-    complexity, ponytail, and deprecation fold into one code-health call.
+    ``fast`` (the default) covers seven built-in lenses in four calls when the
+    provider can overlap work: security, correctness flow/intent, correctness
+    state/lifecycle, and code health. With one worker, correctness stays
+    combined for three calls.
     ``full`` restores tests and documentation and runs each of the nine lenses
     as its own call for release branches and deep audits. An explicit
     ``categories`` list always wins over the preset.

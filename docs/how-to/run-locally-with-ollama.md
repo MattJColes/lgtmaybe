@@ -214,8 +214,10 @@ To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
 `OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — by default lgtmaybe issues ollama calls one at a time. Add `--profile`
-to any run to see the per-call breakdown.
+match. With more than one worker, lgtmaybe splits correctness into focused flow
+and state/lifecycle calls, making four parallel fast-preset tasks instead of
+three combined serial tasks. By default lgtmaybe issues ollama calls one at a
+time. Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 

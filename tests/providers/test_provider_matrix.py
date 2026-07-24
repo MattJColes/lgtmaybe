@@ -189,7 +189,7 @@ class TestEngineBehaviourMatrix:
         assert _resolve_workers(cfg, task_count=99) == expected
 
     @pytest.mark.parametrize("provider", list(Provider))
-    def test_fast_preset_runs_three_calls_on_every_provider(self, provider: Provider) -> None:
+    def test_fast_preset_call_count_is_provider_aware(self, provider: Provider) -> None:
         from lgtmaybe.core.models import PRContext, ReviewConfig
         from lgtmaybe.engine import LLMReviewEngine
         from tests.fakes import FakeProvider
@@ -205,7 +205,8 @@ class TestEngineBehaviourMatrix:
         cfg = ReviewConfig(provider=provider, model="m", reflect=False)
         fake = FakeProvider()
         LLMReviewEngine(fake).review(ctx, cfg)
-        assert len(fake.calls) == 3
+        expected = 3 if provider in self.SINGLE_STREAM else 4
+        assert len(fake.calls) == expected
 
     @pytest.mark.parametrize("provider", list(Provider))
     def test_review_deadline_field_defaults_on_every_provider(self, provider: Provider) -> None:

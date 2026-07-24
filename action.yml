@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   preset:
-    description: "Review preset. fast (the default) covers security, correctness/intent, performance, complexity, ponytail, and deprecation in three model calls. full restores tests/documentation and runs one call per lens for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
+    description: "Review preset. fast (the default) covers security, correctness/intent, performance, complexity, ponytail, and deprecation in four model calls when parallelism is available, or three with one worker. full restores tests/documentation and runs one call per lens for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
     required: false
     default: ""
   fallback_model:
