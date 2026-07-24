@@ -48,14 +48,20 @@ GitHub — and **`/ask <question>`** answers questions about the change in-threa
 
 ```mermaid
 C4Container
-    title User lookup after this change
-    Person(client, "Client")
-    Container(api, "User API", "Python", "Serves user reads")
-    ContainerDb(cache, "Redis cache", "Redis", "caches user rows (new)")
-    ContainerDb(db, "User DB", "Postgres")
-    Rel(client, api, "GET /users/{id}")
-    Rel(api, cache, "check cache (new)")
-    Rel(api, db, "on miss, query")
+    title Async order confirmations after this change
+    Person(customer, "Customer")
+    Container(web, "Storefront", "React", "Places orders")
+    Container(api, "Order API", "Python", "Creates orders (changed)")
+    ContainerDb(db, "Order database", "PostgreSQL", "Stores orders")
+    Container(queue, "Order events", "SQS", "Buffers OrderCreated events (new)")
+    Container(worker, "Notification worker", "Python", "Consumes order events (new)")
+    System_Ext(email, "Email provider", "Delivers confirmations")
+    Rel(customer, web, "places order")
+    Rel(web, api, "POST /orders")
+    Rel(api, db, "stores order")
+    Rel(api, queue, "publishes OrderCreated (new)")
+    Rel(queue, worker, "delivers event (new)")
+    Rel(worker, email, "sends confirmation (new)")
 ```
 
 Every finding is graded from `info` up to `critical`, so you can set the
