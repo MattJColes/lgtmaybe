@@ -8,8 +8,9 @@ deleted, or context line in the diff — so the gateway can post findings on rea
 diff lines and silently drop anything that isn't (e.g. a finding the model put
 on an expanded-context-only line).
 
-Skip filter: lockfiles, minified bundles, vendored/generated paths and binary
-files are dropped before review to save tokens and avoid noise.
+Skip filter: lockfiles, minified bundles, vendored/generated paths, generated
+LLM-index corpora (llms.txt / llms-full.txt), and binary files are dropped before
+review to save tokens and avoid noise.
 """
 
 from __future__ import annotations
@@ -121,6 +122,10 @@ _SKIP_FILENAMES = frozenset(
         "mix.lock",
         "Package.resolved",
         "gradle.lockfile",
+        # Generated LLM-index corpora (llmstxt.org): machine-written whole-docs
+        # dumps, never meaningfully line-reviewed.
+        "llms.txt",
+        "llms-full.txt",
     }
 )
 

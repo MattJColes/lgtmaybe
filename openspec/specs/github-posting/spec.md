@@ -79,8 +79,8 @@ best-effort, never failing the review.
 
 ### Requirement: Generated and binary files are skipped
 
-Lockfiles, minified bundles, vendored trees, and binary files SHALL be
-excluded from review before any path filter or cap applies.
+Lockfiles, minified bundles, vendored trees, binary files, and generated LLM-index corpora (`llms.txt` / `llms-full.txt`) SHALL be excluded from review
+before any path filter or cap applies.
 <!-- anchor: github.reviewable -->
 
 #### Scenario: lockfile in the diff
