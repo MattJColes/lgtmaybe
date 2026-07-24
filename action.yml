@@ -216,7 +216,11 @@ runs:
         LGTMAYBE_IMAGE: ${{ inputs.image }}
       run: |
         set -euo pipefail
+        # host-gateway mapping: lets api_base reach a model server on the
+        # runner host (ollama / openai-compatible) at host.docker.internal,
+        # which Linux Docker does not resolve without it.
         docker run --rm \
+          --add-host=host.docker.internal:host-gateway \
           -e GITHUB_TOKEN \
           -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH \
           -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_PRESET \
