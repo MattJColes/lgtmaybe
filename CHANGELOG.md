@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.13.0...lgtmaybe-v0.13.1) (2026-07-24)
+
+
+### Documentation
+
+* accuracy pass, Mermaid diagrams, and a light-stroke header logo ([#194](https://github.com/MattJColes/lgtmaybe/issues/194)) ([394ea3a](https://github.com/MattJColes/lgtmaybe/commit/394ea3ac65bac035b4a751acb52c4c6a075bfa07))
+
 ## [0.13.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.12.2...lgtmaybe-v0.13.0) (2026-07-24)
 
 
