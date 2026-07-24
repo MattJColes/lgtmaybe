@@ -45,6 +45,7 @@ jobs:
         with:
           provider: azure
           model: my-gpt-4o-deployment      # your Azure deployment name
+          auto_diagram: true
           api_base: ${{ secrets.AZURE_API_BASE }}  # https://<resource>.openai.azure.com
           azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
           azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}

@@ -299,8 +299,17 @@ bundles all three and wires up the OIDC/WIF auth for you.
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
+GitHub Marketplace copies the Action syntax into your workflow. Provider and
+model selection happens in that workflow, not on a separate Marketplace
+settings screen: add a `with:` block containing `provider`, `model`, and the
+matching authentication input. The [minimal OpenAI workflow](#minimal-workflow-openai)
+below shows the complete shape.
+
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
+They enable `auto_diagram`, so newly opened or reopened pull requests receive
+a C4-style change diagram automatically. Remove that input or set it to `false`
+if you do not want the extra model call.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -394,6 +403,7 @@ jobs:
         with:
           provider: openai
           model: gpt-5.5
+          auto_diagram: true
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
@@ -2723,9 +2733,10 @@ Comment **`/diagram`** on a pull request to post (or update in place) the change
 diagram. Like `/describe`, it's an idempotent upsert — re-running edits the same
 comment instead of stacking new ones.
 
-To post it automatically when a PR is opened, set the `auto_diagram` Action
-input (off by default; it fires only on `opened` / `reopened`, never on a
-`synchronize` push):
+The supplied starter workflows set `auto_diagram: true`, so new repositories
+post one automatically when a PR is opened or reopened. The underlying Action
+input remains off by default for backwards compatibility, and it never fires
+on a `synchronize` push. To enable it in an existing workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v0
@@ -2744,6 +2755,8 @@ auto_diagram: true
 ```
 
 The diagram is best-effort — a failure is logged and never blocks the review.
+To opt out of the starter-workflow default, remove `auto_diagram` or set it to
+`false`.
 
 ## Locally: `lgtmaybe diagram`
 

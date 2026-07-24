@@ -7,8 +7,17 @@ description: Add lgtmaybe as a GitHub Action to review every pull request automa
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
+GitHub Marketplace copies the Action syntax into your workflow. Provider and
+model selection happens in that workflow, not on a separate Marketplace
+settings screen: add a `with:` block containing `provider`, `model`, and the
+matching authentication input. The [minimal OpenAI workflow](#minimal-workflow-openai)
+below shows the complete shape.
+
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
+They enable `auto_diagram`, so newly opened or reopened pull requests receive
+a C4-style change diagram automatically. Remove that input or set it to `false`
+if you do not want the extra model call.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -102,6 +111,7 @@ jobs:
         with:
           provider: openai
           model: gpt-5.5
+          auto_diagram: true
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 

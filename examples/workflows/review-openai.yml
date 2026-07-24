@@ -36,4 +36,5 @@ jobs:
         with:
           provider: openai
           model: gpt-5.5
+          auto_diagram: true
           api_key: ${{ secrets.OPENAI_API_KEY }}

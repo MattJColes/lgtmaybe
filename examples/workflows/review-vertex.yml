@@ -38,5 +38,6 @@ jobs:
         with:
           provider: vertex
           model: gemini-3-pro
+          auto_diagram: true
           gcp_wif_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           gcp_service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
