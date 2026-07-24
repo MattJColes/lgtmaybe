@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.13.1...lgtmaybe-v1.0.0) (2026-07-24)
+
+
+### Features
+
+* **action:** post reviews as a GitHub App via app_id/app_private_key inputs ([#197](https://github.com/MattJColes/lgtmaybe/issues/197)) ([88ec1e4](https://github.com/MattJColes/lgtmaybe/commit/88ec1e4e03284a28c2e8e97ccd00f98447178a41))
+
+
+### Documentation
+
+* optimise the docs site for SEO and LLM crawlers ([#200](https://github.com/MattJColes/lgtmaybe/issues/200)) ([d46078f](https://github.com/MattJColes/lgtmaybe/commit/d46078f18ebd97eedfa33b6f01e0d45f4eed32f2))
+
 ## [0.13.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.13.0...lgtmaybe-v0.13.1) (2026-07-24)
 
 
