@@ -18,6 +18,12 @@ quality.suppress:
     has: { field: name, regex: '^apply_suppressions$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+quality.learned-feedback:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_apply_learned_feedback$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 quality.rules:
   rule:
     kind: function_definition

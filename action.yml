@@ -102,6 +102,10 @@ inputs:
     description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, and consider-splitting when the diff spans many unrelated directories. Best-effort; off by default."
     required: false
     default: ""
+  learn_feedback:
+    description: "On a re-run, suppress a finding a human reacted 👎 (thumbs-down) to on its inline comment last time. The reactions live on GitHub and are re-read each run — no new persistence. Resolving a thread is NOT a suppress signal (that means fixed). On by default; set to false to disable."
+    required: false
+    default: ""
   profile:
     description: "Print a timing profile at the end of the run in the Action log: total wall time, per-stage and per-call tables (with token and prompt-cache usage), and cache hit totals. Off by default."
     required: false
@@ -243,6 +247,7 @@ runs:
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
+        INPUT_LEARN_FEEDBACK: ${{ inputs.learn_feedback }}
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         LGTMAYBE_IMAGE: ${{ inputs.image }}
@@ -264,7 +269,8 @@ runs:
           -e INPUT_RESOLVE_FIXED \
           -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \
           -e INPUT_PROMPT_CACHE -e INPUT_INCREMENTAL -e INPUT_STATIC_ANALYSIS \
-          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_PR_LABELS -e INPUT_PROFILE \
+          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_PR_LABELS \
+          -e INPUT_LEARN_FEEDBACK -e INPUT_PROFILE \
           -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
           -e AWS_REGION -e AWS_DEFAULT_REGION \
           -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

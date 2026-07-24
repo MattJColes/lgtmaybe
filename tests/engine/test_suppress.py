@@ -21,6 +21,17 @@ def test_config_fingerprint_suppresses() -> None:
     assert apply_suppressions([f], cfg, {}) == []
 
 
+def test_downvoted_fingerprint_fed_in_is_suppressed() -> None:
+    """A fingerprint learned from a 👎 reaction is merged into
+    ignore_fingerprints exactly as run_review does (model_copy update), and the
+    matching finding is then dropped by the shared suppression path."""
+    f = _finding(title="Downvoted nit")
+    downvoted = finding_fingerprint(f.path, f.title)
+    cfg = _CFG.model_copy(update={"ignore_fingerprints": [*_CFG.ignore_fingerprints, downvoted]})
+
+    assert apply_suppressions([f], cfg, {}) == []
+
+
 def test_inline_pragma_on_the_line_suppresses() -> None:
     f = _finding(line=2)
     contents = {"a.py": "import os\nx = eval(data)  # lgtmaybe: ignore\ny = 1\n"}

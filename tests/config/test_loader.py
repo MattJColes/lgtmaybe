@@ -55,6 +55,20 @@ def test_resolve_fixed_round_trips_from_file(tmp_path):
     assert cfg.resolve_fixed is False
 
 
+def test_learn_feedback_round_trips_from_file(tmp_path):
+    """learn_feedback defaults on and can be disabled in .lgtmaybe.yml."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    assert load_config(config_path=cfg_file).learn_feedback is True
+
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nlearn_feedback: false\n")
+    assert load_config(config_path=cfg_file).learn_feedback is False
+
+    # A CLI/action input overrides the file value.
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nlearn_feedback: true\n")
+    assert load_config(config_path=cfg_file, learn_feedback=False).learn_feedback is False
+
+
 def test_reflect_model_round_trips_from_file_and_cli(tmp_path):
     """reflect_model can be set in .lgtmaybe.yml and overridden via a CLI input."""
     cfg_file = tmp_path / ".lgtmaybe.yml"

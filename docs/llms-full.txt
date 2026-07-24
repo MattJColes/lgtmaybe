@@ -3010,6 +3010,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
+| `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
@@ -3104,6 +3105,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `commit_messages` | list[string] | No | `[]` | Commit Messages |
 | `description` | string | No | `` | Description |
 | `diff` | string | Yes | — | Diff |
+| `feedback_downvotes` | list[string] | No | `[]` | Feedback Downvotes |
 | `file_contents` | object | No | — | File Contents |
 | `head_sha` | string | Yes | — | Head Sha |
 | `pr_number` | integer | Yes | — | Pr Number |
@@ -3588,6 +3590,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Incremental"
     },
+    "learn_feedback": {
+      "default": true,
+      "title": "Learn Feedback",
+      "type": "boolean"
+    },
     "max_concurrency": {
       "anyOf": [
         {
@@ -3969,6 +3976,15 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "diff": {
       "title": "Diff",
       "type": "string"
+    },
+    "feedback_downvotes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Feedback Downvotes",
+      "type": "array",
+      "uniqueItems": true
     },
     "file_contents": {
       "additionalProperties": {

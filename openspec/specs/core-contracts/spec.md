@@ -62,8 +62,8 @@ is never parsed.
 ### Requirement: One config surface with ordered severities
 
 `ReviewConfig` SHALL be the single knob surface for a review (provider, model,
-filters, caps, toggles); `Severity` SHALL order `info < low < medium < high <
-critical` so floors like `min_severity` compare with `>=`.
+filters, caps, toggles like `learn_feedback`); `Severity` SHALL order `info <
+low < medium < high < critical` so floors like `min_severity` compare with `>=`.
 <!-- anchor: core.config -->
 
 #### Scenario: severity floor filters findings

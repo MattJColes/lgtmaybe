@@ -29,6 +29,15 @@
       "title": "Diff",
       "type": "string"
     },
+    "feedback_downvotes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Feedback Downvotes",
+      "type": "array",
+      "uniqueItems": true
+    },
     "file_contents": {
       "additionalProperties": {
         "type": "string"

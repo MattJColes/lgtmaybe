@@ -480,7 +480,9 @@ class LLMReviewEngine(ReviewEngine):
         #     suppressed finding costs no reflection tokens and never posts.
         with profiler.stage("suppress"):
             before_suppress = len(all_findings)
-            all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+            all_findings = apply_suppressions(
+                all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
+            )
             suppressed = before_suppress - len(all_findings)
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})

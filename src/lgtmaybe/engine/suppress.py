@@ -1,6 +1,6 @@
 """Finding suppression: drop findings a team has marked known-fine.
 
-Two suppression channels, both deterministic and applied before reflection so a
+Three suppression channels, all deterministic and applied before reflection so a
 suppressed finding costs no reflection tokens:
 
 - **Config fingerprint** — ``ReviewConfig.ignore_fingerprints`` lists
@@ -8,13 +8,17 @@ suppressed finding costs no reflection tokens:
 - **Inline pragma** — a ``# lgtmaybe: ignore`` comment on the flagged line (or
   the line immediately above it) in the file's head text suppresses that finding,
   so a developer can silence a known-fine pattern at the source.
+- **Feedback learning** — fingerprints an authorised reviewer reacted 👎 to on a
+  previous run (``PRContext.feedback_downvotes``). Unlike the two above, this
+  channel **never** suppresses a high/critical security finding, so a downvote
+  can't be used to hide a serious vulnerability.
 """
 
 from __future__ import annotations
 
 import re
 
-from lgtmaybe.core.models import ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import ReviewCategory, ReviewConfig, ReviewFinding, Severity
 from lgtmaybe.github.rest_gateway import finding_fingerprint
 
 # A `# lgtmaybe: ignore` pragma anywhere in a line (after a `#` comment marker).
@@ -22,14 +26,36 @@ from lgtmaybe.github.rest_gateway import finding_fingerprint
 _PRAGMA = re.compile(r"#\s*lgtmaybe:\s*ignore\b", re.IGNORECASE)
 
 
-def _is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, lines: list[str] | None) -> bool:
+def _is_protected_security(finding: ReviewFinding) -> bool:
+    """A high/critical security finding is never auto-suppressed by feedback.
+
+    On a public repo a 👎 reaction is only as trustworthy as who left it, so a
+    downvote must never be able to hide a serious vulnerability. An explicit
+    config ``ignore_fingerprints`` dismissal is a deliberate maintainer decision
+    and still applies — this carve-out is for the feedback channel only.
+    """
+    return finding.category == ReviewCategory.security.value and finding.severity >= Severity.high
+
+
+def _is_suppressed(
+    finding: ReviewFinding,
+    cfg: ReviewConfig,
+    lines: list[str] | None,
+    feedback_downvotes: frozenset[str],
+) -> bool:
     """Whether *finding* is suppressed, against a file's already-split lines (None if no text).
 
     Split out so ``apply_suppressions`` can split each file's head text once and
     reuse it across every finding on that file, rather than re-splitting per
     finding (the file's text is unchanged within a run).
     """
-    if finding_fingerprint(finding.path, finding.title) in cfg.ignore_fingerprints:
+    fingerprint = finding_fingerprint(finding.path, finding.title)
+    # Config dismissal — unconditional (a maintainer's explicit decision).
+    if fingerprint in cfg.ignore_fingerprints:
+        return True
+    # Feedback learning — an authorised reviewer's 👎, but never a high/critical
+    # security finding, so a downvote can't hide a serious vulnerability.
+    if fingerprint in feedback_downvotes and not _is_protected_security(finding):
         return True
     if not lines:
         return False
@@ -41,12 +67,17 @@ def _is_suppressed(finding: ReviewFinding, cfg: ReviewConfig, lines: list[str] |
 
 
 def apply_suppressions(
-    findings: list[ReviewFinding], cfg: ReviewConfig, file_contents: dict[str, str]
+    findings: list[ReviewFinding],
+    cfg: ReviewConfig,
+    file_contents: dict[str, str],
+    feedback_downvotes: frozenset[str] = frozenset(),
 ) -> list[ReviewFinding]:
     """Return *findings* with the suppressed ones removed (order preserved).
 
     Each file's head text is split into lines once (lazily, only for paths a
     finding actually lands on) and reused across that file's findings.
+    ``feedback_downvotes`` is the set of finding fingerprints an authorised
+    reviewer reacted 👎 to (see ``_is_suppressed``); empty when off.
     """
     lines_cache: dict[str, list[str]] = {}
 
@@ -58,4 +89,6 @@ def apply_suppressions(
             lines_cache[path] = cached
         return cached
 
-    return [f for f in findings if not _is_suppressed(f, cfg, lines_for(f.path))]
+    return [
+        f for f in findings if not _is_suppressed(f, cfg, lines_for(f.path), feedback_downvotes)
+    ]

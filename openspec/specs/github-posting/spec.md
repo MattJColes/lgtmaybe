@@ -79,6 +79,20 @@ suppressed by re-run dedupe — best-effort, never failing the review.
 - **WHEN** `resolveReviewThread` fails
 - **THEN** the review still completes and posts normally
 
+### Requirement: Downvoted findings are read from 👎 reactions
+
+`list_downvoted_fingerprints` SHALL return the fingerprints of our findings an
+authorised reviewer reacted 👎 (THUMBS_DOWN) to — read via GraphQL from each
+review thread's first comment (its body marker plus the reacting users), with
+each reactor's repo permission checked and failing closed, never persisted
+locally. A write-access thumbs-down is the only suppress signal; an unprivileged
+reaction and a resolved thread are not.
+<!-- anchor: github.feedback -->
+
+#### Scenario: an authorised reviewer downvotes a finding comment
+- **WHEN** the opening comment carries our finding marker and a write-access user's 👎
+- **THEN** its fingerprint is returned, to be suppressed next run
+
 ### Requirement: Generated and binary files are skipped
 
 Lockfiles, minified bundles, vendored trees, binary files, and generated LLM-index corpora (`llms.txt` / `llms-full.txt`) SHALL be excluded from review
