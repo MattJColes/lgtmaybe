@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 _ACTION_YML = Path(__file__).parent.parent / "action.yml"
+_README = Path(__file__).parent.parent / "README.md"
 
 # The container reads GITHUB_TOKEN; prefer the minted App token, else the default
 # workflow token. A skipped mint step yields an empty output, so ``||`` falls
@@ -49,6 +50,27 @@ def test_declares_github_app_inputs() -> None:
     inputs = _action()["inputs"]
     for name in ("app_id", "app_private_key", "app_owner", "app_repositories"):
         assert name in inputs, f"action.yml must declare the '{name}' input"
+
+
+def test_marketplace_setup_explains_workflow_configuration() -> None:
+    action = _action()
+    marketplace_copy = " ".join(
+        [
+            action["description"],
+            action["inputs"]["provider"]["description"],
+            action["inputs"]["model"]["description"],
+            action["inputs"]["api_key"]["description"],
+        ]
+    ).lower()
+    for term in ("workflow", "provider", "model", "api key"):
+        assert term in marketplace_copy
+
+    action_section = _README.read_text(encoding="utf-8").split(
+        "## Use as a GitHub Action", maxsplit=1
+    )[1].split("## Distribution", maxsplit=1)[0]
+    assert "GitHub Marketplace" in action_section
+    for input_name in ("provider:", "model:", "api_key:"):
+        assert input_name in action_section
 
 
 def test_mint_step_is_pinned_and_gated_on_app_id() -> None:

@@ -7,6 +7,12 @@ description: Add lgtmaybe as a GitHub Action to review every pull request automa
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
+GitHub Marketplace copies the Action syntax into your workflow. Provider and
+model selection happens in that workflow, not on a separate Marketplace
+settings screen: add a `with:` block containing `provider`, `model`, and the
+matching authentication input. The [minimal OpenAI workflow](#minimal-workflow-openai)
+below shows the complete shape.
+
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
 ollama runs the model on your own machine, so it is local-only — use the

@@ -1,5 +1,5 @@
 name: lgtmaybe
-description: Provider-agnostic PR reviewer — seven hosted providers plus ollama and any OpenAI-compatible endpoint, one flag, no static keys for cloud.
+description: Provider-agnostic PR reviewer. After Marketplace install, choose the provider, model, and authentication in your workflow.
 author: Matt Coles
 branding:
   icon: check-circle
@@ -7,11 +7,11 @@ branding:
 
 inputs:
   provider:
-    description: "LLM provider: openai, anthropic, openrouter, zai, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
+    description: "Set this in the workflow `with:` block. LLM provider: openai, anthropic, openrouter, zai, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
     required: false
     default: ""
   model:
-    description: "Model name understood by the chosen provider (e.g. gpt-5.5, claude-sonnet-4-6)."
+    description: "Set this beside `provider` in the workflow `with:` block. Model name understood by the chosen provider (e.g. gpt-5.5, claude-sonnet-4-6)."
     required: false
     default: ""
   preset:
