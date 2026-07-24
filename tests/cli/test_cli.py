@@ -184,6 +184,45 @@ class TestReviewCommandLocal:
         assert seen.get("working") is False
 
 
+class TestDiagramCommand:
+    def _patch_diagram_provider(self, monkeypatch):
+        import lgtmaybe.cli as cli_module
+        from lgtmaybe.core.models import ProviderResult
+
+        payload = json.dumps(
+            {
+                "title": "Change map",
+                "mermaid": 'C4Container\n    Container(app, "App")',
+                "ascii": "[Client] --> [App]",
+            }
+        )
+        result = ProviderResult(text=payload, input_tokens=1, output_tokens=1)
+        provider = FakeProvider(result=result)
+        monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: provider)
+        monkeypatch.setattr(cli_module, "local_pr_context", lambda **kwargs: _LOCAL_CTX)
+
+    def test_diagram_prints_mermaid_and_ascii(self, monkeypatch):
+        self._patch_diagram_provider(monkeypatch)
+
+        result = CliRunner().invoke(main, ["diagram", "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code == 0, result.output
+        assert "```mermaid" in result.output
+        assert "C4Container" in result.output
+        assert "[Client] --> [App]" in result.output
+
+    def test_working_and_uncommitted_flags_conflict(self, monkeypatch):
+        self._patch_diagram_provider(monkeypatch)
+
+        result = CliRunner().invoke(
+            main,
+            ["diagram", "--provider", "ollama", "--model", "llama3", "--working", "--uncommitted"],
+        )
+
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
+
+
 class TestModuleEntrypoint:
     def test_python_m_lgtmaybe_runs_the_cli_group(self):
         """`python -m lgtmaybe` (Docker ENTRYPOINT) must invoke the real CLI."""

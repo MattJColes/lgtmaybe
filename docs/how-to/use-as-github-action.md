@@ -36,7 +36,7 @@ All lgtmaybe workflows use the `pull_request_target` trigger, not
 
 The action derives the PR from the triggering event, so there is no `pr-url`
 input to set. On an `issue_comment` event it routes the slash command
-(`/review`, `/ask`, `/describe`, `/improve`) to the same engine. On a
+(`/review`, `/ask`, `/describe`, `/diagram`, `/improve`) to the same engine. On a
 `synchronize` push the review is **incremental** by default: only the commits
 added since the last completed review are re-reviewed, and earlier findings
 stay open until fixed. Comment `/review full` for a full re-review on demand,

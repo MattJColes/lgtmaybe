@@ -18,6 +18,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 |---|---|---|---|---|
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
+| `auto_diagram` | boolean | No | `False` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -523,6 +524,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "auto_describe": {
       "default": false,
       "title": "Auto Describe",
+      "type": "boolean"
+    },
+    "auto_diagram": {
+      "default": false,
+      "title": "Auto Diagram",
       "type": "boolean"
     },
     "categories": {

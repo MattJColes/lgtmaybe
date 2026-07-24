@@ -84,8 +84,8 @@ lgtmaybe/
 │   │
 │   └── cli/                 # Click entrypoints + wiring
 │       ├── __init__.py      #   execute_* logic; wires real adapters into the engine
-│       ├── commands.py      #   command + option declarations (review/comment/action/config)
-│       ├── slash.py         #   /review /improve /ask /describe slash commands
+│       ├── commands.py      #   command + option declarations (review/diagram/comment/action/config)
+│       ├── slash.py         #   /review /improve /ask /describe /diagram slash commands
 │       ├── runtime.py       #   per-invocation options bag (creds, PR URL)
 │       └── render.py        #   local output: human / json / agent formats
 │
@@ -165,10 +165,11 @@ minified, vendored, generated, binary).
 repo `.lgtmaybe.yml` → CLI flags / Action inputs); the user store deliberately
 refuses to persist API keys.
 
-**CLI (`cli/`)** — the Click surface: `review` (local), `comment` (issue_comment
-slash commands), `action` (the container entrypoint that routes by event), and a
-`config` group. Slash commands (`/review`, `/improve`, `/ask`, `/describe`) route
-to the same engine/provider.
+**CLI (`cli/`)** — the Click surface: `review` (local), `diagram` (local C4
+change diagram), `comment` (issue_comment slash commands), `action` (the
+container entrypoint that routes by event), and a `config` group. Slash commands
+(`/review`, `/improve`, `/ask`, `/describe`, `/diagram`) route to the same
+engine/provider.
 
 ## Features
 

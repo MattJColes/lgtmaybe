@@ -179,6 +179,11 @@ class RestGitHubGateway(GitHubGateway):
             if marker_key
             else "<!-- lgtmaybe-describe -->"
         )
+        # Idempotency marker for the change-diagram comment — its own family so a
+        # diagram update never clobbers the description or the review summary.
+        self._diagram_marker = (
+            f"<!-- lgtmaybe-diagram:{marker_key} -->" if marker_key else "<!-- lgtmaybe-diagram -->"
+        )
         self._resolve_fixed = resolve_fixed
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
         # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
@@ -406,6 +411,39 @@ class RestGitHubGateway(GitHubGateway):
         for resp in self._paginate(f"{url}?per_page=100"):
             for comment in resp.json():
                 if self._describe_marker in (comment.get("body") or ""):
+                    edit_url = (
+                        f"https://api.github.com/repos/{self._repo}/issues/comments/{comment['id']}"
+                    )
+                    patched = self._client.patch(
+                        edit_url,
+                        headers={**self._headers, "Accept": "application/vnd.github+json"},
+                        json={"body": stamped},
+                        timeout=_TIMEOUT,
+                    )
+                    patched.raise_for_status()
+                    return
+        created = self._client.post(
+            url,
+            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            json={"body": stamped},
+            timeout=_TIMEOUT,
+        )
+        created.raise_for_status()
+
+    def post_diagram_comment(self, body: str) -> None:
+        """Post or update the change-diagram comment, idempotently.
+
+        Finds our previous diagram by its hidden marker and edits it in place,
+        so a re-run (or auto-diagram after new pushes) never stacks duplicate
+        diagram comments. Its marker family is disjoint from the describe and
+        review markers, so the three comments never clobber each other.
+        Adapter-only, beyond the frozen port.
+        """
+        stamped = f"{body}\n\n{self._diagram_marker}"
+        url = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}/comments"
+        for resp in self._paginate(f"{url}?per_page=100"):
+            for comment in resp.json():
+                if self._diagram_marker in (comment.get("body") or ""):
                     edit_url = (
                         f"https://api.github.com/repos/{self._repo}/issues/comments/{comment['id']}"
                     )

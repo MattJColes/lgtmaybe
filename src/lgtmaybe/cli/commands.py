@@ -21,12 +21,15 @@ from lgtmaybe.cli import (
     config_cmd,
     execute_comment,
     execute_describe,
+    execute_diagram,
+    execute_local_diagram,
     execute_local_review,
     execute_review,
     main,
     pr_url_from_event,
     resolve_auto_incremental,
     should_auto_describe,
+    should_auto_diagram,
 )
 from lgtmaybe.config import store
 from lgtmaybe.config.loader import load_config
@@ -340,6 +343,87 @@ def review(
 
 
 @main.command()
+@click.option("--provider", default=None, help="LLM provider override")
+@click.option("--model", default=None, help="Model name understood by the chosen provider")
+@click.option("--fallback-model", default=None, help="Model to retry with if the primary fails")
+@click.option(
+    "--api-key",
+    default=None,
+    envvar="LGTMAYBE_API_KEY",
+    help="API key (not needed for bedrock/vertex/keyless-azure ambient creds, or ollama)",
+)
+@click.option("--api-base", default=None, help="API base URL (e.g. ollama)")
+@click.option(
+    "--base",
+    default=None,
+    help="Base ref to diff against (default: the remote's primary branch)",
+)
+@click.option(
+    "--working",
+    is_flag=True,
+    default=False,
+    help="Diagram the whole worktree — branch commits plus uncommitted edits — vs the base",
+)
+@click.option(
+    "--uncommitted",
+    is_flag=True,
+    default=False,
+    help="Diagram only the uncommitted working-tree edits (vs HEAD); "
+    "mutually exclusive with --working",
+)
+@click.option(
+    "--timeout",
+    default=None,
+    type=int,
+    help="Per-request timeout in seconds for the model call (raise for slow local models)",
+)
+@click.option(
+    "--num-ctx",
+    default=None,
+    type=int,
+    help="ollama context window (ollama only; raise it for a large multi-file diff)",
+)
+@click.option(
+    "--config",
+    "config_path",
+    default=".lgtmaybe.yml",
+    show_default=True,
+    help="Path to a per-repo config file",
+)
+def diagram(
+    provider: str | None,
+    model: str | None,
+    fallback_model: str | None,
+    api_key: str | None,
+    api_base: str | None,
+    base: str | None,
+    working: bool,
+    uncommitted: bool,
+    timeout: int | None,
+    num_ctx: int | None,
+    config_path: str,
+) -> None:
+    """Print a C4-style diagram of your local changes — no GitHub needed.
+
+    Emits the ASCII rendering (which shows in a terminal) plus the Mermaid
+    source — paste that into a GitHub comment, mermaid.live, or a Markdown file
+    to render it.
+    """
+    if working and uncommitted:
+        raise click.UsageError("--working and --uncommitted are mutually exclusive")
+    cfg = load_config(
+        config_path=Path(config_path),
+        user_config_path=store.user_config_path(),
+        provider=provider,
+        model=model,
+        timeout=timeout,
+        num_ctx=num_ctx,
+    )
+    runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
+    execute_local_diagram(cfg, runtime, base=base, working=working, uncommitted=uncommitted)
+
+
+@main.command()
 @click.option(
     "--event-path",
     envvar="GITHUB_EVENT_PATH",
@@ -402,6 +486,7 @@ def action() -> None:
         prompt_cache=inputs["prompt_cache"],
         incremental=inputs["incremental"],
         auto_describe=inputs["auto_describe"],
+        auto_diagram=inputs["auto_diagram"],
         pr_labels=inputs["pr_labels"],
     )
     raw_sa = inputs["static_analysis"]
@@ -428,10 +513,13 @@ def action() -> None:
     event_action = str(event.get("action") or "")
     cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
-    # Auto-describe (opt-in): on a freshly opened PR, post the structured
-    # description first — best-effort, never blocks the review.
+    # Auto-describe / auto-diagram (opt-in): on a freshly opened PR, post the
+    # structured description and/or the change diagram first — both best-effort,
+    # neither blocks the review.
     if should_auto_describe(cfg, event_action=event_action):
         execute_describe(cfg, runtime)
+    if should_auto_diagram(cfg, event_action=event_action):
+        execute_diagram(cfg, runtime)
     execute_review(cfg, runtime)
 
 

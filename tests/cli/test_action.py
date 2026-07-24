@@ -77,6 +77,52 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert len(github.posted) == 1
 
+    def _run_diagram_gate(self, tmp_path, monkeypatch, *, action: str, auto: str) -> list[bool]:
+        """Run the action for a PR event and record whether execute_diagram fired."""
+        import lgtmaybe.cli as cli_module
+        import lgtmaybe.cli.commands as commands_module
+
+        github = FakeGitHub()
+        engine = FakeEngine(FakeProvider())
+        monkeypatch.setattr(cli_module, "build_adapters", lambda cfg, runtime: (github, engine))
+
+        called: list[bool] = []
+        monkeypatch.setattr(
+            commands_module, "execute_diagram", lambda cfg, runtime: called.append(True)
+        )
+
+        event = _write_event(
+            tmp_path,
+            {
+                "action": action,
+                "repository": {"full_name": "org/repo"},
+                "pull_request": {"number": 3},
+            },
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        monkeypatch.setenv("INPUT_AUTO_DIAGRAM", auto)
+
+        result = CliRunner().invoke(main, ["action"])
+        assert result.exit_code == 0, result.output
+        # The review still runs regardless of the diagram.
+        assert len(github.posted) == 1
+        return called
+
+    def test_auto_diagram_posts_on_opened_pr(self, tmp_path, monkeypatch):
+        called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="true")
+        assert called == [True]
+
+    def test_auto_diagram_skipped_on_synchronize(self, tmp_path, monkeypatch):
+        called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronize", auto="true")
+        assert called == []
+
+    def test_auto_diagram_off_by_default(self, tmp_path, monkeypatch):
+        called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="")
+        assert called == []
+
     def test_issue_comment_event_routes_slash_command(self, tmp_path, monkeypatch):
         github = FakeGitHub()
         provider = FakeProvider()

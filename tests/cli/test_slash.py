@@ -34,6 +34,9 @@ class TestParseCommand:
         assert parse_command("/improve").name is SlashCommand.improve
         assert parse_command("/describe").name is SlashCommand.describe
 
+    def test_diagram(self):
+        assert parse_command("/diagram").name is SlashCommand.diagram
+
     def test_leading_and_trailing_whitespace(self):
         assert parse_command("  /review  \n").name is SlashCommand.review
 
@@ -161,6 +164,28 @@ class TestDispatch:
         assert body.startswith("## Add a thing")
         assert "**Change type:** feature" in body
         assert "| `a.py` |" in body
+
+    def test_diagram_upserts_the_diagram_comment(self):
+        """/diagram goes through the idempotent diagram upsert with a mermaid block."""
+        github = FakeGitHub()
+        structured = json.dumps(
+            {"title": "Change map", "mermaid": 'C4Container\n    Container(a, "A")'}
+        )
+        provider = FakeProvider(
+            result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)
+        )
+
+        dispatch(
+            parse_command("/diagram"),
+            github=github,
+            engine=FakeEngine(provider),
+            provider=provider,
+            cfg=_cfg(),
+        )
+
+        assert github.described == []
+        assert len(github.diagrams) == 1
+        assert "```mermaid" in github.diagrams[0]
 
 
 def _write_event(tmp_path: Path, body: str) -> Path:

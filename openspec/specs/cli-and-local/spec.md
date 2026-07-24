@@ -34,14 +34,18 @@ vs full decision, optional auto-describe, engine call, posting — so `review`,
 ### Requirement: Slash commands route to the same engine
 
 `issue_comment` events SHALL parse into commands — `/review` (with `full`
-forcing a full re-review), `/improve`, `/ask <q>` replying in-thread, and
-`/describe` upserting a structured description — all dispatched to the same
-engine and provider stack.
+forcing a full re-review), `/improve`, `/ask <q>` replying in-thread,
+`/describe` upserting a structured description, and `/diagram` upserting a
+C4-style change diagram — all dispatched to the same engine and provider stack.
 <!-- anchor: cli.slash -->
 
 #### Scenario: reviewer comments /review full
 - **WHEN** the comment body is `/review full`
 - **THEN** a full review runs, bypassing triage and incremental scoping
+
+#### Scenario: reviewer comments /diagram
+- **WHEN** the comment body is `/diagram`
+- **THEN** a C4-style change diagram is upserted as its own comment
 
 ### Requirement: Local review needs no GitHub
 

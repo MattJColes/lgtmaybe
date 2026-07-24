@@ -103,6 +103,8 @@ everywhere:
 - **On a GitHub PR** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the same comments instead of duplicating them, auto-resolves a conversation once its finding is fixed, and a clean PR gets a 👍 **LGTM!**.
 - **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted to GitHub.
 
+Beyond the review, lgtmaybe can post a **structured description** (`/describe`, `auto_describe`) and a **C4-style change diagram** (`/diagram`, `auto_diagram`) — a Mermaid diagram of the components the PR touches, rendered natively in the comment, with an ASCII fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
+
 <p align="center">
   <img src="docs/assets/review-sql-injection.png" alt="An inline lgtmaybe review comment on a GitHub pull request flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a suggested parameterized-query fix" width="640">
 </p>

@@ -72,6 +72,33 @@ def run_describe(github: GitHubGateway, provider: ProviderClient, cfg: ReviewCon
         post_comment(body)
 
 
+def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
+    """Whether the action run should post the change diagram first.
+
+    Only when the user opted in (``auto_diagram``) and the PR was just opened or
+    reopened — a synchronize push updates the review, not the diagram.
+    """
+    return cfg.auto_diagram and event_action in ("opened", "reopened")
+
+
+def run_diagram(github: GitHubGateway, provider: ProviderClient, cfg: ReviewConfig) -> None:
+    """Build the change diagram and post it idempotently.
+
+    Pure function over injected ports, like ``run_describe``. Prefers the
+    gateway's diagram upsert; falls back to a plain issue comment.
+    """
+    from lgtmaybe.engine.diagram import build_diagram
+
+    body = build_diagram(github.get_pr_context(), cfg, provider)
+    post_diagram = getattr(github, "post_diagram_comment", None)
+    if post_diagram is not None:
+        post_diagram(body)
+        return
+    post_comment = getattr(github, "post_issue_comment", None)
+    if post_comment is not None:
+        post_comment(body)
+
+
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
     """Resolve ``incremental=None`` (auto) against the triggering event's action.
 
@@ -355,6 +382,46 @@ def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
         _log.warning("auto-describe failed — continuing without it", exc_info=True)
 
 
+def execute_diagram(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+    """Post the change diagram (auto-diagram path). Best-effort.
+
+    Like the description, the diagram is auxiliary: any failure is logged and
+    swallowed so it can never block the review that follows it.
+    """
+    try:
+        github, _engine, provider = build_review_context(cfg, runtime)
+        run_diagram(github, provider, cfg)
+    except Exception:
+        _log.warning("auto-diagram failed — continuing without it", exc_info=True)
+
+
+def execute_local_diagram(
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    *,
+    base: str | None,
+    working: bool,
+    uncommitted: bool = False,
+) -> None:
+    """Print a C4-style diagram of the local git changes — no GitHub involvement.
+
+    Builds the provider straight from config/runtime (no token, no gateway) and
+    echoes the same Markdown body the ``/diagram`` comment would carry: the
+    Mermaid source (paste it into GitHub to render) plus the ASCII rendering,
+    which is what actually shows in a terminal.
+    """
+    from lgtmaybe.engine.diagram import build_diagram
+
+    try:
+        _engine, provider = build_provider_engine(cfg, runtime)
+        ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+        body = build_diagram(ctx, cfg, provider)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(body)
+
+
 def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
     """Build adapters, run the review, surface failures back to the PR.
 
@@ -476,6 +543,7 @@ def action_inputs() -> dict[str, str | None]:
         "incremental": get("INCREMENTAL"),
         "static_analysis": get("STATIC_ANALYSIS"),
         "auto_describe": get("AUTO_DESCRIBE"),
+        "auto_diagram": get("AUTO_DIAGRAM"),
         "pr_labels": get("PR_LABELS"),
         "profile": get("PROFILE"),
         "config_path": get("CONFIG_PATH"),

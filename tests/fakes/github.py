@@ -24,6 +24,7 @@ class FakeGitHub(GitHubGateway):
         self.posted_diffs: list[str | None] = []
         self.comments: list[str] = []
         self.described: list[str] = []
+        self.diagrams: list[str] = []
 
     def get_pr_context(self) -> PRContext:
         return self._ctx
@@ -41,3 +42,7 @@ class FakeGitHub(GitHubGateway):
     def post_describe_comment(self, body: str) -> None:
         """Idempotent PR-description upsert — beyond the frozen port."""
         self.described.append(body)
+
+    def post_diagram_comment(self, body: str) -> None:
+        """Idempotent change-diagram upsert — beyond the frozen port."""
+        self.diagrams.append(body)
