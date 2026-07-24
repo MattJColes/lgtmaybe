@@ -1,4 +1,4 @@
-"""Tests for the fast/full review presets (fast = 4 grouped calls, default)."""
+"""Tests for the fast/full review presets (fast = 3 calls, default)."""
 
 from __future__ import annotations
 
@@ -42,32 +42,36 @@ class TestFastLensGrouping:
     def test_default_preset_is_fast(self) -> None:
         assert _cfg().preset is ReviewPreset.fast
 
-    def test_fast_builds_four_lenses(self) -> None:
+    def test_fast_builds_three_lenses(self) -> None:
         lenses = _build_lenses(_cfg(), has_intent=False)
         assert [lens.id for lens in lenses] == [
             "security",
             "correctness",
             "code-health",
-            "artefacts",
         ]
 
-    def test_fast_covers_every_builtin_category(self) -> None:
-        """Four calls, nine lenses: every category is either a dedicated call
-        or a member of a merged one — nothing silently dropped."""
+    def test_fast_reserves_artefact_categories_for_deep_reviews(self) -> None:
         lenses = _build_lenses(_cfg(), has_intent=True)
         covered: set[str] = set()
         for lens in lenses:
             covered.add(lens.id)
             covered |= set(lens.allowed_categories or ())
-        assert covered >= {c.value for c in ReviewCategory}
+        assert covered >= {
+            "security",
+            "correctness",
+            "intent",
+            "performance",
+            "complexity",
+            "ponytail",
+            "deprecation",
+        }
+        assert covered.isdisjoint({"tests", "documentation"})
 
     def test_merged_prompts_name_their_member_categories(self) -> None:
         lenses = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=False)}
         code_health = lenses["code-health"].user_block
         for name in ("performance", "complexity", "ponytail", "deprecation"):
             assert f'"{name}"' in code_health
-        artefacts = lenses["artefacts"].user_block
-        assert '"tests"' in artefacts and '"documentation"' in artefacts
 
     def test_intent_folds_into_correctness_when_stated(self) -> None:
         lenses = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=True)}
@@ -83,6 +87,7 @@ class TestFastLensGrouping:
     def test_full_preset_builds_one_lens_per_category(self) -> None:
         lenses = _build_lenses(_cfg(preset="full"), has_intent=True)
         assert [lens.id for lens in lenses] == [c.value for c in ReviewCategory]
+        assert {"tests", "documentation"} <= {lens.id for lens in lenses}
 
     def test_full_preset_skips_intent_without_a_stated_intent(self) -> None:
         lenses = _build_lenses(_cfg(preset="full"), has_intent=False)
@@ -93,10 +98,10 @@ class TestFastLensGrouping:
         lenses = _build_lenses(cfg, has_intent=False)
         assert [lens.id for lens in lenses] == ["security", "performance"]
 
-    def test_fast_review_makes_four_calls(self) -> None:
+    def test_fast_review_makes_three_calls(self) -> None:
         provider = FakeProvider()
         LLMReviewEngine(provider).review(_CTX, _cfg())
-        assert len(provider.calls) == 4
+        assert len(provider.calls) == 3
 
 
 class TestMergedCategoryStamping:

@@ -10,9 +10,9 @@ credentials are handled. No data flows occur beyond what is described here.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends one model call per review lens — four grouped calls under the
-default `fast` preset, one per category under `full`, fanned out concurrently —
-plus a self-reflection call. Each call contains some subset of:
+lgtmaybe sends three grouped model calls under the default `fast` preset, one
+per category under `full`, fanned out concurrently — plus a self-reflection
+call. Each call contains some subset of:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been

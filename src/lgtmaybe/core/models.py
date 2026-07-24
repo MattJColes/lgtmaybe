@@ -76,14 +76,13 @@ class ReviewCategory(StrEnum):
 class ReviewPreset(StrEnum):
     """How many model calls a review spends: the everyday path or the deep audit.
 
-    ``fast`` (the default) covers all nine built-in lenses in four calls:
+    ``fast`` (the default) covers seven built-in lenses in three calls:
     security and correctness keep dedicated calls (they earn it; the stated
-    intent, when present, merges into correctness), while the remaining six
-    fold into two combined calls — code health (performance, complexity,
-    ponytail, deprecation) and supporting artefacts (tests, documentation).
-    ``full`` runs each of the nine lenses as its own call — more per-lens
-    focus for release branches and deep audits, at ~2× the calls and wall
-    time. An explicit ``categories`` list always wins over the preset.
+    intent, when present, merges into correctness), while performance,
+    complexity, ponytail, and deprecation fold into one code-health call.
+    ``full`` restores tests and documentation and runs each of the nine lenses
+    as its own call for release branches and deep audits. An explicit
+    ``categories`` list always wins over the preset.
     """
 
     fast = "fast"
@@ -570,9 +569,9 @@ class ReviewConfig(_Strict):
     # replies and resolves the conversation. GitHub posting only — ignored by the
     # local CLI review, which has no conversations to resolve.
     resolve_fixed: bool = True
-    # Call-count preset (see ReviewPreset): `fast` (default) covers all nine
-    # built-in lenses in four calls; `full` runs one call per lens for release
-    # branches and deep audits. An explicit `categories` list overrides it.
+    # Call-count preset (see ReviewPreset): `fast` (default) covers seven
+    # built-in lenses in three calls; `full` restores tests/documentation and
+    # runs one call per lens. An explicit `categories` list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the

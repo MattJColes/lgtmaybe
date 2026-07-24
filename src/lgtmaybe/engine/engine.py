@@ -134,11 +134,11 @@ class _Lens:
 def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
-    The fast preset groups the nine built-ins into four calls — but only when
+    The fast preset runs seven built-ins in three calls — but only when
     ``categories`` is the untouched default: a user who explicitly listed
     lenses asked for exactly those, so the preset never regroups them. The
-    full preset (and any explicit list) runs one call per category, skipping
-    the intent lens when nothing states an intent.
+    full preset runs every category; an explicit list runs exactly its selected
+    categories. Both skip intent when nothing states an intent.
     """
     fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
     if fast:

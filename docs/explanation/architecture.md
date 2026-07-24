@@ -52,15 +52,13 @@ flowchart TD
     compress --> security["security lens"]
     compress --> correctness["correctness + intent lens"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
-    compress --> artefacts["artefacts lens<br/>tests · documentation"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
     correctness --> anchor
     codehealth --> anchor
-    artefacts --> anchor
     anchor --> dedupe["merge / dedupe"] --> reflect["reflect<br/>self-audit, drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-(The four lens calls shown are the `fast` preset's grouping; the `full` preset
+(The three lens calls shown are the `fast` preset's grouping; the `full` preset
 fans out one call per category, and custom lenses join the same fan-out.)
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
@@ -80,11 +78,11 @@ fans out one call per category, and custom lenses join the same fan-out.)
 
 3. **prompt + parse** — this stage **fans out one model call per review
    lens**. The `preset` decides the lens set. `fast` (the default) covers the
-   nine built-in categories in **four calls**: dedicated security and
+   seven code-focused categories in **three calls**: dedicated security and
    correctness calls (the stated intent folds into correctness when present),
    plus a merged code-health call (performance/complexity/ponytail/
-   deprecation) and an artefacts call (tests/documentation), each demanding a
-   per-finding `category`. `full` runs one call per category. Every
+   deprecation), each demanding a per-finding `category`. `full` restores tests
+   and documentation and runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
    ollama and openai-compatible), so batches never wait on each other.

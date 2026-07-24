@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   preset:
-    description: "Review preset. fast (the default) covers all nine lenses in four model calls: dedicated security and correctness calls (the stated intent folds into correctness), plus merged code-health (performance/complexity/ponytail/deprecation) and artefacts (tests/documentation) calls — roughly half the calls and wall time, trading some recall on the softer lenses. full runs one call per lens, for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
+    description: "Review preset. fast (the default) covers security, correctness/intent, performance, complexity, ponytail, and deprecation in three model calls. full restores tests/documentation and runs one call per lens for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
     required: false
     default: ""
   fallback_model:
@@ -39,7 +39,7 @@ inputs:
     required: false
     default: ""
   timeout:
-    description: "Per-request timeout in seconds for each model call. Leave empty for the provider default (ollama and openai-compatible 300, cloud 60)."
+    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama and openai-compatible 300, cloud 60)."
     required: false
     default: ""
   max_review_seconds:
