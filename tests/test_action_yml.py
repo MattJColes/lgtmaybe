@@ -65,9 +65,11 @@ def test_marketplace_setup_explains_workflow_configuration() -> None:
     for term in ("workflow", "provider", "model", "api key"):
         assert term in marketplace_copy
 
-    action_section = _README.read_text(encoding="utf-8").split(
-        "## Use as a GitHub Action", maxsplit=1
-    )[1].split("## Distribution", maxsplit=1)[0]
+    action_section = (
+        _README.read_text(encoding="utf-8")
+        .split("## Use as a GitHub Action", maxsplit=1)[1]
+        .split("## Distribution", maxsplit=1)[0]
+    )
     assert "GitHub Marketplace" in action_section
     for input_name in ("provider:", "model:", "api_key:"):
         assert input_name in action_section
