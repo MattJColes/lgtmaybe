@@ -40,6 +40,18 @@ posts a [C4-style Mermaid diagram of the components the PR touches](how-to/gener
 GitHub — and **`/ask <question>`** answers questions about the change in-thread.
 `lgtmaybe diagram` prints the same change diagram locally, before you push.
 
+```mermaid
+C4Container
+    title User lookup after this change
+    Person(client, "Client")
+    Container(api, "User API", "Python", "Serves user reads")
+    ContainerDb(cache, "Redis cache", "Redis", "caches user rows (new)")
+    ContainerDb(db, "User DB", "Postgres")
+    Rel(client, api, "GET /users/{id}")
+    Rel(api, cache, "check cache (new)")
+    Rel(api, db, "on miss, query")
+```
+
 Every finding is graded from `info` up to `critical`, so you can set the
 severity floor that matters to you. Each one lands as an inline comment on
 the exact line where the problem is, with a single summary at the top. On the CLI
