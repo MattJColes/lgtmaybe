@@ -1,0 +1,53 @@
+# Copy into your repo at .github/workflows/lgtmaybe.yml
+#
+# Post reviews under your own branded GitHub App identity (e.g. lgtmaybe[bot])
+# instead of the default github-actions[bot], with higher API rate limits.
+#
+# This example uses Anthropic for the model, but the app_id / app_private_key
+# inputs work with ANY provider — add them to any of the other example workflows.
+#
+# One-time setup (create the App, grant it pull-requests:write + contents:read,
+# install it, store the ID + private key): see
+# https://mattjcoles.github.io/lgtmaybe/how-to/post-as-a-github-app/
+#
+# Secrets/variables to add:
+#   ANTHROPIC_API_KEY        (secret)   — your model provider key
+#   LGTMAYBE_APP_ID          (variable) — the GitHub App's ID
+#   LGTMAYBE_APP_PRIVATE_KEY (secret)   — the App's private key (PEM contents)
+name: lgtmaybe (github app)
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Only trusted authors (repo owner / org member / collaborator) can trigger a
+    # review, so fork PRs and drive-by /ask or /review comments from strangers
+    # cannot spend your provider budget. A maintainer can still opt-in to an
+    # external PR by commenting /review on it. (Comments not on a PR are skipped.)
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MattJColes/lgtmaybe@v0
+        with:
+          provider: anthropic
+          model: claude-sonnet-4-6
+          api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Post as the App identity instead of github-actions[bot].
+          app_id: ${{ vars.LGTMAYBE_APP_ID }}
+          app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}

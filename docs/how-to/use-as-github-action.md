@@ -19,6 +19,7 @@ ollama runs the model on your own machine, so it is local-only — use the
 - [Minimal workflow — openai](#minimal-workflow-openai)
 - [Other key-based providers](#other-key-based-providers)
 - [Keyless cloud workflows](#keyless-cloud-workflows)
+- [Post reviews as a GitHub App](#post-reviews-as-a-github-app)
 - [Action inputs](#action-inputs)
 - [Adding a config file](#adding-a-config-file)
 - [Pin to a specific version](#pin-to-a-specific-version)
@@ -146,6 +147,32 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 - [Review with Vertex WIF](./review-with-vertex-wif.md)
 - [Review with Azure OpenAI](./review-with-azure.md)
 
+## Post reviews as a GitHub App
+
+By default reviews post as `github-actions[bot]` using the workflow token. To post
+as **your own branded identity** — e.g. `lgtmaybe[bot]` with an avatar — with
+higher API rate limits (and optional cross-repo reach), pass `app_id` and
+`app_private_key`. The action mints a short-lived installation token, uses it to
+fetch the diff and post the review, and revokes it at the end of the job. This is
+purely the *posting identity* — the keyless cloud model is unchanged and
+everything still runs in your own CI.
+
+```yaml
+- uses: MattJColes/lgtmaybe@v0
+  with:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    app_id: ${{ vars.LGTMAYBE_APP_ID }}
+    app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
+```
+
+The App's own installation permissions (`pull requests: write`, `contents: read`)
+govern what the review can post — but keep the workflow `permissions:` block for
+the `actions/checkout` of your `.lgtmaybe.yml`. The one-time setup (create the
+App, grant those permissions, install it, and store the ID and key) is in
+[Post reviews as a GitHub App](./post-as-a-github-app.md).
+
 ## Action inputs
 
 | Input | Default | Description |
@@ -183,6 +210,10 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
 | `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
 | `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
+| `app_id` | — | GitHub App ID — post as a branded App identity (with `app_private_key`) instead of `github-actions[bot]`, with higher rate limits. [Setup](./post-as-a-github-app.md) |
+| `app_private_key` | — | Private key (PEM) of the App named by `app_id`; wire a secret to it. Mints a short-lived, auto-revoked installation token |
+| `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
+| `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
 | `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
 
 The action sets the `GITHUB_TOKEN` and provider credentials for the container
