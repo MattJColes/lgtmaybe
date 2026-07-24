@@ -68,6 +68,35 @@ is what actually places the comment: it must match a changed line character-for-
 """
 
 
+def _language_directive(language: str) -> str:
+    """The output-language directive appended to the shared header when set.
+
+    Only the prose fields are translated: the structural fields and the
+    ``suggestion`` (literal replacement code) must stay in the source language so
+    anchoring, severity comparison, and one-click apply keep working.
+    """
+    return (
+        "\n## Output language\n\n"
+        f"Write the `title` and `body` fields in {language}. Leave `path`, `line`, "
+        "`side`, `severity`, and `anchor` unchanged, and keep `suggestion` as literal "
+        "replacement code — do not translate it.\n"
+    )
+
+
+@lru_cache(maxsize=8)
+def _localised_header(language: str | None) -> str:
+    """``_SHARED_HEADER``, plus an output-language directive when *language* is set.
+
+    Byte-identical to ``_SHARED_HEADER`` when *language* is falsy (the default) —
+    the prompt-cache contract depends on the unset prompt never drifting. Keyed on
+    *language* (constant within a run), so every lens in a fan-out reads the same
+    cached header.
+    """
+    if not language:
+        return _SHARED_HEADER
+    return _SHARED_HEADER + _language_directive(language)
+
+
 def _example_block(
     diff: str,
     finding: dict[str, object],
@@ -678,9 +707,9 @@ CODE_HEALTH_GROUP = LensGroup(
 FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP,)
 
 
-def build_group_prompt(group: LensGroup) -> str:
+def build_group_prompt(group: LensGroup, language: str | None = None) -> str:
     """A merged lens's system prompt (legacy shape, ``prompt_cache: false``)."""
-    return f"{_SHARED_HEADER}\n{group.example}\n\n{group.section}\n\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{group.example}\n\n{group.section}\n\n{_SHARED_RULES}\n"
 
 
 def build_group_block(group: LensGroup) -> str:
@@ -698,10 +727,11 @@ def _correctness_section(include_intent: bool) -> str:
     return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_SECTION}\n\n{_INTENT_SECTION}"
 
 
-def build_correctness_prompt(include_intent: bool) -> str:
+def build_correctness_prompt(include_intent: bool, language: str | None = None) -> str:
     """The fast preset's correctness call, system-prompt (legacy) shape."""
     section = _correctness_section(include_intent)
-    return f"{_SHARED_HEADER}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
+    header = _localised_header(language)
+    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
 
 
 def build_correctness_block(include_intent: bool) -> str:
@@ -717,10 +747,11 @@ def _correctness_flow_section(include_intent: bool) -> str:
     return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_FLOW_SECTION}\n\n{_INTENT_SECTION}"
 
 
-def build_correctness_flow_prompt(include_intent: bool) -> str:
+def build_correctness_flow_prompt(include_intent: bool, language: str | None = None) -> str:
     """The parallel fast preset's correctness-flow system prompt."""
     section = _correctness_flow_section(include_intent)
-    return f"{_SHARED_HEADER}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
+    header = _localised_header(language)
+    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
 
 
 def build_correctness_flow_block(include_intent: bool) -> str:
@@ -730,10 +761,10 @@ def build_correctness_flow_block(include_intent: bool) -> str:
     )
 
 
-def build_correctness_state_prompt() -> str:
+def build_correctness_state_prompt(language: str | None = None) -> str:
     """The parallel fast preset's correctness-state system prompt."""
     return (
-        f"{_SHARED_HEADER}\n{_CORRECTNESS_STATE_EXAMPLE}\n\n"
+        f"{_localised_header(language)}\n{_CORRECTNESS_STATE_EXAMPLE}\n\n"
         f"{_CORRECTNESS_STATE_SECTION}\n\n{_SHARED_RULES}\n"
     )
 
@@ -822,8 +853,8 @@ verify (hedge, lower the severity), never as confident `high`/`critical` fixes �
 - Return `{"findings": []}` only when there are genuinely no issues."""
 
 
-@lru_cache(maxsize=1)
-def build_shared_preamble() -> str:
+@lru_cache(maxsize=8)
+def build_shared_preamble(language: str | None = None) -> str:
     """The lens-independent system prompt for the split (cache-shaped) layout.
 
     Everything common to every lens — role, severity rubric, output contract,
@@ -833,8 +864,12 @@ def build_shared_preamble() -> str:
     reads it (and the diff block that follows it) from cache. The lens-specific
     checklist and worked example move to the final user block
     (:func:`build_lens_block`), outside the cached prefix.
+
+    *language* (constant within a run) adds the output-language directive to the
+    header; keyed on it so the shared prefix stays byte-identical across the
+    fan-out, and byte-identical to the pre-language prompt when unset.
     """
-    return f"{_SHARED_HEADER}\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{_SHARED_RULES}\n"
 
 
 # Lead-in for the lens block: the diff (untrusted data) is above, these
@@ -874,21 +909,23 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     return f"{_LENS_LEAD_IN}\n\n{body}\n\n{example}"
 
 
-@lru_cache(maxsize=len(ReviewCategory))
-def build_system_prompt(category: ReviewCategory) -> str:
+@lru_cache(maxsize=len(ReviewCategory) * 4)
+def build_system_prompt(category: ReviewCategory, language: str | None = None) -> str:
     """Return the system message for the review LLM's *category* lens.
 
     The prompt carries only that lens's section and a matching worked example.
 
     Cached: the prompts are deterministic, and the engine rebuilds one per
-    category on every batch — caching makes those rebuilds free.
+    category on every batch — caching makes those rebuilds free. Keyed on
+    *language* too (constant within a run), and byte-identical to the
+    pre-language prompt when unset.
     """
     example = _CATEGORY_EXAMPLES[category]
     body = _CATEGORY_SECTIONS[category]
-    return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
 
 
-def build_lens_prompt(lens: CustomLens) -> str:
+def build_lens_prompt(lens: CustomLens, language: str | None = None) -> str:
     """Return the system message for a user-defined ("BYO") lens.
 
     Same scaffold as a built-in category — shared header, one worked example, the
@@ -901,4 +938,4 @@ def build_lens_prompt(lens: CustomLens) -> str:
         example = _GENERIC_EXAMPLE
     heading = lens.title.strip() or lens.id
     body = f"## {heading}\n\n{lens.instructions.strip()}"
-    return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"

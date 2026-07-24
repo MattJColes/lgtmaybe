@@ -29,6 +29,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
+| `language` | string / null | No | `null` | Language |
 | `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
@@ -619,6 +620,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Incremental"
+    },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
     },
     "learn_feedback": {
       "default": true,

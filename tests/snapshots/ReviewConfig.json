@@ -480,6 +480,18 @@
       "default": null,
       "title": "Incremental"
     },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    },
     "learn_feedback": {
       "default": true,
       "title": "Learn Feedback",

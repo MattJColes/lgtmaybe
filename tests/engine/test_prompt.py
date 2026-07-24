@@ -509,3 +509,38 @@ def test_json_only_rule_not_duplicated_in_shared_rules() -> None:
     preamble = build_shared_preamble()
     assert "Return ONLY a JSON object" in preamble
     assert "Never output anything other than" not in preamble
+
+
+_LANG = "Japanese"
+
+
+def test_language_directive_absent_by_default() -> None:
+    """Unset language ⇒ the preamble and every legacy per-category prompt are
+    byte-identical to the pre-language build — the prompt-cache contract depends
+    on this default staying stable."""
+    default = build_shared_preamble()
+    assert build_shared_preamble(None) == default
+    assert "Output language" not in default
+    assert "do not translate" not in default
+    for category in ReviewCategory:
+        assert build_system_prompt(category, None) == build_system_prompt(category)
+        assert "Output language" not in build_system_prompt(category)
+
+
+def test_language_directive_present_when_set() -> None:
+    """A set language adds a directive naming the prose fields (`title`/`body`)
+    and the language, in both the split preamble and the legacy prompt."""
+    preamble = build_shared_preamble(_LANG)
+    assert preamble != build_shared_preamble()
+    assert _LANG in preamble
+    assert "`title`" in preamble and "`body`" in preamble
+    # Structural fields + suggestion code stay untranslated.
+    assert "do not translate" in preamble
+    legacy = build_system_prompt(ReviewCategory.security, _LANG)
+    assert _LANG in legacy and "`title`" in legacy and "do not translate" in legacy
+
+
+def test_custom_lens_prompt_carries_language_directive() -> None:
+    lens = CustomLens(id="naming", instructions="Flag bad names.")
+    assert build_lens_prompt(lens, None) == build_lens_prompt(lens)
+    assert _LANG in build_lens_prompt(lens, _LANG)
