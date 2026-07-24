@@ -199,7 +199,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
 | `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
 | `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
-| `preset` | `fast` | `fast` covers seven code-focused lenses in three calls; `full` restores tests/documentation and runs one call per lens |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens |
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
 | `max_review_seconds` | `600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |

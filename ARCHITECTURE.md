@@ -140,8 +140,9 @@ reviews need no static keys in GitHub secrets. The `LiteLLMProvider` adds retrie
 budget-scaled context → batch to token budget → fan out one call per review
 lens → parse → merge & dedupe → self-reflect → filter by severity →
 findings + summary`. The lens set follows the `preset` — `fast` (default)
-covers seven code-focused categories in three calls, `full` runs all nine — and
-every (batch, lens) call shares one pool (`max_concurrency`: 8 cloud, 1
+covers seven code-focused categories in four calls when the pool can overlap
+work, or three combined calls with one worker; `full` runs all nine — and every
+(batch, lens) call shares one pool (`max_concurrency`: 8 cloud, 1
 ollama/openai-compatible) with a cacheable preamble-plus-diff prompt prefix on
 anthropic/bedrock. A soft whole-review deadline (`max_review_seconds`) degrades
 an overrunning review to partial-with-a-notice, and every stage and model call
@@ -176,11 +177,12 @@ engine/provider.
 ## Features
 
 **Review intelligence** — nine review lenses, fanned out per the `preset`:
-`fast` (default) covers seven in three concurrent calls — dedicated security
-and correctness calls (the stated intent folds into correctness), plus merged
-code-health with per-finding category attribution — while `full` restores tests
-and documentation and runs each lens as its own focused call with a lens-matched
-worked example. Findings from every call are merged & de-duped:
+`fast` (default) covers seven in four concurrent calls when parallelism is
+available — security, correctness flow/intent, correctness state/lifecycle, and
+merged code health — while a single-worker provider keeps correctness combined
+for three calls. `full` restores tests and documentation and runs each lens as
+its own focused call with a lens-matched worked example. Findings from every
+call are merged & de-duped:
 - **Security** — OWASP-aligned checklist: injection, XSS, CSRF/open redirect,
   hardcoded secrets, broken authn/authz (incl. JWT pitfalls), path traversal,
   unrestricted upload, SSRF, insecure deserialization/XXE, mass assignment, weak

@@ -277,7 +277,7 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` covers seven code-focused lenses in three model calls; `full` restores tests/documentation and runs one call per lens. |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
@@ -309,12 +309,13 @@ Each finding has:
 
 The nine review categories are security, correctness, deprecation, tests,
 documentation, performance, complexity, intent, and ponytail. The default
-`fast` preset runs seven of them in three concurrent calls: dedicated security
-and correctness calls (the stated intent folds into correctness), plus a merged
-code-health call (performance/complexity/ponytail/deprecation). `preset: full`
-restores tests and documentation and runs each category as its own focused call
-with a worked example of its own finding type. Their findings are merged and
-de-duplicated. A
+`fast` preset covers seven of them in four concurrent calls when parallelism is
+available: security, correctness flow/intent, correctness state/lifecycle, and
+merged code health (performance/complexity/ponytail/deprecation). With one
+worker, correctness stays combined and the preset uses three calls.
+`preset: full` restores tests and documentation and runs each category as its
+own focused call with a worked example of its own finding type. Their findings
+are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 

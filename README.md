@@ -62,7 +62,11 @@ credentials in connection strings) before anything leaves your environment. See
 
 **Fast by default.** Reviews run the **`fast` preset** by default: security,
 correctness (including stated intent), and code health
-(performance/complexity/ponytail/deprecation) run in **three model calls**.
+(performance/complexity/ponytail/deprecation) run in **four parallel model
+calls** when more than one worker is available: correctness is split into
+focused flow and state/lifecycle checks so one oversized task cannot set the
+critical path. Single-worker configurations keep the combined **three-call**
+shape.
 Tests and documentation are reserved for `--preset full` (or `preset: full` in
 `.lgtmaybe.yml`), which restores the one-call-per-lens deep audit for release
 branches. This keeps the everyday path focused on code defects while avoiding a
@@ -76,7 +80,7 @@ the time and tokens went.
 **How the scope is bounded.** Every run is capped so a large PR can't blow up
 latency:
 
-- `preset` (default `fast`) — three focused/grouped calls; `full` restores tests and documentation and runs one call per lens.
+- `preset` (default `fast`) — four focused/grouped calls when concurrency is available, three with one worker; `full` restores tests and documentation and runs one call per lens.
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
 - `max_concurrency` (default 8 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.

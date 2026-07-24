@@ -63,8 +63,9 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     default=None,
     type=click.Choice(["fast", "full"]),
     help="Review preset: fast (default) covers security, correctness/intent, "
-    "performance, complexity, ponytail, and deprecation in three calls; full "
-    "restores tests/documentation and runs one call per lens for deep audits",
+    "performance, complexity, ponytail, and deprecation in four calls when "
+    "parallelism is available, or three with one worker; full restores "
+    "tests/documentation and runs one call per lens for deep audits",
 )
 @click.option(
     "--full",

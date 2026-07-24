@@ -19,7 +19,7 @@ prompt.custom-lens:
     files: [src/lgtmaybe/engine/**/*.py]
   - rule:
       kind: function_definition
-      has: { field: name, regex: '^_build_lenses$' }
+      has: { field: name, regex: '^build_custom_lens_block$' }
     files: [src/lgtmaybe/engine/**/*.py]
 
 prompt.groups:
@@ -30,4 +30,8 @@ prompt.groups:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^build_correctness_prompt$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_build_lenses$' }
     files: [src/lgtmaybe/engine/**/*.py]
