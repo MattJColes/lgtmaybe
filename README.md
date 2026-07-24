@@ -201,6 +201,11 @@ are published at the docs root.
 
 ## Use as a GitHub Action
 
+GitHub Marketplace copies the Action syntax into a workflow; it does not choose
+an LLM service or model for you. In `.github/workflows/lgtmaybe.yml`, set
+`provider`, `model`, and the matching authentication input in the step's `with:`
+block. This complete example uses OpenAI:
+
 ```yaml
 name: lgtmaybe
 
@@ -226,7 +231,8 @@ jobs:
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Copy-paste workflows for every cloud and API-key provider live in
+Using another platform? Copy-paste workflows for every cloud and API-key
+provider live in
 [`examples/workflows/`](examples/workflows/). Cloud providers (Bedrock, Vertex,
 Azure) are **keyless** — pass `aws_role_arn` / `gcp_wif_provider` /
 `azure_client_id` and the action does the OIDC/WIF exchange for you (needs
