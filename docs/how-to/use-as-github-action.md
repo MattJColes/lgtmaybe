@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only — for .lgtmaybe.yml config
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: openai
           model: gpt-5.5
@@ -121,21 +121,21 @@ Swap the `provider`, `model`, and `api_key` inputs:
 
 ```yaml
 # anthropic
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
     api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
 # openrouter
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: zai
     model: glm-4.6
@@ -168,7 +168,7 @@ purely the *posting identity* — the keyless cloud model is unchanged and
 everything still runs in your own CI.
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
@@ -224,7 +224,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `app_private_key` | — | Private key (PEM) of the App named by `app_id`; wire a secret to it. Mints a short-lived, auto-revoked installation token |
 | `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
 | `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
-| `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
+| `image` | `ghcr.io/mattjcoles/lgtmaybe:v1` | Override the container image (advanced) |
 
 The action sets the `GITHUB_TOKEN` and provider credentials for the container
 itself — you do not pass them as `env`.
@@ -237,9 +237,9 @@ filters, and cost caps. See
 
 ## Pin to a specific version
 
-`@v0` is a floating tag that tracks the latest `v0.x.x` release. To pin exactly,
+`@v1` is a floating tag that tracks the latest `v1.x.x` release. To pin exactly,
 use a full version tag:
 
 ```yaml
-uses: MattJColes/lgtmaybe@v0.1.0
+uses: MattJColes/lgtmaybe@v1.0.0
 ```

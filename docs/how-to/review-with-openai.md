@@ -27,7 +27,7 @@ Copy [`examples/workflows/review-openai.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openai
     model: gpt-5.5

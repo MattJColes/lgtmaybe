@@ -10,7 +10,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "The released tag to build and publish (e.g. lgtmaybe-v0.1.0)."
+        description: "The released tag to build and publish (e.g. lgtmaybe-v1.0.0)."
         required: true
         type: string
   # Manual path: (re)publish the image + (re)move the clean v-tags for an
@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to build and publish (e.g. lgtmaybe-v0.1.0)."
+        description: "Existing release tag to build and publish (e.g. lgtmaybe-v1.0.0)."
         required: true
         type: string
 
@@ -38,16 +38,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # release-please cuts component-prefixed tags (lgtmaybe-v0.1.0); strip the
-      # prefix to a clean semver so the metadata/git tags are v0 / 0.1.0, not the
+      # release-please cuts component-prefixed tags (lgtmaybe-v1.0.0); strip the
+      # prefix to a clean semver so the metadata/git tags are v1 / 1.0.0, not the
       # prefixed form (which semver can't parse).
       - name: Clean version from tag
         id: ver
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag }}"   # e.g. lgtmaybe-v0.1.0
-          v="${tag##*-}"            # v0.1.0  (everything after the last '-')
-          v="${v#v}"                # 0.1.0
+          tag="${{ inputs.tag }}"   # e.g. lgtmaybe-v1.0.0
+          v="${tag##*-}"            # v1.0.0  (everything after the last '-')
+          v="${v#v}"                # 1.0.0
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Image metadata
         id: meta
@@ -67,10 +67,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   # Publish clean v-prefixed git tags consumers can use in `uses:` — the exact
-  # alias (v0.1.0), the floating major (v0), and the component-prefixed floating
-  # major (lgtmaybe-v0) — all pointing at the released commit. release-please owns
-  # the canonical lgtmaybe-v0.1.0 tag + GitHub release; these are the
-  # Action-friendly aliases (the image uses the same v0 / 0.1.0 scheme).
+  # alias (v1.0.0), the floating major (v1), and the component-prefixed floating
+  # major (lgtmaybe-v1) — all pointing at the released commit. release-please owns
+  # the canonical lgtmaybe-v1.0.0 tag + GitHub release; these are the
+  # Action-friendly aliases (the image uses the same v1 / 1.0.0 scheme).
   floating-tag:
     needs: [ghcr]
     runs-on: ubuntu-latest
@@ -83,17 +83,17 @@ jobs:
       - name: Tag clean exact + floating-major v-tags
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag }}"   # e.g. lgtmaybe-v0.1.0
-          ver="${tag##*-}"          # v0.1.0  (everything after the last '-')
-          major="${ver%%.*}"        # v0
+          tag="${{ inputs.tag }}"   # e.g. lgtmaybe-v1.0.0
+          ver="${tag##*-}"          # v1.0.0  (everything after the last '-')
+          major="${ver%%.*}"        # v1
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -f "$ver" "$tag"
           git push -f origin "refs/tags/$ver"
           git tag -f "$major" "$tag"
           git push -f origin "refs/tags/$major"
-          # Also keep the component-prefixed floating major (lgtmaybe-v0) in sync.
-          # Some consumers pin `uses: MattJColes/lgtmaybe@lgtmaybe-v0`; without this
+          # Also keep the component-prefixed floating major (lgtmaybe-v1) in sync.
+          # Some consumers pin `uses: MattJColes/lgtmaybe@lgtmaybe-v1`; without this
           # it stays frozen at an old commit whose action.yml points at a stale image.
           git tag -f "lgtmaybe-$major" "$tag"
           git push -f origin "refs/tags/lgtmaybe-$major"

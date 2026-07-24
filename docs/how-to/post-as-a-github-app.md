@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
@@ -104,7 +104,7 @@ review PRs across a monorepo or several repos in an org, set `app_owner` (and
 optionally `app_repositories`):
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
@@ -133,7 +133,7 @@ steps:
         with:
           app-id: ${{ vars.LGTMAYBE_APP_ID }}
           private-key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6

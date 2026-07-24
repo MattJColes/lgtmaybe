@@ -28,7 +28,7 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
