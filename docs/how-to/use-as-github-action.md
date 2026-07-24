@@ -15,6 +15,9 @@ below shows the complete shape.
 
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
+They enable `auto_diagram`, so newly opened or reopened pull requests receive
+a C4-style change diagram automatically. Remove that input or set it to `false`
+if you do not want the extra model call.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -108,6 +111,7 @@ jobs:
         with:
           provider: openai
           model: gpt-5.5
+          auto_diagram: true
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 

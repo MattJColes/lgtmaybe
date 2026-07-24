@@ -167,6 +167,16 @@ def test_is_reviewable_rejects_generated_globs() -> None:
     assert not is_reviewable("__generated__/foo.py")
 
 
+def test_is_reviewable_rejects_generated_llms_files() -> None:
+    """llms.txt / llms-full.txt (the llmstxt.org convention) are generated
+    whole-docs corpora — skip them by exact name, at the root or nested."""
+    assert not is_reviewable("llms.txt")
+    assert not is_reviewable("llms-full.txt")
+    assert not is_reviewable("docs/llms-full.txt")
+    # Control: a normal .txt is still reviewed — we skip by name, not extension.
+    assert is_reviewable("docs/notes.txt")
+
+
 def test_is_reviewable_accepts_dotfiles_and_configs() -> None:
     """Config/source-ish files that are not on a skip list should be reviewed."""
     assert is_reviewable(".github/workflows/ci.yml")
