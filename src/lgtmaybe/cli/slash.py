@@ -48,13 +48,15 @@ def parse_command(body: str) -> ParsedCommand | None:
     if not text.startswith("/"):
         return None
 
-    head, _, rest = text[1:].partition(" ")
-    head = head.strip().lower()
+    # Split on any whitespace, not just a space — "/review\nfull" is a command.
+    parts = text[1:].split(None, 1)
+    if not parts:
+        return None
     try:
-        name = SlashCommand(head)
+        name = SlashCommand(parts[0].lower())
     except ValueError:
         return None
-    return ParsedCommand(name=name, arg=rest.strip())
+    return ParsedCommand(name=name, arg=parts[1].strip() if len(parts) > 1 else "")
 
 
 def dispatch(

@@ -67,7 +67,7 @@ class IncrementalFakeGitHub(FakeGitHub):
         self._last_sha = last_sha
         self._compare_result = compare_result
         self.compare_calls: list[tuple[str, str]] = []
-        self.marked_reviewed: list[str] = []
+        self.marked_reviewed: list[str | None] = []
         self.scopes: list[set[str] | None] = []
         self.last_reviewed_calls = 0
 
@@ -79,7 +79,7 @@ class IncrementalFakeGitHub(FakeGitHub):
         self.compare_calls.append((base_sha, head_sha))
         return self._compare_result
 
-    def mark_reviewed(self, head_sha: str) -> None:
+    def mark_reviewed(self, head_sha: str | None) -> None:
         self.marked_reviewed.append(head_sha)
 
     def set_incremental_scope(self, paths: set[str] | None) -> None:

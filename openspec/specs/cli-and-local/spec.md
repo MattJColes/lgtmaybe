@@ -64,7 +64,10 @@ commit subjects feeding the intent lens.
 
 Config SHALL merge user-level file → repo `.lgtmaybe.yml` → CLI flags (most
 specific wins), and the user-level store persists only non-secret defaults —
-API keys stay in the environment, never written to disk.
+API keys stay in the environment, never written to disk. An explicitly chosen
+config path (`--config` / the Action's `config_path`) must exist and parse to
+a mapping — a typo'd path fails loudly rather than silently running with
+defaults; the default `.lgtmaybe.yml` probe stays lenient when absent.
 <!-- anchor: cli.config -->
 
 #### Scenario: user tries to persist a key

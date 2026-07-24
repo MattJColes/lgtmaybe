@@ -246,9 +246,11 @@ pattern, event bus, plugin framework.
      hunk header, teaching the line-number arithmetic). `ReviewConfig.preset`
      picks the lens set: **`fast` (default)** covers security, correctness and
      stated intent, performance, complexity, ponytail, and deprecation in
-     **three calls** (dedicated security + correctness — stated intent folds
-     into correctness with per-finding `category` attribution — plus merged
-     code-health, `prompt.FAST_GROUPS`); **`full`** restores tests and
+     **four calls** when the provider can overlap work (dedicated security +
+     two correctness calls, flow and state — stated intent folds into
+     correctness with per-finding `category` attribution — plus merged
+     code-health, `prompt.FAST_GROUPS`), or **three** with one worker
+     (correctness combined); **`full`** restores tests and
      documentation and runs one call per category. An explicit `categories`
      list overrides the grouping. Every (batch, lens) call runs through **one global
      `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8

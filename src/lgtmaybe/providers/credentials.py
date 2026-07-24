@@ -133,7 +133,9 @@ def resolve_credentials(
                 "a named profile (AWS_PROFILE), or set AWS_ACCESS_KEY_ID / "
                 "AWS_SECRET_ACCESS_KEY in the environment."
             )
-        return AuthConfig()
+        # Ambient creds carry the auth; an explicit base (e.g. a gateway)
+        # still passes through.
+        return AuthConfig(api_base=api_base)
 
     if provider is Provider.vertex:
         probe = ambient_probe if ambient_probe is not None else _default_gcp_probe
@@ -143,7 +145,7 @@ def resolve_credentials(
                 "Configure Workload Identity Federation, set GOOGLE_APPLICATION_CREDENTIALS "
                 "to a service-account key file, or run 'gcloud auth application-default login'."
             )
-        return AuthConfig()
+        return AuthConfig(api_base=api_base)
 
     if provider is Provider.azure:
         base = api_base or os.environ.get("AZURE_API_BASE")
@@ -217,12 +219,14 @@ def resolve_credentials(
     }
     env_var = _ENV_VAR[provider]
 
+    # An explicit --api-base (e.g. an OpenAI-format proxy) rides along with the
+    # key — dropping it here would silently ignore the user's endpoint.
     if api_key:
-        return AuthConfig(api_key=api_key)
+        return AuthConfig(api_key=api_key, api_base=api_base)
 
     key_from_env = os.environ.get(env_var)
     if key_from_env:
-        return AuthConfig(api_key=key_from_env)
+        return AuthConfig(api_key=key_from_env, api_base=api_base)
 
     raise ValueError(
         f"{provider} requires an API key. Set the {env_var} environment variable or pass --api-key."

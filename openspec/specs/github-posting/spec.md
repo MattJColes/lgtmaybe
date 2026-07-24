@@ -69,8 +69,10 @@ scoped to the increment's files.
 ### Requirement: Resolving threads is best-effort GraphQL
 
 When a finding is gone and GitHub marks its thread outdated, the thread SHALL
-be replied to and resolved via GraphQL (the one op REST can't do) —
-best-effort, never failing the review.
+be replied to and resolved via GraphQL (the one op REST can't do), and the
+opening comment's fingerprint marker rewritten into a disjoint "resolved"
+family so a finding that reappears later posts again instead of staying
+suppressed by re-run dedupe — best-effort, never failing the review.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: GraphQL call errors

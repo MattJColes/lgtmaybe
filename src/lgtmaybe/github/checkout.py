@@ -13,6 +13,7 @@ simply finds nothing — a review never fails because a base clone didn't.
 from __future__ import annotations
 
 import atexit
+import base64
 import shutil
 import subprocess
 import tempfile
@@ -44,18 +45,37 @@ def clone_base_tree(
 
     *repo* is ``owner/name`` (the base repo). *ref* is the base branch name. The
     temp dir is registered for cleanup at process exit. Returns None on any
-    filesystem or git failure — the caller treats that as "no corpus". The token is
-    embedded in the remote URL only; ``capture_output`` keeps it out of surfaced
-    stderr, and the clone lands in an ephemeral dir that is removed at exit.
+    filesystem or git failure — the caller treats that as "no corpus". The token
+    is passed as a one-shot ``git -c http.<url>.extraheader`` basic-auth header
+    (the actions/checkout approach) rather than embedded in the clone URL — a
+    URL-embedded token is visible in the clear via /proc/*/cmdline and gets
+    persisted as the remote URL in the temp clone's .git/config. The global
+    ``-c`` applies to this invocation only (unlike ``git clone --config`` it is
+    never written into the new clone's config); ``capture_output`` keeps it out
+    of surfaced stderr, and the clone lands in an ephemeral dir removed at exit.
     """
     try:
         dest = Path(tempfile.mkdtemp(prefix="lgtmaybe-base-"))
     except OSError:
         return None
-    url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    url = f"https://github.com/{repo}.git"
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    auth_config = f"http.https://github.com/.extraheader=Authorization: basic {basic}"
     try:
         runner(
-            ["git", "clone", "--depth", "1", "--single-branch", "--branch", ref, url, str(dest)],
+            [
+                "git",
+                "-c",
+                auth_config,
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--branch",
+                ref,
+                url,
+                str(dest),
+            ],
             capture_output=True,
             timeout=_CLONE_TIMEOUT,
             check=True,

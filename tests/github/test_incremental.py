@@ -106,6 +106,28 @@ def test_unmarked_post_does_not_stamp_a_watermark() -> None:
 
 
 @respx.mock
+def test_mark_reviewed_none_clears_watermark() -> None:
+    """The CLI's failure path calls mark_reviewed(None) to clear a previously
+    set watermark, so a failure notice posted after a partial run never stamps
+    <!-- lgtmaybe-reviewed:... --> for commits nobody fully reviewed."""
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"id": 1})
+
+    respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture)
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.mark_reviewed(None)
+    gateway.post_review([], "⚠️ lgtmaybe review failed: boom", diff=SAMPLE_DIFF)
+
+    assert "lgtmaybe-reviewed" not in str(captured["body"])
+
+
+@respx.mock
 def test_last_reviewed_sha_reads_marker_from_existing_review() -> None:
     existing = [{"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
@@ -240,6 +262,37 @@ def test_rerun_skips_inline_comment_already_posted() -> None:
     gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
 
     assert posted == []
+
+
+@respx.mock
+def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
+    """A comment whose marker was rewritten to the "resolved" family (by the
+    resolve-on-fix pass) no longer counts as an existing finding — the same
+    finding reintroduced later posts again instead of being suppressed forever."""
+    fp = finding_fingerprint(FINDING.path, FINDING.title)
+    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
+    respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
+        return_value=httpx.Response(200, json={"id": 99})
+    )
+    resolved_comment = [{"id": 1, "body": f"stuff\n\n<!-- lgtmaybe-resolved-fingerprint:{fp} -->"}]
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=resolved_comment)
+    )
+    posted: list[dict[str, object]] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1000})
+
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(side_effect=capture)
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+    assert len(posted) == 1
+    assert posted[0]["path"] == "src/app.py"
 
 
 # ---------------------------------------------------------------------------

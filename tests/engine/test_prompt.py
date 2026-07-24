@@ -393,6 +393,9 @@ def test_prompt_explains_line_number_mapping() -> None:
 def test_prompt_asks_for_one_finding_per_distinct_issue() -> None:
     prompt = _union_prompt().lower()
     assert "each distinct issue" in prompt
+    # The pipeline dedupes to one finding per (path, line, side), so the prompt
+    # must not solicit several findings sharing a line — output it would discard.
+    assert "share a line" not in prompt
 
 
 def test_prompt_asks_for_a_verbatim_anchor() -> None:

@@ -892,10 +892,14 @@ def _match_anchor(anchor: str, candidates: list[_PreparedCandidate]) -> list[int
     if normalised:
         return normalised
     if len(target) >= _MIN_SUBSTRING_ANCHOR:
+        # Both directions must clear the length floor: a trivially short
+        # candidate (`)`, `pass`) is a substring of almost any anchor, so
+        # without the guard it wins as the "unique" match — a confident
+        # wrong-line comment.
         substring = [
             line
             for line, text, stripped, _norm in candidates
-            if target in text or stripped in target
+            if target in text or (len(stripped) >= _MIN_SUBSTRING_ANCHOR and stripped in target)
         ]
         if len(substring) == 1:
             return substring

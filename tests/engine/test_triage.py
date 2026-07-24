@@ -87,6 +87,27 @@ def test_plain_small_file_does_not_escalate() -> None:
     assert not always_escalate("src/util.py", "@@ -1 +1 @@\n+return x + 1\n", hinted_paths=set())
 
 
+def test_security_path_tokens_do_not_fire_inside_ordinary_words() -> None:
+    """Short tokens (acl, sso, iam, token, session) are word-bounded so they
+    don't substring-match ordinary words — an `oracle_db.py` escalating via the
+    `acl` token silently defeats triage's whole point."""
+    for path in ("src/oracle_db.py", "src/professor.py", "src/tokenizer.py"):
+        assert not always_escalate(path, "@@ -1 +1 @@\n+x = 1\n", hinted_paths=set()), path
+
+
+def test_short_security_path_tokens_still_escalate_as_words() -> None:
+    """The same short tokens still fire when they appear as real path words —
+    `_`, `/`, `.` and `-` all count as separators (err toward escalation)."""
+    for path in (
+        "auth/session.py",
+        "iam/policy.py",
+        "sso/config.py",
+        "app/access_token.py",
+        "src/acl-rules.py",
+    ):
+        assert always_escalate(path, "@@ -1 +1 @@\n+x = 1\n", hinted_paths=set()), path
+
+
 # ---------------------------------------------------------------------------
 # triage_files
 # ---------------------------------------------------------------------------

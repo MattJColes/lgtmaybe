@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -45,58 +46,73 @@ _log = get_logger(__name__)
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
 
 
+def _should_auto_post(enabled: bool, event_action: str) -> bool:
+    """One gate for both auto extras: opted in, and the PR was just opened or
+    reopened — a synchronize push updates the review, not the extras."""
+    return enabled and event_action in ("opened", "reopened")
+
+
 def should_auto_describe(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the structured description first.
-
-    Only when the user opted in (``auto_describe``) and the PR was just opened
-    or reopened — a synchronize push updates the review, not the description.
-    """
-    return cfg.auto_describe and event_action in ("opened", "reopened")
-
-
-def run_describe(github: GitHubGateway, provider: ProviderClient, cfg: ReviewConfig) -> None:
-    """Build the structured description and post it idempotently.
-
-    Pure function over injected ports, like ``run_review``. Prefers the
-    gateway's describe upsert; falls back to a plain issue comment.
-    """
-    from lgtmaybe.engine.describe import build_description
-
-    body = build_description(github.get_pr_context(), cfg, provider)
-    post_describe = getattr(github, "post_describe_comment", None)
-    if post_describe is not None:
-        post_describe(body)
-        return
-    post_comment = getattr(github, "post_issue_comment", None)
-    if post_comment is not None:
-        post_comment(body)
+    """Whether the action run should post the structured description first."""
+    return _should_auto_post(cfg.auto_describe, event_action)
 
 
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the change diagram first.
+    """Whether the action run should post the change diagram first."""
+    return _should_auto_post(cfg.auto_diagram, event_action)
 
-    Only when the user opted in (``auto_diagram``) and the PR was just opened or
-    reopened — a synchronize push updates the review, not the diagram.
+
+def _run_upsert(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    *,
+    build: Callable[[PRContext, ReviewConfig, ProviderClient], str],
+    post_method: str,
+    ctx: PRContext | None,
+) -> None:
+    """Build a describe/diagram body and post it idempotently.
+
+    Pure function over injected ports, like ``run_review``. Prefers the
+    gateway's upsert method; falls back to a plain issue comment. A prefetched
+    ``ctx`` avoids repeating the expensive PR-context fetch.
     """
-    return cfg.auto_diagram and event_action in ("opened", "reopened")
-
-
-def run_diagram(github: GitHubGateway, provider: ProviderClient, cfg: ReviewConfig) -> None:
-    """Build the change diagram and post it idempotently.
-
-    Pure function over injected ports, like ``run_describe``. Prefers the
-    gateway's diagram upsert; falls back to a plain issue comment.
-    """
-    from lgtmaybe.engine.diagram import build_diagram
-
-    body = build_diagram(github.get_pr_context(), cfg, provider)
-    post_diagram = getattr(github, "post_diagram_comment", None)
-    if post_diagram is not None:
-        post_diagram(body)
+    body = build(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    post = getattr(github, post_method, None)
+    if post is not None:
+        post(body)
         return
     post_comment = getattr(github, "post_issue_comment", None)
     if post_comment is not None:
         post_comment(body)
+
+
+def run_describe(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    ctx: PRContext | None = None,
+) -> None:
+    """Build the structured description and post it idempotently."""
+    from lgtmaybe.engine.describe import build_description
+
+    _run_upsert(
+        github, provider, cfg, build=build_description, post_method="post_describe_comment", ctx=ctx
+    )
+
+
+def run_diagram(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    ctx: PRContext | None = None,
+) -> None:
+    """Build the change diagram and post it idempotently."""
+    from lgtmaybe.engine.diagram import build_diagram
+
+    _run_upsert(
+        github, provider, cfg, build=build_diagram, post_method="post_diagram_comment", ctx=ctx
+    )
 
 
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
@@ -234,18 +250,21 @@ def run_review(
     engine: ReviewEngine,
     cfg: ReviewConfig,
     dry_run: bool,
+    ctx: PRContext | None = None,
 ) -> tuple[list[ReviewFinding], str]:
     """Core review pipeline — pure function over injected ports.
 
-    Fetches PR context, runs the engine, and optionally posts the review.
-    Returns (findings, summary) in all cases so callers can inspect output.
+    Fetches PR context (unless a prefetched ``ctx`` is passed in), runs the
+    engine, and optionally posts the review. Returns (findings, summary) in
+    all cases so callers can inspect output.
 
     With ``cfg.incremental`` on and a gateway that supports it, only the diff
     of the commits pushed since the last completed review is reviewed; every
     degraded case (first review, force-push, compare failure, a gateway
     without the adapter methods) falls back to the full review.
     """
-    ctx = github.get_pr_context()
+    if ctx is None:
+        ctx = github.get_pr_context()
     review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
@@ -369,30 +388,32 @@ def execute_local_review(
         click.echo(profiler.render())
 
 
-def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
-    """Post the structured PR description (auto-describe path). Best-effort.
+def _execute_auxiliary(
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    run: Callable[[GitHubGateway, ProviderClient, ReviewConfig], None],
+    name: str,
+) -> None:
+    """Build a fresh context and run one auxiliary post. Best-effort.
 
-    The description is auxiliary: any failure is logged and swallowed so it
-    can never block the review that follows it.
+    The extras are auxiliary: any failure is logged and swallowed so they can
+    never block a review.
     """
     try:
         github, _engine, provider = build_review_context(cfg, runtime)
-        run_describe(github, provider, cfg)
+        run(github, provider, cfg)
     except Exception:
-        _log.warning("auto-describe failed — continuing without it", exc_info=True)
+        _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
+
+
+def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+    """Post the structured PR description (standalone path). Best-effort."""
+    _execute_auxiliary(cfg, runtime, run_describe, "describe")
 
 
 def execute_diagram(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
-    """Post the change diagram (auto-diagram path). Best-effort.
-
-    Like the description, the diagram is auxiliary: any failure is logged and
-    swallowed so it can never block the review that follows it.
-    """
-    try:
-        github, _engine, provider = build_review_context(cfg, runtime)
-        run_diagram(github, provider, cfg)
-    except Exception:
-        _log.warning("auto-diagram failed — continuing without it", exc_info=True)
+    """Post the change diagram (standalone path). Best-effort."""
+    _execute_auxiliary(cfg, runtime, run_diagram, "diagram")
 
 
 def execute_local_diagram(
@@ -422,23 +443,51 @@ def execute_local_diagram(
     click.echo(body)
 
 
-def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+def execute_review(
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    *,
+    describe: bool = False,
+    diagram: bool = False,
+) -> None:
     """Build adapters, run the review, surface failures back to the PR.
 
-    Shared by the ``review`` command and the ``action`` entrypoint.
+    Shared by the ``review`` command and the ``action`` entrypoint. With
+    ``describe``/``diagram`` on (the action's auto extras), the adapters are
+    built once and the expensive O(files) PR-context fetch happens once —
+    extras and review all reuse them.
     """
     profiler.reset()
     # Adapter construction can fail before we have any way to post (bad URL,
     # missing token/credentials). Surface those as a clean CLI error.
     try:
-        github, engine = build_adapters(cfg, runtime)
+        github, engine, provider = build_review_context(cfg, runtime)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
+
+    ctx: PRContext | None = None
+    if describe or diagram:
+        # The extras are best-effort and must never block the review. A failed
+        # prefetch just means run_review fetches (and surfaces) it itself.
+        try:
+            ctx = github.get_pr_context()
+        except Exception:
+            _log.warning("PR context prefetch failed — extras skipped", exc_info=True)
+        if ctx is not None:
+            for enabled, run, name in (
+                (describe, run_describe, "describe"),
+                (diagram, run_diagram, "diagram"),
+            ):
+                if enabled:
+                    try:
+                        run(github, provider, cfg, ctx=ctx)
+                    except Exception:
+                        _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
 
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
     try:
-        run_review(github=github, engine=engine, cfg=cfg, dry_run=False)
+        run_review(github=github, engine=engine, cfg=cfg, dry_run=False, ctx=ctx)
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
@@ -488,6 +537,12 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     """Post a short failure notice to the PR; never raise from here."""
     notice = f"⚠️ lgtmaybe review failed: {exc}"
     try:
+        # run_review may have stamped the reviewed watermark before the post
+        # failed — clear it so the failure notice doesn't carry it and the next
+        # incremental run re-reviews the commits whose findings never posted.
+        mark_reviewed = getattr(github, "mark_reviewed", None)
+        if mark_reviewed is not None:
+            mark_reviewed(None)
         github.post_review([], notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;

@@ -68,6 +68,21 @@ def test_severity_is_ordered() -> None:
     assert not (Severity.low >= Severity.high)
 
 
+def test_severity_is_totally_ordered() -> None:
+    """All four comparisons rank by severity, never alphabetically (a StrEnum
+    would otherwise fall back to string order, where "critical" < "high")."""
+    assert Severity.critical > Severity.high
+    assert Severity.info < Severity.low
+    assert Severity.medium <= Severity.medium
+    assert not (Severity.high < Severity.medium)
+    assert sorted([Severity.high, Severity.info, Severity.critical, Severity.medium]) == [
+        Severity.info,
+        Severity.medium,
+        Severity.high,
+        Severity.critical,
+    ]
+
+
 def test_review_finding_severity_is_case_insensitive() -> None:
     """Models emit "High"/"MEDIUM"; the finding coerces case rather than failing."""
     cases = [("High", Severity.high), ("MEDIUM", Severity.medium), (" low ", Severity.low)]

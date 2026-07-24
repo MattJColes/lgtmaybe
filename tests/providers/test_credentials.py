@@ -47,6 +47,13 @@ class TestBedrock:
         with pytest.raises(ValueError, match="bedrock"):
             resolve_credentials(Provider.bedrock, ambient_probe=_ambient_absent)
 
+    def test_bedrock_threads_api_base_through(self) -> None:
+        """A custom endpoint (e.g. a gateway) passes through untouched."""
+        config = resolve_credentials(
+            Provider.bedrock, ambient_probe=_ambient_present, api_base="http://proxy:4000"
+        )
+        assert config.api_base == "http://proxy:4000"
+
 
 class TestVertex:
     def test_vertex_with_ambient_creds_resolves_keyless(self) -> None:
@@ -69,6 +76,12 @@ class TestVertex:
             or "google" in str(exc_info.value).lower()
         )
 
+    def test_vertex_threads_api_base_through(self) -> None:
+        config = resolve_credentials(
+            Provider.vertex, ambient_probe=_ambient_present, api_base="http://proxy:4000"
+        )
+        assert config.api_base == "http://proxy:4000"
+
 
 class TestOpenAI:
     def test_openai_with_api_key_resolves(self) -> None:
@@ -87,6 +100,13 @@ class TestOpenAI:
             resolve_credentials(Provider.openai)
         assert "OPENAI_API_KEY" in str(exc_info.value)
 
+    def test_openai_threads_api_base_through(self) -> None:
+        """--api-base must reach the client (e.g. an OpenAI-format proxy)."""
+        config = resolve_credentials(
+            Provider.openai, api_key="sk-abc", api_base="http://proxy:4000/v1"
+        )
+        assert config.api_base == "http://proxy:4000/v1"
+
 
 class TestAnthropic:
     def test_anthropic_with_api_key_resolves(self) -> None:
@@ -98,6 +118,12 @@ class TestAnthropic:
             resolve_credentials(Provider.anthropic)
         assert "ANTHROPIC_API_KEY" in str(exc_info.value)
 
+    def test_anthropic_threads_api_base_through(self) -> None:
+        config = resolve_credentials(
+            Provider.anthropic, api_key="sk-ant-xyz", api_base="http://proxy:4000"
+        )
+        assert config.api_base == "http://proxy:4000"
+
 
 class TestOpenRouter:
     def test_openrouter_with_api_key_resolves(self) -> None:
@@ -108,6 +134,12 @@ class TestOpenRouter:
         with pytest.raises(ValueError) as exc_info:
             resolve_credentials(Provider.openrouter)
         assert "OPENROUTER_API_KEY" in str(exc_info.value)
+
+    def test_openrouter_threads_api_base_through(self) -> None:
+        config = resolve_credentials(
+            Provider.openrouter, api_key="sk-or-test", api_base="http://proxy:4000/v1"
+        )
+        assert config.api_base == "http://proxy:4000/v1"
 
 
 class TestZai:

@@ -154,7 +154,7 @@ def _reflect_pass(
     the recheck sees the cross-file code it deferred for.
     """
     try:
-        verdicts = _audit(findings, ctx, cfg, provider, fetched_paths=fetched_paths)
+        verdicts, grounded_paths = _audit(findings, ctx, cfg, provider, fetched_paths=fetched_paths)
     except Exception:
         # If reflection fails (provider error, quota, unparseable output), keep all
         # findings (safe default), each non-broad — never silently drop a real
@@ -207,11 +207,16 @@ def _reflect_pass(
     # Try to resolve the deferral: fetch the named files (read-only, redacted) and
     # re-run the auditor on ONLY the deferred subset with that text in context.
     if fetch_file is not None and hop < MAX_HOPS:
-        already = set(ctx.file_contents)
+        # Only the files actually RENDERED into this pass's grounding block count
+        # as already seen: ``ctx.file_contents`` lists every reviewable changed
+        # file, but the auditor only saw the budget-capped block built from
+        # flagged files — a deferral naming an unshown changed file must still
+        # fetch it, or the deferral can never resolve and the finding is
+        # silently dropped as unverifiable.
         fetched = resolve_needs(
             deferred_needs,
             fetch_file,
-            already=already,
+            already=grounded_paths,
             budget_tokens=max(0, cfg.max_input_tokens // 4),  # 1/4 of input budget per fetch hop
             max_files=MAX_FETCH_FILES,
             resolve_symbol=resolve_symbol,
@@ -252,13 +257,15 @@ def _audit(
     cfg: ReviewConfig,
     provider: ProviderClient,
     fetched_paths: list[str],
-) -> dict[int, _ParsedVerdict]:
-    """Run one auditor completion over *findings* and return the parsed verdicts.
+) -> tuple[dict[int, _ParsedVerdict], set[str]]:
+    """Run one auditor completion over *findings*; ``(verdicts, grounded paths)``.
 
     Builds the grounded prompt (diff + redacted head text of flagged files, plus
     any ``fetched_paths`` a prior deferral pulled in) and parses the structured
-    verdict map. Raises on an unparseable verdict so the caller can apply its
-    keep-all safe default.
+    verdict map. The second element is the set of paths actually rendered into
+    the grounding block — what the auditor really saw, which the deferral
+    resolver uses as its "already grounded" set. Raises on an unparseable
+    verdict so the caller can apply its keep-all safe default.
     """
     # Engine-stamped fields are excluded: at audit time `anchored`/`broad`/
     # `confidence` are always their placeholder defaults (they are populated
@@ -280,7 +287,7 @@ def _audit(
         # audit: cap the head-text budget at a quarter of the input budget
         # (the full preset still hands the auditor everything that fits).
         reserve = min(reserve, cfg.max_input_tokens // 4)
-    grounding = _grounding_block(findings, ctx, reserve, extra_paths=fetched_paths)
+    grounding, grounded_paths = _grounding_block(findings, ctx, reserve, extra_paths=fetched_paths)
 
     diff_part = f"Diff:\n{ctx.diff}"
     rest_part = (
@@ -315,7 +322,7 @@ def _audit(
         label="reflect",
         **opts,
     )
-    return _parse_verdicts(result.text)
+    return _parse_verdicts(result.text), grounded_paths
 
 
 def _grounding_block(
@@ -323,7 +330,7 @@ def _grounding_block(
     ctx: PRContext,
     budget_tokens: int,
     extra_paths: list[str],
-) -> str:
+) -> tuple[str, set[str]]:
     """Redacted head text of the files carrying a finding, fit into *budget_tokens*.
 
     Files in ``{f.path for f in findings}`` are included, walked most-flagged-first
@@ -332,11 +339,13 @@ def _grounding_block(
     file) are appended after the flagged files so the recheck actually sees the
     cross-file code it deferred for. Each file's text is redacted (``file_contents``
     is RAW head text — this is the one leak path to get right) and head+tail-
-    truncated if a single file would exceed the remaining budget. Returns "" when
-    the budget is non-positive or no included file has fetched head text.
+    truncated if a single file would exceed the remaining budget. Returns the
+    block plus the set of paths actually rendered into it (what the auditor
+    truly saw — the deferral resolver's "already grounded" set); ``("", set())``
+    when the budget is non-positive or no included file has fetched head text.
     """
     if budget_tokens < _MIN_GROUNDING_TOKENS or not ctx.file_contents:
-        return ""
+        return "", set()
 
     counts: dict[str, int] = {}
     for f in findings:
@@ -351,6 +360,7 @@ def _grounding_block(
 
     remaining = budget_tokens
     blocks: list[str] = []
+    included: set[str] = set()
     for path in order:
         raw = ctx.file_contents.get(path)
         if not raw:
@@ -364,14 +374,18 @@ def _grounding_block(
         if used <= 0:
             continue
         blocks.append(f"--- {path} ---\n{text}")
+        included.add(path)
         remaining -= used
         if remaining < _MIN_GROUNDING_TOKENS:
             break
 
     if not blocks:
-        return ""
+        return "", set()
     body = "\n\n".join(blocks)
-    return f"Full head text of the changed files (for verification only):\n{body}\n\n"
+    return (
+        f"Full head text of the changed files (for verification only):\n{body}\n\n",
+        included,
+    )
 
 
 def _head_tail(text: str, max_tokens: int) -> tuple[str, int]:

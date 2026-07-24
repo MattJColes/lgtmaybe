@@ -137,6 +137,7 @@ _SKIP_DIR_PREFIXES = (
     ".git/",
     "third_party/",
     "third-party/",
+    "__generated__/",
 )
 
 # Glob patterns matched against the full path.
@@ -147,7 +148,6 @@ _SKIP_GLOB_PATTERNS = (
     "*.pb.go",
     "*.pb.py",
     "*.generated.*",
-    "__generated__/*",
     "*.d.ts",
     # Sourcemaps are compiler output, never hand-written.
     "*.js.map",

@@ -1158,6 +1158,27 @@ def test_prepared_candidates_match_across_all_levels() -> None:
     assert _match_anchor("nonexistent line", cands) == []
 
 
+def test_substring_match_never_snaps_to_a_trivially_short_line() -> None:
+    """The `stripped in target` direction must also respect _MIN_SUBSTRING_ANCHOR:
+    a one-token candidate (`)`, `pass`) is a substring of almost any anchor, so
+    letting it win as the "unique" match posts a confident wrong-line comment."""
+    from lgtmaybe.engine.engine import _match_anchor, _prepare_candidates
+
+    index = {
+        ("m.py", "RIGHT"): [
+            (5, "    )"),
+            (9, "        pass"),
+        ]
+    }
+    cands = _prepare_candidates(index)[("m.py", "RIGHT")]
+
+    # The anchor is long enough to enter the substring level and contains ")",
+    # but the only would-be match is a trivially short line — no snap.
+    assert _match_anchor("def compute(value, other):", cands) == []
+    # Same for "pass" hiding inside a longer anchor.
+    assert _match_anchor("passwords = load_passwords()", cands) == []
+
+
 def test_keeps_model_line_when_anchor_matches_nothing() -> None:
     f = ReviewFinding(
         path="m.py", line=3, severity=Severity.high, title="bug", body="x", anchor="z = 99"

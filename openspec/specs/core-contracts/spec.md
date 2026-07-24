@@ -75,9 +75,11 @@ critical` so floors like `min_severity` compare with `>=`.
 `ReviewCategory` SHALL enumerate the nine built-in lenses (security,
 correctness, deprecation, tests, documentation, performance, complexity,
 intent, ponytail). `ReviewPreset` SHALL shape the fan-out: `fast` (default)
-covers all nine in four calls; `full` runs one call per lens.
+covers seven of the nine (tests and documentation excluded) in four calls
+when the provider can overlap work, three with one worker; `full` runs one
+call per lens.
 <!-- anchor: core.lenses -->
 
 #### Scenario: default preset batches the lenses
 - **WHEN** a review runs with no preset override
-- **THEN** the nine lenses fan out as four concurrent calls
+- **THEN** the seven fast-preset lenses fan out as four concurrent calls

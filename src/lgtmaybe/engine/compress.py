@@ -249,7 +249,17 @@ def expand_hunks(
                 # The enclosing definition starts above the fixed window and
                 # within reach — widen the pad up to its signature line.
                 lead_start = enclosing
-        leading = [content_lines[i - 1] for i in range(lead_start, new_start)]
+        # The rewritten header's old start is `old_start - len(leading)`: when
+        # earlier hunks net-added lines, old_start sits far below new_start, so
+        # an unclamped pad drives it negative — an invalid header that
+        # parse_hunk_header rejects, mis-numbering every line downstream. Clamp
+        # the pad (after any boundary widening) so the old start stays >= 1.
+        lead_start = max(lead_start, new_start - (old_start - 1))
+        # Clamp reads to the file's real bounds: redaction or stale head text
+        # can leave the file shorter than the hunk positions — degrade to less
+        # padding, never an IndexError.
+        lead_end = min(new_start, len(content_lines) + 1)
+        leading = [content_lines[i - 1] for i in range(min(lead_start, lead_end), lead_end)]
         last_new = new_start + new_len - 1
         trailing = [
             content_lines[i - 1]

@@ -107,6 +107,32 @@ def test_pem_private_key_block_redacted() -> None:
     assert REDACTED_PLACEHOLDER in result
 
 
+def test_pem_block_redaction_preserves_line_count() -> None:
+    """A multi-line PEM block is replaced line-for-line, never collapsed: hunk
+    expansion indexes into the redacted head text by line number, so a
+    count-shrinking replacement would desync (and crash) it."""
+    before = f"header line\n{_PRIVATE_KEY}\ntrailing line\n"
+
+    after = redact(before)
+
+    assert after.count("\n") == before.count("\n")
+    assert "MIIEowIBAAKCAQEA" not in after
+    # One placeholder per original PEM line (the fixture block spans 4 lines).
+    assert after.count(REDACTED_PLACEHOLDER) == 4
+
+
+def test_pem_block_in_diff_redaction_preserves_line_count() -> None:
+    """A PEM block committed in a diff keeps one line per original `+` line, so
+    the hunk header's line counts still describe the redacted hunk."""
+    diff_block = "\n".join("+" + ln for ln in _PRIVATE_KEY.split("\n"))
+    before = f"@@ -1,0 +1,4 @@\n{diff_block}\n"
+
+    after = redact(before)
+
+    assert after.count("\n") == before.count("\n")
+    assert "MIIEowIBAAKCAQEA" not in after
+
+
 def test_quoted_password_literal_redacted() -> None:
     result = redact('+    password = "hunter2pass"\n')
     assert "hunter2pass" not in result

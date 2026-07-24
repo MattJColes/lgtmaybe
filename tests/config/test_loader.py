@@ -122,6 +122,34 @@ def test_cli_input_overrides_provider(tmp_path):
     assert cfg.provider == "anthropic"
 
 
+def test_missing_required_config_raises(tmp_path):
+    """An explicitly chosen config path that doesn't exist is a clear error —
+    a typo'd --config must not silently run with defaults."""
+    with pytest.raises(ValueError, match="not found"):
+        load_config(config_path=tmp_path / "mytea.yml", config_required=True)
+
+
+def test_required_config_must_parse_to_a_mapping(tmp_path):
+    """An explicitly chosen config file that parses to a YAML list is an error."""
+    cfg_file = tmp_path / "list.yml"
+    cfg_file.write_text("- provider: ollama\n")
+
+    with pytest.raises(ValueError, match="mapping"):
+        load_config(config_path=cfg_file, config_required=True)
+
+
+def test_non_mapping_default_config_is_ignored(tmp_path):
+    """Without config_required (the default ./.lgtmaybe.yml probe), a non-mapping
+    file is skipped leniently, as before."""
+    cfg_file = tmp_path / "list.yml"
+    cfg_file.write_text("- provider: ollama\n")
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert cfg.provider == "ollama"
+    assert cfg.model == "llama3"
+
+
 def test_unknown_key_in_yaml_raises(tmp_path):
     """An unknown key in the YAML file is rejected with a clear error (extra=forbid)."""
     cfg_file = tmp_path / ".lgtmaybe.yml"

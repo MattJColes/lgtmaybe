@@ -20,8 +20,6 @@ from lgtmaybe.cli import (
     action_inputs,
     config_cmd,
     execute_comment,
-    execute_describe,
-    execute_diagram,
     execute_local_diagram,
     execute_local_review,
     execute_review,
@@ -48,6 +46,33 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     return cfg.model_copy(
         update={"static_analysis": cfg.static_analysis.model_copy(update={"enabled": flag})}
     )
+
+
+def _parse_bool(value: str | None) -> bool | None:
+    """Parse an action bool input the way pydantic parses the others.
+
+    None (unset input) stays None so downstream defaults apply.
+    """
+    if value is None:
+        return None
+    return value.strip().lower() in ("true", "t", "1", "yes", "y", "on")
+
+
+def _load_cfg(config_path: str | None, **inputs: object) -> ReviewConfig:
+    """Load config; an explicitly given path must exist and parse to a mapping.
+
+    None (no --config / no config_path input) probes the default
+    ``.lgtmaybe.yml`` leniently — absent is fine. Loader errors surface as a
+    clean CLI error rather than a traceback.
+    """
+    try:
+        return load_config(
+            config_path=Path(config_path) if config_path else Path(".lgtmaybe.yml"),
+            config_required=config_path is not None,
+            **inputs,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @main.command()
@@ -264,9 +289,9 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
 @click.option(
     "--config",
     "config_path",
-    default=".lgtmaybe.yml",
-    show_default=True,
-    help="Path to a per-repo config file",
+    default=None,
+    help="Path to a per-repo config file (must exist when given) "
+    "[default: .lgtmaybe.yml, absent is fine]",
 )
 def review(
     provider: str | None,
@@ -301,15 +326,15 @@ def review(
     prompt_cache: bool | None,
     static_analysis: bool | None,
     profile: bool,
-    config_path: str,
+    config_path: str | None,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
     if working and uncommitted:
         raise click.UsageError("--working and --uncommitted are mutually exclusive")
     if full_preset and preset == "fast":
         raise click.UsageError("--full contradicts --preset fast")
-    cfg = load_config(
-        config_path=Path(config_path),
+    cfg = _load_cfg(
+        config_path,
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
@@ -386,9 +411,9 @@ def review(
 @click.option(
     "--config",
     "config_path",
-    default=".lgtmaybe.yml",
-    show_default=True,
-    help="Path to a per-repo config file",
+    default=None,
+    help="Path to a per-repo config file (must exist when given) "
+    "[default: .lgtmaybe.yml, absent is fine]",
 )
 def diagram(
     provider: str | None,
@@ -401,7 +426,7 @@ def diagram(
     uncommitted: bool,
     timeout: int | None,
     num_ctx: int | None,
-    config_path: str,
+    config_path: str | None,
 ) -> None:
     """Print a C4-style diagram of your local changes — no GitHub needed.
 
@@ -411,8 +436,8 @@ def diagram(
     """
     if working and uncommitted:
         raise click.UsageError("--working and --uncommitted are mutually exclusive")
-    cfg = load_config(
-        config_path=Path(config_path),
+    cfg = _load_cfg(
+        config_path,
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
@@ -438,9 +463,9 @@ def diagram(
 @click.option(
     "--config",
     "config_path",
-    default=".lgtmaybe.yml",
-    show_default=True,
-    help="Path to a per-repo config file",
+    default=None,
+    help="Path to a per-repo config file (must exist when given) "
+    "[default: .lgtmaybe.yml, absent is fine]",
 )
 def comment(
     event_path: str,
@@ -449,11 +474,11 @@ def comment(
     fallback_model: str | None,
     api_key: str | None,
     api_base: str | None,
-    config_path: str,
+    config_path: str | None,
 ) -> None:
     """Handle an issue_comment event: route a /slash command to the engine."""
     event = json.loads(Path(event_path).read_text())
-    cfg = load_config(config_path=Path(config_path), provider=provider, model=model)
+    cfg = _load_cfg(config_path, provider=provider, model=model)
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
     execute_comment(event, cfg, runtime)
 
@@ -466,8 +491,8 @@ def action() -> None:
     / ``pull_request_target``) runs a full review of the triggering PR.
     """
     inputs = action_inputs()
-    cfg = load_config(
-        config_path=Path(inputs["config_path"] or ".lgtmaybe.yml"),
+    cfg = _load_cfg(
+        inputs["config_path"],
         provider=inputs["provider"],
         model=inputs["model"],
         preset=inputs["preset"],
@@ -489,16 +514,12 @@ def action() -> None:
         auto_diagram=inputs["auto_diagram"],
         pr_labels=inputs["pr_labels"],
     )
-    raw_sa = inputs["static_analysis"]
-    cfg = _apply_static_analysis_flag(
-        cfg, None if raw_sa is None else raw_sa.strip().lower() in ("true", "1", "yes")
-    )
-    raw_profile = inputs["profile"]
+    cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],
         api_base=inputs["api_base"],
         fallback_model=inputs["fallback_model"],
-        profile=raw_profile is not None and raw_profile.strip().lower() in ("true", "1", "yes"),
+        profile=bool(_parse_bool(inputs["profile"])),
     )
 
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
@@ -515,12 +536,14 @@ def action() -> None:
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
     # Auto-describe / auto-diagram (opt-in): on a freshly opened PR, post the
     # structured description and/or the change diagram first — both best-effort,
-    # neither blocks the review.
-    if should_auto_describe(cfg, event_action=event_action):
-        execute_describe(cfg, runtime)
-    if should_auto_diagram(cfg, event_action=event_action):
-        execute_diagram(cfg, runtime)
-    execute_review(cfg, runtime)
+    # neither blocks the review. execute_review shares one gateway and one
+    # PR-context fetch across the extras and the review itself.
+    execute_review(
+        cfg,
+        runtime,
+        describe=should_auto_describe(cfg, event_action=event_action),
+        diagram=should_auto_diagram(cfg, event_action=event_action),
+    )
 
 
 @config_cmd.command("path")

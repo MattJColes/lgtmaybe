@@ -247,7 +247,9 @@ class TestGitHubReviewErrorSurfacing:
 
         github = FakeGitHub()
         monkeypatch.setattr(
-            cli_module, "build_adapters", lambda cfg, runtime: (github, _BoomEngine())
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, _BoomEngine(), FakeProvider()),
         )
 
         with pytest.raises(click.ClickException):
@@ -257,6 +259,43 @@ class TestGitHubReviewErrorSurfacing:
         posted_findings, posted_summary = github.posted[0]
         assert posted_findings == []
         assert "fail" in posted_summary.lower()
+
+    def test_post_review_failure_clears_the_reviewed_watermark(self, monkeypatch):
+        """A failed post must not leave the reviewed watermark stamped — the
+        failure notice would carry it and the next incremental run would skip
+        commits whose findings were never posted."""
+        import click
+
+        import lgtmaybe.cli as cli_module
+        from tests.cli.test_incremental_review import (
+            CTX,
+            IncrementalFakeGitHub,
+            RecordingEngine,
+        )
+
+        class _FailingPostGitHub(IncrementalFakeGitHub):
+            def post_review(self, findings, summary, diff=None):
+                # The real review post carries the diff; the failure notice
+                # (posted by _post_failure) does not.
+                if diff is not None:
+                    raise RuntimeError("post exploded")
+                super().post_review(findings, summary, diff)
+
+        github = _FailingPostGitHub(CTX)
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, RecordingEngine(), FakeProvider()),
+        )
+
+        with pytest.raises(click.ClickException):
+            cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"))
+
+        # The watermark was stamped before the post, then cleared before the
+        # failure notice went out.
+        assert github.marked_reviewed == ["head2222", None]
+        assert len(github.posted) == 1  # only the failure notice landed
+        assert "fail" in github.posted[0][1].lower()
 
 
 class TestLocalReviewErrors:
@@ -284,6 +323,54 @@ class TestLocalReviewErrors:
         result = CliRunner().invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
 
         assert result.exit_code != 0
+
+
+class TestConfigPathOption:
+    """An explicit --config path must exist; the default stays lenient."""
+
+    def test_explicit_missing_config_errors_clearly(self, monkeypatch, tmp_path):
+        """A typo'd --config must not silently run with defaults."""
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "review",
+                "--provider",
+                "ollama",
+                "--model",
+                "llama3",
+                "--config",
+                str(tmp_path / "mytea.yml"),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "not found" in result.output
+
+    def test_explicit_non_mapping_config_errors_clearly(self, monkeypatch, tmp_path):
+        """An explicit config file that parses to a YAML list is an error."""
+        cfg_file = tmp_path / "list.yml"
+        cfg_file.write_text("- provider: ollama\n")
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(
+            main,
+            ["review", "--provider", "ollama", "--model", "llama3", "--config", str(cfg_file)],
+        )
+
+        assert result.exit_code != 0
+        assert "mapping" in result.output
+
+    def test_missing_default_config_is_fine(self, monkeypatch):
+        """No --config given and no ./.lgtmaybe.yml present still reviews."""
+        _patch_local(monkeypatch)
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code == 0, result.output
 
 
 class TestParsePrUrl:
