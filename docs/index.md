@@ -1,5 +1,5 @@
 ---
-description: Provider-agnostic AI pull-request reviewer — seven hosted providers, local ollama, any OpenAI-compatible endpoint. Inline review comments, keyless cloud auth.
+description: Provider-agnostic AI code review for pull requests — OpenAI, Claude, Bedrock, Vertex, Azure, ollama and any OpenAI-compatible endpoint. Inline review comments, keyless OIDC/WIF cloud auth, GitHub Action + CLI.
 ---
 
 <div class="hero" markdown>
@@ -10,7 +10,7 @@ description: Provider-agnostic AI pull-request reviewer — seven hosted provide
 
 </div>
 
-Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
+Provider-agnostic AI PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
 posts inline comments and a summary straight onto the pull request.
 

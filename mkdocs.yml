@@ -1,5 +1,5 @@
 site_name: lgtmaybe
-site_description: Provider-agnostic PR reviewer — seven hosted providers, ollama, and any OpenAI-compatible endpoint, one flag, no keys in secrets for cloud.
+site_description: Provider-agnostic AI PR reviewer — OpenAI, Claude, Bedrock, Vertex, Azure, ollama and more. One flag, keyless OIDC/WIF for cloud, no keys in secrets. GitHub Action + CLI.
 site_url: https://mattjcoles.github.io/lgtmaybe/
 repo_url: https://github.com/MattJColes/lgtmaybe
 repo_name: MattJColes/lgtmaybe
@@ -44,6 +44,12 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+
+# Cookieless, privacy-first analytics. The config (endpoint + no_onload) must load
+# before GoatCounter's script, which is why goatcounter.js is listed first.
+extra_javascript:
+  - javascripts/goatcounter.js
+  - https://gc.zgo.at/count.js
 
 markdown_extensions:
   - admonition
