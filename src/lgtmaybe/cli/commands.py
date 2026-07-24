@@ -12,6 +12,7 @@ import json
 import os
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -58,7 +59,7 @@ def _parse_bool(value: str | None) -> bool | None:
     return value.strip().lower() in ("true", "t", "1", "yes", "y", "on")
 
 
-def _load_cfg(config_path: str | None, **inputs: object) -> ReviewConfig:
+def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     """Load config; an explicitly given path must exist and parse to a mapping.
 
     None (no --config / no config_path input) probes the default
