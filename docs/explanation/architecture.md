@@ -11,25 +11,14 @@ lets tests swap in fakes without patching.
 
 ## Ports and adapters
 
-```
-          ┌─────────────────────────────────────────┐
-          │               core                      │
-          │                                         │
-          │  ports.py: ProviderClient               │
-          │             GitHubGateway               │
-          │             ReviewEngine                │
-          │                                         │
-          │  models.py: ReviewConfig                │
-          │              ReviewFinding              │
-          │              ProviderResult             │
-          │              PRContext                  │
-          └───────────┬───────────────┬─────────────┘
-                      │               │
-          ┌───────────▼──┐    ┌───────▼──────────┐
-          │  providers/  │    │    github/       │
-          │  (litellm    │    │  (REST adapter)  │
-          │   adapter)   │    └──────────────────┘
-          └──────────────┘
+```mermaid
+flowchart TB
+    subgraph core["core — never imports an adapter"]
+        ports["ports.py<br/>ProviderClient · GitHubGateway · ReviewEngine"]
+        models["models.py<br/>ReviewConfig · ReviewFinding · ProviderResult · PRContext"]
+    end
+    providers["providers/<br/>litellm adapter"] -- implements --> ports
+    github["github/<br/>REST adapter"] -- implements --> ports
 ```
 
 **`core/ports.py`** — the seam. Three abstract base classes:
@@ -37,7 +26,9 @@ lets tests swap in fakes without patching.
 - `ProviderClient` — one method: `complete(messages, model)` returns a
   `ProviderResult` (text + token usage).
 - `GitHubGateway` — `get_pr_context()` fetches the PR diff and metadata;
-  `post_review()` posts batched inline comments and a summary.
+  `post_review()` posts batched inline comments and a summary;
+  `post_issue_comment()` posts a standalone comment (used by `/ask` and as the
+  describe/diagram fallback).
 - `ReviewEngine` — `review(ctx, cfg)` returns `(findings, summary)`.
 
 The ports were frozen in the foundation step. Other tracks (providers, github,
@@ -51,6 +42,26 @@ The engine executes a pipeline of composable stages in sequence:
 ```
 fetch → compress → prompt → parse → re-anchor → merge/dedupe → reflect → filter → post
 ```
+
+The prompt/parse stage is where the pipeline fans out — one concurrent model
+call per review lens — before the findings funnel back into a single stream:
+
+```mermaid
+flowchart TD
+    fetch["fetch<br/>diff via API — never a checkout"] --> compress["compress<br/>skip generated files · pad context · batch to budget"]
+    compress --> security["security lens"]
+    compress --> correctness["correctness + intent lens"]
+    compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
+    compress --> artefacts["artefacts lens<br/>tests · documentation"]
+    security --> anchor["re-anchor<br/>snap lines to the real diff"]
+    correctness --> anchor
+    codehealth --> anchor
+    artefacts --> anchor
+    anchor --> dedupe["merge / dedupe"] --> reflect["reflect<br/>self-audit, drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+```
+
+(The four lens calls shown are the `fast` preset's grouping; the `full` preset
+fans out one call per category, and custom lenses join the same fan-out.)
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
    metadata from the GitHub REST API. No PR code is checked out or executed.

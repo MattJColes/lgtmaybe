@@ -38,9 +38,22 @@ SUMMARY = (
 )
 
 
+class _MkDocsLoader(yaml.SafeLoader):
+    """SafeLoader that tolerates mkdocs' ``!!python/name:`` tags.
+
+    The superfences mermaid config uses one; only the nav is read here, so the
+    tagged value can load as None.
+    """
+
+
+_MkDocsLoader.add_multi_constructor(
+    "tag:yaml.org,2002:python/name:", lambda loader, suffix, node: None
+)
+
+
 def _load_nav() -> list[Any]:
     """Return the nav list from mkdocs.yml."""
-    config = yaml.safe_load(MKDOCS_PATH.read_text(encoding="utf-8"))
+    config = yaml.load(MKDOCS_PATH.read_text(encoding="utf-8"), Loader=_MkDocsLoader)
     nav = config["nav"]
     assert isinstance(nav, list)
     return nav

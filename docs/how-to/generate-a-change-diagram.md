@@ -31,6 +31,37 @@ diagram stays honest about the diff being only a slice of the codebase —
 relationships it infers from imports rather than the diff itself are called out
 in the notes rather than asserted as fact.
 
+Here is what the posted comment looks like for a PR that puts a Redis cache in
+front of a user service — the Mermaid renders in place, with the ASCII tucked
+in a collapsible "Text version" underneath:
+
+> **Cache user lookups in Redis**
+
+```mermaid
+C4Container
+    title User lookup after this change
+    Person(client, "Client")
+    Container(api, "User API", "Python", "Serves user reads")
+    ContainerDb(cache, "Redis cache", "Redis", "caches user rows (new)")
+    ContainerDb(db, "User DB", "Postgres")
+    Rel(client, api, "GET /users/{id}")
+    Rel(api, cache, "check cache (new)")
+    Rel(api, db, "on miss, query")
+```
+
+<details>
+<summary>Text version</summary>
+
+```
+[Client] --> [User API] --check--> [Redis cache] (new)
+                  |
+                  +--miss--> [User DB]
+```
+
+</details>
+
+> *The User DB link is inferred from an import, not shown in the diff.*
+
 ## On GitHub: `/diagram` and `auto_diagram`
 
 Comment **`/diagram`** on a pull request to post (or update in place) the change
@@ -42,10 +73,10 @@ input (off by default; it fires only on `opened` / `reopened`, never on a
 `synchronize` push):
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v1
+      - uses: MattJColes/lgtmaybe@v0
         with:
           provider: anthropic
-          model: claude-sonnet-4-5
+          model: claude-sonnet-4-6
           auto_diagram: "true"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -69,10 +100,11 @@ $ lgtmaybe diagram --provider ollama --model llama3
 
 It diffs your branch against the base (the same base resolution as `lgtmaybe
 review`; `--base` overrides, `--working` includes uncommitted edits,
-`--uncommitted` reviews only the working-tree edits). The output is the ASCII
-rendering (which renders in your terminal) followed by the Mermaid source —
-paste that into a GitHub comment, [mermaid.live](https://mermaid.live), or a
-Markdown file to render it.
+`--uncommitted` reviews only the working-tree edits). The output is the same
+Markdown body the `/diagram` comment carries — the Mermaid source first, then
+the ASCII rendering (which reads fine in a terminal) in a collapsed "Text
+version" block. Paste the Mermaid into a GitHub comment,
+[mermaid.live](https://mermaid.live), or a Markdown file to render it.
 
 ## Why Mermaid (and what the ASCII is for)
 
@@ -83,9 +115,10 @@ image would mean committing a file or calling an external service, neither of
 which fits a fork-safe, idempotently-updated comment.
 
 A terminal, though, can't render Mermaid — which is exactly why the same call
-also returns **ASCII art**. The CLI prints the ASCII; the GitHub comment shows
-the Mermaid with the ASCII tucked in a collapsible "Text version", which also
-means a reviewer never sees a red "unable to render" box if a diagram comes back
+also returns **ASCII art**. Both the CLI output and the GitHub comment show the
+Mermaid with the ASCII tucked in a collapsible "Text version" — the ASCII is
+what you actually read in a terminal, and it doubles as the fallback body, so a
+reviewer never sees a red "unable to render" box if a diagram comes back
 malformed.
 
 D2 (the [C4 notation](https://d2lang.com/blog/c4/) that inspired this) isn't

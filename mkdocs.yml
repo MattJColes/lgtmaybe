@@ -15,7 +15,9 @@ exclude_docs: |
 theme:
   name: material
   custom_dir: overrides
-  logo: assets/logo.svg
+  # Light-stroke variant: the header bar is slate, the same colour as the
+  # primary logo's strokes, which made the brace arms invisible there.
+  logo: assets/logo-light.svg
   favicon: assets/favicon.ico
   icon:
     repo: fontawesome/brands/github
@@ -51,7 +53,11 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.highlight
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.inlinehilite
   - pymdownx.tabbed:
       alternate_style: true

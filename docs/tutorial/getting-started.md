@@ -60,7 +60,8 @@ lgtmaybe review \
 ```
 
 lgtmaybe diffs your current branch against the remote primary branch
-(`origin/HEAD`, falling back to `origin/main`), sends the changed lines to your
+(`origin/HEAD`, falling back to `origin/main` / `origin/master`, then a local
+`main` / `master`), sends the changed lines to your
 local qwen3.6:27b instance, and prints the findings to your terminal:
 
 ```console
