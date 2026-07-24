@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only — for .lgtmaybe.yml config
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: openai-compatible
           model: deepseek-chat

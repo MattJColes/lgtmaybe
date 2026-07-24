@@ -74,7 +74,7 @@ input remains off by default for backwards compatibility, and it never fires
 on a `synchronize` push. To enable it in an existing workflow:
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6

@@ -223,7 +223,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: openai
           model: gpt-5.5
@@ -252,7 +252,7 @@ only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instea
 - **CLI (PyPI)** — `pip install lgtmaybe`
 - **CLI (Homebrew)** — `brew tap MattJColes/lgtmaybe && brew trust MattJColes/lgtmaybe && brew install lgtmaybe`
   ([details](docs/how-to/install-the-cli.md) — the `brew trust` step is required for third-party taps)
-- **GitHub Action** — `uses: MattJColes/lgtmaybe@v0`
+- **GitHub Action** — `uses: MattJColes/lgtmaybe@v1`
 
 ## Contributing
 

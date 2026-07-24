@@ -406,7 +406,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only — for .lgtmaybe.yml config
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: openai
           model: gpt-5.5
@@ -420,21 +420,21 @@ Swap the `provider`, `model`, and `api_key` inputs:
 
 ```yaml
 # anthropic
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
     api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
 # openrouter
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: zai
     model: glm-4.6
@@ -467,7 +467,7 @@ purely the *posting identity* — the keyless cloud model is unchanged and
 everything still runs in your own CI.
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
@@ -523,7 +523,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `app_private_key` | — | Private key (PEM) of the App named by `app_id`; wire a secret to it. Mints a short-lived, auto-revoked installation token |
 | `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
 | `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
-| `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
+| `image` | `ghcr.io/mattjcoles/lgtmaybe:v1` | Override the container image (advanced) |
 
 The action sets the `GITHUB_TOKEN` and provider credentials for the container
 itself — you do not pass them as `env`.
@@ -536,11 +536,11 @@ filters, and cost caps. See
 
 ## Pin to a specific version
 
-`@v0` is a floating tag that tracks the latest `v0.x.x` release. To pin exactly,
+`@v1` is a floating tag that tracks the latest `v1.x.x` release. To pin exactly,
 use a full version tag:
 
 ```yaml
-uses: MattJColes/lgtmaybe@v0.1.0
+uses: MattJColes/lgtmaybe@v1.0.0
 ```
 
 ---
@@ -629,7 +629,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
@@ -649,7 +649,7 @@ review PRs across a monorepo or several repos in an org, set `app_owner` (and
 optionally `app_repositories`):
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
@@ -678,7 +678,7 @@ steps:
         with:
           app-id: ${{ vars.LGTMAYBE_APP_ID }}
           private-key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
@@ -732,7 +732,7 @@ Copy [`examples/workflows/review-openai.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openai
     model: gpt-5.5
@@ -807,7 +807,7 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
@@ -888,7 +888,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6
@@ -969,7 +969,7 @@ Copy [`examples/workflows/review-zai.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: zai
     model: glm-4.6
@@ -1123,7 +1123,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: bedrock
           model: us.anthropic.claude-sonnet-4-6
@@ -1268,7 +1268,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: vertex
           model: gemini-3-pro
@@ -1412,7 +1412,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: azure
           model: my-gpt-4o-deployment            # your deployment name
@@ -1454,7 +1454,7 @@ If you would rather use a resource key, set `AZURE_API_KEY` and `AZURE_API_BASE`
 extra is not required in this mode.
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: azure
           model: my-gpt-4o-deployment
@@ -2742,7 +2742,7 @@ input remains off by default for backwards compatibility, and it never fires
 on a `synchronize` push. To enable it in an existing workflow:
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
@@ -2898,7 +2898,7 @@ It reads the **conventional commits** merged to `main` and keeps a "Release PR"
 open that bumps the version and regenerates `CHANGELOG.md`. **Merging that PR** is
 the release: it cuts the tag and the GitHub release, then the same run publishes —
 **PyPI** via trusted publishing (OIDC) and the **GHCR image** + floating major
-tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
+tag (`v{major}`, currently `v1`) via the reusable `.github/workflows/release.yml`
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
 A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew

@@ -137,7 +137,7 @@ inputs:
   image:
     description: "Override the container image (advanced; defaults to the released GHCR image)."
     required: false
-    default: "ghcr.io/mattjcoles/lgtmaybe:v0"
+    default: "ghcr.io/mattjcoles/lgtmaybe:v1"
   github_token:
     description: "Token used to fetch the diff and post the review. Defaults to the workflow token."
     required: false

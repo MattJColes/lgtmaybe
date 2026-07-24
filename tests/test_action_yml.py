@@ -11,11 +11,15 @@ a refactor of the YAML can't silently drop the fallback or the gate.
 
 from __future__ import annotations
 
+import json
+import tomllib
 from pathlib import Path
 
 import yaml
 
 _ACTION_YML = Path(__file__).parent.parent / "action.yml"
+_PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
+_RELEASE_PLEASE_CONFIG = Path(__file__).parent.parent / "release-please-config.json"
 _README = Path(__file__).parent.parent / "README.md"
 
 # The container reads GITHUB_TOKEN; prefer the minted App token, else the default
@@ -90,3 +94,16 @@ def test_mint_step_is_pinned_and_gated_on_app_id() -> None:
 
 def test_container_token_prefers_the_minted_app_token() -> None:
     assert _run_lgtmaybe_step()["env"]["GITHUB_TOKEN"] == _TOKEN_EXPR
+
+
+def test_default_container_image_tracks_package_major() -> None:
+    version = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    major = version.split(".", maxsplit=1)[0]
+
+    assert _action()["inputs"]["image"]["default"] == f"ghcr.io/mattjcoles/lgtmaybe:v{major}"
+
+
+def test_release_please_is_not_pinned_to_a_consumed_version() -> None:
+    config = json.loads(_RELEASE_PLEASE_CONFIG.read_text(encoding="utf-8"))
+
+    assert "release-as" not in config["packages"]["."]
