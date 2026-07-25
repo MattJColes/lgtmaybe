@@ -20,5 +20,11 @@
 
 - [x] 3.1 Run focused preset, prompt, concurrency, and eval tests.
 - [x] 3.2 Run the full test, lint, type, OpenSpec, anchor, drift, and docs gates.
-- [ ] 3.3 Compare the dogfood profile's correctness critical path and total
+- [x] 3.3 Compare the dogfood profile's correctness critical path and total
   tokens before deciding whether the split should ship.
+  The recorded pre-split straggler took 513 seconds and emitted 32,768 output
+  tokens. Production dogfood run 30154965187 split the work into
+  `correctness-flow` (97.37 seconds) and `correctness-state` (0.81 seconds);
+  together they used 8,907 input and 3,885 output tokens. The diffs were not
+  identical, so this is directional rather than a controlled A/B result, but
+  it shows no regression and supports keeping the split enabled.
