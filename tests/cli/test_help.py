@@ -16,7 +16,7 @@ def test_help_lists_commands_and_examples() -> None:
         assert command in result.output
     assert "Examples:" in result.output
     assert "lgtmaybe review" in result.output
-    assert "https://mattjcoles.github.io/lgtmaybe/" in result.output
+    assert "https://lgtmaybe.coles.codes/" in result.output
 
 
 def test_help_command_matches_dash_dash_help() -> None:

@@ -8,7 +8,7 @@
 #
 # One-time setup (create the App, grant it pull-requests:write + contents:read,
 # install it, store the ID + private key): see
-# https://mattjcoles.github.io/lgtmaybe/how-to/post-as-a-github-app/
+# https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/
 #
 # Secrets/variables to add:
 #   ANTHROPIC_API_KEY        (secret)   — your model provider key

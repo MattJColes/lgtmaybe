@@ -52,7 +52,7 @@ static-analysis = [
 lgtmaybe = "lgtmaybe.cli:main"
 
 [project.urls]
-Homepage = "https://mattjcoles.github.io/lgtmaybe/"
+Homepage = "https://lgtmaybe.coles.codes/"
 Repository = "https://github.com/MattJColes/lgtmaybe"
 
 [dependency-groups]
