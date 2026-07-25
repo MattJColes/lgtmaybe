@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.2.0...lgtmaybe-v1.3.0) (2026-07-25)
+
+
+### Features
+
+* **diagram:** green-border changed elements; recommend App identity; marketplace assets ([#220](https://github.com/MattJColes/lgtmaybe/issues/220)) ([17700fc](https://github.com/MattJColes/lgtmaybe/commit/17700fc9ba81acd732f9bd55b80d34c8b90ace14))
+* **diagram:** light-green relationship lines and labels in C4 diagrams ([#224](https://github.com/MattJColes/lgtmaybe/issues/224)) ([a1c40f5](https://github.com/MattJColes/lgtmaybe/commit/a1c40f5726a7c9439cf2738f17c39c5ea61bcd8b))
+* full-screen link and density-aware layout for change diagrams ([4667dc2](https://github.com/MattJColes/lgtmaybe/commit/4667dc20b9212f221cd70dc3c504f4061978d5a0))
+* generous timeout defaults for slow providers and auto diagrams by default ([18707a5](https://github.com/MattJColes/lgtmaybe/commit/18707a5b51476a5634d19a06a109b23adddbfeab))
+* raise the direct-cloud timeout default to 300s ([e656b32](https://github.com/MattJColes/lgtmaybe/commit/e656b329600066ad152ba3624f842e44717baca7))
+
+
+### Bug Fixes
+
+* **diagram:** loosen C4 layout and brighten rel styling for dark mode ([#221](https://github.com/MattJColes/lgtmaybe/issues/221)) ([00116a6](https://github.com/MattJColes/lgtmaybe/commit/00116a6c20f6962e31f0be1c6fff126fef077d96))
+
+
+### Documentation
+
+* link the Marketplace listing and feature the branded screenshots ([#223](https://github.com/MattJColes/lgtmaybe/issues/223)) ([ddb39ec](https://github.com/MattJColes/lgtmaybe/commit/ddb39ecd4d1228f104d3351538f29ec0b09d4e74))
+
 ## [1.2.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.1.0...lgtmaybe-v1.2.0) (2026-07-25)
 
 
