@@ -15,8 +15,9 @@ tag (`v{major}`, currently `v1`) via the reusable `.github/workflows/release.yml
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
 A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
-formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
-`brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version.
+formula** in the tap repo (`MattJColes/homebrew-tap`, i.e. the tap
+`MattJColes/tap`) so `brew install MattJColes/tap/lgtmaybe` tracks the latest
+version.
 `scripts/update-homebrew-formula.sh` writes a small formula that creates a venv
 and `pip install`s lgtmaybe + its dependencies from **PyPI wheels**, with no
 per-dependency `resource` stanzas. litellm's tree includes Rust sdists
@@ -72,12 +73,16 @@ The only human-only pieces:
 - First release only: from the GitHub release page, tick **"Publish this Action
   to the GitHub Marketplace"**, accept the terms, and pick the categories
   `code-review` and `continuous-integration`.
-- **Homebrew tap:** create the repo **`MattJColes/homebrew-lgtmaybe`** with a
+- **Homebrew tap:** create the repo **`MattJColes/homebrew-tap`** with a
   `Formula/` directory (it can start empty — the workflow writes the formula).
-  Add a repo secret **`HOMEBREW_TAP_TOKEN`** to *this* repo: a fine-grained PAT
-  with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
-  to another repository). To seed or verify the formula by hand on a Mac, run
-  `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
+  Homebrew strips the `homebrew-` prefix, so that repo is the tap
+  `MattJColes/tap` and the formula inside it is `MattJColes/tap/lgtmaybe` — name
+  the repo `homebrew-tap`, not `homebrew-lgtmaybe`, or the formula reads as
+  `MattJColes/lgtmaybe/lgtmaybe`. Add a repo secret **`HOMEBREW_TAP_TOKEN`** to
+  *this* repo: a fine-grained PAT with `contents: write` on the tap repo (the
+  default `GITHUB_TOKEN` cannot push to another repository). To seed or verify
+  the formula by hand on a Mac, run
+  `scripts/update-homebrew-formula.sh <version> path/to/homebrew-tap/Formula/lgtmaybe.rb`.
 - **winget:** fork [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs).
   Create a classic GitHub PAT with the `public_repo` scope and add it to this
   repo as **`WINGET_TOKEN`**. For the first release, build/upload the Windows

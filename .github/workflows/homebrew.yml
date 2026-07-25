@@ -1,6 +1,7 @@
 name: homebrew
 
-# Publishes lgtmaybe to the Homebrew tap (MattJColes/homebrew-lgtmaybe).
+# Publishes lgtmaybe to the Homebrew tap (MattJColes/homebrew-tap, i.e. the tap
+# MattJColes/tap — so the formula is MattJColes/tap/lgtmaybe).
 #
 # The formula installs lgtmaybe + its dependency tree from PyPI **wheels** into an
 # isolated virtualenv (see scripts/update-homebrew-formula.sh). Building every
@@ -14,7 +15,7 @@ name: homebrew
 # workflow_dispatch (manual; `force` re-publishes the same version), a daily
 # schedule safety net, and release: published (for a human-cut release).
 #
-# One-time setup (see docs/how-to/releasing.md): create MattJColes/homebrew-lgtmaybe
+# One-time setup (see docs/how-to/releasing.md): create MattJColes/homebrew-tap
 # and add repo secret HOMEBREW_TAP_TOKEN (a PAT with contents:write on the tap).
 on:
   workflow_call:
@@ -69,7 +70,7 @@ jobs:
       - name: Checkout the tap
         uses: actions/checkout@v7
         with:
-          repository: MattJColes/homebrew-lgtmaybe
+          repository: MattJColes/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
@@ -104,12 +105,13 @@ jobs:
         env:
           HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
-          tap_link="$(brew --repository)/Library/Taps/local/homebrew-lgtmaybe"
+          # The directory name sets the tap slug: homebrew-tap -> local/tap.
+          tap_link="$(brew --repository)/Library/Taps/local/homebrew-tap"
           mkdir -p "$(dirname "$tap_link")"
           ln -sfn "$GITHUB_WORKSPACE/tap" "$tap_link"
           # Exactly what a user runs. With `preserve_rpath` the install must now
           # exit cleanly AND link `lgtmaybe` onto the prefix bin.
-          brew install --formula "local/lgtmaybe/lgtmaybe"
+          brew install --formula "local/tap/lgtmaybe"
           "$(brew --prefix)/bin/lgtmaybe" --help | grep -qi usage
           echo "smoke test passed: lgtmaybe installs cleanly and runs"
 

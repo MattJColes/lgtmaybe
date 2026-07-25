@@ -117,8 +117,8 @@ pip install lgtmaybe
 On macOS you can install from the Homebrew tap instead:
 
 ```bash
-brew tap MattJColes/lgtmaybe
-brew trust MattJColes/lgtmaybe   # current Homebrew requires trusting third-party taps
+brew tap MattJColes/tap
+brew trust MattJColes/tap   # current Homebrew requires trusting third-party taps
 brew install lgtmaybe
 ```
 
@@ -276,11 +276,11 @@ The regular `pip install lgtmaybe` path also works on Windows.
 ## Install on macOS (Homebrew)
 
 On macOS (and Linuxbrew) you can install from the project's
-[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`:
+[Homebrew tap](https://github.com/MattJColes/homebrew-tap) instead of `pip`:
 
 ```bash
-brew tap MattJColes/lgtmaybe
-brew trust MattJColes/lgtmaybe
+brew tap MattJColes/tap
+brew trust MattJColes/tap
 brew install lgtmaybe
 ```
 
@@ -289,13 +289,18 @@ third-party tap until you explicitly **trust** it (`Error: Refusing to load
 formula … from untrusted tap`). This is a one-time, per-machine decision that
 applies to every tap outside Homebrew's core — the tap author can't waive it for
 you, by design. To trust only this one formula instead of the whole tap, use
-`brew trust --formula MattJColes/lgtmaybe/lgtmaybe`.
+`brew trust --formula MattJColes/tap/lgtmaybe`.
 
-Tapping and installing in one line (`brew install MattJColes/lgtmaybe/lgtmaybe`)
+Tapping and installing in one line (`brew install MattJColes/tap/lgtmaybe`)
 works too, but still needs the `brew trust …` step first — otherwise the install
 stops at the untrusted-tap error.
 
 Upgrade later with `brew upgrade lgtmaybe`.
+
+If you tapped the earlier `MattJColes/lgtmaybe` name, switch over once with
+`brew untap MattJColes/lgtmaybe && brew tap MattJColes/tap` (then `brew trust
+MattJColes/tap`). Upgrades keep working on the old tap either way — GitHub
+redirects the renamed repo — so this is tidying, not a break.
 
 Homebrew installs lgtmaybe into its own isolated virtualenv, so it never touches
 your system or project Python. The formula creates the venv and installs
@@ -2954,8 +2959,9 @@ tag (`v{major}`, currently `v1`) via the reusable `.github/workflows/release.yml
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
 A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
-formula** in the tap repo (`MattJColes/homebrew-lgtmaybe`) so
-`brew install MattJColes/lgtmaybe/lgtmaybe` tracks the latest version.
+formula** in the tap repo (`MattJColes/homebrew-tap`, i.e. the tap
+`MattJColes/tap`) so `brew install MattJColes/tap/lgtmaybe` tracks the latest
+version.
 `scripts/update-homebrew-formula.sh` writes a small formula that creates a venv
 and `pip install`s lgtmaybe + its dependencies from **PyPI wheels**, with no
 per-dependency `resource` stanzas. litellm's tree includes Rust sdists
@@ -3011,12 +3017,16 @@ The only human-only pieces:
 - First release only: from the GitHub release page, tick **"Publish this Action
   to the GitHub Marketplace"**, accept the terms, and pick the categories
   `code-review` and `continuous-integration`.
-- **Homebrew tap:** create the repo **`MattJColes/homebrew-lgtmaybe`** with a
+- **Homebrew tap:** create the repo **`MattJColes/homebrew-tap`** with a
   `Formula/` directory (it can start empty — the workflow writes the formula).
-  Add a repo secret **`HOMEBREW_TAP_TOKEN`** to *this* repo: a fine-grained PAT
-  with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
-  to another repository). To seed or verify the formula by hand on a Mac, run
-  `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
+  Homebrew strips the `homebrew-` prefix, so that repo is the tap
+  `MattJColes/tap` and the formula inside it is `MattJColes/tap/lgtmaybe` — name
+  the repo `homebrew-tap`, not `homebrew-lgtmaybe`, or the formula reads as
+  `MattJColes/lgtmaybe/lgtmaybe`. Add a repo secret **`HOMEBREW_TAP_TOKEN`** to
+  *this* repo: a fine-grained PAT with `contents: write` on the tap repo (the
+  default `GITHUB_TOKEN` cannot push to another repository). To seed or verify
+  the formula by hand on a Mac, run
+  `scripts/update-homebrew-formula.sh <version> path/to/homebrew-tap/Formula/lgtmaybe.rb`.
 - **winget:** fork [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs).
   Create a classic GitHub PAT with the `public_repo` scope and add it to this
   repo as **`WINGET_TOKEN`**. For the first release, build/upload the Windows

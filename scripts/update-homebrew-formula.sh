@@ -16,7 +16,7 @@
 # Usage:
 #   scripts/update-homebrew-formula.sh <version> <output-formula-path>
 # e.g.
-#   scripts/update-homebrew-formula.sh 0.7.2 ../homebrew-lgtmaybe/Formula/lgtmaybe.rb
+#   scripts/update-homebrew-formula.sh 0.7.2 ../homebrew-tap/Formula/lgtmaybe.rb
 set -euo pipefail
 
 VERSION="${1:?usage: update-homebrew-formula.sh <version> <output-formula-path>}"
