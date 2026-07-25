@@ -1,10 +1,30 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 from services.github_app_identity import handler
 from services.github_app_identity.broker import BrokerError, InstallationToken
+
+
+def test_handler_imports_from_the_flat_lambda_bundle() -> None:
+    service_root = Path(__file__).parents[2] / "services" / "github_app_identity"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            f"import sys; sys.path.insert(0, {str(service_root)!r}); import handler",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 class SuccessfulBroker:

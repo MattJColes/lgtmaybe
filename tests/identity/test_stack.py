@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", EncodingWarning)
+    import infra.identity.stack as identity_stack
     from aws_cdk import App
+    from aws_cdk import aws_lambda as lambda_
     from aws_cdk.assertions import Match, Template
     from infra.identity.stack import IdentityBrokerStack
 
@@ -47,6 +50,46 @@ def test_stack_provisions_a_bounded_python_lambda_and_retained_secret() -> None:
             "DeletionPolicy": "Retain",
             "UpdateReplacePolicy": "Retain",
         },
+    )
+
+
+def test_bundled_stack_names_the_exported_handler_once(monkeypatch) -> None:
+    python_function_arguments: dict[str, object] = {}
+
+    def fake_python_function(
+        scope,
+        construct_id: str,
+        *,
+        entry: str,
+        index: str,
+        bundling,
+        handler: str,
+        **kwargs,
+    ):
+        python_function_arguments.update({"entry": entry, "index": index, "handler": handler})
+        return lambda_.Function(
+            scope,
+            construct_id,
+            code=lambda_.Code.from_asset(entry),
+            handler=f"{Path(index).stem}.{handler}",
+            **kwargs,
+        )
+
+    monkeypatch.setattr(identity_stack, "PythonFunction", fake_python_function)
+
+    stack = IdentityBrokerStack(
+        App(),
+        "BundledIdentityBroker",
+        app_id="3987976",
+        alarm_email="matt@coles.codes",
+    )
+    template = Template.from_stack(stack)
+
+    assert python_function_arguments["index"] == "handler.py"
+    assert python_function_arguments["handler"] == "handler"
+    template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {"Handler": "handler.handler"},
     )
 
 

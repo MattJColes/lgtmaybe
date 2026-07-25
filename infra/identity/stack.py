@@ -208,7 +208,6 @@ class IdentityBrokerStack(Stack):
         common: dict[str, object] = {
             "runtime": lambda_.Runtime.PYTHON_3_14,
             "architecture": lambda_.Architecture.X86_64,
-            "handler": "handler.handler",
             "timeout": Duration.seconds(15),
             "memory_size": 256,
             "reserved_concurrent_executions": 5,
@@ -230,6 +229,7 @@ class IdentityBrokerStack(Stack):
                 "Broker",
                 entry=str(SERVICE_ROOT),
                 index="handler.py",
+                handler="handler",
                 bundling=BundlingOptions(
                     asset_excludes=["__pycache__", "*.pyc", ".pytest_cache", ".venv"]
                 ),
@@ -239,5 +239,6 @@ class IdentityBrokerStack(Stack):
             self,
             "Broker",
             code=lambda_.Code.from_asset(str(SERVICE_ROOT)),
+            handler="handler.handler",
             **common,
         )
