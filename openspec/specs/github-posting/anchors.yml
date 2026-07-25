@@ -89,3 +89,13 @@ github.check-run:
       has: { field: name, regex: '^RestGitHubGateway$' }
       stopBy: end
   files: [src/lgtmaybe/github/**/*.py]
+
+github.app-attribution:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^__init__$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^RestGitHubGateway$' }
+      stopBy: end
+  files: [src/lgtmaybe/github/**/*.py]

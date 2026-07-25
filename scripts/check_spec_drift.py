@@ -6,7 +6,8 @@ capability's anchors.yml sidecar. On a PR this script:
 
 1. scans the sidecar rules at HEAD and at the merge-base with the target branch
    (a temporary git worktree — the scan cwd matters: `files:` globs resolve
-   against it, so both scans run from a repo root targeting src/);
+   against it, so both scans run from a repo root targeting the anchored code
+   and workflow roots);
 2. flags DANGLING rules — matched at the base, match nothing now (a rename or
    removal nobody re-pointed; intersection alone goes blind here);
 3. flags DRIFT — a rule's match intersects the PR's changed lines while the diff
@@ -38,7 +39,7 @@ import yaml
 from lgtmaybe.core.diffparse import changed_line_index
 
 ANCHOR_RE = re.compile(r"^<!-- anchor: (?P<id>[a-z0-9.-]+) -->$")
-SCAN_TARGETS = ("src/", ".github/workflows/")
+SCAN_TARGETS = ("src/", "services/", "scripts/", ".github/workflows/")
 
 
 @dataclass(frozen=True)
@@ -137,17 +138,24 @@ def parse_scan_output(json_text: str) -> dict[str, list[Match]]:
 
 def run_scan(binary: str, inline_rules: str, cwd: Path) -> dict[str, list[Match]]:
     """Run ast-grep from *cwd* so each rule's files glob resolves consistently."""
-    result = subprocess.run(
-        [binary, "scan", "--inline-rules", inline_rules, "--json", *SCAN_TARGETS],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-        timeout=120,
-    )
-    return parse_scan_output(result.stdout)
+    matches: dict[str, list[Match]] = {}
+    with tempfile.TemporaryDirectory(prefix="lgtmaybe-anchor-rules-") as temp_dir:
+        for index, rule_text in enumerate(inline_rules.split("\n---\n")):
+            rule_path = Path(temp_dir) / f"{index}.yml"
+            rule_path.write_text(rule_text, encoding="utf-8", newline="\n")
+            result = subprocess.run(
+                [binary, "scan", "--rule", str(rule_path), "--json=compact", *SCAN_TARGETS],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=True,
+                timeout=120,
+            )
+            for rule_id, rule_matches in parse_scan_output(result.stdout).items():
+                matches.setdefault(rule_id, []).extend(rule_matches)
+    return matches
 
 
 def extract_sections(spec_md: str, spec_path: str) -> dict[str, SpecSection]:

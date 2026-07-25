@@ -57,6 +57,7 @@ The only human-only pieces:
 
 - [One-time setup](#one-time-setup)
 - [Each release](#each-release)
+- [Rotate the public App private key](#rotate-the-public-app-private-key)
 - [Before going public](#before-going-public)
 
 ## One-time setup
@@ -96,6 +97,55 @@ The only human-only pieces:
    `release-please` workflow via **workflow_dispatch** with the tag name.
 4. If Windows publication needs recovery, dispatch `windows-exe` for the tag,
    then dispatch `winget` after the release asset is visible.
+
+## Rotate the public App private key
+
+Rotate the public `lgtmaybe` GitHub App key quarterly, whenever maintainer access
+changes, and immediately after any suspected exposure. Keep the old key active
+until the replacement has passed a brokered smoke test so rotation does not
+interrupt reviews.
+
+1. In the GitHub App settings, generate a new private key. Do not delete the old
+   key yet.
+2. From the directory containing the downloaded PEM, replace the retained
+   Secrets Manager value without printing the key:
+
+    ```bash
+    aws secretsmanager put-secret-value \
+      --secret-id lgtmaybe/github-app/private-key \
+      --secret-string file://lgtmaybe.private-key.pem \
+      --region ap-southeast-2
+    ```
+
+3. Refresh the Lambda configuration so every execution environment drops its
+   cached copy of the old key:
+
+    ```bash
+    FUNCTION_NAME="$(
+      aws cloudformation describe-stack-resources \
+        --stack-name LgtmaybeGithubAppIdentity \
+        --region ap-southeast-2 \
+        --query "StackResources[?ResourceType=='AWS::Lambda::Function'].PhysicalResourceId | [0]" \
+        --output text
+    )"
+    aws lambda update-function-configuration \
+      --function-name "$FUNCTION_NAME" \
+      --description "GitHub App key rotated $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --region ap-southeast-2
+    aws lambda wait function-updated-v2 \
+      --function-name "$FUNCTION_NAME" \
+      --region ap-southeast-2
+    ```
+
+4. Run a brokered dogfood review and confirm GitHub attributes it to
+   `lgtmaybe[bot]`.
+5. Delete the old key in the GitHub App settings, then delete the downloaded PEM
+   from the maintainer machine. Never paste the PEM into a command argument,
+   issue, workflow log, or repository file.
+
+If the smoke test fails, leave the old GitHub key active, put its PEM back into
+the same Secrets Manager secret, refresh the Lambda configuration again, and
+investigate before retrying.
 
 ## Before going public
 

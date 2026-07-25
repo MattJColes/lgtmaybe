@@ -1,12 +1,10 @@
 # Copy into your repo at .github/workflows/lgtmaybe.yml
 #
-# Public branded identity: install https://github.com/apps/lgtmaybe on this
-# repository, then use github_identity: lgtmaybe. You do not create or store a
-# GitHub App private key. The provider configuration is otherwise unchanged.
-#
-# Secret to add:
-#   OPENAI_API_KEY — your model provider key
-name: lgtmaybe (public app)
+# Advanced: use this only if your organisation already operates a GitHub App.
+# Store its ID in LGTMAYBE_APP_ID and PEM private key in
+# LGTMAYBE_APP_PRIVATE_KEY. The App should have contents: read,
+# pull requests: write, and issues: write on the selected repositories.
+name: lgtmaybe (self-managed app)
 
 on:
   pull_request_target:
@@ -17,11 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-
-concurrency:
-  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
 
 jobs:
   review:
@@ -37,7 +30,8 @@ jobs:
       - uses: actions/checkout@v7 # base repository only
       - uses: MattJColes/lgtmaybe@v1
         with:
-          github_identity: lgtmaybe
           provider: openai
           model: gpt-5.5
           api_key: ${{ secrets.OPENAI_API_KEY }}
+          app_id: ${{ vars.LGTMAYBE_APP_ID }}
+          app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}

@@ -109,6 +109,31 @@ defaults; the default `.lgtmaybe.yml` probe stays lenient when absent.
 - **WHEN** `lgtmaybe config set` targets an API key
 - **THEN** it is refused; keys are read from env/flags at run time only
 
+### Requirement: The Action selects GitHub identity explicitly
+
+The GitHub Action SHALL default to the built-in workflow token and perform the
+public App OIDC exchange only when `github_identity: lgtmaybe` is selected,
+while retaining App ID/private-key inputs as an advanced self-managed path.
+<!-- anchor: cli.github-identity -->
+
+#### Scenario: Identity input is omitted
+- **WHEN** a user runs the Action without a GitHub identity input
+- **THEN** the supplied or default `github_token` is used exactly as before
+
+#### Scenario: Identity configuration conflicts
+- **WHEN** public lgtmaybe identity and self-managed App credentials are both set
+- **THEN** the Action fails before review execution and asks the user to choose one path
+
+### Requirement: Branded setup remains provider-independent
+
+Selecting a GitHub posting identity SHALL NOT change provider, model, provider
+authentication, review configuration, or local CLI behavior.
+<!-- anchor: cli.github-identity-provider -->
+
+#### Scenario: User changes only identity mode
+- **WHEN** an existing workflow switches from Actions identity to lgtmaybe identity
+- **THEN** all provider and review inputs reach the same runtime entrypoint unchanged
+
 ### Requirement: Text boundaries are deterministic across host locales
 
 The CLI, local git adapter, and configuration store SHALL read and write owned

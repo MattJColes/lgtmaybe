@@ -343,11 +343,14 @@ that reviews pull requests automatically.
 
 Use lgtmaybe from the
 [GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe).
-It is a **GitHub Action**, not a hosted GitHub App. Its provider, model, and
-authentication settings live in the workflow's `with:` block. GitHub Actions
-supplies the repository token, so there is no separate App to install. The
+It is a **GitHub Action**: the reviewer runs in your workflow, and its provider,
+model, and provider authentication settings live in the step's `with:` block.
+GitHub Actions supplies the repository token by default, so reviews post as
+`github-actions[bot]`. You can optionally install the public lgtmaybe App and
+set `github_identity: lgtmaybe` to post as `lgtmaybe[bot]`; the App changes only
+the GitHub author identity. The
 [minimal OpenAI workflow](#minimal-workflow-openai) below shows the complete
-shape.
+default shape.
 
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
@@ -362,6 +365,7 @@ ollama runs the model on your own machine, so it is local-only — use the
 - [Security requirement: pull_request_target](#security-requirement-pull_request_target)
 - [Who can trigger a review](#who-can-trigger-a-review)
 - [Minimal workflow — openai](#minimal-workflow-openai)
+- [Choose the GitHub author](#choose-the-github-author)
 - [Other key-based providers](#other-key-based-providers)
 - [Keyless cloud workflows](#keyless-cloud-workflows)
 - [Action inputs](#action-inputs)
@@ -464,6 +468,21 @@ jobs:
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+## Choose the GitHub author
+
+The minimal workflow uses GitHub's built-in workflow token and posts as
+`github-actions[bot]`. This path needs no App installation and remains the
+default.
+
+To post as `lgtmaybe[bot]`, install the public lgtmaybe App on selected
+repositories, add `id-token: write` to the workflow, and set
+`github_identity: lgtmaybe`. The provider, model, and provider key stay exactly
+where they are. Follow [Post as lgtmaybe[bot]](./post-as-a-github-app.md) for
+the complete workflow, permission boundary, and uninstall instructions.
+
+If your organisation operates its own App, the same guide documents the
+advanced `app_id` / `app_private_key` inputs.
+
 ## Other key-based providers
 
 Swap the `provider`, `model`, and `api_key` inputs:
@@ -545,8 +564,10 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
 | `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
 | `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
-| `app_id` | — | Advanced: ID of an existing GitHub App used with `app_private_key`; most users should leave this empty |
-| `app_private_key` | — | Advanced: private key of the existing App named by `app_id`; most users should leave this empty |
+| `github_identity` | `actions` | GitHub author identity: `actions` posts as `github-actions[bot]`; `lgtmaybe` posts as `lgtmaybe[bot]` after the public App is installed and `id-token: write` is granted |
+| `identity_broker_url` | managed endpoint | Advanced override for the public App identity exchange |
+| `app_id` | — | Advanced: ID of your own GitHub App used with `app_private_key`; do not combine with `github_identity: lgtmaybe` |
+| `app_private_key` | — | Advanced: private key of your own App named by `app_id` |
 | `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
 | `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
 | `image` | `ghcr.io/mattjcoles/lgtmaybe:v1` | Override the container image (advanced) |
@@ -584,6 +605,12 @@ check and cannot merge until the finding is resolved (or `fail_on` is lowered).
 Leave `fail_on` unset to keep reviews advisory (the default) — no check run is
 created.
 
+Creating the Check Run requires `checks: write`. For the default Actions
+identity, add it to the workflow `permissions:` block. The public
+`lgtmaybe[bot]` App intentionally does not hold that permission, so
+`github_identity: lgtmaybe` cannot be combined with `fail_on`; use the Actions
+identity or a self-managed App granted `Checks: write`.
+
 ## Adding a config file
 
 Place a `.lgtmaybe.yml` at the repo root to control severity thresholds, path
@@ -598,6 +625,123 @@ use a full version tag:
 ```yaml
 uses: MattJColes/lgtmaybe@v1.0.0
 ```
+
+---
+
+<!-- Source: https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/ -->
+
+# Post as lgtmaybe[bot]
+
+lgtmaybe is a GitHub Action. The Action runs the reviewer and keeps the
+provider, model, and provider authentication in the workflow's `with:` block.
+A GitHub App is optional: it changes the author of GitHub comments from
+`github-actions[bot]` to a branded bot.
+
+There are three identity choices:
+
+- Do nothing: the Action uses GitHub's workflow token and posts as
+  `github-actions[bot]`.
+- Install the public lgtmaybe App: the Action posts as `lgtmaybe[bot]`; you do
+  not receive or manage an App private key.
+- Use your own GitHub App: provide its App ID and private key as an advanced,
+  self-managed setup.
+
+## Install the public lgtmaybe App
+
+1. [Install the lgtmaybe App](https://github.com/apps/lgtmaybe/installations/new)
+   and select only the repositories where it should review pull requests.
+2. Add `id-token: write` to the workflow permissions.
+3. Set `github_identity: lgtmaybe` on the Action step.
+
+Here is a complete OpenAI workflow:
+
+```yaml
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7 # base repository only
+      - uses: MattJColes/lgtmaybe@v1
+        with:
+          github_identity: lgtmaybe
+          provider: openai
+          model: gpt-5.5
+          api_key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+The provider configuration is unchanged. `github_identity` selects who posts
+on GitHub; it does not select or host the model.
+
+The public App has only:
+
+- `contents: read`, to fetch repository and pull-request content
+- `pull requests: write`, to post reviews, comments, and labels
+- `issues: write`, to answer pull-request issue comments
+
+The Action exchanges GitHub's signed workflow identity for a short-lived App
+token restricted to the triggering repository and those exact permissions.
+The identity broker verifies the repository, event, and default-branch
+workflow. It never receives your diff, provider key, prompt, model response, or
+review findings.
+
+Selecting `github_identity: lgtmaybe` is explicit: if `id-token: write` is
+missing, the App is not installed on the repository, the workflow is not
+trusted, or the identity service is unavailable, the job fails with setup
+guidance. It does not fall back to `github-actions[bot]`.
+
+To remove access, uninstall the App from the repository or remove that
+repository from the installation. Remove `github_identity: lgtmaybe` and
+`id-token: write` from the workflow to return to `github-actions[bot]`. The
+Action also revokes its temporary App token after each run; GitHub expires it
+automatically if cleanup cannot run.
+
+The public App intentionally has no `Checks: write` permission, so
+`github_identity: lgtmaybe` cannot be combined with `fail_on`. Keep the
+default `github_identity: actions` and grant the workflow `checks: write`, or
+use a self-managed App with `Checks: write`, when lgtmaybe must create a merge
+gate.
+
+## Use your own GitHub App
+
+Use this path only when your organisation already operates a GitHub App and
+wants reviews attributed to it.
+
+Configure the App with repository permissions `contents: read`, `pull
+requests: write`, and `issues: write`. Add `checks: write` only when using
+`fail_on`. Then install it on the repositories it may review. Store its ID as
+the `LGTMAYBE_APP_ID` repository variable and its PEM private key as the
+`LGTMAYBE_APP_PRIVATE_KEY` Actions secret:
+
+```yaml
+permissions:
+  contents: read
+
+steps:
+  - uses: actions/checkout@v7
+  - uses: MattJColes/lgtmaybe@v1
+    with:
+      provider: openai
+      model: gpt-5.5
+      api_key: ${{ secrets.OPENAI_API_KEY }}
+      app_id: ${{ vars.LGTMAYBE_APP_ID }}
+      app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
+```
+
+Do not combine `app_id` / `app_private_key` with
+`github_identity: lgtmaybe`. The Action validates this before minting a token.
 
 ---
 
@@ -2852,6 +2996,7 @@ The only human-only pieces:
 
 - [One-time setup](#one-time-setup)
 - [Each release](#each-release)
+- [Rotate the public App private key](#rotate-the-public-app-private-key)
 - [Before going public](#before-going-public)
 
 ## One-time setup
@@ -2891,6 +3036,55 @@ The only human-only pieces:
    `release-please` workflow via **workflow_dispatch** with the tag name.
 4. If Windows publication needs recovery, dispatch `windows-exe` for the tag,
    then dispatch `winget` after the release asset is visible.
+
+## Rotate the public App private key
+
+Rotate the public `lgtmaybe` GitHub App key quarterly, whenever maintainer access
+changes, and immediately after any suspected exposure. Keep the old key active
+until the replacement has passed a brokered smoke test so rotation does not
+interrupt reviews.
+
+1. In the GitHub App settings, generate a new private key. Do not delete the old
+   key yet.
+2. From the directory containing the downloaded PEM, replace the retained
+   Secrets Manager value without printing the key:
+
+    ```bash
+    aws secretsmanager put-secret-value \
+      --secret-id lgtmaybe/github-app/private-key \
+      --secret-string file://lgtmaybe.private-key.pem \
+      --region ap-southeast-2
+    ```
+
+3. Refresh the Lambda configuration so every execution environment drops its
+   cached copy of the old key:
+
+    ```bash
+    FUNCTION_NAME="$(
+      aws cloudformation describe-stack-resources \
+        --stack-name LgtmaybeGithubAppIdentity \
+        --region ap-southeast-2 \
+        --query "StackResources[?ResourceType=='AWS::Lambda::Function'].PhysicalResourceId | [0]" \
+        --output text
+    )"
+    aws lambda update-function-configuration \
+      --function-name "$FUNCTION_NAME" \
+      --description "GitHub App key rotated $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --region ap-southeast-2
+    aws lambda wait function-updated-v2 \
+      --function-name "$FUNCTION_NAME" \
+      --region ap-southeast-2
+    ```
+
+4. Run a brokered dogfood review and confirm GitHub attributes it to
+   `lgtmaybe[bot]`.
+5. Delete the old key in the GitHub App settings, then delete the downloaded PEM
+   from the maintainer machine. Never paste the PEM into a command argument,
+   issue, workflow log, or repository file.
+
+If the smoke test fails, leave the old GitHub key active, put its PEM back into
+the same Secrets Manager secret, refresh the Lambda configuration again, and
+investigate before retrying.
 
 ## Before going public
 
