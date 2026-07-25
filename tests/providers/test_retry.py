@@ -378,7 +378,13 @@ class TestFailFastOnPermanentErrors:
         def slow_transient(*args: Any, **kwargs: Any) -> Any:
             nonlocal calls
             calls += 1
-            time.sleep(0.06)
+            # Must outlast the 0.05s wall bound by more than the platform's timer
+            # granularity, or `future.result(timeout=...)` can over-wait, see the
+            # call already finished, and surface this RuntimeError instead of the
+            # TimeoutError under test — 0.06s lost that race on Windows (~15.6ms
+            # granularity). The wall timeout abandons the worker thread rather
+            # than joining it, so a long sleep costs no test time.
+            time.sleep(1.0)
             raise RuntimeError("transient")
 
         with patch("litellm.completion", side_effect=slow_transient):
