@@ -1,5 +1,5 @@
 name: lgtmaybe
-description: Provider-agnostic PR reviewer. After Marketplace install, choose the provider, model, and authentication in your workflow.
+description: Provider-agnostic PR reviewer. Choose the provider, model, and authentication in your GitHub Actions workflow.
 author: Matt Coles
 branding:
   icon: check-circle
@@ -159,11 +159,11 @@ inputs:
     required: false
     default: ${{ github.token }}
   app_id:
-    description: "GitHub App ID. Set it (with app_private_key) to post reviews as your own branded App identity — e.g. lgtmaybe[bot] with an avatar, plus higher API rate limits — instead of the default github-actions[bot]. The App needs `pull requests: write` + `contents: read`. Left empty, the default workflow token is used."
+    description: "Advanced: ID of an existing GitHub App used with app_private_key. Most users should leave this empty and use the default workflow token."
     required: false
     default: ""
   app_private_key:
-    description: "Private key (PEM) of the GitHub App named by app_id. Wire a repository secret to it. Used only to mint a short-lived installation token, which is auto-revoked at the end of the job — no static key is stored."
+    description: "Advanced: private key (PEM) of the existing GitHub App named by app_id. Most users should leave this empty."
     required: false
     default: ""
   app_owner:

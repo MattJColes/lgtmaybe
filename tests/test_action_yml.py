@@ -21,6 +21,10 @@ _ACTION_YML = Path(__file__).parent.parent / "action.yml"
 _PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
 _RELEASE_PLEASE_CONFIG = Path(__file__).parent.parent / "release-please-config.json"
 _README = Path(__file__).parent.parent / "README.md"
+_GITHUB_APP_GUIDE = (
+    Path(__file__).parent.parent / "docs" / "how-to" / "post-as-a-github-app.md"
+)
+_MKDOCS = Path(__file__).parent.parent / "mkdocs.yml"
 
 # The container reads GITHUB_TOKEN; prefer the minted App token, else the default
 # workflow token. A skipped mint step yields an empty output, so ``||`` falls
@@ -77,6 +81,13 @@ def test_marketplace_setup_explains_workflow_configuration() -> None:
     assert "GitHub Marketplace" in action_section
     for input_name in ("provider:", "model:", "api_key:"):
         assert input_name in action_section
+
+
+def test_marketplace_setup_does_not_require_a_separate_github_app() -> None:
+    guide = _GITHUB_APP_GUIDE.read_text(encoding="utf-8")
+    assert "do not need to create or install a separate GitHub App" in guide
+    assert "[Use lgtmaybe as a GitHub Action](./use-as-github-action.md)" in guide
+    assert "Post reviews as a GitHub App" not in _MKDOCS.read_text(encoding="utf-8")
 
 
 def test_mint_step_is_pinned_and_gated_on_app_id() -> None:

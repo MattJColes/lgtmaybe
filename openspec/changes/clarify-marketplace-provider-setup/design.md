@@ -24,6 +24,7 @@ lgtmaybe is published to GitHub Marketplace as an Action. GitHub's Marketplace f
 2. Lead with one complete OpenAI example and link to the existing provider-specific workflows. A single working path is easier to scan, while the examples already encode the different keyless and key-based authentication shapes.
 3. Clarify the setup through `action.yml`, the README's GitHub Action section, and the focused how-to guide. These are the surfaces a Marketplace visitor and a repository adopter encounter.
 4. Add a small documentation acceptance test that asserts the quick-start example includes `provider`, `model`, and `api_key`. This protects the essential handoff without testing prose formatting.
+5. Do not promote creation of a separate GitHub App. GitHub Actions already supplies the default token, so the old App guide becomes a short compatibility page outside the navigation.
 
 ## Risks / Trade-offs
 

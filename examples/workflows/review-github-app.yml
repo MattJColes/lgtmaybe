@@ -1,14 +1,10 @@
 # Copy into your repo at .github/workflows/lgtmaybe.yml
 #
-# Post reviews under your own branded GitHub App identity (e.g. lgtmaybe[bot])
-# instead of the default github-actions[bot], with higher API rate limits.
+# Advanced: use this only if your organisation already operates a GitHub App
+# and wants reviews posted under that identity instead of github-actions[bot].
 #
 # This example uses Anthropic for the model, but the app_id / app_private_key
 # inputs work with ANY provider — add them to any of the other example workflows.
-#
-# One-time setup (create the App, grant it pull-requests:write + contents:read,
-# install it, store the ID + private key): see
-# https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/
 #
 # Secrets/variables to add:
 #   ANTHROPIC_API_KEY        (secret)   — your model provider key

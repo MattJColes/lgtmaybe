@@ -7,6 +7,7 @@ GitHub Marketplace can add the lgtmaybe Action to a workflow, but it cannot pres
 - Make the Marketplace-facing Action metadata state where provider and model selection happens.
 - Add a short Marketplace setup path that shows the minimum working `with:` block and credential secret.
 - Link directly to the provider-specific workflow examples for users who need Bedrock, Vertex, Azure, OpenRouter, z.ai, or an OpenAI-compatible endpoint.
+- Remove the separate GitHub App setup from the default journey and make the old URL clarify that the Marketplace listing is an Action.
 - Add a documentation acceptance check so the Marketplace setup cannot regress to an unconfigured `uses:` example.
 
 ## Capabilities
@@ -21,4 +22,4 @@ None.
 
 ## Impact
 
-The change is limited to Marketplace-facing Action metadata, setup documentation, and documentation tests. It does not change provider routing, authentication behavior, runtime defaults, dependencies, or the GitHub permissions model.
+The change is limited to Marketplace-facing Action metadata, setup documentation, navigation, and documentation tests. It does not change provider routing, authentication behavior, runtime defaults, dependencies, or the GitHub permissions model.

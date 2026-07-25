@@ -76,7 +76,6 @@ nav:
       - Install & run:
           - Install the CLI: how-to/install-the-cli.md
           - Use as a GitHub Action: how-to/use-as-github-action.md
-          - Post reviews as a GitHub App: how-to/post-as-a-github-app.md
       - Cloud providers (API key):
           - Review with OpenAI: how-to/review-with-openai.md
           - Review with Claude (Anthropic): how-to/review-with-anthropic.md
