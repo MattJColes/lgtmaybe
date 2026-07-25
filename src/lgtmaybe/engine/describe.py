@@ -113,15 +113,16 @@ def structured_comment(
     wanted: Callable[[dict[str, Any]], bool],
     render: Callable[[_M, bool], str],
     label: str,
+    fallback: Callable[[str], str] | None = None,
 ) -> str:
     """The shared one-call scaffold behind describe and diagram.
 
     Wraps the (redacted) stated intent and the (redacted, fitted, neutralised)
     diff — delimited with injection.py's own markers — makes one provider call,
     leniently parses the first JSON object *wanted* accepts into *result_model*,
-    and hands it to *render* (with whether an intent block was sent). Falls back
-    to the raw model text when nothing parses, so a weak model still yields a
-    usable comment.
+    and hands it to *render* (with whether an intent block was sent). When
+    nothing parses, callers may provide a safe fallback; otherwise the raw text
+    is preserved for compatibility with weak prose-only models.
     """
     intent = _intent_text(ctx)
     parts: list[str] = []
@@ -140,10 +141,13 @@ def structured_comment(
         model=cfg.model,
         **opts,
     )
-    parsed = _parse_structured(result.text, result_model, wanted)
+    parsed = parse_structured(result.text, result_model, wanted)
     if parsed is None:
-        _log.info("%s output unstructured — posting raw text", label)
-        return result.text
+        if fallback is None:
+            _log.info("%s output unstructured — posting raw text", label)
+            return result.text
+        _log.info("%s output did not match its schema — using safe fallback", label)
+        return fallback(result.text)
     return render(parsed, bool(intent))
 
 
@@ -163,7 +167,7 @@ def _fit_diff(diff: str, max_tokens: int) -> str:
     return "\n".join([*kept, _MAX_DIFF_LINES_OVER_BUDGET_MARKER])
 
 
-def _parse_structured(
+def parse_structured(
     raw: str, result_model: type[_M], wanted: Callable[[dict[str, Any]], bool]
 ) -> _M | None:
     """Leniently extract the first *wanted* JSON object from *raw*; None when absent."""

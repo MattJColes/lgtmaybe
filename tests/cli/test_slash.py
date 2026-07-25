@@ -96,7 +96,7 @@ class TestDispatch:
     def test_ask_replies_in_thread(self):
         github = FakeGitHub()
         answer = ProviderResult(
-            text="Because it re-scans the list on every iteration.",
+            text=json.dumps({"answer": "Because it re-scans the list on every iteration."}),
             input_tokens=10,
             output_tokens=8,
         )
@@ -113,6 +113,23 @@ class TestDispatch:
         assert github.posted == []  # not a review
         assert len(github.comments) == 1
         assert "re-scans the list" in github.comments[0]
+
+    def test_ask_rejects_review_shaped_json(self):
+        github = FakeGitHub()
+        provider = FakeProvider(
+            result=ProviderResult(text='{"findings": []}', input_tokens=1, output_tokens=1)
+        )
+
+        dispatch(
+            parse_command("/ask what files changed?"),
+            github=github,
+            engine=FakeEngine(provider),
+            provider=provider,
+            cfg=_cfg(),
+        )
+
+        assert github.comments == ["I couldn't produce a valid answer. Please try again."]
+        assert provider.calls[0]["opts"]["response_format"].__name__ == "AnswerResult"
 
     def test_ask_does_not_leak_the_question_back_as_an_instruction(self):
         """The PR diff is wrapped as untrusted; the provider is actually called."""
@@ -131,6 +148,7 @@ class TestDispatch:
 
         sent = " ".join(m.get("content", "") for call in provider.calls for m in call["messages"])
         assert "what does this do?" in sent
+        assert github.comments == ["answer"]
 
     def test_describe_upserts_the_description_comment(self):
         """/describe goes through the idempotent describe upsert, and an
@@ -184,7 +202,22 @@ class TestDispatch:
     def test_diagram_upserts_the_diagram_comment(self):
         """/diagram goes through the idempotent diagram upsert with a mermaid block."""
         github = FakeGitHub()
-        structured = json.dumps({"title": "Change map", "mermaid": 'flowchart LR\n    a["A"]'})
+        structured = json.dumps(
+            {
+                "title": "Change map",
+                "nodes": [
+                    {
+                        "id": "a",
+                        "label": "A",
+                        "technology": "",
+                        "description": "",
+                        "change": "changed",
+                    }
+                ],
+                "edges": [],
+                "notes": "",
+            }
+        )
         provider = FakeProvider(
             result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)
         )

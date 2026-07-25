@@ -379,21 +379,44 @@ class DescribeResult(_Strict):
     intent_check: str = ""
 
 
+class DiagramNode(_Strict):
+    """One component in the model's presentation-agnostic change graph."""
+
+    id: str
+    label: str
+    technology: str = ""
+    description: str = ""
+    change: Literal["unchanged", "changed", "new"] = "unchanged"
+
+
+class DiagramEdge(_Strict):
+    """One directed relationship between two diagram node ids."""
+
+    source: str
+    target: str
+    label: str = ""
+
+
 class DiagramResult(_Strict):
     """Structured-output envelope for the change-diagram pass.
 
-    The model returns a compact Mermaid flowchart of what the PR changes plus a
-    plain-text ASCII rendering of the same graph. Mermaid renders natively in a
-    GitHub comment; the ASCII is the terminal view for the local CLI and the
-    fallback the comment shows when the Mermaid can't be rendered. Every field
-    defaults empty so a partial answer still validates; a fully unparseable
-    answer falls back to the raw text.
+    The model returns presentation-agnostic nodes and edges. lgtmaybe renders
+    both Mermaid and ASCII locally so model-authored syntax never reaches a
+    Mermaid fence. ``ascii`` remains only as a compatibility fallback for weak
+    models that return the legacy C4-plus-text shape.
     """
 
     title: str = ""
-    mermaid: str = ""
+    nodes: list[DiagramNode] = Field(default_factory=list)
+    edges: list[DiagramEdge] = Field(default_factory=list)
     ascii: str = ""
     notes: str = ""
+
+
+class AnswerResult(_Strict):
+    """Task-specific structured envelope for a slash-command answer."""
+
+    answer: str
 
 
 class TriageFileVerdict(_Strict):

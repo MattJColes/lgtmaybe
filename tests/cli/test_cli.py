@@ -192,8 +192,24 @@ class TestDiagramCommand:
         payload = json.dumps(
             {
                 "title": "Change map",
-                "mermaid": 'flowchart LR\n    client["Client"] --> app["App"]',
-                "ascii": "[Client] --> [App]",
+                "nodes": [
+                    {
+                        "id": "client",
+                        "label": "Client",
+                        "technology": "",
+                        "description": "",
+                        "change": "unchanged",
+                    },
+                    {
+                        "id": "app",
+                        "label": "App",
+                        "technology": "",
+                        "description": "",
+                        "change": "changed",
+                    },
+                ],
+                "edges": [{"source": "client", "target": "app", "label": "calls"}],
+                "notes": "",
             }
         )
         result = ProviderResult(text=payload, input_tokens=1, output_tokens=1)
@@ -209,7 +225,7 @@ class TestDiagramCommand:
         assert result.exit_code == 0, result.output
         assert "```mermaid" in result.output
         assert "flowchart LR" in result.output
-        assert "[Client] --> [App]" in result.output
+        assert "[Client] --calls--> [App (changed)]" in result.output
 
     def test_working_and_uncommitted_flags_conflict(self, monkeypatch):
         self._patch_diagram_provider(monkeypatch)
