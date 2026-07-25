@@ -155,6 +155,20 @@ def test_review_config_unanchored_min_severity_defaults_to_high() -> None:
     assert cfg.unanchored_min_severity is Severity.high
 
 
+def test_review_config_fail_on_defaults_none() -> None:
+    # The merge-gate is off by default (non-breaking): no check run is created.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.fail_on is None
+
+
+def test_review_config_accepts_fail_on() -> None:
+    # A plain severity string coerces to the ordered Severity enum, so the gate
+    # can compare `finding.severity >= cfg.fail_on`.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", fail_on="high")
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.fail_on is Severity.high
+
+
 def test_review_finding_broad_defaults_false() -> None:
     # `broad` is engine-set (like `anchored`); a fresh finding is not broad.
     f = ReviewFinding(path="x.py", line=1, severity=Severity.high, title="t", body="b")

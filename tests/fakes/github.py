@@ -25,6 +25,7 @@ class FakeGitHub(GitHubGateway):
         self.comments: list[str] = []
         self.described: list[str] = []
         self.diagrams: list[str] = []
+        self.check_runs: list[dict[str, str]] = []
 
     def get_pr_context(self) -> PRContext:
         return self._ctx
@@ -46,3 +47,14 @@ class FakeGitHub(GitHubGateway):
     def post_diagram_comment(self, body: str) -> None:
         """Idempotent change-diagram upsert — beyond the frozen port."""
         self.diagrams.append(body)
+
+    def create_check_run(self, head_sha: str, conclusion: str, title: str, summary: str) -> None:
+        """Merge-gate Check Run (fail_on) — beyond the frozen port."""
+        self.check_runs.append(
+            {
+                "head_sha": head_sha,
+                "conclusion": conclusion,
+                "title": title,
+                "summary": summary,
+            }
+        )

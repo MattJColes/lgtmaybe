@@ -63,12 +63,18 @@ is never parsed.
 
 `ReviewConfig` SHALL be the single knob surface for a review (provider, model,
 filters, caps, toggles like `learn_feedback`); `Severity` SHALL order `info <
-low < medium < high < critical` so floors like `min_severity` compare with `>=`.
+low < medium < high < critical` so floors like `min_severity` and `fail_on`
+compare with `>=`. `fail_on` is an optional `Severity` (default `None` = off)
+driving the merge-gate Check Run.
 <!-- anchor: core.config -->
 
 #### Scenario: severity floor filters findings
 - **WHEN** `min_severity` is `medium`
 - **THEN** `low` and `info` findings are dropped before posting
+
+#### Scenario: merge-gate threshold is off by default
+- **WHEN** a `ReviewConfig` is built without `fail_on`
+- **THEN** `fail_on` is `None` and no check run is created
 
 ### Requirement: Nine built-in lenses, preset-shaped fan-out
 

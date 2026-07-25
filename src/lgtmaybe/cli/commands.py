@@ -141,6 +141,14 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     help="Minimum severity to report",
 )
 @click.option(
+    "--fail-on",
+    default=None,
+    type=click.Choice(["info", "low", "medium", "high", "critical"]),
+    help="Merge-gate threshold: on the GitHub Action, create a Check Run that "
+    "fails when any finding is at or above this severity (make it a required "
+    "check in branch protection). Default off",
+)
+@click.option(
     "--unanchored-min-severity",
     default=None,
     type=click.Choice(["info", "low", "medium", "high", "critical"]),
@@ -312,6 +320,7 @@ def review(
     api_key: str | None,
     api_base: str | None,
     min_severity: str | None,
+    fail_on: str | None,
     unanchored_min_severity: str | None,
     max_files: int | None,
     max_input_tokens: int | None,
@@ -351,6 +360,7 @@ def review(
         reflect_model=reflect_model,
         triage_model=triage_model,
         min_severity=min_severity,
+        fail_on=fail_on,
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
         max_input_tokens=max_input_tokens,
@@ -524,6 +534,7 @@ def action() -> None:
         auto_diagram=inputs["auto_diagram"],
         pr_labels=inputs["pr_labels"],
         learn_feedback=inputs["learn_feedback"],
+        fail_on=inputs["fail_on"],
     )
     cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
     runtime = RuntimeOptions(

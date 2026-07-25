@@ -431,6 +431,17 @@
       "title": "Extra Lenses",
       "type": "array"
     },
+    "fail_on": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Severity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"

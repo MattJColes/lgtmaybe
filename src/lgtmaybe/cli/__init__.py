@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -32,6 +33,7 @@ from lgtmaybe.core.models import (
     ReviewConfig,
     ReviewFinding,
     ReviewPreset,
+    Severity,
 )
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
@@ -341,8 +343,39 @@ def run_review(
                 from lgtmaybe.engine.labels import compute_labels
 
                 apply_labels(compute_labels(findings, ctx))
+        if cfg.fail_on is not None:
+            # Merge-gate: create a Check Run so branch protection can require it.
+            # Enforcement rides the Check Run, never PR approval state. Best-effort
+            # and only on gateways that support it (fakes/plain gateways don't).
+            create_check_run = getattr(github, "create_check_run", None)
+            if create_check_run is not None:
+                conclusion, title, check_summary = _fail_on_check(findings, cfg.fail_on)
+                create_check_run(ctx.head_sha, conclusion, title, check_summary)
 
     return findings, summary
+
+
+def _fail_on_check(findings: list[ReviewFinding], fail_on: Severity) -> tuple[str, str, str]:
+    """Build the (conclusion, title, summary) for the merge-gate Check Run.
+
+    ``failure`` when any surviving finding is at or above ``fail_on`` (the
+    findings are already the severity-floor-filtered set), else ``success``.
+    The summary carries the count at/above the threshold plus a per-severity
+    breakdown so the check page explains the verdict.
+    """
+    failing = [f for f in findings if f.severity >= fail_on]
+    conclusion = "failure" if failing else "success"
+    counts = Counter(f.severity for f in findings)
+    breakdown = ", ".join(f"{counts[s]} {s.value}" for s in Severity if counts[s]) or "none"
+    if failing:
+        title = f"{len(failing)} finding(s) at or above {fail_on.value}"
+    else:
+        title = f"No findings at or above {fail_on.value}"
+    summary = (
+        f"{len(failing)} of {len(findings)} finding(s) are at or above the "
+        f"`{fail_on.value}` threshold.\n\nFindings by severity: {breakdown}."
+    )
+    return conclusion, title, summary
 
 
 def _incremental_context(
@@ -631,6 +664,7 @@ def action_inputs() -> dict[str, str | None]:
         "auto_diagram": get("AUTO_DIAGRAM"),
         "pr_labels": get("PR_LABELS"),
         "learn_feedback": get("LEARN_FEEDBACK"),
+        "fail_on": get("FAIL_ON"),
         "profile": get("PROFILE"),
         "config_path": get("CONFIG_PATH"),
     }

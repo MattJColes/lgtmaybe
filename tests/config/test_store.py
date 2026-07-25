@@ -33,6 +33,13 @@ def test_set_coerces_to_field_type(cfg_home: Path) -> None:
     assert store.get_key("max_files") == 25  # int, not "25"
 
 
+def test_set_fail_on_round_trips(cfg_home: Path) -> None:
+    # A nullable-Severity field coerces the string to the enum's plain value.
+    store.set_key("fail_on", "high")
+
+    assert store.get_key("fail_on") == "high"
+
+
 def test_set_validates_enum_value(cfg_home: Path) -> None:
     with pytest.raises(ValueError):
         store.set_key("provider", "not-a-provider")
