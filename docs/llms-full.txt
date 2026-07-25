@@ -470,12 +470,14 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 - [Review with Vertex WIF](./review-with-vertex-wif.md)
 - [Review with Azure OpenAI](./review-with-azure.md)
 
-## Post reviews as a GitHub App
+## Post reviews as a GitHub App (recommended)
 
-By default reviews post as `github-actions[bot]` using the workflow token. To post
-as **your own branded identity** — e.g. `lgtmaybe[bot]` with an avatar — with
-higher API rate limits (and optional cross-repo reach), pass `app_id` and
-`app_private_key`. The action mints a short-lived installation token, uses it to
+By default reviews post as `github-actions[bot]` using the workflow token. The
+**recommended setup** is to post as **your own branded identity** — e.g.
+`lgtmaybe[bot]` with an avatar — with higher API rate limits (and optional
+cross-repo reach): pass `app_id` and `app_private_key`. It costs a one-time
+five-minute App setup, and reviews are clearly attributed to the reviewer
+rather than blending into every other `github-actions[bot]` comment. The action mints a short-lived installation token, uses it to
 fetch the diff and post the review, and revokes it at the end of the job. This is
 purely the *posting identity* — the keyless cloud model is unchanged and
 everything still runs in your own CI.
@@ -596,9 +598,13 @@ uses: MattJColes/lgtmaybe@v1.0.0
 # Post reviews as a GitHub App
 
 By default lgtmaybe posts reviews as `github-actions[bot]` using the workflow's
-built-in token. Point it at a **GitHub App** you own and reviews post under that
-App's identity instead — a branded `lgtmaybe[bot]` name and avatar, a higher API
-rate limit, and optional access across several repositories.
+built-in token. The **recommended setup** is to point it at a **GitHub App** you
+own so reviews post under that App's identity instead — a branded
+`lgtmaybe[bot]` name and avatar, a higher API rate limit, and optional access
+across several repositories. The default token still works and every workflow
+falls back to it when the App inputs are empty, but the App identity is worth
+the one-time setup: reviews are clearly attributed, and busy repos don't share
+the workflow token's rate limit.
 
 This changes only the **posting identity**. The action still runs in your own CI,
 still fetches the diff via the API without checking out PR code, and the keyless
