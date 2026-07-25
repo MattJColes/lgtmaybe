@@ -218,7 +218,7 @@ runs:
     - name: Mint a GitHub App token (branded bot identity)
       id: app-token
       if: ${{ inputs.app_id != '' }}
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@v3
       with:
         # Empty owner/repositories scope the token to the current repository;
         # set them to review PRs across a monorepo/org. The token is short-lived

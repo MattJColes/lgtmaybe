@@ -90,7 +90,7 @@ def test_marketplace_setup_does_not_require_a_separate_github_app() -> None:
 
 def test_mint_step_is_pinned_and_gated_on_app_id() -> None:
     step = _mint_step()
-    assert step["uses"] == "actions/create-github-app-token@v2", (
+    assert step["uses"] == "actions/create-github-app-token@v3", (
         "pin the mint action to a major tag, matching the other bundled actions"
     )
     assert "app_id" in str(step.get("if", "")), (
