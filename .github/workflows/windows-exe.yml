@@ -1,0 +1,111 @@
+name: windows executable
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version or tag to build, e.g. 1.0.0 or lgtmaybe-v1.0.0."
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version or tag to build, e.g. 1.0.0 or lgtmaybe-v1.0.0."
+        required: true
+        type: string
+      force:
+        description: "Replace the release asset when it already exists."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}" -replace '^lgtmaybe-v', '' -replace '^v', ''
+          if (-not $v) {
+            throw "version is required"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "tag=lgtmaybe-v$v" >> $env:GITHUB_OUTPUT
+          "asset=lgtmaybe-$v-windows-x86_64.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Skip if the release asset already exists
+        id: idem
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $assets = gh release view "${{ steps.ver.outputs.tag }}" --json assets --jq '.assets[].name'
+          if ($LASTEXITCODE -ne 0) {
+            throw "release ${{ steps.ver.outputs.tag }} does not exist"
+          }
+          $exists = $assets -contains "${{ steps.ver.outputs.asset }}"
+          $force = "${{ inputs.force }}" -eq "true"
+          if ($exists -and -not $force) {
+            "skip=true" >> $env:GITHUB_OUTPUT
+            Write-Output "Release asset already exists; nothing to do."
+          }
+
+      - uses: actions/checkout@v7
+        if: steps.idem.outputs.skip != 'true'
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+
+      - name: Install uv
+        if: steps.idem.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Sync locked packaging environment
+        if: steps.idem.outputs.skip != 'true'
+        run: uv sync --frozen --no-dev --group packaging
+
+      - name: Build executable
+        if: steps.idem.outputs.skip != 'true'
+        run: uv run pyinstaller packaging/pyinstaller/lgtmaybe.spec
+
+      - name: Smoke-test executable
+        id: smoke
+        if: steps.idem.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path ".\dist\lgtmaybe.exe"
+          $help = & $exe --help
+          if ($LASTEXITCODE -ne 0 -or -not ($help | Select-String -Quiet "Usage")) {
+            throw "lgtmaybe.exe --help failed"
+          }
+          $configPath = & $exe config path
+          if ($LASTEXITCODE -ne 0 -or -not $configPath) {
+            throw "lgtmaybe.exe config path failed"
+          }
+          $reviewHelp = & $exe help review
+          if ($LASTEXITCODE -ne 0 -or -not ($reviewHelp | Select-String -Quiet "Usage")) {
+            throw "lgtmaybe.exe help review failed"
+          }
+
+          $size = (Get-Item $exe).Length
+          Write-Output "Executable size: $size bytes ($([math]::Round($size / 1MB, 1)) MiB)"
+          Copy-Item $exe "${{ steps.ver.outputs.asset }}"
+
+      - name: Upload release asset
+        if: steps.idem.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.ver.outputs.tag }}" `
+            "${{ steps.ver.outputs.asset }}" --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release upload failed with exit code $LASTEXITCODE"
+          }

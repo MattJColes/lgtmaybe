@@ -37,6 +37,24 @@ class Severity(StrEnum):
     def rank(self) -> int:
         return _SEVERITY_ORDER.index(self)
 
+    # All four order comparisons rank by severity. Defined explicitly (not via
+    # functools.total_ordering, which skips operators str already defines) so
+    # none can fall back to str's alphabetical order, where "critical" < "high".
+    def __lt__(self, other: object) -> bool:
+        if isinstance(other, Severity):
+            return self.rank < other.rank
+        return NotImplemented
+
+    def __le__(self, other: object) -> bool:
+        if isinstance(other, Severity):
+            return self.rank <= other.rank
+        return NotImplemented
+
+    def __gt__(self, other: object) -> bool:
+        if isinstance(other, Severity):
+            return self.rank > other.rank
+        return NotImplemented
+
     def __ge__(self, other: object) -> bool:
         if isinstance(other, Severity):
             return self.rank >= other.rank
@@ -76,14 +94,13 @@ class ReviewCategory(StrEnum):
 class ReviewPreset(StrEnum):
     """How many model calls a review spends: the everyday path or the deep audit.
 
-    ``fast`` (the default) covers all nine built-in lenses in four calls:
-    security and correctness keep dedicated calls (they earn it; the stated
-    intent, when present, merges into correctness), while the remaining six
-    fold into two combined calls — code health (performance, complexity,
-    ponytail, deprecation) and supporting artefacts (tests, documentation).
-    ``full`` runs each of the nine lenses as its own call — more per-lens
-    focus for release branches and deep audits, at ~2× the calls and wall
-    time. An explicit ``categories`` list always wins over the preset.
+    ``fast`` (the default) covers seven built-in lenses in four calls when the
+    provider can overlap work: security, correctness flow/intent, correctness
+    state/lifecycle, and code health. With one worker, correctness stays
+    combined for three calls.
+    ``full`` restores tests and documentation and runs each of the nine lenses
+    as its own call for release branches and deep audits. An explicit
+    ``categories`` list always wins over the preset.
     """
 
     fast = "fast"
@@ -429,6 +446,11 @@ class PRContext(_Strict):
     title: str = ""
     description: str = ""
     commit_messages: list[str] = Field(default_factory=list)
+    # Fingerprints of our own findings an authorised reviewer reacted 👎 to on a
+    # previous run (read from GitHub each run — no local persistence). Suppression
+    # drops matching findings, except high/critical security findings, which a
+    # downvote can never hide. Populated by the CLI, empty by default.
+    feedback_downvotes: frozenset[str] = frozenset()
 
 
 class ReviewConfig(_Strict):
@@ -448,6 +470,13 @@ class ReviewConfig(_Strict):
     # high/critical guess is worth surfacing (demoted to the review body, never
     # posted on a line we can't stand behind); anything weaker is dropped.
     unanchored_min_severity: Severity = Severity.high
+    # Merge-gate threshold. When set, after posting the review the GitHub adapter
+    # creates a Check Run whose conclusion is `failure` if any surviving finding
+    # is at or above this severity, else `success` — so a team can make lgtmaybe a
+    # required check in branch protection. Enforcement rides the Check Run, never
+    # PR approval state (lgtmaybe never sets approval state). None (default) = off,
+    # non-breaking: no check run is created.
+    fail_on: Severity | None = None
     include_paths: list[str] = Field(default_factory=list)
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50
@@ -480,9 +509,9 @@ class ReviewConfig(_Strict):
     # languages or any ast-grep failure. Off = fixed-line padding only.
     function_context: bool = True
     # Per-request timeout (seconds) for each provider completion call. None means
-    # "auto": the factory picks a provider-aware default (ollama gets a long one,
-    # since local models are slow; cloud providers a short one). An explicit value
-    # always wins.
+    # "auto": the factory picks a provider-aware default (long for providers that
+    # may front a slow model — ollama, openai-compatible, openrouter — short for
+    # direct cloud providers). An explicit value always wins.
     timeout: int | None = None
     # Sampling temperature for completions. Defaults to 0.0 for deterministic,
     # reproducible reviews (and steadier instruction-following on small models).
@@ -490,11 +519,24 @@ class ReviewConfig(_Strict):
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True
+    # Answer a PR author who replies inside a review conversation lgtmaybe opened
+    # on a finding: the reply is answered in that same thread, using the finding
+    # and its surrounding diff hunk as context. GitHub posting only (a
+    # pull_request_review_comment event); the reply text is treated as untrusted
+    # input. On by default; set false to leave finding threads unanswered.
+    answer_replies: bool = True
     # Model used for the self-reflection (false-positive audit) pass. None falls
     # back to `model`. Point it at a stronger model so a weaker reviewer's findings
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Human language for the reviewer's prose. When set, finding `title`/`body`
+    # (and the describe/diagram prose) are written in this language, while the
+    # structural fields (`path`, `line`, `side`, `severity`, `anchor`) and the
+    # `suggestion` code stay untranslated. None (default) = English, and emits
+    # the pre-language prompts byte-for-byte (the prompt-cache contract depends
+    # on that default staying stable).
+    language: str | None = None
     # Declarative finding post-processing, applied in order just before
     # posting: each rule's match (path glob / category / title substring /
     # severity floor, ANDed) selects findings and its action drops them or
@@ -523,8 +565,9 @@ class ReviewConfig(_Strict):
     # a Mermaid flowchart of the components the PR touches (with an ASCII
     # fallback), rendered natively in the comment — when a PR is opened or
     # reopened. Its own comment, updated in place on later /diagram runs.
-    # Best-effort; a diagram failure never blocks the review. Default off.
-    auto_diagram: bool = False
+    # Best-effort; a diagram failure never blocks the review. Default on —
+    # no yaml needed; set false to opt out.
+    auto_diagram: bool = True
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the
@@ -548,6 +591,13 @@ class ReviewConfig(_Strict):
     # reflection and posting. Set it in .lgtmaybe.yml; an inline `# lgtmaybe: ignore`
     # comment on (or just above) a flagged line suppresses that finding too.
     ignore_fingerprints: list[str] = Field(default_factory=list)
+    # Feedback learning (GitHub posting only): on a re-run, suppress a finding a
+    # human reacted 👎 (thumbs-down) to on its inline comment last time. The 👎
+    # reactions live on GitHub and are re-read each run (no new persistence); a
+    # downvoted finding's fingerprint is merged into ignore_fingerprints and
+    # dropped before reflection and posting. Resolving a thread is NOT a suppress
+    # signal — that means "fixed" and is handled by resolve-on-fix. Default on.
+    learn_feedback: bool = True
     # Static-analysis fusion: run installed deterministic linters (ruff,
     # bandit, semgrep-with-local-rules) over the changed files and feed their
     # findings into the lens prompts as untrusted hints to confirm or discard.
@@ -570,9 +620,10 @@ class ReviewConfig(_Strict):
     # replies and resolves the conversation. GitHub posting only — ignored by the
     # local CLI review, which has no conversations to resolve.
     resolve_fixed: bool = True
-    # Call-count preset (see ReviewPreset): `fast` (default) covers all nine
-    # built-in lenses in four calls; `full` runs one call per lens for release
-    # branches and deep audits. An explicit `categories` list overrides it.
+    # Call-count preset (see ReviewPreset): `fast` (default) covers seven
+    # built-in lenses in four calls when the provider can overlap work (three
+    # with one worker); `full` restores tests/documentation and runs one call
+    # per lens. An explicit `categories` list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the
@@ -591,9 +642,10 @@ class ReviewConfig(_Strict):
     # findings post, and the summary carries the existing "results may be
     # incomplete" notice naming the skipped calls. It can never turn a total
     # failure into a silent LGTM — a run where every call failed or was
-    # skipped still fails loud. Generous by default (10 minutes); 0 disables
-    # the ceiling entirely.
-    max_review_seconds: int = Field(default=600, ge=0)
+    # skipped still fails loud. Generous by default (30 minutes — 2× the
+    # generous per-call timeout, so one slow gateway/local call can't eat the
+    # whole review budget); 0 disables the ceiling entirely.
+    max_review_seconds: int = Field(default=1800, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
     # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
     # providers (their retry layer absorbs a capacity 429, and on bedrock cache

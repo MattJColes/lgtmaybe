@@ -2,6 +2,11 @@
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
 # Add an OPENROUTER_API_KEY repo secret.
 #
+# Reviews post as lgtmaybe[bot] (name + avatar) via the GitHub App identity —
+# see docs/how-to/post-as-a-github-app.md. Set the LGTMAYBE_APP_ID repo
+# variable and LGTMAYBE_APP_PRIVATE_KEY secret; until they exist the action
+# falls back to the default workflow token (github-actions[bot]).
+#
 # Reviews run automatically on PRs from trusted authors (owner / member /
 # collaborator), and on demand via slash commands (/review, /improve, /ask,
 # /describe, /diagram) — a maintainer can opt an external PR in by commenting
@@ -12,6 +17,8 @@ name: lgtmaybe
 on:
   pull_request_target:
   issue_comment:
+    types: [created]
+  pull_request_review_comment:
     types: [created]
 
 # pull_request_target and issue_comment run against the BASE repo (secrets
@@ -35,6 +42,8 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     # A healthy full review runs in a handful of minutes; cap it so a wedged
@@ -48,4 +57,7 @@ jobs:
         with:
           provider: openrouter
           model: deepseek/deepseek-v4-pro
+          profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          app_id: ${{ vars.LGTMAYBE_APP_ID }}
+          app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}

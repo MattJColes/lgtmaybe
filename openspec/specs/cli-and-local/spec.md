@@ -56,6 +56,24 @@ same engine and provider stack.
 - **THEN** the C4 source is not posted as Mermaid and the ASCII rendering is
   shown instead
 
+### Requirement: Finding-thread replies are answered in-thread
+
+A `pull_request_review_comment` reply in a finding thread lgtmaybe opened SHALL
+be answered in that same thread — using the finding and its surrounding diff
+hunk as context, the reply treated as untrusted input — only when it is a
+freshly *created* reply from a non-bot author whose thread root carries the
+finding marker, and gated on `answer_replies`; every other case posts nothing so
+the reviewer never answers itself.
+<!-- anchor: cli.review-reply -->
+
+#### Scenario: PR author replies in a finding thread
+- **WHEN** the author replies to a lgtmaybe finding comment and `answer_replies` is on
+- **THEN** lgtmaybe answers in that thread using the finding + hunk as context
+
+#### Scenario: a bot reply arrives
+- **WHEN** the review-comment author is a bot, or it is not a freshly created reply
+- **THEN** nothing is posted, so the reviewer never loops on its own replies
+
 ### Requirement: Local review needs no GitHub
 
 `lgtmaybe review` in a repo SHALL build the context from git alone: branch
@@ -73,9 +91,33 @@ commit subjects feeding the intent lens.
 
 Config SHALL merge user-level file → repo `.lgtmaybe.yml` → CLI flags (most
 specific wins), and the user-level store persists only non-secret defaults —
-API keys stay in the environment, never written to disk.
+API keys stay in the environment, never written to disk. An explicitly chosen
+config path (`--config` / the Action's `config_path`) must exist and parse to
+a mapping — a typo'd path fails loudly rather than silently running with
+defaults; the default `.lgtmaybe.yml` probe stays lenient when absent.
 <!-- anchor: cli.config -->
 
 #### Scenario: user tries to persist a key
 - **WHEN** `lgtmaybe config set` targets an API key
 - **THEN** it is refused; keys are read from env/flags at run time only
+
+### Requirement: Text boundaries are deterministic across host locales
+
+The CLI, local git adapter, and configuration store SHALL read and write owned
+text as UTF-8 on every host. External subprocess output MUST decode as UTF-8
+with undecodable bytes replaced, and CLI stdout and stderr MUST emit safely
+when the inherited stream uses a legacy Windows encoding.
+<!-- anchor: cli.utf8-boundaries -->
+
+#### Scenario: configuration contains non-Latin text
+- **WHEN** a user stores and reloads non-Latin configuration values on Windows
+- **THEN** the values round-trip as UTF-8 without locale-dependent corruption
+
+#### Scenario: a clean review writes an emoji to redirected output
+- **WHEN** stdout is redirected through a cp1252 text stream
+- **THEN** the CLI emits the summary without raising `UnicodeEncodeError`
+
+#### Scenario: git emits an undecodable byte
+- **WHEN** the local git subprocess returns output that is not valid UTF-8
+- **THEN** the command retains the decodable output and replaces only the
+  malformed byte sequence

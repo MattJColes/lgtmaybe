@@ -37,17 +37,19 @@ _PREFIXES: dict[Provider, str] = {
     Provider.zai: "zai",
 }
 
-# Default per-request timeout (seconds) when the caller doesn't set one. Local
-# models are slow — and the per-category fan-out runs them serially — so the
-# providers that can front a local server (ollama, and openai-compatible pointing
-# at llama.cpp / LM Studio / vLLM) get a generous default; cloud providers respond
-# fast. An explicit --timeout always wins, so a fast cloud openai-compatible
-# endpoint (e.g. DeepSeek) can dial it down.
-_LOCAL_TIMEOUT = 300
-_CLOUD_TIMEOUT = 60
+# Default per-request timeout (seconds) when the caller doesn't set one. Some
+# providers can't be assumed fast: the ones that can front a slow local server
+# (ollama, and openai-compatible pointing at llama.cpp / LM Studio / vLLM), and
+# openrouter, a gateway to arbitrary third-party models — including reasoning
+# models that routinely think slowly on a large diff. Those get a generous
+# default; direct cloud providers get a shorter one that still leaves room
+# for a reasoning model to think. An explicit --timeout always wins, so a
+# fast endpoint can dial it down.
+_SLOW_TIMEOUT = 900
+_CLOUD_TIMEOUT = 300
 
-# Providers whose endpoint may be a slow, locally hosted model.
-_LOCAL_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible})
+# Providers whose endpoint may be a slow model (local server or open gateway).
+_SLOW_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})
 
 # Ollama context window. Big enough to hold a real review prompt + diff + the
 # emitted findings; ollama's own default (~4k) truncates the output to a stub.
@@ -58,7 +60,7 @@ _OLLAMA_NUM_CTX = 32768
 
 def default_timeout_for(provider: Provider) -> int:
     """The auto timeout (seconds) for a provider when none is given explicitly."""
-    return _LOCAL_TIMEOUT if provider in _LOCAL_CAPABLE else _CLOUD_TIMEOUT
+    return _SLOW_TIMEOUT if provider in _SLOW_CAPABLE else _CLOUD_TIMEOUT
 
 
 def cheaper_reflect_sibling(provider: Provider, model: str) -> str | None:

@@ -27,7 +27,7 @@ MKDOCS_PATH = DOCS.parent / "mkdocs.yml"
 LLMS_PATH = DOCS / "llms.txt"
 LLMS_FULL_PATH = DOCS / "llms-full.txt"
 
-SITE_URL = "https://mattjcoles.github.io/lgtmaybe/"
+SITE_URL = "https://lgtmaybe.coles.codes/"
 
 SUMMARY = (
     "Provider-agnostic AI pull-request reviewer. It posts inline review comments "

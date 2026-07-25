@@ -11,11 +11,18 @@ a refactor of the YAML can't silently drop the fallback or the gate.
 
 from __future__ import annotations
 
+import json
+import tomllib
 from pathlib import Path
 
 import yaml
 
 _ACTION_YML = Path(__file__).parent.parent / "action.yml"
+_PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
+_RELEASE_PLEASE_CONFIG = Path(__file__).parent.parent / "release-please-config.json"
+_README = Path(__file__).parent.parent / "README.md"
+_GITHUB_APP_GUIDE = Path(__file__).parent.parent / "docs" / "how-to" / "post-as-a-github-app.md"
+_MKDOCS = Path(__file__).parent.parent / "mkdocs.yml"
 
 # The container reads GITHUB_TOKEN; prefer the minted App token, else the default
 # workflow token. A skipped mint step yields an empty output, so ``||`` falls
@@ -51,6 +58,36 @@ def test_declares_github_app_inputs() -> None:
         assert name in inputs, f"action.yml must declare the '{name}' input"
 
 
+def test_marketplace_setup_explains_workflow_configuration() -> None:
+    action = _action()
+    marketplace_copy = " ".join(
+        [
+            action["description"],
+            action["inputs"]["provider"]["description"],
+            action["inputs"]["model"]["description"],
+            action["inputs"]["api_key"]["description"],
+        ]
+    ).lower()
+    for term in ("workflow", "provider", "model", "api key"):
+        assert term in marketplace_copy
+
+    action_section = (
+        _README.read_text(encoding="utf-8")
+        .split("## Use as a GitHub Action", maxsplit=1)[1]
+        .split("## Distribution", maxsplit=1)[0]
+    )
+    assert "GitHub Marketplace" in action_section
+    for input_name in ("provider:", "model:", "api_key:"):
+        assert input_name in action_section
+
+
+def test_marketplace_setup_does_not_require_a_separate_github_app() -> None:
+    guide = _GITHUB_APP_GUIDE.read_text(encoding="utf-8")
+    assert "do not need to create or install a separate GitHub App" in guide
+    assert "[Use lgtmaybe as a GitHub Action](./use-as-github-action.md)" in guide
+    assert "Post reviews as a GitHub App" not in _MKDOCS.read_text(encoding="utf-8")
+
+
 def test_mint_step_is_pinned_and_gated_on_app_id() -> None:
     step = _mint_step()
     assert step["uses"] == "actions/create-github-app-token@v2", (
@@ -66,3 +103,16 @@ def test_mint_step_is_pinned_and_gated_on_app_id() -> None:
 
 def test_container_token_prefers_the_minted_app_token() -> None:
     assert _run_lgtmaybe_step()["env"]["GITHUB_TOKEN"] == _TOKEN_EXPR
+
+
+def test_default_container_image_tracks_package_major() -> None:
+    version = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    major = version.split(".", maxsplit=1)[0]
+
+    assert _action()["inputs"]["image"]["default"] == f"ghcr.io/mattjcoles/lgtmaybe:v{major}"
+
+
+def test_release_please_is_not_pinned_to_a_consumed_version() -> None:
+    config = json.loads(_RELEASE_PLEASE_CONFIG.read_text(encoding="utf-8"))
+
+    assert "release-as" not in config["packages"]["."]

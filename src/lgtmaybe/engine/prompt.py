@@ -39,7 +39,7 @@ path (string), line (integer), side ("LEFT" or "RIGHT", default "RIGHT"), severi
 the levels above), title (string ≤ 80 chars), body (string), suggestion (string or null), \
 anchor (string — the verbatim flagged line, see below).
 
-Report each distinct issue as its own finding — several findings may share a line.
+Report each distinct issue as its own finding.
 
 ### How to fill `body` and `suggestion`
 
@@ -66,6 +66,35 @@ about — copy it straight from the diff with its leading `+`/`-` marker removed
 the original indentation, and nothing else. Counting lines is error-prone, so `anchor`
 is what actually places the comment: it must match a changed line character-for-character.
 """
+
+
+def _language_directive(language: str) -> str:
+    """The output-language directive appended to the shared header when set.
+
+    Only the prose fields are translated: the structural fields and the
+    ``suggestion`` (literal replacement code) must stay in the source language so
+    anchoring, severity comparison, and one-click apply keep working.
+    """
+    return (
+        "\n## Output language\n\n"
+        f"Write the `title` and `body` fields in {language}. Leave `path`, `line`, "
+        "`side`, `severity`, and `anchor` unchanged, and keep `suggestion` as literal "
+        "replacement code — do not translate it.\n"
+    )
+
+
+@lru_cache(maxsize=8)
+def _localised_header(language: str | None) -> str:
+    """``_SHARED_HEADER``, plus an output-language directive when *language* is set.
+
+    Byte-identical to ``_SHARED_HEADER`` when *language* is falsy (the default) —
+    the prompt-cache contract depends on the unset prompt never drifting. Keyed on
+    *language* (constant within a run), so every lens in a fan-out reads the same
+    cached header.
+    """
+    if not language:
+        return _SHARED_HEADER
+    return _SHARED_HEADER + _language_directive(language)
 
 
 def _example_block(
@@ -123,6 +152,26 @@ _CORRECTNESS_EXAMPLE = _example_block(
         "body": "Indexing with len(items) raises IndexError; the last index is len(items) - 1.",
         "suggestion": "    return items[-1]",
         "anchor": "    return items[len(items)]",
+    },
+)
+
+_CORRECTNESS_STATE_EXAMPLE = _example_block(
+    "--- a/cache.py\n"
+    "+++ b/cache.py\n"
+    "@@ -8,1 +8,3 @@\n"
+    " def get_or_create(key):\n"
+    "+    if key not in cache:\n"
+    "+        cache[key] = create_value(key)\n",
+    {
+        "path": "cache.py",
+        "line": 9,
+        "side": "RIGHT",
+        "severity": "high",
+        "title": "Check-then-act race can create the value twice",
+        "body": "Concurrent callers can both observe a missing key and run create_value. "
+        "Protect the read-modify-write sequence or use an atomic cache operation.",
+        "suggestion": None,
+        "anchor": "    if key not in cache:",
     },
 )
 
@@ -271,12 +320,11 @@ _INTENT_EXAMPLE = _example_block(
 # The monolithic (no-category) prompt keeps a single generic example.
 _GENERIC_EXAMPLE = _SECURITY_EXAMPLE
 
-_CORRECTNESS_SECTION = """\
-## Correctness & logic (the substance of the change)
-
+_CORRECTNESS_INTRO = """\
 Actively hunt for bugs the change introduces — these are high-value findings,
-graded `high` or `critical` when they cause wrong results, crashes, or data loss:
+graded `high` or `critical` when they cause wrong results, crashes, or data loss."""
 
+_CORRECTNESS_FLOW_CHECKS = """\
 - **Null / None dereferences** — a value that can be `null`/`None`/undefined used
   without a guard; an Optional unwrapped on a path where it may be empty.
 - **Off-by-one & boundary errors** — `<` vs `<=`, fencepost mistakes, indexing
@@ -287,20 +335,44 @@ graded `high` or `critical` when they cause wrong results, crashes, or data loss
   swallowed, a result/error left unchecked, a path that leaves state half-updated.
 - **Incorrect conditionals** — inverted booleans, `and`/`or` mix-ups, missing
   branches, comparisons against the wrong variable.
+- **Numeric errors** — integer overflow or truncation, float equality
+  comparisons, division by zero, money handled in binary floats, precision loss.
+- **Wrong validation anchoring** — a regex anchored with `match` where full-match
+  semantics are needed, letting bad input through."""
+
+_CORRECTNESS_STATE_CHECKS = """\
 - **Resource leaks & ordering** — handles/locks/connections not released,
   use-after-close, or operations sequenced so a concurrent caller sees a bad state.
 - **Races & concurrency** — check-then-act (TOCTOU) sequences, shared mutable
   state read or written without synchronisation, non-atomic read-modify-write,
   and async mistakes: a coroutine called without `await`, blocking calls inside
   an async path.
-- **Numeric errors** — integer overflow or truncation, float equality
-  comparisons, division by zero, money handled in binary floats, precision loss.
 - **Date & time bugs** — timezone-naive datetimes mixed with aware ones,
   seconds/milliseconds epoch confusion, DST-unsafe date arithmetic.
 - **Aliasing & mutation** — mutable default arguments, storing a mutable value
-  the caller still owns, mutating a collection while iterating over it.
-- **Wrong validation anchoring** — a regex anchored with `match` where full-match
-  semantics are needed, letting bad input through."""
+  the caller still owns, mutating a collection while iterating over it."""
+
+_CORRECTNESS_FLOW_SECTION = f"""\
+## Correctness & control/data flow
+
+{_CORRECTNESS_INTRO}
+
+{_CORRECTNESS_FLOW_CHECKS}"""
+
+_CORRECTNESS_STATE_SECTION = f"""\
+## Correctness & state/lifecycle
+
+{_CORRECTNESS_INTRO}
+
+{_CORRECTNESS_STATE_CHECKS}"""
+
+_CORRECTNESS_SECTION = f"""\
+## Correctness & logic (the substance of the change)
+
+{_CORRECTNESS_INTRO}
+
+{_CORRECTNESS_FLOW_CHECKS}
+{_CORRECTNESS_STATE_CHECKS}"""
 
 _SECURITY_SECTION = """\
 ## Security review (be thorough — these are high-value findings)
@@ -499,9 +571,10 @@ keep this lens to "should this exist at all?" — leave readability nits to othe
 
 # ---------------------------------------------------------------------------
 # Fast-preset merged lenses. Written as integrated checklists (not a paste-up
-# of the per-lens sections): four calls must cover what nine did, so each
-# merged prompt condenses its members to their high-signal items and demands
-# the per-finding `category` field so downstream rules/labels keep working.
+# of the per-lens sections): the bounded pool runs four calls when parallelism
+# is available, or three combined calls with one worker. Each merged prompt
+# condenses its members to their high-signal items and demands the per-finding
+# `category` field so downstream rules/labels keep working.
 # ---------------------------------------------------------------------------
 
 _CODE_HEALTH_SECTION = """\
@@ -616,12 +689,10 @@ class LensGroup:
 # The fast preset's grouping (a judgement call the profile can't settle, so
 # here is the reasoning): security and correctness are the two lenses whose
 # recall is worth a dedicated, focused call — they find the merge-blocking
-# bugs. The other six split by what the reviewer is looking AT: code health
-# reads the changed code itself (how it performs, how complex it is, whether
-# it should exist, what it depends on), artefacts reads what should accompany
-# the code (tests, docs). Members that grade similarly and share framing merge
-# well; splitting differently (e.g. perf+tests) would force one call to switch
-# between unrelated rubrics.
+# bugs. Code health keeps the lower-cost concerns that inspect the changed code
+# itself. Tests and documentation are reserved for full/explicit reviews: the
+# default artefacts call was the slowest call in production while yielding no
+# findings, so it did not earn a place in the everyday path.
 CODE_HEALTH_GROUP = LensGroup(
     id="code-health",
     members=(
@@ -633,18 +704,12 @@ CODE_HEALTH_GROUP = LensGroup(
     section=_CODE_HEALTH_SECTION,
     example=_PERFORMANCE_EXAMPLE,
 )
-ARTEFACTS_GROUP = LensGroup(
-    id="artefacts",
-    members=(ReviewCategory.tests, ReviewCategory.documentation),
-    section=_ARTEFACTS_SECTION,
-    example=_TESTS_EXAMPLE,
-)
-FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
+FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP,)
 
 
-def build_group_prompt(group: LensGroup) -> str:
+def build_group_prompt(group: LensGroup, language: str | None = None) -> str:
     """A merged lens's system prompt (legacy shape, ``prompt_cache: false``)."""
-    return f"{_SHARED_HEADER}\n{group.example}\n\n{group.section}\n\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{group.example}\n\n{group.section}\n\n{_SHARED_RULES}\n"
 
 
 def build_group_block(group: LensGroup) -> str:
@@ -662,15 +727,51 @@ def _correctness_section(include_intent: bool) -> str:
     return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_SECTION}\n\n{_INTENT_SECTION}"
 
 
-def build_correctness_prompt(include_intent: bool) -> str:
+def build_correctness_prompt(include_intent: bool, language: str | None = None) -> str:
     """The fast preset's correctness call, system-prompt (legacy) shape."""
     section = _correctness_section(include_intent)
-    return f"{_SHARED_HEADER}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
+    header = _localised_header(language)
+    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
 
 
 def build_correctness_block(include_intent: bool) -> str:
     """The fast preset's correctness call, user-block (split) shape."""
     return f"{_LENS_LEAD_IN}\n\n{_correctness_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
+
+
+@lru_cache(maxsize=2)
+def _correctness_flow_section(include_intent: bool) -> str:
+    """The parallel fast preset's flow section, optionally carrying intent."""
+    if not include_intent:
+        return _CORRECTNESS_FLOW_SECTION
+    return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_FLOW_SECTION}\n\n{_INTENT_SECTION}"
+
+
+def build_correctness_flow_prompt(include_intent: bool, language: str | None = None) -> str:
+    """The parallel fast preset's correctness-flow system prompt."""
+    section = _correctness_flow_section(include_intent)
+    header = _localised_header(language)
+    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
+
+
+def build_correctness_flow_block(include_intent: bool) -> str:
+    """The parallel fast preset's correctness-flow split block."""
+    return (
+        f"{_LENS_LEAD_IN}\n\n{_correctness_flow_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
+    )
+
+
+def build_correctness_state_prompt(language: str | None = None) -> str:
+    """The parallel fast preset's correctness-state system prompt."""
+    return (
+        f"{_localised_header(language)}\n{_CORRECTNESS_STATE_EXAMPLE}\n\n"
+        f"{_CORRECTNESS_STATE_SECTION}\n\n{_SHARED_RULES}\n"
+    )
+
+
+def build_correctness_state_block() -> str:
+    """The parallel fast preset's correctness-state split block."""
+    return f"{_LENS_LEAD_IN}\n\n{_CORRECTNESS_STATE_SECTION}\n\n{_CORRECTNESS_STATE_EXAMPLE}"
 
 
 _CATEGORY_SECTIONS: dict[ReviewCategory, str] = {
@@ -752,8 +853,8 @@ verify (hedge, lower the severity), never as confident `high`/`critical` fixes �
 - Return `{"findings": []}` only when there are genuinely no issues."""
 
 
-@lru_cache(maxsize=1)
-def build_shared_preamble() -> str:
+@lru_cache(maxsize=8)
+def build_shared_preamble(language: str | None = None) -> str:
     """The lens-independent system prompt for the split (cache-shaped) layout.
 
     Everything common to every lens — role, severity rubric, output contract,
@@ -763,8 +864,12 @@ def build_shared_preamble() -> str:
     reads it (and the diff block that follows it) from cache. The lens-specific
     checklist and worked example move to the final user block
     (:func:`build_lens_block`), outside the cached prefix.
+
+    *language* (constant within a run) adds the output-language directive to the
+    header; keyed on it so the shared prefix stays byte-identical across the
+    fan-out, and byte-identical to the pre-language prompt when unset.
     """
-    return f"{_SHARED_HEADER}\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{_SHARED_RULES}\n"
 
 
 # Lead-in for the lens block: the diff (untrusted data) is above, these
@@ -804,21 +909,23 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     return f"{_LENS_LEAD_IN}\n\n{body}\n\n{example}"
 
 
-@lru_cache(maxsize=len(ReviewCategory))
-def build_system_prompt(category: ReviewCategory) -> str:
+@lru_cache(maxsize=len(ReviewCategory) * 4)
+def build_system_prompt(category: ReviewCategory, language: str | None = None) -> str:
     """Return the system message for the review LLM's *category* lens.
 
     The prompt carries only that lens's section and a matching worked example.
 
     Cached: the prompts are deterministic, and the engine rebuilds one per
-    category on every batch — caching makes those rebuilds free.
+    category on every batch — caching makes those rebuilds free. Keyed on
+    *language* too (constant within a run), and byte-identical to the
+    pre-language prompt when unset.
     """
     example = _CATEGORY_EXAMPLES[category]
     body = _CATEGORY_SECTIONS[category]
-    return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
 
 
-def build_lens_prompt(lens: CustomLens) -> str:
+def build_lens_prompt(lens: CustomLens, language: str | None = None) -> str:
     """Return the system message for a user-defined ("BYO") lens.
 
     Same scaffold as a built-in category — shared header, one worked example, the
@@ -831,4 +938,4 @@ def build_lens_prompt(lens: CustomLens) -> str:
         example = _GENERIC_EXAMPLE
     heading = lens.title.strip() or lens.id
     body = f"## {heading}\n\n{lens.instructions.strip()}"
-    return f"{_SHARED_HEADER}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"

@@ -43,6 +43,20 @@ on them.
 - **WHEN** its fingerprint is in `ignore_fingerprints`
 - **THEN** it never reaches reflection or posting
 
+### Requirement: Downvoted findings are learned and suppressed
+
+When `learn_feedback` is on, a finding an authorised reviewer reacted 👎 to SHALL
+be suppressed on the next run — its fingerprint is read from GitHub each run and
+carried on `PRContext.feedback_downvotes` into the suppression pass. A high or
+critical security finding is never suppressed this way, so a downvote can never
+hide a serious vulnerability. Best-effort: a gateway without the capability or
+any read error leaves the review untouched, never failing.
+<!-- anchor: quality.learned-feedback -->
+
+#### Scenario: a finding was downvoted last run
+- **WHEN** the gateway reports an authorised reviewer's 👎 for its fingerprint
+- **THEN** it is dropped before reflection, unless it is a high/critical security finding
+
 ### Requirement: Finding rules are declarative, never code
 
 `finding_rules` SHALL be an ordered declarative match (path glob / lens

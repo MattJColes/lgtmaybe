@@ -145,14 +145,12 @@ Default: `100000`.
 
 ### preset
 
-How many model calls the review spends. `fast` (the default) covers all nine
-lenses in **four calls**: security and correctness keep dedicated calls (the
-stated intent folds into the correctness prompt when the PR states one), and
-the rest merge into a code-health call (performance, complexity, ponytail,
-deprecation) and an artefacts call (tests, documentation), with each finding
-attributed to its category. `full` runs one call per lens — more per-lens
-focus for release branches and deep audits, at roughly twice the calls and
-wall time.
+How many model calls the review spends. `fast` (the default) covers security,
+correctness and stated intent, performance, complexity, ponytail, and
+deprecation in **four calls when parallelism is available**: correctness splits
+into flow/intent and state/lifecycle tasks. With one worker it stays combined
+for three calls. `full` restores tests and documentation and runs one focused
+call per lens for release branches and deep audits.
 
 ```yaml
 preset: full
@@ -228,14 +226,16 @@ Default: `true`.
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
-**provider-aware default**: **300 s for ollama and openai-compatible** (local
-models are slow) and 60 s for cloud providers. Set it explicitly to raise it for a large local model.
+**provider-aware default**: **900 s for ollama, openai-compatible, and
+openrouter** (local models are slow, and openrouter can route to slow reasoning
+models) and 300 s for direct cloud providers. Set it explicitly to raise it for a
+large local model.
 
 ```yaml
-timeout: 900   # 15 minutes per call, e.g. for a big model on CPU
+timeout: 1800   # 30 minutes per call, e.g. for a big model on CPU
 ```
 
-Default: auto (ollama/openai-compatible 300 s, cloud 60 s). See
+Default: auto (ollama/openai-compatible/openrouter 900 s, cloud 300 s). See
 [Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
 
 ### structured_output

@@ -1,5 +1,82 @@
 # Changelog
 
+## [1.3.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.2.0...lgtmaybe-v1.3.0) (2026-07-25)
+
+
+### Features
+
+* **diagram:** green-border changed elements; recommend App identity; marketplace assets ([#220](https://github.com/MattJColes/lgtmaybe/issues/220)) ([17700fc](https://github.com/MattJColes/lgtmaybe/commit/17700fc9ba81acd732f9bd55b80d34c8b90ace14))
+* **diagram:** light-green relationship lines and labels in C4 diagrams ([#224](https://github.com/MattJColes/lgtmaybe/issues/224)) ([a1c40f5](https://github.com/MattJColes/lgtmaybe/commit/a1c40f5726a7c9439cf2738f17c39c5ea61bcd8b))
+* full-screen link and density-aware layout for change diagrams ([4667dc2](https://github.com/MattJColes/lgtmaybe/commit/4667dc20b9212f221cd70dc3c504f4061978d5a0))
+* generous timeout defaults for slow providers and auto diagrams by default ([18707a5](https://github.com/MattJColes/lgtmaybe/commit/18707a5b51476a5634d19a06a109b23adddbfeab))
+* raise the direct-cloud timeout default to 300s ([e656b32](https://github.com/MattJColes/lgtmaybe/commit/e656b329600066ad152ba3624f842e44717baca7))
+
+
+### Bug Fixes
+
+* **diagram:** loosen C4 layout and brighten rel styling for dark mode ([#221](https://github.com/MattJColes/lgtmaybe/issues/221)) ([00116a6](https://github.com/MattJColes/lgtmaybe/commit/00116a6c20f6962e31f0be1c6fff126fef077d96))
+
+
+### Documentation
+
+* link the Marketplace listing and feature the branded screenshots ([#223](https://github.com/MattJColes/lgtmaybe/issues/223)) ([ddb39ec](https://github.com/MattJColes/lgtmaybe/commit/ddb39ecd4d1228f104d3351538f29ec0b09d4e74))
+
+## [1.2.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.1.0...lgtmaybe-v1.2.0) (2026-07-25)
+
+
+### Features
+
+* answer author replies in review finding threads ([#217](https://github.com/MattJColes/lgtmaybe/issues/217)) ([3ecf858](https://github.com/MattJColes/lgtmaybe/commit/3ecf85860b1a6c79217f50bdc70526d30633ea6d))
+* gate merges on findings via a GitHub Check Run ([#214](https://github.com/MattJColes/lgtmaybe/issues/214)) ([4cc2604](https://github.com/MattJColes/lgtmaybe/commit/4cc2604754984cab990bbb3841f818be1fff7c27))
+* parallelise correctness review ([#210](https://github.com/MattJColes/lgtmaybe/issues/210)) ([f63e0ec](https://github.com/MattJColes/lgtmaybe/commit/f63e0ec8e9dc62831671051fb7f79e2fd71962c1))
+* suppress findings downvoted with thumbs-down reactions ([#213](https://github.com/MattJColes/lgtmaybe/issues/213)) ([fbbebce](https://github.com/MattJColes/lgtmaybe/commit/fbbebced80e16b97169b9dcda11f2004f9784578))
+* write reviews in a configurable language ([#215](https://github.com/MattJColes/lgtmaybe/issues/215)) ([23abe0a](https://github.com/MattJColes/lgtmaybe/commit/23abe0a45d3c8e0f0e8c9db9da93a2c18ea3593f))
+
+
+### Bug Fixes
+
+* **diagram:** keep C4 relationship lines readable in GitHub dark mode ([#216](https://github.com/MattJColes/lgtmaybe/issues/216)) ([317ce54](https://github.com/MattJColes/lgtmaybe/commit/317ce54f5a3b637a5c5927a3a2cdfcfd2c4ee8dc))
+* harden review pipeline against watermark, expansion, and redaction bugs ([#212](https://github.com/MattJColes/lgtmaybe/issues/212)) ([f03e076](https://github.com/MattJColes/lgtmaybe/commit/f03e0761a7ec49a96bbda61b644423cbf7d51fe8))
+
+
+### Documentation
+
+* move docs site to lgtmaybe.coles.codes ([#218](https://github.com/MattJColes/lgtmaybe/issues/218)) ([65960fc](https://github.com/MattJColes/lgtmaybe/commit/65960fc2a6b5160036047c67feae3f5d44d4207b))
+
+## [1.1.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.0.0...lgtmaybe-v1.1.0) (2026-07-24)
+
+
+### Features
+
+* **diff:** skip generated llms.txt/llms-full.txt files in review ([#202](https://github.com/MattJColes/lgtmaybe/issues/202)) ([b06086c](https://github.com/MattJColes/lgtmaybe/commit/b06086c23279bfd256b9e7de1ab3500f11c45474))
+* enable diagrams in starter workflows ([#204](https://github.com/MattJColes/lgtmaybe/issues/204)) ([157c47d](https://github.com/MattJColes/lgtmaybe/commit/157c47dfdca040529b08bc48591be7fbdfe00ff5))
+
+
+### Bug Fixes
+
+* align action with v1 release ([#209](https://github.com/MattJColes/lgtmaybe/issues/209)) ([46e94b5](https://github.com/MattJColes/lgtmaybe/commit/46e94b518d46a31c969ba5e0623c84e32bb593d1))
+* bound default review runtime ([#208](https://github.com/MattJColes/lgtmaybe/issues/208)) ([d21e4e8](https://github.com/MattJColes/lgtmaybe/commit/d21e4e8f262b809fbf75bbd4469178aaa8312519))
+
+
+### Documentation
+
+* add Google Search Console verification file ([#201](https://github.com/MattJColes/lgtmaybe/issues/201)) ([d20b6d3](https://github.com/MattJColes/lgtmaybe/commit/d20b6d31b308dd924e8b2f117e826f2f0ed94d46))
+* clarify Marketplace provider setup ([#206](https://github.com/MattJColes/lgtmaybe/issues/206)) ([089e74f](https://github.com/MattJColes/lgtmaybe/commit/089e74ff209e4043f1b7c394b191eccbb190dcdf))
+* improve homepage feature showcase ([#207](https://github.com/MattJColes/lgtmaybe/issues/207)) ([ab9984f](https://github.com/MattJColes/lgtmaybe/commit/ab9984f9ae3f4651425f9d769f3717f8e6716cb4))
+* show change diagram on homepage ([#205](https://github.com/MattJColes/lgtmaybe/issues/205)) ([64f58f7](https://github.com/MattJColes/lgtmaybe/commit/64f58f7d5fdebdf2ff7b9e6ab8096d38128a7064))
+
+## [1.0.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.13.1...lgtmaybe-v1.0.0) (2026-07-24)
+
+
+### Features
+
+* **action:** post reviews as a GitHub App via app_id/app_private_key inputs ([#197](https://github.com/MattJColes/lgtmaybe/issues/197)) ([88ec1e4](https://github.com/MattJColes/lgtmaybe/commit/88ec1e4e03284a28c2e8e97ccd00f98447178a41))
+
+
+### Documentation
+
+* optimise the docs site for SEO and LLM crawlers ([#200](https://github.com/MattJColes/lgtmaybe/issues/200)) ([d46078f](https://github.com/MattJColes/lgtmaybe/commit/d46078f18ebd97eedfa33b6f01e0d45f4eed32f2))
+
 ## [0.13.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v0.13.0...lgtmaybe-v0.13.1) (2026-07-24)
 
 

@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+from collections import Counter
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -23,7 +27,7 @@ import click
 
 from lgtmaybe.cli.render import render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
-from lgtmaybe.core.diffparse import FILE_HEADER_RE
+from lgtmaybe.core.diffparse import FILE_HEADER_RE, hunk_for_line
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
@@ -31,6 +35,7 @@ from lgtmaybe.core.models import (
     ReviewConfig,
     ReviewFinding,
     ReviewPreset,
+    Severity,
 )
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
@@ -45,58 +50,73 @@ _log = get_logger(__name__)
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
 
 
+def _should_auto_post(enabled: bool, event_action: str) -> bool:
+    """One gate for both auto extras: opted in, and the PR was just opened or
+    reopened — a synchronize push updates the review, not the extras."""
+    return enabled and event_action in ("opened", "reopened")
+
+
 def should_auto_describe(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the structured description first.
-
-    Only when the user opted in (``auto_describe``) and the PR was just opened
-    or reopened — a synchronize push updates the review, not the description.
-    """
-    return cfg.auto_describe and event_action in ("opened", "reopened")
-
-
-def run_describe(github: GitHubGateway, provider: ProviderClient, cfg: ReviewConfig) -> None:
-    """Build the structured description and post it idempotently.
-
-    Pure function over injected ports, like ``run_review``. Prefers the
-    gateway's describe upsert; falls back to a plain issue comment.
-    """
-    from lgtmaybe.engine.describe import build_description
-
-    body = build_description(github.get_pr_context(), cfg, provider)
-    post_describe = getattr(github, "post_describe_comment", None)
-    if post_describe is not None:
-        post_describe(body)
-        return
-    post_comment = getattr(github, "post_issue_comment", None)
-    if post_comment is not None:
-        post_comment(body)
+    """Whether the action run should post the structured description first."""
+    return _should_auto_post(cfg.auto_describe, event_action)
 
 
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the change diagram first.
+    """Whether the action run should post the change diagram first."""
+    return _should_auto_post(cfg.auto_diagram, event_action)
 
-    Only when the user opted in (``auto_diagram``) and the PR was just opened or
-    reopened — a synchronize push updates the review, not the diagram.
+
+def _run_upsert(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    *,
+    build: Callable[[PRContext, ReviewConfig, ProviderClient], str],
+    post_method: str,
+    ctx: PRContext | None,
+) -> None:
+    """Build a describe/diagram body and post it idempotently.
+
+    Pure function over injected ports, like ``run_review``. Prefers the
+    gateway's upsert method; falls back to a plain issue comment. A prefetched
+    ``ctx`` avoids repeating the expensive PR-context fetch.
     """
-    return cfg.auto_diagram and event_action in ("opened", "reopened")
-
-
-def run_diagram(github: GitHubGateway, provider: ProviderClient, cfg: ReviewConfig) -> None:
-    """Build the change diagram and post it idempotently.
-
-    Pure function over injected ports, like ``run_describe``. Prefers the
-    gateway's diagram upsert; falls back to a plain issue comment.
-    """
-    from lgtmaybe.engine.diagram import build_diagram
-
-    body = build_diagram(github.get_pr_context(), cfg, provider)
-    post_diagram = getattr(github, "post_diagram_comment", None)
-    if post_diagram is not None:
-        post_diagram(body)
+    body = build(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    post = getattr(github, post_method, None)
+    if post is not None:
+        post(body)
         return
     post_comment = getattr(github, "post_issue_comment", None)
     if post_comment is not None:
         post_comment(body)
+
+
+def run_describe(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    ctx: PRContext | None = None,
+) -> None:
+    """Build the structured description and post it idempotently."""
+    from lgtmaybe.engine.describe import build_description
+
+    _run_upsert(
+        github, provider, cfg, build=build_description, post_method="post_describe_comment", ctx=ctx
+    )
+
+
+def run_diagram(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    ctx: PRContext | None = None,
+) -> None:
+    """Build the change diagram and post it idempotently."""
+    from lgtmaybe.engine.diagram import build_diagram
+
+    _run_upsert(
+        github, provider, cfg, build=build_diagram, post_method="post_diagram_comment", ctx=ctx
+    )
 
 
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
@@ -228,25 +248,58 @@ def build_adapters(
     return github, engine
 
 
+def _apply_learned_feedback(github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig) -> PRContext:
+    """Attach 👎-downvoted finding fingerprints to ``ctx.feedback_downvotes``.
+
+    A human with write access reacting thumbs-down to one of our inline finding
+    comments is a signal to stop surfacing that finding on this PR. We re-read
+    those reactions from GitHub each run (no new persistence). The engine's
+    suppression pass then drops the matching findings — except high/critical
+    security findings, which a downvote can never hide (see ``suppress.py``).
+
+    Best-effort: disabled by ``learn_feedback=False``, a no-op on a gateway
+    without the adapter method (fakes, the frozen port), and any error is
+    swallowed so a feedback-read hiccup can never fail the review.
+    """
+    if not cfg.learn_feedback:
+        return ctx
+    list_downvoted = getattr(github, "list_downvoted_fingerprints", None)
+    if list_downvoted is None:
+        return ctx
+    try:
+        downvoted = list_downvoted()
+    except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
+        _log.warning("reading downvoted findings failed: %s", exc)
+        return ctx
+    if not downvoted:
+        return ctx
+    _log.info("suppressing downvoted findings from feedback", extra={"count": len(downvoted)})
+    return ctx.model_copy(update={"feedback_downvotes": frozenset(downvoted)})
+
+
 def run_review(
     *,
     github: GitHubGateway,
     engine: ReviewEngine,
     cfg: ReviewConfig,
     dry_run: bool,
+    ctx: PRContext | None = None,
 ) -> tuple[list[ReviewFinding], str]:
     """Core review pipeline — pure function over injected ports.
 
-    Fetches PR context, runs the engine, and optionally posts the review.
-    Returns (findings, summary) in all cases so callers can inspect output.
+    Fetches PR context (unless a prefetched ``ctx`` is passed in), runs the
+    engine, and optionally posts the review. Returns (findings, summary) in
+    all cases so callers can inspect output.
 
     With ``cfg.incremental`` on and a gateway that supports it, only the diff
     of the commits pushed since the last completed review is reviewed; every
     degraded case (first review, force-push, compare failure, a gateway
     without the adapter methods) falls back to the full review.
     """
-    ctx = github.get_pr_context()
+    if ctx is None:
+        ctx = github.get_pr_context()
     review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
+    review_ctx = _apply_learned_feedback(github, review_ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
     if incremental_since is not None:
@@ -292,8 +345,39 @@ def run_review(
                 from lgtmaybe.engine.labels import compute_labels
 
                 apply_labels(compute_labels(findings, ctx))
+        if cfg.fail_on is not None:
+            # Merge-gate: create a Check Run so branch protection can require it.
+            # Enforcement rides the Check Run, never PR approval state. Best-effort
+            # and only on gateways that support it (fakes/plain gateways don't).
+            create_check_run = getattr(github, "create_check_run", None)
+            if create_check_run is not None:
+                conclusion, title, check_summary = _fail_on_check(findings, cfg.fail_on)
+                create_check_run(ctx.head_sha, conclusion, title, check_summary)
 
     return findings, summary
+
+
+def _fail_on_check(findings: list[ReviewFinding], fail_on: Severity) -> tuple[str, str, str]:
+    """Build the (conclusion, title, summary) for the merge-gate Check Run.
+
+    ``failure`` when any surviving finding is at or above ``fail_on`` (the
+    findings are already the severity-floor-filtered set), else ``success``.
+    The summary carries the count at/above the threshold plus a per-severity
+    breakdown so the check page explains the verdict.
+    """
+    failing = [f for f in findings if f.severity >= fail_on]
+    conclusion = "failure" if failing else "success"
+    counts = Counter(f.severity for f in findings)
+    breakdown = ", ".join(f"{counts[s]} {s.value}" for s in Severity if counts[s]) or "none"
+    if failing:
+        title = f"{len(failing)} finding(s) at or above {fail_on.value}"
+    else:
+        title = f"No findings at or above {fail_on.value}"
+    summary = (
+        f"{len(failing)} of {len(findings)} finding(s) are at or above the "
+        f"`{fail_on.value}` threshold.\n\nFindings by severity: {breakdown}."
+    )
+    return conclusion, title, summary
 
 
 def _incremental_context(
@@ -369,30 +453,32 @@ def execute_local_review(
         click.echo(profiler.render())
 
 
-def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
-    """Post the structured PR description (auto-describe path). Best-effort.
+def _execute_auxiliary(
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    run: Callable[[GitHubGateway, ProviderClient, ReviewConfig], None],
+    name: str,
+) -> None:
+    """Build a fresh context and run one auxiliary post. Best-effort.
 
-    The description is auxiliary: any failure is logged and swallowed so it
-    can never block the review that follows it.
+    The extras are auxiliary: any failure is logged and swallowed so they can
+    never block a review.
     """
     try:
         github, _engine, provider = build_review_context(cfg, runtime)
-        run_describe(github, provider, cfg)
+        run(github, provider, cfg)
     except Exception:
-        _log.warning("auto-describe failed — continuing without it", exc_info=True)
+        _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
+
+
+def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+    """Post the structured PR description (standalone path). Best-effort."""
+    _execute_auxiliary(cfg, runtime, run_describe, "describe")
 
 
 def execute_diagram(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
-    """Post the change diagram (auto-diagram path). Best-effort.
-
-    Like the description, the diagram is auxiliary: any failure is logged and
-    swallowed so it can never block the review that follows it.
-    """
-    try:
-        github, _engine, provider = build_review_context(cfg, runtime)
-        run_diagram(github, provider, cfg)
-    except Exception:
-        _log.warning("auto-diagram failed — continuing without it", exc_info=True)
+    """Post the change diagram (standalone path). Best-effort."""
+    _execute_auxiliary(cfg, runtime, run_diagram, "diagram")
 
 
 def execute_local_diagram(
@@ -422,23 +508,51 @@ def execute_local_diagram(
     click.echo(body)
 
 
-def execute_review(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+def execute_review(
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    *,
+    describe: bool = False,
+    diagram: bool = False,
+) -> None:
     """Build adapters, run the review, surface failures back to the PR.
 
-    Shared by the ``review`` command and the ``action`` entrypoint.
+    Shared by the ``review`` command and the ``action`` entrypoint. With
+    ``describe``/``diagram`` on (the action's auto extras), the adapters are
+    built once and the expensive O(files) PR-context fetch happens once —
+    extras and review all reuse them.
     """
     profiler.reset()
     # Adapter construction can fail before we have any way to post (bad URL,
     # missing token/credentials). Surface those as a clean CLI error.
     try:
-        github, engine = build_adapters(cfg, runtime)
+        github, engine, provider = build_review_context(cfg, runtime)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
+
+    ctx: PRContext | None = None
+    if describe or diagram:
+        # The extras are best-effort and must never block the review. A failed
+        # prefetch just means run_review fetches (and surfaces) it itself.
+        try:
+            ctx = github.get_pr_context()
+        except Exception:
+            _log.warning("PR context prefetch failed — extras skipped", exc_info=True)
+        if ctx is not None:
+            for enabled, run, name in (
+                (describe, run_describe, "describe"),
+                (diagram, run_diagram, "diagram"),
+            ):
+                if enabled:
+                    try:
+                        run(github, provider, cfg, ctx=ctx)
+                    except Exception:
+                        _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
 
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
     try:
-        run_review(github=github, engine=engine, cfg=cfg, dry_run=False)
+        run_review(github=github, engine=engine, cfg=cfg, dry_run=False, ctx=ctx)
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
@@ -484,10 +598,114 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         raise click.ClickException(f"/{parsed.name} failed: {exc}") from exc
 
 
+def execute_review_reply(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
+    """Answer a PR author's reply inside a finding conversation lgtmaybe opened.
+
+    Handles a ``pull_request_review_comment`` event. It acts **only** when every
+    loop-safety condition holds — ``answer_replies`` on, a freshly *created*
+    reply (``in_reply_to_id`` present), from a non-bot author, whose thread's
+    root comment carries our finding marker — and answers in that same thread,
+    using the finding and its surrounding diff hunk as context. Every other case
+    returns without posting, so the reviewer never answers its own replies in a
+    loop. The reply body is untrusted input (redacted + delimiter-neutralised
+    before it reaches the model); the model's answer is fence-defanged before it
+    is posted.
+    """
+    from lgtmaybe.cli.slash import _answer_reply
+    from lgtmaybe.github.rest_gateway import _defang_fences
+
+    # Loop-safety gates — all checked before any network call. A failure here is
+    # a silent no-op: the event simply isn't one we answer.
+    if not cfg.answer_replies:
+        click.echo("answer_replies is off; ignoring review comment.")
+        return
+    if event.get("action") != "created":
+        return
+    comment = event.get("comment") or {}
+    in_reply_to = comment.get("in_reply_to_id")
+    if not in_reply_to:
+        click.echo("Review comment is not a reply; ignoring.")
+        return
+    if (comment.get("user") or {}).get("type") == "Bot":
+        # Never answer a bot (including ourselves) — that is the reply loop.
+        return
+
+    try:
+        repo = event["repository"]["full_name"]
+        pr_number = event["pull_request"]["number"]
+    except (KeyError, TypeError) as exc:
+        raise click.ClickException(f"event payload missing required field: {exc}") from exc
+    runtime = replace(runtime, pr_url=f"https://github.com/{repo}/pull/{pr_number}")
+
+    try:
+        github, _engine, provider = build_review_context(cfg, runtime)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        thread = github.find_review_thread(int(in_reply_to))
+        if thread is None:
+            click.echo("Reply is not in a review thread we can resolve; ignoring.")
+            return
+        thread_id, root_body = thread
+        finding = _finding_from_comment(root_body)
+        if finding is None:
+            # The thread's root is not one of ours — do not answer.
+            click.echo("Reply thread was not opened by lgtmaybe; ignoring.")
+            return
+        answer = _answer_reply(
+            provider,
+            cfg,
+            finding=finding,
+            hunk=_reply_hunk(github, comment),
+            reply=comment.get("body") or "",
+        )
+        github.reply_in_thread(thread_id, _defang_fences(answer))
+    except Exception as exc:
+        _post_failure(github, exc)
+        raise click.ClickException(f"answering the review reply failed: {exc}") from exc
+
+
+def _finding_from_comment(root_body: str) -> str | None:
+    """The visible finding text of a lgtmaybe inline comment, or None if not ours.
+
+    Our inline finding comments carry a hidden ``lgtmaybe-finding`` marker; a
+    thread whose root lacks it was not opened by us and must not be answered.
+    The fingerprint is a one-way hash, so the finding is recovered from the
+    visible title/body text (marker stripped), never by reversing the hash.
+    """
+    from lgtmaybe.github.rest_gateway import _FINDING_MARKER
+
+    if _FINDING_MARKER.search(root_body) is None:
+        return None
+    return _FINDING_MARKER.sub("", root_body).strip()
+
+
+def _reply_hunk(github: GitHubGateway, comment: dict[str, Any]) -> str:
+    """The diff hunk covering the replied-to comment's line, or "" if none.
+
+    Reads the comment's ``path``/``line`` (falling back to ``original_line`` for
+    an outdated position) off the review-comment payload and slices the covering
+    hunk out of the already-fetched PR diff — grounding context for the answer.
+    """
+    path = comment.get("path") or ""
+    line = comment.get("line") or comment.get("original_line") or 0
+    if not path or not line:
+        return ""
+    hunk = hunk_for_line(github.get_pr_context().diff, path, int(line))
+    return hunk or ""
+
+
 def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     """Post a short failure notice to the PR; never raise from here."""
     notice = f"⚠️ lgtmaybe review failed: {exc}"
     try:
+        # run_review may have stamped the reviewed watermark before the post
+        # failed — clear it so the failure notice doesn't carry it and the next
+        # incremental run re-reviews the commits whose findings never posted.
+        mark_reviewed = getattr(github, "mark_reviewed", None)
+        if mark_reviewed is not None:
+            mark_reviewed(None)
         github.post_review([], notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
@@ -526,6 +744,7 @@ def action_inputs() -> dict[str, str | None]:
         "preset": get("PRESET"),
         "fallback_model": get("FALLBACK_MODEL"),
         "reflect_model": get("REFLECT_MODEL"),
+        "language": get("LANGUAGE"),
         "triage_model": get("TRIAGE_MODEL"),
         "api_key": get("API_KEY"),
         "api_base": get("API_BASE"),
@@ -544,7 +763,10 @@ def action_inputs() -> dict[str, str | None]:
         "static_analysis": get("STATIC_ANALYSIS"),
         "auto_describe": get("AUTO_DESCRIBE"),
         "auto_diagram": get("AUTO_DIAGRAM"),
+        "answer_replies": get("ANSWER_REPLIES"),
         "pr_labels": get("PR_LABELS"),
+        "learn_feedback": get("LEARN_FEEDBACK"),
+        "fail_on": get("FAIL_ON"),
         "profile": get("PROFILE"),
         "config_path": get("CONFIG_PATH"),
     }
@@ -560,13 +782,23 @@ Examples:
   lgtmaybe config init                     One-time provider/model setup
   lgtmaybe help COMMAND                    Detailed help for any command
 \b
-Docs: https://mattjcoles.github.io/lgtmaybe/
+Docs: https://lgtmaybe.coles.codes/
 """
+
+
+def _utf8_stdio() -> None:
+    """Keep redirected Windows output safe for summaries containing Unicode."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
 
 
 @click.group(epilog=_EPILOG)
 def main() -> None:
     """lgtmaybe — provider-agnostic PR reviewer."""
+    _utf8_stdio()
 
 
 @main.group(name="config")
@@ -589,6 +821,7 @@ __all__ = [
     "execute_describe",
     "execute_local_review",
     "execute_review",
+    "execute_review_reply",
     "main",
     "parse_pr_url",
     "pr_url_from_event",

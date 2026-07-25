@@ -1,5 +1,5 @@
 name: lgtmaybe
-description: Provider-agnostic PR reviewer — seven hosted providers plus ollama and any OpenAI-compatible endpoint, one flag, no static keys for cloud.
+description: Provider-agnostic PR reviewer. Choose the provider, model, and authentication in your GitHub Actions workflow.
 author: Matt Coles
 branding:
   icon: check-circle
@@ -7,15 +7,15 @@ branding:
 
 inputs:
   provider:
-    description: "LLM provider: openai, anthropic, openrouter, zai, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
+    description: "Set this in the workflow `with:` block. LLM provider: openai, anthropic, openrouter, zai, bedrock, vertex, azure, ollama, or openai-compatible (any OpenAI /v1 endpoint via api_base — DeepSeek, llama.cpp, LM Studio, vLLM)."
     required: false
     default: ""
   model:
-    description: "Model name understood by the chosen provider (e.g. gpt-5.5, claude-sonnet-4-6)."
+    description: "Set this beside `provider` in the workflow `with:` block. Model name understood by the chosen provider (e.g. gpt-5.5, claude-sonnet-4-6)."
     required: false
     default: ""
   preset:
-    description: "Review preset. fast (the default) covers all nine lenses in four model calls: dedicated security and correctness calls (the stated intent folds into correctness), plus merged code-health (performance/complexity/ponytail/deprecation) and artefacts (tests/documentation) calls — roughly half the calls and wall time, trading some recall on the softer lenses. full runs one call per lens, for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
+    description: "Review preset. fast (the default) covers security, correctness/intent, performance, complexity, ponytail, and deprecation in four model calls when parallelism is available, or three with one worker. full restores tests/documentation and runs one call per lens for release branches and deep audits. An explicit categories list in .lgtmaybe.yml overrides the preset."
     required: false
     default: ""
   fallback_model:
@@ -30,6 +30,10 @@ inputs:
     description: "Model for the self-reflection (false-positive audit) pass. Defaults to model; point it at a stronger model to audit a weaker reviewer's findings."
     required: false
     default: ""
+  language:
+    description: "Human language for the reviewer's prose — finding title/body and the describe/diagram text (e.g. Japanese, Spanish, French). Structural fields (path/line/side/severity/anchor) and suggestion code stay unchanged. Leave empty for English."
+    required: false
+    default: ""
   api_key:
     description: "API key for key-based providers (openai/anthropic/openrouter/azure, and openai-compatible hosted endpoints like DeepSeek). Leave empty for bedrock/vertex/ollama and keyless local openai-compatible servers."
     required: false
@@ -39,11 +43,11 @@ inputs:
     required: false
     default: ""
   timeout:
-    description: "Per-request timeout in seconds for each model call. Leave empty for the provider default (ollama and openai-compatible 300, cloud 60)."
+    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama, openai-compatible and openrouter 900, cloud 300)."
     required: false
     default: ""
   max_review_seconds:
-    description: "Soft wall-clock ceiling for the whole review, in seconds (default 600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with an incomplete-results notice. Set 0 to disable."
+    description: "Soft wall-clock ceiling for the whole review, in seconds (default 1800). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with an incomplete-results notice. Set 0 to disable."
     required: false
     default: ""
   temperature:
@@ -95,11 +99,23 @@ inputs:
     required: false
     default: ""
   auto_diagram:
-    description: "On a freshly opened (or reopened) PR, post a C4-style change diagram comment — a Mermaid C4 diagram of the components the PR touches (rendered natively by GitHub), with an ASCII fallback — before the review runs, updated in place by later /diagram runs. Off by default."
+    description: "On a freshly opened (or reopened) PR, post a C4-style change diagram comment — a Mermaid C4 diagram of the components the PR touches (rendered natively by GitHub), with an ASCII fallback — before the review runs, updated in place by later /diagram runs. On by default; set to false to opt out."
+    required: false
+    default: ""
+  answer_replies:
+    description: "Answer a PR author who replies inside a review conversation lgtmaybe opened on a finding: the reply is answered in that same thread, using the finding and its surrounding diff hunk as context (the reply text is treated as untrusted input). Needs the pull_request_review_comment trigger. On by default; set to false to leave finding threads unanswered."
     required: false
     default: ""
   pr_labels:
     description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, and consider-splitting when the diff spans many unrelated directories. Best-effort; off by default."
+    required: false
+    default: ""
+  learn_feedback:
+    description: "On a re-run, suppress a finding a human reacted 👎 (thumbs-down) to on its inline comment last time. The reactions live on GitHub and are re-read each run — no new persistence. Resolving a thread is NOT a suppress signal (that means fixed). On by default; set to false to disable."
+    required: false
+    default: ""
+  fail_on:
+    description: "Merge-gate threshold (info/low/medium/high/critical). When set, after posting the review a GitHub Check Run named 'lgtmaybe' is created with conclusion failure if any finding is at or above this severity, else success — make it a required check in branch protection to block merges. Enforcement rides the Check Run, never PR approval state. Off by default (no check run)."
     required: false
     default: ""
   profile:
@@ -137,17 +153,17 @@ inputs:
   image:
     description: "Override the container image (advanced; defaults to the released GHCR image)."
     required: false
-    default: "ghcr.io/mattjcoles/lgtmaybe:v0"
+    default: "ghcr.io/mattjcoles/lgtmaybe:v1"
   github_token:
     description: "Token used to fetch the diff and post the review. Defaults to the workflow token."
     required: false
     default: ${{ github.token }}
   app_id:
-    description: "GitHub App ID. Set it (with app_private_key) to post reviews as your own branded App identity — e.g. lgtmaybe[bot] with an avatar, plus higher API rate limits — instead of the default github-actions[bot]. The App needs `pull requests: write` + `contents: read`. Left empty, the default workflow token is used."
+    description: "Advanced: ID of an existing GitHub App used with app_private_key. Most users should leave this empty and use the default workflow token."
     required: false
     default: ""
   app_private_key:
-    description: "Private key (PEM) of the GitHub App named by app_id. Wire a repository secret to it. Used only to mint a short-lived installation token, which is auto-revoked at the end of the job — no static key is stored."
+    description: "Advanced: private key (PEM) of the existing GitHub App named by app_id. Most users should leave this empty."
     required: false
     default: ""
   app_owner:
@@ -224,6 +240,7 @@ runs:
         INPUT_PRESET: ${{ inputs.preset }}
         INPUT_FALLBACK_MODEL: ${{ inputs.fallback_model }}
         INPUT_REFLECT_MODEL: ${{ inputs.reflect_model }}
+        INPUT_LANGUAGE: ${{ inputs.language }}
         INPUT_TRIAGE_MODEL: ${{ inputs.triage_model }}
         INPUT_API_KEY: ${{ inputs.api_key }}
         INPUT_API_BASE: ${{ inputs.api_base }}
@@ -242,7 +259,10 @@ runs:
         INPUT_STATIC_ANALYSIS: ${{ inputs.static_analysis }}
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}
+        INPUT_ANSWER_REPLIES: ${{ inputs.answer_replies }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
+        INPUT_LEARN_FEEDBACK: ${{ inputs.learn_feedback }}
+        INPUT_FAIL_ON: ${{ inputs.fail_on }}
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         LGTMAYBE_IMAGE: ${{ inputs.image }}
@@ -257,6 +277,7 @@ runs:
           -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH \
           -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_PRESET \
           -e INPUT_FALLBACK_MODEL -e INPUT_REFLECT_MODEL \
+          -e INPUT_LANGUAGE \
           -e INPUT_TRIAGE_MODEL \
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
           -e INPUT_TIMEOUT -e INPUT_MAX_REVIEW_SECONDS -e INPUT_TEMPERATURE \
@@ -264,7 +285,8 @@ runs:
           -e INPUT_RESOLVE_FIXED \
           -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \
           -e INPUT_PROMPT_CACHE -e INPUT_INCREMENTAL -e INPUT_STATIC_ANALYSIS \
-          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_PR_LABELS -e INPUT_PROFILE \
+          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_ANSWER_REPLIES \
+          -e INPUT_PR_LABELS -e INPUT_LEARN_FEEDBACK -e INPUT_FAIL_ON -e INPUT_PROFILE \
           -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
           -e AWS_REGION -e AWS_DEFAULT_REGION \
           -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \

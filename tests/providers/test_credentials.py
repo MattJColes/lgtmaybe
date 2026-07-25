@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import lgtmaybe.providers.credentials as credentials
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.credentials import (
     _default_aws_probe,
@@ -47,6 +48,13 @@ class TestBedrock:
         with pytest.raises(ValueError, match="bedrock"):
             resolve_credentials(Provider.bedrock, ambient_probe=_ambient_absent)
 
+    def test_bedrock_threads_api_base_through(self) -> None:
+        """A custom endpoint (e.g. a gateway) passes through untouched."""
+        config = resolve_credentials(
+            Provider.bedrock, ambient_probe=_ambient_present, api_base="http://proxy:4000"
+        )
+        assert config.api_base == "http://proxy:4000"
+
 
 class TestVertex:
     def test_vertex_with_ambient_creds_resolves_keyless(self) -> None:
@@ -69,6 +77,12 @@ class TestVertex:
             or "google" in str(exc_info.value).lower()
         )
 
+    def test_vertex_threads_api_base_through(self) -> None:
+        config = resolve_credentials(
+            Provider.vertex, ambient_probe=_ambient_present, api_base="http://proxy:4000"
+        )
+        assert config.api_base == "http://proxy:4000"
+
 
 class TestOpenAI:
     def test_openai_with_api_key_resolves(self) -> None:
@@ -87,6 +101,13 @@ class TestOpenAI:
             resolve_credentials(Provider.openai)
         assert "OPENAI_API_KEY" in str(exc_info.value)
 
+    def test_openai_threads_api_base_through(self) -> None:
+        """--api-base must reach the client (e.g. an OpenAI-format proxy)."""
+        config = resolve_credentials(
+            Provider.openai, api_key="sk-abc", api_base="http://proxy:4000/v1"
+        )
+        assert config.api_base == "http://proxy:4000/v1"
+
 
 class TestAnthropic:
     def test_anthropic_with_api_key_resolves(self) -> None:
@@ -98,6 +119,12 @@ class TestAnthropic:
             resolve_credentials(Provider.anthropic)
         assert "ANTHROPIC_API_KEY" in str(exc_info.value)
 
+    def test_anthropic_threads_api_base_through(self) -> None:
+        config = resolve_credentials(
+            Provider.anthropic, api_key="sk-ant-xyz", api_base="http://proxy:4000"
+        )
+        assert config.api_base == "http://proxy:4000"
+
 
 class TestOpenRouter:
     def test_openrouter_with_api_key_resolves(self) -> None:
@@ -108,6 +135,12 @@ class TestOpenRouter:
         with pytest.raises(ValueError) as exc_info:
             resolve_credentials(Provider.openrouter)
         assert "OPENROUTER_API_KEY" in str(exc_info.value)
+
+    def test_openrouter_threads_api_base_through(self) -> None:
+        config = resolve_credentials(
+            Provider.openrouter, api_key="sk-or-test", api_base="http://proxy:4000/v1"
+        )
+        assert config.api_base == "http://proxy:4000/v1"
 
 
 class TestZai:
@@ -296,8 +329,9 @@ _AWS_ENV_VARS = (
 def _clear(monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], home: str) -> None:
     for name in names:
         monkeypatch.delenv(name, raising=False)
-    # Redirect HOME so a real ~/.config/gcloud or ~/.aws on the dev box can't leak in.
+    # Redirect both host conventions so real local cloud config can't leak in.
     monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)
 
 
 class TestDefaultGcpProbe:
@@ -324,9 +358,36 @@ class TestDefaultGcpProbe:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
         gcloud_dir = tmp_path / "gcloud"
         gcloud_dir.mkdir()
-        (gcloud_dir / "application_default_credentials.json").write_text("{}")
+        (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
         monkeypatch.setenv("CLOUDSDK_CONFIG", str(gcloud_dir))
         assert _default_gcp_probe() is True
+
+    def test_gcp_probe_finds_adc_under_appdata_on_windows(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
+        monkeypatch.setattr(credentials, "_WINDOWS", True, raising=False)
+        appdata = tmp_path / "AppData" / "Roaming"
+        gcloud_dir = appdata / "gcloud"
+        gcloud_dir.mkdir(parents=True)
+        (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("APPDATA", str(appdata))
+
+        assert _default_gcp_probe() is True
+
+    def test_gcp_probe_prefers_cloudsdk_config_over_appdata(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
+        monkeypatch.setattr(credentials, "_WINDOWS", True, raising=False)
+        appdata = tmp_path / "AppData" / "Roaming"
+        gcloud_dir = appdata / "gcloud"
+        gcloud_dir.mkdir(parents=True)
+        (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("APPDATA", str(appdata))
+        monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "explicit-empty"))
+
+        assert _default_gcp_probe() is False
 
     def test_no_creds_anywhere_is_absent(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))

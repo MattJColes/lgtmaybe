@@ -50,18 +50,19 @@ call per review lens — before the findings funnel back into a single stream:
 flowchart TD
     fetch["fetch<br/>diff via API — never a checkout"] --> compress["compress<br/>skip generated files · pad context · batch to budget"]
     compress --> security["security lens"]
-    compress --> correctness["correctness + intent lens"]
+    compress --> correctnessflow["correctness flow + intent lens"]
+    compress --> correctnessstate["correctness state/lifecycle lens"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
-    compress --> artefacts["artefacts lens<br/>tests · documentation"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
-    correctness --> anchor
+    correctnessflow --> anchor
+    correctnessstate --> anchor
     codehealth --> anchor
-    artefacts --> anchor
     anchor --> dedupe["merge / dedupe"] --> reflect["reflect<br/>self-audit, drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-(The four lens calls shown are the `fast` preset's grouping; the `full` preset
-fans out one call per category, and custom lenses join the same fan-out.)
+(The four lens calls shown are the parallel-capable `fast` grouping. A
+single-worker configuration combines the two correctness calls; the `full`
+preset fans out one call per category, and custom lenses join the same fan-out.)
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
    metadata from the GitHub REST API. No PR code is checked out or executed.
@@ -80,11 +81,12 @@ fans out one call per category, and custom lenses join the same fan-out.)
 
 3. **prompt + parse** — this stage **fans out one model call per review
    lens**. The `preset` decides the lens set. `fast` (the default) covers the
-   nine built-in categories in **four calls**: dedicated security and
-   correctness calls (the stated intent folds into correctness when present),
-   plus a merged code-health call (performance/complexity/ponytail/
-   deprecation) and an artefacts call (tests/documentation), each demanding a
-   per-finding `category`. `full` runs one call per category. Every
+   seven code-focused categories in **four calls** when parallelism is
+   available: security, correctness flow (with stated intent when present),
+   correctness state/lifecycle, and merged code health (performance/
+   complexity/ponytail/deprecation). With one worker the two correctness tasks
+   stay combined, keeping the three-call serial path. `full` restores tests and
+   documentation and runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
    ollama and openai-compatible), so batches never wait on each other.
@@ -174,14 +176,16 @@ network recovers but a dead-end failure surfaces fast:
   — lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 60s for hosted providers, 300s for local ones (ollama,
-  openai-compatible), overridable via `timeout` / `--timeout`. All attempts for
+  timeout: 300s for direct cloud providers, 900s for the ones that may front a
+  slow model — ollama and openai-compatible (local servers) and openrouter (a
+  gateway to arbitrary models, including slow reasoning ones) — overridable via
+  `timeout` / `--timeout`. All attempts for
   one call additionally share a wall-clock budget of **2.5× that timeout**, so
   a flaky model can't burn four full timeouts plus backoff per lens. The
   posting workflows additionally set a job-level `timeout-minutes` so a wedged
   run can't hold a runner for GitHub's six-hour default.
 
-- **A whole-review deadline.** `max_review_seconds` (default 600, `0` disables)
+- **A whole-review deadline.** `max_review_seconds` (default 1800, `0` disables)
   is a soft ceiling on the run: once it passes, queued model calls are skipped
   — in-flight ones finish and their findings post — and the summary carries an
   explicit incomplete-results notice. It can never produce a silent LGTM: a

@@ -183,16 +183,16 @@ branch locally before opening a PR. See
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
-long default per-request timeout (300 seconds)** automatically — you don't need
-to set anything for a normal run. (Cloud providers default to 60 s.)
+long default per-request timeout (900 seconds)** automatically — you don't need
+to set anything for a normal run. (Direct cloud providers default to 300 s.)
 
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 300.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 900.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
 lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 900
+  --api-base http://localhost:11434 --timeout 1800
 ```
 
 ```yaml
@@ -202,20 +202,22 @@ model: qwen3.6:35b
 timeout: 900
 ```
 
-The review fans out one call per lens — **four calls** under the default `fast`
-preset (nine under `--preset full`). lgtmaybe runs those **serially for
+The review fans out **three calls** under the default `fast` preset (nine under
+`--preset full`). lgtmaybe runs those **serially for
 ollama**: a single ollama instance serves one request at a time, so firing them
 concurrently would only make each wait and time out. The trade-off is
 wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — four serial calls instead of nine is the
+is exactly why `fast` is the default — three serial calls instead of nine is the
 single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
 `OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — by default lgtmaybe issues ollama calls one at a time. Add `--profile`
-to any run to see the per-call breakdown.
+match. With more than one worker, lgtmaybe splits correctness into focused flow
+and state/lifecycle calls, making four parallel fast-preset tasks instead of
+three combined serial tasks. By default lgtmaybe issues ollama calls one at a
+time. Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 from functools import partial
 
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
@@ -42,7 +42,11 @@ from .profiling import profiler
 from .prompt import (
     FAST_GROUPS,
     build_correctness_block,
+    build_correctness_flow_block,
+    build_correctness_flow_prompt,
     build_correctness_prompt,
+    build_correctness_state_block,
+    build_correctness_state_prompt,
     build_custom_lens_block,
     build_group_block,
     build_group_prompt,
@@ -129,41 +133,74 @@ class _Lens:
     # and falls back to the lens id otherwise; None (a focused lens) means the
     # lens id is always stamped — the model's value is ignored, as before.
     allowed_categories: frozenset[str] | None = None
+    # A split task can keep a distinct profiler label while attributing its
+    # findings to an existing public category.
+    finding_category: str | None = None
+
+
+def _parallel_fast_enabled(cfg: ReviewConfig) -> bool:
+    """Whether the fast preset can overlap its two correctness tasks."""
+    if cfg.max_concurrency is not None:
+        return cfg.max_concurrency > 1
+    return cfg.provider not in _SINGLE_STREAM_PROVIDERS
 
 
 def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
-    The fast preset groups the nine built-ins into four calls — but only when
-    ``categories`` is the untouched default: a user who explicitly listed
-    lenses asked for exactly those, so the preset never regroups them. The
-    full preset (and any explicit list) runs one call per category, skipping
-    the intent lens when nothing states an intent.
+    The fast preset runs seven built-ins in four calls when the provider can
+    overlap work, or three combined calls with one worker. This grouping applies
+    only when ``categories`` is the untouched default: a user who explicitly
+    listed lenses asked for exactly those, so the preset never regroups them.
+    The full preset runs every category; an explicit list runs exactly its
+    selected categories. Both skip intent when nothing states an intent.
     """
     fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
     if fast:
         lenses = [
             _Lens(
                 id=ReviewCategory.security.value,
-                system_prompt=build_system_prompt(ReviewCategory.security),
+                system_prompt=build_system_prompt(ReviewCategory.security, cfg.language),
                 user_block=build_lens_block(ReviewCategory.security),
             ),
-            _Lens(
-                id=ReviewCategory.correctness.value,
-                system_prompt=build_correctness_prompt(has_intent),
-                user_block=build_correctness_block(has_intent),
-                carries_intent=has_intent,
-                allowed_categories=(
-                    frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
-                    if has_intent
-                    else None
-                ),
-            ),
         ]
+        correctness_categories = (
+            frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
+            if has_intent
+            else frozenset({ReviewCategory.correctness.value})
+        )
+        if _parallel_fast_enabled(cfg):
+            lenses += [
+                _Lens(
+                    id="correctness-flow",
+                    system_prompt=build_correctness_flow_prompt(has_intent, cfg.language),
+                    user_block=build_correctness_flow_block(has_intent),
+                    carries_intent=has_intent,
+                    allowed_categories=correctness_categories,
+                    finding_category=ReviewCategory.correctness.value,
+                ),
+                _Lens(
+                    id="correctness-state",
+                    system_prompt=build_correctness_state_prompt(cfg.language),
+                    user_block=build_correctness_state_block(),
+                    allowed_categories=frozenset({ReviewCategory.correctness.value}),
+                    finding_category=ReviewCategory.correctness.value,
+                ),
+            ]
+        else:
+            lenses.append(
+                _Lens(
+                    id=ReviewCategory.correctness.value,
+                    system_prompt=build_correctness_prompt(has_intent, cfg.language),
+                    user_block=build_correctness_block(has_intent),
+                    carries_intent=has_intent,
+                    allowed_categories=correctness_categories if has_intent else None,
+                )
+            )
         lenses += [
             _Lens(
                 id=group.id,
-                system_prompt=build_group_prompt(group),
+                system_prompt=build_group_prompt(group, cfg.language),
                 user_block=build_group_block(group),
                 allowed_categories=frozenset(c.value for c in group.members),
             )
@@ -173,7 +210,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses = [
             _Lens(
                 id=category.value,
-                system_prompt=build_system_prompt(category),
+                system_prompt=build_system_prompt(category, cfg.language),
                 user_block=build_lens_block(category),
                 carries_intent=category is ReviewCategory.intent,
             )
@@ -185,7 +222,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     lenses += [
         _Lens(
             id=lens.id,
-            system_prompt=build_lens_prompt(lens),
+            system_prompt=build_lens_prompt(lens, cfg.language),
             user_block=build_custom_lens_block(lens),
         )
         for lens in cfg.extra_lenses
@@ -393,6 +430,7 @@ class LLMReviewEngine(ReviewEngine):
                     response_format,
                     batch_num,
                     cfg.prompt_cache,
+                    cfg.language,
                     deadline_at,
                     lens,
                 )
@@ -443,7 +481,9 @@ class LLMReviewEngine(ReviewEngine):
         #     suppressed finding costs no reflection tokens and never posts.
         with profiler.stage("suppress"):
             before_suppress = len(all_findings)
-            all_findings = apply_suppressions(all_findings, cfg, ctx.file_contents)
+            all_findings = apply_suppressions(
+                all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
+            )
             suppressed = before_suppress - len(all_findings)
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
@@ -585,6 +625,7 @@ class LLMReviewEngine(ReviewEngine):
         response_format: type[ReviewResult] | None,
         batch_num: int,
         split_prompt: bool,
+        language: str | None,
         deadline_at: float | None,
         lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
@@ -619,7 +660,7 @@ class LLMReviewEngine(ReviewEngine):
                 # prefix — so the other lenses' cached prefix stays identical.
                 suffix = f"{intent_block}\n\n{suffix}"
             messages: list[Message] = [
-                {"role": "system", "content": build_shared_preamble()},
+                {"role": "system", "content": build_shared_preamble(language)},
                 {"role": "user", "content": prefix},
                 {"role": "user", "content": suffix},
             ]
@@ -699,11 +740,14 @@ class LLMReviewEngine(ReviewEngine):
         # value from its member set is kept and anything else falls back to
         # the lens id.
         allowed = lens.allowed_categories
+        fallback_category = lens.finding_category or lens.id
         findings = [
             f.model_copy(
                 update={
                     "category": (
-                        f.category if allowed is not None and f.category in allowed else lens.id
+                        f.category
+                        if allowed is not None and f.category in allowed
+                        else fallback_category
                     )
                 }
             )
@@ -749,9 +793,9 @@ def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) ->
 
 
 def _matches_glob(path: str, pattern: str) -> bool:
-    if fnmatch(path, pattern):
+    if fnmatchcase(path, pattern):
         return True
-    return pattern.startswith("**/") and fnmatch(path, pattern[3:])
+    return pattern.startswith("**/") and fnmatchcase(path, pattern[3:])
 
 
 def _intent_text(ctx: PRContext) -> str:
@@ -852,10 +896,14 @@ def _match_anchor(anchor: str, candidates: list[_PreparedCandidate]) -> list[int
     if normalised:
         return normalised
     if len(target) >= _MIN_SUBSTRING_ANCHOR:
+        # Both directions must clear the length floor: a trivially short
+        # candidate (`)`, `pass`) is a substring of almost any anchor, so
+        # without the guard it wins as the "unique" match — a confident
+        # wrong-line comment.
         substring = [
             line
             for line, text, stripped, _norm in candidates
-            if target in text or stripped in target
+            if target in text or (len(stripped) >= _MIN_SUBSTRING_ANCHOR and stripped in target)
         ]
         if len(substring) == 1:
             return substring

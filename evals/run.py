@@ -49,6 +49,8 @@ def _head_sha() -> str:
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
         )
         return out.stdout.strip() or "unknown"
@@ -59,8 +61,8 @@ def _head_sha() -> str:
 def _load_fixtures() -> list[tuple[str, Fixture]]:
     out: list[tuple[str, Fixture]] = []
     for d in sorted(p for p in _FIXTURES.iterdir() if p.is_dir()):
-        diff = (d / "diff.txt").read_text()
-        manifest = Fixture.model_validate_json((d / "expected.json").read_text())
+        diff = (d / "diff.txt").read_text(encoding="utf-8")
+        manifest = Fixture.model_validate_json((d / "expected.json").read_text(encoding="utf-8"))
         # A `repo/` subdir is the fixture's on-disk corpus of unshown files — the
         # ones a cross-file deferral needs to verify. When present, the harness
         # roots a read-only reader + symbol resolver here (see `_review`).
@@ -164,9 +166,9 @@ def _review(
         reflect=reflect,
         recursive=recursive,
         # Evals measure model quality, never wall-clock discipline: the
-        # production review deadline (max_review_seconds, default 600s) would
+        # production review deadline (max_review_seconds, default 1800s) would
         # skip calls mid-eval on a slow local model — a full-preset run on a
-        # big fixture easily exceeds 600s serially — and silently melt the
+        # big fixture can exceed it serially — and silently melt the
         # recall it exists to measure. Always off here.
         max_review_seconds=0,
         **cfg_overrides,

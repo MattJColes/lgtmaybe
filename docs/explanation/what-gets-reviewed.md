@@ -26,7 +26,8 @@ like the diff.
 Before the diff reaches the model it is cleaned:
 
 - **Non-reviewable files are skipped** — lockfiles, minified/bundled assets,
-  vendored directories, and binaries. Reviewing them is noise and wastes tokens.
+  vendored directories, generated LLM-index corpora (`llms.txt` / `llms-full.txt`),
+  and binaries. Reviewing them is noise and wastes tokens.
 - **Secrets are redacted** — anything that looks like a key or token is stripped
   from the diff before it leaves your environment for the provider.
 
@@ -276,11 +277,11 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` covers the nine lenses in four grouped model calls; `full` runs one call per lens for deep audits. |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
-| `max_review_seconds` | 600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
+| `max_review_seconds` | 1800 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
 | `categories` | all nine | Which review lenses to run; an explicit list overrides the preset grouping and runs those lenses one call each. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
 | `min_severity` | `low` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
@@ -306,15 +307,15 @@ Each finding has:
 | `body` | The explanation |
 | `suggestion` | Optional suggested replacement code |
 
-The nine review categories (security, correctness, deprecation, tests,
-documentation, performance, complexity, intent, ponytail) fan out as concurrent
-model calls per the `preset`. The default `fast` preset covers them in four
-calls: dedicated security and correctness calls (the stated intent folds into
-correctness), plus a merged code-health call
-(performance/complexity/ponytail/deprecation) and a merged artefacts call
-(tests/documentation), with each finding attributed to its category.
-`preset: full` runs each category as its own focused call with a worked example
-of its own finding type. Their findings are merged and de-duplicated. A
+The nine review categories are security, correctness, deprecation, tests,
+documentation, performance, complexity, intent, and ponytail. The default
+`fast` preset covers seven of them in four concurrent calls when parallelism is
+available: security, correctness flow/intent, correctness state/lifecycle, and
+merged code health (performance/complexity/ponytail/deprecation). With one
+worker, correctness stays combined and the preset uses three calls.
+`preset: full` restores tests and documentation and runs each category as its
+own focused call with a worked example of its own finding type. Their findings
+are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 

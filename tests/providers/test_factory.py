@@ -121,7 +121,7 @@ class TestBuildProvider:
             api_key="sk-x",
             api_base="https://api.deepseek.com/v1",
         )
-        assert provider.default_opts.get("timeout") == 300
+        assert provider.default_opts.get("timeout") == 900
 
     def test_openai_compatible_timeout_is_overridable(self) -> None:
         provider = build_provider(
@@ -147,11 +147,11 @@ class TestBuildProvider:
 
     def test_ollama_gets_a_long_default_timeout_when_unset(self) -> None:
         provider = build_provider(Provider.ollama, "llama2")
-        assert provider.default_opts.get("timeout") == 300
+        assert provider.default_opts.get("timeout") == 900
 
     def test_cloud_gets_a_short_default_timeout_when_unset(self) -> None:
         provider = build_provider(Provider.openai, "gpt-4o", api_key="sk-test")
-        assert provider.default_opts.get("timeout") == 60
+        assert provider.default_opts.get("timeout") == 300
 
     def test_explicit_timeout_overrides_the_provider_default(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", timeout=45)
@@ -196,6 +196,14 @@ class TestDefaultTimeout:
         assert default_timeout_for(Provider.openai_compatible) == default_timeout_for(
             Provider.ollama
         )
+
+    def test_openrouter_default_matches_ollama(self) -> None:
+        # openrouter is a gateway to arbitrary models, including reasoning models
+        # that routinely think past the 60s cloud default — it gets the generous
+        # default too.
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        assert default_timeout_for(Provider.openrouter) == default_timeout_for(Provider.ollama)
 
     def test_build_provider_threads_temperature_into_default_opts(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", temperature=0.0)

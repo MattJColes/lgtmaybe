@@ -67,7 +67,7 @@ class IncrementalFakeGitHub(FakeGitHub):
         self._last_sha = last_sha
         self._compare_result = compare_result
         self.compare_calls: list[tuple[str, str]] = []
-        self.marked_reviewed: list[str] = []
+        self.marked_reviewed: list[str | None] = []
         self.scopes: list[set[str] | None] = []
         self.last_reviewed_calls = 0
 
@@ -79,7 +79,7 @@ class IncrementalFakeGitHub(FakeGitHub):
         self.compare_calls.append((base_sha, head_sha))
         return self._compare_result
 
-    def mark_reviewed(self, head_sha: str) -> None:
+    def mark_reviewed(self, head_sha: str | None) -> None:
         self.marked_reviewed.append(head_sha)
 
     def set_incremental_scope(self, paths: set[str] | None) -> None:
@@ -256,7 +256,8 @@ def test_auto_diagram_only_on_open_events_when_enabled() -> None:
     assert should_auto_diagram(on, event_action="opened") is True
     assert should_auto_diagram(on, event_action="reopened") is True
     assert should_auto_diagram(on, event_action="synchronize") is False
-    assert should_auto_diagram(_cfg(), event_action="opened") is False  # default off
+    assert should_auto_diagram(_cfg(), event_action="opened") is True  # default on
+    assert should_auto_diagram(_cfg(auto_diagram=False), event_action="opened") is False
 
 
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:

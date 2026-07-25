@@ -40,6 +40,22 @@ class TestParseCommand:
     def test_leading_and_trailing_whitespace(self):
         assert parse_command("  /review  \n").name is SlashCommand.review
 
+    def test_newline_separates_command_from_arg(self):
+        """Any whitespace splits command from arg — GitHub comments often wrap."""
+        parsed = parse_command("/review\nfull")
+        assert parsed is not None
+        assert parsed.name is SlashCommand.review
+        assert parsed.arg == "full"
+
+    def test_ask_with_newline_keeps_question(self):
+        parsed = parse_command("/ask\nwhat does this do?")
+        assert parsed is not None
+        assert parsed.name is SlashCommand.ask
+        assert parsed.arg == "what does this do?"
+
+    def test_bare_slash_returns_none(self):
+        assert parse_command("/") is None
+
     def test_non_command_returns_none(self):
         assert parse_command("looks good to me") is None
 

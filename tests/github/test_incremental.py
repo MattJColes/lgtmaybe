@@ -106,6 +106,28 @@ def test_unmarked_post_does_not_stamp_a_watermark() -> None:
 
 
 @respx.mock
+def test_mark_reviewed_none_clears_watermark() -> None:
+    """The CLI's failure path calls mark_reviewed(None) to clear a previously
+    set watermark, so a failure notice posted after a partial run never stamps
+    <!-- lgtmaybe-reviewed:... --> for commits nobody fully reviewed."""
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"id": 1})
+
+    respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture)
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.mark_reviewed(None)
+    gateway.post_review([], "⚠️ lgtmaybe review failed: boom", diff=SAMPLE_DIFF)
+
+    assert "lgtmaybe-reviewed" not in str(captured["body"])
+
+
+@respx.mock
 def test_last_reviewed_sha_reads_marker_from_existing_review() -> None:
     existing = [{"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
@@ -242,6 +264,37 @@ def test_rerun_skips_inline_comment_already_posted() -> None:
     assert posted == []
 
 
+@respx.mock
+def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
+    """A comment whose marker was rewritten to the "resolved" family (by the
+    resolve-on-fix pass) no longer counts as an existing finding — the same
+    finding reintroduced later posts again instead of being suppressed forever."""
+    fp = finding_fingerprint(FINDING.path, FINDING.title)
+    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
+    respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
+        return_value=httpx.Response(200, json={"id": 99})
+    )
+    resolved_comment = [{"id": 1, "body": f"stuff\n\n<!-- lgtmaybe-resolved-fingerprint:{fp} -->"}]
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=resolved_comment)
+    )
+    posted: list[dict[str, object]] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1000})
+
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(side_effect=capture)
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+    assert len(posted) == 1
+    assert posted[0]["path"] == "src/app.py"
+
+
 # ---------------------------------------------------------------------------
 # incremental scope on resolve-on-fix
 # ---------------------------------------------------------------------------
@@ -323,3 +376,99 @@ def test_no_scope_keeps_full_resolve_behaviour() -> None:
     _gateway().post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["T1"]
+
+
+# ---------------------------------------------------------------------------
+# feedback learning: 👎 (THUMBS_DOWN) reactions on our finding comments
+# ---------------------------------------------------------------------------
+
+
+def _reaction_thread(body: str, reactors: list[str]) -> dict[str, object]:
+    """A review thread whose first comment carries *body* and 👎 *reactors*.
+
+    Matches the shape ``list_downvoted_fingerprints`` selects — the first
+    comment's ``body`` plus the users who left a ``THUMBS_DOWN`` reaction.
+    """
+    return {
+        "comments": {
+            "nodes": [
+                {
+                    "body": body,
+                    "reactions": {"nodes": [{"user": {"login": login}} for login in reactors]},
+                }
+            ]
+        }
+    }
+
+
+def _mock_permissions(permissions: dict[str, str | None]) -> None:
+    """Mock the collaborator-permission endpoint per login (``None`` → 404)."""
+    for login, perm in permissions.items():
+        resp = (
+            httpx.Response(404, json={"message": "Not Found"})
+            if perm is None
+            else httpx.Response(200, json={"permission": perm})
+        )
+        respx.route(
+            method="GET",
+            url=f"{BASE_URL}/repos/{REPO}/collaborators/{login}/permission",
+        ).mock(return_value=resp)
+
+
+@respx.mock
+def test_list_downvoted_collects_thumbs_down_finding_fingerprint() -> None:
+    """A finding comment an authorised reviewer reacted 👎 to yields its fingerprint."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(
+        threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=["maintainer"])]
+    )
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    _mock_permissions({"maintainer": "write"})
+
+    assert _gateway().list_downvoted_fingerprints() == {fp}
+
+
+@respx.mock
+def test_list_downvoted_ignores_finding_without_thumbs_down() -> None:
+    """Our marker but no 👎 → not a suppression signal."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=[])])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    assert _gateway().list_downvoted_fingerprints() == set()
+
+
+@respx.mock
+def test_list_downvoted_ignores_non_lgtmaybe_thread() -> None:
+    """A 👎 on a thread that isn't one of ours carries no fingerprint."""
+    graphql = _GraphQL(threads=[_reaction_thread("a human comment", reactors=["maintainer"])])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    assert _gateway().list_downvoted_fingerprints() == set()
+
+
+@respx.mock
+def test_list_downvoted_ignores_unauthorized_reactor() -> None:
+    """A 👎 from a user without write access is ignored — on a public repo
+    anyone can react, so an unprivileged reaction must never suppress."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(
+        threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=["drive_by"])]
+    )
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    _mock_permissions({"drive_by": "read"})
+
+    assert _gateway().list_downvoted_fingerprints() == set()
+
+
+@respx.mock
+def test_list_downvoted_ignores_non_collaborator_reactor() -> None:
+    """A 👎 from a non-collaborator (permission lookup 404s) is ignored — fails closed."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(
+        threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=["stranger"])]
+    )
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    _mock_permissions({"stranger": None})
+
+    assert _gateway().list_downvoted_fingerprints() == set()

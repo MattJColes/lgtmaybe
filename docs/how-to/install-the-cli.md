@@ -1,5 +1,5 @@
 ---
-description: Install the lgtmaybe CLI with pip (any OS) or Homebrew (macOS/Linuxbrew), and add the cloud extras for keyless Bedrock/Vertex/Azure.
+description: Install the lgtmaybe CLI with pip (any OS), Homebrew (macOS/Linuxbrew), or winget (Windows), and add cloud extras for keyless Bedrock/Vertex/Azure.
 ---
 
 # Install the CLI
@@ -27,6 +27,19 @@ That prints the command list with usage examples; `lgtmaybe help <command>`
 (e.g. `lgtmaybe help review`) shows the full option reference for one command.
 
 Upgrade later with `pip install --upgrade lgtmaybe`.
+
+## Install on Windows (winget)
+
+Install the portable Windows executable from winget:
+
+```powershell
+winget install MattJColes.lgtmaybe
+```
+
+The executable bundles ast-grep for cross-file symbol resolution, but it does
+not bundle the optional cloud SDKs used by keyless Bedrock, Vertex, or Azure
+authentication. Use the pip install with the matching extra for those providers.
+The regular `pip install lgtmaybe` path also works on Windows.
 
 ## Install on macOS (Homebrew)
 
@@ -62,7 +75,8 @@ resolution during review.
 
 ## Cloud providers need extras
 
-The base install (either method) covers every **API-key** and **local** provider:
+The base pip install, Homebrew formula, and Windows executable cover every
+**API-key** and **local** provider:
 
 | Providers | Covered by base install? |
 |---|---|
@@ -70,8 +84,8 @@ The base install (either method) covers every **API-key** and **local** provider
 | `ollama`, `openai-compatible` — fully local, point `--api-base` at the server | ✅ Yes |
 | `bedrock`, `vertex`, `azure` — keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
-The **keyless cloud** providers need extra cloud SDKs that the base install (and
-the Homebrew formula) does not bundle. Install the CLI from PyPI with the matching
+The **keyless cloud** providers need extra cloud SDKs that the Homebrew formula
+and Windows executable do not bundle. Install the CLI from PyPI with the matching
 extra:
 
 ```bash

@@ -7,7 +7,7 @@ Read this before writing code. It encodes decisions that are **made, not options
 
 A PR reviewer that posts inline review comments + a summary. The user picks the
 LLM backend with a `--provider` flag, drops a key into GitHub secrets (or wires
-OIDC/WIF for cloud providers), and gets a review. One core, three distribution
+OIDC/WIF for cloud providers), and gets a review. One core, four distribution
 variants:
 
 - **PyPI CLI** — `pip install lgtmaybe`
@@ -28,6 +28,11 @@ variants:
   published` event isn't delivered for a `GITHUB_TOKEN` release), **actually
   `brew install`s it as a gate** (so a broken formula is never published), then
   commits to the tap; a daily schedule + `force` dispatch are the safety nets
+- **Windows CLI** — `winget install MattJColes.lgtmaybe`. Each release builds a
+  one-file Python 3.13 executable, smoke-tests the Click command tree, attaches
+  it to the GitHub release, then submits `MattJColes.lgtmaybe` to winget. The
+  executable bundles ast-grep but not the optional cloud-auth SDKs; use pip for
+  keyless Bedrock, Vertex, or Azure.
 - **GitHub Action** — composite action (`action.yml`) that does keyless OIDC/WIF
   auth, then runs a GHCR image via the `action` entrypoint
 
@@ -37,6 +42,10 @@ cloud. We win on auth + simplicity. An `openai-compatible` provider is the escap
 hatch for anything else that speaks the OpenAI `/v1` wire format (DeepSeek's API,
 llama.cpp, LM Studio, vLLM) — you bring the `--api-base`, the key is optional —
 so the provider list is never a cage.
+
+The main CI matrix runs Ubuntu on Python 3.11–3.14 and Windows on Python 3.11
+and 3.13. Windows runs with locale-default encoding behavior and disables
+autocrlf before checkout.
 
 ## Non-negotiables
 
@@ -172,8 +181,8 @@ pattern, event bus, plugin framework.
      when the Mermaid can't render; one structured call, `_mermaid_ok` prefix
      check, raw-text fallback) via `post_diagram_comment` — its own idempotent
      upsert with a disjoint marker family. `ReviewConfig.auto_diagram` (default
-     off; Action input `auto_diagram`) posts it automatically alongside
-     auto-describe. The local `lgtmaybe diagram` command prints the same body
+     **on**; Action input `auto_diagram`, set false to opt out) posts it
+     automatically on freshly opened/reopened PRs. The local `lgtmaybe diagram` command prints the same body
      (no GitHub) — a terminal can't render Mermaid, which is what the ASCII is
      for. **No D2:** GitHub doesn't render it in Markdown.
    - **Guards (in the engine):** generated/binary files skipped via
@@ -244,16 +253,19 @@ pattern, event bus, plugin framework.
    - **Per-lens fan-out (preset-shaped):** the prompt is composed per lens
      (`engine/prompt.py`) — each lens gets a **worked example** (with a real
      hunk header, teaching the line-number arithmetic). `ReviewConfig.preset`
-     picks the lens set: **`fast` (default)** covers the nine `ReviewCategory`
-     lenses in **four calls** (dedicated security + correctness — stated intent
-     folds into correctness with per-finding `category` attribution — plus
-     merged code-health and artefacts calls, `prompt.FAST_GROUPS`); **`full`**
-     runs one call per category. An explicit `categories` list overrides the
-     grouping. Every (batch, lens) call runs through **one global
+     picks the lens set: **`fast` (default)** covers security, correctness and
+     stated intent, performance, complexity, ponytail, and deprecation in
+     **four calls** when the provider can overlap work (dedicated security +
+     two correctness calls, flow and state — stated intent folds into
+     correctness with per-finding `category` attribution — plus merged
+     code-health, `prompt.FAST_GROUPS`), or **three** with one worker
+     (correctness combined); **`full`** restores tests and
+     documentation and runs one call per category. An explicit `categories`
+     list overrides the grouping. Every (batch, lens) call runs through **one global
      `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
      cloud, 1 ollama/openai-compatible), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
-     A soft whole-review deadline (`max_review_seconds`, default 600s, 0 = off)
+     A soft whole-review deadline (`max_review_seconds`, default 1800s, 0 = off)
      skips still-queued calls once passed — partial results with a notice,
      never a silent LGTM. Every stage and call is timed
      (`engine/profiling.py`); `--profile` / Action input `profile` prints the
@@ -341,7 +353,7 @@ pattern, event bus, plugin framework.
      gateway reconciles only lgtmaybe's own label families, best-effort.
    - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
      (comment only — no GitHub approval state) — still naming the model.
-4. **Packaging (sequential, last) — DONE:** the two distribution variants over
+4. **Packaging (sequential, last) — DONE:** the four distribution variants over
    one core. Delivered in this step:
    - **`action` entrypoint** — the container command. Routes by
      `GITHUB_EVENT_NAME` (`issue_comment` → slash command, else → full review with
@@ -373,6 +385,10 @@ pattern, event bus, plugin framework.
      pushes with the `HOMEBREW_TAP_TOKEN` PAT). Regenerated wholesale each release
      so dep bumps flow through — never hand-edited. Maintainer setup (tap repo +
      PAT) is in `docs/how-to/releasing.md`.
+   - **Windows executable + winget** — `.github/workflows/windows-exe.yml`
+     builds and smoke-tests the portable x86_64 executable before attaching it
+     to the release; `.github/workflows/winget.yml` then submits the versioned
+     asset to `MattJColes.lgtmaybe`.
    - **`examples/workflows/`** — one per posting provider (cloud + API-key);
      `id-token: write` for cloud. ollama is local-only (CLI), not a workflow.
    - **Model IDs in docs are kept current** per platform (litellm-native form).

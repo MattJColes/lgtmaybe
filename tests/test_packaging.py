@@ -17,6 +17,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).parent.parent
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
+_PYINSTALLER_SPEC = _REPO_ROOT / "packaging" / "pyinstaller" / "lgtmaybe.spec"
 
 # provider extra -> the import-name of the package its keyless path needs.
 _CLOUD_EXTRAS = {
@@ -49,3 +50,12 @@ def test_dockerfile_bundles_every_cloud_extra() -> None:
             f"Dockerfile must `uv sync ... --extra {extra}` so the image can run "
             f"keyless {extra} reviews"
         )
+
+
+def test_pyinstaller_spec_collects_data_trees() -> None:
+    spec = _PYINSTALLER_SPEC.read_text(encoding="utf-8")
+
+    assert 'collect_data_files("lgtmaybe")' in spec
+    assert 'collect_data_files("litellm")' in spec
+    assert '"tiktoken_ext"' in spec
+    assert '"tiktoken_ext.openai_public"' in spec

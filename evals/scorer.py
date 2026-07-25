@@ -224,7 +224,7 @@ def _eval_ctx(diff: str, manifest: Fixture) -> PRContext:
         # the GitHub gateway fetches — feeding static analysis, context
         # expansion, and boundary padding during an eval run.
         file_contents = {
-            str(p.relative_to(manifest.head_root)): p.read_text()
+            str(p.relative_to(manifest.head_root)): p.read_text(encoding="utf-8")
             for p in sorted(manifest.head_root.rglob("*"))
             if p.is_file()
         }
@@ -309,9 +309,10 @@ def _add_review_args(ap: argparse.ArgumentParser) -> None:
         "--preset",
         default=None,
         choices=["fast", "full"],
-        help="review preset to run under (fast = 4 grouped calls, full = one call per "
-        "lens). Default: the production default (fast). Run the same model under both "
-        "to measure what the fast grouping trades away.",
+        help="review preset to run under (fast = 4 grouped calls when the provider can "
+        "overlap work, 3 with one worker; full = one call per lens). Default: the "
+        "production default (fast). Run the same model under both to measure what the "
+        "fast grouping trades away.",
     )
     ap.add_argument(
         "--fixture",

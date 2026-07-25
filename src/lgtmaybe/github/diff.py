@@ -8,13 +8,14 @@ deleted, or context line in the diff — so the gateway can post findings on rea
 diff lines and silently drop anything that isn't (e.g. a finding the model put
 on an expanded-context-only line).
 
-Skip filter: lockfiles, minified bundles, vendored/generated paths and binary
-files are dropped before review to save tokens and avoid noise.
+Skip filter: lockfiles, minified bundles, vendored/generated paths, generated
+LLM-index corpora (llms.txt / llms-full.txt), and binary files are dropped before
+review to save tokens and avoid noise.
 """
 
 from __future__ import annotations
 
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 
 from lgtmaybe.core.diffparse import FILE_HEADER_RE, parse_hunk_header
 
@@ -121,6 +122,10 @@ _SKIP_FILENAMES = frozenset(
         "mix.lock",
         "Package.resolved",
         "gradle.lockfile",
+        # Generated LLM-index corpora (llmstxt.org): machine-written whole-docs
+        # dumps, never meaningfully line-reviewed.
+        "llms.txt",
+        "llms-full.txt",
     }
 )
 
@@ -132,6 +137,7 @@ _SKIP_DIR_PREFIXES = (
     ".git/",
     "third_party/",
     "third-party/",
+    "__generated__/",
 )
 
 # Glob patterns matched against the full path.
@@ -142,7 +148,6 @@ _SKIP_GLOB_PATTERNS = (
     "*.pb.go",
     "*.pb.py",
     "*.generated.*",
-    "__generated__/*",
     "*.d.ts",
     # Sourcemaps are compiler output, never hand-written.
     "*.js.map",
@@ -226,7 +231,7 @@ def is_reviewable(path: str) -> bool:
 
     # Glob pattern check on the full path
     for pattern in _SKIP_GLOB_PATTERNS:
-        if fnmatch(path, pattern) or fnmatch(filename, pattern):
+        if fnmatchcase(path, pattern) or fnmatchcase(filename, pattern):
             return False
 
     return True

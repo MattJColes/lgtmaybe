@@ -499,13 +499,20 @@ class _GraphQL:
         raise AssertionError(f"unexpected GraphQL operation: {query}")
 
 
-def _thread(fingerprint: str, *, outdated: bool, resolved: bool = False, tid: str = "T1") -> dict:
+def _thread(
+    fingerprint: str,
+    *,
+    outdated: bool,
+    resolved: bool = False,
+    tid: str = "T1",
+    comment_id: int = 555,
+) -> dict:
     body = f"**[MEDIUM] Old issue**\n\nbody\n\n<!-- lgtmaybe-finding:{fingerprint} -->"
     return {
         "id": tid,
         "isResolved": resolved,
         "isOutdated": outdated,
-        "comments": {"nodes": [{"body": body}]},
+        "comments": {"nodes": [{"body": body, "databaseId": comment_id}]},
     }
 
 
@@ -545,6 +552,56 @@ def test_resolve_fixed_resolves_outdated_disappeared_thread() -> None:
     assert graphql.resolved == ["THREAD1"]
     assert len(graphql.replies) == 1
     assert graphql.replies[0]["threadId"] == "THREAD1"
+
+
+@respx.mock
+def test_resolve_fixed_rewrites_fingerprint_to_resolved_marker() -> None:
+    """Resolving a fixed thread also rewrites the original comment's fingerprint
+    marker into the disjoint "resolved" family, so a later run's fingerprint scan
+    (which matches only the active marker) no longer sees it — a reintroduced
+    finding posts again instead of being suppressed forever."""
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1", comment_id=555)])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    patched: list[dict[str, object]] = []
+
+    def capture_patch(request: httpx.Request) -> httpx.Response:
+        patched.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": 555})
+
+    respx.route(method="PATCH", url=f"{BASE_URL}/repos/{REPO}/pulls/comments/555").mock(
+        side_effect=capture_patch
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.resolved == ["THREAD1"]
+    assert len(patched) == 1
+    body = str(patched[0]["body"])
+    assert f"<!-- lgtmaybe-resolved-fingerprint:{gone_fp} -->" in body
+    assert "<!-- lgtmaybe-finding:" not in body
+
+
+@respx.mock
+def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
+    """The fingerprint-marker PATCH is best-effort like the rest of resolve-on-fix:
+    a failure is swallowed and the thread is still resolved."""
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1", comment_id=555)])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    respx.route(method="PATCH", url=f"{BASE_URL}/repos/{REPO}/pulls/comments/555").mock(
+        return_value=httpx.Response(500)
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    # Must not raise, and the thread still resolves.
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.resolved == ["THREAD1"]
 
 
 @respx.mock
@@ -937,6 +994,34 @@ def test_post_review_empty_findings_skips_diff_fetch() -> None:
     gw.post_review([], "review failed: provider quota exceeded")  # diff omitted
 
     assert pr_fetches == [], "empty-findings post_review must not fetch the PR diff/context"
+
+
+@respx.mock
+def test_post_review_diff_none_fetches_bare_diff_only() -> None:
+    """With findings but no diff, post_review needs only the diff to build the
+    commentable-line index — a single .diff-Accept GET, never the full
+    get_pr_context fan-out (metadata, per-file head contents, commits)."""
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    respx.route(method="POST", url=REVIEWS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+    diff_route = respx.route(
+        method="GET", url=PR_URL, headers={"Accept": "application/vnd.github.v3.diff"}
+    ).mock(return_value=httpx.Response(200, text=SAMPLE_DIFF))
+    other_fetches: list[httpx.Request] = []
+
+    def capture_other(request: httpx.Request) -> httpx.Response:
+        other_fetches.append(request)
+        return httpx.Response(200, json=_pr_detail())
+
+    # Catches the metadata GET plus the /files and /commits sub-resources.
+    respx.route(method="GET", url__startswith=PR_URL).mock(side_effect=capture_other)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "Summary")  # diff omitted
+
+    assert diff_route.called
+    assert other_fetches == [], "diff=None must fetch the bare diff, not the whole PR context"
 
 
 @respx.mock

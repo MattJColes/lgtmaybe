@@ -36,8 +36,13 @@ _log = get_logger(__name__)
 # dependency manifests (supply chain). Matched case-insensitively against the
 # full path.
 _SECURITY_PATH_RE = re.compile(
-    r"auth|login|password|passwd|credential|secret|token|crypto|session|permission|acl"
-    r"|iam|oauth|sso|migration"
+    r"auth|login|password|passwd|credential|secret|crypto|permission|oauth|migration"
+    # Short/ambiguous tokens are word-bounded (with `_`, `/`, `.`, `-` all
+    # counting as separators) so they don't substring-match ordinary words —
+    # `acl` in oracle, `sso` in professor, `token` in tokenizer — which would
+    # silently escalate everything and defeat triage's savings. Genuinely
+    # path-ish long tokens stay unanchored: when in doubt, escalate.
+    r"|(?<![a-z0-9])(?:token|session|acl|iam|sso)(?![a-z0-9])"
     r"|\.github/workflows/|\.gitlab-ci|jenkinsfile"
     r"|\.tf$|\.tfvars$|cloudformation|/k8s/|kubernetes|helm|dockerfile|docker-compose"
     r"|pyproject\.toml$|requirements[^/]*\.txt$|package\.json$|go\.mod$|gemfile$|pom\.xml$"

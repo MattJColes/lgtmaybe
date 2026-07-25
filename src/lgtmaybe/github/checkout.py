@@ -13,8 +13,11 @@ simply finds nothing — a review never fails because a base clone didn't.
 from __future__ import annotations
 
 import atexit
+import base64
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -33,6 +36,42 @@ _CLONE_TIMEOUT = 120
 Runner = Callable[..., Any]
 
 
+def _rmtree_force(path: Path) -> None:
+    """Remove a tree, making Windows read-only entries writable when needed."""
+    root = path.resolve()
+
+    def retry(function: Callable[..., Any], failed_path: str, _error: Any) -> None:
+        target = Path(failed_path)
+        candidates = [target]
+        try:
+            target.parent.resolve().relative_to(root)
+        except ValueError:
+            pass
+        else:
+            candidates.append(target.parent)
+        for candidate in candidates:
+            try:
+                candidate.chmod(candidate.stat().st_mode | stat.S_IWRITE | stat.S_IEXEC)
+            except OSError:
+                pass
+        function(failed_path)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
+def _cleanup_base_tree(path: Path) -> None:
+    try:
+        _rmtree_force(path)
+    except OSError as exc:
+        _log.warning(
+            "could not remove temporary base tree",
+            extra={"path": str(path), "error": str(exc)},
+        )
+
+
 def clone_base_tree(
     repo: str,
     ref: str,
@@ -44,25 +83,44 @@ def clone_base_tree(
 
     *repo* is ``owner/name`` (the base repo). *ref* is the base branch name. The
     temp dir is registered for cleanup at process exit. Returns None on any
-    filesystem or git failure — the caller treats that as "no corpus". The token is
-    embedded in the remote URL only; ``capture_output`` keeps it out of surfaced
-    stderr, and the clone lands in an ephemeral dir that is removed at exit.
+    filesystem or git failure — the caller treats that as "no corpus". The token
+    is passed as a one-shot ``git -c http.<url>.extraheader`` basic-auth header
+    (the actions/checkout approach) rather than embedded in the clone URL — a
+    URL-embedded token is visible in the clear via /proc/*/cmdline and gets
+    persisted as the remote URL in the temp clone's .git/config. The global
+    ``-c`` applies to this invocation only (unlike ``git clone --config`` it is
+    never written into the new clone's config); ``capture_output`` keeps it out
+    of surfaced stderr, and the clone lands in an ephemeral dir removed at exit.
     """
     try:
         dest = Path(tempfile.mkdtemp(prefix="lgtmaybe-base-"))
     except OSError:
         return None
-    url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    url = f"https://github.com/{repo}.git"
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    auth_config = f"http.https://github.com/.extraheader=Authorization: basic {basic}"
     try:
         runner(
-            ["git", "clone", "--depth", "1", "--single-branch", "--branch", ref, url, str(dest)],
+            [
+                "git",
+                "-c",
+                auth_config,
+                "clone",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--branch",
+                ref,
+                url,
+                str(dest),
+            ],
             capture_output=True,
             timeout=_CLONE_TIMEOUT,
             check=True,
         )
     except (OSError, subprocess.SubprocessError):
-        shutil.rmtree(dest, ignore_errors=True)
+        _cleanup_base_tree(dest)
         return None
-    atexit.register(shutil.rmtree, dest, ignore_errors=True)
+    atexit.register(_cleanup_base_tree, dest)
     _log.info("cloned base tree for symbol resolution", extra={"repo": repo, "ref": ref})
     return dest

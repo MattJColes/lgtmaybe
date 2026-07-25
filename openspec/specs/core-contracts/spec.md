@@ -62,22 +62,34 @@ is never parsed.
 ### Requirement: One config surface with ordered severities
 
 `ReviewConfig` SHALL be the single knob surface for a review (provider, model,
-filters, caps, toggles); `Severity` SHALL order `info < low < medium < high <
-critical` so floors like `min_severity` compare with `>=`.
+filters, caps, toggles like `learn_feedback`); `Severity` SHALL order `info <
+low < medium < high < critical` so floors like `min_severity` and `fail_on`
+compare with `>=`. `fail_on` is an optional `Severity` (default `None` = off)
+driving the merge-gate Check Run.
 <!-- anchor: core.config -->
 
 #### Scenario: severity floor filters findings
 - **WHEN** `min_severity` is `medium`
 - **THEN** `low` and `info` findings are dropped before posting
 
+#### Scenario: merge-gate threshold is off by default
+- **WHEN** a `ReviewConfig` is built without `fail_on`
+- **THEN** `fail_on` is `None` and no check run is created
+
+#### Scenario: a posting toggle defaults on
+- **WHEN** `answer_replies` is unset
+- **THEN** it defaults to `true`, enabling finding-thread replies
+
 ### Requirement: Nine built-in lenses, preset-shaped fan-out
 
 `ReviewCategory` SHALL enumerate the nine built-in lenses (security,
 correctness, deprecation, tests, documentation, performance, complexity,
 intent, ponytail). `ReviewPreset` SHALL shape the fan-out: `fast` (default)
-covers all nine in four calls; `full` runs one call per lens.
+covers seven of the nine (tests and documentation excluded) in four calls
+when the provider can overlap work, three with one worker; `full` runs one
+call per lens.
 <!-- anchor: core.lenses -->
 
 #### Scenario: default preset batches the lenses
 - **WHEN** a review runs with no preset override
-- **THEN** the nine lenses fan out as four concurrent calls
+- **THEN** the seven fast-preset lenses fan out as four concurrent calls

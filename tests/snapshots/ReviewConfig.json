@@ -287,7 +287,7 @@
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in lenses in four calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while the remaining six\nfold into two combined calls \u2014 code health (performance, complexity,\nponytail, deprecation) and supporting artefacts (tests, documentation).\n``full`` runs each of the nine lenses as its own call \u2014 more per-lens\nfocus for release branches and deep audits, at ~2\u00d7 the calls and wall\ntime. An explicit ``categories`` list always wins over the preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in four calls when the\nprovider can overlap work: security, correctness flow/intent, correctness\nstate/lifecycle, and code health. With one worker, correctness stays\ncombined for three calls.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
       "enum": [
         "fast",
         "full"
@@ -372,6 +372,11 @@
   "additionalProperties": false,
   "description": "How to run one review: provider/model, severity floor, filters, caps.",
   "properties": {
+    "answer_replies": {
+      "default": true,
+      "title": "Answer Replies",
+      "type": "boolean"
+    },
     "api_base": {
       "anyOf": [
         {
@@ -390,7 +395,7 @@
       "type": "boolean"
     },
     "auto_diagram": {
-      "default": false,
+      "default": true,
       "title": "Auto Diagram",
       "type": "boolean"
     },
@@ -431,6 +436,17 @@
       "title": "Extra Lenses",
       "type": "array"
     },
+    "fail_on": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Severity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"
@@ -469,6 +485,23 @@
       "default": null,
       "title": "Incremental"
     },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    },
+    "learn_feedback": {
+      "default": true,
+      "title": "Learn Feedback",
+      "type": "boolean"
+    },
     "max_concurrency": {
       "anyOf": [
         {
@@ -493,7 +526,7 @@
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 600,
+      "default": 1800,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"

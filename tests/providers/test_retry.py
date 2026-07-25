@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -21,6 +23,29 @@ def _fake_response(content: str = "ok") -> Any:
 
 
 class TestRetry:
+    def test_sdk_hang_cannot_exceed_the_request_timeout(self) -> None:
+        """The adapter timeout is a real wall-clock bound even if LiteLLM's
+        downstream transport never returns."""
+        release = threading.Event()
+
+        def hangs(*args: Any, **kwargs: Any) -> Any:
+            release.wait(timeout=5)
+            return _fake_response()
+
+        started = time.perf_counter()
+        try:
+            with (
+                patch("litellm.completion", side_effect=hangs),
+                patch("lgtmaybe.providers.litellm_provider._MAX_ATTEMPTS", 1),
+            ):
+                provider = LiteLLMProvider(timeout=0.05)
+                with pytest.raises(TimeoutError, match="exceeded 0.05"):
+                    provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+        finally:
+            release.set()
+
+        assert time.perf_counter() - started < 0.5
+
     def test_first_call_raises_then_retry_succeeds(self) -> None:
         """Provider retries on transient failure and returns the good result."""
         good_response = _fake_response("retried ok")
@@ -358,7 +383,7 @@ class TestFailFastOnPermanentErrors:
 
         with patch("litellm.completion", side_effect=slow_transient):
             provider = LiteLLMProvider(timeout=0.05)
-            with pytest.raises(RuntimeError):
+            with pytest.raises(TimeoutError, match="exceeded 0.05"):
                 provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
         assert calls < _MAX_ATTEMPTS

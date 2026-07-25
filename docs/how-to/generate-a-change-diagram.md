@@ -4,10 +4,10 @@ description: Post a compact Mermaid flowchart of a pull request's changes as a G
 
 # Generate a change diagram
 
-lgtmaybe can post a **compact diagram of what a pull request changes** — the
-containers and components the PR touches plus their immediate relationships — so
-a reviewer gets a visual overview before they read the diff. It's a separate
-concern from the review and the description: enable any of them independently.
+lgtmaybe can post a **compact flowchart of what a pull request changes** — the
+components the PR touches plus their immediate relationships — so a reviewer
+gets a visual overview before they read the diff. It's a separate concern from
+the review and the description: enable any of them independently.
 
 ## Contents
 
@@ -21,15 +21,22 @@ concern from the review and the description: enable any of them independently.
 
 One model call returns two renderings of the same graph:
 
-- an automatically laid-out **Mermaid flowchart**, which GitHub renders natively
-  inside the comment — no image, no external hosting; and
+- a **Mermaid flowchart**, which GitHub renders natively inside the comment —
+  no image, no external hosting; and
 - a **plain-text ASCII** rendering of the same diagram, which is what shows in a
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
-Changed elements are marked in the labels (`(new)` / `(changed)`), and the
-diagram stays honest about the diff being only a slice of the codebase —
-relationships it infers from imports rather than the diff itself are called out
-in the notes rather than asserted as fact.
+The flowchart is intentionally sparse: it uses at most six nodes, short
+relationship labels, and Mermaid's automatic layout. Changed elements are
+marked in their labels (`(new)` / `(changed)`), keeping labels and arrows clear
+of neighbouring cards. Because GitHub's renderer offers zoom buttons but no
+full-screen, the diagram is followed by an **⛶ Open full screen** link that
+renders the same diagram alone in a browser tab, with pan and zoom, on
+[mermaid.live](https://mermaid.live). The source travels compressed in the URL
+fragment, decoded in your browser, so nothing is sent anywhere until you click.
+The diagram also stays honest about the diff being only a slice of the
+codebase: relationships inferred from imports rather than shown in the diff
+are called out in the notes.
 
 Here is what the posted comment looks like for a PR that puts a Redis cache in
 front of a user service — the Mermaid renders in place, with the ASCII tucked
@@ -40,13 +47,16 @@ in a collapsible "Text version" underneath:
 ```mermaid
 flowchart LR
     client["Client"]
-    api["User API<br/>Python<br/>serves user reads (changed)"]
-    cache["Redis cache<br/>Redis<br/>caches user rows (new)"]
-    db["User DB<br/>Postgres"]
+    api["User API<br/>Python<br/>serves user reads"]
+    cache["Redis cache<br/>Redis<br/>caches rows (new)"]
+    db["User DB<br/>PostgreSQL"]
     client -->|requests| api
     api -->|checks| cache
     api -->|on miss| db
 ```
+
+> [⛶ Open full screen](https://mermaid.live)&nbsp; *(the real link carries the
+> diagram source compressed into the URL)*
 
 <details>
 <summary>Text version</summary>
@@ -67,24 +77,24 @@ Comment **`/diagram`** on a pull request to post (or update in place) the change
 diagram. Like `/describe`, it's an idempotent upsert — re-running edits the same
 comment instead of stacking new ones.
 
-To post it automatically when a PR is opened, set the `auto_diagram` Action
-input (off by default; it fires only on `opened` / `reopened`, never on a
-`synchronize` push):
+`auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
+needed — so a diagram posts automatically when a PR is opened or reopened. It
+never fires on a `synchronize` push. To opt out, set it in your workflow:
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
-          auto_diagram: "true"
+          auto_diagram: "false"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-You can also set it in `.lgtmaybe.yml`:
+or in `.lgtmaybe.yml`:
 
 ```yaml
-auto_diagram: true
+auto_diagram: false
 ```
 
 The diagram is best-effort — a failure is logged and never blocks the review.
@@ -108,10 +118,8 @@ version" block. Paste the Mermaid into a GitHub comment,
 ## Why Mermaid (and what the ASCII is for)
 
 GitHub renders **Mermaid** natively in comments and Markdown, so a `mermaid`
-fenced block renders in the comment with no image to generate or host. The
-flowchart layout routes edges automatically, avoiding the manual card ordering
-and per-label offsets required by Mermaid's C4 renderer. Native rendering also
-matters for a `pull_request_target` reviewer: hosting an image would mean
+fenced flowchart renders in the comment with no image to generate or host.
+That matters for a `pull_request_target` reviewer: hosting an image would mean
 committing a file or calling an external service, neither of which fits a
 fork-safe, idempotently-updated comment.
 
@@ -122,8 +130,8 @@ what you actually read in a terminal, and it doubles as the fallback body, so a
 reviewer never sees a red "unable to render" box if a diagram comes back
 malformed.
 
-D2 (the [C4 notation](https://d2lang.com/blog/c4/) that inspired this) isn't
-used: GitHub doesn't render D2 in Markdown, so it would show as source anyway.
+D2 isn't used because GitHub doesn't render it in Markdown, so it would show as
+source anyway.
 
 ## See also
 

@@ -33,20 +33,23 @@ def load_config(
     *,
     config_path: Path | None = None,
     user_config_path: Path | None = None,
+    config_required: bool = False,
     **cli_inputs: Any,
 ) -> ReviewConfig:
     """Return a ReviewConfig by merging defaults, configs, and CLI inputs.
 
     Pass explicit CLI values as keyword arguments — only non-None values
     override lower-precedence layers.  Supply a ``config_path`` (repo file) and/or
-    ``user_config_path`` (user-level file); the user layer sits below the repo
+    ``user_config_path`` (user-level file); the user layer sits below the repo.
+    With ``config_required`` (a user-chosen ``--config`` path, not the default
+    probe), a missing or non-mapping file raises instead of being ignored.
     """
     merged: dict[str, Any] = dict(_DEFAULTS)
 
     if user_config_path is not None:
         merged.update(store.load(user_config_path))
 
-    file_data = _load_file(config_path)
+    file_data = _load_file(config_path, required=config_required)
     merged.update(file_data)
 
     # CLI inputs win only when the caller actually supplied a value.
@@ -82,7 +85,7 @@ def _load_lens_files(lens_paths: Any) -> list[dict[str, Any]]:
         else:
             files = [path]
         for file in files:
-            parsed = yaml.safe_load(file.read_text())
+            parsed = yaml.safe_load(file.read_text(encoding="utf-8"))
             if isinstance(parsed, list):
                 lenses.extend(item for item in parsed if isinstance(item, dict))
             elif isinstance(parsed, dict):
@@ -117,18 +120,32 @@ def _resolve_lens_path(raw_path: Any) -> Path:
 
 def _load_file(
     config_path: Path | None,
+    *,
+    required: bool = False,
 ) -> dict[str, Any]:
-    """Parse YAML from a path; return an empty dict when absent."""
-    raw: str | None = None
+    """Parse YAML from a path; return an empty dict when absent.
 
-    if config_path is not None and config_path.exists():
-        raw = config_path.read_text()
+    With ``required`` (an explicitly chosen config file), a missing path or a
+    file that doesn't parse to a mapping is an error — a typo'd ``--config``
+    must not silently run with defaults. An empty file is fine either way.
+    """
+    if config_path is None:
+        return {}
+    if not config_path.exists():
+        if required:
+            raise ValueError(f"config file not found: {config_path}")
+        return {}
 
-    if not raw or not raw.strip():
+    raw = config_path.read_text(encoding="utf-8")
+    if not raw.strip():
         return {}
 
     parsed = yaml.safe_load(raw)
     if not isinstance(parsed, dict):
+        if required:
+            raise ValueError(
+                f"config file {config_path} must be a YAML mapping, got {type(parsed).__name__}"
+            )
         return {}
 
     return parsed

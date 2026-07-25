@@ -69,18 +69,47 @@ scoped to the increment's files.
 ### Requirement: Resolving threads is best-effort GraphQL
 
 When a finding is gone and GitHub marks its thread outdated, the thread SHALL
-be replied to and resolved via GraphQL (the one op REST can't do) —
-best-effort, never failing the review.
+be replied to and resolved via GraphQL (the one op REST can't do), and the
+opening comment's fingerprint marker rewritten into a disjoint "resolved"
+family so a finding that reappears later posts again instead of staying
+suppressed by re-run dedupe — best-effort, never failing the review.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: GraphQL call errors
 - **WHEN** `resolveReviewThread` fails
 - **THEN** the review still completes and posts normally
 
+### Requirement: Downvoted findings are read from 👎 reactions
+
+`list_downvoted_fingerprints` SHALL return the fingerprints of our findings an
+authorised reviewer reacted 👎 (THUMBS_DOWN) to — read via GraphQL from each
+review thread's first comment (its body marker plus the reacting users), with
+each reactor's repo permission checked and failing closed, never persisted
+locally. A write-access thumbs-down is the only suppress signal; an unprivileged
+reaction and a resolved thread are not.
+<!-- anchor: github.feedback -->
+
+#### Scenario: an authorised reviewer downvotes a finding comment
+- **WHEN** the opening comment carries our finding marker and a write-access user's 👎
+- **THEN** its fingerprint is returned, to be suppressed next run
+
+### Requirement: Replying in a finding thread is GraphQL
+
+`reply_in_thread` SHALL post a reply on a review thread via the GraphQL
+`addPullRequestReviewThreadReply` mutation — its node id resolved from an inbound
+review-comment id by `find_review_thread`, matching the thread whose comments
+carry that id — the primitive that answers a PR author in a finding conversation
+and the same reply the resolve-on-fix path uses.
+<!-- anchor: github.reply-in-thread -->
+
+#### Scenario: author replies in a finding thread
+- **WHEN** `reply_in_thread` is called with a thread node id and a body
+- **THEN** the reply is posted to that thread via GraphQL
+
 ### Requirement: Generated and binary files are skipped
 
-Lockfiles, minified bundles, vendored trees, and binary files SHALL be
-excluded from review before any path filter or cap applies.
+Lockfiles, minified bundles, vendored trees, binary files, and generated LLM-index corpora (`llms.txt` / `llms-full.txt`) SHALL be excluded from review
+before any path filter or cap applies.
 <!-- anchor: github.reviewable -->
 
 #### Scenario: lockfile in the diff
@@ -98,3 +127,20 @@ best-effort, never failing the review.
 #### Scenario: repo has unrelated labels
 - **WHEN** labels are reconciled
 - **THEN** labels outside lgtmaybe's families are never added or removed
+
+### Requirement: Merge-gate rides a Check Run, never approval state
+
+With `fail_on` set, after posting the review the adapter SHALL create a
+completed Check Run on the PR head SHA whose conclusion is `failure` when any
+surviving finding is at or above `fail_on`, else `success` — so teams can make
+it a required check in branch protection. Enforcement rides the Check Run;
+approval state is never set. `fail_on` unset (default) creates no check run.
+<!-- anchor: github.check-run -->
+
+#### Scenario: a blocking finding is present
+- **WHEN** `fail_on` is `high` and a finding is `high` or above
+- **THEN** the Check Run is created with conclusion `failure`
+
+#### Scenario: no finding meets the threshold
+- **WHEN** `fail_on` is set and no surviving finding reaches it
+- **THEN** the Check Run is created with conclusion `success`

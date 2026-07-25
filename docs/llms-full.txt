@@ -2,11 +2,11 @@
 
 > Provider-agnostic AI pull-request reviewer. It posts inline review comments and a summary onto a GitHub pull request, or prints findings locally from your git diff. Seven hosted providers, local ollama, and any OpenAI-compatible endpoint — one flag, and keyless OIDC/WIF auth for cloud providers (no static keys in secrets).
 
-Source: https://mattjcoles.github.io/lgtmaybe/ — generated from the docs/ tree.
+Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/ -->
+<!-- Source: https://lgtmaybe.coles.codes/ -->
 
 <div class="hero" markdown>
 
@@ -16,43 +16,49 @@ Source: https://mattjcoles.github.io/lgtmaybe/ — generated from the docs/ tree
 
 </div>
 
-Provider-agnostic AI PR reviewer. Seven hosted providers, local ollama, and any
-OpenAI-compatible endpoint — one flag, and no static keys for cloud providers. It
-posts inline comments and a summary straight onto the pull request.
+lgtmaybe reviews the code a pull request changes. Pick OpenAI, Claude, Bedrock,
+Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it as a
+GitHub Action or from your terminal. GitHub gets inline comments and one
+summary; locally, you get the same findings before you push.
 
-lgtmaybe reviews the lines a change touches. It runs in two places: as a
-GitHub Action on a pull request, or locally from the command line against your
-`git` diff before you push. As an Action it fetches the diff from the GitHub API
-and never checks out or runs your code. Locally it reads your working branch.
-Either way it pads each change with a few surrounding lines, so a finding lands
-with the function around it in view — but it only ever comments on the lines
-that actually changed.
+It reads the diff and a little surrounding code, but only comments on changed
+lines. On GitHub it never checks out or runs the pull request. Generated files
+and binaries are skipped, secrets are redacted, and all PR text is treated as
+untrusted.
 
-Reviews surface the things you'd want a careful reviewer to catch:
+It checks for:
 
-- **Logic and correctness bugs** — edge cases, null/None dereferences, off-by-one and boundary errors, mismatched or inverted ranges, unhandled error paths, races and TOCTOU, missed `await`s, and numeric or timezone bugs.
-- **Security vulnerabilities** — an OWASP-aligned sweep: injection, XSS, CSRF and open redirects, hardcoded secrets, broken authn/authz (including JWT pitfalls), path traversal, unrestricted uploads, SSRF, insecure deserialization and XXE, mass assignment, weak crypto, resource/DoS safety (including ReDoS), secrets or PII (passwords, tokens, SSNs, card data) leaking into logs, and CI/IaC misconfiguration.
-- **Missing or weak tests** — changed code paths shipped without a test (flagged with a suggested test to drop in), and tests that don't really test: assertion-free, over-mocked, or sleep-based.
-- **Documentation gaps and stale docs** — public APIs added without a docstring, names that contradict what the code does, and docstrings or comments the change just made wrong.
-- **Deprecated and end-of-life code** — deprecated APIs, end-of-life or vulnerable dependencies, and typosquat-looking additions, flagged when the diff shows them (with the modern replacement suggested where known).
-- **Intent** — does the PR do what it says? lgtmaybe compares the PR title, description, and commit names (or your local `git log` commit names on the CLI) against the diff, and flags out-of-scope hunks, contradictions, and promised behaviour that never lands.
-- **Ponytail** — the "lazy senior dev" lens: the best code is the code you never wrote. Flags code that needn't exist at all — YAGNI, reaching for the standard library, doing it in fewer lines.
+- **Correctness and security** — logic errors, missed `await`s, injection, auth mistakes, and leaked secrets.
+- **Code health** — performance problems, needless complexity, deprecations, and risky dependencies.
+- **Tests and documentation** — missing or weak tests, stale comments, and undocumented APIs.
+- **Intent** — whether the change does what its title, description, and commits say it does.
+- **Ponytail** — code you don't need, standard-library opportunities, and simpler ways to get the job done.
 
-Beyond the review itself, slash commands on the PR keep the reviewer's mental
-model of the code intact: **`/describe`** posts a structured description of the
-change (title, change type, per-file walkthrough, intent check), **`/diagram`**
-posts a [compact Mermaid diagram of the components the PR touches](how-to/generate-a-change-diagram.md)
-— a visual map of where the change sits in the system, rendered natively by
-GitHub — and **`/ask <question>`** answers questions about the change in-thread.
-`lgtmaybe diagram` prints the same change diagram locally, before you push.
+Findings are graded from `info` to `critical` and land on the exact changed
+line. A clean change just gets a 👍 **LGTM!**.
 
-Every finding is graded from `info` up to `critical`, so you can set the
-severity floor that matters to you. Each one lands as an inline comment on
-the exact line where the problem is, with a single summary at the top. On the CLI
-the same findings print to your terminal — ready to read, or to hand to an AI
-agent to apply. Before anything leaves for the model, generated files and
-binaries are skipped, secrets are redacted, and the diff is treated as untrusted
-input, hardened against prompt injection. A clean PR just gets a 👍 **LGTM!**.
+![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
+
+Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
+**`/describe`** writes a structured overview, **`/diagram`** draws a
+[compact flowchart of the change](how-to/generate-a-change-diagram.md), and
+**`/ask <question>`** answers in the PR. Run `lgtmaybe diagram` to draw the same
+map locally before you push.
+
+```mermaid
+flowchart LR
+    web["Storefront<br/>React<br/>places orders"]
+    api["Order API<br/>Python<br/>creates orders (changed)"]
+    db["Order database<br/>PostgreSQL<br/>stores orders"]
+    queue["Order events<br/>SQS<br/>buffers events (new)"]
+    worker["Notification worker<br/>Python<br/>sends confirmations (new)"]
+    email["Email provider<br/>delivers messages"]
+    web -->|calls| api
+    api -->|stores in| db
+    api -->|publishes to| queue
+    queue -->|delivers to| worker
+    worker -->|sends via| email
+```
 
 ## Start here
 
@@ -87,7 +93,7 @@ coding agents.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/tutorial/getting-started/ -->
+<!-- Source: https://lgtmaybe.coles.codes/tutorial/getting-started/ -->
 
 # Getting Started with lgtmaybe
 
@@ -204,7 +210,7 @@ lgtmaybe ran its pipeline over your local diff:
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/install-the-cli/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/install-the-cli/ -->
 
 # Install the CLI
 
@@ -231,6 +237,19 @@ That prints the command list with usage examples; `lgtmaybe help <command>`
 (e.g. `lgtmaybe help review`) shows the full option reference for one command.
 
 Upgrade later with `pip install --upgrade lgtmaybe`.
+
+## Install on Windows (winget)
+
+Install the portable Windows executable from winget:
+
+```powershell
+winget install MattJColes.lgtmaybe
+```
+
+The executable bundles ast-grep for cross-file symbol resolution, but it does
+not bundle the optional cloud SDKs used by keyless Bedrock, Vertex, or Azure
+authentication. Use the pip install with the matching extra for those providers.
+The regular `pip install lgtmaybe` path also works on Windows.
 
 ## Install on macOS (Homebrew)
 
@@ -266,7 +285,8 @@ resolution during review.
 
 ## Cloud providers need extras
 
-The base install (either method) covers every **API-key** and **local** provider:
+The base pip install, Homebrew formula, and Windows executable cover every
+**API-key** and **local** provider:
 
 | Providers | Covered by base install? |
 |---|---|
@@ -274,8 +294,8 @@ The base install (either method) covers every **API-key** and **local** provider
 | `ollama`, `openai-compatible` — fully local, point `--api-base` at the server | ✅ Yes |
 | `bedrock`, `vertex`, `azure` — keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
-The **keyless cloud** providers need extra cloud SDKs that the base install (and
-the Homebrew formula) does not bundle. Install the CLI from PyPI with the matching
+The **keyless cloud** providers need extra cloud SDKs that the Homebrew formula
+and Windows executable do not bundle. Install the CLI from PyPI with the matching
 extra:
 
 ```bash
@@ -292,15 +312,26 @@ bundles all three and wires up the OIDC/WIF auth for you.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-as-github-action/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/use-as-github-action/ -->
 
 # Use lgtmaybe as a GitHub Action
 
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
+Use lgtmaybe from the
+[GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe).
+It is a **GitHub Action**, not a hosted GitHub App. Its provider, model, and
+authentication settings live in the workflow's `with:` block. GitHub Actions
+supplies the repository token, so there is no separate App to install. The
+[minimal OpenAI workflow](#minimal-workflow-openai) below shows the complete
+shape.
+
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
+`auto_diagram` is on by default, so newly opened or reopened pull requests
+receive a compact Mermaid flowchart automatically. Set it to `false` if you do
+not want the extra model call.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -311,7 +342,6 @@ ollama runs the model on your own machine, so it is local-only — use the
 - [Minimal workflow — openai](#minimal-workflow-openai)
 - [Other key-based providers](#other-key-based-providers)
 - [Keyless cloud workflows](#keyless-cloud-workflows)
-- [Post reviews as a GitHub App](#post-reviews-as-a-github-app)
 - [Action inputs](#action-inputs)
 - [Adding a config file](#adding-a-config-file)
 - [Pin to a specific version](#pin-to-a-specific-version)
@@ -334,6 +364,16 @@ input to set. On an `issue_comment` event it routes the slash command
 added since the last completed review are re-reviewed, and earlier findings
 stay open until fixed. Comment `/review full` for a full re-review on demand,
 or pin the behaviour with the `incremental` input / config key.
+
+On a `pull_request_review_comment` event lgtmaybe **answers replies in finding
+threads**: when a PR author replies inside a review conversation it opened on a
+finding, it responds in that same thread, using the finding and its surrounding
+diff hunk as context (the reply text is treated as untrusted input, exactly like
+the diff). This needs the `pull_request_review_comment` trigger in your workflow
+(the example workflows include it), and it never answers itself — only a freshly
+created reply from a human author, on a thread lgtmaybe started, is answered. It
+is on by default; set `answer_replies: false` to leave finding threads
+unanswered.
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
 > are free. On a hosted provider each run uses tokens you pay for, so it's worth
@@ -374,6 +414,8 @@ on:
   pull_request_target:
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -386,14 +428,17 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only — for .lgtmaybe.yml config
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: openai
           model: gpt-5.5
+          auto_diagram: true
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
@@ -403,21 +448,21 @@ Swap the `provider`, `model`, and `api_key` inputs:
 
 ```yaml
 # anthropic
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
     api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
 # openrouter
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: zai
     model: glm-4.6
@@ -439,32 +484,6 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 - [Review with Vertex WIF](./review-with-vertex-wif.md)
 - [Review with Azure OpenAI](./review-with-azure.md)
 
-## Post reviews as a GitHub App
-
-By default reviews post as `github-actions[bot]` using the workflow token. To post
-as **your own branded identity** — e.g. `lgtmaybe[bot]` with an avatar — with
-higher API rate limits (and optional cross-repo reach), pass `app_id` and
-`app_private_key`. The action mints a short-lived installation token, uses it to
-fetch the diff and post the review, and revokes it at the end of the job. This is
-purely the *posting identity* — the keyless cloud model is unchanged and
-everything still runs in your own CI.
-
-```yaml
-- uses: MattJColes/lgtmaybe@v0
-  with:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-    app_id: ${{ vars.LGTMAYBE_APP_ID }}
-    app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-```
-
-The App's own installation permissions (`pull requests: write`, `contents: read`)
-govern what the review can post — but keep the workflow `permissions:` block for
-the `actions/checkout` of your `.lgtmaybe.yml`. The one-time setup (create the
-App, grant those permissions, install it, and store the ID and key) is in
-[Post reviews as a GitHub App](./post-as-a-github-app.md).
-
 ## Action inputs
 
 | Input | Default | Description |
@@ -474,25 +493,27 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
-| `timeout` | provider default (ollama/openai-compatible 300s, cloud 60s) | Per-request timeout in seconds for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `timeout` | provider default (ollama/openai-compatible/openrouter 900s, cloud 300s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
 | `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
 | `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
 | `resolve_fixed` | `true` | Auto-resolve a review conversation once its finding is fixed (set `false` to resolve manually) |
 | `recursive` | `true` | Walk a file whose diff exceeds `max_input_tokens` hunk-by-hunk (RLM-style) instead of sending it whole; set `false` to disable |
 | `structured_output` | `true` | Constrain output to the findings JSON schema via `response_format` (JSON mode); set `false` for an `openai-compatible` gateway that rejects it |
-| `preset` | `fast` | Lens grouping: `fast` covers all nine lenses in four model calls; `full` runs one call per lens (an explicit `categories` list in `.lgtmaybe.yml` overrides it) |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens |
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
-| `max_review_seconds` | `600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
+| `max_review_seconds` | `1800` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
 | `max_concurrency` | auto (8 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix on providers with an explicit cache breakpoint (anthropic, bedrock Claude/Nova); safe no-op elsewhere |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `false` | Post a compact Mermaid change diagram comment when a PR is opened/reopened, before the review |
+| `auto_diagram` | `true` | Post a compact Mermaid flowchart comment when a PR is opened/reopened, before the review; set `false` to opt out |
+| `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
+| `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
 | `aws_region` | `us-east-1` | AWS region for bedrock |
@@ -502,14 +523,44 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
 | `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
 | `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
-| `app_id` | — | GitHub App ID — post as a branded App identity (with `app_private_key`) instead of `github-actions[bot]`, with higher rate limits. [Setup](./post-as-a-github-app.md) |
-| `app_private_key` | — | Private key (PEM) of the App named by `app_id`; wire a secret to it. Mints a short-lived, auto-revoked installation token |
+| `app_id` | — | Advanced: ID of an existing GitHub App used with `app_private_key`; most users should leave this empty |
+| `app_private_key` | — | Advanced: private key of the existing App named by `app_id`; most users should leave this empty |
 | `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
 | `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
-| `image` | `ghcr.io/mattjcoles/lgtmaybe:v0` | Override the container image (advanced) |
+| `image` | `ghcr.io/mattjcoles/lgtmaybe:v1` | Override the container image (advanced) |
 
 The action sets the `GITHUB_TOKEN` and provider credentials for the container
 itself — you do not pass them as `env`.
+
+## Gate merges on findings
+
+Set `fail_on` to a severity to turn the review into a merge gate. After posting
+the review, lgtmaybe creates a **Check Run** named `lgtmaybe` whose conclusion is
+`failure` when any surviving finding is at or above that severity, and `success`
+otherwise. Enforcement rides the Check Run — lgtmaybe never sets PR approval
+state, so a clean review stays comment-only.
+
+```yaml
+- uses: MattJColes/lgtmaybe@v1
+  with:
+    provider: openai
+    model: gpt-4o
+    api_key: ${{ secrets.OPENAI_API_KEY }}
+    fail_on: high   # block merge on any high/critical finding
+```
+
+To make it block merges, mark the check as required in **branch protection**:
+
+1. Open **Settings → Branches → Branch protection rules** (or a ruleset) for the
+   target branch.
+2. Enable **Require status checks to pass before merging**.
+3. Search for and add the **`lgtmaybe`** check. It appears in the list once the
+   Action has run at least once with `fail_on` set on a PR against that branch.
+
+A PR with a finding at or above the threshold then shows a failing `lgtmaybe`
+check and cannot merge until the finding is resolved (or `fail_on` is lowered).
+Leave `fail_on` unset to keep reviews advisory (the default) — no check run is
+created.
 
 ## Adding a config file
 
@@ -519,176 +570,16 @@ filters, and cost caps. See
 
 ## Pin to a specific version
 
-`@v0` is a floating tag that tracks the latest `v0.x.x` release. To pin exactly,
+`@v1` is a floating tag that tracks the latest `v1.x.x` release. To pin exactly,
 use a full version tag:
 
 ```yaml
-uses: MattJColes/lgtmaybe@v0.1.0
+uses: MattJColes/lgtmaybe@v1.0.0
 ```
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/post-as-a-github-app/ -->
-
-# Post reviews as a GitHub App
-
-By default lgtmaybe posts reviews as `github-actions[bot]` using the workflow's
-built-in token. Point it at a **GitHub App** you own and reviews post under that
-App's identity instead — a branded `lgtmaybe[bot]` name and avatar, a higher API
-rate limit, and optional access across several repositories.
-
-This changes only the **posting identity**. The action still runs in your own CI,
-still fetches the diff via the API without checking out PR code, and the keyless
-cloud auth (Bedrock/Vertex/Azure) is untouched. There is no hosted service — you
-are not sending your code or keys anywhere new.
-
-## Contents
-
-- [How it works](#how-it-works)
-- [One-time GitHub App setup](#one-time-github-app-setup)
-- [Workflow example](#workflow-example)
-- [Reviewing across several repositories](#reviewing-across-several-repositories)
-- [Without the built-in inputs](#without-the-built-in-inputs)
-- [Troubleshooting](#troubleshooting)
-
-## How it works
-
-You pass the App's ID and private key as action inputs. The action mints a
-**short-lived installation token** with
-[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token),
-uses it to read the PR and post the review, and revokes it in a post step at the
-end of the job. Nothing long-lived is stored, and the token's scope is only what
-the App is installed for.
-
-## One-time GitHub App setup
-
-This is the human-only part — do it once:
-
-1. Create a **GitHub App** (Settings → Developer settings → GitHub Apps → New, at
-   the personal or organisation level). Name it — the name becomes the `[bot]`
-   identity on the review, e.g. `lgtmaybe`.
-2. Under **Repository permissions**, grant:
-   - **Pull requests: Read and write** — to post the review and inline comments.
-   - **Contents: Read-only** — to read the config and files.
-   - (Optional) **Issues: Read and write** if you use `/ask`, which replies on the
-     PR conversation.
-3. You do **not** need to subscribe to any webhook events — the App is used only
-   to mint a token; the review is still triggered by your workflow.
-4. **Install** the App on the repositories you want reviewed (the App's page →
-   Install App).
-5. Note the **App ID** (on the App's General page) and **generate a private key**
-   (same page → Private keys → Generate). The key downloads as a `.pem` file.
-6. Store them in the repo (or org):
-   - **App ID** as a repository variable, e.g. `LGTMAYBE_APP_ID` (Settings →
-     Secrets and variables → Actions → Variables).
-   - **Private key** as a secret, e.g. `LGTMAYBE_APP_PRIVATE_KEY` (paste the whole
-     `.pem` contents).
-
-## Workflow example
-
-Add `app_id` and `app_private_key` to any provider workflow. Everything else is
-unchanged — this example is the anthropic workflow with the App identity added:
-
-```yaml
-name: lgtmaybe
-
-on:
-  pull_request_target:
-  issue_comment:
-    types: [created]
-
-permissions:
-  contents: read           # still needed for the actions/checkout of .lgtmaybe.yml
-  pull-requests: write
-
-jobs:
-  review:
-    # Only trusted authors can trigger a review (see "Who can trigger a review").
-    if: >-
-      (github.event_name == 'pull_request_target' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
-      (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
-        with:
-          provider: anthropic
-          model: claude-sonnet-4-6
-          api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          app_id: ${{ vars.LGTMAYBE_APP_ID }}
-          app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-```
-
-The App's **installation** permissions govern what the review can post; the
-workflow `permissions:` block still applies to the default token that
-`actions/checkout` uses to read `.lgtmaybe.yml`.
-
-## Reviewing across several repositories
-
-By default the minted token is scoped to the current repository. To let one App
-review PRs across a monorepo or several repos in an org, set `app_owner` (and
-optionally `app_repositories`):
-
-```yaml
-      - uses: MattJColes/lgtmaybe@v0
-        with:
-          provider: anthropic
-          model: claude-sonnet-4-6
-          api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          app_id: ${{ vars.LGTMAYBE_APP_ID }}
-          app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-          app_owner: my-org
-          app_repositories: |
-            service-a
-            service-b
-```
-
-With `app_owner` set and `app_repositories` empty, the token covers every repo
-the App is installed on under that owner.
-
-## Without the built-in inputs
-
-The `app_id` / `app_private_key` inputs are a convenience — because `github_token`
-is already a pass-through input, you can mint the token yourself and pass it in.
-This is useful if you already run `actions/create-github-app-token` for other
-steps:
-
-```yaml
-      - uses: actions/create-github-app-token@v2
-        id: app-token
-        with:
-          app-id: ${{ vars.LGTMAYBE_APP_ID }}
-          private-key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-      - uses: MattJColes/lgtmaybe@v0
-        with:
-          provider: anthropic
-          model: claude-sonnet-4-6
-          api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ steps.app-token.outputs.token }}
-```
-
-## Troubleshooting
-
-**Reviews still post as `github-actions[bot]`** — `app_id` is empty, so the action
-fell back to the default token. Check that the `LGTMAYBE_APP_ID` variable and
-`LGTMAYBE_APP_PRIVATE_KEY` secret are set and referenced correctly (a variable is
-`${{ vars.* }}`, a secret is `${{ secrets.* }}`).
-
-**`RequestError [HttpError]: Not Found` / `Resource not accessible by
-integration`** — the App is not installed on the repository, or lacks a required
-permission. Install it on the repo and confirm **Pull requests: write** +
-**Contents: read** under the App's Repository permissions (re-accept the
-permission change on the installation if you edited it after installing).
-
-**`private key ... failed to parse`** — the secret must contain the full PEM,
-including the `-----BEGIN...-----` / `-----END...-----` lines. Paste the whole
-`.pem` file contents.
-
----
-
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openai/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-openai/ -->
 
 # Review with OpenAI
 
@@ -715,7 +606,7 @@ Copy [`examples/workflows/review-openai.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openai
     model: gpt-5.5
@@ -762,7 +653,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-anthropic/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-anthropic/ -->
 
 # Review with Claude (Anthropic)
 
@@ -790,7 +681,7 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: anthropic
     model: claude-sonnet-4-6
@@ -843,7 +734,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openrouter/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-openrouter/ -->
 
 # Review with OpenRouter
 
@@ -871,7 +762,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6
@@ -921,7 +812,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-zai/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-zai/ -->
 
 # Review with z.ai (GLM)
 
@@ -952,7 +843,7 @@ Copy [`examples/workflows/review-zai.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v0
+- uses: MattJColes/lgtmaybe@v1
   with:
     provider: zai
     model: glm-4.6
@@ -1008,7 +899,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-bedrock-oidc/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-bedrock-oidc/ -->
 
 # Review with AWS Bedrock (keyless OIDC)
 
@@ -1106,7 +997,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: bedrock
           model: us.anthropic.claude-sonnet-4-6
@@ -1181,7 +1072,7 @@ needs a cross-region inference profile — prefix with `us.`/`eu.`/`apac.` (e.g.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-vertex-wif/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-vertex-wif/ -->
 
 # Review with Google Vertex AI (keyless WIF)
 
@@ -1251,7 +1142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: vertex
           model: gemini-3-pro
@@ -1314,7 +1205,7 @@ region. Check the [Vertex AI model garden](https://console.cloud.google.com/vert
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-azure/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-azure/ -->
 
 # Review with Azure OpenAI (keyless OIDC)
 
@@ -1395,7 +1286,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: azure
           model: my-gpt-4o-deployment            # your deployment name
@@ -1437,7 +1328,7 @@ If you would rather use a resource key, set `AZURE_API_KEY` and `AZURE_API_BASE`
 extra is not required in this mode.
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: azure
           model: my-gpt-4o-deployment
@@ -1474,7 +1365,7 @@ resource that `api_base` points at, not the upstream OpenAI model id.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/run-locally-with-ollama/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/run-locally-with-ollama/ -->
 
 # Run Locally with ollama
 
@@ -1657,16 +1548,16 @@ branch locally before opening a PR. See
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
-long default per-request timeout (300 seconds)** automatically — you don't need
-to set anything for a normal run. (Cloud providers default to 60 s.)
+long default per-request timeout (900 seconds)** automatically — you don't need
+to set anything for a normal run. (Direct cloud providers default to 300 s.)
 
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 300.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 900.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
 lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 900
+  --api-base http://localhost:11434 --timeout 1800
 ```
 
 ```yaml
@@ -1676,20 +1567,22 @@ model: qwen3.6:35b
 timeout: 900
 ```
 
-The review fans out one call per lens — **four calls** under the default `fast`
-preset (nine under `--preset full`). lgtmaybe runs those **serially for
+The review fans out **three calls** under the default `fast` preset (nine under
+`--preset full`). lgtmaybe runs those **serially for
 ollama**: a single ollama instance serves one request at a time, so firing them
 concurrently would only make each wait and time out. The trade-off is
 wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — four serial calls instead of nine is the
+is exactly why `fast` is the default — three serial calls instead of nine is the
 single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
 `OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — by default lgtmaybe issues ollama calls one at a time. Add `--profile`
-to any run to see the per-call breakdown.
+match. With more than one worker, lgtmaybe splits correctness into focused flow
+and state/lifecycle calls, making four parallel fast-preset tasks instead of
+three combined serial tasks. By default lgtmaybe issues ollama calls one at a
+time. Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
@@ -1752,7 +1645,7 @@ window. Add a path filter in `.lgtmaybe.yml` to reduce diff size, or set
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-a-custom-openai-compatible-endpoint/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/use-a-custom-openai-compatible-endpoint/ -->
 
 # Local Models & other OpenAI providers
 
@@ -1818,7 +1711,7 @@ The API key, when you do supply one, is read from the environment or `--api-key`
 and is **never persisted** to config.
 
 Because the endpoint might be a slow local model, `openai-compatible` defaults to
-the same generous **300s** per-call timeout as ollama. For a fast hosted endpoint
+the same generous **900s** per-call timeout as ollama. For a fast hosted endpoint
 like DeepSeek you can dial it down with `--timeout` (or `timeout:` in config).
 
 ## DeepSeek (hosted, keyed)
@@ -1936,7 +1829,7 @@ Persist it as `structured_output: false` in `.lgtmaybe.yml`, or set the
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/configure-lgtmaybe-yml/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/configure-lgtmaybe-yml/ -->
 
 # Configure .lgtmaybe.yml
 
@@ -2081,14 +1974,12 @@ Default: `100000`.
 
 ### preset
 
-How many model calls the review spends. `fast` (the default) covers all nine
-lenses in **four calls**: security and correctness keep dedicated calls (the
-stated intent folds into the correctness prompt when the PR states one), and
-the rest merge into a code-health call (performance, complexity, ponytail,
-deprecation) and an artefacts call (tests, documentation), with each finding
-attributed to its category. `full` runs one call per lens — more per-lens
-focus for release branches and deep audits, at roughly twice the calls and
-wall time.
+How many model calls the review spends. `fast` (the default) covers security,
+correctness and stated intent, performance, complexity, ponytail, and
+deprecation in **four calls when parallelism is available**: correctness splits
+into flow/intent and state/lifecycle tasks. With one worker it stays combined
+for three calls. `full` restores tests and documentation and runs one focused
+call per lens for release branches and deep audits.
 
 ```yaml
 preset: full
@@ -2164,14 +2055,16 @@ Default: `true`.
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
-**provider-aware default**: **300 s for ollama and openai-compatible** (local
-models are slow) and 60 s for cloud providers. Set it explicitly to raise it for a large local model.
+**provider-aware default**: **900 s for ollama, openai-compatible, and
+openrouter** (local models are slow, and openrouter can route to slow reasoning
+models) and 300 s for direct cloud providers. Set it explicitly to raise it for a
+large local model.
 
 ```yaml
-timeout: 900   # 15 minutes per call, e.g. for a big model on CPU
+timeout: 1800   # 30 minutes per call, e.g. for a big model on CPU
 ```
 
-Default: auto (ollama/openai-compatible 300 s, cloud 60 s). See
+Default: auto (ollama/openai-compatible/openrouter 900 s, cloud 300 s). See
 [Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
 
 ### structured_output
@@ -2497,7 +2390,7 @@ Flags take precedence over `.lgtmaybe.yml`.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/add-a-custom-lens/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/add-a-custom-lens/ -->
 
 # Add a custom review lens (BYO skills)
 
@@ -2655,14 +2548,14 @@ your lenses.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/generate-a-change-diagram/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/ -->
 
 # Generate a change diagram
 
-lgtmaybe can post a **compact diagram of what a pull request changes** — the
-containers and components the PR touches plus their immediate relationships — so
-a reviewer gets a visual overview before they read the diff. It's a separate
-concern from the review and the description: enable any of them independently.
+lgtmaybe can post a **compact flowchart of what a pull request changes** — the
+components the PR touches plus their immediate relationships — so a reviewer
+gets a visual overview before they read the diff. It's a separate concern from
+the review and the description: enable any of them independently.
 
 ## Contents
 
@@ -2676,15 +2569,22 @@ concern from the review and the description: enable any of them independently.
 
 One model call returns two renderings of the same graph:
 
-- an automatically laid-out **Mermaid flowchart**, which GitHub renders natively
-  inside the comment — no image, no external hosting; and
+- a **Mermaid flowchart**, which GitHub renders natively inside the comment —
+  no image, no external hosting; and
 - a **plain-text ASCII** rendering of the same diagram, which is what shows in a
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
-Changed elements are marked in the labels (`(new)` / `(changed)`), and the
-diagram stays honest about the diff being only a slice of the codebase —
-relationships it infers from imports rather than the diff itself are called out
-in the notes rather than asserted as fact.
+The flowchart is intentionally sparse: it uses at most six nodes, short
+relationship labels, and Mermaid's automatic layout. Changed elements are
+marked in their labels (`(new)` / `(changed)`), keeping labels and arrows clear
+of neighbouring cards. Because GitHub's renderer offers zoom buttons but no
+full-screen, the diagram is followed by an **⛶ Open full screen** link that
+renders the same diagram alone in a browser tab, with pan and zoom, on
+[mermaid.live](https://mermaid.live). The source travels compressed in the URL
+fragment, decoded in your browser, so nothing is sent anywhere until you click.
+The diagram also stays honest about the diff being only a slice of the
+codebase: relationships inferred from imports rather than shown in the diff
+are called out in the notes.
 
 Here is what the posted comment looks like for a PR that puts a Redis cache in
 front of a user service — the Mermaid renders in place, with the ASCII tucked
@@ -2695,13 +2595,16 @@ in a collapsible "Text version" underneath:
 ```mermaid
 flowchart LR
     client["Client"]
-    api["User API<br/>Python<br/>serves user reads (changed)"]
-    cache["Redis cache<br/>Redis<br/>caches user rows (new)"]
-    db["User DB<br/>Postgres"]
+    api["User API<br/>Python<br/>serves user reads"]
+    cache["Redis cache<br/>Redis<br/>caches rows (new)"]
+    db["User DB<br/>PostgreSQL"]
     client -->|requests| api
     api -->|checks| cache
     api -->|on miss| db
 ```
+
+> [⛶ Open full screen](https://mermaid.live)&nbsp; *(the real link carries the
+> diagram source compressed into the URL)*
 
 <details>
 <summary>Text version</summary>
@@ -2722,24 +2625,24 @@ Comment **`/diagram`** on a pull request to post (or update in place) the change
 diagram. Like `/describe`, it's an idempotent upsert — re-running edits the same
 comment instead of stacking new ones.
 
-To post it automatically when a PR is opened, set the `auto_diagram` Action
-input (off by default; it fires only on `opened` / `reopened`, never on a
-`synchronize` push):
+`auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
+needed — so a diagram posts automatically when a PR is opened or reopened. It
+never fires on a `synchronize` push. To opt out, set it in your workflow:
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
-          auto_diagram: "true"
+          auto_diagram: "false"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-You can also set it in `.lgtmaybe.yml`:
+or in `.lgtmaybe.yml`:
 
 ```yaml
-auto_diagram: true
+auto_diagram: false
 ```
 
 The diagram is best-effort — a failure is logged and never blocks the review.
@@ -2763,10 +2666,8 @@ version" block. Paste the Mermaid into a GitHub comment,
 ## Why Mermaid (and what the ASCII is for)
 
 GitHub renders **Mermaid** natively in comments and Markdown, so a `mermaid`
-fenced block renders in the comment with no image to generate or host. The
-flowchart layout routes edges automatically, avoiding the manual card ordering
-and per-label offsets required by Mermaid's C4 renderer. Native rendering also
-matters for a `pull_request_target` reviewer: hosting an image would mean
+fenced flowchart renders in the comment with no image to generate or host.
+That matters for a `pull_request_target` reviewer: hosting an image would mean
 committing a file or calling an external service, neither of which fits a
 fork-safe, idempotently-updated comment.
 
@@ -2777,8 +2678,8 @@ what you actually read in a terminal, and it doubles as the fallback body, so a
 reviewer never sees a red "unable to render" box if a diagram comes back
 malformed.
 
-D2 (the [C4 notation](https://d2lang.com/blog/c4/) that inspired this) isn't
-used: GitHub doesn't render D2 in Markdown, so it would show as source anyway.
+D2 isn't used because GitHub doesn't render it in Markdown, so it would show as
+source anyway.
 
 ## See also
 
@@ -2788,7 +2689,7 @@ used: GitHub doesn't render D2 in Markdown, so it would show as source anyway.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/fix-findings-with-an-ai-agent/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/fix-findings-with-an-ai-agent/ -->
 
 # Fix findings with an AI agent
 
@@ -2874,7 +2775,7 @@ you are happy, then open your PR. To post reviews on the PR itself, wire up the
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/releasing/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/releasing/ -->
 
 # Releasing lgtmaybe (maintainers)
 
@@ -2883,7 +2784,7 @@ It reads the **conventional commits** merged to `main` and keeps a "Release PR"
 open that bumps the version and regenerates `CHANGELOG.md`. **Merging that PR** is
 the release: it cuts the tag and the GitHub release, then the same run publishes —
 **PyPI** via trusted publishing (OIDC) and the **GHCR image** + floating major
-tag (`v{major}`, currently `v0`) via the reusable `.github/workflows/release.yml`
+tag (`v{major}`, currently `v1`) via the reusable `.github/workflows/release.yml`
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
 A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
@@ -2897,6 +2798,11 @@ source is a dead end — the wheels work. The formula declares **`preserve_rpath
 so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
 rewrite them ("Failed to fix install linkage"). It's a plain source formula —
 no bottle — so it installs on any architecture and macOS version.
+
+The release run also calls `.github/workflows/windows-exe.yml` to build and
+smoke-test a portable Windows executable, then `.github/workflows/winget.yml`
+to submit the new asset to winget. The executable must exist before the winget
+job starts; both workflows are manually dispatchable for recovery.
 
 The workflow:
 
@@ -2944,6 +2850,14 @@ The only human-only pieces:
   with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
   to another repository). To seed or verify the formula by hand on a Mac, run
   `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
+- **winget:** fork [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs).
+  Create a classic GitHub PAT with the `public_repo` scope and add it to this
+  repo as **`WINGET_TOKEN`**. For the first release, build/upload the Windows
+  asset and run `wingetcreate new <asset-url>` manually with package id
+  `MattJColes.lgtmaybe`, installer type `portable`, command alias `lgtmaybe`,
+  and MIT licence metadata. Microsoft moderates a new package before it exists;
+  this can take days or weeks. Once that first manifest is accepted, the release
+  workflow uses `wingetcreate update` for every later version.
 
 ## Each release
 
@@ -2953,6 +2867,8 @@ The only human-only pieces:
    proposed version + changelog, then **merge it** to publish.
 3. To (re)publish an existing tag to PyPI without a new release, run the
    `release-please` workflow via **workflow_dispatch** with the tag name.
+4. If Windows publication needs recovery, dispatch `windows-exe` for the tag,
+   then dispatch `winget` after the release asset is visible.
 
 ## Before going public
 
@@ -2963,7 +2879,7 @@ The only human-only pieces:
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/reference/config/ -->
+<!-- Source: https://lgtmaybe.coles.codes/reference/config/ -->
 
 <!-- DO NOT EDIT — this file is generated by docs/generate_reference.py.
      Run `uv run python docs/generate_reference.py` to regenerate.
@@ -2979,22 +2895,26 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `answer_replies` | boolean | No | `True` | Answer Replies |
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
-| `auto_diagram` | boolean | No | `False` | Auto Diagram |
+| `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
+| `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
+| `language` | string / null | No | `null` | Language |
+| `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `max_review_seconds` | integer | No | `600` | Max Review Seconds |
+| `max_review_seconds` | integer | No | `1800` | Max Review Seconds |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
@@ -3085,6 +3005,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `commit_messages` | list[string] | No | `[]` | Commit Messages |
 | `description` | string | No | `` | Description |
 | `diff` | string | Yes | — | Diff |
+| `feedback_downvotes` | list[string] | No | `[]` | Feedback Downvotes |
 | `file_contents` | object | No | — | File Contents |
 | `head_sha` | string | Yes | — | Head Sha |
 | `pr_number` | integer | Yes | — | Pr Number |
@@ -3387,7 +3308,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in lenses in four calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while the remaining six\nfold into two combined calls \u2014 code health (performance, complexity,\nponytail, deprecation) and supporting artefacts (tests, documentation).\n``full`` runs each of the nine lenses as its own call \u2014 more per-lens\nfocus for release branches and deep audits, at ~2\u00d7 the calls and wall\ntime. An explicit ``categories`` list always wins over the preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in four calls when the\nprovider can overlap work: security, correctness flow/intent, correctness\nstate/lifecycle, and code health. With one worker, correctness stays\ncombined for three calls.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
       "enum": [
         "fast",
         "full"
@@ -3472,6 +3393,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "How to run one review: provider/model, severity floor, filters, caps.",
   "properties": {
+    "answer_replies": {
+      "default": true,
+      "title": "Answer Replies",
+      "type": "boolean"
+    },
     "api_base": {
       "anyOf": [
         {
@@ -3490,7 +3416,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "boolean"
     },
     "auto_diagram": {
-      "default": false,
+      "default": true,
       "title": "Auto Diagram",
       "type": "boolean"
     },
@@ -3531,6 +3457,17 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Extra Lenses",
       "type": "array"
     },
+    "fail_on": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Severity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"
@@ -3569,6 +3506,23 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Incremental"
     },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    },
+    "learn_feedback": {
+      "default": true,
+      "title": "Learn Feedback",
+      "type": "boolean"
+    },
     "max_concurrency": {
       "anyOf": [
         {
@@ -3593,7 +3547,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 600,
+      "default": 1800,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"
@@ -3951,6 +3905,15 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Diff",
       "type": "string"
     },
+    "feedback_downvotes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Feedback Downvotes",
+      "type": "array",
+      "uniqueItems": true
+    },
     "file_contents": {
       "additionalProperties": {
         "type": "string"
@@ -3991,7 +3954,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/what-gets-reviewed/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/ -->
 
 # What gets reviewed
 
@@ -4017,7 +3980,8 @@ like the diff.
 Before the diff reaches the model it is cleaned:
 
 - **Non-reviewable files are skipped** — lockfiles, minified/bundled assets,
-  vendored directories, and binaries. Reviewing them is noise and wastes tokens.
+  vendored directories, generated LLM-index corpora (`llms.txt` / `llms-full.txt`),
+  and binaries. Reviewing them is noise and wastes tokens.
 - **Secrets are redacted** — anything that looks like a key or token is stripped
   from the diff before it leaves your environment for the provider.
 
@@ -4267,11 +4231,11 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` covers the nine lenses in four grouped model calls; `full` runs one call per lens for deep audits. |
+| `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
-| `max_review_seconds` | 600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
+| `max_review_seconds` | 1800 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
 | `categories` | all nine | Which review lenses to run; an explicit list overrides the preset grouping and runs those lenses one call each. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
 | `min_severity` | `low` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
@@ -4297,15 +4261,15 @@ Each finding has:
 | `body` | The explanation |
 | `suggestion` | Optional suggested replacement code |
 
-The nine review categories (security, correctness, deprecation, tests,
-documentation, performance, complexity, intent, ponytail) fan out as concurrent
-model calls per the `preset`. The default `fast` preset covers them in four
-calls: dedicated security and correctness calls (the stated intent folds into
-correctness), plus a merged code-health call
-(performance/complexity/ponytail/deprecation) and a merged artefacts call
-(tests/documentation), with each finding attributed to its category.
-`preset: full` runs each category as its own focused call with a worked example
-of its own finding type. Their findings are merged and de-duplicated. A
+The nine review categories are security, correctness, deprecation, tests,
+documentation, performance, complexity, intent, and ponytail. The default
+`fast` preset covers seven of them in four concurrent calls when parallelism is
+available: security, correctness flow/intent, correctness state/lifecycle, and
+merged code health (performance/complexity/ponytail/deprecation). With one
+worker, correctness stays combined and the preset uses three calls.
+`preset: full` restores tests and documentation and runs each category as its
+own focused call with a worked example of its own finding type. Their findings
+are merged and de-duplicated. A
 self-reflection pass then runs over the merged set and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 
@@ -4412,7 +4376,7 @@ coding agent can read and apply — a local review-and-fix loop. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/architecture/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/architecture/ -->
 
 # Architecture
 
@@ -4462,18 +4426,19 @@ call per review lens — before the findings funnel back into a single stream:
 flowchart TD
     fetch["fetch<br/>diff via API — never a checkout"] --> compress["compress<br/>skip generated files · pad context · batch to budget"]
     compress --> security["security lens"]
-    compress --> correctness["correctness + intent lens"]
+    compress --> correctnessflow["correctness flow + intent lens"]
+    compress --> correctnessstate["correctness state/lifecycle lens"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
-    compress --> artefacts["artefacts lens<br/>tests · documentation"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
-    correctness --> anchor
+    correctnessflow --> anchor
+    correctnessstate --> anchor
     codehealth --> anchor
-    artefacts --> anchor
     anchor --> dedupe["merge / dedupe"] --> reflect["reflect<br/>self-audit, drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-(The four lens calls shown are the `fast` preset's grouping; the `full` preset
-fans out one call per category, and custom lenses join the same fan-out.)
+(The four lens calls shown are the parallel-capable `fast` grouping. A
+single-worker configuration combines the two correctness calls; the `full`
+preset fans out one call per category, and custom lenses join the same fan-out.)
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
    metadata from the GitHub REST API. No PR code is checked out or executed.
@@ -4492,11 +4457,12 @@ fans out one call per category, and custom lenses join the same fan-out.)
 
 3. **prompt + parse** — this stage **fans out one model call per review
    lens**. The `preset` decides the lens set. `fast` (the default) covers the
-   nine built-in categories in **four calls**: dedicated security and
-   correctness calls (the stated intent folds into correctness when present),
-   plus a merged code-health call (performance/complexity/ponytail/
-   deprecation) and an artefacts call (tests/documentation), each demanding a
-   per-finding `category`. `full` runs one call per category. Every
+   seven code-focused categories in **four calls** when parallelism is
+   available: security, correctness flow (with stated intent when present),
+   correctness state/lifecycle, and merged code health (performance/
+   complexity/ponytail/deprecation). With one worker the two correctness tasks
+   stay combined, keeping the three-call serial path. `full` restores tests and
+   documentation and runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
    ollama and openai-compatible), so batches never wait on each other.
@@ -4586,14 +4552,16 @@ network recovers but a dead-end failure surfaces fast:
   — lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 60s for hosted providers, 300s for local ones (ollama,
-  openai-compatible), overridable via `timeout` / `--timeout`. All attempts for
+  timeout: 300s for direct cloud providers, 900s for the ones that may front a
+  slow model — ollama and openai-compatible (local servers) and openrouter (a
+  gateway to arbitrary models, including slow reasoning ones) — overridable via
+  `timeout` / `--timeout`. All attempts for
   one call additionally share a wall-clock budget of **2.5× that timeout**, so
   a flaky model can't burn four full timeouts plus backoff per lens. The
   posting workflows additionally set a job-level `timeout-minutes` so a wedged
   run can't hold a runner for GitHub's six-hour default.
 
-- **A whole-review deadline.** `max_review_seconds` (default 600, `0` disables)
+- **A whole-review deadline.** `max_review_seconds` (default 1800, `0` disables)
   is a soft ceiling on the run: once it passes, queued model calls are skipped
   — in-flight ones finish and their findings post — and the summary carries an
   explicit incomplete-results notice. It can never produce a silent LGTM: a
@@ -4625,7 +4593,7 @@ requirement arises.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/auth-model/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/auth-model/ -->
 
 # Auth Model
 
@@ -4744,7 +4712,7 @@ display key values.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/data-and-privacy/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/data-and-privacy/ -->
 
 # Data and Privacy
 
@@ -4754,9 +4722,10 @@ credentials are handled. No data flows occur beyond what is described here.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends one model call per review lens — four grouped calls under the
-default `fast` preset, one per category under `full`, fanned out concurrently —
-plus a self-reflection call. Each call contains some subset of:
+lgtmaybe sends four grouped model calls under the default `fast` preset when
+the provider can overlap work, or three combined calls with one worker. `full`
+sends one per category. The review calls fan out through one bounded pool and
+are followed by a self-reflection call. Each call contains some subset of:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been
@@ -4774,9 +4743,10 @@ plus a self-reflection call. Each call contains some subset of:
   each commit message (on the CLI: the commit names from your local `git log`).
   This feeds the **intent lens** ("does the PR do what it says?"). It is
   redacted exactly like the diff, wrapped as untrusted data, and sent **only on
-  the single lens call that carries the intent** (the correctness call under
-  the default `fast` preset, or the dedicated intent lens under `full`) — drop
-  `intent` from `categories` in `.lgtmaybe.yml` and it is never sent at all.
+  the single lens call that carries the intent** (the correctness-flow or
+  combined correctness call under the default `fast` preset, or the dedicated
+  intent lens under `full`) — drop `intent` from `categories` in
+  `.lgtmaybe.yml` and it is never sent at all.
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
 
@@ -4792,7 +4762,12 @@ Nothing else is sent. lgtmaybe does not send:
 The optional **description** (`/describe`, `auto_describe`) and **change
 diagram** (`/diagram`, `auto_diagram`) features send exactly the same inputs —
 the redacted diff and, when present, the redacted stated intent. They add no new
-data flows; they only ask the model for a different output.
+data flows; they only ask the model for a different output. The diagram comment
+does include an "Open full screen" [mermaid.live](https://mermaid.live) link
+whose URL fragment embeds the diagram source — but that source is the
+already-public, post-redaction comment body, the fragment is decoded
+client-side (browsers never send fragments to a server), and nothing is fetched
+unless a reader clicks the link.
 
 ## Secret redaction before egress
 
@@ -4892,7 +4867,7 @@ malicious PR from gaining access to repository secrets.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/trust-and-cost/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/trust-and-cost/ -->
 
 # Trust and Cost
 

@@ -68,6 +68,21 @@ def test_severity_is_ordered() -> None:
     assert not (Severity.low >= Severity.high)
 
 
+def test_severity_is_totally_ordered() -> None:
+    """All four comparisons rank by severity, never alphabetically (a StrEnum
+    would otherwise fall back to string order, where "critical" < "high")."""
+    assert Severity.critical > Severity.high
+    assert Severity.info < Severity.low
+    assert Severity.medium <= Severity.medium
+    assert not (Severity.high < Severity.medium)
+    assert sorted([Severity.high, Severity.info, Severity.critical, Severity.medium]) == [
+        Severity.info,
+        Severity.medium,
+        Severity.high,
+        Severity.critical,
+    ]
+
+
 def test_review_finding_severity_is_case_insensitive() -> None:
     """Models emit "High"/"MEDIUM"; the finding coerces case rather than failing."""
     cases = [("High", Severity.high), ("MEDIUM", Severity.medium), (" low ", Severity.low)]
@@ -140,6 +155,20 @@ def test_review_config_unanchored_min_severity_defaults_to_high() -> None:
     assert cfg.unanchored_min_severity is Severity.high
 
 
+def test_review_config_fail_on_defaults_none() -> None:
+    # The merge-gate is off by default (non-breaking): no check run is created.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.fail_on is None
+
+
+def test_review_config_accepts_fail_on() -> None:
+    # A plain severity string coerces to the ordered Severity enum, so the gate
+    # can compare `finding.severity >= cfg.fail_on`.
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", fail_on="high")
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.fail_on is Severity.high
+
+
 def test_review_finding_broad_defaults_false() -> None:
     # `broad` is engine-set (like `anchored`); a fresh finding is not broad.
     f = ReviewFinding(path="x.py", line=1, severity=Severity.high, title="t", body="b")
@@ -157,6 +186,17 @@ def test_review_config_accepts_reflect_model() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect_model="big-judge")
     restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
     assert restored.reflect_model == "big-judge"
+
+
+def test_review_config_language_defaults_none() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.language is None
+
+
+def test_review_config_accepts_language() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", language="Japanese")
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.language == "Japanese"
 
 
 def test_review_config_ignore_fingerprints_defaults_empty() -> None:
@@ -246,6 +286,18 @@ def test_review_config_reflect_defaults_to_true() -> None:
 def test_review_config_accepts_reflect_false() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False)
     assert cfg.reflect is False
+
+
+def test_review_config_answer_replies_defaults_to_true() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.answer_replies is True
+
+
+def test_review_config_accepts_answer_replies_false() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", answer_replies=False)
+    assert cfg.answer_replies is False
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.answer_replies is False
 
 
 def test_review_config_resolve_fixed_defaults_to_true() -> None:

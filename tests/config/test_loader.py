@@ -55,6 +55,39 @@ def test_resolve_fixed_round_trips_from_file(tmp_path):
     assert cfg.resolve_fixed is False
 
 
+def test_learn_feedback_round_trips_from_file(tmp_path):
+    """learn_feedback defaults on and can be disabled in .lgtmaybe.yml."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    assert load_config(config_path=cfg_file).learn_feedback is True
+
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nlearn_feedback: false\n")
+    assert load_config(config_path=cfg_file).learn_feedback is False
+
+    # A CLI/action input overrides the file value.
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nlearn_feedback: true\n")
+    assert load_config(config_path=cfg_file, learn_feedback=False).learn_feedback is False
+
+
+def test_fail_on_round_trips_from_file_and_cli(tmp_path):
+    """fail_on can be set in .lgtmaybe.yml and overridden via a CLI input."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nfail_on: high\n")
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.fail_on == "high"
+
+    cfg = load_config(config_path=cfg_file, fail_on="critical")
+    assert cfg.fail_on == "critical"
+
+
+def test_fail_on_defaults_off(tmp_path):
+    """With nothing set, the merge-gate stays off (fail_on is None)."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.fail_on is None
+
+
 def test_reflect_model_round_trips_from_file_and_cli(tmp_path):
     """reflect_model can be set in .lgtmaybe.yml and overridden via a CLI input."""
     cfg_file = tmp_path / ".lgtmaybe.yml"
@@ -65,6 +98,18 @@ def test_reflect_model_round_trips_from_file_and_cli(tmp_path):
     cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
     cfg = load_config(config_path=cfg_file, reflect_model="cli-judge")
     assert cfg.reflect_model == "cli-judge"
+
+
+def test_language_round_trips_from_file_and_cli(tmp_path):
+    """language can be set in .lgtmaybe.yml and overridden via a CLI input."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nlanguage: Japanese\n")
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.language == "Japanese"
+
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    cfg = load_config(config_path=cfg_file, language="Spanish")
+    assert cfg.language == "Spanish"
 
 
 def test_cli_input_overrides_file_value(tmp_path):
@@ -120,6 +165,34 @@ def test_cli_input_overrides_provider(tmp_path):
     cfg = load_config(config_path=cfg_file, provider="anthropic")
 
     assert cfg.provider == "anthropic"
+
+
+def test_missing_required_config_raises(tmp_path):
+    """An explicitly chosen config path that doesn't exist is a clear error —
+    a typo'd --config must not silently run with defaults."""
+    with pytest.raises(ValueError, match="not found"):
+        load_config(config_path=tmp_path / "mytea.yml", config_required=True)
+
+
+def test_required_config_must_parse_to_a_mapping(tmp_path):
+    """An explicitly chosen config file that parses to a YAML list is an error."""
+    cfg_file = tmp_path / "list.yml"
+    cfg_file.write_text("- provider: ollama\n")
+
+    with pytest.raises(ValueError, match="mapping"):
+        load_config(config_path=cfg_file, config_required=True)
+
+
+def test_non_mapping_default_config_is_ignored(tmp_path):
+    """Without config_required (the default ./.lgtmaybe.yml probe), a non-mapping
+    file is skipped leniently, as before."""
+    cfg_file = tmp_path / "list.yml"
+    cfg_file.write_text("- provider: ollama\n")
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert cfg.provider == "ollama"
+    assert cfg.model == "llama3"
 
 
 def test_unknown_key_in_yaml_raises(tmp_path):

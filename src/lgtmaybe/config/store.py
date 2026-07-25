@@ -33,7 +33,7 @@ def load(path: Path | None = None) -> dict[str, Any]:
     path = path or user_config_path()
     if not path.exists():
         return {}
-    parsed = yaml.safe_load(path.read_text())
+    parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
     return parsed if isinstance(parsed, dict) else {}
 
 
@@ -41,7 +41,7 @@ def save(data: dict[str, Any], path: Path | None = None) -> None:
     """Write the config dict as YAML, creating parent directories as needed."""
     path = path or user_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, sort_keys=True))
+    path.write_text(yaml.safe_dump(data, sort_keys=True), encoding="utf-8")
 
 
 def as_yaml(path: Path | None = None) -> str:

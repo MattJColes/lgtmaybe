@@ -16,22 +16,26 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `answer_replies` | boolean | No | `True` | Answer Replies |
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
-| `auto_diagram` | boolean | No | `False` | Auto Diagram |
+| `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
+| `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
+| `language` | string / null | No | `null` | Language |
+| `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `max_review_seconds` | integer | No | `600` | Max Review Seconds |
+| `max_review_seconds` | integer | No | `1800` | Max Review Seconds |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
@@ -122,6 +126,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `commit_messages` | list[string] | No | `[]` | Commit Messages |
 | `description` | string | No | `` | Description |
 | `diff` | string | Yes | — | Diff |
+| `feedback_downvotes` | list[string] | No | `[]` | Feedback Downvotes |
 | `file_contents` | object | No | — | File Contents |
 | `head_sha` | string | Yes | — | Head Sha |
 | `pr_number` | integer | Yes | — | Pr Number |
@@ -424,7 +429,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in lenses in four calls:\nsecurity and correctness keep dedicated calls (they earn it; the stated\nintent, when present, merges into correctness), while the remaining six\nfold into two combined calls \u2014 code health (performance, complexity,\nponytail, deprecation) and supporting artefacts (tests, documentation).\n``full`` runs each of the nine lenses as its own call \u2014 more per-lens\nfocus for release branches and deep audits, at ~2\u00d7 the calls and wall\ntime. An explicit ``categories`` list always wins over the preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in four calls when the\nprovider can overlap work: security, correctness flow/intent, correctness\nstate/lifecycle, and code health. With one worker, correctness stays\ncombined for three calls.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
       "enum": [
         "fast",
         "full"
@@ -509,6 +514,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "How to run one review: provider/model, severity floor, filters, caps.",
   "properties": {
+    "answer_replies": {
+      "default": true,
+      "title": "Answer Replies",
+      "type": "boolean"
+    },
     "api_base": {
       "anyOf": [
         {
@@ -527,7 +537,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "boolean"
     },
     "auto_diagram": {
-      "default": false,
+      "default": true,
       "title": "Auto Diagram",
       "type": "boolean"
     },
@@ -568,6 +578,17 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Extra Lenses",
       "type": "array"
     },
+    "fail_on": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Severity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"
@@ -606,6 +627,23 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Incremental"
     },
+    "language": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Language"
+    },
+    "learn_feedback": {
+      "default": true,
+      "title": "Learn Feedback",
+      "type": "boolean"
+    },
     "max_concurrency": {
       "anyOf": [
         {
@@ -630,7 +668,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 600,
+      "default": 1800,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"
@@ -987,6 +1025,15 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "diff": {
       "title": "Diff",
       "type": "string"
+    },
+    "feedback_downvotes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Feedback Downvotes",
+      "type": "array",
+      "uniqueItems": true
     },
     "file_contents": {
       "additionalProperties": {

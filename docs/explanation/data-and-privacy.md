@@ -10,9 +10,10 @@ credentials are handled. No data flows occur beyond what is described here.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends one model call per review lens — four grouped calls under the
-default `fast` preset, one per category under `full`, fanned out concurrently —
-plus a self-reflection call. Each call contains some subset of:
+lgtmaybe sends four grouped model calls under the default `fast` preset when
+the provider can overlap work, or three combined calls with one worker. `full`
+sends one per category. The review calls fan out through one bounded pool and
+are followed by a self-reflection call. Each call contains some subset of:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been
@@ -30,9 +31,10 @@ plus a self-reflection call. Each call contains some subset of:
   each commit message (on the CLI: the commit names from your local `git log`).
   This feeds the **intent lens** ("does the PR do what it says?"). It is
   redacted exactly like the diff, wrapped as untrusted data, and sent **only on
-  the single lens call that carries the intent** (the correctness call under
-  the default `fast` preset, or the dedicated intent lens under `full`) — drop
-  `intent` from `categories` in `.lgtmaybe.yml` and it is never sent at all.
+  the single lens call that carries the intent** (the correctness-flow or
+  combined correctness call under the default `fast` preset, or the dedicated
+  intent lens under `full`) — drop `intent` from `categories` in
+  `.lgtmaybe.yml` and it is never sent at all.
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
 
@@ -48,7 +50,12 @@ Nothing else is sent. lgtmaybe does not send:
 The optional **description** (`/describe`, `auto_describe`) and **change
 diagram** (`/diagram`, `auto_diagram`) features send exactly the same inputs —
 the redacted diff and, when present, the redacted stated intent. They add no new
-data flows; they only ask the model for a different output.
+data flows; they only ask the model for a different output. The diagram comment
+does include an "Open full screen" [mermaid.live](https://mermaid.live) link
+whose URL fragment embeds the diagram source — but that source is the
+already-public, post-redaction comment body, the fragment is decoded
+client-side (browsers never send fragments to a server), and nothing is fetched
+unless a reader clicks the link.
 
 ## Secret redaction before egress
 

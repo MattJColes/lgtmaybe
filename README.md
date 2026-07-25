@@ -8,7 +8,7 @@ Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, no static keys for cloud providers. Posts
 inline review comments and a summary.
 
-📖 **Full documentation:** <https://mattjcoles.github.io/lgtmaybe/>
+📖 **Full documentation:** <https://lgtmaybe.coles.codes/>
 
 ## What it reviews
 
@@ -60,14 +60,17 @@ forged delimiter break-out attempts), and redacts a broad set of secret formats
 credentials in connection strings) before anything leaves your environment. See
 [Data and Privacy](docs/explanation/data-and-privacy.md).
 
-**Fast by default.** Reviews run the **`fast` preset** by default: the nine
-lenses are covered in **four model calls** instead of nine. Security and
-correctness keep dedicated calls (the stated intent folds into correctness when
-the PR states one), and the rest merge into a code-health call
-(performance/complexity/ponytail/deprecation) and an artefacts call
-(tests/documentation). That's roughly **half the calls and wall time**, trading
-some recall on the softer lenses; `--preset full` (or `preset: full` in
-`.lgtmaybe.yml`) restores the one-call-per-lens deep audit for release branches.
+**Fast by default.** Reviews run the **`fast` preset** by default: security,
+correctness (including stated intent), and code health
+(performance/complexity/ponytail/deprecation) run in **four parallel model
+calls** when more than one worker is available: correctness is split into
+focused flow and state/lifecycle checks so one oversized task cannot set the
+critical path. Single-worker configurations keep the combined **three-call**
+shape.
+Tests and documentation are reserved for `--preset full` (or `preset: full` in
+`.lgtmaybe.yml`), which restores the one-call-per-lens deep audit for release
+branches. This keeps the everyday path focused on code defects while avoiding a
+low-yield call that can dominate wall time.
 On top of that, all calls across all batches share **one concurrency pool**
 (`max_concurrency`, default 8 on cloud providers) and share a **cached
 preamble-plus-diff prefix** on anthropic/bedrock, so the diff is processed once
@@ -77,7 +80,7 @@ the time and tokens went.
 **How the scope is bounded.** Every run is capped so a large PR can't blow up
 latency:
 
-- `preset` (default `fast`) — four grouped lens calls; `full` runs one call per lens.
+- `preset` (default `fast`) — four focused/grouped calls when concurrency is available, three with one worker; `full` restores tests and documentation and runs one call per lens.
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
 - `max_concurrency` (default 8 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.
@@ -103,12 +106,12 @@ everywhere:
 - **On a GitHub PR** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the same comments instead of duplicating them, auto-resolves a conversation once its finding is fixed, and a clean PR gets a 👍 **LGTM!**.
 - **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted to GitHub.
 
-Beyond the review, slash commands on the PR route to the same engine: **`/review`** and **`/improve`** post (or refresh) the review, **`/ask <question>`** answers a question about the change in-thread, **`/describe`** (`auto_describe`) posts a **structured description**, and **`/diagram`** (`auto_diagram`) posts a **compact Mermaid change diagram** — an automatically laid-out map of the components the PR touches, with an ASCII fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
+Beyond the review, slash commands on the PR route to the same engine: **`/review`** and **`/improve`** post (or refresh) the review, **`/ask <question>`** answers a question about the change in-thread, **`/describe`** (`auto_describe`) posts a **structured description**, and **`/diagram`** (`auto_diagram`) posts a **compact change diagram** — an automatically laid-out Mermaid flowchart of the components the PR touches, with changes marked on nodes, rendered natively in the comment, with an ASCII fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
 
 On re-runs and big PRs the review stays cheap: a `synchronize` push triggers an **incremental review** of just the new commits, an optional cheap **triage model** (`triage_model`) skips plainly-non-substantive files before the strong model runs, and optional **static-analysis fusion** (`static_analysis`) feeds ruff/bandit/semgrep hints into the review as untrusted context.
 
 <p align="center">
-  <img src="docs/assets/review-sql-injection.png" alt="An inline lgtmaybe review comment on a GitHub pull request flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a suggested parameterized-query fix" width="640">
+  <img src="docs/assets/marketplace/marketplace-screenshot-1.png" alt="An inline lgtmaybe review comment on a GitHub pull request flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a suggested parameterized-query fix" width="640">
 </p>
 
 <p align="center"><em>On a GitHub PR — an inline comment on the changed line. The same findings on the CLI:</em></p>
@@ -162,10 +165,10 @@ reviews on real pull requests, wire up the
 
 ## Documentation
 
-Browse the rendered docs at <https://mattjcoles.github.io/lgtmaybe/>, or read the
+Browse the rendered docs at <https://lgtmaybe.coles.codes/>, or read the
 Markdown sources below. For LLM agents, a curated
-[`llms.txt`](https://mattjcoles.github.io/lgtmaybe/llms.txt) index (and a
-whole-corpus [`llms-full.txt`](https://mattjcoles.github.io/lgtmaybe/llms-full.txt))
+[`llms.txt`](https://lgtmaybe.coles.codes/llms.txt) index (and a
+whole-corpus [`llms-full.txt`](https://lgtmaybe.coles.codes/llms-full.txt))
 are published at the docs root.
 
 **Tutorial** — learn by doing
@@ -201,6 +204,13 @@ are published at the docs root.
 
 ## Use as a GitHub Action
 
+Use lgtmaybe from the
+[GitHub Marketplace](https://github.com/marketplace/actions/lgtmaybe). It is a
+GitHub Action, so its settings live in your workflow. In
+`.github/workflows/lgtmaybe.yml`, set `provider`, `model`, and the matching
+authentication input in the step's `with:` block. This complete example uses
+OpenAI:
+
 ```yaml
 name: lgtmaybe
 
@@ -219,20 +229,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: MattJColes/lgtmaybe@v0
+      - uses: MattJColes/lgtmaybe@v1
         with:
           provider: openai
           model: gpt-5.5
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Copy-paste workflows for every cloud and API-key provider live in
+Using another platform? Copy-paste workflows for every cloud and API-key
+provider live in
 [`examples/workflows/`](examples/workflows/). Cloud providers (Bedrock, Vertex,
 Azure) are **keyless** — pass `aws_role_arn` / `gcp_wif_provider` /
 `azure_client_id` and the action does the OIDC/WIF exchange for you (needs
 `id-token: write`). See
 [Use as a GitHub Action](docs/how-to/use-as-github-action.md). ollama is local
 only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instead.
+
+**Recommended:** post reviews under your own branded GitHub App identity (e.g.
+`lgtmaybe[bot]` with an avatar) instead of `github-actions[bot]` — add `app_id`
+/ `app_private_key` to any workflow after a one-time five-minute App setup. See
+[Post reviews as a GitHub App](docs/how-to/post-as-a-github-app.md).
 
 > **🔧 Choose who can trigger reviews.** You decide who reviews run for —
 > everyone, trusted contributors, or just admins. The example workflows default
@@ -247,7 +263,8 @@ only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instea
 - **CLI (PyPI)** — `pip install lgtmaybe`
 - **CLI (Homebrew)** — `brew tap MattJColes/lgtmaybe && brew trust MattJColes/lgtmaybe && brew install lgtmaybe`
   ([details](docs/how-to/install-the-cli.md) — the `brew trust` step is required for third-party taps)
-- **GitHub Action** — `uses: MattJColes/lgtmaybe@v0`
+- **CLI (winget)** — `winget install MattJColes.lgtmaybe`
+- **GitHub Action** — `uses: MattJColes/lgtmaybe@v1`
 
 ## Contributing
 

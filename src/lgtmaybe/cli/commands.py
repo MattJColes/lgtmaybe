@@ -12,6 +12,7 @@ import json
 import os
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -20,11 +21,10 @@ from lgtmaybe.cli import (
     action_inputs,
     config_cmd,
     execute_comment,
-    execute_describe,
-    execute_diagram,
     execute_local_diagram,
     execute_local_review,
     execute_review,
+    execute_review_reply,
     main,
     pr_url_from_event,
     resolve_auto_incremental,
@@ -50,6 +50,33 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     )
 
 
+def _parse_bool(value: str | None) -> bool | None:
+    """Parse an action bool input the way pydantic parses the others.
+
+    None (unset input) stays None so downstream defaults apply.
+    """
+    if value is None:
+        return None
+    return value.strip().lower() in ("true", "t", "1", "yes", "y", "on")
+
+
+def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
+    """Load config; an explicitly given path must exist and parse to a mapping.
+
+    None (no --config / no config_path input) probes the default
+    ``.lgtmaybe.yml`` leniently — absent is fine. Loader errors surface as a
+    clean CLI error rather than a traceback.
+    """
+    try:
+        return load_config(
+            config_path=Path(config_path) if config_path else Path(".lgtmaybe.yml"),
+            config_required=config_path is not None,
+            **inputs,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @main.command()
 @click.option(
     "--provider",
@@ -62,10 +89,10 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     "--preset",
     default=None,
     type=click.Choice(["fast", "full"]),
-    help="Review preset: fast (default) covers all nine lenses in four model "
-    "calls — dedicated security and correctness calls (stated intent folds "
-    "into correctness), plus merged code-health and artefacts calls; full runs "
-    "one call per lens for release branches and deep audits (~2x the calls)",
+    help="Review preset: fast (default) covers security, correctness/intent, "
+    "performance, complexity, ponytail, and deprecation in four calls when "
+    "parallelism is available, or three with one worker; full restores "
+    "tests/documentation and runs one call per lens for deep audits",
 )
 @click.option(
     "--full",
@@ -84,6 +111,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     default=None,
     help="Model for the self-reflection (false-positive audit) pass; defaults to "
     "--model. Point it at a stronger model to audit a weaker reviewer's findings",
+)
+@click.option(
+    "--language",
+    default=None,
+    help="Human language for the reviewer's prose — finding title/body (and "
+    "describe/diagram text). Structural fields and suggestion code stay "
+    "unchanged. Unset = English",
 )
 @click.option(
     "--triage-model",
@@ -113,6 +147,14 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     default=None,
     type=click.Choice(["info", "low", "medium", "high", "critical"]),
     help="Minimum severity to report",
+)
+@click.option(
+    "--fail-on",
+    default=None,
+    type=click.Choice(["info", "low", "medium", "high", "critical"]),
+    help="Merge-gate threshold: on the GitHub Action, create a Check Run that "
+    "fails when any finding is at or above this severity (make it a required "
+    "check in branch protection). Default off",
 )
 @click.option(
     "--unanchored-min-severity",
@@ -196,7 +238,7 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     "--max-review-seconds",
     default=None,
     type=click.IntRange(min=0),
-    help="Soft wall-clock ceiling for the whole review (default 600). Past it, "
+    help="Soft wall-clock ceiling for the whole review (default 1800). Past it, "
     "no further model calls are dispatched — in-flight calls finish and the "
     "review returns partial results with an incomplete-results notice. 0 disables",
 )
@@ -211,6 +253,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     default=None,
     help="Run the self-reflection pass that drops low-confidence findings "
     "(--no-reflect keeps them all; useful for weaker models)",
+)
+@click.option(
+    "--learn-feedback/--no-learn-feedback",
+    default=None,
+    help="On a re-run, suppress a finding a human reacted 👎 to on its inline "
+    "comment last time (GitHub posting only; --no-learn-feedback disables). The "
+    "reactions live on GitHub and are re-read each run — no local state",
 )
 @click.option(
     "--min-confidence",
@@ -264,9 +313,9 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
 @click.option(
     "--config",
     "config_path",
-    default=".lgtmaybe.yml",
-    show_default=True,
-    help="Path to a per-repo config file",
+    default=None,
+    help="Path to a per-repo config file (must exist when given) "
+    "[default: .lgtmaybe.yml, absent is fine]",
 )
 def review(
     provider: str | None,
@@ -275,10 +324,12 @@ def review(
     full_preset: bool,
     fallback_model: str | None,
     reflect_model: str | None,
+    language: str | None,
     triage_model: str | None,
     api_key: str | None,
     api_base: str | None,
     min_severity: str | None,
+    fail_on: str | None,
     unanchored_min_severity: str | None,
     max_files: int | None,
     max_input_tokens: int | None,
@@ -294,6 +345,7 @@ def review(
     max_review_seconds: int | None,
     temperature: float | None,
     reflect: bool | None,
+    learn_feedback: bool | None,
     min_confidence: int | None,
     recursive: bool | None,
     structured_output: bool | None,
@@ -301,22 +353,24 @@ def review(
     prompt_cache: bool | None,
     static_analysis: bool | None,
     profile: bool,
-    config_path: str,
+    config_path: str | None,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
     if working and uncommitted:
         raise click.UsageError("--working and --uncommitted are mutually exclusive")
     if full_preset and preset == "fast":
         raise click.UsageError("--full contradicts --preset fast")
-    cfg = load_config(
-        config_path=Path(config_path),
+    cfg = _load_cfg(
+        config_path,
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
         preset="full" if full_preset else preset,
         reflect_model=reflect_model,
+        language=language,
         triage_model=triage_model,
         min_severity=min_severity,
+        fail_on=fail_on,
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
         max_input_tokens=max_input_tokens,
@@ -327,6 +381,7 @@ def review(
         max_review_seconds=max_review_seconds,
         temperature=temperature,
         reflect=reflect,
+        learn_feedback=learn_feedback,
         min_confidence=min_confidence,
         recursive=recursive,
         structured_output=structured_output,
@@ -386,9 +441,9 @@ def review(
 @click.option(
     "--config",
     "config_path",
-    default=".lgtmaybe.yml",
-    show_default=True,
-    help="Path to a per-repo config file",
+    default=None,
+    help="Path to a per-repo config file (must exist when given) "
+    "[default: .lgtmaybe.yml, absent is fine]",
 )
 def diagram(
     provider: str | None,
@@ -401,7 +456,7 @@ def diagram(
     uncommitted: bool,
     timeout: int | None,
     num_ctx: int | None,
-    config_path: str,
+    config_path: str | None,
 ) -> None:
     """Print a compact Mermaid diagram of your local changes — no GitHub needed.
 
@@ -411,8 +466,8 @@ def diagram(
     """
     if working and uncommitted:
         raise click.UsageError("--working and --uncommitted are mutually exclusive")
-    cfg = load_config(
-        config_path=Path(config_path),
+    cfg = _load_cfg(
+        config_path,
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
@@ -438,9 +493,9 @@ def diagram(
 @click.option(
     "--config",
     "config_path",
-    default=".lgtmaybe.yml",
-    show_default=True,
-    help="Path to a per-repo config file",
+    default=None,
+    help="Path to a per-repo config file (must exist when given) "
+    "[default: .lgtmaybe.yml, absent is fine]",
 )
 def comment(
     event_path: str,
@@ -449,11 +504,11 @@ def comment(
     fallback_model: str | None,
     api_key: str | None,
     api_base: str | None,
-    config_path: str,
+    config_path: str | None,
 ) -> None:
     """Handle an issue_comment event: route a /slash command to the engine."""
-    event = json.loads(Path(event_path).read_text())
-    cfg = load_config(config_path=Path(config_path), provider=provider, model=model)
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    cfg = _load_cfg(config_path, provider=provider, model=model)
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
     execute_comment(event, cfg, runtime)
 
@@ -466,12 +521,13 @@ def action() -> None:
     / ``pull_request_target``) runs a full review of the triggering PR.
     """
     inputs = action_inputs()
-    cfg = load_config(
-        config_path=Path(inputs["config_path"] or ".lgtmaybe.yml"),
+    cfg = _load_cfg(
+        inputs["config_path"],
         provider=inputs["provider"],
         model=inputs["model"],
         preset=inputs["preset"],
         reflect_model=inputs["reflect_model"],
+        language=inputs["language"],
         triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
         max_review_seconds=inputs["max_review_seconds"],
@@ -487,25 +543,30 @@ def action() -> None:
         incremental=inputs["incremental"],
         auto_describe=inputs["auto_describe"],
         auto_diagram=inputs["auto_diagram"],
+        answer_replies=inputs["answer_replies"],
         pr_labels=inputs["pr_labels"],
+        learn_feedback=inputs["learn_feedback"],
+        fail_on=inputs["fail_on"],
     )
-    raw_sa = inputs["static_analysis"]
-    cfg = _apply_static_analysis_flag(
-        cfg, None if raw_sa is None else raw_sa.strip().lower() in ("true", "1", "yes")
-    )
-    raw_profile = inputs["profile"]
+    cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],
         api_base=inputs["api_base"],
         fallback_model=inputs["fallback_model"],
-        profile=raw_profile is not None and raw_profile.strip().lower() in ("true", "1", "yes"),
+        profile=bool(_parse_bool(inputs["profile"])),
     )
 
-    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
 
     if event_name == "issue_comment":
         execute_comment(event, cfg, runtime)
+        return
+
+    if event_name == "pull_request_review_comment":
+        # A reply inside a review conversation — answered in-thread when it lands
+        # on a finding lgtmaybe opened (loop-safe; see execute_review_reply).
+        execute_review_reply(event, cfg, runtime)
         return
 
     # incremental=None (auto): review only the new commits on a synchronize
@@ -515,12 +576,14 @@ def action() -> None:
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
     # Auto-describe / auto-diagram (opt-in): on a freshly opened PR, post the
     # structured description and/or the change diagram first — both best-effort,
-    # neither blocks the review.
-    if should_auto_describe(cfg, event_action=event_action):
-        execute_describe(cfg, runtime)
-    if should_auto_diagram(cfg, event_action=event_action):
-        execute_diagram(cfg, runtime)
-    execute_review(cfg, runtime)
+    # neither blocks the review. execute_review shares one gateway and one
+    # PR-context fetch across the extras and the review itself.
+    execute_review(
+        cfg,
+        runtime,
+        describe=should_auto_describe(cfg, event_action=event_action),
+        diagram=should_auto_diagram(cfg, event_action=event_action),
+    )
 
 
 @config_cmd.command("path")
