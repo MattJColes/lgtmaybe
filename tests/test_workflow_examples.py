@@ -41,3 +41,15 @@ def test_dogfood_workflow_prints_the_timing_profile() -> None:
         if step.get("uses") == "./"
     ]
     assert action_step.get("with", {}).get("profile") is True
+
+
+def test_dogfood_concurrency_only_applies_to_eligible_review_job() -> None:
+    workflow = yaml.safe_load(_DOGFOOD_WORKFLOW.read_text(encoding="utf-8"))
+    review_job = workflow["jobs"]["review"]
+
+    assert "concurrency" not in workflow
+    assert "if" in review_job
+    assert review_job["concurrency"] == {
+        "group": "lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}",
+        "cancel-in-progress": True,
+    }
