@@ -13,7 +13,10 @@ rendering and renders them as a Markdown comment. Contracts:
   every GitHub theme (the renderer's near-black default vanishes in dark mode),
   without duplicating styles the model already emitted;
 - C4 diagrams get an ``UpdateLayoutConfig`` loosening the default 4-per-row
-  layout (whose fixed-width cards overlap), unless the model set its own;
+  layout (whose fixed-width cards overlap), unless the model set its own —
+  dense diagrams (more than six elements) drop further to two cards per row;
+- a valid Mermaid fence is followed by an "Open full screen" mermaid.live link
+  whose pako fragment round-trips to the exact fenced source;
 - C4 elements whose label carries the ``(new)``/``(changed)`` marker get an
   ``UpdateElementStyle`` with a green border, so what the PR touches stands
   out at a glance, without duplicating styles the model already emitted;
@@ -24,7 +27,9 @@ rendering and renders them as a Markdown comment. Contracts:
 
 from __future__ import annotations
 
+import base64
 import json
+import zlib
 
 from lgtmaybe.core.models import DiagramResult, PRContext, Provider, ProviderResult, ReviewConfig
 from lgtmaybe.engine.diagram import build_diagram
@@ -147,6 +152,48 @@ def test_c4_gets_an_overlap_loosening_layout_config() -> None:
 
     fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
     assert 'UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")' in fence
+
+
+def test_dense_c4_drops_to_two_shapes_per_row() -> None:
+    """More than six elements ⇒ two cards per row, so a dense diagram grows
+    down instead of cramming fixed-width cards into overlap."""
+    elements = "\n".join(f'    Container(c{i}, "Service {i}")' for i in range(7))
+    mermaid = f'C4Container\n{elements}\n    Rel(c0, c1, "calls")'
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    assert 'UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="1")' in body
+
+
+def test_mermaid_gets_a_full_screen_link() -> None:
+    """A valid Mermaid fence is followed by a mermaid.live view link whose pako
+    fragment decodes back to the exact fenced source — full screen shows the
+    same diagram GitHub renders, styles and all."""
+    body = build_diagram(_CTX, _CFG, _structured_provider())
+
+    assert "[⛶ Open full screen](https://mermaid.live/view#pako:" in body
+    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
+    encoded = body.split("#pako:", 1)[1].split(")", 1)[0]
+    state = json.loads(zlib.decompress(base64.urlsafe_b64decode(encoded)))
+    assert state["code"] == fence
+
+
+def test_no_full_screen_link_without_mermaid() -> None:
+    body = build_diagram(
+        _CTX, _CFG, _structured_provider(mermaid="Here is a prose answer, not a diagram.")
+    )
+
+    assert "mermaid.live" not in body
+
+
+def test_prompt_caps_the_element_count() -> None:
+    """Overlap is mostly density: the prompt must cap how many elements the
+    model draws, not just how long their labels run."""
+    provider = _structured_provider()
+
+    build_diagram(_CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "at most 8 elements" in system
 
 
 def test_model_supplied_layout_config_is_kept() -> None:
