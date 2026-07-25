@@ -1,16 +1,14 @@
 """Change diagram: a compact Mermaid flowchart of a PR's changes.
 
-``build_diagram`` asks the provider for a Mermaid flowchart plus an ASCII
-rendering and renders them as a Markdown comment. Contracts:
+``build_diagram`` asks the provider for typed graph data and renders Mermaid
+plus an ASCII view locally. Contracts:
 
 - structured JSON renders the title, a ``mermaid`` fence, the ASCII in a
   collapsed ``<details>``, and the notes;
-- a fence the model wrapped around its Mermaid is stripped;
-- invalid Mermaid (not a diagram) drops to an ASCII-only plain fence — never a
-  broken Mermaid block;
+- model-authored Mermaid never enters a ``mermaid`` fence;
 - legacy C4 output also drops to the ASCII fallback rather than rendering an
   overlap-prone graph;
-- unparseable model output falls back to the raw text;
+- unparseable model output becomes a safe explanatory comment;
 - a valid Mermaid fence is followed by an "Open full screen" mermaid.live link
   whose pako fragment round-trips to the exact fenced source;
 - the diff is redacted before it leaves, and wrapped as untrusted data;
@@ -43,20 +41,101 @@ _NO_INTENT_CTX = _CTX.model_copy(update={"title": "", "description": "", "commit
 
 _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
-_MERMAID = 'flowchart LR\n    client["Client"] --> app["App (changed)"]'
+_BROKEN_MERMAID = "flowchart LR\n    step[Bundled step reference (changed)] step["
 _LEGACY_C4 = 'C4Container\n    Container(app, "App", "Python")'
 
 
 def _structured_provider(**overrides: object) -> FakeProvider:
     payload = {
         "title": "Retry flow after this change",
-        "mermaid": _MERMAID,
-        "ascii": "[Client] --> [App] (changed)",
+        "nodes": [
+            {
+                "id": "client",
+                "label": "Client",
+                "technology": "",
+                "description": "",
+                "change": "unchanged",
+            },
+            {
+                "id": "app",
+                "label": "App",
+                "technology": "",
+                "description": "retries requests",
+                "change": "changed",
+            },
+        ],
+        "edges": [{"source": "client", "target": "app", "label": "calls"}],
         "notes": "The upstream link is inferred from an import.",
     }
     payload.update(overrides)
     result = ProviderResult(text=json.dumps(payload), input_tokens=5, output_tokens=5)
     return FakeProvider(result=result)
+
+
+def _graph_provider(**overrides: object) -> FakeProvider:
+    payload = {
+        "title": "Workflow change",
+        "nodes": [
+            {
+                "id": "step",
+                "label": "Bundled step reference",
+                "technology": "GitHub Actions",
+                "description": "",
+                "change": "changed",
+            }
+        ],
+        "edges": [],
+        "notes": "",
+    }
+    payload.update(overrides)
+    return FakeProvider(
+        result=ProviderResult(text=json.dumps(payload), input_tokens=5, output_tokens=5)
+    )
+
+
+def test_parenthesized_change_marker_is_rendered_inside_a_quoted_node() -> None:
+    body = build_diagram(_CTX, _CFG, _graph_provider())
+
+    assert 'n0["Bundled step reference<br/>GitHub Actions<br/>(changed)"]' in body
+    assert "step[Bundled step reference (changed)]" not in body
+
+
+def test_graph_renderer_escapes_labels_caps_nodes_and_drops_invalid_edges() -> None:
+    nodes = [
+        {
+            "id": f"node-{index}",
+            "label": f"Node {index}",
+            "technology": "",
+            "description": "",
+            "change": "unchanged",
+        }
+        for index in range(7)
+    ]
+    nodes[0].update(
+        {
+            "label": 'Node "0" <safe>',
+            "change": "changed",
+        }
+    )
+    body = build_diagram(
+        _CTX,
+        _CFG,
+        _graph_provider(
+            nodes=nodes,
+            edges=[
+                {"source": "node-0", "target": "node-1", "label": 'calls | "uses"'},
+                {"source": "node-0", "target": "missing", "label": "missing"},
+                {"source": "node-0", "target": "node-6", "label": "capped"},
+            ],
+        ),
+    )
+
+    assert 'n0["Node &quot;0&quot; &lt;safe&gt;<br/>(changed)"]' in body
+    assert 'n5["Node 5"]' in body
+    assert "n6[" not in body
+    assert 'n0 -->|"calls &#124; &quot;uses&quot;"| n1' in body
+    assert '-->|"missing"|' not in body
+    assert '-->|"capped"|' not in body
 
 
 def test_structured_diagram_renders_every_section() -> None:
@@ -66,7 +145,7 @@ def test_structured_diagram_renders_every_section() -> None:
     assert "```mermaid" in body
     assert "flowchart LR" in body
     assert "<details><summary>Text version</summary>" in body
-    assert "[Client] --> [App] (changed)" in body
+    assert "[Client] --calls--> [App (changed)]" in body
     assert "inferred from an import" in body
 
 
@@ -78,27 +157,50 @@ def test_response_format_is_the_diagram_schema() -> None:
     assert provider.calls[0]["opts"]["response_format"] is DiagramResult
 
 
-def test_model_added_fence_is_stripped() -> None:
-    fenced = f"```mermaid\n{_MERMAID}\n```"
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=fenced))
-
-    # Exactly one opening mermaid fence — the model's stray fence didn't nest.
-    assert body.count("```mermaid") == 1
-    assert "```mermaid\nflowchart LR" in body
-
-
-def test_invalid_mermaid_falls_back_to_ascii_only() -> None:
+def test_model_authored_mermaid_is_never_rendered() -> None:
     body = build_diagram(
-        _CTX, _CFG, _structured_provider(mermaid="Here is a prose answer, not a diagram.")
+        _CTX,
+        _CFG,
+        _structured_provider(
+            nodes=[],
+            edges=[],
+            mermaid='```mermaid\nflowchart LR\n    a["A"]\n```',
+            ascii="[A]",
+        ),
+    )
+
+    assert "```mermaid" not in body
+    assert "\n[A]\n" in body
+
+
+def test_reported_invalid_mermaid_falls_back_to_ascii_only() -> None:
+    body = build_diagram(
+        _CTX,
+        _CFG,
+        _structured_provider(
+            nodes=[],
+            edges=[],
+            mermaid=_BROKEN_MERMAID,
+            ascii="[Bundled step reference] (changed)",
+        ),
     )
 
     assert "```mermaid" not in body
     assert "<details>" not in body
-    assert "[Client] --> [App] (changed)" in body
+    assert "[Bundled step reference] (changed)" in body
 
 
 def test_legacy_c4_falls_back_to_ascii_only() -> None:
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=_LEGACY_C4))
+    body = build_diagram(
+        _CTX,
+        _CFG,
+        _structured_provider(
+            nodes=[],
+            edges=[],
+            mermaid=_LEGACY_C4,
+            ascii="[Client] --> [App] (changed)",
+        ),
+    )
 
     assert "```mermaid" not in body
     assert "<details>" not in body
@@ -120,52 +222,56 @@ def test_mermaid_gets_a_full_screen_link() -> None:
 
 def test_no_full_screen_link_without_mermaid() -> None:
     body = build_diagram(
-        _CTX, _CFG, _structured_provider(mermaid="Here is a prose answer, not a diagram.")
+        _CTX,
+        _CFG,
+        _structured_provider(nodes=[], edges=[], mermaid=_BROKEN_MERMAID, ascii="[Fallback]"),
     )
 
     assert "mermaid.live" not in body
 
 
-def test_prompt_requires_a_compact_automatic_flowchart() -> None:
+def test_prompt_requires_a_compact_structured_graph() -> None:
     provider = _structured_provider()
 
     build_diagram(_CTX, _CFG, provider)
 
     system = provider.calls[0]["messages"][0]["content"].lower()
-    assert '"flowchart lr"' in system
+    assert '"nodes"' in system
+    assert '"edges"' in system
     assert "maximum of six nodes" in system
     assert "short relationship labels" in system
-    assert "change markers on nodes only" in system
-    assert "automatic layout" in system
-    assert "manual styling or positioning" in system
+    assert '"change" field' in system
+    assert "graph data only" in system
+    assert "lgtmaybe owns mermaid and ascii syntax" in system
 
 
 def test_flowchart_is_not_post_processed() -> None:
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid="flowchart LR\n    a --> b"))
+    body = build_diagram(_CTX, _CFG, _structured_provider())
 
     assert "UpdateRelStyle" not in body
     assert "UpdateLayoutConfig" not in body
     assert "UpdateElementStyle" not in body
 
 
-def test_prompt_teaches_a_branched_flowchart() -> None:
+def test_prompt_teaches_graph_relationships() -> None:
     provider = _structured_provider()
 
     build_diagram(_CTX, _CFG, provider)
 
     system = provider.calls[0]["messages"][0]["content"]
-    assert "release -->|triggers| build" in system
-    assert "release -->|after build| publish" in system
+    assert '"source": "release", "target": "build"' in system
+    assert '"source": "build", "target": "assets"' in system
 
 
-def test_unparseable_output_falls_back_to_raw_text() -> None:
+def test_unparseable_output_uses_safe_fallback() -> None:
     provider = FakeProvider(
         result=ProviderResult(text="Just prose, no JSON.", input_tokens=1, output_tokens=1)
     )
 
     body = build_diagram(_CTX, _CFG, provider)
 
-    assert body == "Just prose, no JSON."
+    assert "couldn't produce a valid change diagram" in body
+    assert "Just prose" not in body
 
 
 def test_diff_is_redacted_before_prompting() -> None:
@@ -227,14 +333,13 @@ def test_no_language_directive_by_default() -> None:
 
 
 def test_language_directive_added_when_set() -> None:
-    """A set language appends a directive naming the language, while the Mermaid
-    keyword convention is preserved in the base system prompt."""
+    """A set language translates prose while graph references stay stable."""
     provider = _structured_provider()
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", language="Japanese")
     build_diagram(_CTX, cfg, provider)
     system = provider.calls[0]["messages"][0]["content"]
     assert "Japanese" in system
-    assert "flowchart LR" in system  # Mermaid structure keywords untouched
+    assert 'Keep node ids and "change" enum values unchanged' in system
 
 
 def test_forged_markers_in_the_diff_are_neutralised() -> None:
