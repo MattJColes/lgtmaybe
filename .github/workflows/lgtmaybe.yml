@@ -28,10 +28,6 @@ permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     # Only trusted authors (repo owner / org member / collaborator) trigger a
@@ -45,6 +41,9 @@ jobs:
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    concurrency:
+      group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     # A healthy full review runs in a handful of minutes; cap it so a wedged
     # model call can't sit on the runner for GitHub's 6-hour default. Fail-fast on
