@@ -30,9 +30,9 @@ One model call returns two renderings of the same graph:
 
 Changed elements are marked in the labels (`(new)` / `(changed)`) **and get a
 green border**, so the PR's footprint stands out from the untouched
-collaborators at a glance; the relationship lines are restyled in a mid-grey
-that stays readable on every GitHub theme — Mermaid's C4 renderer defaults
-them to a near-black that disappears in dark mode — and the layout is loosened
+collaborators at a glance; the relationship lines and labels are restyled in a
+light green that stays readable on every GitHub theme — Mermaid's C4 renderer
+defaults them to a near-black that disappears in dark mode — and the layout is loosened
 to three cards per row so the renderer's fixed-width cards don't overlap. The diagram also stays
 honest about the diff being only a slice of the codebase —
 relationships it infers from imports rather than the diff itself are called out
@@ -54,9 +54,9 @@ C4Container
     Rel(client, api, "GET /users/{id}")
     Rel(api, cache, "check cache (new)")
     Rel(api, db, "on miss, query")
-    UpdateRelStyle(client, api, $textColor="#808080", $lineColor="#808080")
-    UpdateRelStyle(api, cache, $textColor="#808080", $lineColor="#808080")
-    UpdateRelStyle(api, db, $textColor="#808080", $lineColor="#808080")
+    UpdateRelStyle(client, api, $textColor="#34a862", $lineColor="#34a862")
+    UpdateRelStyle(api, cache, $textColor="#34a862", $lineColor="#34a862")
+    UpdateRelStyle(api, db, $textColor="#34a862", $lineColor="#34a862")
     UpdateElementStyle(cache, $borderColor="#54d090")
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```

@@ -9,7 +9,7 @@ rendering and renders them as a Markdown comment. Contracts:
 - invalid Mermaid (not a diagram) drops to an ASCII-only plain fence — never a
   broken Mermaid block;
 - unparseable model output falls back to the raw text;
-- C4 relationship lines get an ``UpdateRelStyle`` in a mid-grey readable on
+- C4 relationship lines get an ``UpdateRelStyle`` in a light green readable on
   every GitHub theme (the renderer's near-black default vanishes in dark mode),
   without duplicating styles the model already emitted;
 - C4 diagrams get an ``UpdateLayoutConfig`` loosening the default 4-per-row
@@ -108,8 +108,8 @@ def test_c4_rels_get_dark_mode_safe_styles() -> None:
     )
     body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
 
-    assert 'UpdateRelStyle(client, api, $textColor="#808080", $lineColor="#808080")' in body
-    assert 'UpdateRelStyle(api, db, $textColor="#808080", $lineColor="#808080")' in body
+    assert 'UpdateRelStyle(client, api, $textColor="#34a862", $lineColor="#34a862")' in body
+    assert 'UpdateRelStyle(api, db, $textColor="#34a862", $lineColor="#34a862")' in body
 
 
 def test_rel_styles_land_inside_the_mermaid_fence() -> None:
@@ -132,7 +132,7 @@ def test_model_supplied_rel_style_is_not_duplicated() -> None:
     # The model's own style for (a, b) is kept; only (b, c) gets ours.
     assert body.count("UpdateRelStyle(a, b,") == 1
     assert '$textColor="red"' in body
-    assert 'UpdateRelStyle(b, c, $textColor="#808080"' in body
+    assert 'UpdateRelStyle(b, c, $textColor="#34a862"' in body
 
 
 def test_repeated_rel_pair_styled_once() -> None:
