@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lgtmaybe.core.diffparse import parse_hunk_header, split_by_file
+from lgtmaybe.core.diffparse import hunk_for_line, parse_hunk_header, split_by_file
 
 _TWO_FILE_DIFF = """\
 diff --git a/src/a.py b/src/a.py
@@ -59,6 +59,50 @@ class TestParseHunkHeader:
     def test_non_hunk_line_returns_none(self):
         assert parse_hunk_header(" context line") is None
         assert parse_hunk_header("diff --git a/x b/x") is None
+
+
+_MULTI_HUNK_DIFF = """\
+diff --git a/src/a.py b/src/a.py
+index 111..222 100644
+--- a/src/a.py
++++ b/src/a.py
+@@ -1,2 +1,3 @@
+ x = 1
++y = 2
+ z = 3
+@@ -20,2 +21,3 @@
+ p = 1
++q = 2
+ r = 3
+"""
+
+
+class TestHunkForLine:
+    def test_returns_the_hunk_covering_a_right_side_line(self):
+        # The added line "q = 2" is new-file line 22, inside the second hunk.
+        hunk = hunk_for_line(_MULTI_HUNK_DIFF, "src/a.py", 22, "RIGHT")
+        assert hunk is not None
+        assert "+q = 2" in hunk
+        assert "+y = 2" not in hunk  # not the first hunk
+        # Carries the file header so a reply's context still names the file.
+        assert "+++ b/src/a.py" in hunk
+
+    def test_picks_the_first_hunk_for_a_line_it_covers(self):
+        hunk = hunk_for_line(_MULTI_HUNK_DIFF, "src/a.py", 2, "RIGHT")
+        assert hunk is not None
+        assert "+y = 2" in hunk
+        assert "+q = 2" not in hunk
+
+    def test_none_when_line_is_outside_every_hunk(self):
+        assert hunk_for_line(_MULTI_HUNK_DIFF, "src/a.py", 999, "RIGHT") is None
+
+    def test_none_when_path_not_in_diff(self):
+        assert hunk_for_line(_MULTI_HUNK_DIFF, "other.py", 2, "RIGHT") is None
+
+    def test_matches_a_left_side_line_by_old_file_number(self):
+        hunk = hunk_for_line(_TWO_FILE_DIFF, "src/b.py", 10, "LEFT")
+        assert hunk is not None
+        assert "-old" in hunk
 
 
 class TestChangedLineIndex:

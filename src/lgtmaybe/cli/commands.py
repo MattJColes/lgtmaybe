@@ -24,6 +24,7 @@ from lgtmaybe.cli import (
     execute_local_diagram,
     execute_local_review,
     execute_review,
+    execute_review_reply,
     main,
     pr_url_from_event,
     resolve_auto_incremental,
@@ -542,6 +543,7 @@ def action() -> None:
         incremental=inputs["incremental"],
         auto_describe=inputs["auto_describe"],
         auto_diagram=inputs["auto_diagram"],
+        answer_replies=inputs["answer_replies"],
         pr_labels=inputs["pr_labels"],
         learn_feedback=inputs["learn_feedback"],
         fail_on=inputs["fail_on"],
@@ -559,6 +561,12 @@ def action() -> None:
 
     if event_name == "issue_comment":
         execute_comment(event, cfg, runtime)
+        return
+
+    if event_name == "pull_request_review_comment":
+        # A reply inside a review conversation — answered in-thread when it lands
+        # on a finding lgtmaybe opened (loop-safe; see execute_review_reply).
+        execute_review_reply(event, cfg, runtime)
         return
 
     # incremental=None (auto): review only the new commits on a synchronize

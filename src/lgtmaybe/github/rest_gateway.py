@@ -636,6 +636,70 @@ class RestGitHubGateway(GitHubGateway):
         return fingerprints
 
     # ------------------------------------------------------------------
+    # Conversational finding threads (adapter-only, beyond the frozen port)
+    # ------------------------------------------------------------------
+
+    def find_review_thread(self, comment_id: int) -> tuple[str, str] | None:
+        """Resolve a REST review-comment id to ``(thread_node_id, root_body)``.
+
+        Replying to a review thread needs its GraphQL global node id, not a REST
+        comment id, so this walks the PR's review threads (paginated) and returns
+        the thread whose comments include *comment_id* (matched by ``databaseId``)
+        together with its root comment's body — the body a caller inspects to tell
+        whether the thread is one lgtmaybe opened. Returns None when no thread
+        carries that comment. Read-only; adapter-only, beyond the frozen port.
+        """
+        query = """
+        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){
+            pullRequest(number:$number){
+              reviewThreads(first:100, after:$cursor){
+                pageInfo{ hasNextPage endCursor }
+                nodes{
+                  id
+                  comments(first:100){ nodes{ databaseId body } }
+                }
+              }
+            }
+          }
+        }
+        """
+        owner, _, name = self._repo.partition("/")
+        cursor: str | None = None
+        while True:
+            data = self._graphql(
+                query,
+                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
+            )
+            conn = data["repository"]["pullRequest"]["reviewThreads"]
+            for node in conn["nodes"]:
+                comments = node.get("comments", {}).get("nodes", [])
+                if any(c.get("databaseId") == comment_id for c in comments):
+                    root_body = comments[0].get("body", "") if comments else ""
+                    return node["id"], root_body
+            page = conn.get("pageInfo", {})
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+        return None
+
+    def reply_in_thread(self, thread_id: str, body: str) -> None:
+        """Post *body* as a reply on review thread *thread_id* (a GraphQL node id).
+
+        Reuses the ``addPullRequestReviewThreadReply`` mutation — the same reply
+        primitive resolve-on-fix uses. Adapter-only, beyond the frozen port; used
+        to answer a PR author's reply in a finding thread.
+        """
+        mutation = """
+        mutation($threadId:ID!,$body:String!){
+          addPullRequestReviewThreadReply(
+            input:{pullRequestReviewThreadId:$threadId, body:$body}
+          ){ comment{ id } }
+        }
+        """
+        self._graphql(mutation, {"threadId": thread_id, "body": body})
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
@@ -834,14 +898,7 @@ class RestGitHubGateway(GitHubGateway):
 
     def _reply_and_resolve(self, thread_id: str) -> None:
         """Post a short reply on a thread, then mark it resolved."""
-        reply = """
-        mutation($threadId:ID!,$body:String!){
-          addPullRequestReviewThreadReply(
-            input:{pullRequestReviewThreadId:$threadId, body:$body}
-          ){ comment{ id } }
-        }
-        """
-        self._graphql(reply, {"threadId": thread_id, "body": "✅ Looks resolved."})
+        self.reply_in_thread(thread_id, "✅ Looks resolved.")
         resolve = """
         mutation($threadId:ID!){
           resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
