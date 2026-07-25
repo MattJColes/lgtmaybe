@@ -511,7 +511,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
-| `timeout` | provider default (ollama/openai-compatible/openrouter 900s, cloud 60s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `timeout` | provider default (ollama/openai-compatible/openrouter 900s, cloud 300s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
 | `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
 | `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
@@ -1741,7 +1741,7 @@ branch locally before opening a PR. See
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
 long default per-request timeout (900 seconds)** automatically — you don't need
-to set anything for a normal run. (Direct cloud providers default to 60 s.)
+to set anything for a normal run. (Direct cloud providers default to 300 s.)
 
 If a big model still times out — you'll see
 `litellm.Timeout: Connection timed out after 900.0 seconds` — raise it explicitly:
@@ -2249,14 +2249,14 @@ Default: `true`.
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
 **provider-aware default**: **900 s for ollama, openai-compatible, and
 openrouter** (local models are slow, and openrouter can route to slow reasoning
-models) and 60 s for direct cloud providers. Set it explicitly to raise it for a
+models) and 300 s for direct cloud providers. Set it explicitly to raise it for a
 large local model.
 
 ```yaml
 timeout: 1800   # 30 minutes per call, e.g. for a big model on CPU
 ```
 
-Default: auto (ollama/openai-compatible/openrouter 900 s, cloud 60 s). See
+Default: auto (ollama/openai-compatible/openrouter 900 s, cloud 300 s). See
 [Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
 
 ### structured_output
@@ -4732,7 +4732,7 @@ network recovers but a dead-end failure surfaces fast:
   — lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 60s for direct cloud providers, 900s for the ones that may front a
+  timeout: 300s for direct cloud providers, 900s for the ones that may front a
   slow model — ollama and openai-compatible (local servers) and openrouter (a
   gateway to arbitrary models, including slow reasoning ones) — overridable via
   `timeout` / `--timeout`. All attempts for

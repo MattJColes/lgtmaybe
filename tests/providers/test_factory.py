@@ -151,7 +151,7 @@ class TestBuildProvider:
 
     def test_cloud_gets_a_short_default_timeout_when_unset(self) -> None:
         provider = build_provider(Provider.openai, "gpt-4o", api_key="sk-test")
-        assert provider.default_opts.get("timeout") == 60
+        assert provider.default_opts.get("timeout") == 300
 
     def test_explicit_timeout_overrides_the_provider_default(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", timeout=45)
