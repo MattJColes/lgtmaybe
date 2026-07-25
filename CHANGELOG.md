@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.4.0...lgtmaybe-v1.4.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* generate readable Mermaid flowcharts ([#231](https://github.com/MattJColes/lgtmaybe/issues/231)) ([e85b491](https://github.com/MattJColes/lgtmaybe/commit/e85b4910621005ead0f7e70bd449f421a231d0ab))
+* pass repository to release commands ([#232](https://github.com/MattJColes/lgtmaybe/issues/232)) ([1e4c633](https://github.com/MattJColes/lgtmaybe/commit/1e4c633cd9a1e209df484a8cf8833eabd6a3678d))
+
 ## [1.4.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.3.0...lgtmaybe-v1.4.0) (2026-07-25)
 
 
