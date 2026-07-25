@@ -5,7 +5,8 @@ comment) bound to code by ast-grep rules in the capability's co-located
 ``anchors.yml`` sidecar. This suite enforces the convention deterministically:
 
 - spec.md anchor ids and anchors.yml rule ids are a bijection, per capability
-- every rule resolves to EXACTLY one place in src/ (0 = dangling, >1 = too loose)
+- every rule resolves to EXACTLY one place in an anchored code root
+  (0 = dangling, >1 = too loose)
 - every spec.md has the OpenSpec shape (Purpose / Requirements / Scenario, SHALL)
 - requirement sections stay under the 40-line soft cap (split, don't append)
 

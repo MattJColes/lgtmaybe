@@ -144,3 +144,23 @@ approval state is never set. `fail_on` unset (default) creates no check run.
 #### Scenario: no finding meets the threshold
 - **WHEN** `fail_on` is set and no surviving finding reaches it
 - **THEN** the Check Run is created with conclusion `success`
+
+### Requirement: App-authenticated activity carries one identity
+
+The GitHub adapter SHALL use the selected credential uniformly for review and
+summary comments, slash-command replies, thread resolution, labels,
+descriptions, and diagrams. Public branded mode SHALL reject `fail_on` because
+the least-privilege public App does not hold `checks: write`.
+<!-- anchor: github.app-attribution -->
+
+#### Scenario: Branded review completes
+- **WHEN** a review uses a brokered lgtmaybe App installation token
+- **THEN** GitHub attributes every supported write in that run to `lgtmaybe[bot]`
+
+#### Scenario: Public branded review requests a merge gate
+- **WHEN** `github_identity` is `lgtmaybe` and `fail_on` is set
+- **THEN** the Action fails before token exchange with guidance to use Actions identity or a self-managed App
+
+#### Scenario: Default review completes
+- **WHEN** a review uses the built-in workflow token
+- **THEN** existing `github-actions[bot]` posting behavior remains unchanged

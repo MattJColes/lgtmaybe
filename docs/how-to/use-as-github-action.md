@@ -9,11 +9,14 @@ that reviews pull requests automatically.
 
 Use lgtmaybe from the
 [GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe).
-It is a **GitHub Action**, not a hosted GitHub App. Its provider, model, and
-authentication settings live in the workflow's `with:` block. GitHub Actions
-supplies the repository token, so there is no separate App to install. The
+It is a **GitHub Action**: the reviewer runs in your workflow, and its provider,
+model, and provider authentication settings live in the step's `with:` block.
+GitHub Actions supplies the repository token by default, so reviews post as
+`github-actions[bot]`. You can optionally install the public lgtmaybe App and
+set `github_identity: lgtmaybe` to post as `lgtmaybe[bot]`; the App changes only
+the GitHub author identity. The
 [minimal OpenAI workflow](#minimal-workflow-openai) below shows the complete
-shape.
+default shape.
 
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
@@ -28,6 +31,7 @@ ollama runs the model on your own machine, so it is local-only — use the
 - [Security requirement: pull_request_target](#security-requirement-pull_request_target)
 - [Who can trigger a review](#who-can-trigger-a-review)
 - [Minimal workflow — openai](#minimal-workflow-openai)
+- [Choose the GitHub author](#choose-the-github-author)
 - [Other key-based providers](#other-key-based-providers)
 - [Keyless cloud workflows](#keyless-cloud-workflows)
 - [Action inputs](#action-inputs)
@@ -130,6 +134,21 @@ jobs:
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+## Choose the GitHub author
+
+The minimal workflow uses GitHub's built-in workflow token and posts as
+`github-actions[bot]`. This path needs no App installation and remains the
+default.
+
+To post as `lgtmaybe[bot]`, install the public lgtmaybe App on selected
+repositories, add `id-token: write` to the workflow, and set
+`github_identity: lgtmaybe`. The provider, model, and provider key stay exactly
+where they are. Follow [Post as lgtmaybe[bot]](./post-as-a-github-app.md) for
+the complete workflow, permission boundary, and uninstall instructions.
+
+If your organisation operates its own App, the same guide documents the
+advanced `app_id` / `app_private_key` inputs.
+
 ## Other key-based providers
 
 Swap the `provider`, `model`, and `api_key` inputs:
@@ -211,8 +230,10 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
 | `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
 | `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
-| `app_id` | — | Advanced: ID of an existing GitHub App used with `app_private_key`; most users should leave this empty |
-| `app_private_key` | — | Advanced: private key of the existing App named by `app_id`; most users should leave this empty |
+| `github_identity` | `actions` | GitHub author identity: `actions` posts as `github-actions[bot]`; `lgtmaybe` posts as `lgtmaybe[bot]` after the public App is installed and `id-token: write` is granted |
+| `identity_broker_url` | managed endpoint | Advanced override for the public App identity exchange |
+| `app_id` | — | Advanced: ID of your own GitHub App used with `app_private_key`; do not combine with `github_identity: lgtmaybe` |
+| `app_private_key` | — | Advanced: private key of your own App named by `app_id` |
 | `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
 | `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
 | `image` | `ghcr.io/mattjcoles/lgtmaybe:v1` | Override the container image (advanced) |
@@ -249,6 +270,12 @@ A PR with a finding at or above the threshold then shows a failing `lgtmaybe`
 check and cannot merge until the finding is resolved (or `fail_on` is lowered).
 Leave `fail_on` unset to keep reviews advisory (the default) — no check run is
 created.
+
+Creating the Check Run requires `checks: write`. For the default Actions
+identity, add it to the workflow `permissions:` block. The public
+`lgtmaybe[bot]` App intentionally does not hold that permission, so
+`github_identity: lgtmaybe` cannot be combined with `fail_on`; use the Actions
+identity or a self-managed App granted `Checks: write`.
 
 ## Adding a config file
 

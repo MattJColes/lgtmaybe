@@ -10,6 +10,7 @@
 
 - [Install the CLI](https://lgtmaybe.coles.codes/how-to/install-the-cli/): Install the lgtmaybe CLI with pip (any OS), Homebrew (macOS/Linuxbrew), or winget (Windows), and add cloud extras for keyless Bedrock/Vertex/Azure.
 - [Use as a GitHub Action](https://lgtmaybe.coles.codes/how-to/use-as-github-action/): Add lgtmaybe as a GitHub Action to review every pull request automatically with inline comments and a summary.
+- [Post as lgtmaybe[bot]](https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/): Post lgtmaybe reviews as lgtmaybe[bot] with the public App, or use a self-managed GitHub App.
 - [Review with OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI — add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
 - [Review with Claude (Anthropic)](https://lgtmaybe.coles.codes/how-to/review-with-anthropic/): Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
 - [Review with OpenRouter](https://lgtmaybe.coles.codes/how-to/review-with-openrouter/): Use OpenRouter as the lgtmaybe backend to reach many model vendors through one OpenAI-compatible API key.

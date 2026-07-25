@@ -44,6 +44,18 @@ cli.config:
       has: { field: name, regex: '^set_key$' }
     files: [src/lgtmaybe/config/**/*.py]
 
+cli.github-identity:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^validate$' }
+  files: [scripts/github-app-identity.py]
+
+cli.github-identity-provider:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^exchange$' }
+  files: [scripts/github-app-identity.py]
+
 cli.utf8-boundaries:
   rule:
     kind: function_definition

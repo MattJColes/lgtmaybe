@@ -245,10 +245,14 @@ Azure) are **keyless** — pass `aws_role_arn` / `gcp_wif_provider` /
 [Use as a GitHub Action](docs/how-to/use-as-github-action.md). ollama is local
 only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instead.
 
-**Recommended:** post reviews under your own branded GitHub App identity (e.g.
-`lgtmaybe[bot]` with an avatar) instead of `github-actions[bot]` — add `app_id`
-/ `app_private_key` to any workflow after a one-time five-minute App setup. See
-[Post reviews as a GitHub App](docs/how-to/post-as-a-github-app.md).
+By default, reviews post as `github-actions[bot]`. To post as
+`lgtmaybe[bot]`, install the public
+[lgtmaybe App](https://github.com/apps/lgtmaybe/installations/new), grant the
+workflow `id-token: write`, and add `github_identity: lgtmaybe` beside the
+provider settings. You never receive or manage the App's private key. lgtmaybe
+is still the Action running in your workflow; the App changes only the GitHub
+author identity. See
+[Post as lgtmaybe[bot]](docs/how-to/post-as-a-github-app.md).
 
 > **🔧 Choose who can trigger reviews.** You decide who reviews run for —
 > everyone, trusted contributors, or just admins. The example workflows default

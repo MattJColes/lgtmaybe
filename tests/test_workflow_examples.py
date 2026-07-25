@@ -53,3 +53,18 @@ def test_dogfood_concurrency_only_applies_to_eligible_review_job() -> None:
         "group": "lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}",
         "cancel-in-progress": True,
     }
+
+
+def test_dogfood_workflow_uses_the_public_app_identity() -> None:
+    workflow = yaml.safe_load(_DOGFOOD_WORKFLOW.read_text(encoding="utf-8"))
+    assert workflow["permissions"]["id-token"] == "write"
+    [action_step] = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("uses") == "./"
+    ]
+    inputs = action_step["with"]
+    assert inputs["github_identity"] == "lgtmaybe"
+    assert "app_id" not in inputs
+    assert "app_private_key" not in inputs

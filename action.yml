@@ -158,8 +158,16 @@ inputs:
     description: "Token used to fetch the diff and post the review. Defaults to the workflow token."
     required: false
     default: ${{ github.token }}
+  github_identity:
+    description: "GitHub author for review comments: actions posts as github-actions[bot] (default); lgtmaybe posts as lgtmaybe[bot] after you install the public lgtmaybe App and grant id-token: write."
+    required: false
+    default: "actions"
+  identity_broker_url:
+    description: "Advanced: lgtmaybe identity broker endpoint. Most users should keep the default."
+    required: false
+    default: "https://m8h7wpmdyi.execute-api.ap-southeast-2.amazonaws.com/token"
   app_id:
-    description: "Advanced: ID of an existing GitHub App used with app_private_key. Most users should leave this empty and use the default workflow token."
+    description: "Advanced: ID of your own GitHub App used with app_private_key. Do not combine this with github_identity: lgtmaybe."
     required: false
     default: ""
   app_private_key:
@@ -178,6 +186,24 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate GitHub identity configuration
+      id: validate-identity
+      shell: bash
+      env:
+        GITHUB_IDENTITY: ${{ inputs.github_identity }}
+        APP_ID: ${{ inputs.app_id }}
+        APP_PRIVATE_KEY: ${{ inputs.app_private_key }}
+        FAIL_ON: ${{ inputs.fail_on }}
+      run: python3 "${{ github.action_path }}/scripts/github-app-identity.py" validate
+
+    - name: Exchange workflow identity for lgtmaybe App token
+      id: lgtmaybe-token
+      if: ${{ inputs.github_identity == 'lgtmaybe' }}
+      shell: bash
+      env:
+        IDENTITY_BROKER_URL: ${{ inputs.identity_broker_url }}
+      run: python3 "${{ github.action_path }}/scripts/github-app-identity.py" exchange
+
     - name: Configure AWS credentials (OIDC, keyless)
       if: ${{ inputs.aws_role_arn != '' }}
       uses: aws-actions/configure-aws-credentials@v6
@@ -217,7 +243,7 @@ runs:
 
     - name: Mint a GitHub App token (branded bot identity)
       id: app-token
-      if: ${{ inputs.app_id != '' }}
+      if: ${{ inputs.app_id != '' && inputs.github_identity != 'lgtmaybe' }}
       uses: actions/create-github-app-token@v3
       with:
         # Empty owner/repositories scope the token to the current repository;
@@ -231,10 +257,9 @@ runs:
     - name: Run lgtmaybe
       shell: bash
       env:
-        # Prefer the minted App token (branded bot + higher rate limits); a
-        # skipped mint step yields an empty output, so fall back to the default
-        # workflow token.
-        GITHUB_TOKEN: ${{ steps.app-token.outputs.token || inputs.github_token }}
+        # Prefer the selected branded App identity; a skipped mint/exchange
+        # yields an empty output, so the default remains github-actions[bot].
+        GITHUB_TOKEN: ${{ steps.lgtmaybe-token.outputs.token || steps.app-token.outputs.token || inputs.github_token }}
         INPUT_PROVIDER: ${{ inputs.provider }}
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_PRESET: ${{ inputs.preset }}
@@ -298,3 +323,12 @@ runs:
           -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
           -w "${GITHUB_WORKSPACE}" \
           "${LGTMAYBE_IMAGE}" action
+
+    - name: Revoke temporary lgtmaybe App token
+      id: revoke-lgtmaybe-token
+      if: ${{ always() && steps.lgtmaybe-token.outputs.token != '' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        LGTMAYBE_TOKEN: ${{ steps.lgtmaybe-token.outputs.token }}
+      run: python3 "${{ github.action_path }}/scripts/github-app-identity.py" revoke

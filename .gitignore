@@ -167,6 +167,7 @@ venv.bak/
 
 # mkdocs documentation
 /site
+**/cdk.out/
 
 # mypy
 .mypy_cache/

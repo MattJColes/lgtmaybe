@@ -1,0 +1,37 @@
+github-app.install:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^main$' }
+  files: [scripts/github-app-identity.py]
+
+github-app.exchange:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^exchange$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^IdentityBroker$' }
+      stopBy: end
+  files: [services/github_app_identity/**/*.py]
+
+github-app.scope:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^create_token$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^HttpGitHubAppClient$' }
+      stopBy: end
+  files: [services/github_app_identity/**/*.py]
+
+github-app.boundary:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^handler$' }
+  files: [services/github_app_identity/**/*.py]
+
+github-app.failure:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_http_error_message$' }
+  files: [scripts/github-app-identity.py]

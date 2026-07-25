@@ -2,10 +2,9 @@
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
 # Add an OPENROUTER_API_KEY repo secret.
 #
-# Reviews post as lgtmaybe[bot] (name + avatar) via the GitHub App identity —
-# see docs/how-to/post-as-a-github-app.md. Set the LGTMAYBE_APP_ID repo
-# variable and LGTMAYBE_APP_PRIVATE_KEY secret; until they exist the action
-# falls back to the default workflow token (github-actions[bot]).
+# Reviews post as lgtmaybe[bot] (name + avatar) via the public GitHub App
+# identity. The workflow proves its repository identity with GitHub OIDC; no
+# App private key is stored in this repository.
 #
 # Reviews run automatically on PRs from trusted authors (owner / member /
 # collaborator), and on demand via slash commands (/review, /improve, /ask,
@@ -26,6 +25,7 @@ on:
 # out PR code.
 permissions:
   contents: read
+  id-token: write
   pull-requests: write
 
 jobs:
@@ -58,5 +58,4 @@ jobs:
           model: deepseek/deepseek-v4-pro
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          app_id: ${{ vars.LGTMAYBE_APP_ID }}
-          app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
+          github_identity: lgtmaybe
