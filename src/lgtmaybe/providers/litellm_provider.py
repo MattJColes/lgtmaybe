@@ -7,6 +7,7 @@ optional fallback model.
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
@@ -344,7 +345,19 @@ def _cache_block(text: str) -> dict[str, Any]:
 def _completion_with_wall_timeout(
     model: str, messages: list[Message], kwargs: dict[str, Any]
 ) -> Any:
-    """Call LiteLLM with a real wall-clock bound even if its transport hangs."""
+    """Call LiteLLM with a real wall-clock bound even if its transport hangs.
+
+    The deadline is owned by the monotonic clock, not delegated to a single
+    ``Future.result(timeout=...)`` wait: on a coarse-timer platform (Windows'
+    default granularity is ~15.6ms) that wait can resolve either side of the
+    deadline, which made "did this time out?" a question about thread scheduling
+    rather than about elapsed time. Re-checking the clock keeps the bound honest and
+    puts the measured wait in the error.
+
+    A call that *did* complete, even a hair past the deadline, is still honoured —
+    discarding it would waste a response the provider already billed for and, worse,
+    resurface a permanent error (see ``_is_permanent``) as a retryable TimeoutError.
+    """
     timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
     future: Future[Any] = Future()
 
@@ -354,11 +367,22 @@ def _completion_with_wall_timeout(
         except BaseException as exc:
             future.set_exception(exc)
 
+    start = time.monotonic()
+    deadline = start + timeout
     threading.Thread(target=complete, name="lgtmaybe-provider", daemon=True).start()
-    try:
-        return future.result(timeout=timeout)
-    except FutureTimeoutError as exc:
-        raise TimeoutError(f"provider request exceeded {timeout:g}s") from exc
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            return future.result(timeout=remaining)
+        except FutureTimeoutError:
+            continue  # the wait resolved early — trust the clock, not the wakeup
+    if future.done():
+        return future.result()
+    raise TimeoutError(
+        f"provider request exceeded {timeout:g}s (waited {time.monotonic() - start:.3f}s)"
+    )
 
 
 def _trailing_user_run(messages: list[Message]) -> tuple[int, list[Message]]:
