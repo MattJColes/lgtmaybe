@@ -2699,7 +2699,10 @@ One model call returns two renderings of the same graph:
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
 Changed elements are marked in the labels (`(new)` / `(changed)`), and the
-diagram stays honest about the diff being only a slice of the codebase —
+relationship lines are restyled in a mid-grey that stays readable on both
+GitHub themes — Mermaid's C4 renderer defaults them to a near-black that
+disappears in dark mode. The diagram also stays honest about the diff being
+only a slice of the codebase —
 relationships it infers from imports rather than the diff itself are called out
 in the notes rather than asserted as fact.
 
@@ -2719,6 +2722,9 @@ C4Container
     Rel(client, api, "GET /users/{id}")
     Rel(api, cache, "check cache (new)")
     Rel(api, db, "on miss, query")
+    UpdateRelStyle(client, api, $textColor="#767676", $lineColor="#767676")
+    UpdateRelStyle(api, cache, $textColor="#767676", $lineColor="#767676")
+    UpdateRelStyle(api, db, $textColor="#767676", $lineColor="#767676")
 ```
 
 <details>
