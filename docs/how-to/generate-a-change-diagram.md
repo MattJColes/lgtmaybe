@@ -33,7 +33,14 @@ green border**, so the PR's footprint stands out from the untouched
 collaborators at a glance; the relationship lines and labels are restyled in a
 light green that stays readable on every GitHub theme — Mermaid's C4 renderer
 defaults them to a near-black that disappears in dark mode — and the layout is loosened
-to three cards per row so the renderer's fixed-width cards don't overlap. The diagram also stays
+to three cards per row so the renderer's fixed-width cards don't overlap (a
+dense diagram of more than six elements drops further to two per row and grows
+down instead). Because GitHub's renderer offers zoom buttons but no
+full-screen, the diagram is followed by an **⛶ Open full screen** link that
+renders the same diagram alone in a browser tab, with pan and zoom, on
+[mermaid.live](https://mermaid.live) — the source travels compressed in the
+URL fragment, decoded in your browser, so nothing is sent anywhere until you
+click. The diagram also stays
 honest about the diff being only a slice of the codebase —
 relationships it infers from imports rather than the diff itself are called out
 in the notes rather than asserted as fact.
@@ -60,6 +67,9 @@ C4Container
     UpdateElementStyle(cache, $borderColor="#54d090")
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
+
+> [⛶ Open full screen](https://mermaid.live)&nbsp; *(the real link carries the
+> diagram source compressed into the URL)*
 
 <details>
 <summary>Text version</summary>
