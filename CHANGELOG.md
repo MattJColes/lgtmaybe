@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.3.0...lgtmaybe-v1.4.0) (2026-07-25)
+
+
+### Features
+
+* add Windows executable and winget distribution ([cac1339](https://github.com/MattJColes/lgtmaybe/commit/cac1339bf29be2bd595002b8b57cbe277e95bebe))
+
+
+### Bug Fixes
+
+* harden Windows release workflows ([ee08c9f](https://github.com/MattJColes/lgtmaybe/commit/ee08c9f65333f1da5c73cc2623b16326caca2175))
+* support Windows compatibility ([ab7185e](https://github.com/MattJColes/lgtmaybe/commit/ab7185e65431a5f53621168a4b1a89147866af90))
+
+
+### Documentation
+
+* simplify Marketplace Action setup ([2b9c274](https://github.com/MattJColes/lgtmaybe/commit/2b9c2741a4879befbbed6047e36e925b3d50e685))
+
 ## [1.3.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.2.0...lgtmaybe-v1.3.0) (2026-07-25)
 
 
