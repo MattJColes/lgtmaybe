@@ -458,7 +458,7 @@ def diagram(
     num_ctx: int | None,
     config_path: str | None,
 ) -> None:
-    """Print a C4-style diagram of your local changes — no GitHub needed.
+    """Print a compact Mermaid diagram of your local changes — no GitHub needed.
 
     Emits the ASCII rendering (which shows in a terminal) plus the Mermaid
     source — paste that into a GitHub comment, mermaid.live, or a Markdown file

@@ -1,6 +1,6 @@
-"""Change diagram: a C4-style Mermaid diagram of a PR's changes.
+"""Change diagram: a compact Mermaid flowchart of a PR's changes.
 
-``build_diagram`` asks the provider for a C4-style Mermaid diagram plus an ASCII
+``build_diagram`` asks the provider for a Mermaid flowchart plus an ASCII
 rendering and renders them as a Markdown comment. Contracts:
 
 - structured JSON renders the title, a ``mermaid`` fence, the ASCII in a
@@ -8,18 +8,11 @@ rendering and renders them as a Markdown comment. Contracts:
 - a fence the model wrapped around its Mermaid is stripped;
 - invalid Mermaid (not a diagram) drops to an ASCII-only plain fence — never a
   broken Mermaid block;
+- legacy C4 output also drops to the ASCII fallback rather than rendering an
+  overlap-prone graph;
 - unparseable model output falls back to the raw text;
-- C4 relationship lines get an ``UpdateRelStyle`` in a light green readable on
-  every GitHub theme (the renderer's near-black default vanishes in dark mode),
-  without duplicating styles the model already emitted;
-- C4 diagrams get an ``UpdateLayoutConfig`` loosening the default 4-per-row
-  layout (whose fixed-width cards overlap), unless the model set its own —
-  dense diagrams (more than six elements) drop further to two cards per row;
 - a valid Mermaid fence is followed by an "Open full screen" mermaid.live link
   whose pako fragment round-trips to the exact fenced source;
-- C4 elements whose label carries the ``(new)``/``(changed)`` marker get an
-  ``UpdateElementStyle`` with a green border, so what the PR touches stands
-  out at a glance, without duplicating styles the model already emitted;
 - the diff is redacted before it leaves, and wrapped as untrusted data;
 - the intent block is sent only when the PR states an intent;
 - the diagram prompt carries no findings-JSON task restatement.
@@ -50,7 +43,8 @@ _NO_INTENT_CTX = _CTX.model_copy(update={"title": "", "description": "", "commit
 
 _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
-_MERMAID = 'C4Container\n    title Retry flow\n    Container(app, "App", "Python")'
+_MERMAID = 'flowchart LR\n    client["Client"] --> app["App (changed)"]'
+_LEGACY_C4 = 'C4Container\n    Container(app, "App", "Python")'
 
 
 def _structured_provider(**overrides: object) -> FakeProvider:
@@ -70,7 +64,7 @@ def test_structured_diagram_renders_every_section() -> None:
 
     assert "Retry flow after this change" in body
     assert "```mermaid" in body
-    assert "C4Container" in body
+    assert "flowchart LR" in body
     assert "<details><summary>Text version</summary>" in body
     assert "[Client] --> [App] (changed)" in body
     assert "inferred from an import" in body
@@ -90,7 +84,7 @@ def test_model_added_fence_is_stripped() -> None:
 
     # Exactly one opening mermaid fence — the model's stray fence didn't nest.
     assert body.count("```mermaid") == 1
-    assert "```mermaid\nC4Container" in body
+    assert "```mermaid\nflowchart LR" in body
 
 
 def test_invalid_mermaid_falls_back_to_ascii_only() -> None:
@@ -103,65 +97,12 @@ def test_invalid_mermaid_falls_back_to_ascii_only() -> None:
     assert "[Client] --> [App] (changed)" in body
 
 
-def test_c4_rels_get_dark_mode_safe_styles() -> None:
-    mermaid = (
-        "C4Container\n"
-        '    Container(api, "API")\n'
-        '    ContainerDb(db, "DB")\n'
-        '    Rel(client, api, "GET /users")\n'
-        '    BiRel_D(api, db, "query")\n'
-    )
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+def test_legacy_c4_falls_back_to_ascii_only() -> None:
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=_LEGACY_C4))
 
-    assert 'UpdateRelStyle(client, api, $textColor="#34a862", $lineColor="#34a862")' in body
-    assert 'UpdateRelStyle(api, db, $textColor="#34a862", $lineColor="#34a862")' in body
-
-
-def test_rel_styles_land_inside_the_mermaid_fence() -> None:
-    mermaid = 'C4Container\n    Rel(a, b, "calls")'
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
-    assert "UpdateRelStyle(a, b," in fence
-
-
-def test_model_supplied_rel_style_is_not_duplicated() -> None:
-    mermaid = (
-        "C4Container\n"
-        '    Rel(a, b, "calls")\n'
-        '    Rel(b, c, "calls")\n'
-        '    UpdateRelStyle(a, b, $textColor="red", $lineColor="red")\n'
-    )
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    # The model's own style for (a, b) is kept; only (b, c) gets ours.
-    assert body.count("UpdateRelStyle(a, b,") == 1
-    assert '$textColor="red"' in body
-    assert 'UpdateRelStyle(b, c, $textColor="#34a862"' in body
-
-
-def test_repeated_rel_pair_styled_once() -> None:
-    mermaid = 'C4Container\n    Rel(a, b, "calls")\n    Rel(a, b, "calls again")'
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    assert body.count("UpdateRelStyle(a, b,") == 1
-
-
-def test_c4_gets_an_overlap_loosening_layout_config() -> None:
-    body = build_diagram(_CTX, _CFG, _structured_provider())
-
-    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
-    assert 'UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")' in fence
-
-
-def test_dense_c4_drops_to_two_shapes_per_row() -> None:
-    """More than six elements ⇒ two cards per row, so a dense diagram grows
-    down instead of cramming fixed-width cards into overlap."""
-    elements = "\n".join(f'    Container(c{i}, "Service {i}")' for i in range(7))
-    mermaid = f'C4Container\n{elements}\n    Rel(c0, c1, "calls")'
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    assert 'UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="1")' in body
+    assert "```mermaid" not in body
+    assert "<details>" not in body
+    assert "[Client] --> [App] (changed)" in body
 
 
 def test_mermaid_gets_a_full_screen_link() -> None:
@@ -185,30 +126,21 @@ def test_no_full_screen_link_without_mermaid() -> None:
     assert "mermaid.live" not in body
 
 
-def test_prompt_caps_the_element_count() -> None:
-    """Overlap is mostly density: the prompt must cap how many elements the
-    model draws, not just how long their labels run."""
+def test_prompt_requires_a_compact_automatic_flowchart() -> None:
     provider = _structured_provider()
 
     build_diagram(_CTX, _CFG, provider)
 
     system = provider.calls[0]["messages"][0]["content"].lower()
-    assert "at most 8 elements" in system
+    assert '"flowchart lr"' in system
+    assert "maximum of six nodes" in system
+    assert "short relationship labels" in system
+    assert "change markers on nodes only" in system
+    assert "automatic layout" in system
+    assert "manual styling or positioning" in system
 
 
-def test_model_supplied_layout_config_is_kept() -> None:
-    mermaid = (
-        "C4Container\n"
-        '    Container(api, "API")\n'
-        '    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")\n'
-    )
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    assert body.count("UpdateLayoutConfig") == 1
-    assert '$c4ShapeInRow="2"' in body
-
-
-def test_non_c4_mermaid_is_left_unstyled() -> None:
+def test_flowchart_is_not_post_processed() -> None:
     body = build_diagram(_CTX, _CFG, _structured_provider(mermaid="flowchart LR\n    a --> b"))
 
     assert "UpdateRelStyle" not in body
@@ -216,56 +148,14 @@ def test_non_c4_mermaid_is_left_unstyled() -> None:
     assert "UpdateElementStyle" not in body
 
 
-def test_changed_and_new_elements_get_a_green_border() -> None:
-    mermaid = (
-        "C4Container\n"
-        '    Person(client, "Client")\n'
-        '    Container(api, "API", "Python", "verifies signatures (changed)")\n'
-        '    ContainerDb(db, "DB", "Postgres", "events table (new)")\n'
-        '    System_Ext(stripe, "Stripe", "payments")\n'
-    )
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    assert 'UpdateElementStyle(api, $borderColor="#54d090")' in body
-    assert 'UpdateElementStyle(db, $borderColor="#54d090")' in body
-    # Untouched elements keep the default style.
-    assert "UpdateElementStyle(client," not in body
-    assert "UpdateElementStyle(stripe," not in body
-
-
-def test_element_styles_land_inside_the_mermaid_fence() -> None:
-    mermaid = 'C4Container\n    Container(api, "API", "Python", "rate limits (new)")'
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
-    assert "UpdateElementStyle(api," in fence
-
-
-def test_model_supplied_element_style_is_not_duplicated() -> None:
-    mermaid = (
-        "C4Container\n"
-        '    Container(api, "API", "Python", "rate limits (new)")\n'
-        '    Container(worker, "Worker", "Celery", "drains queue (new)")\n'
-        '    UpdateElementStyle(api, $bgColor="purple")\n'
-    )
-    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
-
-    # The model's own style for api is kept; only worker gets ours.
-    assert body.count("UpdateElementStyle(api,") == 1
-    assert '$bgColor="purple"' in body
-    assert 'UpdateElementStyle(worker, $borderColor="#54d090")' in body
-
-
-def test_prompt_tells_the_model_to_keep_labels_short() -> None:
-    """C4 cards are fixed-width, so the prompt must constrain label length —
-    long descriptions and relationship labels are what overlap neighbours."""
+def test_prompt_teaches_a_branched_flowchart() -> None:
     provider = _structured_provider()
 
     build_diagram(_CTX, _CFG, provider)
 
-    system = provider.calls[0]["messages"][0]["content"].lower()
-    assert "fixed-width" in system
-    assert "short" in system
+    system = provider.calls[0]["messages"][0]["content"]
+    assert "release -->|triggers| build" in system
+    assert "release -->|after build| publish" in system
 
 
 def test_unparseable_output_falls_back_to_raw_text() -> None:
@@ -344,7 +234,7 @@ def test_language_directive_added_when_set() -> None:
     build_diagram(_CTX, cfg, provider)
     system = provider.calls[0]["messages"][0]["content"]
     assert "Japanese" in system
-    assert "C4Container" in system  # Mermaid structure keywords untouched
+    assert "flowchart LR" in system  # Mermaid structure keywords untouched
 
 
 def test_forged_markers_in_the_diff_are_neutralised() -> None:

@@ -35,26 +35,23 @@ line. A clean change just gets a 👍 **LGTM!**.
 
 Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
 **`/describe`** writes a structured overview, **`/diagram`** draws a
-[C4-style map of the change](how-to/generate-a-change-diagram.md), and
+[compact flowchart of the change](how-to/generate-a-change-diagram.md), and
 **`/ask <question>`** answers in the PR. Run `lgtmaybe diagram` to draw the same
 map locally before you push.
 
 ```mermaid
-C4Container
-    title Async order confirmations after this change
-    Person(customer, "Customer")
-    Container(web, "Storefront", "React", "Places orders")
-    Container(api, "Order API", "Python", "Creates orders (changed)")
-    ContainerDb(db, "Order database", "PostgreSQL", "Stores orders")
-    Container(queue, "Order events", "SQS", "Buffers OrderCreated events (new)")
-    Container(worker, "Notification worker", "Python", "Consumes order events (new)")
-    System_Ext(email, "Email provider", "Delivers confirmations")
-    Rel(customer, web, "places order")
-    Rel(web, api, "POST /orders")
-    Rel(api, db, "stores order")
-    Rel(api, queue, "publishes OrderCreated (new)")
-    Rel(queue, worker, "delivers event (new)")
-    Rel(worker, email, "sends confirmation (new)")
+flowchart LR
+    web["Storefront<br/>React<br/>places orders"]
+    api["Order API<br/>Python<br/>creates orders (changed)"]
+    db["Order database<br/>PostgreSQL<br/>stores orders"]
+    queue["Order events<br/>SQS<br/>buffers events (new)"]
+    worker["Notification worker<br/>Python<br/>sends confirmations (new)"]
+    email["Email provider<br/>delivers messages"]
+    web -->|calls| api
+    api -->|stores in| db
+    api -->|publishes to| queue
+    queue -->|delivers to| worker
+    worker -->|sends via| email
 ```
 
 ## Start here

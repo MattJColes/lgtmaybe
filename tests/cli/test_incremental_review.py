@@ -268,7 +268,7 @@ def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
     from tests.fakes import FakeGitHub, FakeProvider
 
     github = FakeGitHub()
-    structured = _json.dumps({"title": "Change map", "mermaid": "C4Container"})
+    structured = _json.dumps({"title": "Change map", "mermaid": "flowchart LR"})
     provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
 
     run_diagram(github, provider, _cfg())
@@ -309,7 +309,7 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
     from tests.fakes import FakeProvider
 
     github = PlainGateway()
-    structured = _json.dumps({"title": "Change map", "mermaid": "C4Container"})
+    structured = _json.dumps({"title": "Change map", "mermaid": "flowchart LR"})
     provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
 
     run_diagram(github, provider, _cfg())

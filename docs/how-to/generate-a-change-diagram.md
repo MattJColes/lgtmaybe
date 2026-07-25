@@ -1,15 +1,13 @@
 ---
-description: Post a C4-style Mermaid diagram of a pull request's changes as a GitHub comment, or print one from the CLI.
+description: Post a compact Mermaid flowchart of a pull request's changes as a GitHub comment, or print one from the CLI.
 ---
 
 # Generate a change diagram
 
-lgtmaybe can post a **C4-style diagram of what a pull request changes** — the
-containers and components the PR touches plus their immediate relationships — so
-a reviewer gets a visual overview before they read the diff. It's a separate
-concern from the review and the description: enable any of them independently.
-
-![A /diagram comment posted by lgtmaybe: a C4 diagram of a Stripe webhook change, with the changed Checkout API and new Orders DB and Billing worker components highlighted with green borders](../assets/marketplace/marketplace-screenshot-4.png){ width="720" }
+lgtmaybe can post a **compact flowchart of what a pull request changes** — the
+components the PR touches plus their immediate relationships — so a reviewer
+gets a visual overview before they read the diff. It's a separate concern from
+the review and the description: enable any of them independently.
 
 ## Contents
 
@@ -23,27 +21,22 @@ concern from the review and the description: enable any of them independently.
 
 One model call returns two renderings of the same graph:
 
-- a **Mermaid C4 diagram** (`C4Container` / `C4Context`), which GitHub renders
-  natively inside the comment — no image, no external hosting; and
+- a **Mermaid flowchart**, which GitHub renders natively inside the comment —
+  no image, no external hosting; and
 - a **plain-text ASCII** rendering of the same diagram, which is what shows in a
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
-Changed elements are marked in the labels (`(new)` / `(changed)`) **and get a
-green border**, so the PR's footprint stands out from the untouched
-collaborators at a glance; the relationship lines and labels are restyled in a
-light green that stays readable on every GitHub theme — Mermaid's C4 renderer
-defaults them to a near-black that disappears in dark mode — and the layout is loosened
-to three cards per row so the renderer's fixed-width cards don't overlap (a
-dense diagram of more than six elements drops further to two per row and grows
-down instead). Because GitHub's renderer offers zoom buttons but no
+The flowchart is intentionally sparse: it uses at most six nodes, short
+relationship labels, and Mermaid's automatic layout. Changed elements are
+marked in their labels (`(new)` / `(changed)`), keeping labels and arrows clear
+of neighbouring cards. Because GitHub's renderer offers zoom buttons but no
 full-screen, the diagram is followed by an **⛶ Open full screen** link that
 renders the same diagram alone in a browser tab, with pan and zoom, on
-[mermaid.live](https://mermaid.live) — the source travels compressed in the
-URL fragment, decoded in your browser, so nothing is sent anywhere until you
-click. The diagram also stays
-honest about the diff being only a slice of the codebase —
-relationships it infers from imports rather than the diff itself are called out
-in the notes rather than asserted as fact.
+[mermaid.live](https://mermaid.live). The source travels compressed in the URL
+fragment, decoded in your browser, so nothing is sent anywhere until you click.
+The diagram also stays honest about the diff being only a slice of the
+codebase: relationships inferred from imports rather than shown in the diff
+are called out in the notes.
 
 Here is what the posted comment looks like for a PR that puts a Redis cache in
 front of a user service — the Mermaid renders in place, with the ASCII tucked
@@ -52,20 +45,14 @@ in a collapsible "Text version" underneath:
 > **Cache user lookups in Redis**
 
 ```mermaid
-C4Container
-    title User lookup after this change
-    Person(client, "Client")
-    Container(api, "User API", "Python", "Serves user reads")
-    ContainerDb(cache, "Redis cache", "Redis", "caches user rows (new)")
-    ContainerDb(db, "User DB", "Postgres")
-    Rel(client, api, "GET /users/{id}")
-    Rel(api, cache, "check cache (new)")
-    Rel(api, db, "on miss, query")
-    UpdateRelStyle(client, api, $textColor="#34a862", $lineColor="#34a862")
-    UpdateRelStyle(api, cache, $textColor="#34a862", $lineColor="#34a862")
-    UpdateRelStyle(api, db, $textColor="#34a862", $lineColor="#34a862")
-    UpdateElementStyle(cache, $borderColor="#54d090")
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+flowchart LR
+    client["Client"]
+    api["User API<br/>Python<br/>serves user reads"]
+    cache["Redis cache<br/>Redis<br/>caches rows (new)"]
+    db["User DB<br/>PostgreSQL"]
+    client -->|requests| api
+    api -->|checks| cache
+    api -->|on miss| db
 ```
 
 > [⛶ Open full screen](https://mermaid.live)&nbsp; *(the real link carries the
@@ -130,11 +117,11 @@ version" block. Paste the Mermaid into a GitHub comment,
 
 ## Why Mermaid (and what the ASCII is for)
 
-GitHub renders **Mermaid** natively in comments and Markdown, and Mermaid has a
-C4 dialect — so a `mermaid` fenced block renders in the comment with no image to
-generate or host. That matters for a `pull_request_target` reviewer: hosting an
-image would mean committing a file or calling an external service, neither of
-which fits a fork-safe, idempotently-updated comment.
+GitHub renders **Mermaid** natively in comments and Markdown, so a `mermaid`
+fenced flowchart renders in the comment with no image to generate or host.
+That matters for a `pull_request_target` reviewer: hosting an image would mean
+committing a file or calling an external service, neither of which fits a
+fork-safe, idempotently-updated comment.
 
 A terminal, though, can't render Mermaid — which is exactly why the same call
 also returns **ASCII art**. Both the CLI output and the GitHub comment show the
@@ -143,8 +130,8 @@ what you actually read in a terminal, and it doubles as the fallback body, so a
 reviewer never sees a red "unable to render" box if a diagram comes back
 malformed.
 
-D2 (the [C4 notation](https://d2lang.com/blog/c4/) that inspired this) isn't
-used: GitHub doesn't render D2 in Markdown, so it would show as source anyway.
+D2 isn't used because GitHub doesn't render it in Markdown, so it would show as
+source anyway.
 
 ## See also
 

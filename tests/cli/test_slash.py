@@ -184,9 +184,7 @@ class TestDispatch:
     def test_diagram_upserts_the_diagram_comment(self):
         """/diagram goes through the idempotent diagram upsert with a mermaid block."""
         github = FakeGitHub()
-        structured = json.dumps(
-            {"title": "Change map", "mermaid": 'C4Container\n    Container(a, "A")'}
-        )
+        structured = json.dumps({"title": "Change map", "mermaid": 'flowchart LR\n    a["A"]'})
         provider = FakeProvider(
             result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)
         )

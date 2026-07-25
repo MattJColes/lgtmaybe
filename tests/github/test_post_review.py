@@ -865,7 +865,7 @@ def test_post_diagram_comment_creates_with_marker() -> None:
     respx.route(method="POST", url=COMMENTS_URL).mock(side_effect=capture)
 
     gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
-    gateway.post_diagram_comment("## Diagram\n\n```mermaid\nC4Container\n```")
+    gateway.post_diagram_comment("## Diagram\n\n```mermaid\nflowchart LR\n```")
 
     body = str(captured["body"])
     assert body.startswith("## Diagram")
