@@ -35,7 +35,7 @@ Reviews surface the things you'd want a careful reviewer to catch:
 Beyond the review itself, slash commands on the PR keep the reviewer's mental
 model of the code intact: **`/describe`** posts a structured description of the
 change (title, change type, per-file walkthrough, intent check), **`/diagram`**
-posts a [C4-style Mermaid diagram of the components the PR touches](how-to/generate-a-change-diagram.md)
+posts a [compact Mermaid diagram of the components the PR touches](how-to/generate-a-change-diagram.md)
 — a visual map of where the change sits in the system, rendered natively by
 GitHub — and **`/ask <question>`** answers questions about the change in-thread.
 `lgtmaybe diagram` prints the same change diagram locally, before you push.

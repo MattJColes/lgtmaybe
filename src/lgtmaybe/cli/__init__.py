@@ -403,7 +403,7 @@ def execute_local_diagram(
     working: bool,
     uncommitted: bool = False,
 ) -> None:
-    """Print a C4-style diagram of the local git changes — no GitHub involvement.
+    """Print a compact Mermaid diagram of local changes — no GitHub involvement.
 
     Builds the provider straight from config/runtime (no token, no gateway) and
     echoes the same Markdown body the ``/diagram`` comment would carry: the

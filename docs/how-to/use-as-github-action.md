@@ -199,7 +199,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `false` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review |
+| `auto_diagram` | `false` | Post a compact Mermaid change diagram comment when a PR is opened/reopened, before the review |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |

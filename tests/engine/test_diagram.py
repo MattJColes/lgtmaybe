@@ -1,6 +1,6 @@
-"""Change diagram: a C4-style Mermaid diagram of a PR's changes.
+"""Change diagram: a compact Mermaid flowchart of a PR's changes.
 
-``build_diagram`` asks the provider for a C4-style Mermaid diagram plus an ASCII
+``build_diagram`` asks the provider for a Mermaid flowchart plus an ASCII
 rendering and renders them as a Markdown comment. Contracts:
 
 - structured JSON renders the title, a ``mermaid`` fence, the ASCII in a
@@ -37,7 +37,8 @@ _NO_INTENT_CTX = _CTX.model_copy(update={"title": "", "description": "", "commit
 
 _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
-_MERMAID = 'C4Container\n    title Retry flow\n    Container(app, "App", "Python")'
+_MERMAID = 'flowchart LR\n    client["Client"] --> app["App (changed)"]'
+_LEGACY_C4 = 'C4Container\n    Container(app, "App", "Python")'
 
 
 def _structured_provider(**overrides: object) -> FakeProvider:
@@ -57,7 +58,7 @@ def test_structured_diagram_renders_every_section() -> None:
 
     assert "Retry flow after this change" in body
     assert "```mermaid" in body
-    assert "C4Container" in body
+    assert "flowchart LR" in body
     assert "<details><summary>Text version</summary>" in body
     assert "[Client] --> [App] (changed)" in body
     assert "inferred from an import" in body
@@ -77,13 +78,21 @@ def test_model_added_fence_is_stripped() -> None:
 
     # Exactly one opening mermaid fence — the model's stray fence didn't nest.
     assert body.count("```mermaid") == 1
-    assert "```mermaid\nC4Container" in body
+    assert "```mermaid\nflowchart LR" in body
 
 
 def test_invalid_mermaid_falls_back_to_ascii_only() -> None:
     body = build_diagram(
         _CTX, _CFG, _structured_provider(mermaid="Here is a prose answer, not a diagram.")
     )
+
+    assert "```mermaid" not in body
+    assert "<details>" not in body
+    assert "[Client] --> [App] (changed)" in body
+
+
+def test_legacy_c4_falls_back_to_ascii_only() -> None:
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=_LEGACY_C4))
 
     assert "```mermaid" not in body
     assert "<details>" not in body
@@ -146,6 +155,29 @@ def test_prompt_carries_the_codebase_humility_rule() -> None:
     system = provider.calls[0]["messages"][0]["content"].lower()
     assert "untrusted" in system
     assert "slice" in system
+
+
+def test_prompt_requires_a_compact_automatic_flowchart() -> None:
+    provider = _structured_provider()
+
+    build_diagram(_CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"]
+    assert "flowchart LR" in system
+    assert "maximum of six nodes" in system
+    assert "short relationship labels" in system
+    assert "change markers on nodes only" in system
+    assert "manual styling or positioning directives" in system
+
+
+def test_prompt_teaches_a_branched_flowchart() -> None:
+    provider = _structured_provider()
+
+    build_diagram(_CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"]
+    assert "release -->|triggers| build" in system
+    assert "release -->|after build| publish" in system
 
 
 def test_forged_markers_in_the_diff_are_neutralised() -> None:

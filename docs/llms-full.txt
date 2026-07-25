@@ -41,7 +41,7 @@ Reviews surface the things you'd want a careful reviewer to catch:
 Beyond the review itself, slash commands on the PR keep the reviewer's mental
 model of the code intact: **`/describe`** posts a structured description of the
 change (title, change type, per-file walkthrough, intent check), **`/diagram`**
-posts a [C4-style Mermaid diagram of the components the PR touches](how-to/generate-a-change-diagram.md)
+posts a [compact Mermaid diagram of the components the PR touches](how-to/generate-a-change-diagram.md)
 — a visual map of where the change sits in the system, rendered natively by
 GitHub — and **`/ask <question>`** answers questions about the change in-thread.
 `lgtmaybe diagram` prints the same change diagram locally, before you push.
@@ -491,7 +491,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `false` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review |
+| `auto_diagram` | `false` | Post a compact Mermaid change diagram comment when a PR is opened/reopened, before the review |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
@@ -2659,7 +2659,7 @@ your lenses.
 
 # Generate a change diagram
 
-lgtmaybe can post a **C4-style diagram of what a pull request changes** — the
+lgtmaybe can post a **compact diagram of what a pull request changes** — the
 containers and components the PR touches plus their immediate relationships — so
 a reviewer gets a visual overview before they read the diff. It's a separate
 concern from the review and the description: enable any of them independently.
@@ -2676,8 +2676,8 @@ concern from the review and the description: enable any of them independently.
 
 One model call returns two renderings of the same graph:
 
-- a **Mermaid C4 diagram** (`C4Container` / `C4Context`), which GitHub renders
-  natively inside the comment — no image, no external hosting; and
+- an automatically laid-out **Mermaid flowchart**, which GitHub renders natively
+  inside the comment — no image, no external hosting; and
 - a **plain-text ASCII** rendering of the same diagram, which is what shows in a
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
@@ -2693,15 +2693,14 @@ in a collapsible "Text version" underneath:
 > **Cache user lookups in Redis**
 
 ```mermaid
-C4Container
-    title User lookup after this change
-    Person(client, "Client")
-    Container(api, "User API", "Python", "Serves user reads")
-    ContainerDb(cache, "Redis cache", "Redis", "caches user rows (new)")
-    ContainerDb(db, "User DB", "Postgres")
-    Rel(client, api, "GET /users/{id}")
-    Rel(api, cache, "check cache (new)")
-    Rel(api, db, "on miss, query")
+flowchart LR
+    client["Client"]
+    api["User API<br/>Python<br/>serves user reads (changed)"]
+    cache["Redis cache<br/>Redis<br/>caches user rows (new)"]
+    db["User DB<br/>Postgres"]
+    client -->|requests| api
+    api -->|checks| cache
+    api -->|on miss| db
 ```
 
 <details>
@@ -2763,11 +2762,13 @@ version" block. Paste the Mermaid into a GitHub comment,
 
 ## Why Mermaid (and what the ASCII is for)
 
-GitHub renders **Mermaid** natively in comments and Markdown, and Mermaid has a
-C4 dialect — so a `mermaid` fenced block renders in the comment with no image to
-generate or host. That matters for a `pull_request_target` reviewer: hosting an
-image would mean committing a file or calling an external service, neither of
-which fits a fork-safe, idempotently-updated comment.
+GitHub renders **Mermaid** natively in comments and Markdown, so a `mermaid`
+fenced block renders in the comment with no image to generate or host. The
+flowchart layout routes edges automatically, avoiding the manual card ordering
+and per-label offsets required by Mermaid's C4 renderer. Native rendering also
+matters for a `pull_request_target` reviewer: hosting an image would mean
+committing a file or calling an external service, neither of which fits a
+fork-safe, idempotently-updated comment.
 
 A terminal, though, can't render Mermaid — which is exactly why the same call
 also returns **ASCII art**. Both the CLI output and the GitHub comment show the

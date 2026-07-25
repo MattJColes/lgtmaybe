@@ -192,7 +192,7 @@ class TestDiagramCommand:
         payload = json.dumps(
             {
                 "title": "Change map",
-                "mermaid": 'C4Container\n    Container(app, "App")',
+                "mermaid": 'flowchart LR\n    client["Client"] --> app["App"]',
                 "ascii": "[Client] --> [App]",
             }
         )
@@ -208,7 +208,7 @@ class TestDiagramCommand:
 
         assert result.exit_code == 0, result.output
         assert "```mermaid" in result.output
-        assert "C4Container" in result.output
+        assert "flowchart LR" in result.output
         assert "[Client] --> [App]" in result.output
 
     def test_working_and_uncommitted_flags_conflict(self, monkeypatch):

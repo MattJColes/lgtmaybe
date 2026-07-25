@@ -1,10 +1,10 @@
 ---
-description: Post a C4-style Mermaid diagram of a pull request's changes as a GitHub comment, or print one from the CLI.
+description: Post a compact Mermaid flowchart of a pull request's changes as a GitHub comment, or print one from the CLI.
 ---
 
 # Generate a change diagram
 
-lgtmaybe can post a **C4-style diagram of what a pull request changes** — the
+lgtmaybe can post a **compact diagram of what a pull request changes** — the
 containers and components the PR touches plus their immediate relationships — so
 a reviewer gets a visual overview before they read the diff. It's a separate
 concern from the review and the description: enable any of them independently.
@@ -21,8 +21,8 @@ concern from the review and the description: enable any of them independently.
 
 One model call returns two renderings of the same graph:
 
-- a **Mermaid C4 diagram** (`C4Container` / `C4Context`), which GitHub renders
-  natively inside the comment — no image, no external hosting; and
+- an automatically laid-out **Mermaid flowchart**, which GitHub renders natively
+  inside the comment — no image, no external hosting; and
 - a **plain-text ASCII** rendering of the same diagram, which is what shows in a
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
@@ -38,15 +38,14 @@ in a collapsible "Text version" underneath:
 > **Cache user lookups in Redis**
 
 ```mermaid
-C4Container
-    title User lookup after this change
-    Person(client, "Client")
-    Container(api, "User API", "Python", "Serves user reads")
-    ContainerDb(cache, "Redis cache", "Redis", "caches user rows (new)")
-    ContainerDb(db, "User DB", "Postgres")
-    Rel(client, api, "GET /users/{id}")
-    Rel(api, cache, "check cache (new)")
-    Rel(api, db, "on miss, query")
+flowchart LR
+    client["Client"]
+    api["User API<br/>Python<br/>serves user reads (changed)"]
+    cache["Redis cache<br/>Redis<br/>caches user rows (new)"]
+    db["User DB<br/>Postgres"]
+    client -->|requests| api
+    api -->|checks| cache
+    api -->|on miss| db
 ```
 
 <details>
@@ -108,11 +107,13 @@ version" block. Paste the Mermaid into a GitHub comment,
 
 ## Why Mermaid (and what the ASCII is for)
 
-GitHub renders **Mermaid** natively in comments and Markdown, and Mermaid has a
-C4 dialect — so a `mermaid` fenced block renders in the comment with no image to
-generate or host. That matters for a `pull_request_target` reviewer: hosting an
-image would mean committing a file or calling an external service, neither of
-which fits a fork-safe, idempotently-updated comment.
+GitHub renders **Mermaid** natively in comments and Markdown, so a `mermaid`
+fenced block renders in the comment with no image to generate or host. The
+flowchart layout routes edges automatically, avoiding the manual card ordering
+and per-label offsets required by Mermaid's C4 renderer. Native rendering also
+matters for a `pull_request_target` reviewer: hosting an image would mean
+committing a file or calling an external service, neither of which fits a
+fork-safe, idempotently-updated comment.
 
 A terminal, though, can't render Mermaid — which is exactly why the same call
 also returns **ASCII art**. Both the CLI output and the GitHub comment show the
