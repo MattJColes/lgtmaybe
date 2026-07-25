@@ -524,6 +524,13 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Human language for the reviewer's prose. When set, finding `title`/`body`
+    # (and the describe/diagram prose) are written in this language, while the
+    # structural fields (`path`, `line`, `side`, `severity`, `anchor`) and the
+    # `suggestion` code stay untranslated. None (default) = English, and emits
+    # the pre-language prompts byte-for-byte (the prompt-cache contract depends
+    # on that default staying stable).
+    language: str | None = None
     # Declarative finding post-processing, applied in order just before
     # posting: each rule's match (path glob / category / title substring /
     # severity floor, ANDed) selects findings and its action drops them or

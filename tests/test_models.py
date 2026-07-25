@@ -188,6 +188,17 @@ def test_review_config_accepts_reflect_model() -> None:
     assert restored.reflect_model == "big-judge"
 
 
+def test_review_config_language_defaults_none() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.language is None
+
+
+def test_review_config_accepts_language() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", language="Japanese")
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.language == "Japanese"
+
+
 def test_review_config_ignore_fingerprints_defaults_empty() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     assert cfg.ignore_fingerprints == []

@@ -100,6 +100,18 @@ def test_reflect_model_round_trips_from_file_and_cli(tmp_path):
     assert cfg.reflect_model == "cli-judge"
 
 
+def test_language_round_trips_from_file_and_cli(tmp_path):
+    """language can be set in .lgtmaybe.yml and overridden via a CLI input."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nlanguage: Japanese\n")
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.language == "Japanese"
+
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    cfg = load_config(config_path=cfg_file, language="Spanish")
+    assert cfg.language == "Spanish"
+
+
 def test_cli_input_overrides_file_value(tmp_path):
     """An explicit CLI input takes precedence over the file's value."""
     cfg_file = tmp_path / ".lgtmaybe.yml"

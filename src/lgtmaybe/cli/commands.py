@@ -112,6 +112,13 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "--model. Point it at a stronger model to audit a weaker reviewer's findings",
 )
 @click.option(
+    "--language",
+    default=None,
+    help="Human language for the reviewer's prose — finding title/body (and "
+    "describe/diagram text). Structural fields and suggestion code stay "
+    "unchanged. Unset = English",
+)
+@click.option(
     "--triage-model",
     default=None,
     help="Cheap model that runs first to skip plainly-non-substantive files and "
@@ -316,6 +323,7 @@ def review(
     full_preset: bool,
     fallback_model: str | None,
     reflect_model: str | None,
+    language: str | None,
     triage_model: str | None,
     api_key: str | None,
     api_base: str | None,
@@ -358,6 +366,7 @@ def review(
         model=model,
         preset="full" if full_preset else preset,
         reflect_model=reflect_model,
+        language=language,
         triage_model=triage_model,
         min_severity=min_severity,
         fail_on=fail_on,
@@ -517,6 +526,7 @@ def action() -> None:
         model=inputs["model"],
         preset=inputs["preset"],
         reflect_model=inputs["reflect_model"],
+        language=inputs["language"],
         triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
         max_review_seconds=inputs["max_review_seconds"],

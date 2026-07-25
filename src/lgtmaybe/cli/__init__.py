@@ -644,6 +644,7 @@ def action_inputs() -> dict[str, str | None]:
         "preset": get("PRESET"),
         "fallback_model": get("FALLBACK_MODEL"),
         "reflect_model": get("REFLECT_MODEL"),
+        "language": get("LANGUAGE"),
         "triage_model": get("TRIAGE_MODEL"),
         "api_key": get("API_KEY"),
         "api_base": get("API_BASE"),

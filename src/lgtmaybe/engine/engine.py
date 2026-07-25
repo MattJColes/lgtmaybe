@@ -160,7 +160,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses = [
             _Lens(
                 id=ReviewCategory.security.value,
-                system_prompt=build_system_prompt(ReviewCategory.security),
+                system_prompt=build_system_prompt(ReviewCategory.security, cfg.language),
                 user_block=build_lens_block(ReviewCategory.security),
             ),
         ]
@@ -173,7 +173,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
             lenses += [
                 _Lens(
                     id="correctness-flow",
-                    system_prompt=build_correctness_flow_prompt(has_intent),
+                    system_prompt=build_correctness_flow_prompt(has_intent, cfg.language),
                     user_block=build_correctness_flow_block(has_intent),
                     carries_intent=has_intent,
                     allowed_categories=correctness_categories,
@@ -181,7 +181,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
                 ),
                 _Lens(
                     id="correctness-state",
-                    system_prompt=build_correctness_state_prompt(),
+                    system_prompt=build_correctness_state_prompt(cfg.language),
                     user_block=build_correctness_state_block(),
                     allowed_categories=frozenset({ReviewCategory.correctness.value}),
                     finding_category=ReviewCategory.correctness.value,
@@ -191,7 +191,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
             lenses.append(
                 _Lens(
                     id=ReviewCategory.correctness.value,
-                    system_prompt=build_correctness_prompt(has_intent),
+                    system_prompt=build_correctness_prompt(has_intent, cfg.language),
                     user_block=build_correctness_block(has_intent),
                     carries_intent=has_intent,
                     allowed_categories=correctness_categories if has_intent else None,
@@ -200,7 +200,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses += [
             _Lens(
                 id=group.id,
-                system_prompt=build_group_prompt(group),
+                system_prompt=build_group_prompt(group, cfg.language),
                 user_block=build_group_block(group),
                 allowed_categories=frozenset(c.value for c in group.members),
             )
@@ -210,7 +210,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses = [
             _Lens(
                 id=category.value,
-                system_prompt=build_system_prompt(category),
+                system_prompt=build_system_prompt(category, cfg.language),
                 user_block=build_lens_block(category),
                 carries_intent=category is ReviewCategory.intent,
             )
@@ -222,7 +222,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     lenses += [
         _Lens(
             id=lens.id,
-            system_prompt=build_lens_prompt(lens),
+            system_prompt=build_lens_prompt(lens, cfg.language),
             user_block=build_custom_lens_block(lens),
         )
         for lens in cfg.extra_lenses
@@ -430,6 +430,7 @@ class LLMReviewEngine(ReviewEngine):
                     response_format,
                     batch_num,
                     cfg.prompt_cache,
+                    cfg.language,
                     deadline_at,
                     lens,
                 )
@@ -624,6 +625,7 @@ class LLMReviewEngine(ReviewEngine):
         response_format: type[ReviewResult] | None,
         batch_num: int,
         split_prompt: bool,
+        language: str | None,
         deadline_at: float | None,
         lens: _Lens,
     ) -> tuple[list[ReviewFinding], str | None]:
@@ -658,7 +660,7 @@ class LLMReviewEngine(ReviewEngine):
                 # prefix — so the other lenses' cached prefix stays identical.
                 suffix = f"{intent_block}\n\n{suffix}"
             messages: list[Message] = [
-                {"role": "system", "content": build_shared_preamble()},
+                {"role": "system", "content": build_shared_preamble(language)},
                 {"role": "user", "content": prefix},
                 {"role": "user", "content": suffix},
             ]

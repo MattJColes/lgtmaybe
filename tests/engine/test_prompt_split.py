@@ -103,6 +103,20 @@ class TestSplitShape:
         assert len(intent_suffixes) == 1
         assert "Fix the frobnicator" in intent_suffixes[0]
 
+    def test_language_directive_rides_the_shared_prefix(self) -> None:
+        """A set language reaches every lens via the shared system preamble, and
+        the (system, diff) prefix stays byte-identical across the fan-out so a
+        caching provider still serves it once."""
+        provider = FakeProvider()
+        LLMReviewEngine(provider).review(_CTX, _cfg(language="Japanese"))
+        systems = {c["messages"][0]["content"] for c in provider.calls}
+        assert len(systems) == 1
+        assert "Japanese" in next(iter(systems))
+        prefixes = {
+            (c["messages"][0]["content"], c["messages"][1]["content"]) for c in provider.calls
+        }
+        assert len(prefixes) == 1
+
     def test_custom_lens_rides_the_same_split_shape(self) -> None:
         provider = FakeProvider()
         LLMReviewEngine(provider).review(

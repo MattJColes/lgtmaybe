@@ -22,6 +22,14 @@ back into the single plain message they always received.
 - **WHEN** the model's route has no explicit cache breakpoint
 - **THEN** the call is byte-for-byte the legacy single-message shape
 
+#### Scenario: output language configured
+- **WHEN** `ReviewConfig.language` is set
+- **THEN** the shared preamble carries a directive to write the `title`/`body`
+  prose in that language (structural fields and `suggestion` code unchanged),
+  keyed on the language so the prefix stays byte-identical across the fan-out
+- **WHEN** `language` is unset
+- **THEN** the preamble is byte-identical to the pre-language prompt
+
 ### Requirement: Every focused prompt teaches by worked example
 
 Each lens prompt SHALL carry exactly one category-matched worked example with
