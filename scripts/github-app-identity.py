@@ -6,9 +6,9 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -22,7 +22,12 @@ class IdentitySetupError(RuntimeError):
     """A user-actionable GitHub identity configuration error."""
 
 
-Opener = Callable[[Request, float], Any]
+class Opener(Protocol):
+    def __call__(self, request: Request, *, timeout: float) -> Any: ...
+
+
+def _open_url(request: Request, *, timeout: float) -> Any:
+    return urlopen(request, timeout=timeout)
 
 
 def validate(env: Mapping[str, str]) -> None:
@@ -49,7 +54,7 @@ def validate(env: Mapping[str, str]) -> None:
 def exchange(
     env: Mapping[str, str],
     *,
-    opener: Opener = urlopen,
+    opener: Opener = _open_url,
     stdout: IO[str] = sys.stdout,
 ) -> None:
     oidc_url = env.get("ACTIONS_ID_TOKEN_REQUEST_URL")
@@ -69,7 +74,7 @@ def exchange(
             _with_audience(oidc_url),
             headers={"Authorization": f"Bearer {oidc_request_token}"},
         )
-        with opener(oidc_request, TIMEOUT_SECONDS) as response:
+        with opener(oidc_request, timeout=TIMEOUT_SECONDS) as response:
             oidc_token = _json(response).get("value")
         if not isinstance(oidc_token, str) or not oidc_token:
             raise IdentitySetupError("GitHub did not return a workflow identity token.")
@@ -83,7 +88,7 @@ def exchange(
                 "Accept": "application/json",
             },
         )
-        with opener(broker_request, TIMEOUT_SECONDS) as response:
+        with opener(broker_request, timeout=TIMEOUT_SECONDS) as response:
             app_token = _json(response).get("token")
         if not isinstance(app_token, str) or not app_token:
             raise IdentitySetupError("The identity broker did not return an App token.")
@@ -104,7 +109,7 @@ def exchange(
 def revoke(
     env: Mapping[str, str],
     *,
-    opener: Opener = urlopen,
+    opener: Opener = _open_url,
     stdout: IO[str] = sys.stdout,
 ) -> None:
     token = env.get("LGTMAYBE_TOKEN")
@@ -121,7 +126,7 @@ def revoke(
         },
     )
     try:
-        with opener(request, TIMEOUT_SECONDS):
+        with opener(request, timeout=TIMEOUT_SECONDS):
             pass
     except (HTTPError, URLError, OSError):
         stdout.write(
