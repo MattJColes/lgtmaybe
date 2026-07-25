@@ -103,7 +103,8 @@ def test_mint_step_is_pinned_and_gated_on_app_id() -> None:
         "the mint step must be gated on the app_id input so it is a no-op by default"
     )
     with_ = step.get("with", {})
-    assert with_.get("app-id") == "${{ inputs.app_id }}"
+    assert with_.get("client-id") == "${{ inputs.app_id }}"
+    assert "app-id" not in with_
     assert with_.get("private-key") == "${{ inputs.app_private_key }}"
 
 
