@@ -15,9 +15,11 @@ check the comment shows the ASCII alone — a reviewer never sees GitHub's red
 C4 output is post-processed for GitHub's renderer (``_polish_c4``): Mermaid's
 C4 renderer draws relationship lines and labels in a hardcoded near-black that
 disappears on GitHub's dark theme, so every relationship gets an
-``UpdateRelStyle`` in a mid-grey legible on every theme; and its default
-layout packs four fixed-width cards per row, which overlap once labels grow,
-so an ``UpdateLayoutConfig`` loosens the grid unless the model set its own.
+``UpdateRelStyle`` in a mid-grey legible on every theme; elements whose label
+carries the ``(new)``/``(changed)`` marker get an ``UpdateElementStyle`` green
+border so the PR's footprint stands out at a glance; and its default layout
+packs four fixed-width cards per row, which overlap once labels grow, so an
+``UpdateLayoutConfig`` loosens the grid unless the model set its own.
 
 Like describe, the diff and stated intent are untrusted: both are redacted
 before egress and the diff enters its own neutralised block with a
@@ -109,6 +111,20 @@ _MERMAID_START = re.compile(
 _REL_CALL = re.compile(r"^\s*(?:Bi)?Rel(?:_\w+)?\(\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*,")
 _REL_STYLE = re.compile(r"^\s*UpdateRelStyle\(\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*[,)]")
 
+# A C4 element declaration — Person/System/Container/Component with their
+# Db/Queue/_Ext variants — whose first argument is the element alias.
+_ELEMENT_CALL = re.compile(
+    r"^\s*(?:Person|System|Container|Component)(?:Db|Queue)?(?:_Ext)?\(\s*([^,()\s]+)\s*,"
+)
+_ELEMENT_STYLE = re.compile(r"^\s*UpdateElementStyle\(\s*([^,()\s]+)\s*[,)]")
+
+# The prompt has the model suffix changed/new element labels with "(changed)" /
+# "(new)"; a green border on those same elements makes the PR's footprint
+# visible at a glance. lgtmaybe's brand green reads on light and dark themes
+# against the C4 card fills.
+_CHANGED_MARKER = re.compile(r"\((?:new|changed)\)")
+_ELEMENT_COLOR = "#54d090"
+
 # Mermaid's C4 renderer hardcodes near-black relationship lines and labels
 # regardless of theme, so they vanish on GitHub's dark background. #808080
 # maximises the minimum contrast across GitHub's themes: ~4:1 on light
@@ -124,11 +140,13 @@ _LAYOUT = 'UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")'
 def _polish_c4(mermaid: str) -> str:
     """Post-process a C4 diagram so it stays legible on GitHub.
 
-    Appends an ``UpdateRelStyle`` per relationship (dark-mode-safe grey) and an
+    Appends an ``UpdateRelStyle`` per relationship (dark-mode-safe grey), an
+    ``UpdateElementStyle`` green border per element whose label carries the
+    ``(new)``/``(changed)`` marker (so the PR's footprint stands out), and an
     overlap-loosening ``UpdateLayoutConfig``. Best-effort and additive: pairs
-    the model already styled and a layout it already set are left alone, each
-    pair is styled once, and non-C4 diagrams (which GitHub themes and lays out
-    properly) pass through untouched.
+    and elements the model already styled and a layout it already set are left
+    alone, each is styled once, and non-C4 diagrams (which GitHub themes and
+    lays out properly) pass through untouched.
     """
     lines = mermaid.splitlines()
     first = next((line.strip() for line in lines if line.strip()), "")
@@ -136,6 +154,7 @@ def _polish_c4(mermaid: str) -> str:
         return mermaid
 
     styled = {m.groups() for line in lines if (m := _REL_STYLE.match(line))}
+    elem_styled = {m[1] for line in lines if (m := _ELEMENT_STYLE.match(line))}
     additions = []
     for line in lines:
         if (m := _REL_CALL.match(line)) and m.groups() not in styled:
@@ -144,6 +163,13 @@ def _polish_c4(mermaid: str) -> str:
                 f"    UpdateRelStyle({m[1]}, {m[2]}, "
                 f'$textColor="{_REL_COLOR}", $lineColor="{_REL_COLOR}")'
             )
+        elif (
+            (m := _ELEMENT_CALL.match(line))
+            and m[1] not in elem_styled
+            and _CHANGED_MARKER.search(line)
+        ):
+            elem_styled.add(m[1])
+            additions.append(f'    UpdateElementStyle({m[1]}, $borderColor="{_ELEMENT_COLOR}")')
     if not any(line.lstrip().startswith("UpdateLayoutConfig(") for line in lines):
         additions.append(f"    {_LAYOUT}")
     return "\n".join(lines + additions)

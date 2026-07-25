@@ -14,6 +14,9 @@ rendering and renders them as a Markdown comment. Contracts:
   without duplicating styles the model already emitted;
 - C4 diagrams get an ``UpdateLayoutConfig`` loosening the default 4-per-row
   layout (whose fixed-width cards overlap), unless the model set its own;
+- C4 elements whose label carries the ``(new)``/``(changed)`` marker get an
+  ``UpdateElementStyle`` with a green border, so what the PR touches stands
+  out at a glance, without duplicating styles the model already emitted;
 - the diff is redacted before it leaves, and wrapped as untrusted data;
 - the intent block is sent only when the PR states an intent;
 - the diagram prompt carries no findings-JSON task restatement.
@@ -163,6 +166,47 @@ def test_non_c4_mermaid_is_left_unstyled() -> None:
 
     assert "UpdateRelStyle" not in body
     assert "UpdateLayoutConfig" not in body
+    assert "UpdateElementStyle" not in body
+
+
+def test_changed_and_new_elements_get_a_green_border() -> None:
+    mermaid = (
+        "C4Container\n"
+        '    Person(client, "Client")\n'
+        '    Container(api, "API", "Python", "verifies signatures (changed)")\n'
+        '    ContainerDb(db, "DB", "Postgres", "events table (new)")\n'
+        '    System_Ext(stripe, "Stripe", "payments")\n'
+    )
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    assert 'UpdateElementStyle(api, $borderColor="#54d090")' in body
+    assert 'UpdateElementStyle(db, $borderColor="#54d090")' in body
+    # Untouched elements keep the default style.
+    assert "UpdateElementStyle(client," not in body
+    assert "UpdateElementStyle(stripe," not in body
+
+
+def test_element_styles_land_inside_the_mermaid_fence() -> None:
+    mermaid = 'C4Container\n    Container(api, "API", "Python", "rate limits (new)")'
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
+    assert "UpdateElementStyle(api," in fence
+
+
+def test_model_supplied_element_style_is_not_duplicated() -> None:
+    mermaid = (
+        "C4Container\n"
+        '    Container(api, "API", "Python", "rate limits (new)")\n'
+        '    Container(worker, "Worker", "Celery", "drains queue (new)")\n'
+        '    UpdateElementStyle(api, $bgColor="purple")\n'
+    )
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    # The model's own style for api is kept; only worker gets ours.
+    assert body.count("UpdateElementStyle(api,") == 1
+    assert '$bgColor="purple"' in body
+    assert 'UpdateElementStyle(worker, $borderColor="#54d090")' in body
 
 
 def test_prompt_tells_the_model_to_keep_labels_short() -> None:

@@ -5,9 +5,13 @@ description: Post lgtmaybe reviews under your own branded GitHub App identity (l
 # Post reviews as a GitHub App
 
 By default lgtmaybe posts reviews as `github-actions[bot]` using the workflow's
-built-in token. Point it at a **GitHub App** you own and reviews post under that
-App's identity instead — a branded `lgtmaybe[bot]` name and avatar, a higher API
-rate limit, and optional access across several repositories.
+built-in token. The **recommended setup** is to point it at a **GitHub App** you
+own so reviews post under that App's identity instead — a branded
+`lgtmaybe[bot]` name and avatar, a higher API rate limit, and optional access
+across several repositories. The default token still works and every workflow
+falls back to it when the App inputs are empty, but the App identity is worth
+the one-time setup: reviews are clearly attributed, and busy repos don't share
+the workflow token's rate limit.
 
 This changes only the **posting identity**. The action still runs in your own CI,
 still fetches the diff via the API without checking out PR code, and the keyless
