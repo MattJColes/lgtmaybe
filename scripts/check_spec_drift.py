@@ -39,7 +39,14 @@ import yaml
 from lgtmaybe.core.diffparse import changed_line_index
 
 ANCHOR_RE = re.compile(r"^<!-- anchor: (?P<id>[a-z0-9.-]+) -->$")
-SCAN_TARGETS = ("src/", "services/", "scripts/", ".github/workflows/", "action.yml")
+SCAN_TARGETS = (
+    "src/",
+    "services/",
+    "scripts/",
+    ".github/workflows/",
+    "docs/",
+    "action.yml",
+)
 
 
 @dataclass(frozen=True)

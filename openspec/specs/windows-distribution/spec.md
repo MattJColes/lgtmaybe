@@ -4,9 +4,7 @@
 
 Windows compatibility coverage and the release chain that builds, verifies,
 publishes, and distributes the portable CLI executable.
-
 ## Requirements
-
 ### Requirement: Supported Windows versions run the full CI gate
 
 The main CI workflow SHALL run the same test, lint, format, and type-check gate
@@ -17,7 +15,7 @@ Python UTF-8 mode.
 
 #### Scenario: a change breaks only under Windows path semantics
 - **WHEN** the pull request test matrix runs
-- **THEN** a Windows job fails before the shared required check can pass
+- **THEN** the Windows job fails before the shared required check can pass
 
 #### Scenario: the routine CI gate expands its test matrix
 - **WHEN** the main CI workflow builds its test jobs

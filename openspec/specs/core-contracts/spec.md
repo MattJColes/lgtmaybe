@@ -7,9 +7,7 @@ The frozen contracts everything else codes against: the hexagonal ports in
 strict pydantic models in `core/models.py` (the wire format between all
 tracks). These froze in the foundation step; adapters and the engine are built
 against them, and fakes drop in through them.
-
 ## Requirements
-
 ### Requirement: Provider port
 
 `ProviderClient` SHALL be the only seam to an LLM backend: one `complete()`
@@ -49,15 +47,20 @@ on this signature, not on the pipeline inside.
 ### Requirement: Findings are structured output only
 
 `ReviewFinding` SHALL be the only shape a finding takes: severity, file, line,
-side, title, body, optional suggestion, verbatim `anchor` line, `anchored`
-flag, 0-10 `confidence`, and the originating lens `category`. Models are
-strict (`extra="forbid"`), so drifted or injected fields are rejected — prose
-is never parsed.
+side, title, body, optional suggestion, nullable `failure_scenario`, verbatim
+`anchor` line, `anchored` flag, 0-10 `confidence`, and the originating lens
+`category`. Models are strict (`extra="forbid"`), so drifted or injected fields
+are rejected — prose is never parsed.
 <!-- anchor: core.finding -->
 
 #### Scenario: model returns an unexpected field
 - **WHEN** the LLM's JSON carries a field the contract doesn't declare
 - **THEN** validation rejects it rather than silently accepting it
+
+#### Scenario: legacy code constructs a finding
+- **WHEN** a caller omits `failure_scenario`
+- **THEN** the field defaults to `null` so compatibility is preserved until the
+  engine applies category-specific eligibility
 
 ### Requirement: One config surface with ordered severities
 
@@ -80,16 +83,24 @@ driving the merge-gate Check Run.
 - **WHEN** `answer_replies` is unset
 - **THEN** it defaults to `true`, enabling finding-thread replies
 
-### Requirement: Nine built-in lenses, preset-shaped fan-out
+### Requirement: Nine built-in lenses, provider-aware preset fan-out
 
-`ReviewCategory` SHALL enumerate the nine built-in lenses (security,
-correctness, deprecation, tests, documentation, performance, complexity,
-intent, ponytail). `ReviewPreset` SHALL shape the fan-out: `fast` (default)
-covers seven of the nine (tests and documentation excluded) in four calls
-when the provider can overlap work, three with one worker; `full` runs one
-call per lens.
+`ReviewCategory` SHALL enumerate the nine built-in lenses. `ReviewPreset` SHALL
+shape their fan-out: `fast` covers the seven code-focused lenses in four calls
+when more than one worker is available and three combined calls for a
+single-worker configuration; `full` runs one call per selected built-in
+category.
 <!-- anchor: core.lenses -->
 
-#### Scenario: default preset batches the lenses
-- **WHEN** a review runs with no preset override
-- **THEN** the seven fast-preset lenses fan out as four concurrent calls
+#### Scenario: parallel-capable default
+- **WHEN** a fast review has effective concurrency greater than one
+- **THEN** correctness is split into two concurrent tasks without creating a
+  new public review category
+
+#### Scenario: serial default
+- **WHEN** a fast review has effective concurrency of one
+- **THEN** correctness remains one combined task
+
+#### Scenario: full preset restores artefact checks
+- **WHEN** a review runs with `preset: full`
+- **THEN** tests and documentation run alongside every other built-in lens

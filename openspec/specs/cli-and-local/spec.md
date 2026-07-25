@@ -5,9 +5,7 @@
 The Click CLI (`cli/`), the slash-command router, local no-GitHub review of a
 git diff (`local/`), and layered config (`config/`) — one engine behind
 `review`, `comment`, and `action` entrypoints.
-
 ## Requirements
-
 ### Requirement: Review failures are loud
 
 The `review` command SHALL surface any failure: a short "review failed"
@@ -154,3 +152,68 @@ when the inherited stream uses a legacy Windows encoding.
 - **WHEN** the local git subprocess returns output that is not valid UTF-8
 - **THEN** the command retains the decodable output and replaces only the
   malformed byte sequence
+
+### Requirement: Starter workflows enable automatic diagrams
+
+The supplied GitHub Actions starter workflows SHALL opt in to automatic C4
+change diagrams and the dogfood workflow SHALL keep the same setting while
+using the faster default review preset.
+<!-- anchor: cli.starter-workflow-diagrams -->
+
+#### Scenario: New repository adopts a supplied workflow
+- **WHEN** a maintainer copies a supplied provider workflow into a repository
+- **THEN** the workflow passes `auto_diagram: true` to the lgtmaybe Action
+
+#### Scenario: Faster default is adopted
+- **WHEN** the supplied workflow runs a default review
+- **THEN** automatic C4 diagram generation remains enabled
+
+### Requirement: Homepage demonstrates change diagrams
+
+The main documentation homepage SHALL render a representative C4-style Mermaid
+change diagram and link readers to the detailed change-diagram guide.
+<!-- anchor: cli.docs-homepage-diagram -->
+
+#### Scenario: Visitor opens the docs homepage
+- **WHEN** a visitor opens the main documentation homepage
+- **THEN** they see a rendered C4-style change-diagram example near the feature
+  description and can follow its link to the full guide
+
+### Requirement: Homepage diagram conveys change breadth
+
+The main documentation homepage SHALL use a representative C4-style Mermaid
+example that distinguishes changed and new elements and maps a change across
+multiple cooperating containers.
+<!-- anchor: cli.docs-homepage-diagram-breadth -->
+
+#### Scenario: Visitor evaluates the diagram feature
+- **WHEN** a visitor views the homepage change-diagram example
+- **THEN** they can see changed and new elements connected across application,
+  asynchronous, data, and external-service boundaries
+
+### Requirement: Homepage overview stays concise
+
+The main documentation homepage SHALL introduce every review category, its
+trust boundaries, and its pull-request commands in no more than 400 source words
+before the "Start here" section.
+<!-- anchor: cli.docs-homepage-overview -->
+
+#### Scenario: Visitor scans the homepage
+- **WHEN** a visitor reads from the hero to the "Start here" section
+- **THEN** they reach the commands and diagram without losing any review category
+
+### Requirement: Action distribution major alignment
+
+The GitHub Action SHALL default to the GHCR image whose floating major matches
+the package major, and maintained workflow examples SHALL use that same Action
+major.
+<!-- anchor: distribution.action-major -->
+
+#### Scenario: package major is released
+- **WHEN** the package version belongs to major v1
+- **THEN** the Action defaults to the v1 image and maintained workflows use
+  `MattJColes/lgtmaybe@v1`
+
+#### Scenario: a future major changes
+- **WHEN** the package major changes without updating the Action image default
+- **THEN** the deterministic distribution alignment test fails

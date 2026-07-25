@@ -23,14 +23,26 @@ failure surfaces to the caller.
 
 ### Requirement: Per-lens fan-out through one bounded executor
 
-Every (batch, lens) call SHALL run through one global thread pool sized by
-`max_concurrency` (auto: 8 cloud, 1 for ollama/openai-compatible), so local
-servers are never flooded and cloud reviews parallelise.
+Every `(batch, lens)` call SHALL run through one global bounded executor sized
+by `max_concurrency` (auto: eight cloud, one for Ollama/OpenAI-compatible).
+When the effective executor can run more than one call, the default fast preset
+SHALL submit separate correctness-flow and correctness-state tasks; when it is
+single-worker, it SHALL submit the existing combined correctness task.
 <!-- anchor: engine.fan-out -->
 
-#### Scenario: local provider stays serial
-- **WHEN** the provider is ollama and `max_concurrency` is unset
-- **THEN** lens calls run one at a time
+#### Scenario: parallel-capable default review
+- **WHEN** a fast review uses cloud auto-concurrency
+- **THEN** security, correctness-flow, correctness-state, and code-health calls
+  share the existing bounded executor and may overlap
+
+#### Scenario: single-worker default review
+- **WHEN** a fast review uses Ollama auto-concurrency or `max_concurrency: 1`
+- **THEN** security, combined correctness, and code-health run within the
+  single-worker pool without an additional serial request
+
+#### Scenario: deep audit
+- **WHEN** a review uses the `full` preset
+- **THEN** every built-in category runs, including tests and documentation
 
 ### Requirement: Findings merge and dedupe across lenses
 
