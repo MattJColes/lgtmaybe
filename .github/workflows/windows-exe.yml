@@ -44,7 +44,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $assets = gh release view "${{ steps.ver.outputs.tag }}" --json assets --jq '.assets[].name'
+          $assets = gh release view "${{ steps.ver.outputs.tag }}" `
+            --repo "$env:GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
           if ($LASTEXITCODE -ne 0) {
             throw "release ${{ steps.ver.outputs.tag }} does not exist"
           }
@@ -105,7 +106,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ steps.ver.outputs.tag }}" `
-            "${{ steps.ver.outputs.asset }}" --clobber
+            "${{ steps.ver.outputs.asset }}" --clobber `
+            --repo "$env:GITHUB_REPOSITORY"
           if ($LASTEXITCODE -ne 0) {
             throw "gh release upload failed with exit code $LASTEXITCODE"
           }
