@@ -104,6 +104,7 @@ def test_to_inline_rules_emits_one_scan_document_per_rule() -> None:
             rule={"kind": "class_definition"},
             files=["src/**"],
             sidecar="openspec/specs/y/anchors.yml",
+            language="yaml",
         ),
     ]
     text = to_inline_rules(rules)
@@ -111,6 +112,7 @@ def test_to_inline_rules_emits_one_scan_document_per_rule() -> None:
     assert len(docs) == 2
     assert "id: a.b__0" in docs[0]
     assert "language: python" in docs[0]
+    assert "language: yaml" in docs[1]
     assert "kind: class_definition" in docs[1]
 
 

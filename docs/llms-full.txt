@@ -241,6 +241,19 @@ That prints the command list with usage examples; `lgtmaybe help <command>`
 
 Upgrade later with `pip install --upgrade lgtmaybe`.
 
+## Install on Windows (winget)
+
+Install the portable Windows executable from winget:
+
+```powershell
+winget install MattJColes.lgtmaybe
+```
+
+The executable bundles ast-grep for cross-file symbol resolution, but it does
+not bundle the optional cloud SDKs used by keyless Bedrock, Vertex, or Azure
+authentication. Use the pip install with the matching extra for those providers.
+The regular `pip install lgtmaybe` path also works on Windows.
+
 ## Install on macOS (Homebrew)
 
 On macOS (and Linuxbrew) you can install from the project's
@@ -275,7 +288,8 @@ resolution during review.
 
 ## Cloud providers need extras
 
-The base install (either method) covers every **API-key** and **local** provider:
+The base pip install, Homebrew formula, and Windows executable cover every
+**API-key** and **local** provider:
 
 | Providers | Covered by base install? |
 |---|---|
@@ -283,8 +297,8 @@ The base install (either method) covers every **API-key** and **local** provider
 | `ollama`, `openai-compatible` — fully local, point `--api-base` at the server | ✅ Yes |
 | `bedrock`, `vertex`, `azure` — keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
-The **keyless cloud** providers need extra cloud SDKs that the base install (and
-the Homebrew formula) does not bundle. Install the CLI from PyPI with the matching
+The **keyless cloud** providers need extra cloud SDKs that the Homebrew formula
+and Windows executable do not bundle. Install the CLI from PyPI with the matching
 extra:
 
 ```bash
@@ -2801,6 +2815,11 @@ so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
 rewrite them ("Failed to fix install linkage"). It's a plain source formula —
 no bottle — so it installs on any architecture and macOS version.
 
+The release run also calls `.github/workflows/windows-exe.yml` to build and
+smoke-test a portable Windows executable, then `.github/workflows/winget.yml`
+to submit the new asset to winget. The executable must exist before the winget
+job starts; both workflows are manually dispatchable for recovery.
+
 The workflow:
 
 - Is **called** by `release-please.yml` (`workflow_call`) right after a release,
@@ -2847,6 +2866,14 @@ The only human-only pieces:
   with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
   to another repository). To seed or verify the formula by hand on a Mac, run
   `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
+- **winget:** fork [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs).
+  Create a classic GitHub PAT with the `public_repo` scope and add it to this
+  repo as **`WINGET_TOKEN`**. For the first release, build/upload the Windows
+  asset and run `wingetcreate new <asset-url>` manually with package id
+  `MattJColes.lgtmaybe`, installer type `portable`, command alias `lgtmaybe`,
+  and MIT licence metadata. Microsoft moderates a new package before it exists;
+  this can take days or weeks. Once that first manifest is accepted, the release
+  workflow uses `wingetcreate update` for every later version.
 
 ## Each release
 
@@ -2856,6 +2883,8 @@ The only human-only pieces:
    proposed version + changelog, then **merge it** to publish.
 3. To (re)publish an existing tag to PyPI without a new release, run the
    `release-please` workflow via **workflow_dispatch** with the tag name.
+4. If Windows publication needs recovery, dispatch `windows-exe` for the tag,
+   then dispatch `winget` after the release asset is visible.
 
 ## Before going public
 
