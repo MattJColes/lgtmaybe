@@ -11,7 +11,7 @@
 - [x] 2.3 Implement App installation lookup and mint a token restricted to the verified repository ID with only contents-read, pull-requests-write, and issues-write permissions.
 - [x] 2.4 Ensure responses and structured logs never contain raw OIDC JWTs, installation tokens, repository contents, or provider data; retry only safe GitHub reads and never retry token creation.
 - [x] 2.5 Add a Python CDK stack for API Gateway, throttled Lambda execution, Secrets Manager access, least-privilege IAM, alarms, and configurable App ID/private-key secret; add CDK assertion tests.
-- [ ] 2.6 Run the broker unit/integration tests and CDK synthesis/assertion tests, then deploy a maintainer-only endpoint and smoke-test valid and rejected exchanges.
+- [x] 2.6 Run the broker unit/integration tests and CDK synthesis/assertion tests, then deploy a maintainer-only endpoint and smoke-test valid and rejected exchanges.
 
 ## 3. GitHub Action Identity
 
@@ -27,7 +27,7 @@
 - [x] 4.2 Install the public App only on `MattJColes/lgtmaybe`, generate a temporary private key, set `LGTMAYBE_APP_ID=3987976`, and store the key as `LGTMAYBE_APP_PRIVATE_KEY` without writing it to the workspace or logs.
 - [x] 4.3 Run a real dogfood review through the existing private-key path and verify review comments, summaries, replies, resolutions, labels, descriptions, and diagrams use `lgtmaybe[bot]`.
 - [x] 4.4 Store the App private key in the broker's Secrets Manager secret, deploy the production broker, and switch the dogfood workflow to `github_identity: lgtmaybe` with `id-token: write`.
-- [ ] 4.5 Run a real brokered dogfood review, verify attribution and token cleanup, then delete `LGTMAYBE_APP_PRIVATE_KEY` and the no-longer-needed App ID variable from the repository.
+- [x] 4.5 Run a real brokered dogfood review, verify attribution and token cleanup, then delete `LGTMAYBE_APP_PRIVATE_KEY` and the no-longer-needed App ID variable from the repository.
 
 ## 5. User Onboarding
 
@@ -42,4 +42,4 @@
 - [x] 6.1 Add or update living-spec sections and ast-grep anchors for the implemented broker and Action identity boundaries; ensure every anchor resolves exactly once.
 - [x] 6.2 Run the full relevant test suite, formatters, linters, type checks, security checks, `uv run pytest tests/specs -q`, and OpenSpec validation.
 - [x] 6.3 Verify rollback by switching a test workflow to Actions identity and confirming it neither calls the broker nor changes existing review behavior.
-- [ ] 6.4 Publish the Action change, repeat the install guide from a clean test repository, and confirm a maintainer can reach `lgtmaybe[bot]` without receiving or creating an App private key.
+- [x] 6.4 Publish the Action change, repeat the install guide from a clean test repository, and confirm a maintainer can reach `lgtmaybe[bot]` without receiving or creating an App private key.

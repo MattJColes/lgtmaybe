@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 from services.github_app_identity import handler
 from services.github_app_identity.broker import BrokerError, InstallationToken
@@ -19,6 +22,30 @@ class SuccessfulBroker:
 class RejectedBroker:
     def exchange(self, token: str) -> InstallationToken:
         raise BrokerError("app_not_installed", 404, "Install the lgtmaybe GitHub App.")
+
+
+def test_handler_imports_from_the_flattened_lambda_bundle() -> None:
+    service_root = Path(__file__).parents[2] / "services" / "github_app_identity"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                f"import sys; sys.path.insert(0, {str(service_root)!r}); "
+                "import handler; "
+                "assert handler.__package__ == ''; "
+                "assert handler.BrokerError.__module__ == 'broker'"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_handler_returns_the_scoped_token_without_cacheable_headers(monkeypatch) -> None:

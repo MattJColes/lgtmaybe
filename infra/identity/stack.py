@@ -208,7 +208,7 @@ class IdentityBrokerStack(Stack):
         common: dict[str, object] = {
             "runtime": lambda_.Runtime.PYTHON_3_14,
             "architecture": lambda_.Architecture.X86_64,
-            "handler": "handler.handler",
+            "handler": "handler" if bundle_code else "handler.handler",
             "timeout": Duration.seconds(15),
             "memory_size": 256,
             "reserved_concurrent_executions": 5,
