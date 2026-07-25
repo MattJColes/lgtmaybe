@@ -1443,6 +1443,11 @@ def test_passes_path_filters_matches_root_level_with_leading_globstar() -> None:
     assert passes_path_filters("deep/nested/file.py", include=["**/*.py"], exclude=[])
 
 
+def test_path_filters_match_case_sensitively() -> None:
+    assert not passes_path_filters("src/App.py", include=["src/app.py"], exclude=[])
+    assert passes_path_filters("src/App.py", include=[], exclude=["src/app.py"])
+
+
 # ---------------------------------------------------------------------------
 # static-analysis fusion: hints enter the prompt as untrusted grounding
 # ---------------------------------------------------------------------------

@@ -49,6 +49,8 @@ def _head_sha() -> str:
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
         )
         return out.stdout.strip() or "unknown"
@@ -59,8 +61,8 @@ def _head_sha() -> str:
 def _load_fixtures() -> list[tuple[str, Fixture]]:
     out: list[tuple[str, Fixture]] = []
     for d in sorted(p for p in _FIXTURES.iterdir() if p.is_dir()):
-        diff = (d / "diff.txt").read_text()
-        manifest = Fixture.model_validate_json((d / "expected.json").read_text())
+        diff = (d / "diff.txt").read_text(encoding="utf-8")
+        manifest = Fixture.model_validate_json((d / "expected.json").read_text(encoding="utf-8"))
         # A `repo/` subdir is the fixture's on-disk corpus of unshown files — the
         # ones a cross-file deferral needs to verify. When present, the harness
         # roots a read-only reader + symbol resolver here (see `_review`).

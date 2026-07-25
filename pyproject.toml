@@ -105,6 +105,10 @@ markers = [
 filterwarnings = [
     "error::DeprecationWarning",
     "error::PendingDeprecationWarning",
+    "error::EncodingWarning",
+    "ignore::EncodingWarning:litellm",
+    "ignore::EncodingWarning:regex",
+    "ignore::EncodingWarning:tests",
 ]
 
 [tool.mypy]

@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import lgtmaybe.github.checkout as checkout
 from lgtmaybe.github.checkout import clone_base_tree
 
 
@@ -74,6 +75,22 @@ def test_clone_failure_returns_none_and_cleans_up(tmp_path: Path) -> None:
     assert created and not Path(created[0]).exists()
 
 
+def test_clone_failure_stays_best_effort_when_cleanup_fails(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    dest = tmp_path / "clone"
+    dest.mkdir()
+    monkeypatch.setattr(checkout.tempfile, "mkdtemp", lambda **_kwargs: str(dest))
+
+    def fail_cleanup(_path: Path) -> None:
+        raise OSError("locked")
+
+    monkeypatch.setattr(checkout, "_rmtree_force", fail_cleanup)
+
+    def runner(cmd: list[str], **kwargs: Any) -> Any:
+        raise subprocess.CalledProcessError(128, cmd)
+
+    assert clone_base_tree("owner/repo", "main", "tok", runner=runner) is None
+
+
 def test_clone_token_not_in_returned_path() -> None:
     def runner(cmd: list[str], **kwargs: Any) -> Any:
         return subprocess.CompletedProcess(cmd, 0)
@@ -82,3 +99,15 @@ def test_clone_token_not_in_returned_path() -> None:
 
     assert dest is not None
     assert "supersecret" not in str(dest)
+
+
+def test_rmtree_force_removes_read_only_tree(tmp_path: Path) -> None:
+    tree = tmp_path / "tree"
+    child = tree / "child"
+    child.mkdir(parents=True)
+    (child / "file.txt").write_text("content", encoding="utf-8")
+    child.chmod(0o500)
+
+    checkout._rmtree_force(tree)
+
+    assert not tree.exists()

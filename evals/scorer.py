@@ -224,7 +224,7 @@ def _eval_ctx(diff: str, manifest: Fixture) -> PRContext:
         # the GitHub gateway fetches — feeding static analysis, context
         # expansion, and boundary padding during an eval run.
         file_contents = {
-            str(p.relative_to(manifest.head_root)): p.read_text()
+            str(p.relative_to(manifest.head_root)): p.read_text(encoding="utf-8")
             for p in sorted(manifest.head_root.rglob("*"))
             if p.is_file()
         }

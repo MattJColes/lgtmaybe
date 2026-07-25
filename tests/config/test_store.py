@@ -27,6 +27,15 @@ def test_set_then_get_round_trips(cfg_home: Path) -> None:
     assert store.get_key("model") == "qwen3:27b"
 
 
+def test_store_roundtrips_non_latin_values_as_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "config.yml"
+
+    store.save({"model": "模型-Привет-👍"}, path)
+
+    assert store.load(path)["model"] == "模型-Привет-👍"
+    assert path.read_bytes().decode("utf-8")
+
+
 def test_set_coerces_to_field_type(cfg_home: Path) -> None:
     store.set_key("max_files", "25")
 

@@ -140,6 +140,8 @@ def run_scan(binary: str, inline_rules: str, cwd: Path) -> dict[str, list[Match]
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
         timeout=120,
     )
@@ -257,7 +259,13 @@ def classify(
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     ).stdout.strip()
 
 

@@ -20,6 +20,8 @@ from lgtmaybe.providers.constants import (
     OPENAI_COMPATIBLE_PLACEHOLDER_KEY,
 )
 
+_WINDOWS = os.name == "nt"
+
 
 @dataclass(frozen=True)
 class AuthConfig:
@@ -80,8 +82,15 @@ def _default_gcp_probe() -> bool:
     ):
         return True
 
-    config_dir = os.environ.get("CLOUDSDK_CONFIG") or str(Path.home() / ".config" / "gcloud")
-    return (Path(config_dir) / "application_default_credentials.json").is_file()
+    configured = os.environ.get("CLOUDSDK_CONFIG")
+    if configured:
+        config_dir = Path(configured)
+    elif _WINDOWS:
+        appdata = os.environ.get("APPDATA")
+        config_dir = (Path(appdata) if appdata else Path.home() / "AppData" / "Roaming") / "gcloud"
+    else:
+        config_dir = Path.home() / ".config" / "gcloud"
+    return (config_dir / "application_default_credentials.json").is_file()
 
 
 def _default_azure_token() -> str | None:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 from functools import partial
 
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
@@ -793,9 +793,9 @@ def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) ->
 
 
 def _matches_glob(path: str, pattern: str) -> bool:
-    if fnmatch(path, pattern):
+    if fnmatchcase(path, pattern):
         return True
-    return pattern.startswith("**/") and fnmatch(path, pattern[3:])
+    return pattern.startswith("**/") and fnmatchcase(path, pattern[3:])
 
 
 def _intent_text(ctx: PRContext) -> str:

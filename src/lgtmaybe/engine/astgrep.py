@@ -168,6 +168,8 @@ def _default_runner(binary: str, rule_yaml: str, target: Path) -> str:
             [binary, "scan", "--inline-rules", rule_yaml, "--json=compact", str(target)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_SCAN_TIMEOUT,
             check=False,
         )
@@ -208,7 +210,7 @@ def _parse_paths(stdout: str, root: Path) -> list[str]:
             rel = Path(file).resolve().relative_to(root)
         except ValueError:
             continue
-        out.append(str(rel))
+        out.append(rel.as_posix())
     return out
 
 

@@ -43,3 +43,9 @@ cli.config:
       kind: function_definition
       has: { field: name, regex: '^set_key$' }
     files: [src/lgtmaybe/config/**/*.py]
+
+cli.utf8-boundaries:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_utf8_stdio$' }
+  files: [src/lgtmaybe/cli/**/*.py]

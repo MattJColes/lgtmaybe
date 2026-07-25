@@ -507,7 +507,7 @@ def comment(
     config_path: str | None,
 ) -> None:
     """Handle an issue_comment event: route a /slash command to the engine."""
-    event = json.loads(Path(event_path).read_text())
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
     cfg = _load_cfg(config_path, provider=provider, model=model)
     runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
     execute_comment(event, cfg, runtime)
@@ -556,7 +556,7 @@ def action() -> None:
         profile=bool(_parse_bool(inputs["profile"])),
     )
 
-    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
 
     if event_name == "issue_comment":

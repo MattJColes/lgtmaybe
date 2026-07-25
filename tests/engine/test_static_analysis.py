@@ -25,8 +25,14 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import lgtmaybe.engine.static_analysis as static_analysis
 from lgtmaybe.core.models import Provider, ReviewConfig, Severity, StaticAnalysisTool
-from lgtmaybe.engine.static_analysis import ToolFinding, format_hints, run_static_analysis
+from lgtmaybe.engine.static_analysis import (
+    ToolFinding,
+    _write_corpus,
+    format_hints,
+    run_static_analysis,
+)
 
 FILES = {"src/app.py": "import os\nx = eval(input())\n"}
 
@@ -104,6 +110,40 @@ def test_missing_tool_is_skipped_silently(monkeypatch) -> None:  # type: ignore[
     assert run.calls == []
 
 
+def test_static_analysis_temp_directory_ignores_cleanup_errors(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    captured: dict[str, object] = {}
+    temporary_directory = static_analysis.tempfile.TemporaryDirectory
+
+    def recording_temp_directory(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return temporary_directory(*args, **kwargs)
+
+    monkeypatch.setattr(static_analysis.tempfile, "TemporaryDirectory", recording_temp_directory)
+    _patch_tools(monkeypatch, _FakeRun(), present=set())
+
+    run_static_analysis(FILES, _cfg())
+
+    assert captured["ignore_cleanup_errors"] is True
+
+
+def test_corpus_written_utf8(tmp_path: Path) -> None:
+    source = "print('你好, мир, 👍')\n"
+
+    assert _write_corpus(tmp_path, {"src/app.py": source}) == ["src/app.py"]
+    assert (tmp_path / "src" / "app.py").read_bytes().decode("utf-8").splitlines() == [
+        source.rstrip()
+    ]
+
+
+def test_relativise_returns_forward_slash_paths(tmp_path: Path) -> None:
+    absolute = tmp_path / "src" / "app.py"
+
+    assert static_analysis._posix_rel(str(absolute), tmp_path) == "src/app.py"
+    assert static_analysis._posix_rel(r"src\app.py", tmp_path) == "src/app.py"
+    assert static_analysis._posix_rel(r".\src\app.py") == "src/app.py"
+    assert static_analysis._posix_rel("./src/app.py") == "src/app.py"
+
+
 def test_ruff_findings_parsed_and_relativised(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     captured_root: dict[str, str] = {}
 
@@ -173,6 +213,40 @@ def test_subprocess_env_is_scrubbed_of_proxies_and_home(monkeypatch) -> None:  #
     assert run.calls[0]["timeout"]
 
 
+def test_scrubbed_env_windows_passes_system_vars(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(static_analysis, "_WINDOWS", True, raising=False)
+    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT")
+    monkeypatch.setenv("TEMP", r"C:\Temp")
+    monkeypatch.setenv("TMP", r"C:\Tmp")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must-not-leak")
+
+    env = static_analysis._scrubbed_env(tmp_path)
+
+    assert env["SystemRoot"] == r"C:\Windows"
+    assert env["COMSPEC"] == r"C:\Windows\System32\cmd.exe"
+    assert env["PATHEXT"] == ".COM;.EXE;.BAT"
+    assert env["TEMP"] == r"C:\Temp"
+    assert env["TMP"] == r"C:\Tmp"
+    for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+        assert env[key] == str(tmp_path)
+    assert "AWS_ACCESS_KEY_ID" not in env
+
+
+def test_scrubbed_env_posix_stays_minimal(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(static_analysis, "_WINDOWS", False, raising=False)
+    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must-not-leak")
+
+    assert static_analysis._scrubbed_env(tmp_path) == {
+        "PATH": static_analysis.os.environ.get("PATH", ""),
+        "HOME": str(tmp_path),
+        "NO_COLOR": "1",
+        "SEMGREP_SEND_METRICS": "off",
+    }
+
+
 def test_semgrep_skipped_without_local_rules(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """semgrep with no --config would need the network registry — never run it
     unless the user configured local rules."""
@@ -235,14 +309,15 @@ def test_escaping_paths_are_never_written(monkeypatch, tmp_path) -> None:  # typ
     """A malicious PR path must not be written outside the sandbox dir."""
     run = _FakeRun()
     _patch_tools(monkeypatch, run, present=set())
-    evil = {"../evil.py": "x = 1", "/abs/evil.py": "x = 1"}
     sentinel = tmp_path / "evil.py"
+    absolute_sentinel = tmp_path / "absolute-evil.py"
+    evil = {"../evil.py": "x = 1", str(absolute_sentinel): "x = 1"}
 
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     run_static_analysis(evil, _cfg())
 
     assert not sentinel.exists()
-    assert not Path("/abs/evil.py").exists()
+    assert not absolute_sentinel.exists()
 
 
 def test_format_hints_renders_tool_rule_path_line() -> None:
