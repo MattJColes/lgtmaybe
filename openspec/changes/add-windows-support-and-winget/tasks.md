@@ -39,6 +39,7 @@
 - [x] 6.1 Add reusable and dispatchable `.github/workflows/winget.yml` automation that normalises the version, polls for the executable asset, and runs `wingetcreate update MattJColes.lgtmaybe` with `WINGET_TOKEN`.
 - [x] 6.2 Wire release-please to call the executable workflow after release creation and the winget workflow only after the executable succeeds, preserving the existing PyPI, Homebrew, and GHCR release jobs.
 - [x] 6.3 Add workflow-structure tests that assert the executable smoke gate, release sequencing, asset URL, portable package ID, and secret wiring.
+- [x] 6.4 Detect an unmoderated initial package, warn and skip only the missing-package case, and retain automatic updates once the package exists.
 
 ## 7. PR 2 - Documentation, specs, and verification
 

@@ -52,3 +52,8 @@ The reusable workflow MUST also support a manually dispatched recovery run.
 - **WHEN** maintainers prepare the first winget release
 - **THEN** they create the portable manifest manually before automated update
   submissions begin
+
+#### Scenario: release automation runs before initial moderation completes
+- **WHEN** the package is not yet present in `microsoft/winget-pkgs`
+- **THEN** the winget workflow warns and skips the update without failing the
+  other release artifacts
