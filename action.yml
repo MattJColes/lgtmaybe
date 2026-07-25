@@ -249,7 +249,7 @@ runs:
         # Empty owner/repositories scope the token to the current repository;
         # set them to review PRs across a monorepo/org. The token is short-lived
         # and auto-revoked in this action's post step at the end of the job.
-        app-id: ${{ inputs.app_id }}
+        client-id: ${{ inputs.app_id }}
         private-key: ${{ inputs.app_private_key }}
         owner: ${{ inputs.app_owner }}
         repositories: ${{ inputs.app_repositories }}
