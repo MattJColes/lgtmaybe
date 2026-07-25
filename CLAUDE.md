@@ -43,8 +43,8 @@ hatch for anything else that speaks the OpenAI `/v1` wire format (DeepSeek's API
 llama.cpp, LM Studio, vLLM) — you bring the `--api-base`, the key is optional —
 so the provider list is never a cage.
 
-The main CI matrix runs Ubuntu on Python 3.11–3.14 and Windows on Python 3.11
-and 3.13. Windows runs with locale-default encoding behavior and disables
+The main CI matrix runs Ubuntu and Windows on the minimum supported Python
+version, 3.11. Windows runs with locale-default encoding behavior and disables
 autocrlf before checkout.
 
 ## Non-negotiables

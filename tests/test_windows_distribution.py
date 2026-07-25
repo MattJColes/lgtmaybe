@@ -15,6 +15,17 @@ def _workflow(name: str) -> tuple[str, dict]:
     return text, yaml.safe_load(text)
 
 
+def test_main_ci_runs_only_minimum_python_on_linux_and_windows() -> None:
+    _text, workflow = _workflow("ci.yml")
+    job = workflow["jobs"]["test"]
+    setup_uv = next(step for step in job["steps"] if step.get("uses") == "astral-sh/setup-uv@v7")
+
+    assert job["strategy"]["matrix"] == {
+        "os": ["ubuntu-latest", "windows-latest"],
+    }
+    assert setup_uv["with"]["python-version"] == "3.11"
+
+
 def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
     text, workflow = _workflow("windows-exe.yml")
     job = workflow["jobs"]["build"]
