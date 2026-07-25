@@ -28,12 +28,33 @@ That prints the command list with usage examples; `lgtmaybe help <command>`
 
 Upgrade later with `pip install --upgrade lgtmaybe`.
 
-## Install on Windows (winget)
+## Install on Windows (WinGet)
 
-Install the portable Windows executable from winget:
+The WinGet package is a portable executable for Windows x86_64 (64-bit).
+Install it by its exact package identifier:
 
 ```powershell
-winget install MattJColes.lgtmaybe
+winget install --id MattJColes.lgtmaybe --exact
+```
+
+Verify the command alias:
+
+```powershell
+lgtmaybe --help
+```
+
+Upgrade or uninstall it later with the same package identifier:
+
+```powershell
+winget upgrade --id MattJColes.lgtmaybe --exact
+winget uninstall --id MattJColes.lgtmaybe --exact
+```
+
+If WinGet cannot find a newly published version, refresh its package sources
+and retry:
+
+```powershell
+winget source update
 ```
 
 The executable bundles ast-grep for cross-file symbol resolution, but it does

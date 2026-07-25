@@ -58,6 +58,23 @@ def test_winget_workflow_updates_the_portable_package() -> None:
     assert "windows-x86_64.exe" in runs
 
 
+def test_winget_docs_cover_installation_lifecycle() -> None:
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    guide = (_ROOT / "docs" / "how-to" / "install-the-cli.md").read_text(encoding="utf-8")
+    install = "winget install --id MattJColes.lgtmaybe --exact"
+
+    assert install in readme
+    assert install in guide
+    for text in (
+        "Windows x86_64 (64-bit)",
+        "lgtmaybe --help",
+        "winget upgrade --id MattJColes.lgtmaybe --exact",
+        "winget uninstall --id MattJColes.lgtmaybe --exact",
+        "winget source update",
+    ):
+        assert text in guide
+
+
 def test_release_please_sequences_windows_exe_before_winget() -> None:
     _text, workflow = _workflow("release-please.yml")
     jobs = workflow["jobs"]
