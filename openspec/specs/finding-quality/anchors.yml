@@ -39,3 +39,15 @@ quality.symbol-resolution:
       kind: function_definition
       has: { field: name, regex: '^build_symbol_resolver$' }
     files: [src/lgtmaybe/engine/**/*.py]
+
+quality.failure-scenario:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_filter_missing_failure_scenarios$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+quality.failure-validation:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^reflect_findings$' }
+  files: [src/lgtmaybe/engine/**/*.py]

@@ -61,3 +61,37 @@ cli.utf8-boundaries:
     kind: function_definition
     has: { field: name, regex: '^_utf8_stdio$' }
   files: [src/lgtmaybe/cli/**/*.py]
+
+cli.starter-workflow-diagrams:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^should_auto_diagram$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+cli.docs-homepage-diagram:
+  rule:
+    kind: fenced_code_block
+    regex: 'flowchart LR'
+  language: markdown
+  files: [docs/index.md]
+
+cli.docs-homepage-diagram-breadth:
+  rule:
+    kind: fenced_code_block
+    regex: '(?s)Order events.*Notification worker'
+  language: markdown
+  files: [docs/index.md]
+
+cli.docs-homepage-overview:
+  rule:
+    kind: atx_heading
+    has: { field: heading_content, regex: '^Start here$' }
+  language: markdown
+  files: [docs/index.md]
+
+distribution.action-major:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^image$' }
+  language: yaml
+  files: [action.yml]

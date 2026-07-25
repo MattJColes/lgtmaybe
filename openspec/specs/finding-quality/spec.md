@@ -6,9 +6,7 @@ The passes between raw lens output and what gets posted: suppression,
 self-reflection with cross-file humility (`engine/reflect.py`), confidence
 scoring, cross-file symbol resolution for deferred verdicts, and declarative
 finding rules — all biased to never silently drop a real finding.
-
 ## Requirements
-
 ### Requirement: Self-reflection with a keep-all safe default
 
 After merge/dedupe the provider SHALL audit its own findings and drop the ones
@@ -80,3 +78,37 @@ languages or any ast-grep failure fall back to the plain verdict.
 - **WHEN** a verdict needs `validate_tenant` defined in an unshown file
 - **THEN** ast-grep finds its file in the corpus and the auditor re-judges
   against the actual code
+
+### Requirement: Defect findings earn eligibility with causal evidence
+
+The engine SHALL require a non-blank `failure_scenario` for security,
+correctness, deprecation, and performance findings before reflection and SHALL
+apply the rule regardless of model-selected severity. Tests, documentation,
+complexity, intent, ponytail, and custom-lens findings SHALL remain eligible
+without one.
+<!-- anchor: quality.failure-scenario -->
+
+#### Scenario: model lowers severity to avoid evidence
+- **WHEN** a correctness finding is marked `low` with no failure scenario
+- **THEN** the engine drops it before reflection and posting
+
+#### Scenario: gap finding has no runtime failure
+- **WHEN** a tests finding has `failure_scenario: null`
+- **THEN** it remains eligible for reflection and posting
+
+### Requirement: Reflection validates claimed failure scenarios
+
+When reflection is enabled, the auditor SHALL drop a defect finding whose
+failure scenario is speculative, contradicted by the diff or grounded file
+text, or depends on an unsupported causal step. The existing `--no-reflect`
+override and keep-all audit-error fallback SHALL remain unchanged.
+<!-- anchor: quality.failure-validation -->
+
+#### Scenario: scenario contradicts grounded code
+- **WHEN** the auditor can disprove a claimed failure using the diff or fetched
+  file context
+- **THEN** its verdict drops the finding
+
+#### Scenario: reflection is explicitly disabled
+- **WHEN** `--no-reflect` is used
+- **THEN** the presence gate still applies but semantic validation is skipped

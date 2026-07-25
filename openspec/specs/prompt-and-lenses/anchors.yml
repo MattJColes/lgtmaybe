@@ -35,3 +35,9 @@ prompt.groups:
       kind: function_definition
       has: { field: name, regex: '^_build_lenses$' }
     files: [src/lgtmaybe/engine/**/*.py]
+
+prompt.failure-scenario:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_shared_preamble$' }
+  files: [src/lgtmaybe/engine/**/*.py]

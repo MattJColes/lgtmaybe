@@ -6,21 +6,31 @@ The LLM adapter track: one litellm-backed client behind the `ProviderClient`
 port, a factory that builds it from the `--provider` flag, and credential
 resolution as a chain of responsibility — the wedge being keyless OIDC/WIF for
 Bedrock/Vertex/Azure with no static cloud keys, ever.
-
 ## Requirements
-
 ### Requirement: One flag builds the whole client
 
 `build_provider` SHALL map `(provider, model)` plus optional key/base/fallback
-to a configured client — provider strategy selection lives here, not in the
+to a configured client - provider strategy selection lives here, not in the
 engine. All model slots (triage, review, reflect) share one provider and one
-set of credentials.
+set of credentials. The GitHub Action setup SHALL show that Marketplace users
+select the provider, model, and matching authentication inputs in workflow
+configuration. It SHALL also state that the Action uses GitHub Actions' built-in
+token and does not require a separate GitHub App.
 <!-- anchor: provider.factory -->
 
 #### Scenario: user picks a provider
 - **WHEN** `--provider bedrock` is given
 - **THEN** the factory returns a client whose calls route via litellm's
   bedrock path with ambient AWS credentials
+
+#### Scenario: Marketplace user configures the Action
+- **WHEN** a user adopts lgtmaybe from GitHub Marketplace
+- **THEN** the setup guidance shows a workflow `with:` block containing a
+  provider, model, and matching authentication input
+
+#### Scenario: Marketplace user authenticates to GitHub
+- **WHEN** a user runs lgtmaybe as a GitHub Action
+- **THEN** the setup guidance says no separate GitHub App installation is required
 
 ### Requirement: Credentials resolve by chain, fail with instructions
 
@@ -47,14 +57,20 @@ this provider" message.
 - **WHEN** `CLOUDSDK_CONFIG` is set
 - **THEN** that directory is checked before the platform default
 
-### Requirement: Completion calls retry, fall back, and cache
+### Requirement: Completion calls retry, fall back, cache, and time out
 
-`LiteLLMProvider.complete` SHALL retry transient failures, switch to
-`fallback_model` when the primary is exhausted, and — on routes with explicit
-cache breakpoints — place them on the shared prefix so lens calls 2..N read
-the preamble-plus-diff from cache. Cache read/creation token counts land on
-`ProviderResult`.
+`LiteLLMProvider.complete` SHALL enforce the configured request timeout at the
+adapter boundary, retry transient failures within its bounded budget, switch to
+`fallback_model` when the primary is exhausted, and place explicit cache
+breakpoints on the shared prefix for supported routes. Cache usage SHALL land
+on `ProviderResult`.
 <!-- anchor: provider.complete -->
+
+#### Scenario: provider SDK ignores its timeout
+- **WHEN** the underlying completion call remains blocked past the configured
+  timeout
+- **THEN** the adapter raises a timeout error and the existing bounded retry
+  policy decides whether to retry
 
 #### Scenario: primary model keeps failing
 - **WHEN** retries on the primary model are exhausted and a fallback is set

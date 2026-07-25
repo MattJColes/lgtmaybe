@@ -6,9 +6,7 @@ How the review prompt is composed (`engine/prompt.py`): a lens-independent
 cacheable preamble, per-lens checklists each with a worked example, the fast
 preset's four-call grouping, and user-supplied custom lenses that fan out
 identically to the built-ins.
-
 ## Requirements
-
 ### Requirement: Split-prefix prompt shape for caching
 
 With `prompt_cache` on (default), every review call SHALL share a
@@ -56,15 +54,48 @@ sourced from PR-author content.
 - **THEN** it runs as one more concurrent lens call, findings merged like any
   built-in
 
-### Requirement: Fast preset groups nine lenses into four calls
+### Requirement: Fast preset splits correctness only when it can overlap
 
-The default `fast` preset SHALL cover all nine categories in four calls —
-dedicated security and correctness (stated intent folds into correctness with
-per-finding category attribution) plus merged code-health and artefacts calls.
-An explicit `categories` list overrides the grouping.
+The default `fast` preset SHALL run security and code-health tasks plus
+provider-aware correctness tasks. A parallel-capable configuration SHALL split
+correctness into focused flow and state/lifecycle calls, both attributed to the
+`correctness` category; a single-worker configuration SHALL keep one combined
+correctness call. Stated intent SHALL remain attached to one correctness task.
+Tests and documentation SHALL remain reserved for `full` or explicit category
+reviews.
 <!-- anchor: prompt.groups -->
+
+#### Scenario: cloud default
+- **WHEN** `fast` uses a cloud provider with auto-concurrency
+- **THEN** its four calls are security, correctness-flow, correctness-state,
+  and code health
+
+#### Scenario: local single-slot default
+- **WHEN** `fast` uses Ollama with auto-concurrency
+- **THEN** its three calls are security, combined correctness, and code health
 
 #### Scenario: intent with no dedicated call
 - **WHEN** the fast preset runs and the PR states an intent
 - **THEN** intent findings come out of the correctness call, attributed to the
   intent category
+
+#### Scenario: everyday review
+- **WHEN** the fast preset runs with no category override
+- **THEN** tests and documentation do not consume a model call
+
+### Requirement: Defect prompts require a concrete failure scenario
+
+Every built-in review prompt SHALL request a nullable `failure_scenario`.
+Security, correctness, deprecation, and performance findings SHALL describe a
+concrete trigger, the changed behaviour, and its observable impact regardless
+of severity; tests, documentation, complexity, intent, and ponytail findings
+SHALL return `null` rather than invent a causal story.
+<!-- anchor: prompt.failure-scenario -->
+
+#### Scenario: correctness lens finds a low-severity defect
+- **WHEN** the correctness lens reports a defect as `low`
+- **THEN** it still returns a concrete `failure_scenario`
+
+#### Scenario: tests lens reports missing coverage
+- **WHEN** the tests lens reports a real coverage gap
+- **THEN** it returns `failure_scenario: null`
