@@ -21,9 +21,7 @@ _ACTION_YML = Path(__file__).parent.parent / "action.yml"
 _PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
 _RELEASE_PLEASE_CONFIG = Path(__file__).parent.parent / "release-please-config.json"
 _README = Path(__file__).parent.parent / "README.md"
-_GITHUB_APP_GUIDE = (
-    Path(__file__).parent.parent / "docs" / "how-to" / "post-as-a-github-app.md"
-)
+_GITHUB_APP_GUIDE = Path(__file__).parent.parent / "docs" / "how-to" / "post-as-a-github-app.md"
 _MKDOCS = Path(__file__).parent.parent / "mkdocs.yml"
 
 # The container reads GITHUB_TOKEN; prefer the minted App token, else the default
