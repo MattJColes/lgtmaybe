@@ -238,7 +238,7 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "--max-review-seconds",
     default=None,
     type=click.IntRange(min=0),
-    help="Soft wall-clock ceiling for the whole review (default 600). Past it, "
+    help="Soft wall-clock ceiling for the whole review (default 1800). Past it, "
     "no further model calls are dispatched — in-flight calls finish and the "
     "review returns partial results with an incomplete-results notice. 0 disables",
 )

@@ -90,30 +90,27 @@ Comment **`/diagram`** on a pull request to post (or update in place) the change
 diagram. Like `/describe`, it's an idempotent upsert — re-running edits the same
 comment instead of stacking new ones.
 
-The supplied starter workflows set `auto_diagram: true`, so new repositories
-post one automatically when a PR is opened or reopened. The underlying Action
-input remains off by default for backwards compatibility, and it never fires
-on a `synchronize` push. To enable it in an existing workflow:
+`auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
+needed — so a diagram posts automatically when a PR is opened or reopened. It
+never fires on a `synchronize` push. To opt out, set it in your workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
-          auto_diagram: "true"
+          auto_diagram: "false"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-You can also set it in `.lgtmaybe.yml`:
+or in `.lgtmaybe.yml`:
 
 ```yaml
-auto_diagram: true
+auto_diagram: false
 ```
 
 The diagram is best-effort — a failure is logged and never blocks the review.
-To opt out of the starter-workflow default, remove `auto_diagram` or set it to
-`false`.
 
 ## Locally: `lgtmaybe diagram`
 

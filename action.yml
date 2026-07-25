@@ -43,11 +43,11 @@ inputs:
     required: false
     default: ""
   timeout:
-    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama and openai-compatible 300, cloud 60)."
+    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama, openai-compatible and openrouter 900, cloud 300)."
     required: false
     default: ""
   max_review_seconds:
-    description: "Soft wall-clock ceiling for the whole review, in seconds (default 600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with an incomplete-results notice. Set 0 to disable."
+    description: "Soft wall-clock ceiling for the whole review, in seconds (default 1800). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with an incomplete-results notice. Set 0 to disable."
     required: false
     default: ""
   temperature:
@@ -99,7 +99,7 @@ inputs:
     required: false
     default: ""
   auto_diagram:
-    description: "On a freshly opened (or reopened) PR, post a C4-style change diagram comment — a Mermaid C4 diagram of the components the PR touches (rendered natively by GitHub), with an ASCII fallback — before the review runs, updated in place by later /diagram runs. Off by default."
+    description: "On a freshly opened (or reopened) PR, post a C4-style change diagram comment — a Mermaid C4 diagram of the components the PR touches (rendered natively by GitHub), with an ASCII fallback — before the review runs, updated in place by later /diagram runs. On by default; set to false to opt out."
     required: false
     default: ""
   answer_replies:

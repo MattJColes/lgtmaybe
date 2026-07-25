@@ -38,7 +38,6 @@ jobs:
         with:
           provider: zai
           model: glm-4.6
-          auto_diagram: true
           api_key: ${{ secrets.ZAI_API_KEY }}
           # Optional: point at the China / coding-plan endpoint instead of the
           # international default.

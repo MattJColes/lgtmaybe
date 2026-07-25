@@ -14,7 +14,9 @@ _ACTION_REF = f"MattJColes/lgtmaybe@v{_PROJECT_VERSION.split('.', maxsplit=1)[0]
 _STARTER_WORKFLOWS = _REPO_ROOT / "examples" / "workflows"
 
 
-def test_supplied_workflows_enable_auto_diagram() -> None:
+def test_supplied_workflows_rely_on_the_auto_diagram_default() -> None:
+    # auto_diagram defaults to on in ReviewConfig, so a workflow that sets it
+    # explicitly is redundant config that would mask a default regression.
     workflows = [_DOGFOOD_WORKFLOW, *_STARTER_WORKFLOWS.glob("*.yml")]
 
     for workflow in workflows:
@@ -25,8 +27,8 @@ def test_supplied_workflows_enable_auto_diagram() -> None:
             if step.get("uses") in {_ACTION_REF, "./"}
         ]
         assert action_steps, f"{workflow} has no lgtmaybe Action step"
-        assert all(step.get("with", {}).get("auto_diagram") is True for step in action_steps), (
-            f"{workflow} must enable automatic diagrams for new repositories"
+        assert all("auto_diagram" not in step.get("with", {}) for step in action_steps), (
+            f"{workflow} sets auto_diagram explicitly; the default already enables it"
         )
 
 

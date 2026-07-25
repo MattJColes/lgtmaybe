@@ -395,7 +395,7 @@
       "type": "boolean"
     },
     "auto_diagram": {
-      "default": false,
+      "default": true,
       "title": "Auto Diagram",
       "type": "boolean"
     },
@@ -526,7 +526,7 @@
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 600,
+      "default": 1800,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"

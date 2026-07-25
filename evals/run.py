@@ -164,9 +164,9 @@ def _review(
         reflect=reflect,
         recursive=recursive,
         # Evals measure model quality, never wall-clock discipline: the
-        # production review deadline (max_review_seconds, default 600s) would
+        # production review deadline (max_review_seconds, default 1800s) would
         # skip calls mid-eval on a slow local model — a full-preset run on a
-        # big fixture easily exceeds 600s serially — and silently melt the
+        # big fixture can exceed it serially — and silently melt the
         # recall it exists to measure. Always off here.
         max_review_seconds=0,
         **cfg_overrides,
