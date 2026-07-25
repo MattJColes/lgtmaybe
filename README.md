@@ -267,6 +267,7 @@ only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instea
 - **CLI (PyPI)** — `pip install lgtmaybe`
 - **CLI (Homebrew)** — `brew tap MattJColes/lgtmaybe && brew trust MattJColes/lgtmaybe && brew install lgtmaybe`
   ([details](docs/how-to/install-the-cli.md) — the `brew trust` step is required for third-party taps)
+- **CLI (winget)** — `winget install MattJColes.lgtmaybe`
 - **GitHub Action** — `uses: MattJColes/lgtmaybe@v1`
 
 ## Contributing

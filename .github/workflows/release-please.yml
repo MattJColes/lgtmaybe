@@ -84,3 +84,21 @@ jobs:
     with:
       version: ${{ needs.release-please.outputs.tag_name }}
     secrets: inherit
+
+  windows-exe:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/windows-exe.yml
+    with:
+      version: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: write
+    secrets: inherit
+
+  winget:
+    needs: [release-please, windows-exe]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/winget.yml
+    with:
+      version: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

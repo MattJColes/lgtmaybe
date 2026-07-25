@@ -7,7 +7,7 @@ Read this before writing code. It encodes decisions that are **made, not options
 
 A PR reviewer that posts inline review comments + a summary. The user picks the
 LLM backend with a `--provider` flag, drops a key into GitHub secrets (or wires
-OIDC/WIF for cloud providers), and gets a review. One core, three distribution
+OIDC/WIF for cloud providers), and gets a review. One core, four distribution
 variants:
 
 - **PyPI CLI** — `pip install lgtmaybe`
@@ -28,6 +28,11 @@ variants:
   published` event isn't delivered for a `GITHUB_TOKEN` release), **actually
   `brew install`s it as a gate** (so a broken formula is never published), then
   commits to the tap; a daily schedule + `force` dispatch are the safety nets
+- **Windows CLI** — `winget install MattJColes.lgtmaybe`. Each release builds a
+  one-file Python 3.13 executable, smoke-tests the Click command tree, attaches
+  it to the GitHub release, then submits `MattJColes.lgtmaybe` to winget. The
+  executable bundles ast-grep but not the optional cloud-auth SDKs; use pip for
+  keyless Bedrock, Vertex, or Azure.
 - **GitHub Action** — composite action (`action.yml`) that does keyless OIDC/WIF
   auth, then runs a GHCR image via the `action` entrypoint
 
@@ -37,6 +42,10 @@ cloud. We win on auth + simplicity. An `openai-compatible` provider is the escap
 hatch for anything else that speaks the OpenAI `/v1` wire format (DeepSeek's API,
 llama.cpp, LM Studio, vLLM) — you bring the `--api-base`, the key is optional —
 so the provider list is never a cage.
+
+The main CI matrix runs Ubuntu on Python 3.11–3.14 and Windows on Python 3.11
+and 3.13. Windows runs with locale-default encoding behavior and disables
+autocrlf before checkout.
 
 ## Non-negotiables
 
@@ -344,7 +353,7 @@ pattern, event bus, plugin framework.
      gateway reconciles only lgtmaybe's own label families, best-effort.
    - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
      (comment only — no GitHub approval state) — still naming the model.
-4. **Packaging (sequential, last) — DONE:** the two distribution variants over
+4. **Packaging (sequential, last) — DONE:** the four distribution variants over
    one core. Delivered in this step:
    - **`action` entrypoint** — the container command. Routes by
      `GITHUB_EVENT_NAME` (`issue_comment` → slash command, else → full review with
@@ -376,6 +385,10 @@ pattern, event bus, plugin framework.
      pushes with the `HOMEBREW_TAP_TOKEN` PAT). Regenerated wholesale each release
      so dep bumps flow through — never hand-edited. Maintainer setup (tap repo +
      PAT) is in `docs/how-to/releasing.md`.
+   - **Windows executable + winget** — `.github/workflows/windows-exe.yml`
+     builds and smoke-tests the portable x86_64 executable before attaching it
+     to the release; `.github/workflows/winget.yml` then submits the versioned
+     asset to `MattJColes.lgtmaybe`.
    - **`examples/workflows/`** — one per posting provider (cloud + API-key);
      `id-token: write` for cloud. ollama is local-only (CLI), not a workflow.
    - **Model IDs in docs are kept current** per platform (litellm-native form).

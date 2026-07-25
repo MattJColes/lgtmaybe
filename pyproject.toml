@@ -66,6 +66,9 @@ dev = [
 docs = [
     "mkdocs-material>=9.5",
 ]
+packaging = [
+    "pyinstaller>=6.11",
+]
 
 [build-system]
 requires = ["hatchling"]

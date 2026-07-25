@@ -1,0 +1,71 @@
+name: winget
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version or tag to submit, e.g. 1.0.0 or lgtmaybe-v1.0.0."
+        required: true
+        type: string
+    secrets:
+      WINGET_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version or tag to submit, e.g. 1.0.0 or lgtmaybe-v1.0.0."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}" -replace '^lgtmaybe-v', '' -replace '^v', ''
+          if (-not $v) {
+            throw "version is required"
+          }
+          $asset = "lgtmaybe-$v-windows-x86_64.exe"
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "asset_url=https://github.com/MattJColes/lgtmaybe/releases/download/lgtmaybe-v$v/$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Wait for the release asset
+        shell: pwsh
+        run: |
+          $url = "${{ steps.ver.outputs.asset_url }}"
+          for ($attempt = 1; $attempt -le 60; $attempt++) {
+            try {
+              Invoke-WebRequest -Uri $url -Method Head -TimeoutSec 30 | Out-Null
+              Write-Output "Release asset is available: $url"
+              exit 0
+            } catch {
+              if ($attempt -eq 60) {
+                throw "Release asset did not become available within 10 minutes: $url"
+              }
+              Start-Sleep -Seconds 10
+            }
+          }
+
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          winget install --id Microsoft.WingetCreate --exact `
+            --accept-package-agreements --accept-source-agreements `
+            --disable-interactivity
+
+      - name: Submit winget update
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          wingetcreate update MattJColes.lgtmaybe `
+            --version "${{ steps.ver.outputs.version }}" `
+            --urls "${{ steps.ver.outputs.asset_url }}" `
+            --submit --token $env:WINGET_TOKEN

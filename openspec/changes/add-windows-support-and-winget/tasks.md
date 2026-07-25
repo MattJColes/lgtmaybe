@@ -29,22 +29,22 @@
 
 ## 5. PR 2 - Portable executable
 
-- [ ] 5.1 Add a failing packaging test that requires lgtmaybe and litellm data collection plus tiktoken registry hidden imports in the PyInstaller spec.
-- [ ] 5.2 Add the packaging dependency group and lockfile update for PyInstaller, then create the executable entrypoint, one-file spec, ast-grep binary collection, and runtime PATH hook needed to satisfy the test.
-- [ ] 5.3 Add reusable and dispatchable `.github/workflows/windows-exe.yml` automation that normalises the version, skips an existing asset unless forced, checks out the tag, builds with Python 3.13, and smoke-tests `--help`, `config path`, and `help review` before upload.
-- [ ] 5.4 Name and attach the versioned x86_64 executable to the existing GitHub release and print its measured size in the smoke job.
+- [x] 5.1 Add a failing packaging test that requires lgtmaybe and litellm data collection plus tiktoken registry hidden imports in the PyInstaller spec.
+- [x] 5.2 Add the packaging dependency group and lockfile update for PyInstaller, then create the executable entrypoint, one-file spec, ast-grep binary collection, and runtime PATH hook needed to satisfy the test.
+- [x] 5.3 Add reusable and dispatchable `.github/workflows/windows-exe.yml` automation that normalises the version, skips an existing asset unless forced, checks out the tag, builds with Python 3.13, and smoke-tests `--help`, `config path`, and `help review` before upload.
+- [x] 5.4 Name and attach the versioned x86_64 executable to the existing GitHub release and print its measured size in the smoke job.
 
 ## 6. PR 2 - winget release chain
 
-- [ ] 6.1 Add reusable and dispatchable `.github/workflows/winget.yml` automation that normalises the version, polls for the executable asset, and runs `wingetcreate update MattJColes.lgtmaybe` with `WINGET_TOKEN`.
-- [ ] 6.2 Wire release-please to call the executable workflow after release creation and the winget workflow only after the executable succeeds, preserving the existing PyPI, Homebrew, and GHCR release jobs.
-- [ ] 6.3 Add workflow-structure tests that assert the executable smoke gate, release sequencing, asset URL, portable package ID, and secret wiring.
+- [x] 6.1 Add reusable and dispatchable `.github/workflows/winget.yml` automation that normalises the version, polls for the executable asset, and runs `wingetcreate update MattJColes.lgtmaybe` with `WINGET_TOKEN`.
+- [x] 6.2 Wire release-please to call the executable workflow after release creation and the winget workflow only after the executable succeeds, preserving the existing PyPI, Homebrew, and GHCR release jobs.
+- [x] 6.3 Add workflow-structure tests that assert the executable smoke gate, release sequencing, asset URL, portable package ID, and secret wiring.
 
 ## 7. PR 2 - Documentation, specs, and verification
 
-- [ ] 7.1 Document `winget install MattJColes.lgtmaybe`, pip-on-Windows support, bundled ast-grep, and the executable's excluded cloud extras in the CLI installation guide and README.
-- [ ] 7.2 Document the one-time winget fork, classic `public_repo` PAT, `WINGET_TOKEN`, initial portable manifest submission, and moderation expectations beside the existing release setup.
-- [ ] 7.3 Update `CLAUDE.md` with the Windows distribution variant and CI legs, and add the `windows-distribution` living spec with exact-one-match anchors for its CI, executable, and winget requirements.
-- [ ] 7.4 Run packaging and workflow tests, the full local quality gate, living-spec tests, OpenSpec spec validation, and the spec drift check.
+- [x] 7.1 Document `winget install MattJColes.lgtmaybe`, pip-on-Windows support, bundled ast-grep, and the executable's excluded cloud extras in the CLI installation guide and README.
+- [x] 7.2 Document the one-time winget fork, classic `public_repo` PAT, `WINGET_TOKEN`, initial portable manifest submission, and moderation expectations beside the existing release setup.
+- [x] 7.3 Update `CLAUDE.md` with the Windows distribution variant and CI legs, and add the `windows-distribution` living spec with exact-one-match anchors for its CI, executable, and winget requirements.
+- [x] 7.4 Run packaging and workflow tests, the full local quality gate, living-spec tests, OpenSpec spec validation, and the spec drift check.
 - [ ] 7.5 Dispatch the executable workflow against a current tag and verify the smoke-tested asset; after the first winget manifest is moderated, dispatch the winget workflow and verify its update PR.
 - [ ] 7.6 Prepare PR 2 with a conventional title, measured executable size noted, and no unresolved release-gate failures.

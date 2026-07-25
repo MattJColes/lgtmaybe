@@ -38,7 +38,7 @@ import yaml
 from lgtmaybe.core.diffparse import changed_line_index
 
 ANCHOR_RE = re.compile(r"^<!-- anchor: (?P<id>[a-z0-9.-]+) -->$")
-SCAN_TARGET = "src/"
+SCAN_TARGETS = ("src/", ".github/workflows/")
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,7 @@ class AnchorRule:
     rule: dict[str, object]
     files: list[str]
     sidecar: str  # repo-relative posix path of the anchors.yml it came from
+    language: str = "python"
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,7 @@ def load_anchors(root: Path) -> list[AnchorRule]:
                         rule=item["rule"],
                         files=list(item["files"]),
                         sidecar=rel,
+                        language=str(item.get("language", "python")),
                     )
                 )
     return rules
@@ -112,7 +114,7 @@ def to_inline_rules(rules: list[AnchorRule]) -> str:
     for r in rules:
         docs.append(
             yaml.safe_dump(
-                {"id": r.rule_id, "language": "python", "files": r.files, "rule": r.rule},
+                {"id": r.rule_id, "language": r.language, "files": r.files, "rule": r.rule},
                 sort_keys=False,
             )
         )
@@ -134,9 +136,9 @@ def parse_scan_output(json_text: str) -> dict[str, list[Match]]:
 
 
 def run_scan(binary: str, inline_rules: str, cwd: Path) -> dict[str, list[Match]]:
-    """Run one ast-grep scan from *cwd* (so files: globs resolve) over src/."""
+    """Run ast-grep from *cwd* so each rule's files glob resolves consistently."""
     result = subprocess.run(
-        [binary, "scan", "--inline-rules", inline_rules, "--json", SCAN_TARGET],
+        [binary, "scan", "--inline-rules", inline_rules, "--json", *SCAN_TARGETS],
         cwd=cwd,
         capture_output=True,
         text=True,

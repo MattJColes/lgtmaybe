@@ -1,5 +1,5 @@
 ---
-description: Maintainer guide to cutting and publishing a new lgtmaybe release with release-please, PyPI trusted publishing, and GHCR.
+description: Maintainer guide to publishing lgtmaybe with release-please, PyPI, GHCR, Homebrew, a Windows executable, and winget.
 search:
   exclude: true
 ---
@@ -25,6 +25,11 @@ source is a dead end — the wheels work. The formula declares **`preserve_rpath
 so Homebrew keeps the wheels' `@rpath` extension-dylib ids instead of failing to
 rewrite them ("Failed to fix install linkage"). It's a plain source formula —
 no bottle — so it installs on any architecture and macOS version.
+
+The release run also calls `.github/workflows/windows-exe.yml` to build and
+smoke-test a portable Windows executable, then `.github/workflows/winget.yml`
+to submit the new asset to winget. The executable must exist before the winget
+job starts; both workflows are manually dispatchable for recovery.
 
 The workflow:
 
@@ -72,6 +77,14 @@ The only human-only pieces:
   with `contents: write` on the tap repo (the default `GITHUB_TOKEN` cannot push
   to another repository). To seed or verify the formula by hand on a Mac, run
   `scripts/update-homebrew-formula.sh <version> path/to/homebrew-lgtmaybe/Formula/lgtmaybe.rb`.
+- **winget:** fork [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs).
+  Create a classic GitHub PAT with the `public_repo` scope and add it to this
+  repo as **`WINGET_TOKEN`**. For the first release, build/upload the Windows
+  asset and run `wingetcreate new <asset-url>` manually with package id
+  `MattJColes.lgtmaybe`, installer type `portable`, command alias `lgtmaybe`,
+  and MIT licence metadata. Microsoft moderates a new package before it exists;
+  this can take days or weeks. Once that first manifest is accepted, the release
+  workflow uses `wingetcreate update` for every later version.
 
 ## Each release
 
@@ -81,6 +94,8 @@ The only human-only pieces:
    proposed version + changelog, then **merge it** to publish.
 3. To (re)publish an existing tag to PyPI without a new release, run the
    `release-please` workflow via **workflow_dispatch** with the tag name.
+4. If Windows publication needs recovery, dispatch `windows-exe` for the tag,
+   then dispatch `winget` after the release asset is visible.
 
 ## Before going public
 

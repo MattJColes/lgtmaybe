@@ -1,0 +1,22 @@
+# ast-grep anchors for Windows distribution workflows.
+
+windows.ci:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^test$' }
+  language: yaml
+  files: [.github/workflows/ci.yml]
+
+windows.executable:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^windows-exe$' }
+  language: yaml
+  files: [.github/workflows/release-please.yml]
+
+windows.winget:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^winget$' }
+  language: yaml
+  files: [.github/workflows/release-please.yml]
