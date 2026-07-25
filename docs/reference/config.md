@@ -95,6 +95,7 @@ The structured output the model must return for each inline comment. All fields 
 | `broad` | boolean | No | `False` | Broad |
 | `category` | string / null | No | `null` | Category |
 | `confidence` | integer / null | No | `null` | Confidence |
+| `failure_scenario` | string / null | No | `null` | Failure Scenario |
 | `line` | integer | Yes | — | Line |
 | `path` | string | Yes | — | Path |
 | `severity` | `critical` / `high` / `info` / `low` / `medium` | Yes | — |  |
@@ -379,6 +380,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
           ],
           "default": null,
           "title": "Confidence"
+        },
+        "failure_scenario": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure Scenario"
         },
         "line": {
           "minimum": 1,
@@ -895,6 +908,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Confidence"
+    },
+    "failure_scenario": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure Scenario"
     },
     "line": {
       "minimum": 1,

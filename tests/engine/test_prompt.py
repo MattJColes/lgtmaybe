@@ -49,8 +49,55 @@ def test_prompt_contains_all_severity_levels() -> None:
 def test_prompt_contains_json_contract() -> None:
     prompt = _union_prompt()
     # Must describe the JSON output fields
-    for field in ("severity", "path", "line", "title", "body", "suggestion"):
+    for field in (
+        "severity",
+        "path",
+        "line",
+        "title",
+        "body",
+        "failure_scenario",
+        "suggestion",
+    ):
         assert field in prompt, f"JSON field '{field}' missing from system prompt"
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        ReviewCategory.security,
+        ReviewCategory.correctness,
+        ReviewCategory.deprecation,
+        ReviewCategory.performance,
+    ],
+)
+def test_defect_examples_include_a_failure_scenario(category: ReviewCategory) -> None:
+    prompt = build_system_prompt(category)
+
+    assert '"failure_scenario": "' in prompt
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        ReviewCategory.tests,
+        ReviewCategory.documentation,
+        ReviewCategory.complexity,
+        ReviewCategory.intent,
+        ReviewCategory.ponytail,
+    ],
+)
+def test_gap_examples_use_a_null_failure_scenario(category: ReviewCategory) -> None:
+    prompt = build_system_prompt(category)
+
+    assert '"failure_scenario": null' in prompt
+
+
+def test_prompt_requires_failure_scenarios_independently_of_severity() -> None:
+    prompt = _union_prompt().lower()
+
+    assert "trigger" in prompt
+    assert "observable impact" in prompt
+    assert "regardless of severity" in prompt
 
 
 def test_contract_requires_suggestion_to_be_replacement_code() -> None:

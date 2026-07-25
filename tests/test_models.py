@@ -91,6 +91,28 @@ def test_review_finding_severity_is_case_insensitive() -> None:
         assert finding.severity is expected
 
 
+def test_review_finding_failure_scenario_defaults_to_none() -> None:
+    finding = ReviewFinding(path="x.py", line=1, severity=Severity.high, title="bug", body="broken")
+
+    assert finding.failure_scenario is None
+
+
+def test_review_finding_failure_scenario_round_trips() -> None:
+    scenario = "When the lookup misses, the new dereference raises AttributeError."
+    finding = ReviewFinding(
+        path="x.py",
+        line=1,
+        severity=Severity.low,
+        title="unchecked lookup",
+        body="The lookup result can be None.",
+        failure_scenario=scenario,
+    )
+
+    restored = ReviewFinding.model_validate_json(finding.model_dump_json())
+
+    assert restored.failure_scenario == scenario
+
+
 def test_review_config_accepts_api_base() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", api_base="http://localhost:11434")
     assert cfg.api_base == "http://localhost:11434"

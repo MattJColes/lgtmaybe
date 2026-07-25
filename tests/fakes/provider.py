@@ -15,6 +15,7 @@ _DEFAULT_FINDINGS = [
         severity=Severity.low,
         title="canned finding",
         body="from FakeProvider",
+        failure_scenario="When the changed path runs, it produces the reported failure.",
     )
 ]
 

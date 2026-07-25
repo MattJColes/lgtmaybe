@@ -26,7 +26,8 @@ _CTX = PRContext(
 )
 
 _FINDING_JSON = (
-    '[{"path": "a.py", "line": 1, "severity": "high", "title": "bug", "body": "broken"}]'
+    '[{"path": "a.py", "line": 1, "severity": "high", "title": "bug", "body": "broken",'
+    ' "failure_scenario": "When the changed line runs, the operation fails."}]'
 )
 
 

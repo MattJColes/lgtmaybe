@@ -185,6 +185,35 @@ def test_reflect_prompt_drops_narration_only_findings() -> None:
     assert "narrat" in system or "describe" in system
 
 
+def test_failure_scenario_reaches_the_auditor_and_can_be_rejected() -> None:
+    scenario = "When the lookup misses, the changed dereference raises AttributeError."
+    finding = ReviewFinding(
+        path="a.py",
+        line=1,
+        severity=Severity.low,
+        title="unchecked lookup",
+        body="The lookup result can be None.",
+        failure_scenario=scenario,
+    )
+    provider = _fake_with_verdict({0: False})
+
+    survivors = reflect_findings([finding], _CTX, _CFG, provider)
+
+    assert survivors == []
+    assert scenario in _user_text(provider.calls[0])
+
+
+def test_reflect_prompt_requires_failure_scenario_validation() -> None:
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "failure scenario" in system
+    assert "unsupported causal" in system
+    assert "drop" in system
+
+
 def test_unparseable_verdict_keeps_all() -> None:
     provider = _fake_with_text("I'm not really sure about these.")
 
