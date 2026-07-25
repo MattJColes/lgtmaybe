@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.1.0...lgtmaybe-v1.2.0) (2026-07-25)
+
+
+### Features
+
+* answer author replies in review finding threads ([#217](https://github.com/MattJColes/lgtmaybe/issues/217)) ([3ecf858](https://github.com/MattJColes/lgtmaybe/commit/3ecf85860b1a6c79217f50bdc70526d30633ea6d))
+* gate merges on findings via a GitHub Check Run ([#214](https://github.com/MattJColes/lgtmaybe/issues/214)) ([4cc2604](https://github.com/MattJColes/lgtmaybe/commit/4cc2604754984cab990bbb3841f818be1fff7c27))
+* parallelise correctness review ([#210](https://github.com/MattJColes/lgtmaybe/issues/210)) ([f63e0ec](https://github.com/MattJColes/lgtmaybe/commit/f63e0ec8e9dc62831671051fb7f79e2fd71962c1))
+* suppress findings downvoted with thumbs-down reactions ([#213](https://github.com/MattJColes/lgtmaybe/issues/213)) ([fbbebce](https://github.com/MattJColes/lgtmaybe/commit/fbbebced80e16b97169b9dcda11f2004f9784578))
+* write reviews in a configurable language ([#215](https://github.com/MattJColes/lgtmaybe/issues/215)) ([23abe0a](https://github.com/MattJColes/lgtmaybe/commit/23abe0a45d3c8e0f0e8c9db9da93a2c18ea3593f))
+
+
+### Bug Fixes
+
+* **diagram:** keep C4 relationship lines readable in GitHub dark mode ([#216](https://github.com/MattJColes/lgtmaybe/issues/216)) ([317ce54](https://github.com/MattJColes/lgtmaybe/commit/317ce54f5a3b637a5c5927a3a2cdfcfd2c4ee8dc))
+* harden review pipeline against watermark, expansion, and redaction bugs ([#212](https://github.com/MattJColes/lgtmaybe/issues/212)) ([f03e076](https://github.com/MattJColes/lgtmaybe/commit/f03e0761a7ec49a96bbda61b644423cbf7d51fe8))
+
+
+### Documentation
+
+* move docs site to lgtmaybe.coles.codes ([#218](https://github.com/MattJColes/lgtmaybe/issues/218)) ([65960fc](https://github.com/MattJColes/lgtmaybe/commit/65960fc2a6b5160036047c67feae3f5d44d4207b))
+
 ## [1.1.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.0.0...lgtmaybe-v1.1.0) (2026-07-24)
 
 
