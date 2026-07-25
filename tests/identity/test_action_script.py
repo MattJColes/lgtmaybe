@@ -72,7 +72,7 @@ def test_exchange_requests_oidc_and_masks_the_brokered_token(tmp_path: Path) -> 
     module = _module()
     requests: list[Request] = []
 
-    def open_request(request: Request, timeout: float):
+    def open_request(request: Request, *, timeout: float):
         requests.append(request)
         assert timeout == 10.0
         if len(requests) == 1:
@@ -131,7 +131,7 @@ def test_exchange_preserves_the_broker_setup_message() -> None:
     )
     calls = 0
 
-    def open_request(request: Request, timeout: float):
+    def open_request(request: Request, *, timeout: float):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -156,7 +156,7 @@ def test_revoke_is_best_effort_and_never_prints_the_token() -> None:
     request_seen: list[Request] = []
     stdout = io.StringIO()
 
-    def open_request(request: Request, timeout: float):
+    def open_request(request: Request, *, timeout: float):
         request_seen.append(request)
         return Response({}, status=204)
 
