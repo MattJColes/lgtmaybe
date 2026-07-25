@@ -4,36 +4,36 @@
 
 ## Tutorial
 
-- [Getting started](https://mattjcoles.github.io/lgtmaybe/tutorial/getting-started/): Run your first lgtmaybe pull-request review locally with ollama — no API keys, no GitHub token, and no pull request required.
+- [Getting started](https://lgtmaybe.coles.codes/tutorial/getting-started/): Run your first lgtmaybe pull-request review locally with ollama — no API keys, no GitHub token, and no pull request required.
 
 ## How-to
 
-- [Install the CLI](https://mattjcoles.github.io/lgtmaybe/how-to/install-the-cli/): Install the lgtmaybe CLI with pip (any OS) or Homebrew (macOS/Linuxbrew), and add the cloud extras for keyless Bedrock/Vertex/Azure.
-- [Use as a GitHub Action](https://mattjcoles.github.io/lgtmaybe/how-to/use-as-github-action/): Add lgtmaybe as a GitHub Action to review every pull request automatically with inline comments and a summary.
-- [Post reviews as a GitHub App](https://mattjcoles.github.io/lgtmaybe/how-to/post-as-a-github-app/): Post lgtmaybe reviews under your own branded GitHub App identity (lgtmaybe[bot]) with higher API rate limits, instead of the default github-actions[bot].
-- [Review with OpenAI](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI — add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
-- [Review with Claude (Anthropic)](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-anthropic/): Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
-- [Review with OpenRouter](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openrouter/): Use OpenRouter as the lgtmaybe backend to reach many model vendors through one OpenAI-compatible API key.
-- [Review with z.ai (GLM)](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-zai/): Configure lgtmaybe to review pull requests with z.ai GLM models through litellm's native zai route.
-- [Review with Bedrock OIDC](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-bedrock-oidc/): Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC — no static AWS credentials stored in repository secrets.
-- [Review with Vertex WIF](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-vertex-wif/): Run lgtmaybe on Google Vertex AI with keyless Workload Identity Federation — no service-account JSON in secrets.
-- [Review with Azure OpenAI](https://mattjcoles.github.io/lgtmaybe/how-to/review-with-azure/): Review pull requests with Azure OpenAI in lgtmaybe using keyless GitHub OIDC federated to Entra, or an API key.
-- [Run locally with ollama](https://mattjcoles.github.io/lgtmaybe/how-to/run-locally-with-ollama/): Run lgtmaybe entirely locally with an ollama model — zero API cost, zero egress, no keys, and code never leaves your machine.
-- [Other OpenAI-compatible servers](https://mattjcoles.github.io/lgtmaybe/how-to/use-a-custom-openai-compatible-endpoint/): Point lgtmaybe at any OpenAI-compatible server — vLLM, llama.cpp, LM Studio, DeepSeek — with --api-base; the key is optional.
-- [Configure .lgtmaybe.yml](https://mattjcoles.github.io/lgtmaybe/how-to/configure-lgtmaybe-yml/): Configure lgtmaybe with a .lgtmaybe.yml file — provider, model, severity floor, lenses, caps, and other non-secret defaults.
-- [Add a custom review lens](https://mattjcoles.github.io/lgtmaybe/how-to/add-a-custom-lens/): Add a custom review lens to lgtmaybe — a bring-your-own skill file that runs alongside the nine built-in lenses.
-- [Generate a change diagram](https://mattjcoles.github.io/lgtmaybe/how-to/generate-a-change-diagram/): Post a C4-style Mermaid diagram of a pull request's changes as a GitHub comment, or print one from the CLI.
-- [Fix findings with an AI agent](https://mattjcoles.github.io/lgtmaybe/how-to/fix-findings-with-an-ai-agent/): Turn lgtmaybe findings into instructions an AI coding agent can apply, for a local review-and-fix loop before you push.
-- [Releasing](https://mattjcoles.github.io/lgtmaybe/how-to/releasing/): Maintainer guide to cutting and publishing a new lgtmaybe release with release-please, PyPI trusted publishing, and GHCR.
+- [Install the CLI](https://lgtmaybe.coles.codes/how-to/install-the-cli/): Install the lgtmaybe CLI with pip (any OS) or Homebrew (macOS/Linuxbrew), and add the cloud extras for keyless Bedrock/Vertex/Azure.
+- [Use as a GitHub Action](https://lgtmaybe.coles.codes/how-to/use-as-github-action/): Add lgtmaybe as a GitHub Action to review every pull request automatically with inline comments and a summary.
+- [Post reviews as a GitHub App](https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/): Post lgtmaybe reviews under your own branded GitHub App identity (lgtmaybe[bot]) with higher API rate limits, instead of the default github-actions[bot].
+- [Review with OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI — add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
+- [Review with Claude (Anthropic)](https://lgtmaybe.coles.codes/how-to/review-with-anthropic/): Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
+- [Review with OpenRouter](https://lgtmaybe.coles.codes/how-to/review-with-openrouter/): Use OpenRouter as the lgtmaybe backend to reach many model vendors through one OpenAI-compatible API key.
+- [Review with z.ai (GLM)](https://lgtmaybe.coles.codes/how-to/review-with-zai/): Configure lgtmaybe to review pull requests with z.ai GLM models through litellm's native zai route.
+- [Review with Bedrock OIDC](https://lgtmaybe.coles.codes/how-to/review-with-bedrock-oidc/): Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC — no static AWS credentials stored in repository secrets.
+- [Review with Vertex WIF](https://lgtmaybe.coles.codes/how-to/review-with-vertex-wif/): Run lgtmaybe on Google Vertex AI with keyless Workload Identity Federation — no service-account JSON in secrets.
+- [Review with Azure OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-azure/): Review pull requests with Azure OpenAI in lgtmaybe using keyless GitHub OIDC federated to Entra, or an API key.
+- [Run locally with ollama](https://lgtmaybe.coles.codes/how-to/run-locally-with-ollama/): Run lgtmaybe entirely locally with an ollama model — zero API cost, zero egress, no keys, and code never leaves your machine.
+- [Other OpenAI-compatible servers](https://lgtmaybe.coles.codes/how-to/use-a-custom-openai-compatible-endpoint/): Point lgtmaybe at any OpenAI-compatible server — vLLM, llama.cpp, LM Studio, DeepSeek — with --api-base; the key is optional.
+- [Configure .lgtmaybe.yml](https://lgtmaybe.coles.codes/how-to/configure-lgtmaybe-yml/): Configure lgtmaybe with a .lgtmaybe.yml file — provider, model, severity floor, lenses, caps, and other non-secret defaults.
+- [Add a custom review lens](https://lgtmaybe.coles.codes/how-to/add-a-custom-lens/): Add a custom review lens to lgtmaybe — a bring-your-own skill file that runs alongside the nine built-in lenses.
+- [Generate a change diagram](https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/): Post a C4-style Mermaid diagram of a pull request's changes as a GitHub comment, or print one from the CLI.
+- [Fix findings with an AI agent](https://lgtmaybe.coles.codes/how-to/fix-findings-with-an-ai-agent/): Turn lgtmaybe findings into instructions an AI coding agent can apply, for a local review-and-fix loop before you push.
+- [Releasing](https://lgtmaybe.coles.codes/how-to/releasing/): Maintainer guide to cutting and publishing a new lgtmaybe release with release-please, PyPI trusted publishing, and GHCR.
 
 ## Reference
 
-- [Configuration](https://mattjcoles.github.io/lgtmaybe/reference/config/): Complete lgtmaybe configuration reference — every ReviewConfig field, enum, and JSON schema, generated from the pydantic models.
+- [Configuration](https://lgtmaybe.coles.codes/reference/config/): Complete lgtmaybe configuration reference — every ReviewConfig field, enum, and JSON schema, generated from the pydantic models.
 
 ## Explanation
 
-- [What gets reviewed](https://mattjcoles.github.io/lgtmaybe/explanation/what-gets-reviewed/): What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
-- [Architecture](https://mattjcoles.github.io/lgtmaybe/explanation/architecture/): lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
-- [Auth model](https://mattjcoles.github.io/lgtmaybe/explanation/auth-model/): How lgtmaybe authenticates to each provider — keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
-- [Data and privacy](https://mattjcoles.github.io/lgtmaybe/explanation/data-and-privacy/): Exactly what data lgtmaybe sends where — diffs only, secret redaction before egress, no code checkout, fully local with ollama.
-- [Trust and cost](https://mattjcoles.github.io/lgtmaybe/explanation/trust-and-cost/): How lgtmaybe's trigger gate and cost model work — who can start a review, and why opening it wide is a cost not a security choice.
+- [What gets reviewed](https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/): What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
+- [Architecture](https://lgtmaybe.coles.codes/explanation/architecture/): lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
+- [Auth model](https://lgtmaybe.coles.codes/explanation/auth-model/): How lgtmaybe authenticates to each provider — keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
+- [Data and privacy](https://lgtmaybe.coles.codes/explanation/data-and-privacy/): Exactly what data lgtmaybe sends where — diffs only, secret redaction before egress, no code checkout, fully local with ollama.
+- [Trust and cost](https://lgtmaybe.coles.codes/explanation/trust-and-cost/): How lgtmaybe's trigger gate and cost model work — who can start a review, and why opening it wide is a cost not a security choice.

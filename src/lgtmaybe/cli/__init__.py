@@ -780,7 +780,7 @@ Examples:
   lgtmaybe config init                     One-time provider/model setup
   lgtmaybe help COMMAND                    Detailed help for any command
 \b
-Docs: https://mattjcoles.github.io/lgtmaybe/
+Docs: https://lgtmaybe.coles.codes/
 """
 
 

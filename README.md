@@ -8,7 +8,7 @@ Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
 OpenAI-compatible endpoint — one flag, no static keys for cloud providers. Posts
 inline review comments and a summary.
 
-📖 **Full documentation:** <https://mattjcoles.github.io/lgtmaybe/>
+📖 **Full documentation:** <https://lgtmaybe.coles.codes/>
 
 ## What it reviews
 
@@ -165,10 +165,10 @@ reviews on real pull requests, wire up the
 
 ## Documentation
 
-Browse the rendered docs at <https://mattjcoles.github.io/lgtmaybe/>, or read the
+Browse the rendered docs at <https://lgtmaybe.coles.codes/>, or read the
 Markdown sources below. For LLM agents, a curated
-[`llms.txt`](https://mattjcoles.github.io/lgtmaybe/llms.txt) index (and a
-whole-corpus [`llms-full.txt`](https://mattjcoles.github.io/lgtmaybe/llms-full.txt))
+[`llms.txt`](https://lgtmaybe.coles.codes/llms.txt) index (and a
+whole-corpus [`llms-full.txt`](https://lgtmaybe.coles.codes/llms-full.txt))
 are published at the docs root.
 
 **Tutorial** — learn by doing

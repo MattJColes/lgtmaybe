@@ -2,11 +2,11 @@
 
 > Provider-agnostic AI pull-request reviewer. It posts inline review comments and a summary onto a GitHub pull request, or prints findings locally from your git diff. Seven hosted providers, local ollama, and any OpenAI-compatible endpoint — one flag, and keyless OIDC/WIF auth for cloud providers (no static keys in secrets).
 
-Source: https://mattjcoles.github.io/lgtmaybe/ — generated from the docs/ tree.
+Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/ -->
+<!-- Source: https://lgtmaybe.coles.codes/ -->
 
 <div class="hero" markdown>
 
@@ -94,7 +94,7 @@ coding agents.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/tutorial/getting-started/ -->
+<!-- Source: https://lgtmaybe.coles.codes/tutorial/getting-started/ -->
 
 # Getting Started with lgtmaybe
 
@@ -211,7 +211,7 @@ lgtmaybe ran its pipeline over your local diff:
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/install-the-cli/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/install-the-cli/ -->
 
 # Install the CLI
 
@@ -299,7 +299,7 @@ bundles all three and wires up the OIDC/WIF auth for you.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-as-github-action/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/use-as-github-action/ -->
 
 # Use lgtmaybe as a GitHub Action
 
@@ -591,7 +591,7 @@ uses: MattJColes/lgtmaybe@v1.0.0
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/post-as-a-github-app/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/ -->
 
 # Post reviews as a GitHub App
 
@@ -751,7 +751,7 @@ including the `-----BEGIN...-----` / `-----END...-----` lines. Paste the whole
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openai/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-openai/ -->
 
 # Review with OpenAI
 
@@ -825,7 +825,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-anthropic/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-anthropic/ -->
 
 # Review with Claude (Anthropic)
 
@@ -906,7 +906,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-openrouter/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-openrouter/ -->
 
 # Review with OpenRouter
 
@@ -984,7 +984,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-zai/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-zai/ -->
 
 # Review with z.ai (GLM)
 
@@ -1071,7 +1071,7 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-bedrock-oidc/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-bedrock-oidc/ -->
 
 # Review with AWS Bedrock (keyless OIDC)
 
@@ -1244,7 +1244,7 @@ needs a cross-region inference profile — prefix with `us.`/`eu.`/`apac.` (e.g.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-vertex-wif/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-vertex-wif/ -->
 
 # Review with Google Vertex AI (keyless WIF)
 
@@ -1377,7 +1377,7 @@ region. Check the [Vertex AI model garden](https://console.cloud.google.com/vert
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/review-with-azure/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-azure/ -->
 
 # Review with Azure OpenAI (keyless OIDC)
 
@@ -1537,7 +1537,7 @@ resource that `api_base` points at, not the upstream OpenAI model id.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/run-locally-with-ollama/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/run-locally-with-ollama/ -->
 
 # Run Locally with ollama
 
@@ -1817,7 +1817,7 @@ window. Add a path filter in `.lgtmaybe.yml` to reduce diff size, or set
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/use-a-custom-openai-compatible-endpoint/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/use-a-custom-openai-compatible-endpoint/ -->
 
 # Local Models & other OpenAI providers
 
@@ -2001,7 +2001,7 @@ Persist it as `structured_output: false` in `.lgtmaybe.yml`, or set the
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/configure-lgtmaybe-yml/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/configure-lgtmaybe-yml/ -->
 
 # Configure .lgtmaybe.yml
 
@@ -2560,7 +2560,7 @@ Flags take precedence over `.lgtmaybe.yml`.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/add-a-custom-lens/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/add-a-custom-lens/ -->
 
 # Add a custom review lens (BYO skills)
 
@@ -2718,7 +2718,7 @@ your lenses.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/generate-a-change-diagram/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/ -->
 
 # Generate a change diagram
 
@@ -2859,7 +2859,7 @@ used: GitHub doesn't render D2 in Markdown, so it would show as source anyway.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/fix-findings-with-an-ai-agent/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/fix-findings-with-an-ai-agent/ -->
 
 # Fix findings with an AI agent
 
@@ -2945,7 +2945,7 @@ you are happy, then open your PR. To post reviews on the PR itself, wire up the
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/how-to/releasing/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/releasing/ -->
 
 # Releasing lgtmaybe (maintainers)
 
@@ -3034,7 +3034,7 @@ The only human-only pieces:
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/reference/config/ -->
+<!-- Source: https://lgtmaybe.coles.codes/reference/config/ -->
 
 <!-- DO NOT EDIT — this file is generated by docs/generate_reference.py.
      Run `uv run python docs/generate_reference.py` to regenerate.
@@ -4109,7 +4109,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/what-gets-reviewed/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/ -->
 
 # What gets reviewed
 
@@ -4531,7 +4531,7 @@ coding agent can read and apply — a local review-and-fix loop. See
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/architecture/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/architecture/ -->
 
 # Architecture
 
@@ -4746,7 +4746,7 @@ requirement arises.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/auth-model/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/auth-model/ -->
 
 # Auth Model
 
@@ -4865,7 +4865,7 @@ display key values.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/data-and-privacy/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/data-and-privacy/ -->
 
 # Data and Privacy
 
@@ -5015,7 +5015,7 @@ malicious PR from gaining access to repository secrets.
 
 ---
 
-<!-- Source: https://mattjcoles.github.io/lgtmaybe/explanation/trust-and-cost/ -->
+<!-- Source: https://lgtmaybe.coles.codes/explanation/trust-and-cost/ -->
 
 # Trust and Cost
 

@@ -64,7 +64,7 @@ class Lgtmaybe < Formula
   include Language::Python::Virtualenv
 
   desc "Provider-agnostic pull request reviewer with keyless cloud auth"
-  homepage "https://mattjcoles.github.io/lgtmaybe/"
+  homepage "https://lgtmaybe.coles.codes/"
   url "${SDIST_URL}"
   sha256 "${SDIST_SHA}"
   license "MIT"
