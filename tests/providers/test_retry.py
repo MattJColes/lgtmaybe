@@ -12,6 +12,7 @@ import httpx
 import litellm
 import pytest
 
+from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
 
 
@@ -45,6 +46,80 @@ class TestRetry:
             release.set()
 
         assert time.perf_counter() - started < 0.5
+
+    def test_timeout_error_reports_the_measured_wait(self) -> None:
+        """The bound is decided by the monotonic clock, so the error says how long
+        we actually waited — an overshoot on a coarse-timer platform (Windows'
+        ~15.6ms granularity) is then visible instead of silent."""
+        release = threading.Event()
+
+        def hangs(*args: Any, **kwargs: Any) -> Any:
+            release.wait(timeout=5)
+            return _fake_response()
+
+        try:
+            with (
+                patch("litellm.completion", side_effect=hangs),
+                patch("lgtmaybe.providers.litellm_provider._MAX_ATTEMPTS", 1),
+            ):
+                provider = LiteLLMProvider(timeout=0.05)
+                with pytest.raises(TimeoutError, match=r"exceeded 0.05s \(waited \d+\.\d+s\)"):
+                    provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+        finally:
+            release.set()
+
+    def test_call_completing_inside_the_timer_slop_is_not_discarded(self) -> None:
+        """A call that finished just past the deadline is honoured, not thrown away.
+
+        Discarding it would waste a response the provider already billed for, and
+        (worse) surface a *permanent* error as a retryable TimeoutError. Driven with
+        a fake clock and an inline worker so it pins the behaviour deterministically
+        rather than racing a real deadline.
+        """
+        # start=0.0, then every check is past the 0.05s deadline.
+        clock = iter([0.0] + [100.0] * 20)
+
+        class _InlineThread:
+            """Runs the worker inline, so the future is complete before the wait."""
+
+            def __init__(self, target: Any, **_: Any) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                self._target()
+
+        with (
+            patch("litellm.completion", return_value=_fake_response("late but complete")),
+            patch.object(provider_module, "time", SimpleNamespace(monotonic=lambda: next(clock))),
+            patch.object(provider_module.threading, "Thread", _InlineThread),
+        ):
+            response = provider_module._completion_with_wall_timeout(
+                "openai/gpt-4o", [{"role": "user", "content": "hi"}], {"timeout": 0.05}
+            )
+
+        assert response.choices[0].message.content == "late but complete"
+
+    def test_permanent_error_is_not_converted_into_a_retryable_timeout(self) -> None:
+        """A permanent failure must surface as itself. TimeoutError is retryable
+        (it is not in _PERMANENT_ERROR_TYPES), so masking one as a timeout would
+        turn fail-fast into a retry storm."""
+        calls = 0
+
+        def bad_auth(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.AuthenticationError(
+                message="AuthenticationError: invalid api key",
+                model="gpt-4o",
+                llm_provider="openai",
+            )
+
+        with patch("litellm.completion", side_effect=bad_auth):
+            provider = LiteLLMProvider(timeout=0.05)
+            with pytest.raises(litellm.AuthenticationError):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls == 1
 
     def test_first_call_raises_then_retry_succeeds(self) -> None:
         """Provider retries on transient failure and returns the good result."""

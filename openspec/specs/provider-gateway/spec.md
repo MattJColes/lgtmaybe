@@ -69,8 +69,14 @@ on `ProviderResult`.
 #### Scenario: provider SDK ignores its timeout
 - **WHEN** the underlying completion call remains blocked past the configured
   timeout
-- **THEN** the adapter raises a timeout error and the existing bounded retry
-  policy decides whether to retry
+- **THEN** the adapter raises a timeout error reporting the measured wait, and the
+  existing bounded retry policy decides whether to retry
+
+#### Scenario: the call completes just past the deadline
+- **WHEN** the completion finishes within the platform timer's granularity after
+  the deadline (coarse-timer platforms overshoot by ~15ms)
+- **THEN** its outcome is honoured rather than discarded, so a paid response is not
+  wasted and a permanent error is not masked as a retryable timeout
 
 #### Scenario: primary model keeps failing
 - **WHEN** retries on the primary model are exhausted and a fallback is set
