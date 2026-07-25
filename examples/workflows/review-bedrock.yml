@@ -41,7 +41,6 @@ jobs:
       - uses: MattJColes/lgtmaybe@v1
         with:
           provider: bedrock
-          auto_diagram: true
           # Bedrock needs a Bedrock model id (Claude/Nova/Llama/…), not an
           # OpenAI/GPT id. Prefer the cross-region inference profile (us./eu./
           # apac.) — most current Claude models aren't available on-demand on the

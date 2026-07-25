@@ -172,8 +172,8 @@ pattern, event bus, plugin framework.
      when the Mermaid can't render; one structured call, `_mermaid_ok` prefix
      check, raw-text fallback) via `post_diagram_comment` — its own idempotent
      upsert with a disjoint marker family. `ReviewConfig.auto_diagram` (default
-     off; Action input `auto_diagram`) posts it automatically alongside
-     auto-describe. The local `lgtmaybe diagram` command prints the same body
+     **on**; Action input `auto_diagram`, set false to opt out) posts it
+     automatically on freshly opened/reopened PRs. The local `lgtmaybe diagram` command prints the same body
      (no GitHub) — a terminal can't render Mermaid, which is what the ASCII is
      for. **No D2:** GitHub doesn't render it in Markdown.
    - **Guards (in the engine):** generated/binary files skipped via
@@ -256,7 +256,7 @@ pattern, event bus, plugin framework.
      `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
      cloud, 1 ollama/openai-compatible), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
-     A soft whole-review deadline (`max_review_seconds`, default 600s, 0 = off)
+     A soft whole-review deadline (`max_review_seconds`, default 1800s, 0 = off)
      skips still-queued calls once passed — partial results with a notice,
      never a silent LGTM. Every stage and call is timed
      (`engine/profiling.py`); `--profile` / Action input `profile` prints the

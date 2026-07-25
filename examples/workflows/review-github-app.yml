@@ -51,7 +51,6 @@ jobs:
         with:
           provider: anthropic
           model: claude-sonnet-4-6
-          auto_diagram: true
           api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Post as the App identity instead of github-actions[bot].
           app_id: ${{ vars.LGTMAYBE_APP_ID }}

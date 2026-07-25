@@ -38,5 +38,4 @@ jobs:
         with:
           provider: openrouter
           model: anthropic/claude-sonnet-4-6
-          auto_diagram: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}

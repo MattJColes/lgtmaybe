@@ -212,7 +212,7 @@ class TestEngineBehaviourMatrix:
     def test_review_deadline_field_defaults_on_every_provider(self, provider: Provider) -> None:
         from lgtmaybe.core.models import ReviewConfig
 
-        assert ReviewConfig(provider=provider, model="m").max_review_seconds == 600
+        assert ReviewConfig(provider=provider, model="m").max_review_seconds == 1800
 
 
 _CUSTOM_BASE = "https://api.deepseek.com/v1"

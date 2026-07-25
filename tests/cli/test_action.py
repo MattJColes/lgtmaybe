@@ -128,8 +128,12 @@ class TestActionRouting:
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronize", auto="true")
         assert called == []
 
-    def test_auto_diagram_off_by_default(self, tmp_path, monkeypatch):
+    def test_auto_diagram_on_by_default(self, tmp_path, monkeypatch):
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="")
+        assert called == [True]
+
+    def test_auto_diagram_can_be_disabled(self, tmp_path, monkeypatch):
+        called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="false")
         assert called == []
 
     def test_auto_extras_share_one_gateway_and_context_fetch(self, tmp_path, monkeypatch):

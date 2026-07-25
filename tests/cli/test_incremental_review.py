@@ -256,7 +256,8 @@ def test_auto_diagram_only_on_open_events_when_enabled() -> None:
     assert should_auto_diagram(on, event_action="opened") is True
     assert should_auto_diagram(on, event_action="reopened") is True
     assert should_auto_diagram(on, event_action="synchronize") is False
-    assert should_auto_diagram(_cfg(), event_action="opened") is False  # default off
+    assert should_auto_diagram(_cfg(), event_action="opened") is True  # default on
+    assert should_auto_diagram(_cfg(auto_diagram=False), event_action="opened") is False
 
 
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
