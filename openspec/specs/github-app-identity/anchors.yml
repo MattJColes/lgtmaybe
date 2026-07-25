@@ -4,6 +4,13 @@ github-app.install:
     has: { field: name, regex: '^main$' }
   files: [scripts/github-app-identity.py]
 
+github-app.self-managed-mint:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^client-id$' }
+  language: yaml
+  files: [action.yml]
+
 github-app.exchange:
   rule:
     kind: function_definition
