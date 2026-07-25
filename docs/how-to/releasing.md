@@ -41,8 +41,10 @@ The workflow:
   `schedule` and a manual `workflow_dispatch` (with an optional `force` to
   re-publish the same version) are the safety nets.
 - **Installs the regenerated formula in CI before committing it** — a real
-  `brew install` of the formula gates the push, so a formula that doesn't install
-  is never published. (You can seed/verify it by hand on a Mac by running
+  `brew trust` + `brew install` of the formula gates the push, so a formula that
+  doesn't install is never published. The gate trusts the tap rather than setting
+  `HOMEBREW_NO_REQUIRE_TAP_TRUST`, so it exercises the same two steps the install
+  guide gives users. (You can seed/verify it by hand on a Mac by running
   `scripts/update-homebrew-formula.sh <version> path/to/Formula/lgtmaybe.rb`.)
 
 Net effect: a new version lands in the tap within minutes of release — no PyPI

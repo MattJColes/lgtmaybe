@@ -102,13 +102,18 @@ jobs:
       # build-bottle), so the commit is gated on a real, working install.
       - name: Smoke-test that the formula installs and runs
         if: steps.idem.outputs.skip != 'true'
-        env:
-          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
           # The directory name sets the tap slug: homebrew-tap -> local/tap.
           tap_link="$(brew --repository)/Library/Taps/local/homebrew-tap"
           mkdir -p "$(dirname "$tap_link")"
           ln -sfn "$GITHUB_WORKSPACE/tap" "$tap_link"
+          # Satisfy the tap-trust requirement the way the install docs tell users to,
+          # rather than switching it off with HOMEBREW_NO_REQUIRE_TAP_TRUST — that
+          # would leave the documented step as the one thing this gate can't fail on,
+          # and it is slated for removal upstream. Non-interactive and idempotent
+          # ("Already trusted"); a single-slash name is trusted as a tap, so nothing
+          # has to load the untrusted formula first.
+          brew trust local/tap
           # Exactly what a user runs. With `preserve_rpath` the install must now
           # exit cleanly AND link `lgtmaybe` onto the prefix bin.
           brew install --formula "local/tap/lgtmaybe"
