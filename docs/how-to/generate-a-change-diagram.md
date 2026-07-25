@@ -26,11 +26,12 @@ One model call returns two renderings of the same graph:
 - a **plain-text ASCII** rendering of the same diagram, which is what shows in a
   terminal and serves as the fallback if the Mermaid can't be rendered.
 
-Changed elements are marked in the labels (`(new)` / `(changed)`), and the
-relationship lines are restyled in a mid-grey that stays readable on both
-GitHub themes — Mermaid's C4 renderer defaults them to a near-black that
-disappears in dark mode. The diagram also stays honest about the diff being
-only a slice of the codebase —
+Changed elements are marked in the labels (`(new)` / `(changed)`), the
+relationship lines are restyled in a mid-grey that stays readable on every
+GitHub theme — Mermaid's C4 renderer defaults them to a near-black that
+disappears in dark mode — and the layout is loosened to three cards per row
+so the renderer's fixed-width cards don't overlap. The diagram also stays
+honest about the diff being only a slice of the codebase —
 relationships it infers from imports rather than the diff itself are called out
 in the notes rather than asserted as fact.
 
@@ -50,9 +51,10 @@ C4Container
     Rel(client, api, "GET /users/{id}")
     Rel(api, cache, "check cache (new)")
     Rel(api, db, "on miss, query")
-    UpdateRelStyle(client, api, $textColor="#767676", $lineColor="#767676")
-    UpdateRelStyle(api, cache, $textColor="#767676", $lineColor="#767676")
-    UpdateRelStyle(api, db, $textColor="#767676", $lineColor="#767676")
+    UpdateRelStyle(client, api, $textColor="#808080", $lineColor="#808080")
+    UpdateRelStyle(api, cache, $textColor="#808080", $lineColor="#808080")
+    UpdateRelStyle(api, db, $textColor="#808080", $lineColor="#808080")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
 <details>
