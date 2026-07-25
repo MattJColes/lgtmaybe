@@ -10,14 +10,19 @@ publishes, and distributes the portable CLI executable.
 ### Requirement: Supported Windows versions run the full CI gate
 
 The main CI workflow SHALL run the same test, lint, format, and type-check gate
-on Windows with Python 3.11 and 3.13 while retaining Ubuntu coverage for every
-supported Python version. The Windows jobs MUST exercise locale-default
-encoding behavior rather than forcing Python UTF-8 mode.
+on Ubuntu and Windows using only the minimum supported Python version. The
+Windows job MUST exercise locale-default encoding behavior rather than forcing
+Python UTF-8 mode.
 <!-- anchor: windows.ci -->
 
 #### Scenario: a change breaks only under Windows path semantics
 - **WHEN** the pull request test matrix runs
 - **THEN** a Windows job fails before the shared required check can pass
+
+#### Scenario: the routine CI gate expands its test matrix
+- **WHEN** the main CI workflow builds its test jobs
+- **THEN** it creates exactly one Ubuntu job and one Windows job on the minimum
+  supported Python version
 
 ### Requirement: Releases include a smoke-tested portable executable
 
