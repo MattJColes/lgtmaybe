@@ -36,7 +36,8 @@ vs full decision, optional auto-describe, engine call, posting — so `review`,
 `issue_comment` events SHALL parse into commands — `/review` (with `full`
 forcing a full re-review), `/improve`, `/ask <q>` replying in-thread,
 `/describe` upserting a structured description, and `/diagram` upserting a
-C4-style change diagram — all dispatched to the same engine and provider stack.
+compact, automatically laid-out Mermaid change diagram — all dispatched to the
+same engine and provider stack.
 <!-- anchor: cli.slash -->
 
 #### Scenario: reviewer comments /review full
@@ -45,7 +46,15 @@ C4-style change diagram — all dispatched to the same engine and provider stack
 
 #### Scenario: reviewer comments /diagram
 - **WHEN** the comment body is `/diagram`
-- **THEN** a C4-style change diagram is upserted as its own comment
+- **THEN** a Mermaid flowchart with automatic edge routing is upserted as its
+  own comment, with compact cards, short relationship labels, and change
+  markers on nodes rather than arrows
+
+#### Scenario: provider returns legacy C4
+- **WHEN** the diagram provider ignores the flowchart contract and returns C4
+  source together with an ASCII rendering
+- **THEN** the C4 source is not posted as Mermaid and the ASCII rendering is
+  shown instead
 
 ### Requirement: Finding-thread replies are answered in-thread
 
