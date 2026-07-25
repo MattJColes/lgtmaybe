@@ -376,3 +376,99 @@ def test_no_scope_keeps_full_resolve_behaviour() -> None:
     _gateway().post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["T1"]
+
+
+# ---------------------------------------------------------------------------
+# feedback learning: 👎 (THUMBS_DOWN) reactions on our finding comments
+# ---------------------------------------------------------------------------
+
+
+def _reaction_thread(body: str, reactors: list[str]) -> dict[str, object]:
+    """A review thread whose first comment carries *body* and 👎 *reactors*.
+
+    Matches the shape ``list_downvoted_fingerprints`` selects — the first
+    comment's ``body`` plus the users who left a ``THUMBS_DOWN`` reaction.
+    """
+    return {
+        "comments": {
+            "nodes": [
+                {
+                    "body": body,
+                    "reactions": {"nodes": [{"user": {"login": login}} for login in reactors]},
+                }
+            ]
+        }
+    }
+
+
+def _mock_permissions(permissions: dict[str, str | None]) -> None:
+    """Mock the collaborator-permission endpoint per login (``None`` → 404)."""
+    for login, perm in permissions.items():
+        resp = (
+            httpx.Response(404, json={"message": "Not Found"})
+            if perm is None
+            else httpx.Response(200, json={"permission": perm})
+        )
+        respx.route(
+            method="GET",
+            url=f"{BASE_URL}/repos/{REPO}/collaborators/{login}/permission",
+        ).mock(return_value=resp)
+
+
+@respx.mock
+def test_list_downvoted_collects_thumbs_down_finding_fingerprint() -> None:
+    """A finding comment an authorised reviewer reacted 👎 to yields its fingerprint."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(
+        threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=["maintainer"])]
+    )
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    _mock_permissions({"maintainer": "write"})
+
+    assert _gateway().list_downvoted_fingerprints() == {fp}
+
+
+@respx.mock
+def test_list_downvoted_ignores_finding_without_thumbs_down() -> None:
+    """Our marker but no 👎 → not a suppression signal."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=[])])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    assert _gateway().list_downvoted_fingerprints() == set()
+
+
+@respx.mock
+def test_list_downvoted_ignores_non_lgtmaybe_thread() -> None:
+    """A 👎 on a thread that isn't one of ours carries no fingerprint."""
+    graphql = _GraphQL(threads=[_reaction_thread("a human comment", reactors=["maintainer"])])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    assert _gateway().list_downvoted_fingerprints() == set()
+
+
+@respx.mock
+def test_list_downvoted_ignores_unauthorized_reactor() -> None:
+    """A 👎 from a user without write access is ignored — on a public repo
+    anyone can react, so an unprivileged reaction must never suppress."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(
+        threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=["drive_by"])]
+    )
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    _mock_permissions({"drive_by": "read"})
+
+    assert _gateway().list_downvoted_fingerprints() == set()
+
+
+@respx.mock
+def test_list_downvoted_ignores_non_collaborator_reactor() -> None:
+    """A 👎 from a non-collaborator (permission lookup 404s) is ignored — fails closed."""
+    fp = finding_fingerprint("src/app.py", "Import order")
+    graphql = _GraphQL(
+        threads=[_reaction_thread(f"x <!-- lgtmaybe-finding:{fp} -->", reactors=["stranger"])]
+    )
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    _mock_permissions({"stranger": None})
+
+    assert _gateway().list_downvoted_fingerprints() == set()

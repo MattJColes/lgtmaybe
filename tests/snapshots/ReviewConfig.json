@@ -469,6 +469,11 @@
       "default": null,
       "title": "Incremental"
     },
+    "learn_feedback": {
+      "default": true,
+      "title": "Learn Feedback",
+      "type": "boolean"
+    },
     "max_concurrency": {
       "anyOf": [
         {

@@ -244,6 +244,35 @@ def build_adapters(
     return github, engine
 
 
+def _apply_learned_feedback(github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig) -> PRContext:
+    """Attach 👎-downvoted finding fingerprints to ``ctx.feedback_downvotes``.
+
+    A human with write access reacting thumbs-down to one of our inline finding
+    comments is a signal to stop surfacing that finding on this PR. We re-read
+    those reactions from GitHub each run (no new persistence). The engine's
+    suppression pass then drops the matching findings — except high/critical
+    security findings, which a downvote can never hide (see ``suppress.py``).
+
+    Best-effort: disabled by ``learn_feedback=False``, a no-op on a gateway
+    without the adapter method (fakes, the frozen port), and any error is
+    swallowed so a feedback-read hiccup can never fail the review.
+    """
+    if not cfg.learn_feedback:
+        return ctx
+    list_downvoted = getattr(github, "list_downvoted_fingerprints", None)
+    if list_downvoted is None:
+        return ctx
+    try:
+        downvoted = list_downvoted()
+    except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
+        _log.warning("reading downvoted findings failed: %s", exc)
+        return ctx
+    if not downvoted:
+        return ctx
+    _log.info("suppressing downvoted findings from feedback", extra={"count": len(downvoted)})
+    return ctx.model_copy(update={"feedback_downvotes": frozenset(downvoted)})
+
+
 def run_review(
     *,
     github: GitHubGateway,
@@ -266,6 +295,7 @@ def run_review(
     if ctx is None:
         ctx = github.get_pr_context()
     review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
+    review_ctx = _apply_learned_feedback(github, review_ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
     if incremental_since is not None:
@@ -600,6 +630,7 @@ def action_inputs() -> dict[str, str | None]:
         "auto_describe": get("AUTO_DESCRIBE"),
         "auto_diagram": get("AUTO_DIAGRAM"),
         "pr_labels": get("PR_LABELS"),
+        "learn_feedback": get("LEARN_FEEDBACK"),
         "profile": get("PROFILE"),
         "config_path": get("CONFIG_PATH"),
     }

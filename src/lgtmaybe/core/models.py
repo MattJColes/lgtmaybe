@@ -446,6 +446,11 @@ class PRContext(_Strict):
     title: str = ""
     description: str = ""
     commit_messages: list[str] = Field(default_factory=list)
+    # Fingerprints of our own findings an authorised reviewer reacted 👎 to on a
+    # previous run (read from GitHub each run — no local persistence). Suppression
+    # drops matching findings, except high/critical security findings, which a
+    # downvote can never hide. Populated by the CLI, empty by default.
+    feedback_downvotes: frozenset[str] = frozenset()
 
 
 class ReviewConfig(_Strict):
@@ -565,6 +570,13 @@ class ReviewConfig(_Strict):
     # reflection and posting. Set it in .lgtmaybe.yml; an inline `# lgtmaybe: ignore`
     # comment on (or just above) a flagged line suppresses that finding too.
     ignore_fingerprints: list[str] = Field(default_factory=list)
+    # Feedback learning (GitHub posting only): on a re-run, suppress a finding a
+    # human reacted 👎 (thumbs-down) to on its inline comment last time. The 👎
+    # reactions live on GitHub and are re-read each run (no new persistence); a
+    # downvoted finding's fingerprint is merged into ignore_fingerprints and
+    # dropped before reflection and posting. Resolving a thread is NOT a suppress
+    # signal — that means "fixed" and is handled by resolve-on-fix. Default on.
+    learn_feedback: bool = True
     # Static-analysis fusion: run installed deterministic linters (ruff,
     # bandit, semgrep-with-local-rules) over the changed files and feed their
     # findings into the lens prompts as untrusted hints to confirm or discard.

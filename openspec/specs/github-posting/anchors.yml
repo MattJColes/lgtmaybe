@@ -48,6 +48,12 @@ github.resolve-fixed:
     has: { field: name, regex: '^_resolve_fixed_threads$' }
   files: [src/lgtmaybe/github/**/*.py]
 
+github.feedback:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^list_downvoted_fingerprints$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
 github.reviewable:
   rule:
     kind: function_definition

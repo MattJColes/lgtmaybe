@@ -189,6 +189,10 @@ class RestGitHubGateway(GitHubGateway):
             f"<!-- lgtmaybe-diagram:{marker_key} -->" if marker_key else "<!-- lgtmaybe-diagram -->"
         )
         self._resolve_fixed = resolve_fixed
+        # Per-run cache of "does this login have write+ access?" — feedback
+        # learning only trusts a 👎 from someone who can push, and a PR's
+        # downvoters repeat across threads.
+        self._perm_cache: dict[str, bool] = {}
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
         # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
         self._head_sha: str | None = None
@@ -840,6 +844,108 @@ class RestGitHubGateway(GitHubGateway):
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             _log.warning("rewriting resolved-finding marker failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Feedback learning (adapter-only, beyond the frozen port): read the 👎
+    # reactions on our finding comments so a later run can suppress them.
+    # ------------------------------------------------------------------
+
+    def list_downvoted_fingerprints(self) -> set[str]:
+        """Fingerprints of our findings an authorised reviewer reacted 👎 to.
+
+        A 👎 from a user with write access on one of our inline finding comments
+        is a signal to stop surfacing that finding — the next run suppresses it.
+        Reads, per review thread, the first comment's body and the *users* who
+        left a ``THUMBS_DOWN`` reaction: a thread whose opening comment carries
+        one of our hidden finding markers AND was downvoted by at least one
+        write-access user contributes its fingerprint. On a public repo anyone
+        can react, so an unprivileged 👎 is ignored (see ``_has_repo_write``).
+
+        The 👎 reaction is the ONLY learning signal — a resolved thread already
+        means "fixed" (handled by resolve-on-fix), never a suppress. Reads only
+        reactions and our own markers; PR content is never executed. High and
+        critical security findings are never suppressed this way (enforced at
+        suppression time), so a downvote can't hide a serious vulnerability.
+        """
+        query = """
+        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){
+            pullRequest(number:$number){
+              reviewThreads(first:100, after:$cursor){
+                pageInfo{ hasNextPage endCursor }
+                nodes{
+                  comments(first:1){
+                    nodes{
+                      body
+                      reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        owner, _, name = self._repo.partition("/")
+        downvoted: set[str] = set()
+        cursor: str | None = None
+        while True:
+            data = self._graphql(
+                query,
+                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
+            )
+            conn = data["repository"]["pullRequest"]["reviewThreads"]
+            for node in conn["nodes"]:
+                comments = node.get("comments", {}).get("nodes", [])
+                if not comments:
+                    continue
+                first = comments[0]
+                match = _FINDING_MARKER.search(first.get("body", "") or "")
+                if match is None:
+                    continue  # not one of ours
+                reactors = (first.get("reactions") or {}).get("nodes") or []
+                logins: set[str] = set()
+                for reaction in reactors:
+                    user = reaction.get("user") or {}
+                    login = user.get("login")
+                    if login:
+                        logins.add(login)
+                # Only an authorised (write+) reviewer's 👎 counts — on a public
+                # repo anyone can react, and an unprivileged reaction must never
+                # suppress a finding.
+                if any(self._has_repo_write(login) for login in logins):
+                    downvoted.add(match.group(1))
+            page = conn.get("pageInfo", {})
+            if not page.get("hasNextPage"):
+                break
+            cursor = page.get("endCursor")
+        return downvoted
+
+    def _has_repo_write(self, login: str) -> bool:
+        """Whether *login* has write (or higher) access to the repo.
+
+        Feedback learning only trusts a 👎 from someone who can push. Fails
+        closed — any lookup error (including a 404 for a non-collaborator) means
+        "not authorised", so an unverifiable reactor never suppresses a finding.
+        Cached per run since a PR's downvoters repeat across threads.
+        """
+        cached = self._perm_cache.get(login)
+        if cached is not None:
+            return cached
+        allowed = False
+        try:
+            resp = self._client.get(
+                f"https://api.github.com/repos/{self._repo}/collaborators/{login}/permission",
+                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+            # The legacy `permission` field collapses maintain→write, triage→read.
+            allowed = resp.json().get("permission") in {"admin", "write"}
+        except httpx.HTTPError as exc:
+            _log.warning("permission check for %s failed: %s", login, exc)
+        self._perm_cache[login] = allowed
+        return allowed
 
     def _graphql(self, query: str, variables: dict[str, Any]) -> Any:
         """Run one GraphQL operation and return its ``data`` (raising on errors)."""

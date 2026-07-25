@@ -239,6 +239,13 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "(--no-reflect keeps them all; useful for weaker models)",
 )
 @click.option(
+    "--learn-feedback/--no-learn-feedback",
+    default=None,
+    help="On a re-run, suppress a finding a human reacted 👎 to on its inline "
+    "comment last time (GitHub posting only; --no-learn-feedback disables). The "
+    "reactions live on GitHub and are re-read each run — no local state",
+)
+@click.option(
     "--min-confidence",
     default=None,
     type=click.IntRange(0, 10),
@@ -320,6 +327,7 @@ def review(
     max_review_seconds: int | None,
     temperature: float | None,
     reflect: bool | None,
+    learn_feedback: bool | None,
     min_confidence: int | None,
     recursive: bool | None,
     structured_output: bool | None,
@@ -353,6 +361,7 @@ def review(
         max_review_seconds=max_review_seconds,
         temperature=temperature,
         reflect=reflect,
+        learn_feedback=learn_feedback,
         min_confidence=min_confidence,
         recursive=recursive,
         structured_output=structured_output,
@@ -514,6 +523,7 @@ def action() -> None:
         auto_describe=inputs["auto_describe"],
         auto_diagram=inputs["auto_diagram"],
         pr_labels=inputs["pr_labels"],
+        learn_feedback=inputs["learn_feedback"],
     )
     cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
     runtime = RuntimeOptions(
