@@ -27,6 +27,7 @@ def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
     for command in ("--help", "config path", "help review"):
         assert command in runs
     assert "gh release upload" in runs
+    assert runs.count('--repo "$env:GITHUB_REPOSITORY"') == 2
     assert "gh release upload failed with exit code $LASTEXITCODE" in runs
     assert "windows-x86_64.exe" in runs
     assert ".Length" in runs
