@@ -23,6 +23,19 @@ credentials remain in the repository's workflow.
 - **WHEN** the App is installed and lgtmaybe identity is selected
 - **THEN** review activity can post as `lgtmaybe[bot]` without a repository App key
 
+### Requirement: Self-managed App minting avoids deprecated inputs
+
+The Action SHALL keep its public `app_id` input and pass that value to
+`actions/create-github-app-token` through the supported `client-id` key, never
+the deprecated `app-id` key.
+<!-- anchor: github-app.self-managed-mint -->
+
+#### Scenario: Existing self-managed workflow runs
+
+- **WHEN** a repository supplies its existing `app_id` and private key
+- **THEN** the Action mints the App token without an `app-id` deprecation
+  warning or a workflow configuration change
+
 ### Requirement: The broker trusts only the installed repository
 
 The token broker MUST verify GitHub OIDC signature, issuer, audience, time,
