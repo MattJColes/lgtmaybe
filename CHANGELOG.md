@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.2...lgtmaybe-v1.5.3) (2026-07-25)
+
+
+### Bug Fixes
+
+* load broker from flattened Lambda bundle ([#249](https://github.com/MattJColes/lgtmaybe/issues/249)) ([a886683](https://github.com/MattJColes/lgtmaybe/commit/a886683430fc3369499101bbe090ae21dd761ab8))
+
 ## [1.5.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.1...lgtmaybe-v1.5.2) (2026-07-25)
 
 
