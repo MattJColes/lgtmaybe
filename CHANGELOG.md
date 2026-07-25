@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.1...lgtmaybe-v1.5.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* avoid deprecated GitHub App input ([#246](https://github.com/MattJColes/lgtmaybe/issues/246)) ([f97bb01](https://github.com/MattJColes/lgtmaybe/commit/f97bb01d83230717df9da95ce938319983331b84))
+* skip Winget update before initial publication ([#248](https://github.com/MattJColes/lgtmaybe/issues/248)) ([72c59fa](https://github.com/MattJColes/lgtmaybe/commit/72c59fa9b1f47e6a1299428be05f85da5af5af25))
+
 ## [1.5.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.0...lgtmaybe-v1.5.1) (2026-07-25)
 
 
