@@ -37,6 +37,8 @@ It checks for:
 Findings are graded from `info` to `critical` and land on the exact changed
 line. A clean change just gets a 👍 **LGTM!**.
 
+![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
+
 Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
 **`/describe`** writes a structured overview, **`/diagram`** draws a
 [C4-style map of the change](how-to/generate-a-change-diagram.md), and
@@ -306,7 +308,9 @@ bundles all three and wires up the OIDC/WIF auth for you.
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
-GitHub Marketplace copies the Action syntax into your workflow. Provider and
+Install from the
+[GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe) —
+it copies the Action syntax into your workflow. Provider and
 model selection happens in that workflow, not on a separate Marketplace
 settings screen: add a `with:` block containing `provider`, `model`, and the
 matching authentication input. The [minimal OpenAI workflow](#minimal-workflow-openai)
@@ -596,6 +600,16 @@ uses: MattJColes/lgtmaybe@v1.0.0
 <!-- Source: https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/ -->
 
 # Post reviews as a GitHub App
+
+!!! note "This is optional branding on top of the Marketplace action — not a second install"
+    lgtmaybe itself is installed from the
+    [GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe)
+    as an Action in your workflow — see
+    [Use as a GitHub Action](use-as-github-action.md). The GitHub App on this
+    page is **one you create yourself** so reviews post under **your** bot
+    identity; there is no shared lgtmaybe App to install, because lgtmaybe has
+    no hosted backend — a shared App would need its private key distributed,
+    which is exactly what this design avoids.
 
 By default lgtmaybe posts reviews as `github-actions[bot]` using the workflow's
 built-in token. The **recommended setup** is to point it at a **GitHub App** you
@@ -2732,6 +2746,8 @@ lgtmaybe can post a **C4-style diagram of what a pull request changes** — the
 containers and components the PR touches plus their immediate relationships — so
 a reviewer gets a visual overview before they read the diff. It's a separate
 concern from the review and the description: enable any of them independently.
+
+![A /diagram comment posted by lgtmaybe: a C4 diagram of a Stripe webhook change, with the changed Checkout API and new Orders DB and Billing worker components highlighted with green borders](../assets/marketplace/marketplace-screenshot-4.png){ width="720" }
 
 ## Contents
 

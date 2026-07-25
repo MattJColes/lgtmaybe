@@ -9,6 +9,8 @@ containers and components the PR touches plus their immediate relationships — 
 a reviewer gets a visual overview before they read the diff. It's a separate
 concern from the review and the description: enable any of them independently.
 
+![A /diagram comment posted by lgtmaybe: a C4 diagram of a Stripe webhook change, with the changed Checkout API and new Orders DB and Billing worker components highlighted with green borders](../assets/marketplace/marketplace-screenshot-4.png){ width="720" }
+
 ## Contents
 
 - [What you get](#what-you-get)
