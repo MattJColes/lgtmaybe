@@ -29,8 +29,10 @@ variants:
   arch/macOS. `.github/workflows/homebrew.yml` regenerates the formula on each
   release (release-please **calls** it via `workflow_call`, since a `release:
   published` event isn't delivered for a `GITHUB_TOKEN` release), **actually
-  `brew install`s it as a gate** (so a broken formula is never published), then
-  commits to the tap; a daily schedule + `force` dispatch are the safety nets
+  `brew trust`s the tap and `brew install`s it as a gate** (so a broken formula is
+  never published — and the gate covers the trust step users must run, instead of
+  disabling it via `HOMEBREW_NO_REQUIRE_TAP_TRUST`, which upstream is removing),
+  then commits to the tap; a daily schedule + `force` dispatch are the safety nets
 - **Windows CLI** — `winget install MattJColes.lgtmaybe`. Each release builds a
   one-file Python 3.13 executable, smoke-tests the Click command tree, attaches
   it to the GitHub release, then submits `MattJColes.lgtmaybe` to winget. The

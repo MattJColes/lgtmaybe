@@ -48,6 +48,37 @@ def test_homebrew_smoke_test_installs_the_generated_formula() -> None:
     assert 'brew install --formula "local/tap/lgtmaybe"' in run
 
 
+def test_homebrew_smoke_test_trusts_the_tap_like_a_user_does() -> None:
+    """The gate must satisfy the tap-trust requirement, not switch it off.
+
+    Homebrew requires third-party taps to be trusted (`HOMEBREW_REQUIRE_TAP_TRUST`
+    defaults on), and our install docs tell users to run `brew trust`. Disabling the
+    check with `HOMEBREW_NO_REQUIRE_TAP_TRUST` would leave the documented step as the
+    one thing the gate cannot fail on — and that escape hatch is slated for removal
+    upstream, so the gate would break with it.
+    """
+    text, workflow = _workflow("homebrew.yml")
+    step = next(
+        s
+        for s in workflow["jobs"]["formula"]["steps"]
+        if s["name"] == "Smoke-test that the formula installs and runs"
+    )
+    run = step["run"]
+
+    assert "brew trust local/tap" in run
+    # Trusting and then disabling the requirement would prove nothing. Checked as a
+    # real assignment, not a substring — the step's comment names the variable to
+    # explain why it is not used.
+    assert "HOMEBREW_NO_REQUIRE_TAP_TRUST:" not in text
+    assert not any(
+        "HOMEBREW_NO_REQUIRE_TAP_TRUST" in (s.get("env") or {})
+        for s in workflow["jobs"]["formula"]["steps"]
+    )
+    assert "HOMEBREW_NO_REQUIRE_TAP_TRUST" not in (workflow["jobs"]["formula"].get("env") or {})
+    # Trust has to be established before the install that needs it.
+    assert run.index("brew trust local/tap") < run.index("brew install --formula")
+
+
 def test_homebrew_docs_use_the_renamed_tap() -> None:
     readme = (_ROOT / "README.md").read_text(encoding="utf-8")
     guide = (_ROOT / "docs" / "how-to" / "install-the-cli.md").read_text(encoding="utf-8")
