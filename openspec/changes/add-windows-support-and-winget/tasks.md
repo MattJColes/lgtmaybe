@@ -25,7 +25,9 @@
 
 - [x] 4.1 Update the `cli-and-local`, `review-pipeline`, and `provider-gateway` living requirements plus anchor sidecars for UTF-8 boundaries, case-sensitive path filters, Windows static-analysis isolation, and Windows gcloud ADC discovery.
 - [x] 4.2 Run the focused new tests, full pytest suite, ruff check, ruff format check, mypy, living-spec tests, OpenSpec spec validation, and the spec drift check.
-- [ ] 4.3 Confirm both Windows CI legs pass under locale defaults, then prepare PR 1 with a conventional title and no packaging/distribution changes.
+- [x] 4.3 Confirm both Windows CI legs pass under locale defaults, then prepare PR 1 with a conventional title and no packaging/distribution changes.
+  PR #229 passed the Windows 3.11 and 3.13 jobs before the later matrix
+  reduction intentionally moved CI to the minimum supported Python only.
 
 ## 5. PR 2 - Portable executable
 
@@ -48,4 +50,10 @@
 - [x] 7.3 Update `CLAUDE.md` with the Windows distribution variant and CI legs, and add the `windows-distribution` living spec with exact-one-match anchors for its CI, executable, and winget requirements.
 - [x] 7.4 Run packaging and workflow tests, the full local quality gate, living-spec tests, OpenSpec spec validation, and the spec drift check.
 - [ ] 7.5 Dispatch the executable workflow against a current tag and verify the smoke-tested asset; after the first winget manifest is moderated, dispatch the winget workflow and verify its update PR.
-- [ ] 7.6 Prepare PR 2 with a conventional title, measured executable size noted, and no unresolved release-gate failures.
+  The executable half passed in workflow run 30147396617 for v1.4.0 and
+  uploaded a 56.5 MiB asset. The winget half remains blocked on the documented
+  manual first submission and moderation; `MattJColes.lgtmaybe` is not yet in
+  `microsoft/winget-pkgs`.
+- [x] 7.6 Prepare PR 2 with a conventional title, measured executable size noted, and no unresolved release-gate failures.
+  PR #230 delivered the distribution work; the subsequent executable run
+  recorded the measured size and completed every build, smoke, and upload gate.
