@@ -171,12 +171,14 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 - [Review with Vertex WIF](./review-with-vertex-wif.md)
 - [Review with Azure OpenAI](./review-with-azure.md)
 
-## Post reviews as a GitHub App
+## Post reviews as a GitHub App (recommended)
 
-By default reviews post as `github-actions[bot]` using the workflow token. To post
-as **your own branded identity** — e.g. `lgtmaybe[bot]` with an avatar — with
-higher API rate limits (and optional cross-repo reach), pass `app_id` and
-`app_private_key`. The action mints a short-lived installation token, uses it to
+By default reviews post as `github-actions[bot]` using the workflow token. The
+**recommended setup** is to post as **your own branded identity** — e.g.
+`lgtmaybe[bot]` with an avatar — with higher API rate limits (and optional
+cross-repo reach): pass `app_id` and `app_private_key`. It costs a one-time
+five-minute App setup, and reviews are clearly attributed to the reviewer
+rather than blending into every other `github-actions[bot]` comment. The action mints a short-lived installation token, uses it to
 fetch the diff and post the review, and revokes it at the end of the job. This is
 purely the *posting identity* — the keyless cloud model is unchanged and
 everything still runs in your own CI.
