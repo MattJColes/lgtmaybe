@@ -15,7 +15,7 @@ check the comment shows the ASCII alone — a reviewer never sees GitHub's red
 C4 output is post-processed for GitHub's renderer (``_polish_c4``): Mermaid's
 C4 renderer draws relationship lines and labels in a hardcoded near-black that
 disappears on GitHub's dark theme, so every relationship gets an
-``UpdateRelStyle`` in a mid-grey legible on every theme; elements whose label
+``UpdateRelStyle`` in a light green legible on every theme; elements whose label
 carries the ``(new)``/``(changed)`` marker get an ``UpdateElementStyle`` green
 border so the PR's footprint stands out at a glance; and its default layout
 packs four fixed-width cards per row, which overlap once labels grow, so an
@@ -126,10 +126,12 @@ _CHANGED_MARKER = re.compile(r"\((?:new|changed)\)")
 _ELEMENT_COLOR = "#54d090"
 
 # Mermaid's C4 renderer hardcodes near-black relationship lines and labels
-# regardless of theme, so they vanish on GitHub's dark background. #808080
-# maximises the minimum contrast across GitHub's themes: ~4:1 on light
-# (#ffffff) and dark-dimmed (#22272e), ~4.8:1 on dark (#0d1117).
-_REL_COLOR = "#808080"
+# regardless of theme, so they vanish on GitHub's dark background. A light
+# brand-green ties the connectors to the green element borders; #34a862 is the
+# lightest green that still clears the 3:1 graphics-contrast bar on every
+# GitHub theme (3.0:1 on light #ffffff, 6.2:1 on dark #0d1117, 5.0:1 on
+# dark-dimmed #22272e) — the brand's #54d090 itself drops to 1.9:1 on light.
+_REL_COLOR = "#34a862"
 
 # The C4 renderer's default grid packs 4 fixed-width shapes per row (with
 # boundaries side by side), so cards and relationship labels overlap once
@@ -140,7 +142,7 @@ _LAYOUT = 'UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")'
 def _polish_c4(mermaid: str) -> str:
     """Post-process a C4 diagram so it stays legible on GitHub.
 
-    Appends an ``UpdateRelStyle`` per relationship (dark-mode-safe grey), an
+    Appends an ``UpdateRelStyle`` per relationship (theme-safe light green), an
     ``UpdateElementStyle`` green border per element whose label carries the
     ``(new)``/``(changed)`` marker (so the PR's footprint stands out), and an
     overlap-loosening ``UpdateLayoutConfig``. Best-effort and additive: pairs
