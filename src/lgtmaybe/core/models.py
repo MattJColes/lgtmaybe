@@ -509,9 +509,9 @@ class ReviewConfig(_Strict):
     # languages or any ast-grep failure. Off = fixed-line padding only.
     function_context: bool = True
     # Per-request timeout (seconds) for each provider completion call. None means
-    # "auto": the factory picks a provider-aware default (ollama gets a long one,
-    # since local models are slow; cloud providers a short one). An explicit value
-    # always wins.
+    # "auto": the factory picks a provider-aware default (long for providers that
+    # may front a slow model — ollama, openai-compatible, openrouter — short for
+    # direct cloud providers). An explicit value always wins.
     timeout: int | None = None
     # Sampling temperature for completions. Defaults to 0.0 for deterministic,
     # reproducible reviews (and steadier instruction-following on small models).
@@ -565,8 +565,9 @@ class ReviewConfig(_Strict):
     # a Mermaid C4 diagram of the components the PR touches (with an ASCII
     # fallback), rendered natively in the comment — when a PR is opened or
     # reopened. Its own comment, updated in place on later /diagram runs.
-    # Best-effort; a diagram failure never blocks the review. Default off.
-    auto_diagram: bool = False
+    # Best-effort; a diagram failure never blocks the review. Default on —
+    # no yaml needed; set false to opt out.
+    auto_diagram: bool = True
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the
@@ -641,9 +642,10 @@ class ReviewConfig(_Strict):
     # findings post, and the summary carries the existing "results may be
     # incomplete" notice naming the skipped calls. It can never turn a total
     # failure into a silent LGTM — a run where every call failed or was
-    # skipped still fails loud. Generous by default (10 minutes); 0 disables
-    # the ceiling entirely.
-    max_review_seconds: int = Field(default=600, ge=0)
+    # skipped still fails loud. Generous by default (30 minutes — 2× the
+    # generous per-call timeout, so one slow gateway/local call can't eat the
+    # whole review budget); 0 disables the ceiling entirely.
+    max_review_seconds: int = Field(default=1800, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
     # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
     # providers (their retry layer absorbs a capacity 429, and on bedrock cache

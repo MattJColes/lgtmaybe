@@ -318,9 +318,9 @@ below shows the complete shape.
 
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
-They enable `auto_diagram`, so newly opened or reopened pull requests receive
-a C4-style change diagram automatically. Remove that input or set it to `false`
-if you do not want the extra model call.
+`auto_diagram` is on by default, so newly opened or reopened pull requests
+receive a C4-style change diagram automatically. Set it to `false` if you do
+not want the extra model call.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -511,7 +511,7 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
-| `timeout` | provider default (ollama/openai-compatible 300s, cloud 60s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `timeout` | provider default (ollama/openai-compatible/openrouter 900s, cloud 60s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
 | `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
 | `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
@@ -521,14 +521,14 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `preset` | `fast` | `fast` uses four calls when parallelism is available, three with one worker; `full` restores tests/documentation and runs one call per lens |
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
-| `max_review_seconds` | `600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
+| `max_review_seconds` | `1800` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
 | `max_concurrency` | auto (8 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix on providers with an explicit cache breakpoint (anthropic, bedrock Claude/Nova); safe no-op elsewhere |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `false` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review |
+| `auto_diagram` | `true` | Post a C4-style Mermaid change diagram comment when a PR is opened/reopened, before the review; set `false` to opt out |
 | `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
@@ -1740,16 +1740,16 @@ branch locally before opening a PR. See
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
-long default per-request timeout (300 seconds)** automatically — you don't need
-to set anything for a normal run. (Cloud providers default to 60 s.)
+long default per-request timeout (900 seconds)** automatically — you don't need
+to set anything for a normal run. (Direct cloud providers default to 60 s.)
 
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 300.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 900.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
 lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 900
+  --api-base http://localhost:11434 --timeout 1800
 ```
 
 ```yaml
@@ -1903,7 +1903,7 @@ The API key, when you do supply one, is read from the environment or `--api-key`
 and is **never persisted** to config.
 
 Because the endpoint might be a slow local model, `openai-compatible` defaults to
-the same generous **300s** per-call timeout as ollama. For a fast hosted endpoint
+the same generous **900s** per-call timeout as ollama. For a fast hosted endpoint
 like DeepSeek you can dial it down with `--timeout` (or `timeout:` in config).
 
 ## DeepSeek (hosted, keyed)
@@ -2247,14 +2247,16 @@ Default: `true`.
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
-**provider-aware default**: **300 s for ollama and openai-compatible** (local
-models are slow) and 60 s for cloud providers. Set it explicitly to raise it for a large local model.
+**provider-aware default**: **900 s for ollama, openai-compatible, and
+openrouter** (local models are slow, and openrouter can route to slow reasoning
+models) and 60 s for direct cloud providers. Set it explicitly to raise it for a
+large local model.
 
 ```yaml
-timeout: 900   # 15 minutes per call, e.g. for a big model on CPU
+timeout: 1800   # 30 minutes per call, e.g. for a big model on CPU
 ```
 
-Default: auto (ollama/openai-compatible 300 s, cloud 60 s). See
+Default: auto (ollama/openai-compatible/openrouter 900 s, cloud 60 s). See
 [Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
 
 ### structured_output
@@ -2818,30 +2820,27 @@ Comment **`/diagram`** on a pull request to post (or update in place) the change
 diagram. Like `/describe`, it's an idempotent upsert — re-running edits the same
 comment instead of stacking new ones.
 
-The supplied starter workflows set `auto_diagram: true`, so new repositories
-post one automatically when a PR is opened or reopened. The underlying Action
-input remains off by default for backwards compatibility, and it never fires
-on a `synchronize` push. To enable it in an existing workflow:
+`auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
+needed — so a diagram posts automatically when a PR is opened or reopened. It
+never fires on a `synchronize` push. To opt out, set it in your workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v1
         with:
           provider: anthropic
           model: claude-sonnet-4-6
-          auto_diagram: "true"
+          auto_diagram: "false"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-You can also set it in `.lgtmaybe.yml`:
+or in `.lgtmaybe.yml`:
 
 ```yaml
-auto_diagram: true
+auto_diagram: false
 ```
 
 The diagram is best-effort — a failure is logged and never blocks the review.
-To opt out of the starter-workflow default, remove `auto_diagram` or set it to
-`false`.
 
 ## Locally: `lgtmaybe diagram`
 
@@ -3079,7 +3078,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `answer_replies` | boolean | No | `True` | Answer Replies |
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
-| `auto_diagram` | boolean | No | `False` | Auto Diagram |
+| `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -3095,7 +3094,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `max_review_seconds` | integer | No | `600` | Max Review Seconds |
+| `max_review_seconds` | integer | No | `1800` | Max Review Seconds |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
@@ -3597,7 +3596,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "boolean"
     },
     "auto_diagram": {
-      "default": false,
+      "default": true,
       "title": "Auto Diagram",
       "type": "boolean"
     },
@@ -3728,7 +3727,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 600,
+      "default": 1800,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"
@@ -4416,7 +4415,7 @@ configurable in `.lgtmaybe.yml` (see
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
-| `max_review_seconds` | 600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
+| `max_review_seconds` | 1800 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
 | `categories` | all nine | Which review lenses to run; an explicit list overrides the preset grouping and runs those lenses one call each. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
 | `min_severity` | `low` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
@@ -4733,14 +4732,16 @@ network recovers but a dead-end failure surfaces fast:
   — lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 60s for hosted providers, 300s for local ones (ollama,
-  openai-compatible), overridable via `timeout` / `--timeout`. All attempts for
+  timeout: 60s for direct cloud providers, 900s for the ones that may front a
+  slow model — ollama and openai-compatible (local servers) and openrouter (a
+  gateway to arbitrary models, including slow reasoning ones) — overridable via
+  `timeout` / `--timeout`. All attempts for
   one call additionally share a wall-clock budget of **2.5× that timeout**, so
   a flaky model can't burn four full timeouts plus backoff per lens. The
   posting workflows additionally set a job-level `timeout-minutes` so a wedged
   run can't hold a runner for GitHub's six-hour default.
 
-- **A whole-review deadline.** `max_review_seconds` (default 600, `0` disables)
+- **A whole-review deadline.** `max_review_seconds` (default 1800, `0` disables)
   is a soft ceiling on the run: once it passes, queued model calls are skipped
   — in-flight ones finish and their findings post — and the summary carries an
   explicit incomplete-results notice. It can never produce a silent LGTM: a

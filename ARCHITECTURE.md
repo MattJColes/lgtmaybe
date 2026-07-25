@@ -240,7 +240,7 @@ run; generated/binary files are skipped automatically.
 
 **Reliability** — provider retries with fallback (all attempts for one call
 share a 2.5×-timeout budget), provider-aware timeouts, a soft whole-review
-deadline (`max_review_seconds`, default 600s) that degrades an overrunning run
+deadline (`max_review_seconds`, default 1800s) that degrades an overrunning run
 to partial results with an explicit notice, a self-reflection pass to cut
 false positives (toggle with `--no-reflect`; its verdicts carry a 0–10
 confidence score, filtered by `min_confidence`), and loud failure surfacing (a

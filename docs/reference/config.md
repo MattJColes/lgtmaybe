@@ -19,7 +19,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `answer_replies` | boolean | No | `True` | Answer Replies |
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
-| `auto_diagram` | boolean | No | `False` | Auto Diagram |
+| `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -35,7 +35,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `max_review_seconds` | integer | No | `600` | Max Review Seconds |
+| `max_review_seconds` | integer | No | `1800` | Max Review Seconds |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
@@ -537,7 +537,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "boolean"
     },
     "auto_diagram": {
-      "default": false,
+      "default": true,
       "title": "Auto Diagram",
       "type": "boolean"
     },
@@ -668,7 +668,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 600,
+      "default": 1800,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"

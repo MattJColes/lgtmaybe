@@ -183,16 +183,16 @@ branch locally before opening a PR. See
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
-long default per-request timeout (300 seconds)** automatically — you don't need
-to set anything for a normal run. (Cloud providers default to 60 s.)
+long default per-request timeout (900 seconds)** automatically — you don't need
+to set anything for a normal run. (Direct cloud providers default to 60 s.)
 
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 300.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 900.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
 lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 900
+  --api-base http://localhost:11434 --timeout 1800
 ```
 
 ```yaml

@@ -51,11 +51,17 @@ the preamble-plus-diff from cache. Cache read/creation token counts land on
 
 ### Requirement: Defaults are provider-aware
 
-Timeouts SHALL default long for local providers (ollama/openai-compatible)
-and short for cloud; the litellm model string is derived per provider so users
-give bare model ids.
+Timeouts SHALL default long for providers that may front a slow model —
+local-capable ones (ollama/openai-compatible) and openrouter, a gateway to
+arbitrary models including slow reasoning ones — and short for direct cloud
+providers; the litellm model string is derived per provider so users give bare
+model ids.
 <!-- anchor: provider.defaults -->
 
 #### Scenario: no timeout configured
 - **WHEN** `timeout` is unset and the provider is ollama
-- **THEN** the local (long) default applies, not the cloud one
+- **THEN** the generous (long) default applies, not the cloud one
+
+#### Scenario: openrouter gets the generous default
+- **WHEN** `timeout` is unset and the provider is openrouter
+- **THEN** the generous (long) default applies, not the cloud one
