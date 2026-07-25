@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.0...lgtmaybe-v1.5.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* pass GitHub identity timeout by keyword ([#243](https://github.com/MattJColes/lgtmaybe/issues/243)) ([6d9beea](https://github.com/MattJColes/lgtmaybe/commit/6d9beea88fea3bd13428edae70059b757252f477))
+
 ## [1.5.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.4.1...lgtmaybe-v1.5.0) (2026-07-25)
 
 
