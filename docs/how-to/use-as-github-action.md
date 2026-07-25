@@ -7,13 +7,13 @@ description: Add lgtmaybe as a GitHub Action to review every pull request automa
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
-Install from the
-[GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe) —
-it copies the Action syntax into your workflow. Provider and
-model selection happens in that workflow, not on a separate Marketplace
-settings screen: add a `with:` block containing `provider`, `model`, and the
-matching authentication input. The [minimal OpenAI workflow](#minimal-workflow-openai)
-below shows the complete shape.
+Use lgtmaybe from the
+[GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe).
+It is a **GitHub Action**, not a hosted GitHub App. Its provider, model, and
+authentication settings live in the workflow's `with:` block. GitHub Actions
+supplies the repository token, so there is no separate App to install. The
+[minimal OpenAI workflow](#minimal-workflow-openai) below shows the complete
+shape.
 
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
@@ -30,7 +30,6 @@ ollama runs the model on your own machine, so it is local-only — use the
 - [Minimal workflow — openai](#minimal-workflow-openai)
 - [Other key-based providers](#other-key-based-providers)
 - [Keyless cloud workflows](#keyless-cloud-workflows)
-- [Post reviews as a GitHub App](#post-reviews-as-a-github-app)
 - [Action inputs](#action-inputs)
 - [Adding a config file](#adding-a-config-file)
 - [Pin to a specific version](#pin-to-a-specific-version)
@@ -173,34 +172,6 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 - [Review with Vertex WIF](./review-with-vertex-wif.md)
 - [Review with Azure OpenAI](./review-with-azure.md)
 
-## Post reviews as a GitHub App (recommended)
-
-By default reviews post as `github-actions[bot]` using the workflow token. The
-**recommended setup** is to post as **your own branded identity** — e.g.
-`lgtmaybe[bot]` with an avatar — with higher API rate limits (and optional
-cross-repo reach): pass `app_id` and `app_private_key`. It costs a one-time
-five-minute App setup, and reviews are clearly attributed to the reviewer
-rather than blending into every other `github-actions[bot]` comment. The action mints a short-lived installation token, uses it to
-fetch the diff and post the review, and revokes it at the end of the job. This is
-purely the *posting identity* — the keyless cloud model is unchanged and
-everything still runs in your own CI.
-
-```yaml
-- uses: MattJColes/lgtmaybe@v1
-  with:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-    app_id: ${{ vars.LGTMAYBE_APP_ID }}
-    app_private_key: ${{ secrets.LGTMAYBE_APP_PRIVATE_KEY }}
-```
-
-The App's own installation permissions (`pull requests: write`, `contents: read`)
-govern what the review can post — but keep the workflow `permissions:` block for
-the `actions/checkout` of your `.lgtmaybe.yml`. The one-time setup (create the
-App, grant those permissions, install it, and store the ID and key) is in
-[Post reviews as a GitHub App](./post-as-a-github-app.md).
-
 ## Action inputs
 
 | Input | Default | Description |
@@ -240,8 +211,8 @@ App, grant those permissions, install it, and store the ID and key) is in
 | `azure_tenant_id` | — | Entra (Azure AD) tenant ID for keyless azure |
 | `config_path` | `.lgtmaybe.yml` | Path to the config file, relative to repo root |
 | `github_token` | `${{ github.token }}` | Token for reading the PR and posting the review |
-| `app_id` | — | GitHub App ID — post as a branded App identity (with `app_private_key`) instead of `github-actions[bot]`, with higher rate limits. [Setup](./post-as-a-github-app.md) |
-| `app_private_key` | — | Private key (PEM) of the App named by `app_id`; wire a secret to it. Mints a short-lived, auto-revoked installation token |
+| `app_id` | — | Advanced: ID of an existing GitHub App used with `app_private_key`; most users should leave this empty |
+| `app_private_key` | — | Advanced: private key of the existing App named by `app_id`; most users should leave this empty |
 | `app_owner` | — | Owner for a cross-repo App token (defaults to the current repo's owner) |
 | `app_repositories` | — | Repositories the App token may access, newline/comma-separated (defaults to the current repo); use with `app_owner` |
 | `image` | `ghcr.io/mattjcoles/lgtmaybe:v1` | Override the container image (advanced) |

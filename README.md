@@ -208,11 +208,12 @@ are published at the docs root.
 
 ## Use as a GitHub Action
 
-Install from the [GitHub Marketplace](https://github.com/marketplace/actions/lgtmaybe):
-it copies the Action syntax into a workflow; it does not choose
-an LLM service or model for you. In `.github/workflows/lgtmaybe.yml`, set
-`provider`, `model`, and the matching authentication input in the step's `with:`
-block. This complete example uses OpenAI:
+Use lgtmaybe from the
+[GitHub Marketplace](https://github.com/marketplace/actions/lgtmaybe). It is a
+GitHub Action, so its settings live in your workflow. In
+`.github/workflows/lgtmaybe.yml`, set `provider`, `model`, and the matching
+authentication input in the step's `with:` block. This complete example uses
+OpenAI:
 
 ```yaml
 name: lgtmaybe
