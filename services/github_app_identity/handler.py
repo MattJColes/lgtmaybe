@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import boto3
 from aws_lambda_powertools import Logger
-from services.github_app_identity.broker import (
-    BrokerError,
-    HttpGitHubAppClient,
-    IdentityBroker,
-    PyJwtOidcVerifier,
-)
+
+if TYPE_CHECKING or __package__:
+    from .broker import BrokerError, HttpGitHubAppClient, IdentityBroker, PyJwtOidcVerifier
+else:
+    # PythonFunction flattens this service into the Lambda deployment root.
+    from broker import BrokerError, HttpGitHubAppClient, IdentityBroker, PyJwtOidcVerifier
 
 logger = Logger(service="github-app-identity")
 _broker: IdentityBroker | None = None
