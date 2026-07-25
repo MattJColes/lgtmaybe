@@ -31,6 +31,8 @@ It checks for:
 Findings are graded from `info` to `critical` and land on the exact changed
 line. A clean change just gets a 👍 **LGTM!**.
 
+![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
+
 Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
 **`/describe`** writes a structured overview, **`/diagram`** draws a
 [C4-style map of the change](how-to/generate-a-change-diagram.md), and

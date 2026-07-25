@@ -4,6 +4,16 @@ description: Post lgtmaybe reviews under your own branded GitHub App identity (l
 
 # Post reviews as a GitHub App
 
+!!! note "This is optional branding on top of the Marketplace action — not a second install"
+    lgtmaybe itself is installed from the
+    [GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe)
+    as an Action in your workflow — see
+    [Use as a GitHub Action](use-as-github-action.md). The GitHub App on this
+    page is **one you create yourself** so reviews post under **your** bot
+    identity; there is no shared lgtmaybe App to install, because lgtmaybe has
+    no hosted backend — a shared App would need its private key distributed,
+    which is exactly what this design avoids.
+
 By default lgtmaybe posts reviews as `github-actions[bot]` using the workflow's
 built-in token. The **recommended setup** is to point it at a **GitHub App** you
 own so reviews post under that App's identity instead — a branded
