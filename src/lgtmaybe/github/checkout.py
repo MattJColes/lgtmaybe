@@ -15,7 +15,9 @@ from __future__ import annotations
 import atexit
 import base64
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -32,6 +34,42 @@ _CLONE_TIMEOUT = 120
 # Injected so tests don't shell out to real git. Mirrors subprocess.run's surface
 # for the args we pass.
 Runner = Callable[..., Any]
+
+
+def _rmtree_force(path: Path) -> None:
+    """Remove a tree, making Windows read-only entries writable when needed."""
+    root = path.resolve()
+
+    def retry(function: Callable[..., Any], failed_path: str, _error: Any) -> None:
+        target = Path(failed_path)
+        candidates = [target]
+        try:
+            target.parent.resolve().relative_to(root)
+        except ValueError:
+            pass
+        else:
+            candidates.append(target.parent)
+        for candidate in candidates:
+            try:
+                candidate.chmod(candidate.stat().st_mode | stat.S_IWRITE | stat.S_IEXEC)
+            except OSError:
+                pass
+        function(failed_path)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
+def _cleanup_base_tree(path: Path) -> None:
+    try:
+        _rmtree_force(path)
+    except OSError as exc:
+        _log.warning(
+            "could not remove temporary base tree",
+            extra={"path": str(path), "error": str(exc)},
+        )
 
 
 def clone_base_tree(
@@ -81,8 +119,8 @@ def clone_base_tree(
             check=True,
         )
     except (OSError, subprocess.SubprocessError):
-        shutil.rmtree(dest, ignore_errors=True)
+        _cleanup_base_tree(dest)
         return None
-    atexit.register(shutil.rmtree, dest, ignore_errors=True)
+    atexit.register(_cleanup_base_tree, dest)
     _log.info("cloned base tree for symbol resolution", extra={"repo": repo, "ref": ref})
     return dest

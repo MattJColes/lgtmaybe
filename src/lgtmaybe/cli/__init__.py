@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections import Counter
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -784,9 +786,19 @@ Docs: https://lgtmaybe.coles.codes/
 """
 
 
+def _utf8_stdio() -> None:
+    """Keep redirected Windows output safe for summaries containing Unicode."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            with suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 @click.group(epilog=_EPILOG)
 def main() -> None:
     """lgtmaybe — provider-agnostic PR reviewer."""
+    _utf8_stdio()
 
 
 @main.group(name="config")

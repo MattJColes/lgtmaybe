@@ -14,10 +14,11 @@ from pathlib import Path
 import pytest
 
 from lgtmaybe.engine.astgrep import (
-    _rule_yaml as rule_yaml,
+    _parse_paths,
+    build_symbol_resolver,
 )
 from lgtmaybe.engine.astgrep import (
-    build_symbol_resolver,
+    _rule_yaml as rule_yaml,
 )
 
 _HAVE_BINARY = "ast-grep"  # any non-None string stands in for "binary present"
@@ -70,6 +71,12 @@ def test_resolver_parses_and_dedupes_paths(tmp_path: Path) -> None:
     assert resolve is not None
     # Returned as a repo-relative path, de-duplicated across the match array.
     assert resolve("already_applied") == ["ledger.py"]
+
+
+def test_parse_paths_emits_posix_separators(tmp_path: Path) -> None:
+    output = json.dumps([{"file": str(tmp_path / "src" / "app.py")}])
+
+    assert _parse_paths(output, tmp_path.resolve()) == ["src/app.py"]
 
 
 def test_resolver_uses_last_dotted_segment(tmp_path: Path) -> None:

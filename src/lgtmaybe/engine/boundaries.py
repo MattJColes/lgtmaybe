@@ -73,9 +73,9 @@ def definition_starts(
     kinds_flow = ", ".join(f"{{kind: {k}}}" for k in kinds)
     rule = f"id: lgtmaybe-boundaries\nlanguage: {language}\nrule: {{any: [{kinds_flow}]}}\n"
     run = runner if runner is not None else _default_runner
-    with tempfile.TemporaryDirectory(prefix="lgtmaybe-bounds-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="lgtmaybe-bounds-", ignore_cleanup_errors=True) as tmp:
         target = Path(tmp) / f"file{Path(path).suffix.lower()}"
-        target.write_text(text)
+        target.write_text(text, encoding="utf-8")
         stdout = run(binary, rule, target)
     return _parse_starts(stdout)
 

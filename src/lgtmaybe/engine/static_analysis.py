@@ -11,9 +11,9 @@ Sandboxing posture:
 
 - tools are external binaries discovered on PATH — a missing tool is skipped
   silently, so a minimal install degrades to no hints;
-- subprocesses get a **scrubbed environment** (only PATH; no proxy vars or
-  cloud credentials to phone home with; HOME pinned inside the sandbox so
-  user-level tool config can't leak in) and a hard timeout;
+- subprocesses get a **scrubbed environment** (PATH plus process-critical
+  Windows variables when applicable; no proxy vars or cloud credentials;
+  user profile/config roots pinned inside the sandbox) and a hard timeout;
 - semgrep runs only with locally configured rules — its registry configs
   (``--config auto``) fetch over the network, which is forbidden here;
 - tool output is untrusted text: the engine redacts it and wraps it in a
@@ -36,6 +36,7 @@ from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ReviewConfig, Severity, StaticAnalysisTool
 
 _log = get_logger(__name__)
+_WINDOWS = os.name == "nt"
 
 # Hard per-tool wall-clock cap: a hung linter must never hang the review.
 _TOOL_TIMEOUT = 60
@@ -83,7 +84,7 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         return []
 
     findings: list[ToolFinding] = []
-    with tempfile.TemporaryDirectory(prefix="lgtmaybe-sa-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="lgtmaybe-sa-", ignore_cleanup_errors=True) as tmp:
         root = Path(tmp)
         written = _write_corpus(root, file_contents)
         if not written:
@@ -131,12 +132,12 @@ def _write_corpus(root: Path, file_contents: dict[str, str]) -> list[str]:
     written: list[str] = []
     for path, text in file_contents.items():
         rel = Path(path)
-        if rel.is_absolute() or ".." in rel.parts:
+        if rel.anchor or ".." in rel.parts:
             _log.warning("skipping unsafe static-analysis path", extra={"path": path})
             continue
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
+        target.write_text(text, encoding="utf-8")
         written.append(path)
     return written
 
@@ -178,6 +179,8 @@ def _run_tool(tool: StaticAnalysisTool, root: Path, cfg: ReviewConfig) -> list[T
             env=_scrubbed_env(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_TOOL_TIMEOUT,
         )
         return _parse_output(tool, result.stdout, root)
@@ -192,17 +195,36 @@ def _run_tool(tool: StaticAnalysisTool, root: Path, cfg: ReviewConfig) -> list[T
 def _scrubbed_env(root: Path) -> dict[str, str]:
     """A minimal subprocess environment: nothing to phone home with.
 
-    Only PATH survives from the parent (to find the binary's own deps); proxy
-    variables, cloud credentials, and tokens are all dropped, and HOME is
-    pinned inside the sandbox so user-level tool config can't alter behaviour.
+    POSIX retains only PATH. Windows also needs a small set of process-critical
+    system variables; user profile/config roots stay pinned inside the sandbox.
+    Proxy variables, cloud credentials, and tokens are always dropped.
     """
-    return {
+    env = {
         "PATH": os.environ.get("PATH", ""),
         "HOME": str(root),
         "NO_COLOR": "1",
         # Belt and braces for semgrep even with --metrics=off.
         "SEMGREP_SEND_METRICS": "off",
     }
+    if not _WINDOWS:
+        return env
+
+    system_vars = {
+        "SystemRoot": os.environ.get("SystemRoot", os.environ.get("SYSTEMROOT")),
+        "COMSPEC": os.environ.get("COMSPEC"),
+        "PATHEXT": os.environ.get("PATHEXT"),
+        "TEMP": os.environ.get("TEMP"),
+        "TMP": os.environ.get("TMP"),
+    }
+    env.update({key: value for key, value in system_vars.items() if value is not None})
+    env.update(
+        {
+            "USERPROFILE": str(root),
+            "APPDATA": str(root),
+            "LOCALAPPDATA": str(root),
+        }
+    )
+    return env
 
 
 def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[ToolFinding]:
@@ -214,20 +236,21 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
     return [_semgrep_finding(item) for item in data.get("results", [])]
 
 
-def _relativise(path: str, root: Path) -> str:
-    """Map a tool-reported path back to the repo-relative form."""
+def _posix_rel(path: str, root: Path | None = None) -> str:
+    """Map a tool-reported path into the canonical repository path form."""
     p = Path(path)
-    try:
-        return str(p.relative_to(root))
-    except ValueError:
-        # Already relative (bandit reports ./src/x.py; semgrep src/x.py).
-        return str(p).removeprefix("./")
+    if root is not None:
+        try:
+            p = p.relative_to(root)
+        except ValueError:
+            pass
+    return p.as_posix().replace("\\", "/").removeprefix("./")
 
 
 def _ruff_finding(item: dict[str, Any], root: Path) -> ToolFinding:
     return ToolFinding(
         tool="ruff",
-        path=_relativise(str(item.get("filename", "")), root),
+        path=_posix_rel(str(item.get("filename", "")), root),
         line=int(item.get("location", {}).get("row", 1)),
         rule=str(item.get("code") or ""),
         message=str(item.get("message", "")),
@@ -239,7 +262,7 @@ def _ruff_finding(item: dict[str, Any], root: Path) -> ToolFinding:
 def _bandit_finding(item: dict[str, Any]) -> ToolFinding:
     return ToolFinding(
         tool="bandit",
-        path=str(item.get("filename", "")).removeprefix("./"),
+        path=_posix_rel(str(item.get("filename", ""))),
         line=int(item.get("line_number", 1)),
         rule=str(item.get("test_id", "")),
         message=str(item.get("issue_text", "")),
@@ -251,7 +274,7 @@ def _semgrep_finding(item: dict[str, Any]) -> ToolFinding:
     extra = item.get("extra", {})
     return ToolFinding(
         tool="semgrep",
-        path=str(item.get("path", "")).removeprefix("./"),
+        path=_posix_rel(str(item.get("path", ""))),
         line=int(item.get("start", {}).get("line", 1)),
         rule=str(item.get("check_id", "")),
         message=str(extra.get("message", "")),

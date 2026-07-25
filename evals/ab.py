@@ -126,7 +126,15 @@ def _run_json(
         "--json",
         *extra_args,
     ]
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=env)
+    proc = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
     if proc.returncode != 0 and not proc.stdout.strip():
         raise RuntimeError(f"eval leg in {cwd} broke:\n{proc.stderr}")
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -151,6 +159,8 @@ def _baseline_leg(
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         try:
             scores = _run_json(
@@ -167,6 +177,8 @@ def _baseline_leg(
                 check=False,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
     return _pool_legs(ref, scores)
 

@@ -38,5 +38,5 @@ def write_run_record(record: RunRecord, results_dir: Path) -> Path:
     """
     results_dir.mkdir(parents=True, exist_ok=True)
     path = results_dir / f"{record.sha}.json"
-    path.write_text(record.model_dump_json(indent=2) + "\n")
+    path.write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return path

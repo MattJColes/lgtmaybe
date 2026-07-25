@@ -10,6 +10,7 @@ failure returns [] and the caller keeps the fixed-line pad.
 
 from __future__ import annotations
 
+import lgtmaybe.engine.boundaries as boundaries
 from lgtmaybe.engine.boundaries import definition_starts
 
 _PY = """\
@@ -52,3 +53,23 @@ def test_runner_failure_returns_nothing() -> None:
     assert (
         definition_starts(_PY, "src/sample.py", runner=lambda binary, rule, path: "not json") == []
     )
+
+
+def test_boundaries_temp_directory_ignores_cleanup_errors(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    captured: dict[str, object] = {}
+    temporary_directory = boundaries.tempfile.TemporaryDirectory
+
+    def recording_temp_directory(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return temporary_directory(*args, **kwargs)
+
+    monkeypatch.setattr(boundaries.tempfile, "TemporaryDirectory", recording_temp_directory)
+
+    definition_starts(
+        _PY,
+        "src/sample.py",
+        runner=lambda *_args: "[]",
+        find_binary=lambda: "ast-grep",
+    )
+
+    assert captured["ignore_cleanup_errors"] is True

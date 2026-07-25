@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import lgtmaybe.providers.credentials as credentials
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.credentials import (
     _default_aws_probe,
@@ -328,8 +329,9 @@ _AWS_ENV_VARS = (
 def _clear(monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], home: str) -> None:
     for name in names:
         monkeypatch.delenv(name, raising=False)
-    # Redirect HOME so a real ~/.config/gcloud or ~/.aws on the dev box can't leak in.
+    # Redirect both host conventions so real local cloud config can't leak in.
     monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)
 
 
 class TestDefaultGcpProbe:
@@ -356,9 +358,36 @@ class TestDefaultGcpProbe:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
         gcloud_dir = tmp_path / "gcloud"
         gcloud_dir.mkdir()
-        (gcloud_dir / "application_default_credentials.json").write_text("{}")
+        (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
         monkeypatch.setenv("CLOUDSDK_CONFIG", str(gcloud_dir))
         assert _default_gcp_probe() is True
+
+    def test_gcp_probe_finds_adc_under_appdata_on_windows(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
+        monkeypatch.setattr(credentials, "_WINDOWS", True, raising=False)
+        appdata = tmp_path / "AppData" / "Roaming"
+        gcloud_dir = appdata / "gcloud"
+        gcloud_dir.mkdir(parents=True)
+        (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("APPDATA", str(appdata))
+
+        assert _default_gcp_probe() is True
+
+    def test_gcp_probe_prefers_cloudsdk_config_over_appdata(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
+        monkeypatch.setattr(credentials, "_WINDOWS", True, raising=False)
+        appdata = tmp_path / "AppData" / "Roaming"
+        gcloud_dir = appdata / "gcloud"
+        gcloud_dir.mkdir(parents=True)
+        (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("APPDATA", str(appdata))
+        monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "explicit-empty"))
+
+        assert _default_gcp_probe() is False
 
     def test_no_creds_anywhere_is_absent(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))

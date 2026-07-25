@@ -85,7 +85,7 @@ def _load_lens_files(lens_paths: Any) -> list[dict[str, Any]]:
         else:
             files = [path]
         for file in files:
-            parsed = yaml.safe_load(file.read_text())
+            parsed = yaml.safe_load(file.read_text(encoding="utf-8"))
             if isinstance(parsed, list):
                 lenses.extend(item for item in parsed if isinstance(item, dict))
             elif isinstance(parsed, dict):
@@ -136,7 +136,7 @@ def _load_file(
             raise ValueError(f"config file not found: {config_path}")
         return {}
 
-    raw = config_path.read_text()
+    raw = config_path.read_text(encoding="utf-8")
     if not raw.strip():
         return {}
 

@@ -15,7 +15,7 @@ review to save tokens and avoid noise.
 
 from __future__ import annotations
 
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 
 from lgtmaybe.core.diffparse import FILE_HEADER_RE, parse_hunk_header
 
@@ -231,7 +231,7 @@ def is_reviewable(path: str) -> bool:
 
     # Glob pattern check on the full path
     for pattern in _SKIP_GLOB_PATTERNS:
-        if fnmatch(path, pattern) or fnmatch(filename, pattern):
+        if fnmatchcase(path, pattern) or fnmatchcase(filename, pattern):
             return False
 
     return True
