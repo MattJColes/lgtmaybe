@@ -10,8 +10,10 @@ rendering and renders them as a Markdown comment. Contracts:
   broken Mermaid block;
 - unparseable model output falls back to the raw text;
 - C4 relationship lines get an ``UpdateRelStyle`` in a mid-grey readable on
-  both GitHub themes (the renderer's near-black default vanishes in dark mode),
+  every GitHub theme (the renderer's near-black default vanishes in dark mode),
   without duplicating styles the model already emitted;
+- C4 diagrams get an ``UpdateLayoutConfig`` loosening the default 4-per-row
+  layout (whose fixed-width cards overlap), unless the model set its own;
 - the diff is redacted before it leaves, and wrapped as untrusted data;
 - the intent block is sent only when the PR states an intent;
 - the diagram prompt carries no findings-JSON task restatement.
@@ -103,8 +105,8 @@ def test_c4_rels_get_dark_mode_safe_styles() -> None:
     )
     body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
 
-    assert 'UpdateRelStyle(client, api, $textColor="#767676", $lineColor="#767676")' in body
-    assert 'UpdateRelStyle(api, db, $textColor="#767676", $lineColor="#767676")' in body
+    assert 'UpdateRelStyle(client, api, $textColor="#808080", $lineColor="#808080")' in body
+    assert 'UpdateRelStyle(api, db, $textColor="#808080", $lineColor="#808080")' in body
 
 
 def test_rel_styles_land_inside_the_mermaid_fence() -> None:
@@ -127,7 +129,7 @@ def test_model_supplied_rel_style_is_not_duplicated() -> None:
     # The model's own style for (a, b) is kept; only (b, c) gets ours.
     assert body.count("UpdateRelStyle(a, b,") == 1
     assert '$textColor="red"' in body
-    assert 'UpdateRelStyle(b, c, $textColor="#767676"' in body
+    assert 'UpdateRelStyle(b, c, $textColor="#808080"' in body
 
 
 def test_repeated_rel_pair_styled_once() -> None:
@@ -137,10 +139,42 @@ def test_repeated_rel_pair_styled_once() -> None:
     assert body.count("UpdateRelStyle(a, b,") == 1
 
 
+def test_c4_gets_an_overlap_loosening_layout_config() -> None:
+    body = build_diagram(_CTX, _CFG, _structured_provider())
+
+    fence = body.split("```mermaid\n", 1)[1].split("\n```", 1)[0]
+    assert 'UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")' in fence
+
+
+def test_model_supplied_layout_config_is_kept() -> None:
+    mermaid = (
+        "C4Container\n"
+        '    Container(api, "API")\n'
+        '    UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="2")\n'
+    )
+    body = build_diagram(_CTX, _CFG, _structured_provider(mermaid=mermaid))
+
+    assert body.count("UpdateLayoutConfig") == 1
+    assert '$c4ShapeInRow="2"' in body
+
+
 def test_non_c4_mermaid_is_left_unstyled() -> None:
     body = build_diagram(_CTX, _CFG, _structured_provider(mermaid="flowchart LR\n    a --> b"))
 
     assert "UpdateRelStyle" not in body
+    assert "UpdateLayoutConfig" not in body
+
+
+def test_prompt_tells_the_model_to_keep_labels_short() -> None:
+    """C4 cards are fixed-width, so the prompt must constrain label length —
+    long descriptions and relationship labels are what overlap neighbours."""
+    provider = _structured_provider()
+
+    build_diagram(_CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "fixed-width" in system
+    assert "short" in system
 
 
 def test_unparseable_output_falls_back_to_raw_text() -> None:
