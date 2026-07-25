@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.3...lgtmaybe-v1.5.4) (2026-07-25)
+
+
+### Bug Fixes
+
+* **providers:** make the wall-clock timeout clock-authoritative ([#260](https://github.com/MattJColes/lgtmaybe/issues/260)) ([979e0e5](https://github.com/MattJColes/lgtmaybe/commit/979e0e5f3a669f62920964d4401239acad8cc5e6))
+
 ## [1.5.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.2...lgtmaybe-v1.5.3) (2026-07-25)
 
 
