@@ -106,3 +106,6 @@ jobs:
         run: |
           gh release upload "${{ steps.ver.outputs.tag }}" `
             "${{ steps.ver.outputs.asset }}" --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release upload failed with exit code $LASTEXITCODE"
+          }

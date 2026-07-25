@@ -27,6 +27,7 @@ def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
     for command in ("--help", "config path", "help review"):
         assert command in runs
     assert "gh release upload" in runs
+    assert "gh release upload failed with exit code $LASTEXITCODE" in runs
     assert "windows-x86_64.exe" in runs
     assert ".Length" in runs
 
@@ -51,7 +52,9 @@ def test_release_please_sequences_windows_exe_before_winget() -> None:
 
     assert jobs["windows-exe"]["needs"] == "release-please"
     assert jobs["windows-exe"]["uses"] == "./.github/workflows/windows-exe.yml"
-    assert jobs["windows-exe"]["secrets"] == "inherit"
+    assert "secrets" not in jobs["windows-exe"]
     assert jobs["winget"]["needs"] == ["release-please", "windows-exe"]
     assert jobs["winget"]["uses"] == "./.github/workflows/winget.yml"
-    assert jobs["winget"]["secrets"] == "inherit"
+    assert jobs["winget"]["secrets"] == {
+        "WINGET_TOKEN": "${{ secrets.WINGET_TOKEN }}",
+    }
