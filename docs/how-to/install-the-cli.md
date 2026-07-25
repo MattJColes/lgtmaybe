@@ -65,11 +65,11 @@ The regular `pip install lgtmaybe` path also works on Windows.
 ## Install on macOS (Homebrew)
 
 On macOS (and Linuxbrew) you can install from the project's
-[Homebrew tap](https://github.com/MattJColes/homebrew-lgtmaybe) instead of `pip`:
+[Homebrew tap](https://github.com/MattJColes/homebrew-tap) instead of `pip`:
 
 ```bash
-brew tap MattJColes/lgtmaybe
-brew trust MattJColes/lgtmaybe
+brew tap MattJColes/tap
+brew trust MattJColes/tap
 brew install lgtmaybe
 ```
 
@@ -78,13 +78,18 @@ third-party tap until you explicitly **trust** it (`Error: Refusing to load
 formula … from untrusted tap`). This is a one-time, per-machine decision that
 applies to every tap outside Homebrew's core — the tap author can't waive it for
 you, by design. To trust only this one formula instead of the whole tap, use
-`brew trust --formula MattJColes/lgtmaybe/lgtmaybe`.
+`brew trust --formula MattJColes/tap/lgtmaybe`.
 
-Tapping and installing in one line (`brew install MattJColes/lgtmaybe/lgtmaybe`)
+Tapping and installing in one line (`brew install MattJColes/tap/lgtmaybe`)
 works too, but still needs the `brew trust …` step first — otherwise the install
 stops at the untrusted-tap error.
 
 Upgrade later with `brew upgrade lgtmaybe`.
+
+If you tapped the earlier `MattJColes/lgtmaybe` name, switch over once with
+`brew untap MattJColes/lgtmaybe && brew tap MattJColes/tap` (then `brew trust
+MattJColes/tap`). Upgrades keep working on the old tap either way — GitHub
+redirects the renamed repo — so this is tidying, not a break.
 
 Homebrew installs lgtmaybe into its own isolated virtualenv, so it never touches
 your system or project Python. The formula creates the venv and installs

@@ -11,10 +11,13 @@ OIDC/WIF for cloud providers), and gets a review. One core, four distribution
 variants:
 
 - **PyPI CLI** — `pip install lgtmaybe`
-- **Homebrew CLI** — `brew install MattJColes/lgtmaybe/lgtmaybe` (after
-  `brew tap MattJColes/lgtmaybe` + `brew trust MattJColes/lgtmaybe` — current
+- **Homebrew CLI** — `brew install MattJColes/tap/lgtmaybe` (after
+  `brew tap MattJColes/tap` + `brew trust MattJColes/tap` — current
   Homebrew requires trusting third-party taps), from the
-  `MattJColes/homebrew-lgtmaybe` tap. The formula (`scripts/update-homebrew-formula.sh`)
+  `MattJColes/homebrew-tap` repo (Homebrew strips `homebrew-`, so the tap is
+  `MattJColes/tap`; the repo is deliberately *not* named `homebrew-lgtmaybe`,
+  which would make the formula `MattJColes/lgtmaybe/lgtmaybe`).
+  The formula (`scripts/update-homebrew-formula.sh`)
   creates a venv and `pip install`s lgtmaybe + deps from **PyPI wheels** — *not*
   per-dependency source `resource` stanzas: litellm's tree includes Rust sdists
   (tokenizers, hf-xet) that can't build in Homebrew's sandbox, and the wheel path
@@ -379,7 +382,7 @@ pattern, event bus, plugin framework.
      `v1`. `.github/workflows/commitlint.yml` (`commitlint.config.cjs`) gates PR
      titles/commits to conventional-commit format so the automation can version.
    - **Homebrew tap** — `.github/workflows/homebrew.yml` fires on the published
-     release and regenerates the formula in the `MattJColes/homebrew-lgtmaybe`
+     release and regenerates the formula in the `MattJColes/homebrew-tap`
      tap via `scripts/update-homebrew-formula.sh` (resolves the PyPI sdist
      url/sha, then `brew update-python-resources` fills the full dependency tree;
      pushes with the `HOMEBREW_TAP_TOKEN` PAT). Regenerated wholesale each release

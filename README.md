@@ -265,7 +265,7 @@ author identity. See
 ## Distribution
 
 - **CLI (PyPI)** — `pip install lgtmaybe`
-- **CLI (Homebrew)** — `brew tap MattJColes/lgtmaybe && brew trust MattJColes/lgtmaybe && brew install lgtmaybe`
+- **CLI (Homebrew)** — `brew tap MattJColes/tap && brew trust MattJColes/tap && brew install lgtmaybe`
   ([details](docs/how-to/install-the-cli.md) — the `brew trust` step is required for third-party taps)
 - **CLI (WinGet, Windows x64)** — `winget install --id MattJColes.lgtmaybe --exact`
   ([details](docs/how-to/install-the-cli.md#install-on-windows-winget))
