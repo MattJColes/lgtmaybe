@@ -93,7 +93,6 @@ jobs:
       version: ${{ needs.release-please.outputs.tag_name }}
     permissions:
       contents: write
-    secrets: inherit
 
   winget:
     needs: [release-please, windows-exe]
@@ -101,4 +100,5 @@ jobs:
     uses: ./.github/workflows/winget.yml
     with:
       version: ${{ needs.release-please.outputs.tag_name }}
-    secrets: inherit
+    secrets:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
