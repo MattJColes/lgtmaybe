@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.5.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.4.1...lgtmaybe-v1.5.0) (2026-07-25)
+
+
+### Features
+
+* add public lgtmaybe bot identity ([#239](https://github.com/MattJColes/lgtmaybe/issues/239)) ([8ff8720](https://github.com/MattJColes/lgtmaybe/commit/8ff8720083cc678d8593e3e2424d9080565742a4))
+* gate defect findings on failure scenarios ([#238](https://github.com/MattJColes/lgtmaybe/issues/238)) ([ea23a60](https://github.com/MattJColes/lgtmaybe/commit/ea23a609b23266afbc0cf53845f533e3652b9fec))
+
+
+### Bug Fixes
+
+* harden auxiliary model outputs ([#241](https://github.com/MattJColes/lgtmaybe/issues/241)) ([421c188](https://github.com/MattJColes/lgtmaybe/commit/421c1889c8d8b045dad8206758312a2288264d06))
+* prevent bot comments cancelling reviews ([#240](https://github.com/MattJColes/lgtmaybe/issues/240)) ([0eeeee3](https://github.com/MattJColes/lgtmaybe/commit/0eeeee3ef7495c3199bce785fd674fb9743eaaa7))
+* upgrade GitHub App token action to v3 ([#237](https://github.com/MattJColes/lgtmaybe/issues/237)) ([8b38186](https://github.com/MattJColes/lgtmaybe/commit/8b38186272590679472759afabe894e2fd13552f))
+
+
+### Documentation
+
+* expand WinGet installation guidance ([#235](https://github.com/MattJColes/lgtmaybe/issues/235)) ([777163e](https://github.com/MattJColes/lgtmaybe/commit/777163e66ccf98a8d6f09edb18a95059999c97f4))
+
 ## [1.4.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.4.0...lgtmaybe-v1.4.1) (2026-07-25)
 
 
