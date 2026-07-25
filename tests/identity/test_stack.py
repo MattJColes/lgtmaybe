@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import warnings
+from typing import Any
+
+import pytest
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", EncodingWarning)
     from aws_cdk import App
+    from aws_cdk import aws_lambda as lambda_
     from aws_cdk.assertions import Match, Template
+    from constructs import Construct
+    from infra.identity import stack as identity_stack
     from infra.identity.stack import IdentityBrokerStack
 
 from services.github_app_identity.broker import OIDC_AUDIENCE, OIDC_ISSUER
@@ -47,6 +53,45 @@ def test_stack_provisions_a_bounded_python_lambda_and_retained_secret() -> None:
             "DeletionPolicy": "Retain",
             "UpdateReplacePolicy": "Retain",
         },
+    )
+
+
+def test_bundled_stack_uses_the_importable_lambda_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_python_function(
+        scope: Construct,
+        construct_id: str,
+        *,
+        entry: str,
+        index: str,
+        bundling: Any,
+        handler: str,
+        **kwargs: Any,
+    ) -> lambda_.Function:
+        del entry, bundling
+        return lambda_.Function(
+            scope,
+            construct_id,
+            code=lambda_.Code.from_inline("def handler(event, context): return event"),
+            handler=f"{index.removesuffix('.py')}.{handler}",
+            **kwargs,
+        )
+
+    monkeypatch.setattr(identity_stack, "PythonFunction", fake_python_function)
+
+    template = Template.from_stack(
+        IdentityBrokerStack(
+            App(),
+            "BundledIdentityBroker",
+            app_id="3987976",
+            alarm_email="matt@coles.codes",
+        )
+    )
+
+    template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {"Handler": "handler.handler"},
     )
 
 
