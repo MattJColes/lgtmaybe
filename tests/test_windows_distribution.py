@@ -47,6 +47,7 @@ def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
 def test_winget_workflow_updates_the_portable_package() -> None:
     text, workflow = _workflow("winget.yml")
     job = workflow["jobs"]["publish"]
+    steps = {step["name"]: step for step in job["steps"]}
     runs = "\n".join(str(step.get("run", "")) for step in job["steps"] if isinstance(step, dict))
 
     assert "workflow_call:" in text
@@ -56,6 +57,12 @@ def test_winget_workflow_updates_the_portable_package() -> None:
     assert "wingetcreate update" in runs
     assert "WINGET_TOKEN" in text
     assert "windows-x86_64.exe" in runs
+    package_check = steps["Check whether the winget package exists"]
+    assert package_check["id"] == "package"
+    assert "microsoft/winget-pkgs/contents/manifests/m/MattJColes/lgtmaybe" in package_check["run"]
+    assert "StatusCode -eq 404" in package_check["run"]
+    for name in ("Install wingetcreate", "Submit winget update"):
+        assert steps[name]["if"] == "steps.package.outputs.exists == 'true'"
 
 
 def test_winget_docs_cover_installation_lifecycle() -> None:

@@ -3023,8 +3023,10 @@ The only human-only pieces:
   asset and run `wingetcreate new <asset-url>` manually with package id
   `MattJColes.lgtmaybe`, installer type `portable`, command alias `lgtmaybe`,
   and MIT licence metadata. Microsoft moderates a new package before it exists;
-  this can take days or weeks. Once that first manifest is accepted, the release
-  workflow uses `wingetcreate update` for every later version.
+  this can take days or weeks. Until that first manifest is accepted, the
+  automatic release job warns and skips the winget update rather than failing
+  the other release artifacts. Once accepted, the workflow uses
+  `wingetcreate update` for every later version.
 
 ## Each release
 
