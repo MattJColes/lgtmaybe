@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.5](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.4...lgtmaybe-v1.5.5) (2026-07-25)
+
+
+### Bug Fixes
+
+* **homebrew:** trust the tap in the smoke gate instead of disabling the check ([#262](https://github.com/MattJColes/lgtmaybe/issues/262)) ([a22bb02](https://github.com/MattJColes/lgtmaybe/commit/a22bb0227bf70db03d46d2194cfb64a515d8d5b4))
+
 ## [1.5.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.3...lgtmaybe-v1.5.4) (2026-07-25)
 
 
