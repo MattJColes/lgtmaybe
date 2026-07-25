@@ -164,3 +164,23 @@ the least-privilege public App does not hold `checks: write`.
 #### Scenario: Default review completes
 - **WHEN** a review uses the built-in workflow token
 - **THEN** existing `github-actions[bot]` posting behavior remains unchanged
+
+### Requirement: Ineligible events cannot preempt active reviews
+
+The dogfood workflow SHALL apply per-PR concurrency only to an event that passes
+the review job's eligibility guard. Eligible jobs for the same PR MUST retain
+newest-run-wins cancellation.
+<!-- anchor: github.workflow-concurrency -->
+
+#### Scenario: lgtmaybe posts an automatic diagram
+
+- **WHEN** the GitHub App comment emits an `issue_comment` workflow run whose
+  author does not pass the review job guard
+- **THEN** that run does not enter the review concurrency group or cancel the
+  active review
+
+#### Scenario: a newer eligible review starts
+
+- **WHEN** a newer PR event or trusted command passes the review job guard for
+  the same PR
+- **THEN** the newer job cancels the older eligible review job

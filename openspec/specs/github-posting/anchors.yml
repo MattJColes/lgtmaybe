@@ -99,3 +99,10 @@ github.app-attribution:
       has: { field: name, regex: '^RestGitHubGateway$' }
       stopBy: end
   files: [src/lgtmaybe/github/**/*.py]
+
+github.workflow-concurrency:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^review$' }
+  language: yaml
+  files: [.github/workflows/lgtmaybe.yml]
