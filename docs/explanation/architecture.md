@@ -176,7 +176,7 @@ network recovers but a dead-end failure surfaces fast:
   — lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 60s for direct cloud providers, 900s for the ones that may front a
+  timeout: 300s for direct cloud providers, 900s for the ones that may front a
   slow model — ollama and openai-compatible (local servers) and openrouter (a
   gateway to arbitrary models, including slow reasoning ones) — overridable via
   `timeout` / `--timeout`. All attempts for

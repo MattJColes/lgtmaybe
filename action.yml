@@ -43,7 +43,7 @@ inputs:
     required: false
     default: ""
   timeout:
-    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama, openai-compatible and openrouter 900, cloud 60)."
+    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama, openai-compatible and openrouter 900, cloud 300)."
     required: false
     default: ""
   max_review_seconds:

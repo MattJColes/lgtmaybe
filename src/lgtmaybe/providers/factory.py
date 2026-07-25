@@ -41,11 +41,12 @@ _PREFIXES: dict[Provider, str] = {
 # providers can't be assumed fast: the ones that can front a slow local server
 # (ollama, and openai-compatible pointing at llama.cpp / LM Studio / vLLM), and
 # openrouter, a gateway to arbitrary third-party models — including reasoning
-# models that routinely think past 60s on a large diff. Those get a generous
-# default; direct cloud providers respond fast and keep the short one. An
-# explicit --timeout always wins, so a fast endpoint can dial it down.
+# models that routinely think slowly on a large diff. Those get a generous
+# default; direct cloud providers get a shorter one that still leaves room
+# for a reasoning model to think. An explicit --timeout always wins, so a
+# fast endpoint can dial it down.
 _SLOW_TIMEOUT = 900
-_CLOUD_TIMEOUT = 60
+_CLOUD_TIMEOUT = 300
 
 # Providers whose endpoint may be a slow model (local server or open gateway).
 _SLOW_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})
