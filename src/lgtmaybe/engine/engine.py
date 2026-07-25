@@ -2,7 +2,8 @@
 
 Pipeline: redact → compress/batch → (per batch) fan out one call per review
          category (concurrent for cloud, serial for ollama) → parse → merge/dedupe
-         → self-reflect/filter → filter by min_severity → return findings + summary.
+         → require defect evidence → self-reflect/filter → filter by min_severity
+         → return findings + summary.
 """
 
 from __future__ import annotations
@@ -77,6 +78,14 @@ _log = get_logger(__name__)
 #   default to 1 and let --max-concurrency raise it for batching servers.
 _CLOUD_MAX_WORKERS = 8
 _SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
+_FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
+    {
+        ReviewCategory.security.value,
+        ReviewCategory.correctness.value,
+        ReviewCategory.deprecation.value,
+        ReviewCategory.performance.value,
+    }
+)
 
 # Providers whose litellm route takes an explicit cache_control breakpoint —
 # the ones where a batch's first call WRITES the shared preamble-plus-diff
@@ -488,6 +497,12 @@ class LLMReviewEngine(ReviewEngine):
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
 
+        # 7c. Evidence gate: built-in defect findings must name a concrete way
+        #     the changed code fails. Category is engine-stamped, so lowering the
+        #     model-selected severity cannot bypass this check.
+        with profiler.stage("failure_scenario"):
+            all_findings = _filter_missing_failure_scenarios(all_findings)
+
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
@@ -839,6 +854,28 @@ def _passes_severity_floor(finding: ReviewFinding, cfg: ReviewConfig) -> bool:
     return finding.severity >= cfg.min_severity and (
         finding.anchored or finding.severity >= cfg.unanchored_min_severity
     )
+
+
+def _filter_missing_failure_scenarios(
+    findings: list[ReviewFinding],
+) -> list[ReviewFinding]:
+    """Drop built-in defect findings that provide no concrete causal evidence."""
+    kept: list[ReviewFinding] = []
+    for finding in findings:
+        scenario = finding.failure_scenario
+        if finding.category in _FAILURE_SCENARIO_CATEGORIES and not (scenario and scenario.strip()):
+            _log.info(
+                "finding missing failure scenario — dropping",
+                extra={
+                    "path": finding.path,
+                    "line": finding.line,
+                    "title": finding.title,
+                    "category": finding.category,
+                },
+            )
+            continue
+        kept.append(finding)
+    return kept
 
 
 def _snap_findings(findings: list[ReviewFinding], diff: str) -> list[ReviewFinding]:

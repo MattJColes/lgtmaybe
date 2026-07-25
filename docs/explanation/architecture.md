@@ -40,7 +40,7 @@ consensus across all tracks.
 The engine executes a pipeline of composable stages in sequence:
 
 ```
-fetch → compress → prompt → parse → re-anchor → merge/dedupe → reflect → filter → post
+fetch → compress → prompt → parse → re-anchor → merge/dedupe → evidence gate → reflect → filter → post
 ```
 
 The prompt/parse stage is where the pipeline fans out — one concurrent model
@@ -57,7 +57,7 @@ flowchart TD
     correctnessflow --> anchor
     correctnessstate --> anchor
     codehealth --> anchor
-    anchor --> dedupe["merge / dedupe"] --> reflect["reflect<br/>self-audit, drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+    anchor --> dedupe["merge / dedupe"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
 (The four lens calls shown are the parallel-capable `fast` grouping. A
@@ -98,8 +98,8 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    prefix from cache (on big diffs a warm-up primer runs the first lens
    alone). Each lens's focused structured prompt requests JSON output with
    the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,
-   `body`, `suggestion`, `anchor`) and carries prompt-injection defense
-   instructions. Each response is parsed and validated against
+   `body`, `failure_scenario`, `suggestion`, `anchor`) and carries
+   prompt-injection defense instructions. Each response is parsed and validated against
    `ReviewFinding` using Pydantic; parse errors are logged and surfaced in
    the summary rather than silently discarded.
 
@@ -112,10 +112,17 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
 5. **merge/dedupe** — findings from every lens are merged and de-duplicated
    (`_dedupe`, keyed on path/line/side).
 
-6. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
+6. **evidence gate** — security, correctness, deprecation, and performance
+   findings must carry a concrete `failure_scenario`: the trigger, changed
+   behaviour, and observable impact. The engine applies this rule regardless
+   of model-selected severity, so lowering a finding to `low` cannot bypass it.
+   Gap and maintainability findings remain eligible without a runtime failure.
+
+7. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings and drops the ones it marks low-confidence
    (keep-all safe default when the verdict can't be parsed; skippable with
-   `--no-reflect`). When the auditor would drop a finding *only* because it
+   `--no-reflect`). It also tries to disprove each claimed failure scenario
+   against the diff and grounded file text. When the auditor would drop a finding *only* because it
    can't see code outside the diff, it **defers** by naming what it needs — a
    file path or a **symbol**. A path is fetched read-only
    (`get_file_contents`). A symbol is located by **ast-grep**
@@ -132,9 +139,9 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    it degrades to the path-only fetch (`--no-symbol-resolution` disables it
    entirely). It is bounded by the same hop/file caps as the path fetch.
 
-7. **filter** — findings below `min_severity` are dropped.
+8. **filter** — findings below `min_severity` are dropped.
 
-8. **post** — findings are batched into a single GitHub review request.
+9. **post** — findings are batched into a single GitHub review request.
    The summary comment is updated idempotently using a hidden marker, so
    re-running lgtmaybe on the same PR does not create duplicate comments. Each
    inline comment is stamped with a hidden per-finding fingerprint; on a re-run,

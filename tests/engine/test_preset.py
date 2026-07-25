@@ -154,6 +154,7 @@ class TestSplitCorrectnessAttribution:
             severity=Severity.high,
             title="shared bug",
             body="x",
+            failure_scenario="When the changed line runs, the shared operation fails.",
         )
         finding_text = json.dumps([finding.model_dump(mode="json")])
 
@@ -181,6 +182,7 @@ class TestMergedCategoryStamping:
             severity=Severity.medium,
             title="finding",
             body="x",
+            failure_scenario="When the changed line runs, the operation fails.",
             category=category,
         )
         return json.dumps([f.model_dump(mode="json")])

@@ -8,6 +8,7 @@ import logging
 import pytest
 
 from lgtmaybe.core.models import (
+    CustomLens,
     PRContext,
     Provider,
     ProviderResult,
@@ -72,6 +73,7 @@ _HIGH = ReviewFinding(
     severity=Severity.high,
     title="real bug",
     body="definitely broken",
+    failure_scenario="When the changed path runs, it produces the reported failure.",
 )
 _INFO = ReviewFinding(
     path="a.py",
@@ -82,7 +84,12 @@ _INFO = ReviewFinding(
 )
 
 
-def _provider_for(findings: list[ReviewFinding], reflection_keeps_all: bool = True) -> FakeProvider:
+def _provider_for(
+    findings: list[ReviewFinding],
+    reflection_keeps_all: bool = True,
+    *,
+    with_failure_scenarios: bool = True,
+) -> FakeProvider:
     """A FakeProvider that returns ``findings`` for every review call and a verdict
     for the reflection call.
 
@@ -90,7 +97,19 @@ def _provider_for(findings: list[ReviewFinding], reflection_keeps_all: bool = Tr
     which dedupe collapses) and to thread ordering — review vs reflection is told
     apart by the system prompt, not a call counter.
     """
-    findings_text = json.dumps([f.model_dump(mode="json") for f in findings])
+    prepared = [
+        finding.model_copy(
+            update={
+                "failure_scenario": (
+                    "When this changed path runs, it produces the reported observable failure."
+                )
+            }
+        )
+        if with_failure_scenarios and finding.failure_scenario is None
+        else finding
+        for finding in findings
+    ]
+    findings_text = json.dumps([f.model_dump(mode="json") for f in prepared])
     verdicts = {i: True for i in range(len(findings))} if reflection_keeps_all else {}
     reflection_text = json.dumps(verdicts)
 
@@ -213,6 +232,114 @@ def test_all_findings_returned_when_min_severity_info() -> None:
     findings, _ = engine.review(_CTX, cfg)
 
     assert len(findings) == 2
+
+
+# ---------------------------------------------------------------------------
+# defect evidence gate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        ReviewCategory.security,
+        ReviewCategory.correctness,
+        ReviewCategory.deprecation,
+        ReviewCategory.performance,
+    ],
+)
+@pytest.mark.parametrize("failure_scenario", [None, "   "])
+def test_low_severity_defect_without_failure_scenario_is_dropped_before_reflection(
+    category: ReviewCategory,
+    failure_scenario: str | None,
+) -> None:
+    finding = ReviewFinding(
+        path="a.py",
+        line=2,
+        severity=Severity.low,
+        title="unchecked lookup",
+        body="The lookup result can be None.",
+        failure_scenario=failure_scenario,
+    )
+    provider = _provider_for([finding], reflection_keeps_all=True, with_failure_scenarios=False)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[category],
+        min_severity=Severity.info,
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert findings == []
+    assert _reflection_calls(provider) == []
+
+
+def test_missing_defect_scenario_is_dropped_when_reflection_is_disabled() -> None:
+    finding = ReviewFinding(
+        path="a.py",
+        line=2,
+        severity=Severity.low,
+        title="unchecked lookup",
+        body="The lookup result can be None.",
+    )
+    provider = _provider_for([finding], with_failure_scenarios=False)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.correctness],
+        min_severity=Severity.info,
+        reflect=False,
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert findings == []
+
+
+def test_gap_finding_without_failure_scenario_remains_eligible() -> None:
+    finding = ReviewFinding(
+        path="a.py",
+        line=2,
+        severity=Severity.low,
+        title="missing boundary test",
+        body="The new branch has no test.",
+    )
+    provider = _provider_for([finding], with_failure_scenarios=False)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.tests],
+        min_severity=Severity.info,
+        reflect=False,
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [item.title for item in findings] == ["missing boundary test"]
+
+
+def test_custom_lens_finding_without_failure_scenario_remains_eligible() -> None:
+    finding = ReviewFinding(
+        path="a.py",
+        line=2,
+        severity=Severity.low,
+        title="house rule",
+        body="This name violates the repository convention.",
+    )
+    provider = _provider_for([finding], with_failure_scenarios=False)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[],
+        extra_lenses=[CustomLens(id="house-style", instructions="Enforce naming rules.")],
+        min_severity=Severity.info,
+        reflect=False,
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [item.title for item in findings] == ["house rule"]
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +701,12 @@ class _PerCategoryProvider(FakeProvider):
         for marker, (title, line) in _CATEGORY_BY_MARKER.items():
             if marker in prompt:
                 finding = ReviewFinding(
-                    path="a.py", line=line, severity=Severity.low, title=title, body="x"
+                    path="a.py",
+                    line=line,
+                    severity=Severity.low,
+                    title=title,
+                    body="x",
+                    failure_scenario="When this path runs, it produces the reported failure.",
                 )
                 return ProviderResult(
                     text=json.dumps([finding.model_dump(mode="json")]),
@@ -900,7 +1032,12 @@ def test_partial_failure_keeps_findings_with_a_notice_and_no_lgtm() -> None:
             prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
             if "owasp" in prompt:
                 f = ReviewFinding(
-                    path="a.py", line=1, severity=Severity.high, title="bug", body="x"
+                    path="a.py",
+                    line=1,
+                    severity=Severity.high,
+                    title="bug",
+                    body="x",
+                    failure_scenario="When this path runs, it produces the reported failure.",
                 )
                 return ProviderResult(
                     text=json.dumps([f.model_dump(mode="json")]), input_tokens=10, output_tokens=5

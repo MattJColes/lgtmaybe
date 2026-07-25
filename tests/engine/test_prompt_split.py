@@ -237,6 +237,7 @@ class TestReflectionSplitShape:
             "severity": "high",
             "title": "bug",
             "body": "broken",
+            "failure_scenario": "When the changed line runs, the operation fails.",
         }
 
         class _Reviewer(FakeProvider):

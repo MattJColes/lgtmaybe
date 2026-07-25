@@ -183,6 +183,11 @@ class ReviewFinding(_Strict):
     severity: Severity
     title: str
     body: str
+    # Concrete causal evidence for defect findings: the trigger, changed
+    # behaviour, and observable impact. The engine requires a non-blank value
+    # for built-in defect categories after it stamps `category`; gap and custom
+    # findings may leave it None.
+    failure_scenario: str | None = None
     suggestion: str | None = None
     # The verbatim text of the changed line this finding is about (no +/- marker).
     # The model can't count diff lines reliably, so the engine re-anchors `line`

@@ -103,7 +103,8 @@ lgtmaybe ran its pipeline over your local diff:
 2. **compress** — stripped generated files, binaries, and lockfiles
 3. **prompt** — built a structured prompt asking for JSON output
 4. **parse** — validated the model's JSON against the `ReviewFinding` schema
-5. **render** — printed the findings (the Action posts them to the PR instead)
+5. **gate** — dropped defect findings without a concrete `failure_scenario`
+6. **render** — printed the findings (the Action posts them to the PR instead)
 
 ## Next steps
 

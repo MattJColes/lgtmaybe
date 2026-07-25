@@ -57,6 +57,9 @@ _FINDING = ReviewFinding(
     severity=Severity.medium,
     title="Import order",
     body="sys should be sorted before os",
+    failure_scenario=(
+        "When the module is linted, the changed import order fails the configured check."
+    ),
 )
 
 

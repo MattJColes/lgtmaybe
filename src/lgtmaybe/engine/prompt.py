@@ -36,14 +36,21 @@ Use exactly one of these severity levels per finding:
 Return ONLY a JSON object with a single key `findings` whose value is an array of \
 finding objects — no prose, no reasoning, nothing before or after. Fields per element:
 path (string), line (integer), side ("LEFT" or "RIGHT", default "RIGHT"), severity (one of \
-the levels above), title (string ≤ 80 chars), body (string), suggestion (string or null), \
-anchor (string — the verbatim flagged line, see below).
+the levels above), title (string ≤ 80 chars), body (string), failure_scenario (string or \
+null), suggestion (string or null), anchor (string — the verbatim flagged line, see below).
 
 Report each distinct issue as its own finding.
 
-### How to fill `body` and `suggestion`
+### How to fill `body`, `failure_scenario`, and `suggestion`
 
 `body` holds your explanation — what is wrong and why it matters, in prose.
+
+`failure_scenario` is the concrete way a defect causes harm: name the trigger, the changed \
+behaviour, and the observable impact in one concise causal chain. It is REQUIRED for every \
+security, correctness, deprecation, and performance finding regardless of severity. Do not \
+invent one for a gap or maintainability observation: set it to null for tests, documentation, \
+complexity, intent, and ponytail findings. A custom lens may set it when its finding makes a \
+concrete defect claim, but custom findings are not gated on it.
 
 `suggestion` is rendered as a one-click committable change, so it must be the \
 **literal replacement code** for the flagged line(s): the exact source that should \
@@ -132,6 +139,8 @@ _SECURITY_EXAMPLE = _example_block(
         "title": "Unsafe deserialization via pickle.loads",
         "body": "pickle.loads executes arbitrary code when the input is attacker-controlled. "
         "Use a safe format such as json.loads instead.",
+        "failure_scenario": "When an attacker controls the file contents, pickle.loads "
+        "executes their serialized payload in the reviewer process.",
         "suggestion": '    return json.loads(open(path, "rb").read())',
         "anchor": '    return pickle.loads(open(path, "rb").read())',
     },
@@ -150,6 +159,8 @@ _CORRECTNESS_EXAMPLE = _example_block(
         "severity": "high",
         "title": "Off-by-one: items[len(items)] is out of range",
         "body": "Indexing with len(items) raises IndexError; the last index is len(items) - 1.",
+        "failure_scenario": "When last_item receives any list, indexing at len(items) raises "
+        "IndexError instead of returning an item.",
         "suggestion": "    return items[-1]",
         "anchor": "    return items[len(items)]",
     },
@@ -170,6 +181,8 @@ _CORRECTNESS_STATE_EXAMPLE = _example_block(
         "title": "Check-then-act race can create the value twice",
         "body": "Concurrent callers can both observe a missing key and run create_value. "
         "Protect the read-modify-write sequence or use an atomic cache operation.",
+        "failure_scenario": "When two callers miss the same key concurrently, both run "
+        "create_value and duplicate its side effects.",
         "suggestion": None,
         "anchor": "    if key not in cache:",
     },
@@ -188,6 +201,8 @@ _DEPRECATION_EXAMPLE = _example_block(
         "severity": "medium",
         "title": "datetime.utcnow() is deprecated",
         "body": "datetime.utcnow() is deprecated since Python 3.12 and returns a naive datetime.",
+        "failure_scenario": "When this value is compared with a timezone-aware datetime, "
+        "Python raises TypeError instead of completing the comparison.",
         "suggestion": "now = datetime.datetime.now(datetime.timezone.utc)",
         "anchor": "now = datetime.datetime.utcnow()",
     },
@@ -207,6 +222,7 @@ _TESTS_EXAMPLE = _example_block(
         "severity": "low",
         "title": "New VIP branch has no accompanying test",
         "body": "The new VIP discount path is untested; a regression here would ship silently.",
+        "failure_scenario": None,
         "suggestion": 'def test_vip_discount():\n    assert discount(100.0, "VIP") == 50.0',
         "anchor": '    if code == "VIP":',
     },
@@ -226,6 +242,7 @@ _DOCUMENTATION_EXAMPLE = _example_block(
         "severity": "info",
         "title": "Public function fetch_user lacks a docstring",
         "body": "fetch_user is a public API surface; a short docstring states the contract.",
+        "failure_scenario": None,
         "suggestion": 'def fetch_user(user_id):\n    """Fetch one user record by id."""',
         "anchor": "def fetch_user(user_id):",
     },
@@ -244,6 +261,8 @@ _PERFORMANCE_EXAMPLE = _example_block(
         "severity": "medium",
         "title": "N+1 query: one database call per user id",
         "body": "Each iteration issues its own query; the cost scales linearly with input size.",
+        "failure_scenario": "When user_ids is large, the function issues one database "
+        "round-trip per id, increasing latency and exhausting the connection pool.",
         "suggestion": "    return [u.email for u in db.get_users(user_ids)]",
         "anchor": "    return [db.get_user(uid).email for uid in user_ids]",
     },
@@ -264,6 +283,7 @@ _COMPLEXITY_EXAMPLE = _example_block(
         "severity": "medium",
         "title": "Deeply nested conditionals — invert to guard clauses",
         "body": "Three nesting levels for one happy path; guard clauses read flat.",
+        "failure_scenario": None,
         "suggestion": "    if not (req and req.user and req.user.active):\n        return None",
         "anchor": "    if req:",
     },
@@ -288,6 +308,7 @@ _PONYTAIL_EXAMPLE = _example_block(
             "This five-line loop is exactly what the standard library already does. "
             "The best code is the code you never wrote — delete it for the one-liner."
         ),
+        "failure_scenario": None,
         "suggestion": "    return text.upper()",
         "anchor": "    result = ''",
     },
@@ -309,6 +330,7 @@ _INTENT_EXAMPLE = _example_block(
             "The stated intent is a README typo fix, but this hunk turns off certificate "
             "verification in the HTTP client — unrelated to the intent and security-sensitive."
         ),
+        "failure_scenario": None,
         "suggestion": None,
         "anchor": "session.verify = False",
     },

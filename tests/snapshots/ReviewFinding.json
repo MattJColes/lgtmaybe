@@ -68,6 +68,18 @@
       "default": null,
       "title": "Confidence"
     },
+    "failure_scenario": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure Scenario"
+    },
     "line": {
       "minimum": 1,
       "title": "Line",

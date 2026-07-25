@@ -65,7 +65,14 @@ class _Provider(FakeProvider):
         return ProviderResult(text=self._payload, input_tokens=10, output_tokens=20)
 
 
-_A_FINDING = ReviewFinding(path="a.py", line=1, severity=Severity.high, title="bug", body="broken")
+_A_FINDING = ReviewFinding(
+    path="a.py",
+    line=1,
+    severity=Severity.high,
+    title="bug",
+    body="broken",
+    failure_scenario="When the changed line runs, the operation fails instead of completing.",
+)
 
 
 def test_clean_review_says_lgtm() -> None:

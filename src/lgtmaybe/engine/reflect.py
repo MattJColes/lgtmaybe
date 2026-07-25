@@ -65,6 +65,14 @@ finding's "broad" is ignored, so emit false there.
 Keep a finding only if you are confident it is a real issue in the actual changed code.
 Drop it if it is speculative, out of scope, or referring to unchanged lines.
 
+For every security, correctness, deprecation, or performance finding, validate its failure \
+scenario from the `failure_scenario` field by tracing the stated trigger through the changed \
+behaviour to its observable impact. Drop the finding when the scenario contradicts the diff \
+or grounded file text, relies on an unsupported causal step, or merely sounds plausible \
+without code support. The reviewing engine has already removed defect findings with an \
+empty scenario; your job is to disprove the non-empty scenario when the evidence does not \
+support it. Gap and maintainability findings may correctly carry `failure_scenario: null`.
+
 Also drop a finding that merely DESCRIBES the change without naming a concrete problem \
 ("X was removed", "Y now takes a new parameter", "this method is now async") — narration \
 that restates the diff is not a finding, only a changelog. Be especially strict with \
