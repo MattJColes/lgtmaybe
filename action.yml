@@ -43,11 +43,11 @@ inputs:
     required: false
     default: ""
   timeout:
-    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama, openai-compatible and openrouter 1800, cloud 600)."
+    description: "Enforced wall-clock timeout in seconds for each model call. Leave empty for the provider default (ollama, openai-compatible and openrouter 1800, cloud 600). A call that times out is reported by the incomplete-results notice, which posts on the PR as well as in the review body."
     required: false
     default: ""
   max_review_seconds:
-    description: "Soft wall-clock ceiling for the whole review, in seconds (default 3600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with an incomplete-results notice. Set 0 to disable."
+    description: "Soft wall-clock ceiling for the whole review, in seconds (default 3600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with the incomplete-results notice every failed or skipped call raises. Set 0 to disable."
     required: false
     default: ""
   temperature:

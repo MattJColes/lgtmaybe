@@ -128,3 +128,22 @@ def test_human_format_omits_confidence_when_unscored() -> None:
     out = render_findings([finding], "1 finding", fmt="human")
 
     assert "confidence" not in out
+
+
+def test_hidden_markers_are_stripped_from_the_terminal_summary() -> None:
+    """The summary is written for a GitHub comment; a terminal must not see its
+    hidden markers — but the visible incompleteness notice must survive."""
+    summary = (
+        "⚠️ 1 of 4 review calls failed (TimeoutError); results may be "
+        "incomplete.\n<!-- lgtmaybe-incomplete -->\n\n0 findings · model llama3"
+    )
+
+    human = render_findings([_FINDING], summary, fmt="human")
+    assert "results may be incomplete" in human
+    assert "<!--" not in human
+
+    # The agent format shows the summary only when there is nothing to correct —
+    # which is exactly when an incomplete run must not read as "all clear".
+    agent = render_findings([], summary, fmt="agent")
+    assert "results may be incomplete" in agent
+    assert "<!--" not in agent
