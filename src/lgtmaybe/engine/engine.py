@@ -59,7 +59,14 @@ from .prompt import (
 from .redact import redact
 from .reflect import reflect_findings
 from .retrieve import FileFetcher
-from .static_analysis import ToolFinding, format_hints, run_static_analysis
+from .static_analysis import (
+    SCAN_CATEGORY_PREFIX,
+    ToolFinding,
+    format_hints,
+    partition_by_mode,
+    run_static_analysis,
+    tool_review_findings,
+)
 from .suppress import apply_suppressions
 from .triage import triage_files
 
@@ -332,12 +339,19 @@ class LLMReviewEngine(ReviewEngine):
         #     so a disabled config never touches the runner (no temp dir, no
         #     subprocess) — behaviour is byte-identical to before the feature.
         sa_hints: list[ToolFinding] = []
+        sa_all: list[ToolFinding] = []
+        scan_findings: list[ReviewFinding] = []
         if cfg.static_analysis.enabled and ctx.file_contents:
             with profiler.stage("static_analysis"):
                 reviewed_paths = {path for path, _ in file_patches}
-                sa_hints = run_static_analysis(
-                    {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}, cfg
-                )
+                corpus = {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}
+                sa_all = run_static_analysis(corpus, cfg)
+                # Split by mode in one stable pass: run_static_analysis returns
+                # findings in `sa.tools` order on purpose, and the hint block is
+                # part of the cacheable prompt prefix — reordering it run to run
+                # would bust the shared-prefix cache for nothing.
+                sa_hints, direct = partition_by_mode(sa_all, cfg)
+                scan_findings = tool_review_findings(direct, corpus)
 
         # 3c. Two-stage triage (default off): a cheap triage_model skips
         #     plainly-non-substantive files and ranks the rest by risk, so the
@@ -490,6 +504,13 @@ class LLMReviewEngine(ReviewEngine):
 
         reviewed_diff = "\n".join(patch for _, patch in file_patches)
 
+        # 5c. Deterministic findings join the model's here — after the fan-out so
+        #     the model's copy of a shared finding wins the dedupe tie below, and
+        #     before snapping so they get re-anchored, deduped, suppressed and
+        #     rule-filtered by exactly the same stages. Reflection is the one
+        #     stage they skip; see step 8.
+        all_findings = all_findings + scan_findings
+
         # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
         #    routinely drifts a few lines. Snap each finding's line to the real
         #    changed line whose content matches its verbatim `anchor`, so comments
@@ -497,6 +518,18 @@ class LLMReviewEngine(ReviewEngine):
         #    model placed on slightly different wrong lines collapse correctly.
         with profiler.stage("snap"):
             all_findings = _snap_findings(all_findings, reviewed_diff)
+
+        # 6b. Scope scan findings to the change. The tools read whole files, so
+        #     they see pre-existing code the PR never touched; an anchor that
+        #     matched no changed line means exactly that. The model is already
+        #     told "only raise these when the diff itself shows the change" —
+        #     hold the tools to the same rule, or a fixture's fake credential
+        #     posts on every PR that happens to touch the file.
+        scoped = [f for f in all_findings if f.anchored or not _is_scan_finding(f)]
+        off_diff = len(all_findings) - len(scoped)
+        if off_diff:
+            _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
+        all_findings = scoped
 
         # 7. Merge: a finding can surface under more than one lens (a shell
         #    injection is both a security and a correctness issue), so collapse
@@ -526,7 +559,13 @@ class LLMReviewEngine(ReviewEngine):
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
         #    Skippable (--no-reflect) for weaker models that drop valid findings here.
+        #    Scan findings sit this stage out: the auditor's job is to catch a
+        #    model talking itself into a false positive, and there is no model
+        #    here to audit. Partitioned rather than filtered afterwards so they
+        #    cost no reflection tokens and the auditor cannot drop them.
         reflection_skipped_by_deadline = False
+        scanned = [f for f in all_findings if _is_scan_finding(f)]
+        all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
             if deadline_at is not None and time.perf_counter() >= deadline_at:
                 # Better unaudited findings with an honest notice than more
@@ -551,6 +590,9 @@ class LLMReviewEngine(ReviewEngine):
                         fetch_file=self._fetch_file,
                         resolve_symbol=self._resolve_symbol,
                     )
+
+        # 8b. Rejoin the deterministic findings the auditor never saw.
+        all_findings = all_findings + scanned
 
         # 9. Filter: drop findings below the severity floor, and apply the
         #    stricter unanchored floor — a finding the engine could not anchor is a
@@ -621,6 +663,16 @@ class LLMReviewEngine(ReviewEngine):
                 f"🙈 {suppressed} finding{plural} suppressed (ignored fingerprint, "
                 "inline `lgtmaybe: ignore`, or a 👎 from a previous run) — not "
                 "counted below."
+            )
+        # Deterministic hits on code this PR did not touch. Scanners read whole
+        # files, so this is routine rather than a fault — but silently dropping
+        # them would make a repo with a pre-existing secret look clean, so say
+        # the number and where to look.
+        if off_diff:
+            plural = "s" if off_diff != 1 else ""
+            notices.append(
+                f"🔍 {off_diff} scan finding{plural} skipped — on unchanged lines "
+                "outside this PR's diff. Run the tool over the repository to see them."
             )
         # Business this run's count cannot see: our own conversations from
         # earlier runs that nobody has resolved. An incremental run may not have
@@ -1003,6 +1055,16 @@ def _error_reason(exc: BaseException) -> str:
     text = " ".join(str(exc).split())
     reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     return reason[:200]
+
+
+def _is_scan_finding(finding: ReviewFinding) -> bool:
+    """Whether *finding* came from a deterministic tool rather than a lens.
+
+    Keyed on the engine-stamped `scan:` category prefix. Lens ids cannot collide
+    with it: `ReviewConfig` rejects a custom lens whose id starts with the
+    prefix, so a model finding can never be mistaken for a tool's.
+    """
+    return (finding.category or "").startswith(SCAN_CATEGORY_PREFIX)
 
 
 def _passes_severity_floor(finding: ReviewFinding, cfg: ReviewConfig) -> bool:

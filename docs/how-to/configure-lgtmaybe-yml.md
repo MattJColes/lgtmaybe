@@ -372,13 +372,44 @@ commands, and the local CLI, which never uses it).
 
 ### static_analysis
 
-Static-analysis fusion: run fast, deterministic linters over the changed files
-and feed their findings to the model as **hints to confirm, contextualise, or
-discard**. This raises recall on exactly the mechanical bugs LLMs miss without
-posting raw linter noise — only findings the model itself confirms are
-reported. Supported tools: **ruff**, **bandit**, and **mypy** (Python), and
-**semgrep** (multi-language) when you point `semgrep_rules` at local rules —
-semgrep's registry configs need the network, which the sandbox forbids.
+Static-analysis fusion: run fast, deterministic tools over the changed files.
+Each tool reaches the review in one of two **modes**:
+
+- **`hint`** — findings become **hints for the model to confirm, contextualise,
+  or discard**. This raises recall on exactly the mechanical bugs LLMs miss
+  without posting raw linter noise; only findings the model itself confirms are
+  reported. The default for **ruff**, **bandit**, **mypy** and **semgrep**.
+- **`finding`** — findings are posted directly, with **no model call at all**.
+  The default for **gitleaks** and **zizmor**. Deterministic, free, and
+  identical run to run.
+
+The split is about the tool, not taste: a committed credential is present or it
+isn't, so asking a model to "confirm or discard" a regex match only adds latency
+and a chance of it talking itself out of a real hit. A lint or a SAST heuristic
+is the opposite — often technically true and beside the point — which is exactly
+what the model is good at filtering. Override either way with `tool_mode`.
+
+Supported tools: **ruff**, **bandit**, and **mypy** (Python), **gitleaks**
+(secrets, any language), **zizmor** (GitHub Actions workflow security — template
+injection, unpinned `uses`, over-broad permissions; it runs only when the PR
+changes a workflow file), and **semgrep** (multi-language) when you point
+`semgrep_rules` at local rules — semgrep's registry configs need the network,
+which the sandbox forbids.
+
+Two rules keep direct posting honest. Tools read **whole files**, but only the
+diff is under review, so a finding on a line this PR did not change is dropped
+and counted in the summary — otherwise a fake credential in a test fixture would
+post on every PR that touches that file, forever. And direct findings are capped
+per review, most severe first, since no model is there to filter volume.
+
+Posted findings carry a `scan:<tool>` category, so `finding_rules` can drop or
+re-grade a scanner without turning it off:
+
+```yaml
+finding_rules:
+  - match: {category: "scan:gitleaks", path: "tests/fixtures/**"}
+    action: drop
+```
 
 **mypy** earns its place on unguarded-`Optional` bugs: a `dict.get()` narrowed
 to `str | None` and then dereferenced is a crash a review lens reads straight
@@ -400,10 +431,12 @@ injection-wrapped before it reaches the model. CLI:
 ```yaml
 static_analysis:
   enabled: true
-  tools: [ruff, bandit, mypy]  # default: ruff, bandit, semgrep, mypy
+  tools: [ruff, bandit, mypy, gitleaks, zizmor]  # default: all supported tools
   min_severity: low            # floor on mapped tool severity (default info)
   tool_min_severity:           # per-tool overrides of the global floor
     ruff: medium               # only medium+ from ruff; bandit keeps `low`
+  tool_mode:                   # per-tool overrides of hint vs finding
+    gitleaks: hint             # route secrets through the model instead
   # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
 ```
 

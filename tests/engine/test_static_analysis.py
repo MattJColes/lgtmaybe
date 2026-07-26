@@ -1,9 +1,10 @@
 """Static-analysis fusion (F1): the sandboxed tool runner.
 
-Deterministic linters (ruff, bandit, and semgrep with local rules) run over the
-already-fetched changed-file TEXTS in a throwaway temp dir — never a checkout,
-never executing PR code. Their output is untrusted grounding for the LLM pass,
-not findings to post. Contracts:
+Deterministic tools (ruff, bandit, mypy, gitleaks, and semgrep with local rules)
+run over the already-fetched changed-file TEXTS in a throwaway temp dir — never a
+checkout, never executing PR code. Their output is untrusted: it either grounds
+the LLM pass or, for a `finding`-mode tool, is redacted and mapped onto findings
+(see test_tool_findings.py). Contracts:
 
 - default off — no config, no subprocess, no behaviour change;
 - a tool missing from PATH is skipped silently (no error, no subprocess);
@@ -385,6 +386,198 @@ def test_semgrep_runs_offline_with_local_rules(monkeypatch, tmp_path) -> None:  
     argv = [str(a) for a in run.calls[0]["argv"]]
     assert "--metrics=off" in argv
     assert "--disable-version-check" in argv
+
+
+class _FakeReportRun(_FakeRun):
+    """A tool that writes its findings to --report-path instead of stdout."""
+
+    def __init__(self, report: str) -> None:
+        super().__init__()
+        self._report = report
+
+    def __call__(self, argv: list[str], **kwargs: object) -> SimpleNamespace:
+        args = [str(a) for a in argv]
+        if "--report-path" in args:
+            Path(args[args.index("--report-path") + 1]).write_text(self._report, encoding="utf-8")
+        return super().__call__(argv, **kwargs)
+
+
+def _gitleaks_report() -> str:
+    """gitleaks JSON. `Match`/`Secret` carry the credential — we must ignore them."""
+    return json.dumps(
+        [
+            {
+                "RuleID": "aws-access-key-id",
+                "Description": "AWS Access Key",
+                "File": "src/app.py",
+                "StartLine": 2,
+                "Match": "AKIAIOSFODNN7EXAMPLE",
+                "Secret": "AKIAIOSFODNN7EXAMPLE",
+                "Line": "KEY = 'AKIAIOSFODNN7EXAMPLE'",
+            }
+        ]
+    )
+
+
+def test_gitleaks_findings_are_read_from_its_report_file(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeReportRun(_gitleaks_report())
+    _patch_tools(monkeypatch, run, present={"gitleaks"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.gitleaks]))
+
+    assert [(f.tool, f.path, f.line, f.rule) for f in findings] == [
+        ("gitleaks", "src/app.py", 2, "aws-access-key-id")
+    ]
+    # A committed credential is high by definition — gitleaks has no severity
+    # field of its own to map.
+    assert findings[0].severity is Severity.high
+
+
+def test_gitleaks_never_reads_the_fields_that_hold_the_secret(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Layer two of the secret defence: an allowlist at the parse boundary.
+
+    `--redact` should already have scrubbed the report, but the parser must not
+    depend on that — it reads RuleID/Description/File/StartLine and nothing else.
+    """
+    run = _FakeReportRun(_gitleaks_report())
+    _patch_tools(monkeypatch, run, present={"gitleaks"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.gitleaks]))
+
+    assert "AKIAIOSFODNN7EXAMPLE" not in format_hints(findings)
+    assert "AKIAIOSFODNN7EXAMPLE" not in str(findings)
+
+
+def test_gitleaks_runs_redacted(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Layer one: the binary must never write the secret down in the first place."""
+    run = _FakeReportRun(_gitleaks_report())
+    _patch_tools(monkeypatch, run, present={"gitleaks"})
+
+    run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.gitleaks]))
+
+    assert "--redact" in [str(a) for a in run.calls[0]["argv"]]
+
+
+def test_gitleaks_report_is_written_outside_the_scanned_corpus(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A report inside the corpus would be scanned by the tools running beside it."""
+    run = _FakeReportRun(_gitleaks_report())
+    _patch_tools(monkeypatch, run, present={"gitleaks"})
+
+    run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.gitleaks]))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    report = Path(argv[argv.index("--report-path") + 1])
+    corpus = Path(str(run.calls[0]["cwd"]))
+    assert corpus not in report.parents
+
+
+def _zizmor_output() -> str:
+    """zizmor --format json. `start_point.row` is 0-BASED; findings are 1-based."""
+    return json.dumps(
+        [
+            {
+                "ident": "template-injection",
+                "desc": "code injection via template expansion",
+                "determinations": {"severity": "High", "confidence": "High"},
+                "locations": [
+                    {
+                        "symbolic": {
+                            "key": {"Local": {"verbatim_path": "./.github/workflows/ci.yml"}}
+                        },
+                        "concrete": {"location": {"start_point": {"row": 6, "column": 8}}},
+                    }
+                ],
+            }
+        ]
+    )
+
+
+WORKFLOW_FILES = {".github/workflows/ci.yml": "on: [pull_request_target]\njobs: {}\n"}
+
+
+def test_zizmor_findings_parsed_with_severity_and_one_based_lines(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    findings = run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    assert len(findings) == 1
+    assert findings[0].rule == "template-injection"
+    assert findings[0].path == ".github/workflows/ci.yml"
+    # row 6 is zizmor's 0-based index for line 7 — off by one if taken verbatim.
+    assert findings[0].line == 7
+    assert findings[0].severity is Severity.high
+
+
+def test_zizmor_runs_offline(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert "--offline" in argv, "zizmor must never reach the network from the sandbox"
+
+
+def test_zizmor_is_skipped_when_no_workflow_file_changed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Not an optimisation: zizmor panics when handed a tree with no workflows.
+
+    Without this the tool would crash on the majority of PRs, degrade to no
+    findings through the blanket handler, and log a warning every time.
+    """
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    assert findings == []
+    assert run.calls == []
+
+
+@pytest.mark.skipif(shutil.which("zizmor") is None, reason="zizmor not installed")
+def test_zizmor_really_flags_template_injection_and_unpinned_uses() -> None:
+    """The two workflow bugs the review checklist already names, run for real."""
+    workflow = (
+        "name: bad\n"
+        "on: [pull_request_target]\n"
+        "jobs:\n"
+        "  x:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        '      - run: echo "${{ github.event.pull_request.title }}"\n'
+    )
+    findings = run_static_analysis(
+        {".github/workflows/bad.yml": workflow}, _cfg(tools=[StaticAnalysisTool.zizmor])
+    )
+
+    rules = {f.rule for f in findings}
+    assert {"template-injection", "unpinned-uses"} <= rules, rules
+    assert all(f.path == ".github/workflows/bad.yml" for f in findings)
+    assert all(f.line >= 1 for f in findings)
+
+
+@pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks not installed")
+def test_gitleaks_really_finds_a_committed_credential() -> None:
+    """The bug this tool exists for, run against the real binary.
+
+    A faked subprocess proves we parse the report; it cannot prove the argv we
+    pass still surfaces a hit — the subcommand and report flags have moved
+    between gitleaks releases, and a wrong one degrades to silent zero findings,
+    which looks exactly like a clean scan.
+    """
+    # NOT the AWS documentation key (AKIAIOSFODNN7EXAMPLE): gitleaks allowlists
+    # well-known example credentials, so using one here would assert nothing.
+    secret = "ghp_012345678901234567890123456789abcdef"
+    findings = run_static_analysis(
+        {"src/settings.py": f'TOKEN = "{secret}"\n'},
+        _cfg(tools=[StaticAnalysisTool.gitleaks]),
+    )
+
+    assert findings, "gitleaks found nothing — check the argv against this version"
+    assert findings[0].path == "src/settings.py"
+    assert findings[0].line == 1
+    assert secret not in str(findings)
 
 
 def test_crashing_tool_degrades_to_no_hints(monkeypatch) -> None:  # type: ignore[no-untyped-def]

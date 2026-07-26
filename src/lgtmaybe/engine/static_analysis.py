@@ -4,9 +4,11 @@ Runs fast linters/SAST (ruff, bandit, mypy, and semgrep with local rules) over
 the **already-fetched changed-file texts**, written to a throwaway temp dir —
 never a checkout, never executing PR code (linting and type checking are
 parsing plus inference, like ast-grep; no module is ever imported). The
-findings are formatted as untrusted HINTS for the lens prompts ("confirm,
-contextualise, or discard"), raising recall on the deterministic bugs LLMs miss
-while letting the model suppress raw linter noise.
+findings reach the review by the tool's mode: `hint` formats them as untrusted
+HINTS for the lens prompts ("confirm, contextualise, or discard"), raising
+recall on the deterministic bugs LLMs miss while letting the model suppress raw
+linter noise; `finding` maps them straight onto review findings with no model
+call at all, for tools whose claims need no interpretation (see `_DEFAULT_MODE`).
 
 Sandboxing posture:
 
@@ -17,9 +19,10 @@ Sandboxing posture:
   user profile/config roots pinned inside the sandbox) and a hard timeout;
 - semgrep runs only with locally configured rules — its registry configs
   (``--config auto``) fetch over the network, which is forbidden here;
-- tool output is untrusted text: the engine redacts it and wraps it in a
-  neutralised injection block before it reaches the model, and it is never
-  posted as a finding verbatim.
+- tool output is untrusted text: a `hint`-mode tool's output is redacted and
+  wrapped in a neutralised injection block before it reaches the model; a
+  `finding`-mode tool's output is redacted before it becomes a finding, and its
+  raw text is never posted verbatim either way.
 """
 
 from __future__ import annotations
@@ -29,13 +32,23 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ReviewConfig, Severity, StaticAnalysisTool
+from lgtmaybe.core.models import (
+    _SCAN_CATEGORY_PREFIX,
+    ReviewConfig,
+    ReviewFinding,
+    Severity,
+    StaticAnalysisTool,
+    ToolMode,
+)
+
+from .redact import redact
 
 _log = get_logger(__name__)
 _WINDOWS = os.name == "nt"
@@ -49,7 +62,47 @@ _TOOL_TIMEOUT = 180
 # noisy lint run is compressed rather than allowed to crowd out the diff.
 MAX_HINTS = 50
 
+# Ceiling on findings posted directly, most severe first. Direct posts never
+# pass through the model, so nothing else bounds them: one over-broad rule pack
+# on a large PR would otherwise open a comment per hit and burn the reviewer's
+# credibility in a single run. Far below MAX_HINTS on purpose — a hint costs a
+# few prompt tokens, a comment costs a human's attention.
+MAX_SCAN_FINDINGS = 20
+
+# How each tool's findings reach the review when the user has not overridden it.
+#
+# The split is "does this tool make a claim that is true or false with no
+# interpretation?". A secret is committed or it isn't; the user's own structural
+# rule matched or it didn't — routing those through a model to be "confirmed"
+# adds latency and a chance of the model talking itself out of a real hit. A
+# ruff lint or a SAST heuristic is the opposite: often technically true and
+# beside the point, which is exactly what the model is good at filtering.
+_DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
+    StaticAnalysisTool.ruff: ToolMode.hint,
+    StaticAnalysisTool.bandit: ToolMode.hint,
+    StaticAnalysisTool.mypy: ToolMode.hint,
+    StaticAnalysisTool.semgrep: ToolMode.hint,
+    StaticAnalysisTool.gitleaks: ToolMode.finding,
+    StaticAnalysisTool.zizmor: ToolMode.finding,
+}
+
+# Category prefix for a finding that came from a tool rather than a lens. Keeps
+# `finding_rules` able to target a specific scanner, and keeps scan findings out
+# of the built-in defect categories whose failure_scenario gate they'd fail.
+# Defined in core.models so the CustomLens validator can reserve it there.
+SCAN_CATEGORY_PREFIX = _SCAN_CATEGORY_PREFIX
+
 _BANDIT_SEVERITY = {
+    "LOW": Severity.low,
+    "MEDIUM": Severity.medium,
+    "HIGH": Severity.high,
+}
+
+# zizmor grades its own audits; "Unknown" is its default when an audit
+# declines to commit, so it maps to the weakest rung rather than being dropped.
+_ZIZMOR_SEVERITY = {
+    "UNKNOWN": Severity.info,
+    "INFORMATIONAL": Severity.info,
     "LOW": Severity.low,
     "MEDIUM": Severity.medium,
     "HIGH": Severity.high,
@@ -90,8 +143,17 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         return []
 
     findings: list[ToolFinding] = []
-    with tempfile.TemporaryDirectory(prefix="lgtmaybe-sa-", ignore_cleanup_errors=True) as tmp:
+    # Two directories, deliberately siblings. Tools that report to a file rather
+    # than stdout (gitleaks) must not write into the corpus: the tools run
+    # concurrently over that same tree, so a report landing there would be
+    # scanned by whichever tool started after it — a secret-bearing report is
+    # the worst possible thing to feed back into the scan.
+    with (
+        tempfile.TemporaryDirectory(prefix="lgtmaybe-sa-", ignore_cleanup_errors=True) as tmp,
+        tempfile.TemporaryDirectory(prefix="lgtmaybe-report-", ignore_cleanup_errors=True) as rpt,
+    ):
         root = Path(tmp)
+        report_dir = Path(rpt)
         written = _write_corpus(root, file_contents)
         if not written:
             return []
@@ -102,7 +164,9 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         # hints feed the prompt, and a prompt that reorders run to run would
         # bust the shared-prefix cache for nothing.
         with ThreadPoolExecutor(max_workers=len(sa.tools)) as pool:
-            for tool_findings in pool.map(lambda tool: _run_tool(tool, root, cfg), sa.tools):
+            for tool_findings in pool.map(
+                lambda tool: _run_tool(tool, root, report_dir, written, cfg), sa.tools
+            ):
                 findings.extend(tool_findings)
 
     # Per-tool floors win over the global floor, in either direction.
@@ -115,6 +179,121 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
             extra={"hints": len(kept), "below_floor": dropped},
         )
     return kept
+
+
+# Tools that only have something to say about particular files. Running one
+# over a corpus with none of them is not merely wasted work: zizmor panics when
+# handed a tree containing no workflows, which would degrade to a warning on the
+# majority of PRs.
+_WORKFLOW_PREFIX = ".github/workflows/"
+_RELEVANT_PATHS: dict[StaticAnalysisTool, Callable[[str], bool]] = {
+    StaticAnalysisTool.zizmor: lambda path: path.startswith(_WORKFLOW_PREFIX),
+}
+
+
+def _has_relevant_input(tool: StaticAnalysisTool, paths: list[str]) -> bool:
+    """Whether *tool* has anything in the corpus worth running over."""
+    predicate = _RELEVANT_PATHS.get(tool)
+    return predicate is None or any(predicate(path) for path in paths)
+
+
+def mode_for(tool: StaticAnalysisTool, cfg: ReviewConfig) -> ToolMode:
+    """How *tool*'s findings reach the review: the user's choice, else the default."""
+    return cfg.static_analysis.tool_mode.get(tool, _DEFAULT_MODE[tool])
+
+
+def partition_by_mode(
+    findings: list[ToolFinding], cfg: ReviewConfig
+) -> tuple[list[ToolFinding], list[ToolFinding]]:
+    """Split tool findings into ``(hints, direct)``, preserving order in both.
+
+    A tool whose name doesn't map to a known member can only come from a future
+    or hand-built ``ToolFinding``; treat it as a hint, the conservative side —
+    grounding costs a few prompt tokens, a wrong direct post costs trust.
+    """
+    hints: list[ToolFinding] = []
+    direct: list[ToolFinding] = []
+    for finding in findings:
+        try:
+            tool = StaticAnalysisTool(finding.tool)
+        except ValueError:
+            hints.append(finding)
+            continue
+        (direct if mode_for(tool, cfg) is ToolMode.finding else hints).append(finding)
+    return hints, direct
+
+
+def tool_review_findings(
+    findings: list[ToolFinding], file_contents: dict[str, str]
+) -> list[ReviewFinding]:
+    """Map ``finding``-mode tool output onto postable review findings.
+
+    No model sees these, so this function carries the whole safety contract:
+    every message is redacted (a tool can quote hostile or secret-bearing code),
+    the category is namespaced per tool, and a finding whose line does not exist
+    in the fetched text is dropped rather than anchored to a guess.
+
+    The anchor is the source line, redacted. Redaction is not optional here and
+    is not only a safety measure: the engine re-anchors against the **redacted**
+    diff (``engine.review`` snaps against ``redact(ctx.diff)``), so a raw anchor
+    from a line holding a credential would match nothing and the finding would
+    be dropped as unanchored. Redacting it makes the anchor match *and* means a
+    secret never enters a ``ReviewFinding`` at all — the corpus these tools scan
+    is deliberately un-redacted, since that is how they find secrets in the
+    first place.
+    """
+    ordered = sorted(findings, key=lambda f: f.severity.rank, reverse=True)
+    kept: list[ReviewFinding] = []
+    for finding in ordered:
+        anchor = _corpus_line(finding, file_contents)
+        if anchor is None:
+            continue
+        kept.append(
+            ReviewFinding(
+                path=finding.path,
+                line=finding.line,
+                # The corpus is head text; there is no LEFT-side equivalent.
+                side="RIGHT",
+                severity=finding.severity,
+                # Deterministic, so finding_fingerprint(path, title) is stable
+                # across re-runs and the ignore / feedback channels keep working.
+                title=f"{finding.tool}: {finding.rule}",
+                body=(
+                    f"{redact(finding.message)}\n\n"
+                    f"Reported by `{finding.tool}` (rule `{finding.rule}`) — a deterministic "
+                    "scan, not a model judgement."
+                ),
+                anchor=redact(anchor),
+                category=f"{SCAN_CATEGORY_PREFIX}{finding.tool}",
+            )
+        )
+        if len(kept) == MAX_SCAN_FINDINGS:
+            _log.info(
+                "scan findings capped",
+                extra={"kept": MAX_SCAN_FINDINGS, "considered": len(ordered)},
+            )
+            break
+    return kept
+
+
+def _corpus_line(finding: ToolFinding, file_contents: dict[str, str]) -> str | None:
+    """The verbatim source line *finding* points at, or None if it doesn't exist.
+
+    A tool can report past the end of a file we fetched (truncated content, or a
+    path we never fetched at all). Emitting a bogus anchor would make the engine
+    fail to match and quietly downgrade the finding; dropping it is honest.
+    """
+    text = file_contents.get(finding.path)
+    if text is None:
+        return None
+    lines = text.splitlines()
+    if not 1 <= finding.line <= len(lines):
+        _log.info(
+            "scan finding points outside the fetched text — dropping",
+            extra={"path": finding.path, "line": finding.line},
+        )
+        return None
+    return lines[finding.line - 1]
 
 
 def format_hints(findings: list[ToolFinding]) -> str:
@@ -155,12 +334,34 @@ def _write_corpus(root: Path, file_contents: dict[str, str]) -> list[str]:
     return written
 
 
-def _run_tool(tool: StaticAnalysisTool, root: Path, cfg: ReviewConfig) -> list[ToolFinding]:
+def _run_tool(
+    tool: StaticAnalysisTool,
+    root: Path,
+    report_dir: Path,
+    paths: list[str],
+    cfg: ReviewConfig,
+) -> list[ToolFinding]:
     """Run one tool over the corpus at *root*; any failure degrades to []."""
+    if not _has_relevant_input(tool, paths):
+        _log.info("no relevant files for tool — skipping", extra={"tool": tool.value})
+        return []
     binary = shutil.which(tool.value)
     if binary is None:
-        _log.info("static-analysis tool not installed — skipping", extra={"tool": tool.value})
+        # A finding-mode tool produces no hints to miss — it produces no
+        # findings, which is a coverage hole rather than lost grounding. Say so
+        # at warning level, but only when the user asked for this tool by name:
+        # `tools` defaults to every member, so a default config on a machine
+        # with one linter installed would otherwise warn about all the others.
+        sa = cfg.static_analysis
+        named = "tools" in sa.model_fields_set and tool in sa.tools
+        loud = mode_for(tool, cfg) is ToolMode.finding and (named or tool in sa.tool_mode)
+        (_log.warning if loud else _log.info)(
+            "static-analysis tool not installed — skipping", extra={"tool": tool.value}
+        )
         return []
+
+    # Report file for tools that write findings to a path rather than stdout.
+    report = report_dir / f"{tool.value}.json"
 
     if tool is StaticAnalysisTool.ruff:
         argv = [binary, "check", "--output-format", "json", "--exit-zero", "--no-cache", "."]
@@ -187,6 +388,29 @@ def _run_tool(tool: StaticAnalysisTool, root: Path, cfg: ReviewConfig) -> list[T
             "--no-incremental",
             ".",
         ]
+    elif tool is StaticAnalysisTool.gitleaks:
+        # --redact is the first of the secret-defence layers: it makes the
+        # binary write "REDACTED" in place of every match, so the credential
+        # never reaches a file we then read. --no-git because the corpus is
+        # loose file texts, not a repository; --exit-code 0 because findings
+        # are a normal result here, not a failure.
+        argv = [
+            binary,
+            "dir",
+            ".",
+            "--redact",
+            "--no-banner",
+            "--exit-code",
+            "0",
+            "--report-format",
+            "json",
+            "--report-path",
+            str(report),
+        ]
+    elif tool is StaticAnalysisTool.zizmor:
+        # --offline forbids the online audits that resolve actions against the
+        # GitHub API; --no-progress keeps the machine-readable output clean.
+        argv = [binary, "--format", "json", "--no-progress", "--offline", "."]
     else:  # semgrep
         rules = cfg.static_analysis.semgrep_rules
         if not rules:
@@ -217,8 +441,18 @@ def _run_tool(tool: StaticAnalysisTool, root: Path, cfg: ReviewConfig) -> list[T
             errors="replace",
             timeout=_TOOL_TIMEOUT,
         )
-        return _parse_output(tool, result.stdout, root)
+        # Tools that report to a path leave stdout empty. Explicit encoding: the
+        # Windows leg runs with locale-default encoding and a bare read_text()
+        # there is exactly what tests/test_code_quality.py fails the build over.
+        raw = (
+            report.read_text(encoding="utf-8")
+            if tool is StaticAnalysisTool.gitleaks
+            else result.stdout
+        )
+        return _parse_output(tool, raw, root)
     except Exception as exc:  # noqa: BLE001 — grounding is best-effort, never fatal
+        # str(exc) only — never stdout/stderr, which for a secret scanner can
+        # quote the credential it just found.
         _log.warning(
             "static-analysis tool failed — skipping",
             extra={"tool": tool.value, "error": str(exc)[:200]},
@@ -270,6 +504,11 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
     data = json.loads(stdout)
     if tool is StaticAnalysisTool.ruff:
         return [_ruff_finding(item, root) for item in data]
+    if tool is StaticAnalysisTool.gitleaks:
+        # gitleaks emits a bare array, and `null` for "no findings".
+        return [_gitleaks_finding(item) for item in data or []]
+    if tool is StaticAnalysisTool.zizmor:
+        return [_zizmor_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.bandit:
         return [_bandit_finding(item) for item in data.get("results", [])]
     return [_semgrep_finding(item) for item in data.get("results", [])]
@@ -325,6 +564,50 @@ def _mypy_finding(item: dict[str, Any]) -> ToolFinding:
         # project also can't see every runtime guard, so it is not automatically
         # high. Notes only elaborate on the error they follow: info.
         severity=Severity.medium if severity == "error" else Severity.info,
+    )
+
+
+def _gitleaks_finding(item: dict[str, Any]) -> ToolFinding:
+    """Map one gitleaks hit, reading only the fields that cannot hold the secret.
+
+    The report also carries ``Match``, ``Secret`` and ``Line`` — the credential
+    and the source line around it. ``--redact`` should already have scrubbed
+    them, but this parser must not depend on that, so it never reads them. This
+    allowlist is layer two of the secret defence; keep it an allowlist.
+    """
+    return ToolFinding(
+        tool="gitleaks",
+        path=_posix_rel(str(item.get("File", ""))),
+        line=int(item.get("StartLine") or 1),
+        rule=str(item.get("RuleID", "")),
+        message=str(item.get("Description", "")),
+        # gitleaks has no severity of its own: a committed credential is high by
+        # definition, and nothing it reports is worth grading lower.
+        severity=Severity.high,
+    )
+
+
+def _zizmor_finding(item: dict[str, Any]) -> ToolFinding:
+    """Map one zizmor audit hit onto the shared scale.
+
+    Two shape traps, both load-bearing: ``start_point.row`` is **0-based**, and
+    the path hides under a single-key enum wrapper (``Local``/``Remote``) whose
+    inner key varies by input kind — so read the one value rather than guessing
+    the name.
+    """
+    location = item.get("locations") or [{}]
+    concrete = location[0].get("concrete", {}).get("location", {})
+    key = location[0].get("symbolic", {}).get("key", {})
+    inner: Any = next(iter(key.values()), {}) if isinstance(key, dict) else {}
+    path = next(iter(inner.values()), "") if isinstance(inner, dict) else ""
+    severity = str(item.get("determinations", {}).get("severity", "")).upper()
+    return ToolFinding(
+        tool="zizmor",
+        path=_posix_rel(str(path)),
+        line=int(concrete.get("start_point", {}).get("row", 0)) + 1,
+        rule=str(item.get("ident", "")),
+        message=str(item.get("desc", "")),
+        severity=_ZIZMOR_SEVERITY.get(severity, Severity.low),
     )
 
 

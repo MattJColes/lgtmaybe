@@ -308,10 +308,12 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
 @click.option(
     "--static-analysis/--no-static-analysis",
     default=None,
-    help="Run installed deterministic linters (ruff, bandit, mypy, semgrep with local "
-    "rules) over the changed files and feed their findings to the model as "
-    "untrusted hints to confirm or discard (default off; tools not installed "
-    "are skipped silently — pip install lgtmaybe[static-analysis])",
+    help="Run installed deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, "
+    "semgrep with local rules) over the changed files: linters ground the model as "
+    "untrusted hints to confirm or discard, while gitleaks (secrets) and zizmor "
+    "(workflow security) post directly with no model call "
+    "(default off; tools not installed are skipped silently — "
+    "pip install lgtmaybe[static-analysis])",
 )
 @click.option(
     "--profile",

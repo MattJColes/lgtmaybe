@@ -84,3 +84,31 @@ def test_focused_diff_gets_no_splitting_hint() -> None:
     files = [f"pkg/mod{j}.py" for j in range(12)]  # many files, one theme
     labels = compute_labels([], _ctx(_SMALL_DIFF, files))
     assert "consider-splitting" not in labels
+
+
+def test_a_leaked_secret_earns_the_security_label() -> None:
+    """The most label-worthy finding lgtmaybe can produce must not be missed.
+
+    The label predicate keyed on the literal "security" category, which no
+    deterministic secret scanner ever carries.
+    """
+    from lgtmaybe.engine.labels import SECURITY_LABEL, compute_labels
+
+    finding = ReviewFinding(
+        path="src/app.py",
+        line=2,
+        severity=Severity.high,
+        title="gitleaks: aws-access-key-id",
+        body="AWS Access Key",
+        category="scan:gitleaks",
+    )
+    ctx = PRContext(
+        diff="diff --git a/src/app.py b/src/app.py\n@@ -1 +1,2 @@\n a\n+b\n",
+        changed_files=["src/app.py"],
+        base_sha="a",
+        head_sha="b",
+        repo="org/repo",
+        pr_number=1,
+    )
+
+    assert SECURITY_LABEL in compute_labels([finding], ctx)
