@@ -580,6 +580,23 @@ class ReviewConfig(_Strict):
     # Sampling temperature for completions. Defaults to 0.0 for deterministic,
     # reproducible reviews (and steadier instruction-following on small models).
     temperature: float = 0.0
+    # Ceiling on the tokens each model call may GENERATE (the findings JSON) — the
+    # output counterpart to max_input_tokens. None (default) sends no cap, so the
+    # model's own ceiling applies and a long findings payload is never truncated.
+    #
+    # Set it on a PREPAID route (OpenRouter and friends), which reserves
+    # prompt + max_tokens against the balance BEFORE generating and falls back to
+    # the model's full output ceiling when the request omits the cap — so an
+    # uncapped review can be refused ("requires more credits ... you requested up
+    # to 65536 tokens, but can only afford N") for credit it was never going to
+    # spend. A cap sized to a real findings payload shrinks that reservation to
+    # what the review actually costs.
+    #
+    # Sized too low it truncates the JSON mid-object and the call parses as a
+    # failed lens, which is why it is opt-in rather than defaulted: reasoning
+    # models spend this budget on thinking tokens too, so a value that suits a
+    # plain model can starve a reasoning one.
+    max_tokens: int | None = Field(default=None, ge=1)
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True

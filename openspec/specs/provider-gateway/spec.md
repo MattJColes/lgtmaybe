@@ -73,6 +73,13 @@ on `ProviderResult`.
   not retry it — an identical request against an identical budget can only fail the
   same way — while a configured fallback model is still tried
 
+#### Scenario: the account is out of prepaid credit
+- **WHEN** a route refuses the request because the balance cannot cover it —
+  prepaid routes reserve prompt + `max_tokens` before generating, so an uncapped
+  request reserves the model's full output ceiling
+- **THEN** it is treated as permanent and tried once, not retried per lens: the
+  balance cannot grow mid-review, so every retry fails identically
+
 #### Scenario: a failed call reports what it cost
 - **WHEN** a completion fails after exhausting its retries
 - **THEN** the raised error carries the attempt count, so instrumentation

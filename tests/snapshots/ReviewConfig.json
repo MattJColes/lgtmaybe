@@ -543,6 +543,19 @@
       "title": "Max Review Seconds",
       "type": "integer"
     },
+    "max_tokens": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Tokens"
+    },
     "min_confidence": {
       "default": 0,
       "maximum": 10,

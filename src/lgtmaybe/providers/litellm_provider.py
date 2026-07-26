@@ -120,6 +120,20 @@ _QUOTA_MARKERS = (
     "check your plan and billing",
 )
 
+# Running out of prepaid credit is permanent, and it does NOT arrive as a
+# RateLimitError: OpenRouter (and other prepaid-balance routes) reject the request
+# up front with a generic APIError, so the type check above and the 429 check below
+# both miss it. The refusal is a *pre-flight reservation* failure — the route costs
+# prompt + max_tokens against the balance before generating a single token, and an
+# uncapped request reserves the model's full output ceiling — so the balance can't
+# grow mid-review and every retry is guaranteed to fail identically.
+_INSUFFICIENT_CREDIT_MARKERS = (
+    "requires more credits",
+    "can only afford",
+    "insufficient credits",
+    "insufficient_credits",
+)
+
 # An expired/invalid cloud credential is permanent — a retry can't refresh it, so
 # storming the backoff over every lens just delays an inevitable failure (the same
 # wasted-runner-time trap as a quota error). Unlike a bad *static* key (which
@@ -143,6 +157,12 @@ def _is_quota_rate_limit(exc: BaseException) -> bool:
     return any(marker in msg for marker in _QUOTA_MARKERS)
 
 
+def _is_insufficient_credit(exc: BaseException) -> bool:
+    """True when *exc* is a prepaid-balance refusal (permanent until topped up)."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _INSUFFICIENT_CREDIT_MARKERS)
+
+
 def _is_expired_credential(exc: BaseException) -> bool:
     """True when *exc* is an expired/invalid ambient cloud credential (permanent)."""
     msg = str(exc).lower()
@@ -163,7 +183,7 @@ def _is_permanent(exc: BaseException) -> bool:
         return True
     if isinstance(exc, RateLimitError):
         return _is_quota_rate_limit(exc)
-    return _is_expired_credential(exc)
+    return _is_expired_credential(exc) or _is_insufficient_credit(exc)
 
 
 def _rejects_temperature(exc: Exception) -> bool:

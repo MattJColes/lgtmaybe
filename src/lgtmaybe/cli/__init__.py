@@ -204,6 +204,12 @@ def build_provider_engine(
     extra: dict[str, Any] = {}
     if cfg.provider is Provider.ollama and cfg.num_ctx is not None:
         extra["num_ctx"] = cfg.num_ctx
+    # An output cap is only sent when asked for: omitting it lets the model's own
+    # ceiling apply, so nothing truncates a long findings payload by default.
+    # Every provider honours it (litellm normalises the param), so unlike num_ctx
+    # it is not gated on the provider.
+    if cfg.max_tokens is not None:
+        extra["max_tokens"] = cfg.max_tokens
     # Announce the per-call budget AND where it came from, before any call runs.
     # A timeout failure reports the budget it blew ("provider request exceeded
     # 60s") but never its origin, so an explicit `timeout: 60` in a repo's
@@ -857,6 +863,7 @@ def action_inputs() -> dict[str, str | None]:
         "temperature": get("TEMPERATURE"),
         "num_ctx": get("NUM_CTX"),
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
+        "max_tokens": get("MAX_TOKENS"),
         "max_concurrency": get("MAX_CONCURRENCY"),
         "resolve_fixed": get("RESOLVE_FIXED"),
         "recursive": get("RECURSIVE"),

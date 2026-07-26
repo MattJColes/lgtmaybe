@@ -527,6 +527,61 @@ class TestFailFastOnPermanentErrors:
 
         assert calls == 1
 
+    def test_openrouter_insufficient_credits_is_not_retried(self) -> None:
+        """OpenRouter reserves prompt + max_tokens against the balance BEFORE
+        generating, and refuses the request when the balance can't cover it. That
+        is a billing dead-end exactly like OpenAI's insufficient_quota — but it
+        arrives as a generic APIError, not a RateLimitError, so the type check
+        alone misses it and every lens retried it three times."""
+        calls = 0
+
+        def no_credit(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.APIError(
+                status_code=402,
+                message=(
+                    "litellm.APIError: APIError: OpenrouterException - "
+                    '{"error":{"message":"This request requires more credits, or fewer '
+                    "max_tokens. You requested up to 65536 tokens, but can only afford "
+                    '25905."}}'
+                ),
+                model="vendor/m",
+                llm_provider="openrouter",
+            )
+
+        with patch("litellm.completion", side_effect=no_credit):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.APIError):
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/vendor/m")
+
+        assert calls == 1
+
+    def test_transient_api_error_is_still_retried(self) -> None:
+        """A plain APIError (an upstream blip) stays transient — only the
+        credit-exhaustion message makes one permanent."""
+        good = _fake_response("ok after backoff")
+        calls = 0
+
+        def flaky(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise litellm.APIError(
+                    status_code=500,
+                    message="litellm.APIError: APIError: OpenrouterException - upstream error",
+                    model="vendor/m",
+                    llm_provider="openrouter",
+                )
+            return good
+
+        with patch("litellm.completion", side_effect=flaky):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openrouter/vendor/m")
+
+        assert result.text == "ok after backoff"
+        assert calls == 2
+
     def test_authentication_error_is_not_retried(self) -> None:
         """A bad key won't become good on a retry — fail fast."""
         calls = 0
