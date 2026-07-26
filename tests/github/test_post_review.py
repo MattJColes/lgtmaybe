@@ -545,6 +545,9 @@ def test_resolve_fixed_resolves_outdated_disappeared_thread() -> None:
     gone_fp = finding_fingerprint("src/old.py", "Removed bug")
     graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    # The marker rewrite is part of resolving; mock it rather than relying on an
+    # exception guard to swallow an unmocked request.
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
@@ -1162,3 +1165,39 @@ def test_failed_resolve_posts_no_reply() -> None:
     assert graphql.replies == [], "replied on a thread that was never resolved"
     assert graphql.resolved == []
     assert patched == [], "rewrote the fingerprint marker of an unresolved thread"
+
+
+@respx.mock
+def test_reply_failure_still_rewrites_the_fingerprint_marker() -> None:
+    """The marker rewrite is correctness-critical; the reply is cosmetic.
+
+    Once the thread is resolved it is skipped by `_fixed_threads` forever, so
+    this is the only chance to move its fingerprint into the "resolved" family.
+    A failing reply must not strand an active marker on a resolved thread — that
+    would let re-run dedupe suppress the finding permanently if it came back.
+    """
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+
+    def resolve_ok_reply_fails(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "addPullRequestReviewThreadReply" in payload.get("query", ""):
+            return httpx.Response(200, json={"errors": [{"message": "reply exploded"}]})
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=resolve_ok_reply_fails)
+    patched: list[str] = []
+
+    def capture_patch(request: httpx.Request) -> httpx.Response:
+        patched.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={})
+
+    respx.route(method="PATCH").mock(side_effect=capture_patch)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.resolved == ["THREAD1"]
+    assert patched, "resolved thread kept its active fingerprint marker"
+    assert "lgtmaybe-resolved-fingerprint:" in patched[0]

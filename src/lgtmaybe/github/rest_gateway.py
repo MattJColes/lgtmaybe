@@ -849,10 +849,24 @@ class RestGitHubGateway(GitHubGateway):
             return
 
         def resolve_one(thread: tuple[str, int | None, str]) -> None:
+            """Resolve one thread, then record it — in that order, deliberately.
+
+            Three steps with three different consequences, so they are sequenced
+            by how much a failure costs:
+
+            1. **Resolve** — the gate. Until it succeeds nothing else should
+               happen: a reply on a thread that stays open re-qualifies as fixed
+               on every later run and collects another reply each time.
+            2. **Rewrite the marker** — correctness-critical, and this is the
+               only chance. A resolved thread is skipped by `_fixed_threads`
+               forever, so an active fingerprint left behind would let re-run
+               dedupe suppress the finding permanently if it came back.
+            3. **Reply** — cosmetic audit trail. Last, because a failure here
+               must not skip step 2.
+            """
             thread_id, comment_id, first_body = thread
             try:
-                self._reply_and_resolve(thread_id)
-                self._mark_comment_resolved(comment_id, first_body)
+                self._resolve_thread(thread_id)
             except Exception as exc:  # noqa: BLE001 — one thread never blocks the rest
                 if "FORBIDDEN" in str(exc) or "not accessible by integration" in str(exc):
                     # Not transient: the identity simply cannot resolve threads,
@@ -866,6 +880,15 @@ class RestGitHubGateway(GitHubGateway):
                     )
                 else:
                     _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
+                return
+            try:
+                self._mark_comment_resolved(comment_id, first_body)
+            except Exception as exc:  # noqa: BLE001 — the thread is already resolved
+                _log.warning("resolved-marker rewrite on %s failed: %s", thread_id, exc)
+            try:
+                self.reply_in_thread(thread_id, "✅ Looks resolved.")
+            except Exception as exc:  # noqa: BLE001 — nothing depends on the reply
+                _log.warning("resolved-thread reply on %s failed: %s", thread_id, exc)
 
         # Each thread costs a reply + a resolve + a marker rewrite; a PR with
         # several fixed findings paid all of it serially. They touch different
@@ -933,16 +956,15 @@ class RestGitHubGateway(GitHubGateway):
             cursor = page.get("endCursor")
         return fixed
 
-    def _reply_and_resolve(self, thread_id: str) -> None:
-        """Mark a thread resolved, then post the short reply recording it.
+    def _resolve_thread(self, thread_id: str) -> None:
+        """Mark a review thread resolved. Raises if the identity may not.
 
-        Resolve FIRST. The reply is the record of a resolution, so it must never
-        outlive one: replying first meant a resolve the app isn't permitted to
-        make (GitHub answers FORBIDDEN, and GraphQL errors arrive as HTTP 200)
-        left "✅ Looks resolved." on a thread that stayed open — which then
-        re-qualified as fixed on every later run and collected another reply each
-        time. Resolving first makes the whole step no-op when it can't complete,
-        instead of unboundedly noisy.
+        The gate for the whole resolve-on-fix step (see `resolve_one`): nothing
+        else may happen until this succeeds. Replying first meant a resolve the
+        app isn't permitted to make (GitHub answers FORBIDDEN, and GraphQL errors
+        arrive as HTTP 200) left "✅ Looks resolved." on a thread that stayed
+        open — which then re-qualified as fixed on every later run and collected
+        another reply each time.
         """
         resolve = """
         mutation($threadId:ID!){
@@ -950,7 +972,6 @@ class RestGitHubGateway(GitHubGateway):
         }
         """
         self._graphql(resolve, {"threadId": thread_id})
-        self.reply_in_thread(thread_id, "✅ Looks resolved.")
 
     def _mark_comment_resolved(self, comment_id: int | None, body: str) -> None:
         """Rewrite a resolved comment's fingerprint marker into the "resolved" family.
