@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -848,6 +849,12 @@ class RestGitHubGateway(GitHubGateway):
         if not fixed:
             return
 
+        # A refusal is a property of the identity, not of the thread: it will
+        # recur on every remaining thread and every future run until the setup
+        # changes. Trip this on the first one and stop, so a misconfigured
+        # identity costs one forbidden call and one warning, not N of each.
+        refused = threading.Event()
+
         def resolve_one(thread: tuple[str, int | None, str]) -> None:
             """Resolve one thread, then record it — in that order, deliberately.
 
@@ -864,6 +871,8 @@ class RestGitHubGateway(GitHubGateway):
             3. **Reply** — cosmetic audit trail. Last, because a failure here
                must not skip step 2.
             """
+            if refused.is_set():
+                return
             thread_id, comment_id, first_body = thread
             try:
                 self._resolve_thread(thread_id)
@@ -872,12 +881,15 @@ class RestGitHubGateway(GitHubGateway):
                     # Not transient: the identity simply cannot resolve threads,
                     # so this recurs every run until someone changes the setup.
                     # Say what to do about it rather than repeating a bare error.
-                    _log.warning(
-                        "auto-resolve is not permitted for this identity — threads stay open. "
-                        "Grant the token/App pull-request write access, or set "
-                        "resolve_fixed: false to stop attempting it. (%s)",
-                        exc,
-                    )
+                    if not refused.is_set():
+                        refused.set()
+                        _log.warning(
+                            "auto-resolve is not permitted for this identity — threads stay "
+                            "open. Grant the token/App pull-request write access (the public "
+                            "lgtmaybe App cannot resolve threads), or set resolve_fixed: false "
+                            "to stop attempting it. (%s)",
+                            exc,
+                        )
                 else:
                     _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
                 return

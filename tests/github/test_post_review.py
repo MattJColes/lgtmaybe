@@ -1201,3 +1201,43 @@ def test_reply_failure_still_rewrites_the_fingerprint_marker() -> None:
     assert graphql.resolved == ["THREAD1"]
     assert patched, "resolved thread kept its active fingerprint marker"
     assert "lgtmaybe-resolved-fingerprint:" in patched[0]
+
+
+@respx.mock
+def test_forbidden_resolve_is_attempted_once_per_run() -> None:
+    """A refusal is a property of the identity, not of the thread.
+
+    `resolveReviewThread` being forbidden recurs on every thread and every run
+    until someone changes the setup, so retrying it per thread just burns API
+    calls and repeats the same warning N times. The first refusal stops the rest.
+    """
+    _mark_existing_review()
+    fps = [finding_fingerprint(f"src/gone{i}.py", "Removed bug") for i in range(4)]
+    threads = [
+        _thread(fp, outdated=True, tid=f"THREAD{i}", comment_id=800 + i) for i, fp in enumerate(fps)
+    ]
+    graphql = _GraphQL(threads)
+    attempts: list[str] = []
+
+    def forbid_resolve(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "resolveReviewThread" in payload.get("query", ""):
+            attempts.append(payload["variables"]["threadId"])
+            return httpx.Response(
+                200,
+                json={
+                    "errors": [
+                        {"type": "FORBIDDEN", "message": "Resource not accessible by integration"}
+                    ]
+                },
+            )
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=forbid_resolve)
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert len(attempts) == 1, f"retried a refused mutation {len(attempts)} times"
+    assert graphql.replies == []

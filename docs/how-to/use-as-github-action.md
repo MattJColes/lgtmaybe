@@ -277,6 +277,21 @@ identity, add it to the workflow `permissions:` block. The public
 `github_identity: lgtmaybe` cannot be combined with `fail_on`; use the Actions
 identity or a self-managed App granted `Checks: write`.
 
+### What the public App cannot do
+
+The public `lgtmaybe[bot]` App holds a deliberately minimal permission set, so
+two features are unavailable under `github_identity: lgtmaybe`:
+
+| Feature | Behaviour under the public App |
+|---|---|
+| `fail_on` (merge-gate Check Run) | Refused up front with a setup error — needs `checks: write` |
+| `resolve_fixed` (auto-resolve fixed conversations) | `resolveReviewThread` is refused, so threads stay open. The review is unaffected: nothing is posted, the refusal is logged once with what to do, and the rest of the run continues |
+
+Both work under the default `actions` identity (with `pull-requests: write` in
+the workflow `permissions:` block) or a self-managed App holding the
+corresponding permission. Set `resolve_fixed: false` if you would rather not
+attempt it at all.
+
 ## Adding a config file
 
 Place a `.lgtmaybe.yml` at the repo root to control severity thresholds, path
