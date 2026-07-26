@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 import respx
 
 from lgtmaybe.cli import _post_failure, run_review
@@ -164,6 +165,48 @@ def test_total_failure_notice_is_visible() -> None:
 
     assert github.comments, "a failed review must be visible on the PR"
     assert "provider quota exhausted" in github.comments[0]
+
+
+def test_total_failure_notice_posts_even_when_the_review_body_update_fails() -> None:
+    """The two writes are independent, and deliberately so.
+
+    The review-body write is the one that can fail *because* of what already
+    went wrong (a bad token, a rate limit, a deleted review). Sharing a `try`
+    with the comment would make the visible disclosure contingent on the
+    invisible one — reinstating exactly the failure this branch removes.
+    """
+
+    class _ReviewPostFails(FakeGitHub):
+        def post_review(self, findings, summary, diff=None):  # type: ignore[override]
+            raise RuntimeError("422 from the reviews endpoint")
+
+    github = _ReviewPostFails(_CTX)
+
+    _post_failure(github, RuntimeError("provider quota exhausted"))
+
+    assert github.comments, "a failed body update must not suppress the visible notice"
+    assert "provider quota exhausted" in github.comments[0]
+
+
+def test_incomplete_notice_failure_is_not_swallowed() -> None:
+    """`run_review` lets a failed disclosure surface rather than hiding it.
+
+    Distinct from `_post_failure`, which must never raise: there the review is
+    already lost, so a best-effort notice is all that is left. Here the review
+    posted, and silently failing to disclose that it was partial is the bug.
+    """
+
+    class _CommentFails(FakeGitHub):
+        def post_issue_comment(self, body: str) -> None:
+            raise RuntimeError("cannot post comment")
+
+    with pytest.raises(RuntimeError, match="cannot post comment"):
+        run_review(
+            github=_CommentFails(_CTX),
+            engine=LLMReviewEngine(_OneLensTimesOut()),
+            cfg=_cfg(),
+            dry_run=False,
+        )
 
 
 # ---------------------------------------------------------------------------

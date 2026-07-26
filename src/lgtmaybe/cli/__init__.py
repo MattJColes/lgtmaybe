@@ -779,13 +779,20 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
         if mark_reviewed is not None:
             mark_reviewed(None)
         github.post_review([], notice)
-        # Same visibility problem as an incomplete run, in its worst form: on a
-        # re-run the notice above only edits the older review's body. A review
-        # that ran no lens to completion has to be visible in the conversation.
-        github.post_issue_comment(notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.
+        pass
+    # Same visibility problem as an incomplete run, in its worst form: on a
+    # re-run the write above only edits the older review's body. Attempted in
+    # its OWN try, because the body update is the write most likely to fail for
+    # the very reason the review did (bad token, rate limit, deleted review) —
+    # sharing a try would make the visible disclosure contingent on the
+    # invisible one, which is the bug being fixed.
+    try:
+        github.post_issue_comment(notice)
+    except Exception:
+        # Best-effort, like the notice above: this path must never raise.
         pass
 
 
