@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
 import yaml
+
+from lgtmaybe.cli import action_inputs
 
 _ACTION_YML = Path(__file__).parent.parent / "action.yml"
 _PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
@@ -149,3 +152,70 @@ def test_release_please_is_not_pinned_to_a_consumed_version() -> None:
     config = json.loads(_RELEASE_PLEASE_CONFIG.read_text(encoding="utf-8"))
 
     assert "release-as" not in config["packages"]["."]
+
+
+# An action input reaches the container only if it is declared, mapped to an
+# INPUT_* env var, forwarded by a bare `-e INPUT_*` on the `docker run`, AND
+# read by `action_inputs()`. Miss any one link and the input is silently dead —
+# which is exactly how `max_tokens` was lost. These three tests pin the chain.
+#
+# Inputs consumed by the composite's own steps rather than the container: cloud
+# auth (the OIDC/WIF steps export the provider SDKs' own credential vars), the
+# App-identity inputs (consumed by the mint/exchange steps), and the two that
+# map to differently-named vars (`github_token` → GITHUB_TOKEN, `image` →
+# LGTMAYBE_IMAGE).
+_NON_CONTAINER_INPUTS = frozenset(
+    {
+        "github_token",
+        "image",
+        "aws_role_arn",
+        "aws_region",
+        "gcp_wif_provider",
+        "gcp_service_account",
+        "azure_client_id",
+        "azure_tenant_id",
+        "github_identity",
+        "identity_broker_url",
+        "app_id",
+        "app_private_key",
+        "app_owner",
+        "app_repositories",
+    }
+)
+
+
+def _declared_input_env_names() -> set[str]:
+    """``INPUT_*`` names for every action input meant to reach the container."""
+    return {
+        f"INPUT_{name.upper()}" for name in _action()["inputs"] if name not in _NON_CONTAINER_INPUTS
+    }
+
+
+def _env_block_input_names() -> set[str]:
+    """``INPUT_*`` names the run step maps from inputs."""
+    return {key for key in _run_lgtmaybe_step()["env"] if key.startswith("INPUT_")}
+
+
+def _forwarded_input_names() -> set[str]:
+    """``INPUT_*`` names the ``docker run`` forwards with a bare ``-e``."""
+    return set(re.findall(r"-e\s+(INPUT_[A-Z0-9_]+)", _run_lgtmaybe_step()["run"]))
+
+
+def test_every_declared_input_is_mapped_to_an_env_var() -> None:
+    """A declared input with no INPUT_* mapping can never reach the container."""
+    assert _declared_input_env_names() == _env_block_input_names()
+
+
+def test_every_mapped_env_var_is_forwarded_to_the_container() -> None:
+    """`docker run` passes no environment by default — a bare `-e` is required.
+
+    The regression this test exists for: INPUT_MAX_TOKENS was set in the step's
+    `env:` block but never forwarded, so `max_tokens` set on the Action was
+    silently dropped while its unit test (which sets the var directly) passed.
+    """
+    assert _env_block_input_names() == _forwarded_input_names()
+
+
+def test_every_forwarded_env_var_is_read_by_the_cli() -> None:
+    """A forwarded var nothing reads is dead weight; an unforwarded read is a bug."""
+    assert _forwarded_input_names() == {f"INPUT_{key.upper()}" for key in action_inputs()}

@@ -22,7 +22,13 @@ COPY src ./src
 # Bundle every keyless-cloud extra so Bedrock (boto3), Vertex (google-auth) and
 # Azure (azure-identity via OIDC) all work out of the box — litellm doesn't pull
 # these itself, so without them a cloud review dies with a ModuleNotFoundError.
-RUN uv sync --no-dev --frozen --extra azure --extra bedrock --extra vertex
+#
+# static-analysis carries the deterministic tool binaries. Without it nothing is
+# on PATH, every tool is "skipped silently", and the `static_analysis` input is a
+# no-op on the Action — the feature was container-invisible until this extra was
+# added here.
+RUN uv sync --no-dev --frozen --extra azure --extra bedrock --extra vertex \
+    --extra static-analysis
 
 ENV PATH="/app/.venv/bin:$PATH"
 
