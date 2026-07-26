@@ -851,8 +851,13 @@ class RestGitHubGateway(GitHubGateway):
 
         # A refusal is a property of the identity, not of the thread: it will
         # recur on every remaining thread and every future run until the setup
-        # changes. Trip this on the first one and stop, so a misconfigured
-        # identity costs one forbidden call and one warning, not N of each.
+        # changes. The first one trips this and the rest are skipped, so a
+        # misconfigured identity costs at most one WAVE of forbidden calls
+        # (_RESOLVE_WORKERS) and exactly one warning, instead of one of each per
+        # thread. Not exactly one call: workers already in flight when the flag
+        # is set have passed the check. Bounding it to the pool width is the
+        # point — serialising a probe first would slow the healthy path to save
+        # three futile calls on the broken one.
         refused = threading.Event()
 
         def resolve_one(thread: tuple[str, int | None, str]) -> None:
