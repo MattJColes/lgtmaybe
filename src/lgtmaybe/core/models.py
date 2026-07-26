@@ -690,8 +690,9 @@ class ReviewConfig(_Strict):
     # Reuse the shared prefix (system preamble + wrapped diff) across the
     # per-lens fan-out and the reflection call instead of re-paying full input
     # price for it on every call. On routes taking an explicit breakpoint
-    # (anthropic, bedrock Claude/Nova, Claude on vertex, zai GLM, openrouter's
-    # claude/gemini/glm/minimax) the adapter marks it with cache_control;
+    # (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM,
+    # openrouter's claude/gemini/glm/minimax) the adapter marks it with
+    # cache_control;
     # backends that cache a repeated prefix automatically (openai, azure,
     # deepseek) need only the identical shape, which this also gives them. Also
     # enables the per-batch warm-up primer. Feature-detected per model and a

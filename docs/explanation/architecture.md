@@ -94,8 +94,9 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    With `prompt_cache` on, each call is shaped as a shared cacheable prefix —
    a lens-independent system preamble, then the wrapped diff — followed by
    the lens-specific instruction as the final user block. On routes that
-   take an explicit cache breakpoint (anthropic, bedrock Claude/Nova, Claude
-   on vertex, zai GLM, and openrouter's claude/gemini/glm/minimax families)
+   take an explicit cache breakpoint (anthropic, bedrock Claude/Nova, vertex
+   Claude and Gemini, zai GLM, and openrouter's claude/gemini/glm/minimax
+   families)
    the prefix is marked with `cache_control`; on backends that cache
    automatically (OpenAI, Azure, DeepSeek) the identical prefix is enough on
    its own. Either way every call after a batch's first reads that

@@ -293,7 +293,7 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     default=None,
     help="Shape every call as a shared cacheable prefix, and mark an explicit "
     "cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, "
-    "Claude on vertex, zai GLM, openrouter) — cached reads are billed at a steep "
+    "vertex, zai GLM, openrouter) — cached reads are billed at a steep "
     "discount. Safe no-op elsewhere (--no-prompt-cache disables)",
 )
 @click.option(
