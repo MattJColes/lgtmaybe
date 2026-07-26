@@ -625,8 +625,9 @@ class ReviewConfig(_Strict):
     # user code ever runs. Empty (default) = no post-processing.
     finding_rules: list[FindingRule] = Field(default_factory=list)
     # Custom template for the review summary line. Placeholders: {count}
-    # (findings posted), {provider}, {model}. None (default) keeps the built-in
-    # line; a template that fails to format falls back to it too.
+    # (findings posted), {provider}, {model}, {version} (the running lgtmaybe
+    # release). None (default) keeps the built-in line, which names all of them;
+    # a template that fails to format falls back to it too.
     summary_template: str | None = None
     # PR labels (GitHub posting only): attach a review-effort/1-5 size
     # estimate, a possible-security-issue flag when a high/critical

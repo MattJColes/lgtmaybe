@@ -20,7 +20,6 @@ from collections import Counter
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +38,7 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
+from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
     INCOMPLETE_MARKER,
     FileFetcher,
@@ -59,19 +59,6 @@ from lgtmaybe.providers.factory import (
 _log = get_logger(__name__)
 
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
-
-
-def package_version() -> str:
-    """The installed lgtmaybe version, or ``"unknown"`` when it can't be read.
-
-    Reading it is best-effort by design: a source checkout that was never
-    installed has no distribution metadata, and a missing version must never be
-    the reason a review fails.
-    """
-    try:
-        return metadata.version("lgtmaybe")
-    except Exception:
-        return "unknown"
 
 
 def _should_auto_post(enabled: bool, event_action: str) -> bool:
@@ -797,7 +784,9 @@ def _reply_hunk(github: GitHubGateway, comment: dict[str, Any]) -> str:
 
 def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     """Post a short failure notice to the PR; never raise from here."""
-    notice = f"⚠️ lgtmaybe review failed: {exc}"
+    # Name the version: unlike the summary line this notice carries no model,
+    # so without it a failure report says nothing about what was running.
+    notice = f"⚠️ lgtmaybe review failed: {exc}\n\n_lgtmaybe {package_version()}_"
     try:
         # run_review may have stamped the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next

@@ -89,9 +89,9 @@ def test_the_running_build_is_named_alongside_the_budget(cli_logs, monkeypatch) 
     that the resolved value reaches the log record, not that this test host happens
     to have distribution metadata installed.
     """
-    import lgtmaybe.cli as cli_module
+    import lgtmaybe.core.version as version_module
 
-    monkeypatch.setattr(cli_module.metadata, "version", lambda _name: "1.2.3")
+    monkeypatch.setattr(version_module.metadata, "version", lambda _name: "1.2.3")
     cfg = ReviewConfig(provider=Provider.openrouter, model="m")
     build_provider_engine(cfg, _runtime())
 
@@ -111,10 +111,10 @@ def test_the_running_build_is_named_alongside_the_budget(cli_logs, monkeypatch) 
     ids=["not-installed", "unreadable-metadata"],
 )
 def test_an_unreadable_version_does_not_break_the_run(monkeypatch, failure) -> None:
-    import lgtmaybe.cli as cli_module
+    import lgtmaybe.core.version as version_module
 
-    monkeypatch.setattr(cli_module.metadata, "version", lambda _name: failure())
-    assert cli_module.package_version() == "unknown"
+    monkeypatch.setattr(version_module.metadata, "version", lambda _name: failure())
+    assert version_module.package_version() == "unknown"
 
 
 def test_the_two_sources_are_distinguishable_at_the_same_value(cli_logs) -> None:

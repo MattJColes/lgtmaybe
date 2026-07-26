@@ -167,6 +167,18 @@ def test_total_failure_notice_is_visible() -> None:
     assert "provider quota exhausted" in github.comments[0]
 
 
+def test_failure_notice_names_the_version() -> None:
+    """The failure notice is the post most likely to start a bug report, and
+    it names no model — so the version is the only handle it can carry."""
+    from lgtmaybe.core.version import package_version
+
+    github = FakeGitHub(_CTX)
+
+    _post_failure(github, RuntimeError("provider quota exhausted"))
+
+    assert f"lgtmaybe {package_version()}" in github.comments[0]
+
+
 def test_total_failure_notice_posts_even_when_the_review_body_update_fails() -> None:
     """The two writes are independent, and deliberately so.
 
