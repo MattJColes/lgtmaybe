@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.7.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.6.0...lgtmaybe-v1.7.0) (2026-07-26)
+
+
+### Features
+
+* **diagnostics:** log the effective timeout's source; stop retrying a refusal ([#271](https://github.com/MattJColes/lgtmaybe/issues/271)) ([ee1e42c](https://github.com/MattJColes/lgtmaybe/commit/ee1e42c850a79e02b670ef1e7a2519b045fc0ee2))
+* **provider:** cap generated tokens and fail fast when credit runs out ([#281](https://github.com/MattJColes/lgtmaybe/issues/281)) ([ea84ba4](https://github.com/MattJColes/lgtmaybe/commit/ea84ba4f4a49dcf2dfee1254dd350dc91bddaa42))
+* **summary:** stop claiming LGTM while business is still outstanding ([#273](https://github.com/MattJColes/lgtmaybe/issues/273)) ([1b50d93](https://github.com/MattJColes/lgtmaybe/commit/1b50d93530a370b7f0b81469b60b0f48dad5eaae))
+
+
+### Bug Fixes
+
+* **dedupe:** key re-run dedupe on a prose-free finding identity ([#275](https://github.com/MattJColes/lgtmaybe/issues/275)) ([7ee4eed](https://github.com/MattJColes/lgtmaybe/commit/7ee4eedc7f435648e38d48435b80c045be417ce1))
+* **engine:** report a split piece that failed instead of claiming the batch was reviewed ([#279](https://github.com/MattJColes/lgtmaybe/issues/279)) ([8885bbd](https://github.com/MattJColes/lgtmaybe/commit/8885bbdd372485a14e7e48872ca25c374e1ddbd3))
+* **posting:** make an incomplete review visible on the PR ([#278](https://github.com/MattJColes/lgtmaybe/issues/278)) ([85f2e7f](https://github.com/MattJColes/lgtmaybe/commit/85f2e7ffd97c9e80757938c72050be88031533ec))
+* **providers:** fail a blown wall clock once, and pin the documented timeouts ([#277](https://github.com/MattJColes/lgtmaybe/issues/277)) ([1af7efc](https://github.com/MattJColes/lgtmaybe/commit/1af7efce4a363531d41bd54cfd6c429e36217a5c))
+* **workflows:** stop lgtmaybe cancelling its own reviews ([#276](https://github.com/MattJColes/lgtmaybe/issues/276)) ([1ece55e](https://github.com/MattJColes/lgtmaybe/commit/1ece55e414972a99c024cb05bec397b7a639e27c))
+
+
+### Dependencies
+
+* bump the python-dependencies group and migrate to cdk-nag v3 ([#280](https://github.com/MattJColes/lgtmaybe/issues/280)) ([bfd429b](https://github.com/MattJColes/lgtmaybe/commit/bfd429bfe6bf685b7d7519baff6eed5bcb65a345))
+
 ## [1.6.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.5...lgtmaybe-v1.6.0) (2026-07-26)
 
 
