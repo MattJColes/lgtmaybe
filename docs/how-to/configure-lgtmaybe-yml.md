@@ -226,16 +226,16 @@ Default: `true`.
 ### timeout
 
 Per-request timeout in seconds for each model call. Left unset, lgtmaybe picks a
-**provider-aware default**: **900 s for ollama, openai-compatible, and
+**provider-aware default**: **1800 s for ollama, openai-compatible, and
 openrouter** (local models are slow, and openrouter can route to slow reasoning
-models) and 300 s for direct cloud providers. Set it explicitly to raise it for a
+models) and 600 s for direct cloud providers. Set it explicitly to raise it for a
 large local model.
 
 ```yaml
-timeout: 1800   # 30 minutes per call, e.g. for a big model on CPU
+timeout: 3600   # an hour per call, e.g. for a big model on CPU
 ```
 
-Default: auto (ollama/openai-compatible/openrouter 900 s, cloud 300 s). See
+Default: auto (ollama/openai-compatible/openrouter 1800 s, cloud 600 s). See
 [Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
 
 ### structured_output

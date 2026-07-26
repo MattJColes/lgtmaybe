@@ -14,7 +14,9 @@ from pathlib import Path
 
 from lgtmaybe.core.models import PRContext
 
-_TIMEOUT = 30
+# `git diff` over a large working tree (or a repo whose objects are cold) can
+# take a while; the timeout only caps a hung git, never a slow one.
+_TIMEOUT = 120
 
 
 def local_pr_context(

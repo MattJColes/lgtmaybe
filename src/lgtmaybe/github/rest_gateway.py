@@ -35,7 +35,10 @@ from .diff import CommentableLines, build_commentable_lines, is_reviewable
 
 _log = get_logger(__name__)
 
-_TIMEOUT = httpx.Timeout(30.0)
+# GitHub's API is usually fast, but a cold runner behind a proxy — or a large
+# PR's file listing — is not. The timeout exists to cap a hung socket, not to
+# race a slow-but-healthy response into a failed review.
+_TIMEOUT = httpx.Timeout(60.0)
 _MARKER = "<!-- lgtmaybe -->"
 _GRAPHQL_URL = "https://api.github.com/graphql"
 

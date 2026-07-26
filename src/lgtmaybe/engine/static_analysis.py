@@ -38,8 +38,10 @@ from lgtmaybe.core.models import ReviewConfig, Severity, StaticAnalysisTool
 _log = get_logger(__name__)
 _WINDOWS = os.name == "nt"
 
-# Hard per-tool wall-clock cap: a hung linter must never hang the review.
-_TOOL_TIMEOUT = 60
+# Hard per-tool wall-clock cap: a hung linter must never hang the review. Large
+# enough that semgrep over a many-file change still finishes — a tool killed
+# mid-scan degrades to no hints at all, silently.
+_TOOL_TIMEOUT = 180
 
 # Ceiling on hints handed to the prompts, most severe first. Beyond this a
 # noisy lint run is compressed rather than allowed to crowd out the diff.

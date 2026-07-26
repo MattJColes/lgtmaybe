@@ -35,7 +35,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
-| `max_review_seconds` | integer | No | `1800` | Max Review Seconds |
+| `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
@@ -681,7 +681,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 1800,
+      "default": 3600,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"

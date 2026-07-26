@@ -45,8 +45,9 @@ RootProvider = Callable[[], "Path | None"]
 AstGrepRunner = Callable[[str, str, Path], str]
 
 # A structural scan of one repo is sub-second (validated at ~20ms over this repo);
-# the timeout only caps a pathological run, never a normal one.
-_SCAN_TIMEOUT = 20
+# the timeout only caps a pathological run, never a normal one — so it is set well
+# above what a large monorepo needs rather than near the measured cost.
+_SCAN_TIMEOUT = 60
 _MAX_CANDIDATES = 3
 # Only resolve identifier-shaped names. This both filters out path-shaped `needs`
 # (handled by the path fetcher) and keeps the symbol safe to drop into the rule's

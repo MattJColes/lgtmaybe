@@ -183,16 +183,18 @@ network recovers but a dead-end failure surfaces fast:
   — lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 300s for direct cloud providers, 900s for the ones that may front a
+  timeout: 600s for direct cloud providers, 1800s for the ones that may front a
   slow model — ollama and openai-compatible (local servers) and openrouter (a
   gateway to arbitrary models, including slow reasoning ones) — overridable via
   `timeout` / `--timeout`. All attempts for
   one call additionally share a wall-clock budget of **2.5× that timeout**, so
   a flaky model can't burn four full timeouts plus backoff per lens. The
   posting workflows additionally set a job-level `timeout-minutes` so a wedged
-  run can't hold a runner for GitHub's six-hour default.
+  run can't hold a runner for GitHub's six-hour default — set above
+  `max_review_seconds`, so the soft deadline (which still posts partial
+  findings) always fires before the runner is killed.
 
-- **A whole-review deadline.** `max_review_seconds` (default 1800, `0` disables)
+- **A whole-review deadline.** `max_review_seconds` (default 3600, `0` disables)
   is a soft ceiling on the run: once it passes, queued model calls are skipped
   — in-flight ones finish and their findings post — and the summary carries an
   explicit incomplete-results notice. It can never produce a silent LGTM: a

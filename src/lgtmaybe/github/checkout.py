@@ -29,7 +29,9 @@ _log = get_logger(__name__)
 
 # A shallow single-branch clone of one repo is quick; the timeout only caps a
 # pathological clone, and a slow one degrades to "no corpus" rather than hanging.
-_CLONE_TIMEOUT = 120
+# Sized for a big monorepo on a cold runner — losing symbol resolution to an
+# impatient clock costs the auditor real context.
+_CLONE_TIMEOUT = 300
 
 # Injected so tests don't shell out to real git. Mirrors subprocess.run's surface
 # for the args we pass.
