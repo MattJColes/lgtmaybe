@@ -1316,3 +1316,46 @@ def test_open_finding_thread_count_failure_never_blocks_the_review() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     assert gw.count_open_finding_threads() == 0
+
+
+@respx.mock
+def test_open_finding_threads_follows_pagination() -> None:
+    """A PR with more than 100 conversations pages — a regression that stopped
+    after the first page, or replayed it, would otherwise go unnoticed."""
+    ours = f"**[MEDIUM] Old**\n\n<!-- lgtmaybe-finding:{finding_fingerprint('a.py', 'Old')} -->"
+
+    def page(nodes: list[dict], *, next_cursor: str | None) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "pageInfo": {
+                                    "hasNextPage": next_cursor is not None,
+                                    "endCursor": next_cursor,
+                                },
+                                "nodes": nodes,
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+    seen_cursors: list[str | None] = []
+
+    def graphql(request: httpx.Request) -> httpx.Response:
+        cursor = json.loads(request.content)["variables"]["cursor"]
+        seen_cursors.append(cursor)
+        if cursor is None:
+            return page([_open_thread(ours), _open_thread(ours)], next_cursor="page-2")
+        return page([_open_thread(ours)], next_cursor=None)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+    assert gw.count_open_finding_threads() == 3  # 2 on page one, 1 on page two
+    assert seen_cursors == [None, "page-2"], "the endCursor was not carried into page two"

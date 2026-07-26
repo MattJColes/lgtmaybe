@@ -265,13 +265,19 @@ class RestGitHubGateway(GitHubGateway):
         # with surrounding context. Read-only API fetch — never a checkout — and
         # the engine redacts it before it leaves the process. The fetches are
         # independent, so run them concurrently to cut round-trip latency.
+        # The open-conversation count walks the reviewThreads connection, which is
+        # a round trip (more on a PR with hundreds of threads) for what is only
+        # disclosure metadata. It shares nothing with the content fetches, so it
+        # rides the same pool rather than sitting in front of them: on the common
+        # single-page PR the whole count hides inside the file-fetch latency.
         reviewable = [path for path in changed_files if is_reviewable(path)]
         file_contents: dict[str, str] = {}
-        if reviewable:
-            workers = min(_CONTENT_FETCH_WORKERS, len(reviewable))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
+        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
+            open_threads = pool.submit(self.count_open_finding_threads)
+            if reviewable:
                 results = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
                 file_contents = {path: content for path, content in results if content is not None}
+            open_finding_threads = open_threads.result()
 
         return PRContext(
             diff=diff,
@@ -284,7 +290,7 @@ class RestGitHubGateway(GitHubGateway):
             title=meta.get("title") or "",
             description=meta.get("body") or "",
             commit_messages=self._fetch_commit_subjects(),
-            open_finding_threads=self.count_open_finding_threads(),
+            open_finding_threads=open_finding_threads,
         )
 
     def post_review(

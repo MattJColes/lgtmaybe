@@ -274,3 +274,70 @@ def test_base_checkout_root_returns_none_when_ref_unavailable(monkeypatch) -> No
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     assert gw.base_checkout_root() is None
     assert cloned is False  # never tried to clone without a ref
+
+
+@respx.mock
+def test_open_thread_count_overlaps_the_file_fetches() -> None:
+    """The count is disclosure metadata, so it must not sit in FRONT of the
+    content fetches — it shares nothing with them and rides the same pool. Run
+    serially it would add a round trip to every review's startup."""
+    import threading
+
+    respx.route(
+        method="GET", url=PR_URL, headers={"Accept": "application/vnd.github.v3.diff"}
+    ).mock(return_value=httpx.Response(200, content=_load("pr_diff.patch").encode()))
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_detail.json"))
+    )
+    respx.route(method="GET", url__startswith=FILES_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_files_page1.json"))
+    )
+    respx.route(method="GET", url__startswith=COMMITS_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_commits.json"))
+    )
+
+    lock = threading.Lock()
+    events: list[str] = []
+
+    def slow(label: str):
+        def handler(request: httpx.Request) -> httpx.Response:
+            with lock:
+                events.append(f"start-{label}")
+            threading.Event().wait(0.05)
+            with lock:
+                events.append(f"end-{label}")
+            if label == "threads":
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                        "nodes": [],
+                                    }
+                                }
+                            }
+                        }
+                    },
+                )
+            return httpx.Response(200, text="raw file content")
+
+        return handler
+
+    respx.route(method="POST", url="https://api.github.com/graphql").mock(
+        side_effect=slow("threads")
+    )
+    respx.route(method="GET", url__startswith=f"{BASE_URL}/repos/{REPO}/contents/").mock(
+        side_effect=slow("content")
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.get_pr_context()
+
+    assert "start-threads" in events, "the thread count never ran"
+    first_end = next(i for i, e in enumerate(events) if e.startswith("end-"))
+    assert len([e for e in events[:first_end] if e.startswith("start-")]) >= 2, (
+        f"the thread count did not overlap the content fetches: {events}"
+    )
