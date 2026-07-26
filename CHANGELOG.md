@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.6.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.5...lgtmaybe-v1.6.0) (2026-07-26)
+
+
+### Features
+
+* **cache:** widen prompt caching to vertex, zai, and openrouter routes ([#266](https://github.com/MattJColes/lgtmaybe/issues/266)) ([461c34a](https://github.com/MattJColes/lgtmaybe/commit/461c34a918b0da7e191df8f0b648315e057ed363))
+* **preset:** four distinct lenses on every provider ([#268](https://github.com/MattJColes/lgtmaybe/issues/268)) ([2d81f5e](https://github.com/MattJColes/lgtmaybe/commit/2d81f5ec7cdf7f87b8d2dfa8ec9e1aee8a64d57a))
+* **timeouts:** raise every wall-clock budget so slow calls finish ([#264](https://github.com/MattJColes/lgtmaybe/issues/264)) ([90591f4](https://github.com/MattJColes/lgtmaybe/commit/90591f486c2e0be520459aee6604cd5bd161a477))
+
+
+### Performance Improvements
+
+* overlap the three serial I/O stages, isolate resolve failures ([#270](https://github.com/MattJColes/lgtmaybe/issues/270)) ([f03c4bf](https://github.com/MattJColes/lgtmaybe/commit/f03c4bf6e0e679bd3a7dbb865ba3f9a5baf8f9ea))
+
+
+### Documentation
+
+* **preset:** fix the mangled --preset help and sweep the stale call counts ([#269](https://github.com/MattJColes/lgtmaybe/issues/269)) ([44a4776](https://github.com/MattJColes/lgtmaybe/commit/44a47769051e39a3a3a6b6f82b4b0cea4a94f770))
+
 ## [1.5.5](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.5.4...lgtmaybe-v1.5.5) (2026-07-25)
 
 
