@@ -554,7 +554,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix, with an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax); safe no-op elsewhere |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
-| `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, semgrep with local rules) sandboxed over the changed files: linters ground the model as untrusted hints, gitleaks posts directly with no model call. The image bundles these tools |
+| `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, semgrep with local rules) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks (secrets) and zizmor (workflow security) post directly with no model call. The image bundles these tools |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
 | `auto_diagram` | `true` | Post a compact Mermaid flowchart comment when a PR is opened/reopened, before the review; set `false` to opt out |
 | `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
@@ -2424,7 +2424,8 @@ Each tool reaches the review in one of two **modes**:
   without posting raw linter noise; only findings the model itself confirms are
   reported. The default for **ruff**, **bandit**, **mypy** and **semgrep**.
 - **`finding`** — findings are posted directly, with **no model call at all**.
-  The default for **gitleaks**. Deterministic, free, and identical run to run.
+  The default for **gitleaks** and **zizmor**. Deterministic, free, and
+  identical run to run.
 
 The split is about the tool, not taste: a committed credential is present or it
 isn't, so asking a model to "confirm or discard" a regex match only adds latency
@@ -2433,7 +2434,9 @@ is the opposite — often technically true and beside the point — which is exa
 what the model is good at filtering. Override either way with `tool_mode`.
 
 Supported tools: **ruff**, **bandit**, and **mypy** (Python), **gitleaks**
-(secrets, any language), and **semgrep** (multi-language) when you point
+(secrets, any language), **zizmor** (GitHub Actions workflow security — template
+injection, unpinned `uses`, over-broad permissions; it runs only when the PR
+changes a workflow file), and **semgrep** (multi-language) when you point
 `semgrep_rules` at local rules — semgrep's registry configs need the network,
 which the sandbox forbids.
 
@@ -2472,7 +2475,7 @@ injection-wrapped before it reaches the model. CLI:
 ```yaml
 static_analysis:
   enabled: true
-  tools: [ruff, bandit, mypy, gitleaks]  # default: all supported tools
+  tools: [ruff, bandit, mypy, gitleaks, zizmor]  # default: all supported tools
   min_severity: low            # floor on mapped tool severity (default info)
   tool_min_severity:           # per-tool overrides of the global floor
     ruff: medium               # only medium+ from ruff; bandit keeps `low`
@@ -3282,7 +3285,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -3748,7 +3751,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
             "bandit",
             "semgrep",
             "mypy",
-            "gitleaks"
+            "gitleaks",
+            "zizmor"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -3767,7 +3771,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "bandit",
         "semgrep",
         "mypy",
-        "gitleaks"
+        "gitleaks",
+        "zizmor"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -4041,7 +4046,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "bandit",
           "semgrep",
           "mypy",
-          "gitleaks"
+          "gitleaks",
+          "zizmor"
         ]
       }
     },

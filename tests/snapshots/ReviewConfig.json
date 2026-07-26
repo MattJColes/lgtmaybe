@@ -370,7 +370,8 @@
             "bandit",
             "semgrep",
             "mypy",
-            "gitleaks"
+            "gitleaks",
+            "zizmor"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -389,7 +390,8 @@
         "bandit",
         "semgrep",
         "mypy",
-        "gitleaks"
+        "gitleaks",
+        "zizmor"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -663,7 +665,8 @@
           "bandit",
           "semgrep",
           "mypy",
-          "gitleaks"
+          "gitleaks",
+          "zizmor"
         ]
       }
     },

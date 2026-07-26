@@ -142,6 +142,7 @@ class StaticAnalysisTool(StrEnum):
     semgrep = "semgrep"
     mypy = "mypy"
     gitleaks = "gitleaks"
+    zizmor = "zizmor"
 
 
 class ToolMode(StrEnum):

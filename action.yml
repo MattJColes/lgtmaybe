@@ -95,7 +95,7 @@ inputs:
     required: false
     default: ""
   static_analysis:
-    description: "Run deterministic tools (ruff, bandit, mypy, gitleaks, and semgrep with local rules) over the changed files in a sandboxed, network-less subprocess. Linters ground the model as untrusted hints to confirm or discard; gitleaks posts findings directly with no model call. Off by default; the image bundles these tools, and any tool not present is skipped silently."
+    description: "Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, and semgrep with local rules) over the changed files in a sandboxed, network-less subprocess. Linters ground the model as untrusted hints to confirm or discard; gitleaks (secrets) and zizmor (workflow security) post findings directly with no model call. Off by default; the image bundles these tools, and any tool not present is skipped silently."
     required: false
     default: ""
   auto_describe:

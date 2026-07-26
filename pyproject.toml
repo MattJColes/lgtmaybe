@@ -48,6 +48,10 @@ static-analysis = [
     "semgrep>=1.60",
     # --output json landed in mypy 1.11; the runner parses that shape only.
     "mypy>=1.11",
+    # GitHub Actions security (template injection, unpinned uses). A Rust binary
+    # that ships wheels, so it installs like any other dependency. gitleaks is
+    # the odd one out: a Go binary with no wheel, fetched in the Dockerfile.
+    "zizmor>=1.5",
 ]
 # Hosted identity broker only; not installed by CLI or Action users.
 identity-broker = [

@@ -380,7 +380,8 @@ Each tool reaches the review in one of two **modes**:
   without posting raw linter noise; only findings the model itself confirms are
   reported. The default for **ruff**, **bandit**, **mypy** and **semgrep**.
 - **`finding`** — findings are posted directly, with **no model call at all**.
-  The default for **gitleaks**. Deterministic, free, and identical run to run.
+  The default for **gitleaks** and **zizmor**. Deterministic, free, and
+  identical run to run.
 
 The split is about the tool, not taste: a committed credential is present or it
 isn't, so asking a model to "confirm or discard" a regex match only adds latency
@@ -389,7 +390,9 @@ is the opposite — often technically true and beside the point — which is exa
 what the model is good at filtering. Override either way with `tool_mode`.
 
 Supported tools: **ruff**, **bandit**, and **mypy** (Python), **gitleaks**
-(secrets, any language), and **semgrep** (multi-language) when you point
+(secrets, any language), **zizmor** (GitHub Actions workflow security — template
+injection, unpinned `uses`, over-broad permissions; it runs only when the PR
+changes a workflow file), and **semgrep** (multi-language) when you point
 `semgrep_rules` at local rules — semgrep's registry configs need the network,
 which the sandbox forbids.
 
@@ -428,7 +431,7 @@ injection-wrapped before it reaches the model. CLI:
 ```yaml
 static_analysis:
   enabled: true
-  tools: [ruff, bandit, mypy, gitleaks]  # default: all supported tools
+  tools: [ruff, bandit, mypy, gitleaks, zizmor]  # default: all supported tools
   min_severity: low            # floor on mapped tool severity (default info)
   tool_min_severity:           # per-tool overrides of the global floor
     ruff: medium               # only medium+ from ruff; bandit keeps `low`

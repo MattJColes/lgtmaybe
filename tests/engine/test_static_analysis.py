@@ -471,6 +471,92 @@ def test_gitleaks_report_is_written_outside_the_scanned_corpus(monkeypatch) -> N
     assert corpus not in report.parents
 
 
+def _zizmor_output() -> str:
+    """zizmor --format json. `start_point.row` is 0-BASED; findings are 1-based."""
+    return json.dumps(
+        [
+            {
+                "ident": "template-injection",
+                "desc": "code injection via template expansion",
+                "determinations": {"severity": "High", "confidence": "High"},
+                "locations": [
+                    {
+                        "symbolic": {
+                            "key": {"Local": {"verbatim_path": "./.github/workflows/ci.yml"}}
+                        },
+                        "concrete": {"location": {"start_point": {"row": 6, "column": 8}}},
+                    }
+                ],
+            }
+        ]
+    )
+
+
+WORKFLOW_FILES = {".github/workflows/ci.yml": "on: [pull_request_target]\njobs: {}\n"}
+
+
+def test_zizmor_findings_parsed_with_severity_and_one_based_lines(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    findings = run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    assert len(findings) == 1
+    assert findings[0].rule == "template-injection"
+    assert findings[0].path == ".github/workflows/ci.yml"
+    # row 6 is zizmor's 0-based index for line 7 — off by one if taken verbatim.
+    assert findings[0].line == 7
+    assert findings[0].severity is Severity.high
+
+
+def test_zizmor_runs_offline(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert "--offline" in argv, "zizmor must never reach the network from the sandbox"
+
+
+def test_zizmor_is_skipped_when_no_workflow_file_changed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Not an optimisation: zizmor panics when handed a tree with no workflows.
+
+    Without this the tool would crash on the majority of PRs, degrade to no
+    findings through the blanket handler, and log a warning every time.
+    """
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    assert findings == []
+    assert run.calls == []
+
+
+@pytest.mark.skipif(shutil.which("zizmor") is None, reason="zizmor not installed")
+def test_zizmor_really_flags_template_injection_and_unpinned_uses() -> None:
+    """The two workflow bugs the review checklist already names, run for real."""
+    workflow = (
+        "name: bad\n"
+        "on: [pull_request_target]\n"
+        "jobs:\n"
+        "  x:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        '      - run: echo "${{ github.event.pull_request.title }}"\n'
+    )
+    findings = run_static_analysis(
+        {".github/workflows/bad.yml": workflow}, _cfg(tools=[StaticAnalysisTool.zizmor])
+    )
+
+    rules = {f.rule for f in findings}
+    assert {"template-injection", "unpinned-uses"} <= rules, rules
+    assert all(f.path == ".github/workflows/bad.yml" for f in findings)
+    assert all(f.line >= 1 for f in findings)
+
+
 @pytest.mark.skipif(shutil.which("gitleaks") is None, reason="gitleaks not installed")
 def test_gitleaks_really_finds_a_committed_credential() -> None:
     """The bug this tool exists for, run against the real binary.

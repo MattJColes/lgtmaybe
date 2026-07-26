@@ -32,6 +32,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,6 +83,7 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.mypy: ToolMode.hint,
     StaticAnalysisTool.semgrep: ToolMode.hint,
     StaticAnalysisTool.gitleaks: ToolMode.finding,
+    StaticAnalysisTool.zizmor: ToolMode.finding,
 }
 
 # Category prefix for a finding that came from a tool rather than a lens. Keeps
@@ -91,6 +93,16 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
 SCAN_CATEGORY_PREFIX = _SCAN_CATEGORY_PREFIX
 
 _BANDIT_SEVERITY = {
+    "LOW": Severity.low,
+    "MEDIUM": Severity.medium,
+    "HIGH": Severity.high,
+}
+
+# zizmor grades its own audits; "Unknown" is its default when an audit
+# declines to commit, so it maps to the weakest rung rather than being dropped.
+_ZIZMOR_SEVERITY = {
+    "UNKNOWN": Severity.info,
+    "INFORMATIONAL": Severity.info,
     "LOW": Severity.low,
     "MEDIUM": Severity.medium,
     "HIGH": Severity.high,
@@ -153,7 +165,7 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         # bust the shared-prefix cache for nothing.
         with ThreadPoolExecutor(max_workers=len(sa.tools)) as pool:
             for tool_findings in pool.map(
-                lambda tool: _run_tool(tool, root, report_dir, cfg), sa.tools
+                lambda tool: _run_tool(tool, root, report_dir, written, cfg), sa.tools
             ):
                 findings.extend(tool_findings)
 
@@ -167,6 +179,22 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
             extra={"hints": len(kept), "below_floor": dropped},
         )
     return kept
+
+
+# Tools that only have something to say about particular files. Running one
+# over a corpus with none of them is not merely wasted work: zizmor panics when
+# handed a tree containing no workflows, which would degrade to a warning on the
+# majority of PRs.
+_WORKFLOW_PREFIX = ".github/workflows/"
+_RELEVANT_PATHS: dict[StaticAnalysisTool, Callable[[str], bool]] = {
+    StaticAnalysisTool.zizmor: lambda path: path.startswith(_WORKFLOW_PREFIX),
+}
+
+
+def _has_relevant_input(tool: StaticAnalysisTool, paths: list[str]) -> bool:
+    """Whether *tool* has anything in the corpus worth running over."""
+    predicate = _RELEVANT_PATHS.get(tool)
+    return predicate is None or any(predicate(path) for path in paths)
 
 
 def mode_for(tool: StaticAnalysisTool, cfg: ReviewConfig) -> ToolMode:
@@ -307,9 +335,16 @@ def _write_corpus(root: Path, file_contents: dict[str, str]) -> list[str]:
 
 
 def _run_tool(
-    tool: StaticAnalysisTool, root: Path, report_dir: Path, cfg: ReviewConfig
+    tool: StaticAnalysisTool,
+    root: Path,
+    report_dir: Path,
+    paths: list[str],
+    cfg: ReviewConfig,
 ) -> list[ToolFinding]:
     """Run one tool over the corpus at *root*; any failure degrades to []."""
+    if not _has_relevant_input(tool, paths):
+        _log.info("no relevant files for tool — skipping", extra={"tool": tool.value})
+        return []
     binary = shutil.which(tool.value)
     if binary is None:
         # A finding-mode tool produces no hints to miss — it produces no
@@ -372,6 +407,10 @@ def _run_tool(
             "--report-path",
             str(report),
         ]
+    elif tool is StaticAnalysisTool.zizmor:
+        # --offline forbids the online audits that resolve actions against the
+        # GitHub API; --no-progress keeps the machine-readable output clean.
+        argv = [binary, "--format", "json", "--no-progress", "--offline", "."]
     else:  # semgrep
         rules = cfg.static_analysis.semgrep_rules
         if not rules:
@@ -468,6 +507,8 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
     if tool is StaticAnalysisTool.gitleaks:
         # gitleaks emits a bare array, and `null` for "no findings".
         return [_gitleaks_finding(item) for item in data or []]
+    if tool is StaticAnalysisTool.zizmor:
+        return [_zizmor_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.bandit:
         return [_bandit_finding(item) for item in data.get("results", [])]
     return [_semgrep_finding(item) for item in data.get("results", [])]
@@ -543,6 +584,30 @@ def _gitleaks_finding(item: dict[str, Any]) -> ToolFinding:
         # gitleaks has no severity of its own: a committed credential is high by
         # definition, and nothing it reports is worth grading lower.
         severity=Severity.high,
+    )
+
+
+def _zizmor_finding(item: dict[str, Any]) -> ToolFinding:
+    """Map one zizmor audit hit onto the shared scale.
+
+    Two shape traps, both load-bearing: ``start_point.row`` is **0-based**, and
+    the path hides under a single-key enum wrapper (``Local``/``Remote``) whose
+    inner key varies by input kind — so read the one value rather than guessing
+    the name.
+    """
+    location = item.get("locations") or [{}]
+    concrete = location[0].get("concrete", {}).get("location", {})
+    key = location[0].get("symbolic", {}).get("key", {})
+    inner: Any = next(iter(key.values()), {}) if isinstance(key, dict) else {}
+    path = next(iter(inner.values()), "") if isinstance(inner, dict) else ""
+    severity = str(item.get("determinations", {}).get("severity", "")).upper()
+    return ToolFinding(
+        tool="zizmor",
+        path=_posix_rel(str(path)),
+        line=int(concrete.get("start_point", {}).get("row", 0)) + 1,
+        rule=str(item.get("ident", "")),
+        message=str(item.get("desc", "")),
+        severity=_ZIZMOR_SEVERITY.get(severity, Severity.low),
     )
 
 
