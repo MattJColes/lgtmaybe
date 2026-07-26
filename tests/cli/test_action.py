@@ -185,6 +185,62 @@ class TestActionRouting:
         assert len(github.diagrams) == 1
         assert len(github.posted) == 1
 
+    def test_auto_extras_post_after_the_review(self, tmp_path, monkeypatch):
+        """The comments lgtmaybe posts itself go out after the review, never before.
+
+        Posting a comment fires an ``issue_comment`` workflow run. A consumer whose
+        concurrency group isn't discriminated by the event name puts that run in the
+        same group as the review, so ``cancel-in-progress`` kills the review that
+        posted the comment. Posting last makes such a cancellation harmless instead
+        of fatal — the review is already on the PR.
+        """
+        import lgtmaybe.cli as cli_module
+
+        class _OrderedGitHub(FakeGitHub):
+            def __init__(self) -> None:
+                super().__init__()
+                self.writes: list[str] = []
+
+            def post_review(self, findings, summary, diff=None):
+                self.writes.append("review")
+                super().post_review(findings, summary, diff)
+
+            def post_describe_comment(self, body: str) -> None:
+                self.writes.append("describe")
+                super().post_describe_comment(body)
+
+            def post_diagram_comment(self, body: str) -> None:
+                self.writes.append("diagram")
+                super().post_diagram_comment(body)
+
+        github = _OrderedGitHub()
+        provider = FakeProvider()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(provider), provider),
+        )
+
+        event = _write_event(
+            tmp_path,
+            {
+                "action": "opened",
+                "repository": {"full_name": "org/repo"},
+                "pull_request": {"number": 3},
+            },
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        monkeypatch.setenv("INPUT_AUTO_DESCRIBE", "true")
+        monkeypatch.setenv("INPUT_AUTO_DIAGRAM", "true")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert github.writes == ["review", "describe", "diagram"]
+
     def test_issue_comment_event_routes_slash_command(self, tmp_path, monkeypatch):
         github = FakeGitHub()
         provider = FakeProvider()

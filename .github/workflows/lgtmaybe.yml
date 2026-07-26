@@ -41,8 +41,17 @@ jobs:
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    # Two independent guards against cancelling our own review. The job scope
+    # keeps an ineligible run (a bot comment that fails the guard above) out of
+    # the group entirely. The event name in the key handles the rest: lgtmaybe
+    # posts comments during a review (the diagram, the inline findings) and those
+    # comments fire the issue_comment / pull_request_review_comment events this
+    # workflow subscribes to, so without it an eligible comment run shares this
+    # group and cancel-in-progress kills the review that posted the comment. A
+    # new push still cancels an in-flight review — two pushes are both
+    # pull_request_target, so they still collide.
     concurrency:
-      group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     # A healthy full review runs in a handful of minutes; cap it so a wedged

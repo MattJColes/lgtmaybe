@@ -185,22 +185,30 @@ the least-privilege public App does not hold `checks: write`.
 - **WHEN** a review uses the built-in workflow token
 - **THEN** existing `github-actions[bot]` posting behavior remains unchanged
 
-### Requirement: Ineligible events cannot preempt active reviews
+### Requirement: lgtmaybe's own comments cannot preempt active reviews
 
-The dogfood workflow SHALL apply per-PR concurrency only to an event that passes
-the review job's eligibility guard. Eligible jobs for the same PR MUST retain
-newest-run-wins cancellation.
+Every workflow lgtmaybe ships or runs SHALL key its per-PR concurrency group on
+the event name as well as the PR, and the dogfood workflow SHALL additionally
+apply that group only to an event passing the review job's eligibility guard.
+Runs of the same event for the same PR MUST retain newest-run-wins cancellation.
+Posting SHALL be ordered so the review lands before any comment lgtmaybe emits.
 <!-- anchor: github.workflow-concurrency -->
 
 #### Scenario: lgtmaybe posts an automatic diagram
 
-- **WHEN** the GitHub App comment emits an `issue_comment` workflow run whose
-  author does not pass the review job guard
-- **THEN** that run does not enter the review concurrency group or cancel the
-  active review
+- **WHEN** the GitHub App comment emits an `issue_comment` workflow run
+- **THEN** that run's concurrency group differs from the active
+  `pull_request_target` review's, and at job scope an author failing the guard
+  does not enter a group at all
 
-#### Scenario: a newer eligible review starts
+#### Scenario: a newer push arrives mid-review
 
-- **WHEN** a newer PR event or trusted command passes the review job guard for
+- **WHEN** a newer `pull_request_target` event passes the review job guard for
   the same PR
-- **THEN** the newer job cancels the older eligible review job
+- **THEN** the newer job cancels the older review job for that PR
+
+#### Scenario: a review is cancelled by a mis-scoped consumer group
+
+- **WHEN** a consumer's group is not event-discriminated and lgtmaybe's own
+  comment cancels the run
+- **THEN** the review was already posted, because comments follow it
