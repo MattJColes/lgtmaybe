@@ -188,6 +188,25 @@ def test_total_failure_notice_posts_even_when_the_review_body_update_fails() -> 
     assert "provider quota exhausted" in github.comments[0]
 
 
+def test_total_failure_notice_survives_a_failed_comment() -> None:
+    """`_post_failure` never raises — including out of its own second write.
+
+    It runs from an exception handler, so an error escaping here would replace
+    the real review failure with a posting error and lose the original cause.
+    """
+
+    class _CommentFails(FakeGitHub):
+        def post_issue_comment(self, body: str) -> None:
+            raise RuntimeError("cannot post comment")
+
+    github = _CommentFails(_CTX)
+
+    _post_failure(github, RuntimeError("provider quota exhausted"))
+
+    # The body write still happened: the two are independent in both directions.
+    assert github.posted and "provider quota exhausted" in github.posted[0][1]
+
+
 def test_incomplete_notice_failure_is_not_swallowed() -> None:
     """`run_review` lets a failed disclosure surface rather than hiding it.
 
