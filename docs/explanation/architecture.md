@@ -173,7 +173,8 @@ The provider wrapper (`LiteLLMProvider`) and the engine cooperate so a flaky
 network recovers but a dead-end failure surfaces fast:
 
 - **Retries are classified, not blanket.** Transient failures — capacity rate
-  limits (`429 rate_limit_exceeded`), timeouts, connection errors (e.g. an
+  limits (`429 rate_limit_exceeded`), the provider's own connect/read timeouts,
+  connection errors (e.g. an
   ollama server still warming up), 5xx — are retried with **exponential backoff
   and jitter** (up to four attempts). **Permanent** failures are *not* retried:
   bad credentials (`AuthenticationError`), malformed/unsupported requests
@@ -183,6 +184,15 @@ network recovers but a dead-end failure surfaces fast:
   quota error can never succeed; stacked across every lens it only turns an
   instant "out of credit" into many minutes of wasted runner time, so lgtmaybe
   raises it immediately. An optional `fallback_model` is still tried once.
+
+- **A blown wall clock is permanent too.** When a call outlives lgtmaybe's own
+  per-request timeout (below), the retry would re-send the identical messages to
+  the identical model against the identical budget — it can only fail the same
+  way and cost another full timeout doing it. So the wall timeout is raised after
+  one attempt, and the failure reports how many attempts it burned (the count
+  rides home on failures as well as successes, so a budget-burning call never
+  reads as one that was never retried). The `fallback_model` — a genuinely
+  different request — still gets its turn, with a fresh budget.
 
 - **One retry layer.** litellm's own internal retry loop is disabled
   (`num_retries=0`) so failures aren't ground through two stacked backoff layers

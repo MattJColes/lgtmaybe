@@ -24,6 +24,7 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     ReviewPreset,
     ReviewResult,
+    attempts_of,
 )
 from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
 from lgtmaybe.github import is_reviewable
@@ -710,9 +711,10 @@ class LLMReviewEngine(ReviewEngine):
                 label=lens.id,
                 batch=batch_num,
                 elapsed=time.perf_counter() - started,
-                # The exception path carries no attempt count — 0 means unknown
-                # (the adapter may have burned its whole retry budget in here).
-                attempts=0,
+                # What the adapter stamped on the exception: a failure that burned
+                # its retry budget must not read as one that was never retried.
+                # 0 only when the failure never reached the retry loop.
+                attempts=attempts_of(exc),
                 input_tokens=0,
                 output_tokens=0,
                 cache_read_tokens=0,

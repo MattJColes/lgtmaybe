@@ -12,6 +12,7 @@ from lgtmaybe.core.models import (
     ProviderResult,
     ReviewCategory,
     ReviewConfig,
+    stamp_attempts,
 )
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.profiling import Profiler, profiler, timed_complete
@@ -147,6 +148,22 @@ class TestTimedComplete:
         assert call.label == "triage"
         assert call.error == "RuntimeError"
 
+    def test_failure_records_the_attempts_the_adapter_burned(self) -> None:
+        """A stamped failure reports its real attempt count, not 0 — else a call
+        that spent its whole retry budget looks like it was never retried."""
+
+        class _BoomAfterRetries(FakeProvider):
+            def complete(self, messages, model, **opts):  # type: ignore[override]
+                exc = RuntimeError("nope")
+                stamp_attempts(exc, 3)
+                raise exc
+
+        with pytest.raises(RuntimeError):
+            timed_complete(
+                _BoomAfterRetries(), [{"role": "user", "content": "hi"}], model="m", label="triage"
+            )
+        assert profiler.calls[-1].attempts == 3
+
 
 class TestEnginePipelineTiming:
     def test_review_records_stages_and_per_lens_calls(self) -> None:
@@ -190,4 +207,26 @@ class TestEnginePipelineTiming:
             LLMReviewEngine(_OneBadLens()).review(_CTX, cfg)
         call = profiler.calls[-1]
         assert call.error is not None and "quota exhausted" in call.error
-        assert call.attempts == 0  # unknown on the exception path
+        assert call.attempts == 0  # unstamped: it never reached the adapter's retry loop
+
+    def test_failed_lens_call_reports_the_attempts_it_burned(self) -> None:
+        """The per-lens recorder reads the count the adapter stamped, so a
+        budget-burning timeout is distinguishable from a first-try failure."""
+
+        class _BurntBudget(FakeProvider):
+            def complete(self, messages, model, **opts):  # type: ignore[override]
+                exc = TimeoutError("provider request exceeded 1800s (waited 1800.001s)")
+                stamp_attempts(exc, 2)
+                raise exc
+
+        cfg = ReviewConfig(
+            provider=Provider.openrouter,
+            model="deepseek/deepseek-v4-pro",
+            categories=[ReviewCategory.security],
+            reflect=False,
+        )
+        import lgtmaybe.engine.engine as engine_mod
+
+        with pytest.raises(engine_mod.ReviewIncompleteError):
+            LLMReviewEngine(_BurntBudget()).review(_CTX, cfg)
+        assert profiler.calls[-1].attempts == 2

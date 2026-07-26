@@ -35,7 +35,7 @@ from tenacity import (
 )
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ProviderResult
+from lgtmaybe.core.models import ProviderResult, stamp_attempts
 from lgtmaybe.core.ports import Message, ProviderClient
 
 _log = get_logger(__name__)
@@ -136,6 +136,16 @@ _EXPIRED_CREDENTIAL_MARKERS = (
 )
 
 
+class ProviderWallTimeout(TimeoutError):
+    """Our own wall-clock bound fired: the request outlived its whole timeout.
+
+    Distinct from litellm's transport ``Timeout`` (a connect/read blip, worth
+    retrying) because re-sending THIS request cannot help — same messages, same
+    model, same wall — so it is treated as permanent (see :func:`_is_permanent`).
+    A ``TimeoutError`` subclass, so callers matching on that keep working.
+    """
+
+
 def _is_quota_rate_limit(exc: BaseException) -> bool:
     """True for a quota/billing 429 (permanent), False for a capacity 429."""
     msg = str(exc).lower()
@@ -151,6 +161,14 @@ def _is_expired_credential(exc: BaseException) -> bool:
 def _is_permanent(exc: BaseException) -> bool:
     """True when retrying *exc* cannot plausibly succeed, so we should not."""
     if isinstance(exc, _PERMANENT_ERROR_TYPES):
+        return True
+    # A blown wall clock is not a blip: the retry re-sends the identical request
+    # against the identical budget, so attempts 2..N can only fail the same way
+    # and cost another full timeout each. On the generous slow-provider default
+    # that turned one stuck lens into an hour of runner time before the failure
+    # surfaced. One attempt, then say so — and let the fallback model (a genuinely
+    # different request) still have its turn.
+    if isinstance(exc, ProviderWallTimeout):
         return True
     if isinstance(exc, RateLimitError):
         return _is_quota_rate_limit(exc)
@@ -276,7 +294,14 @@ class LiteLLMProvider(ProviderClient):
                 result = self._raw_completion(model, messages, kwargs)
             return result
 
-        result = _call()
+        try:
+            result = _call()
+        except BaseException as exc:
+            # A failure has no ProviderResult to ride home on, so the count goes
+            # on the exception — else the instrumentation records a budget-burning
+            # failure as `attempts=0`, which reads as "never retried".
+            stamp_attempts(exc, attempts)
+            raise
         return result.model_copy(update={"attempts": attempts})
 
     def _raw_completion(
@@ -413,7 +438,8 @@ def _completion_with_wall_timeout(
 
     A call that *did* complete, even a hair past the deadline, is still honoured —
     discarding it would waste a response the provider already billed for and, worse,
-    resurface a permanent error (see ``_is_permanent``) as a retryable TimeoutError.
+    replace its real error (a quota 429, a bad key) with a bare timeout, hiding the
+    one thing that tells the user what to fix.
     """
     timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
     future: Future[Any] = Future()
@@ -437,7 +463,7 @@ def _completion_with_wall_timeout(
             continue  # the wait resolved early — trust the clock, not the wakeup
     if future.done():
         return future.result()
-    raise TimeoutError(
+    raise ProviderWallTimeout(
         f"provider request exceeded {timeout:g}s (waited {time.monotonic() - start:.3f}s)"
     )
 
