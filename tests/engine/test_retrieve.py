@@ -266,3 +266,54 @@ class TestConcurrentFetching:
         )
         assert len(out) == 2
         assert len(calls) <= 10, f"fetched {len(calls)} files for a cap of 2"
+
+
+def test_symbol_candidates_are_also_bounded_by_the_cap() -> None:
+    """The symbol branch must respect `max_files` too. `SymbolResolver` is an
+    injected callable — ast-grep caps itself at 3 candidates, but that is the
+    default's detail, not the contract — so prefetching every definition a
+    resolver returns would burn fetches the cap can never accept."""
+    calls: list[str] = []
+
+    def fetch(path: str) -> str | None:
+        calls.append(path)
+        return "x = 1\n" if path.endswith(".py") else None
+
+    def resolve_symbol(symbol: str) -> list[str]:
+        return [f"def{i}.py" for i in range(30)]
+
+    out = resolve_needs(
+        ["a_symbol"],
+        fetch,
+        already=set(),
+        budget_tokens=10_000,
+        max_files=2,
+        resolve_symbol=resolve_symbol,
+    )
+
+    assert len(out) == 2
+    # 1 direct attempt on the symbol name + at most a cap-sized wave of candidates.
+    assert len(calls) <= 5, f"fetched {len(calls)} candidates for a cap of 2"
+
+
+def test_symbol_candidates_keep_trying_past_an_unfetchable_one() -> None:
+    """Bounding the burst must not stop the search early: if the first candidate
+    can't be fetched, later ones are still tried, as they were when each fetch
+    blocked."""
+
+    def fetch(path: str) -> str | None:
+        return None if path in ("sym", "miss.py") else "x = 1\n"
+
+    def resolve_symbol(symbol: str) -> list[str]:
+        return ["miss.py", "real.py"]
+
+    out = resolve_needs(
+        ["sym"],
+        fetch,
+        already=set(),
+        budget_tokens=10_000,
+        max_files=1,
+        resolve_symbol=resolve_symbol,
+    )
+
+    assert list(out) == ["real.py"]

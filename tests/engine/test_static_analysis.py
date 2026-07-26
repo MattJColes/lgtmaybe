@@ -443,3 +443,16 @@ def test_concurrent_tools_keep_deterministic_finding_order(monkeypatch) -> None:
     findings = static_analysis.run_static_analysis({"a.py": "x = 1\n"}, cfg)
 
     assert [f.tool for f in findings] == ["ruff", "bandit"]
+
+
+def test_enabled_with_no_tools_returns_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Enabling the feature but selecting no tools must degrade to no hints, not
+    raise — every other "nothing to do" path here returns [] quietly."""
+    run = _FakeRun()
+    _patch_tools(monkeypatch, run, present={"ruff", "bandit", "semgrep"})
+
+    cfg = _cfg(enabled=True, tools=[])
+    findings = static_analysis.run_static_analysis({"a.py": "x = 1\n"}, cfg)
+
+    assert findings == []
+    assert run.calls == []

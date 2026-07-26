@@ -105,26 +105,30 @@ def resolve_needs(
         used += cost
         return True
 
-    # Fetch in waves of at most `max_files`, so a long needs list never pulls
-    # (and pays for) far more files than the cap can ever accept.
-    pending = list(needs)
-    while pending and len(out) < max_files:
-        wave, pending = pending[:max_files], pending[max_files:]
-        prefetch(wave)
-        for need in wave:
-            if len(out) >= max_files:
-                break
-            if accept(need) or resolve_symbol is None:
-                continue
-            # Not a fetchable path — try resolving it as a symbol to its defining
-            # file(s), then fetch those through the same read-only boundary.
-            # ast-grep is a local scan, so this stays on the ordered walk; only
-            # its resulting fetches are batched.
-            candidates = resolve_symbol(need)
-            prefetch(candidates)
-            for candidate in candidates:
+    def take_in_waves(paths: list[str], *, resolve_symbols: bool) -> None:
+        """Fetch + accept *paths*, never fetching more than the cap can accept.
+
+        Overlapping the I/O must not cost more of it: a wave is only ever as
+        wide as the remaining headroom, so a long list (or a symbol with many
+        definitions) can't burst fetches for files that could never be
+        accepted. Successive waves keep going, so an unfetchable entry doesn't
+        end the search early — the same reach the blocking version had.
+        """
+        pending = list(paths)
+        while pending and len(out) < max_files:
+            width = max_files - len(out)
+            wave, pending = pending[:width], pending[width:]
+            prefetch(wave)
+            for path in wave:
                 if len(out) >= max_files:
                     break
-                accept(candidate)
+                if accept(path) or not resolve_symbols or resolve_symbol is None:
+                    continue
+                # Not a fetchable path — try resolving it as a symbol to its
+                # defining file(s), then fetch those through the same read-only
+                # boundary. ast-grep is a local scan, so it stays on the ordered
+                # walk; only its resulting fetches are batched.
+                take_in_waves(resolve_symbol(path), resolve_symbols=False)
 
+    take_in_waves(list(needs), resolve_symbols=True)
     return out

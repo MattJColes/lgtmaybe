@@ -83,7 +83,9 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
     worth failing a review over.
     """
     sa = cfg.static_analysis
-    if not sa.enabled or not file_contents:
+    # `not sa.tools` guards the executor below (max_workers must be > 0) and,
+    # more usefully, skips writing a corpus nothing would ever read.
+    if not sa.enabled or not sa.tools or not file_contents:
         return []
 
     findings: list[ToolFinding] = []
