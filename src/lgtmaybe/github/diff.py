@@ -16,6 +16,7 @@ review to save tokens and avoid noise.
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
+from pathlib import PurePosixPath
 
 from lgtmaybe.core.diffparse import FILE_HEADER_RE, parse_hunk_header
 
@@ -102,7 +103,10 @@ def build_commentable_lines(diff: str) -> CommentableLines:
 # Skip filter
 # ---------------------------------------------------------------------------
 
-_SKIP_FILENAMES = frozenset(
+# Lockfiles: skipped from review (nobody line-reviews a resolved dependency
+# tree) but fetched for vulnerability scanning, which needs exactly these.
+# Named separately so the two uses can never drift apart.
+_LOCKFILES = frozenset(
     {
         "package-lock.json",
         "yarn.lock",
@@ -122,6 +126,31 @@ _SKIP_FILENAMES = frozenset(
         "mix.lock",
         "Package.resolved",
         "gradle.lockfile",
+    }
+)
+
+# Human-written dependency declarations. Unlike lockfiles these stay reviewable
+# — a version bump is a real change worth a comment — but they are also what a
+# scanner reads when no lockfile changed.
+_MANIFESTS = frozenset(
+    {
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "package.json",
+        "go.mod",
+        "Cargo.toml",
+        "Gemfile",
+        "composer.json",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Pipfile",
+    }
+)
+
+_SKIP_FILENAMES = _LOCKFILES | frozenset(
+    {
         # Generated LLM-index corpora (llmstxt.org): machine-written whole-docs
         # dumps, never meaningfully line-reviewed.
         "llms.txt",
@@ -235,3 +264,17 @@ def is_reviewable(path: str) -> bool:
             return False
 
     return True
+
+
+def is_scannable_manifest(path: str) -> bool:
+    """Whether *path* is a dependency manifest or lockfile worth scanning.
+
+    Deliberately independent of :func:`is_reviewable`: a lockfile is scannable
+    but not reviewable, a manifest is both. Matches on the bare filename, so a
+    nested ``frontend/yarn.lock`` counts — and ``requirements*.txt`` is matched
+    by prefix, since projects split it (``requirements-dev.txt``).
+    """
+    name = PurePosixPath(path).name
+    if name in _LOCKFILES or name in _MANIFESTS:
+        return True
+    return name.startswith("requirements") and name.endswith(".txt")

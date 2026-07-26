@@ -384,7 +384,8 @@
             "mypy",
             "gitleaks",
             "zizmor",
-            "ast-grep"
+            "ast-grep",
+            "osv-scanner"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -405,7 +406,8 @@
         "mypy",
         "gitleaks",
         "zizmor",
-        "ast-grep"
+        "ast-grep",
+        "osv-scanner"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -682,7 +684,8 @@
           "mypy",
           "gitleaks",
           "zizmor",
-          "ast-grep"
+          "ast-grep",
+          "osv-scanner"
         ]
       }
     },

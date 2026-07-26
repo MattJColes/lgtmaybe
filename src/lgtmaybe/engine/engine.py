@@ -61,6 +61,7 @@ from .reflect import reflect_findings
 from .retrieve import FileFetcher
 from .static_analysis import (
     SCAN_CATEGORY_PREFIX,
+    UNANCHORABLE_SCAN_CATEGORIES,
     ToolFinding,
     format_hints,
     partition_by_mode,
@@ -341,10 +342,15 @@ class LLMReviewEngine(ReviewEngine):
         sa_hints: list[ToolFinding] = []
         sa_all: list[ToolFinding] = []
         scan_findings: list[ReviewFinding] = []
-        if cfg.static_analysis.enabled and ctx.file_contents:
+        if cfg.static_analysis.enabled and (ctx.file_contents or ctx.scan_contents):
             with profiler.stage("static_analysis"):
                 reviewed_paths = {path for path, _ in file_patches}
+                # Reviewed file texts, plus the scan-only dependency manifests.
+                # `scan_contents` is NOT filtered by reviewed_paths: a lockfile is
+                # never reviewable, so it would never survive that filter — which
+                # is the whole reason it travels in its own channel.
                 corpus = {p: t for p, t in ctx.file_contents.items() if p in reviewed_paths}
+                corpus |= ctx.scan_contents
                 sa_all = run_static_analysis(corpus, cfg)
                 # Split by mode in one stable pass: run_static_analysis returns
                 # findings in `sa.tools` order on purpose, and the hint block is
@@ -524,8 +530,9 @@ class LLMReviewEngine(ReviewEngine):
         #     matched no changed line means exactly that. The model is already
         #     told "only raise these when the diff itself shows the change" —
         #     hold the tools to the same rule, or a fixture's fake credential
-        #     posts on every PR that happens to touch the file.
-        scoped = [f for f in all_findings if f.anchored or not _is_scan_finding(f)]
+        #     posts on every PR that happens to touch the file. Dependency
+        #     findings are exempt: see _UNANCHORABLE_SCAN_CATEGORIES.
+        scoped = [f for f in all_findings if f.anchored or not _is_droppable_scan(f)]
         off_diff = len(all_findings) - len(scoped)
         if off_diff:
             _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
@@ -1055,6 +1062,15 @@ def _error_reason(exc: BaseException) -> str:
     text = " ".join(str(exc).split())
     reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     return reason[:200]
+
+
+def _is_droppable_scan(finding: ReviewFinding) -> bool:
+    """A scan finding the diff-scoping rule may drop when it fails to anchor.
+
+    Dependency findings are exempt — they are unanchorable by construction, so
+    dropping them for failing to anchor would delete every one of them.
+    """
+    return _is_scan_finding(finding) and finding.category not in UNANCHORABLE_SCAN_CATEGORIES
 
 
 def _is_scan_finding(finding: ReviewFinding) -> bool:

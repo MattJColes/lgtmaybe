@@ -89,3 +89,9 @@ engine.tool-findings:
     kind: function_definition
     has: { field: name, regex: '^tool_review_findings$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+engine.scan-manifests:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^is_scannable_manifest$' }
+  files: [src/lgtmaybe/github/**/*.py]

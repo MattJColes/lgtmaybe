@@ -48,6 +48,7 @@ from lgtmaybe.core.models import (
     StaticAnalysisTool,
     ToolMode,
 )
+from lgtmaybe.github.diff import is_scannable_manifest
 
 from .redact import redact
 
@@ -86,6 +87,7 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.gitleaks: ToolMode.finding,
     StaticAnalysisTool.zizmor: ToolMode.finding,
     StaticAnalysisTool.ast_grep: ToolMode.finding,
+    StaticAnalysisTool.osv_scanner: ToolMode.finding,
 }
 
 # Category prefix for a finding that came from a tool rather than a lens. Keeps
@@ -93,6 +95,16 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
 # of the built-in defect categories whose failure_scenario gate they'd fail.
 # Defined in core.models so the CustomLens validator can reserve it there.
 SCAN_CATEGORY_PREFIX = _SCAN_CATEGORY_PREFIX
+
+# Scanners whose findings can never anchor to a changed line, by construction.
+# A CVE is about the dependency, not about a position in a resolved lockfile —
+# and lockfiles are not reviewable, so their patches never reach the diff the
+# engine re-anchors against. The engine exempts these from the rule that scopes
+# scan findings to changed lines; the stricter unanchored severity floor then
+# keeps them to advisories worth acting on.
+UNANCHORABLE_SCAN_CATEGORIES: frozenset[str] = frozenset(
+    {f"{_SCAN_CATEGORY_PREFIX}{StaticAnalysisTool.osv_scanner.value}"}
+)
 
 _BANDIT_SEVERITY = {
     "LOW": Severity.low,
@@ -108,6 +120,16 @@ _ZIZMOR_SEVERITY = {
     "LOW": Severity.low,
     "MEDIUM": Severity.medium,
     "HIGH": Severity.high,
+}
+
+# OSV grades advisories on GitHub's scale, which has no "critical" between
+# HIGH and the CVSS score — treat CRITICAL when present, else HIGH.
+_OSV_SEVERITY = {
+    "LOW": Severity.low,
+    "MODERATE": Severity.medium,
+    "MEDIUM": Severity.medium,
+    "HIGH": Severity.high,
+    "CRITICAL": Severity.critical,
 }
 
 # ast-grep's rule severities. `hint` and `off` are the rule author saying "this
@@ -199,6 +221,7 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
 _WORKFLOW_PREFIX = ".github/workflows/"
 _RELEVANT_PATHS: dict[StaticAnalysisTool, Callable[[str], bool]] = {
     StaticAnalysisTool.zizmor: lambda path: path.startswith(_WORKFLOW_PREFIX),
+    StaticAnalysisTool.osv_scanner: is_scannable_manifest,
 }
 
 
@@ -434,6 +457,24 @@ def _run_tool(
             "--report-path",
             str(report),
         ]
+    elif tool is StaticAnalysisTool.osv_scanner:
+        # --offline-vulnerabilities uses a LOCAL database only. Never
+        # --download-offline-databases: that fetches, and the sandbox has no
+        # network. With no database present osv reports nothing, which is why a
+        # configured-but-unseeded scanner must not read as a clean bill of
+        # health — see the missing-database notice.
+        argv = [
+            binary,
+            "scan",
+            "source",
+            "--format",
+            "json",
+            "--offline-vulnerabilities",
+            # The corpus is loose files, not a resolvable project: without this
+            # osv tries to resolve transitive dependencies, which needs network.
+            "--no-resolve",
+            ".",
+        ]
     elif tool is StaticAnalysisTool.ast_grep:
         rules = cfg.static_analysis.ast_grep_rules
         if not rules:
@@ -516,6 +557,14 @@ def _scrubbed_env(root: Path) -> dict[str, str]:
         # Belt and braces for semgrep even with --metrics=off.
         "SEMGREP_SEND_METRICS": "off",
     }
+    # The one variable forwarded from the parent environment. It names a
+    # read-only local directory holding the offline vulnerability database —
+    # not a credential, not an endpoint — and osv-scanner cannot fetch a
+    # database from inside a network-less sandbox. Without it the scanner
+    # silently reports nothing, which is indistinguishable from a clean result.
+    osv_db = os.environ.get("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY")
+    if osv_db:
+        env["OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"] = osv_db
     if not _WINDOWS:
         return env
 
@@ -553,6 +602,8 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
         return [_zizmor_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.ast_grep:
         return [_astgrep_finding(item) for item in data or []]
+    if tool is StaticAnalysisTool.osv_scanner:
+        return _osv_findings(data, root)
     if tool is StaticAnalysisTool.bandit:
         return [_bandit_finding(item) for item in data.get("results", [])]
     return [_semgrep_finding(item) for item in data.get("results", [])]
@@ -629,6 +680,37 @@ def _gitleaks_finding(item: dict[str, Any]) -> ToolFinding:
         # definition, and nothing it reports is worth grading lower.
         severity=Severity.high,
     )
+
+
+def _osv_findings(data: dict[str, Any], root: Path) -> list[ToolFinding]:
+    """Flatten osv-scanner's source → packages → vulnerabilities nesting.
+
+    One finding per advisory per package. The line is always 1: a lockfile hunk
+    is machine-generated and the useful anchor is the file, not a position in a
+    resolved dependency tree — these findings are expected to render in the
+    review body rather than inline.
+    """
+    findings: list[ToolFinding] = []
+    for result in data.get("results", []):
+        path = _posix_rel(str(result.get("source", {}).get("path", "")), root)
+        for entry in result.get("packages", []):
+            package = entry.get("package", {})
+            name = str(package.get("name", ""))
+            version = str(package.get("version", ""))
+            for vuln in entry.get("vulnerabilities", []):
+                severity = str(vuln.get("database_specific", {}).get("severity", "")).upper()
+                summary = str(vuln.get("summary") or "known vulnerability")
+                findings.append(
+                    ToolFinding(
+                        tool="osv-scanner",
+                        path=path,
+                        line=1,
+                        rule=str(vuln.get("id", "")),
+                        message=f"{name} {version}: {summary}",
+                        severity=_OSV_SEVERITY.get(severity, Severity.medium),
+                    )
+                )
+    return findings
 
 
 def _astgrep_finding(item: dict[str, Any]) -> ToolFinding:

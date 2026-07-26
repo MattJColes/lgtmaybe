@@ -338,6 +338,12 @@ def run_review(
     without the adapter methods) falls back to the full review.
     """
     if ctx is None:
+        # Dependency manifests are fetched only when a scanner will read them —
+        # an adapter-only method, like set_incremental_scope, so a gateway
+        # implementing just the frozen port still works.
+        want_manifests = getattr(github, "set_scan_manifests", None)
+        if callable(want_manifests):
+            want_manifests(cfg.static_analysis.enabled)
         ctx = github.get_pr_context()
     review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
     review_ctx = _apply_learned_feedback(github, review_ctx, cfg)

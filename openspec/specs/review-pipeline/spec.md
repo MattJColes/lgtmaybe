@@ -194,6 +194,22 @@ no output from that tool rather than failing the review.
 - **THEN** it receives the minimal process-critical system variables and temp-
   rooted user directories without inheriting cloud credentials
 
+### Requirement: Scan-only file texts never reach a prompt
+
+Dependency manifests and lockfiles fetched for scanning SHALL travel in their
+own context channel, separate from reviewed file texts. They MUST NOT enter the
+diff, any prompt, a hint block, or the reflection pass, and they are fetched
+only when a scanner will read them.
+<!-- anchor: engine.scan-manifests -->
+
+#### Scenario: a PR changes a lockfile
+- **WHEN** a reviewed PR changes a lockfile and static analysis is enabled
+- **THEN** the scanner reads it and no model call contains any of its content
+
+#### Scenario: static analysis is off
+- **WHEN** static analysis is disabled
+- **THEN** no dependency manifest is fetched at all
+
 ### Requirement: Tool findings ground or post, by mode
 
 Each tool's findings SHALL reach the review by its configured mode: `hint`
@@ -214,3 +230,8 @@ whole files and only the diff is under review.
 #### Scenario: a scanner hits pre-existing code
 - **WHEN** a `finding`-mode tool reports an issue on an unchanged line
 - **THEN** the finding is dropped and the summary states how many were skipped
+
+#### Scenario: a dependency advisory has no line to anchor to
+- **WHEN** a vulnerability scanner reports an advisory against a lockfile the
+  review never anchors against
+- **THEN** the finding is exempt from that drop and renders in the review body

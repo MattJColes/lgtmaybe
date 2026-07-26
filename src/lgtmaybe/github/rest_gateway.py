@@ -32,7 +32,12 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import GitHubGateway
 
 from .checkout import clone_base_tree
-from .diff import CommentableLines, build_commentable_lines, is_reviewable
+from .diff import (
+    CommentableLines,
+    build_commentable_lines,
+    is_reviewable,
+    is_scannable_manifest,
+)
 
 _log = get_logger(__name__)
 
@@ -281,6 +286,10 @@ class RestGitHubGateway(GitHubGateway):
         # paths — a finding absent merely because its file wasn't re-reviewed
         # this run must never be spuriously resolved. None = full review.
         self._incremental_paths: set[str] | None = None
+        # Whether to fetch dependency manifests for the vulnerability scanner
+        # (set via set_scan_manifests). Off by default so the overwhelming
+        # majority of runs — static analysis is opt-in — pay no extra API calls.
+        self._scan_manifests = False
         # Head SHA this run actually reviewed (set via mark_reviewed by the
         # orchestrator on the success path only). Drives the reviewed-SHA stamp
         # and re-run inline-comment posting. Deliberately NOT inferred inside
@@ -334,13 +343,26 @@ class RestGitHubGateway(GitHubGateway):
         # rides the same pool rather than sitting in front of them: on the common
         # single-page PR the whole count hides inside the file-fetch latency.
         reviewable = [path for path in changed_files if is_reviewable(path)]
+        # Dependency manifests for the vulnerability scanner. Lockfiles are not
+        # reviewable, so they are fetched separately and kept out of
+        # `file_contents` — see PRContext.scan_contents. Only fetched when
+        # something will actually read them.
+        scannable = (
+            [path for path in changed_files if is_scannable_manifest(path)]
+            if self._scan_manifests
+            else []
+        )
         file_contents: dict[str, str] = {}
+        scan_contents: dict[str, str] = {}
         # +1, not a shared slot: the count must be free, and taking a worker
         # from the pool would narrow content fetching to
         # _CONTENT_FETCH_WORKERS - 1 for as long as the count runs — turning an
         # overlap into a slowdown on exactly the wide PRs the pool sizing is for.
         with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 1) as pool:
             open_threads = pool.submit(self.count_open_finding_threads)
+            if scannable:
+                scanned = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), scannable)
+                scan_contents = {path: text for path, text in scanned if text is not None}
             if reviewable:
                 results = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
                 file_contents = {path: content for path, content in results if content is not None}
@@ -354,6 +376,7 @@ class RestGitHubGateway(GitHubGateway):
             repo=self._repo,
             pr_number=self._pr_number,
             file_contents=file_contents,
+            scan_contents=scan_contents,
             title=meta.get("title") or "",
             description=meta.get("body") or "",
             commit_messages=self._fetch_commit_subjects(),
@@ -652,6 +675,15 @@ class RestGitHubGateway(GitHubGateway):
             _log.info("incremental compare failed — falling back to full review: %s", exc)
             return None
         return resp.text
+
+    def set_scan_manifests(self, enabled: bool) -> None:
+        """Fetch changed dependency manifests for scanning on the next context read.
+
+        Off by default: `get_pr_context` takes no config, and fetching lockfiles
+        for every review would cost API calls nothing would read. The CLI turns
+        it on when static analysis is enabled.
+        """
+        self._scan_manifests = enabled
 
     def set_incremental_scope(self, paths: set[str] | None) -> None:
         """Restrict resolve-on-fix to threads on *paths* (None = no restriction).

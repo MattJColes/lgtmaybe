@@ -338,6 +338,7 @@ def test_scrubbed_env_posix_stays_minimal(monkeypatch, tmp_path: Path) -> None: 
     monkeypatch.setattr(static_analysis, "_WINDOWS", False, raising=False)
     monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must-not-leak")
+    monkeypatch.delenv("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", raising=False)
 
     assert static_analysis._scrubbed_env(tmp_path) == {
         "PATH": static_analysis.os.environ.get("PATH", ""),
@@ -345,6 +346,26 @@ def test_scrubbed_env_posix_stays_minimal(monkeypatch, tmp_path: Path) -> None: 
         "NO_COLOR": "1",
         "SEMGREP_SEND_METRICS": "off",
     }
+
+
+def test_scrubbed_env_passes_through_the_offline_vulnerability_database(  # type: ignore[no-untyped-def]
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The one path variable the sandbox forwards, and why it is safe to.
+
+    osv-scanner cannot fetch a database from inside a network-less sandbox, so
+    the image bakes one in and points at it with this variable. It names a
+    read-only local directory — no credential, no endpoint — and without it the
+    scanner silently finds nothing, which reads like a clean bill of health.
+    """
+    monkeypatch.setattr(static_analysis, "_WINDOWS", False, raising=False)
+    monkeypatch.setenv("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", "/opt/osv-db")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
+
+    env = static_analysis._scrubbed_env(tmp_path)
+
+    assert env["OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"] == "/opt/osv-db"
+    assert "AWS_SECRET_ACCESS_KEY" not in env
 
 
 def test_semgrep_never_uses_the_network_registry(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -853,3 +874,76 @@ def test_bundled_rules_really_catch_their_targets() -> None:
     )
 
     assert any("shell-true" in f.rule for f in findings), [f.rule for f in findings]
+
+
+def _osv_output(root: str) -> str:
+    """osv-scanner scan source --format json (v2 shape).
+
+    `source.path` is ABSOLUTE, under the directory scanned — so the parser has
+    to relativise it back to the repository path.
+    """
+    return json.dumps(
+        {
+            "results": [
+                {
+                    "source": {"path": f"{root}/uv.lock", "type": "lockfile"},
+                    "packages": [
+                        {
+                            "package": {"name": "jinja2", "version": "2.4.1", "ecosystem": "PyPI"},
+                            "vulnerabilities": [
+                                {
+                                    "id": "GHSA-462w-v97r-4m45",
+                                    "summary": "Jinja2 sandbox escape",
+                                    "database_specific": {"severity": "HIGH"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+
+MANIFEST_FILES = {"uv.lock": 'name = "jinja2"\nversion = "2.4.1"\n'}
+
+
+def test_osv_findings_name_the_package_and_advisory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    class _Run(_FakeRun):
+        def __call__(self, argv: list[str], **kwargs: object) -> SimpleNamespace:
+            self.calls.append({"argv": argv, **kwargs})
+            return SimpleNamespace(stdout=_osv_output(str(kwargs["cwd"])), stderr="", returncode=0)
+
+    run = _Run()
+    _patch_tools(monkeypatch, run, present={"osv-scanner"})
+
+    findings = run_static_analysis(MANIFEST_FILES, _cfg(tools=[StaticAnalysisTool.osv_scanner]))
+
+    assert len(findings) == 1
+    assert findings[0].rule == "GHSA-462w-v97r-4m45"
+    assert findings[0].path == "uv.lock"
+    assert "jinja2" in findings[0].message
+    assert "2.4.1" in findings[0].message
+    assert findings[0].severity is Severity.high
+
+
+def test_osv_runs_offline(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The vulnerability database must be local — the sandbox has no network."""
+    run = _FakeRun(outputs={"osv-scanner": _osv_output("/x")})
+    _patch_tools(monkeypatch, run, present={"osv-scanner"})
+
+    run_static_analysis(MANIFEST_FILES, _cfg(tools=[StaticAnalysisTool.osv_scanner]))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert "--offline-vulnerabilities" in argv
+    assert "--download-offline-databases" not in argv, "downloading is a network call"
+
+
+def test_osv_is_skipped_when_no_manifest_changed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"osv-scanner": _osv_output("/x")})
+    _patch_tools(monkeypatch, run, present={"osv-scanner"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.osv_scanner]))
+
+    assert findings == []
+    assert run.calls == []

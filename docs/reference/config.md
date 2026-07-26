@@ -49,7 +49,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -134,6 +134,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `open_finding_threads` | integer | No | `0` | Open Finding Threads |
 | `pr_number` | integer | Yes | — | Pr Number |
 | `repo` | string | Yes | — | Repo |
+| `scan_contents` | object | No | — | Scan Contents |
 | `title` | string | No | `` | Title |
 
 ## Raw JSON schemas
@@ -529,7 +530,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
             "mypy",
             "gitleaks",
             "zizmor",
-            "ast-grep"
+            "ast-grep",
+            "osv-scanner"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -550,7 +552,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "mypy",
         "gitleaks",
         "zizmor",
-        "ast-grep"
+        "ast-grep",
+        "osv-scanner"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -827,7 +830,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "mypy",
           "gitleaks",
           "zizmor",
-          "ast-grep"
+          "ast-grep",
+          "osv-scanner"
         ]
       }
     },
@@ -1144,6 +1148,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "repo": {
       "title": "Repo",
       "type": "string"
+    },
+    "scan_contents": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Scan Contents",
+      "type": "object"
     },
     "title": {
       "default": "",

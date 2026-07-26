@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from lgtmaybe.core.models import PRContext
+from lgtmaybe.github.diff import is_reviewable, is_scannable_manifest
 
 # `git diff` over a large working tree (or a repo whose objects are cold) can
 # take a while; the timeout only caps a hung git, never a slow one.
@@ -72,9 +73,27 @@ def local_pr_context(
     name_output = _git(cwd, "diff", "--name-only", spec)
     changed_files = [line for line in name_output.splitlines() if line]
 
+    # Working-tree text for the changed files. Static analysis has never run on
+    # the local CLI because nothing populated these; the reader is the same
+    # traversal-guarded one reflection already uses.
+    read = local_file_reader(cwd)
+    file_contents: dict[str, str] = {}
+    scan_contents: dict[str, str] = {}
+    for path in changed_files:
+        if is_reviewable(path):
+            text = read(path)
+            if text is not None:
+                file_contents[path] = text
+        elif is_scannable_manifest(path):
+            text = read(path)
+            if text is not None:
+                scan_contents[path] = text
+
     return PRContext(
         diff=diff,
         changed_files=changed_files,
+        file_contents=file_contents,
+        scan_contents=scan_contents,
         base_sha=base_sha,
         head_sha=head_sha,
         repo=_repo_name(cwd),

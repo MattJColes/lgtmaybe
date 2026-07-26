@@ -146,6 +146,7 @@ class StaticAnalysisTool(StrEnum):
     # Member name differs from the binary: enum members cannot be hyphenated,
     # and `_run_tool` looks up `tool.value` on PATH.
     ast_grep = "ast-grep"
+    osv_scanner = "osv-scanner"
 
 
 class ToolMode(StrEnum):
@@ -556,6 +557,12 @@ class PRContext(_Strict):
     title: str = ""
     description: str = ""
     commit_messages: list[str] = Field(default_factory=list)
+    # Dependency manifests and lockfiles fetched for DETERMINISTIC SCANNING ONLY.
+    # Separate from `file_contents` on purpose: that dict feeds hunk expansion,
+    # suppression pragmas and reflection grounding, all of which end in a prompt,
+    # and a resolved dependency tree belongs in none of them. Only the static
+    # analysis runner reads this. Empty unless static analysis is enabled.
+    scan_contents: dict[str, str] = Field(default_factory=dict)
     # Fingerprints of our own findings an authorised reviewer reacted 👎 to on a
     # previous run (read from GitHub each run — no local persistence). Suppression
     # drops matching findings, except high/critical security findings, which a
