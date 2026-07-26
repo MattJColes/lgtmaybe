@@ -33,13 +33,28 @@ also carries the last-reviewed-SHA watermark that drives incremental review.
 
 ### Requirement: Findings carry fingerprints
 
-Each inline comment SHALL embed a hidden per-finding fingerprint derived from
-path and title, keying re-run dedupe and resolve-on-fix.
+Each inline comment SHALL embed two hidden per-finding ids — a fingerprint
+(path + title) and a prose-free identity (path + category + anchor, falling back
+to the line when a finding has no anchor) — and re-run dedupe and resolve-on-fix
+SHALL match on either. The fingerprint alone cannot key them: it hashes model
+prose, and a model rewords the same finding between runs. An identity is not
+unique within a file — two findings from one lens on identical source lines
+share one — so re-run dedupe SHALL match candidates to posted comments
+one-for-one rather than by set membership.
 <!-- anchor: github.fingerprint -->
 
 #### Scenario: same finding, next run
 - **WHEN** a re-run produces a finding whose fingerprint is already posted
 - **THEN** it is not posted again
+
+#### Scenario: same finding, reworded
+- **WHEN** a re-run reports the same code and concern in different words
+- **THEN** its identity still matches, so it is neither posted again nor
+  treated as fixed
+
+#### Scenario: a second occurrence of an identical line
+- **WHEN** a re-run flags one more occurrence than is already posted
+- **THEN** the extra occurrence posts rather than being absorbed by its twin
 
 ### Requirement: Unanchored findings are demoted, never guessed
 
@@ -185,22 +200,30 @@ the least-privilege public App does not hold `checks: write`.
 - **WHEN** a review uses the built-in workflow token
 - **THEN** existing `github-actions[bot]` posting behavior remains unchanged
 
-### Requirement: Ineligible events cannot preempt active reviews
+### Requirement: lgtmaybe's own comments cannot preempt active reviews
 
-The dogfood workflow SHALL apply per-PR concurrency only to an event that passes
-the review job's eligibility guard. Eligible jobs for the same PR MUST retain
-newest-run-wins cancellation.
+Every workflow lgtmaybe ships or runs SHALL key its per-PR concurrency group on
+the event name as well as the PR, and the dogfood workflow SHALL additionally
+apply that group only to an event passing the review job's eligibility guard.
+Runs of the same event for the same PR MUST retain newest-run-wins cancellation.
+Posting SHALL be ordered so the review lands before any comment lgtmaybe emits.
 <!-- anchor: github.workflow-concurrency -->
 
 #### Scenario: lgtmaybe posts an automatic diagram
 
-- **WHEN** the GitHub App comment emits an `issue_comment` workflow run whose
-  author does not pass the review job guard
-- **THEN** that run does not enter the review concurrency group or cancel the
-  active review
+- **WHEN** the GitHub App comment emits an `issue_comment` workflow run
+- **THEN** that run's concurrency group differs from the active
+  `pull_request_target` review's, and at job scope an author failing the guard
+  does not enter a group at all
 
-#### Scenario: a newer eligible review starts
+#### Scenario: a newer push arrives mid-review
 
-- **WHEN** a newer PR event or trusted command passes the review job guard for
+- **WHEN** a newer `pull_request_target` event passes the review job guard for
   the same PR
-- **THEN** the newer job cancels the older eligible review job
+- **THEN** the newer job cancels the older review job for that PR
+
+#### Scenario: a review is cancelled by a mis-scoped consumer group
+
+- **WHEN** a consumer's group is not event-discriminated and lgtmaybe's own
+  comment cancels the run
+- **THEN** the review was already posted, because comments follow it

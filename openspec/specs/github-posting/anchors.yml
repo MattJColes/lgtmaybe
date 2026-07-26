@@ -21,10 +21,14 @@ github.post-review:
   files: [src/lgtmaybe/github/**/*.py]
 
 github.fingerprint:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^finding_fingerprint$' }
-  files: [src/lgtmaybe/github/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^finding_fingerprint$' }
+    files: [src/lgtmaybe/github/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^finding_identity$' }
+    files: [src/lgtmaybe/github/**/*.py]
 
 github.demote:
   rule:
