@@ -90,7 +90,7 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     default=None,
     type=click.Choice(["fast", "full"]),
     help="Review preset: fast (default) covers security, correctness/intent, "
-    "performance, complexity, ponytail, and deprecation in four calls when "
+    "performance, complexity, ponytail, deprecation, tests and documentation in "
     "parallelism is available, or three with one worker; full restores "
     "tests/documentation and runs one call per lens for deep audits",
 )

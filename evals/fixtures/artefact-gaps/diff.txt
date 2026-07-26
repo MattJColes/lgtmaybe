@@ -1,0 +1,32 @@
+diff --git a/billing/refunds.py b/billing/refunds.py
+index 3a1b2c4..7d9e0f1 100644
+--- a/billing/refunds.py
++++ b/billing/refunds.py
+@@ -1,10 +1,30 @@
+ """Refund helpers.
+ 
+-`refund_order` issues a full refund for the order and returns the refund id.
+-It raises `OrderNotFound` when the order does not exist.
++`refund_order` issues a full refund for the order and returns the refund id.
++It raises `OrderNotFound` when the order does not exist.
+ """
+ 
+ 
+ def refund_order(order_id, amount=None):
+-    order = _load(order_id)
+-    return _gateway.refund(order.id, order.total)
++    order = _load(order_id)
++    if amount is None:
++        return _gateway.refund(order.id, order.total)
++    if amount > order.total:
++        raise ValueError("refund exceeds order total")
++    return _gateway.refund(order.id, amount)
++
++
++def refund_window_days(plan):
++    """Return how many days a plan has to request a refund."""
++    if plan == "enterprise":
++        return 90
++    if plan == "pro":
++        return 30
++    return 14

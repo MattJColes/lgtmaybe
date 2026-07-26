@@ -50,18 +50,18 @@ call per review lens — before the findings funnel back into a single stream:
 flowchart TD
     fetch["fetch<br/>diff via API — never a checkout"] --> compress["compress<br/>skip generated files · pad context · batch to budget"]
     compress --> security["security lens"]
-    compress --> correctnessflow["correctness flow + intent lens"]
-    compress --> correctnessstate["correctness state/lifecycle lens"]
+    compress --> correctness["correctness lens<br/>+ stated intent"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
+    compress --> artefacts["artefacts lens<br/>tests · documentation"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
-    correctnessflow --> anchor
-    correctnessstate --> anchor
+    correctness --> anchor
     codehealth --> anchor
+    artefacts --> anchor
     anchor --> dedupe["merge / dedupe"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-(The four lens calls shown are the parallel-capable `fast` grouping. A
-single-worker configuration combines the two correctness calls; the `full`
+(The four lens calls shown are the `fast` grouping, and they are the same four
+on every provider — worker count decides only whether they overlap. The `full`
 preset fans out one call per category, and custom lenses join the same fan-out.)
 
 1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
@@ -80,13 +80,12 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    line maps to nothing and is dropped rather than mis-posted.
 
 3. **prompt + parse** — this stage **fans out one model call per review
-   lens**. The `preset` decides the lens set. `fast` (the default) covers the
-   seven code-focused categories in **four calls** when parallelism is
-   available: security, correctness flow (with stated intent when present),
-   correctness state/lifecycle, and merged code health (performance/
-   complexity/ponytail/deprecation). With one worker the two correctness tasks
-   stay combined, keeping the three-call serial path. `full` restores tests and
-   documentation and runs one call per category. Every
+   lens**. The `preset` decides the lens set. `fast` (the default) covers all
+   nine categories in **four calls**, one per concern: security, correctness
+   (with stated intent when present), merged code health (performance/
+   complexity/ponytail/deprecation), and artefacts (tests/documentation). The
+   same four run on every provider — worker count changes only how they are
+   scheduled. `full` runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
    provider port, sized by `max_concurrency` (default 8 for cloud, 1 for
    ollama and openai-compatible), so batches never wait on each other.

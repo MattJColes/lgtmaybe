@@ -258,15 +258,14 @@ pattern, event bus, plugin framework.
    - **Per-lens fan-out (preset-shaped):** the prompt is composed per lens
      (`engine/prompt.py`) — each lens gets a **worked example** (with a real
      hunk header, teaching the line-number arithmetic). `ReviewConfig.preset`
-     picks the lens set: **`fast` (default)** covers security, correctness and
-     stated intent, performance, complexity, ponytail, and deprecation in
-     **four calls** when the provider can overlap work (dedicated security +
-     two correctness calls, flow and state — stated intent folds into
-     correctness with per-finding `category` attribution — plus merged
-     code-health, `prompt.FAST_GROUPS`), or **three** with one worker
-     (correctness combined); **`full`** restores tests and
-     documentation and runs one call per category. An explicit `categories`
-     list overrides the grouping. Every (batch, lens) call runs through **one global
+     picks the lens set: **`fast` (default)** covers all nine categories in
+     **four calls, one per concern** — dedicated security, dedicated
+     correctness (stated intent folds in, with per-finding `category`
+     attribution), merged code-health, and merged artefacts (tests +
+     documentation); the two merged lenses are `prompt.FAST_GROUPS`. The same
+     four run on **every** provider: worker count decides only whether they
+     overlap, never how many there are. **`full`** runs one call per category.
+     An explicit `categories` list overrides the grouping. Every (batch, lens) call runs through **one global
      `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
      cloud, 1 ollama/openai-compatible), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.

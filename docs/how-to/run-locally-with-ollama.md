@@ -202,22 +202,21 @@ model: qwen3.6:35b
 timeout: 1800
 ```
 
-The review fans out **three calls** under the default `fast` preset (nine under
+The review fans out **four calls** under the default `fast` preset (nine under
 `--preset full`). lgtmaybe runs those **serially for
 ollama**: a single ollama instance serves one request at a time, so firing them
 concurrently would only make each wait and time out. The trade-off is
 wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — three serial calls instead of nine is the
+is exactly why `fast` is the default — four serial calls instead of nine is the
 single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
 `OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match. With more than one worker, lgtmaybe splits correctness into focused flow
-and state/lifecycle calls, making four parallel fast-preset tasks instead of
-three combined serial tasks. By default lgtmaybe issues ollama calls one at a
-time. Add `--profile` to any run to see the per-call breakdown.
+match — the same four calls then overlap instead of queueing, which is close to
+a 4× wall-clock win. By default lgtmaybe issues ollama calls one at a time. Add
+`--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 

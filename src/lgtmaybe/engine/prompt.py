@@ -166,28 +166,6 @@ _CORRECTNESS_EXAMPLE = _example_block(
     },
 )
 
-_CORRECTNESS_STATE_EXAMPLE = _example_block(
-    "--- a/cache.py\n"
-    "+++ b/cache.py\n"
-    "@@ -8,1 +8,3 @@\n"
-    " def get_or_create(key):\n"
-    "+    if key not in cache:\n"
-    "+        cache[key] = create_value(key)\n",
-    {
-        "path": "cache.py",
-        "line": 9,
-        "side": "RIGHT",
-        "severity": "high",
-        "title": "Check-then-act race can create the value twice",
-        "body": "Concurrent callers can both observe a missing key and run create_value. "
-        "Protect the read-modify-write sequence or use an atomic cache operation.",
-        "failure_scenario": "When two callers miss the same key concurrently, both run "
-        "create_value and duplicate its side effects.",
-        "suggestion": None,
-        "anchor": "    if key not in cache:",
-    },
-)
-
 _DEPRECATION_EXAMPLE = _example_block(
     "--- a/clock.py\n"
     "+++ b/clock.py\n"
@@ -373,20 +351,6 @@ _CORRECTNESS_STATE_CHECKS = """\
   seconds/milliseconds epoch confusion, DST-unsafe date arithmetic.
 - **Aliasing & mutation** — mutable default arguments, storing a mutable value
   the caller still owns, mutating a collection while iterating over it."""
-
-_CORRECTNESS_FLOW_SECTION = f"""\
-## Correctness & control/data flow
-
-{_CORRECTNESS_INTRO}
-
-{_CORRECTNESS_FLOW_CHECKS}"""
-
-_CORRECTNESS_STATE_SECTION = f"""\
-## Correctness & state/lifecycle
-
-{_CORRECTNESS_INTRO}
-
-{_CORRECTNESS_STATE_CHECKS}"""
 
 _CORRECTNESS_SECTION = f"""\
 ## Correctness & logic (the substance of the change)
@@ -709,12 +673,19 @@ class LensGroup:
 
 
 # The fast preset's grouping (a judgement call the profile can't settle, so
-# here is the reasoning): security and correctness are the two lenses whose
-# recall is worth a dedicated, focused call — they find the merge-blocking
-# bugs. Code health keeps the lower-cost concerns that inspect the changed code
-# itself. Tests and documentation are reserved for full/explicit reviews: the
-# default artefacts call was the slowest call in production while yielding no
-# findings, so it did not earn a place in the everyday path.
+# here is the reasoning): one call per CONCERN, four concerns. Security and
+# correctness each earn a dedicated, focused call — they find the
+# merge-blocking bugs. Code health carries the concerns that inspect the
+# changed code itself, artefacts the ones that ask what the change failed to
+# bring with it.
+#
+# Artefacts was cut from the everyday path once, as the slowest call for no
+# findings. Two things changed: it now overlaps the other three instead of
+# extending them, and reads a cached shared prefix on the breakpoint routes —
+# so "slowest" costs far less than it did. And "no findings" was measured on
+# fixtures that plant no missing-test or stale-doc issue, which is a corpus
+# gap, not evidence the lens is silent. Restored with a fixture that actually
+# tests it; if it earns its place it stays, and now that is measurable.
 CODE_HEALTH_GROUP = LensGroup(
     id="code-health",
     members=(
@@ -726,7 +697,13 @@ CODE_HEALTH_GROUP = LensGroup(
     section=_CODE_HEALTH_SECTION,
     example=_PERFORMANCE_EXAMPLE,
 )
-FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP,)
+ARTEFACTS_GROUP = LensGroup(
+    id="artefacts",
+    members=(ReviewCategory.tests, ReviewCategory.documentation),
+    section=_ARTEFACTS_SECTION,
+    example=_TESTS_EXAMPLE,
+)
+FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
 
 
 def build_group_prompt(group: LensGroup, language: str | None = None) -> str:
@@ -759,41 +736,6 @@ def build_correctness_prompt(include_intent: bool, language: str | None = None) 
 def build_correctness_block(include_intent: bool) -> str:
     """The fast preset's correctness call, user-block (split) shape."""
     return f"{_LENS_LEAD_IN}\n\n{_correctness_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
-
-
-@lru_cache(maxsize=2)
-def _correctness_flow_section(include_intent: bool) -> str:
-    """The parallel fast preset's flow section, optionally carrying intent."""
-    if not include_intent:
-        return _CORRECTNESS_FLOW_SECTION
-    return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_FLOW_SECTION}\n\n{_INTENT_SECTION}"
-
-
-def build_correctness_flow_prompt(include_intent: bool, language: str | None = None) -> str:
-    """The parallel fast preset's correctness-flow system prompt."""
-    section = _correctness_flow_section(include_intent)
-    header = _localised_header(language)
-    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
-
-
-def build_correctness_flow_block(include_intent: bool) -> str:
-    """The parallel fast preset's correctness-flow split block."""
-    return (
-        f"{_LENS_LEAD_IN}\n\n{_correctness_flow_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
-    )
-
-
-def build_correctness_state_prompt(language: str | None = None) -> str:
-    """The parallel fast preset's correctness-state system prompt."""
-    return (
-        f"{_localised_header(language)}\n{_CORRECTNESS_STATE_EXAMPLE}\n\n"
-        f"{_CORRECTNESS_STATE_SECTION}\n\n{_SHARED_RULES}\n"
-    )
-
-
-def build_correctness_state_block() -> str:
-    """The parallel fast preset's correctness-state split block."""
-    return f"{_LENS_LEAD_IN}\n\n{_CORRECTNESS_STATE_SECTION}\n\n{_CORRECTNESS_STATE_EXAMPLE}"
 
 
 _CATEGORY_SECTIONS: dict[ReviewCategory, str] = {

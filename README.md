@@ -60,21 +60,18 @@ forged delimiter break-out attempts), and redacts a broad set of secret formats
 credentials in connection strings) before anything leaves your environment. See
 [Data and Privacy](docs/explanation/data-and-privacy.md).
 
-**Fast by default.** Reviews run the **`fast` preset** by default: security,
-correctness (including stated intent), and code health
-(performance/complexity/ponytail/deprecation) run in **four parallel model
-calls** when more than one worker is available: correctness is split into
-focused flow and state/lifecycle checks so one oversized task cannot set the
-critical path. Single-worker configurations keep the combined **three-call**
-shape.
-Tests and documentation are reserved for `--preset full` (or `preset: full` in
-`.lgtmaybe.yml`), which restores the one-call-per-lens deep audit for release
-branches. This keeps the everyday path focused on code defects while avoiding a
-low-yield call that can dominate wall time.
+**Fast by default.** Reviews run the **`fast` preset** by default: all nine
+categories in **four model calls**, one per concern — security, correctness
+(including stated intent), code health
+(performance/complexity/ponytail/deprecation), and artefacts
+(tests/documentation). The same four run on every provider; worker count
+changes only how they are scheduled, so a cloud review overlaps them while a
+single-slot local one runs them in turn. `--preset full` (or `preset: full` in
+`.lgtmaybe.yml`) restores the one-call-per-lens deep audit for release branches.
 On top of that, all calls across all batches share **one concurrency pool**
 (`max_concurrency`, default 8 on cloud providers) and share a **cached
-preamble-plus-diff prefix** on anthropic/bedrock, so the diff is processed once
-per batch, not once per lens. Add `--profile` to any run to see exactly where
+preamble-plus-diff prefix** on the routes that support it, so the diff is
+processed once per batch, not once per lens. Add `--profile` to any run to see exactly where
 the time and tokens went.
 
 **How the scope is bounded.** Every run is capped so a large PR can't blow up

@@ -1,0 +1,44 @@
+{
+  "name": "artefact-gaps",
+  "changed_file": "billing/refunds.py",
+  "expected": [
+    {
+      "label": "new partial-refund branches in refund_order have no test",
+      "line": 12,
+      "keywords": [
+        "test",
+        "untested",
+        "coverage",
+        "no test",
+        "test case"
+      ],
+      "severity_at_least": "low"
+    },
+    {
+      "label": "module docstring still describes refund_order as full-refund-only and omits ValueError",
+      "line": 3,
+      "keywords": [
+        "docstring",
+        "documentation",
+        "stale",
+        "outdated",
+        "amount",
+        "valueerror",
+        "describe"
+      ],
+      "severity_at_least": "info"
+    },
+    {
+      "label": "refund_window_days is entirely untested",
+      "line": 17,
+      "keywords": [
+        "test",
+        "untested",
+        "coverage",
+        "no test",
+        "test case"
+      ],
+      "severity_at_least": "low"
+    }
+  ]
+}

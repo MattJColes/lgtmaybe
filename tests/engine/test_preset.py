@@ -42,64 +42,44 @@ class TestFastLensGrouping:
     def test_default_preset_is_fast(self) -> None:
         assert _cfg().preset is ReviewPreset.fast
 
-    def test_single_worker_fast_builds_three_lenses(self) -> None:
-        lenses = _build_lenses(_cfg(), has_intent=False)
-        assert [lens.id for lens in lenses] == [
-            "security",
-            "correctness",
-            "code-health",
-        ]
+    _FOUR = ["security", "correctness", "code-health", "artefacts"]
 
-    def test_parallel_fast_splits_correctness_into_two_lenses(self) -> None:
-        lenses = _build_lenses(
-            _cfg(provider=Provider.openai, max_concurrency=None), has_intent=False
-        )
-        assert [lens.id for lens in lenses] == [
-            "security",
-            "correctness-flow",
-            "correctness-state",
-            "code-health",
-        ]
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {},  # ollama: single-worker auto-concurrency
+            {"provider": Provider.openai, "max_concurrency": None},  # cloud auto
+            {"provider": Provider.openai, "max_concurrency": 1},  # forced serial
+            {"max_concurrency": 2},  # local provider, forced parallel
+        ],
+        ids=["ollama-auto", "cloud-auto", "cloud-serial", "local-parallel"],
+    )
+    def test_fast_builds_the_same_four_lenses_on_every_configuration(
+        self, overrides: dict[str, object]
+    ) -> None:
+        """The lens set is a property of the preset, not of how many workers
+        happen to be available: one concern per call, four calls, everywhere."""
+        lenses = _build_lenses(_cfg(**overrides), has_intent=False)
+        assert [lens.id for lens in lenses] == self._FOUR
 
-    def test_explicit_single_worker_keeps_combined_correctness(self) -> None:
-        lenses = _build_lenses(_cfg(provider=Provider.openai, max_concurrency=1), has_intent=False)
-        assert [lens.id for lens in lenses] == [
-            "security",
-            "correctness",
-            "code-health",
-        ]
-
-    def test_explicit_parallel_local_provider_splits_correctness(self) -> None:
-        lenses = _build_lenses(_cfg(max_concurrency=2), has_intent=False)
-        assert [lens.id for lens in lenses] == [
-            "security",
-            "correctness-flow",
-            "correctness-state",
-            "code-health",
-        ]
-
-    def test_fast_reserves_artefact_categories_for_deep_reviews(self) -> None:
+    def test_fast_covers_every_built_in_category(self) -> None:
+        """Four distinct lenses, but still all nine categories — nothing that
+        used to be reviewed silently stops being reviewed."""
         lenses = _build_lenses(_cfg(), has_intent=True)
         covered: set[str] = set()
         for lens in lenses:
             covered.add(lens.id)
             covered |= set(lens.allowed_categories or ())
-        assert covered >= {
-            "security",
-            "correctness",
-            "intent",
-            "performance",
-            "complexity",
-            "ponytail",
-            "deprecation",
-        }
-        assert covered.isdisjoint({"tests", "documentation"})
+        assert covered >= {c.value for c in ReviewCategory}
 
     def test_merged_prompts_name_their_member_categories(self) -> None:
         lenses = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=False)}
         code_health = lenses["code-health"].user_block
         for name in ("performance", "complexity", "ponytail", "deprecation"):
             assert f'"{name}"' in code_health
+        artefacts = lenses["artefacts"].user_block
+        for name in ("tests", "documentation"):
+            assert f'"{name}"' in artefacts
 
     def test_intent_folds_into_combined_correctness_when_stated(self) -> None:
         lenses = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=True)}
@@ -111,15 +91,6 @@ class TestFastLensGrouping:
         plain = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=False)}
         assert not plain["correctness"].carries_intent
         assert "stated intent" not in plain["correctness"].user_block
-
-    def test_parallel_intent_reaches_only_correctness_flow(self) -> None:
-        lenses = {
-            lens.id: lens for lens in _build_lenses(_cfg(provider=Provider.openai), has_intent=True)
-        }
-        assert lenses["correctness-flow"].carries_intent
-        assert "stated intent" in lenses["correctness-flow"].user_block
-        assert not lenses["correctness-state"].carries_intent
-        assert "stated intent" not in lenses["correctness-state"].user_block
 
     def test_full_preset_builds_one_lens_per_category(self) -> None:
         lenses = _build_lenses(_cfg(preset="full"), has_intent=True)
@@ -135,43 +106,13 @@ class TestFastLensGrouping:
         lenses = _build_lenses(cfg, has_intent=False)
         assert [lens.id for lens in lenses] == ["security", "performance"]
 
-    def test_fast_review_makes_three_calls(self) -> None:
-        provider = FakeProvider()
-        LLMReviewEngine(provider).review(_CTX, _cfg())
-        assert len(provider.calls) == 3
-
-    def test_parallel_fast_review_makes_four_calls(self) -> None:
-        provider = FakeProvider()
-        LLMReviewEngine(provider).review(_CTX, _cfg(provider=Provider.openai))
-        assert len(provider.calls) == 4
-
-
-class TestSplitCorrectnessAttribution:
-    def test_split_findings_are_correctness_and_deduplicated(self) -> None:
-        finding = ReviewFinding(
-            path="a.py",
-            line=1,
-            severity=Severity.high,
-            title="shared bug",
-            body="x",
-            failure_scenario="When the changed line runs, the shared operation fails.",
-        )
-        finding_text = json.dumps([finding.model_dump(mode="json")])
-
-        class _BothCorrectnessTasks(FakeProvider):
-            def complete(self, messages, model, **opts):  # type: ignore[override]
-                self.calls.append({"messages": messages, "model": model, "opts": opts})
-                prompt = "\n".join(str(m.get("content", "")) for m in messages)
-                if "Correctness &" in prompt:
-                    return ProviderResult(text=finding_text, input_tokens=1, output_tokens=1)
-                return ProviderResult(text='{"findings": []}', input_tokens=1, output_tokens=1)
-
-        findings, _ = LLMReviewEngine(_BothCorrectnessTasks()).review(
-            _CTX, _cfg(provider=Provider.openai, min_severity="info")
-        )
-
-        assert len(findings) == 1
-        assert findings[0].category == "correctness"
+    @pytest.mark.parametrize("provider", [Provider.ollama, Provider.openai])
+    def test_fast_review_makes_four_calls_on_any_provider(self, provider: Provider) -> None:
+        """Worker count changes how the four calls are scheduled, never how many
+        there are — a single-slot provider runs the same four, serially."""
+        fake = FakeProvider()
+        LLMReviewEngine(fake).review(_CTX, _cfg(provider=provider))
+        assert len(fake.calls) == 4
 
 
 class TestMergedCategoryStamping:

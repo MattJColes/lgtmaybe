@@ -54,34 +54,32 @@ sourced from PR-author content.
 - **THEN** it runs as one more concurrent lens call, findings merged like any
   built-in
 
-### Requirement: Fast preset splits correctness only when it can overlap
+### Requirement: Fast preset is four distinct lenses on every provider
 
-The default `fast` preset SHALL run security and code-health tasks plus
-provider-aware correctness tasks. A parallel-capable configuration SHALL split
-correctness into focused flow and state/lifecycle calls, both attributed to the
-`correctness` category; a single-worker configuration SHALL keep one combined
-correctness call. Stated intent SHALL remain attached to one correctness task.
-Tests and documentation SHALL remain reserved for `full` or explicit category
-reviews.
+The default `fast` preset SHALL run every built-in category as FOUR lenses —
+security, correctness, code health, and artefacts — one per concern. The lens
+set SHALL NOT vary with the number of available workers: a single-worker
+configuration runs the same four calls serially. Stated intent SHALL fold into
+the correctness call rather than consume its own.
 <!-- anchor: prompt.groups -->
 
 #### Scenario: cloud default
 - **WHEN** `fast` uses a cloud provider with auto-concurrency
-- **THEN** its four calls are security, correctness-flow, correctness-state,
-  and code health
+- **THEN** its four calls are security, correctness, code health, and artefacts,
+  and they may overlap
 
 #### Scenario: local single-slot default
 - **WHEN** `fast` uses Ollama with auto-concurrency
-- **THEN** its three calls are security, combined correctness, and code health
+- **THEN** the same four calls run within the single-worker pool, serially
 
 #### Scenario: intent with no dedicated call
 - **WHEN** the fast preset runs and the PR states an intent
 - **THEN** intent findings come out of the correctness call, attributed to the
   intent category
 
-#### Scenario: everyday review
+#### Scenario: everyday review covers artefacts
 - **WHEN** the fast preset runs with no category override
-- **THEN** tests and documentation do not consume a model call
+- **THEN** tests and documentation are reviewed by the artefacts call
 
 ### Requirement: Defect prompts require a concrete failure scenario
 

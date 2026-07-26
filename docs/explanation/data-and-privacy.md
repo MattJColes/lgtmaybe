@@ -31,9 +31,8 @@ are followed by a self-reflection call. Each call contains some subset of:
   each commit message (on the CLI: the commit names from your local `git log`).
   This feeds the **intent lens** ("does the PR do what it says?"). It is
   redacted exactly like the diff, wrapped as untrusted data, and sent **only on
-  the single lens call that carries the intent** (the correctness-flow or
-  combined correctness call under the default `fast` preset, or the dedicated
-  intent lens under `full`) — drop `intent` from `categories` in
+  the single lens call that carries the intent** (the correctness call under
+  the default `fast` preset, or the dedicated intent lens under `full`) — drop `intent` from `categories` in
   `.lgtmaybe.yml` and it is never sent at all.
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.

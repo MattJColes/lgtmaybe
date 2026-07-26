@@ -252,7 +252,7 @@ def test_end_to_end_symbol_deferral_drops_forbidden_finding_with_real_ast_grep()
 
 def test_fixtures_cover_performance_and_complexity_lenses() -> None:
     """Both fixtures plant a performance and a complexity issue so the e2e exercises
-    all seven code lenses, not just security + correctness. (The intent lens needs a
+    the code-health lens, not just security + correctness. (The intent lens needs a
     stated intent the fixtures don't carry, so the engine skips it there.) Guards
     against a future edit silently dropping these lower-severity lenses from the
     live recall check."""
@@ -263,6 +263,17 @@ def test_fixtures_cover_performance_and_complexity_lenses() -> None:
         assert "complexity" in keywords and "cyclomatic" in keywords, (
             f"{name}: no complexity finding"
         )
+
+
+def test_a_fixture_plants_test_and_documentation_gaps() -> None:
+    """The artefacts lens is in the default preset, so the corpus must be able to
+    score it. It was cut from the default once for "yielding no findings" — a claim
+    measured against fixtures that planted no missing test and no stale doc, so it
+    could only ever score zero. This fixture is what makes that claim falsifiable."""
+    _diff, manifest = _fixture("artefact-gaps")
+    keywords = " ".join(k.lower() for e in manifest.expected for k in e.keywords)
+    assert "untested" in keywords or "coverage" in keywords, "no test-gap finding"
+    assert "docstring" in keywords or "stale" in keywords, "no documentation finding"
 
 
 # ---------------------------------------------------------------------------
