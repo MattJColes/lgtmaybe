@@ -57,7 +57,7 @@ jobs:
       - uses: ./
         with:
           provider: openrouter
-          model: deepseek/deepseek-v4-pro
+          model: openai/gpt-5.6-terra-pro
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_identity: lgtmaybe
