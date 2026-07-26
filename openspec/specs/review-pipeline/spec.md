@@ -11,15 +11,23 @@ filter — with budget behaviors that degrade loudly, never silently.
 
 ### Requirement: The pipeline degrades loudly, never silently
 
-`LLMReviewEngine.review` SHALL run the stages in order and, when the soft
-whole-review deadline (`max_review_seconds`) passes, skip still-queued calls
-and return partial results with a notice — never a silent LGTM. Any stage
-failure surfaces to the caller.
+`LLMReviewEngine.review` SHALL run the stages in order and, whenever any lens
+call fails or is skipped, return partial results with a notice plus a hidden
+incomplete marker — never a silent LGTM. A call skipped past the soft
+whole-review deadline (`max_review_seconds`) counts as a failed call, so the
+deadline is one contributor to that notice rather than its only source. Any
+stage failure surfaces to the caller.
 <!-- anchor: engine.review -->
+
+#### Scenario: a lens call fails
+- **WHEN** a lens call raises (timeout, provider error) or returns unparseable
+  output while others succeed
+- **THEN** the summary carries the "N of M review calls failed" notice and the
+  hidden incomplete marker the posting step keys on
 
 #### Scenario: deadline passes mid-review
 - **WHEN** lens calls are still queued after `max_review_seconds`
-- **THEN** they are skipped and the summary carries a partial-results notice
+- **THEN** they are skipped and the summary carries the same partial-results notice
 
 #### Scenario: findings were suppressed
 - **WHEN** a run suppresses findings (ignored fingerprint, inline pragma, or a

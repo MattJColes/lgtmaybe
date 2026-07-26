@@ -38,7 +38,13 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
-from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
+from lgtmaybe.engine import (
+    INCOMPLETE_MARKER,
+    FileFetcher,
+    LLMReviewEngine,
+    SymbolResolver,
+    build_symbol_resolver,
+)
 from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
@@ -358,6 +364,17 @@ def run_review(
         # incremental diff's context lines aren't necessarily in the PR diff.
         with profiler.stage("post"):
             github.post_review(findings, summary, diff=ctx.diff)
+        # Make an incomplete run visible. On a re-run post_review can only PUT
+        # the summary onto the review the FIRST run created — a silent edit of an
+        # older comment that notifies nobody, while this run's new findings post
+        # as individual review comments (which GitHub wraps in bodiless reviews).
+        # A partial review would then be indistinguishable from a clean one, so
+        # the notice also posts as its own PR comment. Only when a call actually
+        # failed, so a healthy review adds no noise; not swallowed, because a
+        # disclosure that silently fails to post is the bug this fixes.
+        if INCOMPLETE_MARKER in summary:
+            _log.warning("review incomplete — posting a visible notice on the PR")
+            github.post_issue_comment(summary)
         if cfg.pr_labels:
             # Effort/risk labels from data already computed — best-effort,
             # and only on gateways that support them (fakes don't).
@@ -728,6 +745,10 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
         if mark_reviewed is not None:
             mark_reviewed(None)
         github.post_review([], notice)
+        # Same visibility problem as an incomplete run, in its worst form: on a
+        # re-run the notice above only edits the older review's body. A review
+        # that ran no lens to completion has to be visible in the conversation.
+        github.post_issue_comment(notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.

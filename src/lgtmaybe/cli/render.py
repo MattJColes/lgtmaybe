@@ -8,8 +8,14 @@ instructions an AI coding agent can read and apply).
 from __future__ import annotations
 
 import json
+import re
 
 from lgtmaybe.core.models import ReviewFinding
+
+# The summary is written for a GitHub comment, so it can carry hidden markers
+# (the incomplete-run flag). They mean nothing to a terminal — strip them rather
+# than print raw HTML at the end of a local review.
+_HIDDEN_MARKER_RE = re.compile(r"[ \t]*<!--.*?-->")
 
 
 def render_findings(findings: list[ReviewFinding], summary: str, *, fmt: str = "human") -> str:
@@ -21,6 +27,7 @@ def render_findings(findings: list[ReviewFinding], summary: str, *, fmt: str = "
     """
     if fmt == "json":
         return json.dumps([f.model_dump(mode="json") for f in findings])
+    summary = _HIDDEN_MARKER_RE.sub("", summary).strip()
     if fmt == "agent":
         return _render_agent(findings, summary)
 
