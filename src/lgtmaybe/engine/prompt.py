@@ -60,6 +60,15 @@ replace them, indented to match, and nothing else. It is not a place for prose �
 drop-in code change (the fix is structural, spans code you cannot see, or is a \
 judgement call), set `suggestion` to null and make the recommendation in `body`.
 
+Every name in a `suggestion` must resolve in **the file being changed** — use the \
+imports, aliases, and spellings that file actually has, never the ones from a worked \
+example in this prompt. The same fix is spelled differently under different imports: \
+a file with `import datetime` needs `datetime.timezone.utc`, while one with \
+`from datetime import datetime` does not — there `datetime` is the class, and \
+`datetime.timezone` raises AttributeError. When the fix needs a name the file has not \
+imported, name the import to add in `body`. A suggestion is committed verbatim, so one \
+that reaches for an unimported name replaces working code with a crash.
+
 ### How to fill `line`, `side`, and `anchor`
 
 `line` is a real file line number, not a position within the diff. Compute it from the
