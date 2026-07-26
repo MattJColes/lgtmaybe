@@ -1264,3 +1264,55 @@ def test_forbidden_resolve_is_attempted_once_per_run() -> None:
         f"({len(attempts)} of {len(threads)} threads)"
     )
     assert graphql.replies == []
+
+
+def _open_thread(body: str, *, resolved: bool = False) -> dict:
+    return {"isResolved": resolved, "comments": {"nodes": [{"body": body}]}}
+
+
+def _count_threads_page(nodes: list[dict]) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": nodes,
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+
+@respx.mock
+def test_open_finding_threads_counts_only_our_unresolved_conversations() -> None:
+    """Resolved threads, and anyone else's threads, are not our outstanding business."""
+    ours = f"**[MEDIUM] Old**\n\n<!-- lgtmaybe-finding:{finding_fingerprint('a.py', 'Old')} -->"
+    resolved_by_us = "**[LOW] Fixed**\n\n<!-- lgtmaybe-resolved-fingerprint:abc123 -->"
+    respx.route(method="POST", url=GRAPHQL_URL).mock(
+        return_value=_count_threads_page(
+            [
+                _open_thread(ours),
+                _open_thread(ours),
+                _open_thread(ours, resolved=True),  # already closed
+                _open_thread(resolved_by_us),  # marker rewritten by resolve-on-fix
+                _open_thread("a human's own review comment"),  # not ours
+            ]
+        )
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    assert gw.count_open_finding_threads() == 2
+
+
+@respx.mock
+def test_open_finding_thread_count_failure_never_blocks_the_review() -> None:
+    """A disclosure nicety must never be the thing that fails a review."""
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=httpx.ConnectError("boom"))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    assert gw.count_open_finding_threads() == 0

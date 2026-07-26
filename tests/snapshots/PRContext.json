@@ -49,6 +49,12 @@
       "title": "Head Sha",
       "type": "string"
     },
+    "open_finding_threads": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Open Finding Threads",
+      "type": "integer"
+    },
     "pr_number": {
       "title": "Pr Number",
       "type": "integer"

@@ -21,6 +21,17 @@ failure surfaces to the caller.
 - **WHEN** lens calls are still queued after `max_review_seconds`
 - **THEN** they are skipped and the summary carries a partial-results notice
 
+#### Scenario: findings were suppressed
+- **WHEN** a run suppresses findings (ignored fingerprint, inline pragma, or a
+  previous run's 👎) and posts no others
+- **THEN** the summary discloses the suppressed count instead of claiming LGTM
+
+#### Scenario: earlier conversations are still open
+- **WHEN** the PR carries unresolved conversations lgtmaybe opened on an earlier
+  run and this run finds nothing
+- **THEN** the summary says so instead of claiming LGTM — this run's count covers
+  what it reviewed now, which an incremental run may not include
+
 ### Requirement: Per-lens fan-out through one bounded executor
 
 Every `(batch, lens)` call SHALL run through one global bounded executor sized

@@ -548,6 +548,28 @@ class LLMReviewEngine(ReviewEngine):
                 "self-reflection audit was skipped, so findings may include "
                 "false positives."
             )
+        # Findings the model DID raise and the run then hid: an ignore
+        # fingerprint, an inline pragma, or a 👎 from a previous run. Reporting
+        # the remaining count as a clean bill of health would let a suppression
+        # quietly convert a real finding into "LGTM".
+        if suppressed:
+            plural = "s" if suppressed != 1 else ""
+            notices.append(
+                f"🙈 {suppressed} finding{plural} suppressed (ignored fingerprint, "
+                "inline `lgtmaybe: ignore`, or a 👎 from a previous run) — not "
+                "counted below."
+            )
+        # Business this run's count cannot see: our own conversations from
+        # earlier runs that nobody has resolved. An incremental run may not have
+        # re-reviewed their files at all, so their absence here is no evidence
+        # they were fixed.
+        if ctx.open_finding_threads:
+            count = ctx.open_finding_threads
+            subject = "conversation is" if count == 1 else "conversations are"
+            notices.append(
+                f"💬 {count} earlier lgtmaybe {subject} still unresolved on this PR — "
+                "this run's count covers what it reviewed now, not those."
+            )
 
         if notices:
             return filtered, "\n\n".join([*notices, summary_line])
