@@ -7,6 +7,7 @@ in the foundation step: change them only by consensus, never to suit one track.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from enum import StrEnum
 from typing import Literal
 
@@ -452,6 +453,34 @@ class ProviderResult(_Strict):
     # Feeds the timing instrumentation so a call that burned its retry budget is
     # distinguishable from one that was merely slow.
     attempts: int = Field(default=1, ge=1)
+
+
+# A FAILED call has no ProviderResult to carry `attempts` home on, so the adapter
+# stamps the count onto the exception instead and the instrumentation reads it
+# back. Without this a call that burned its whole retry budget was recorded as
+# `attempts=0` — indistinguishable from one that never retried at all, which is
+# exactly the wrong impression when the failure is a timeout.
+_ATTEMPTS_ATTR = "lgtmaybe_attempts"
+
+
+def stamp_attempts(exc: BaseException, attempts: int) -> None:
+    """Record on *exc* how many completion attempts the failed call cost.
+
+    Best effort: an exception type that refuses attributes (``__slots__``) is not
+    worth failing a review over — it just reports the attempts as unknown.
+    """
+    with suppress(Exception):
+        setattr(exc, _ATTEMPTS_ATTR, attempts)
+
+
+def attempts_of(exc: BaseException) -> int:
+    """Attempts burned by the call that raised *exc*; 0 when unknown.
+
+    0 means the failure never reached the adapter's retry loop (or the exception
+    could not be stamped) — not "was not retried".
+    """
+    value = getattr(exc, _ATTEMPTS_ATTR, 0)
+    return value if isinstance(value, int) and value > 0 else 0
 
 
 class PRContext(_Strict):

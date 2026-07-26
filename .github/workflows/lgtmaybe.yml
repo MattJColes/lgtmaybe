@@ -41,8 +41,17 @@ jobs:
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+    # Two independent guards against cancelling our own review. The job scope
+    # keeps an ineligible run (a bot comment that fails the guard above) out of
+    # the group entirely. The event name in the key handles the rest: lgtmaybe
+    # posts comments during a review (the diagram, the inline findings) and those
+    # comments fire the issue_comment / pull_request_review_comment events this
+    # workflow subscribes to, so without it an eligible comment run shares this
+    # group and cancel-in-progress kills the review that posted the comment. A
+    # new push still cancels an in-flight review — two pushes are both
+    # pull_request_target, so they still collide.
     concurrency:
-      group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     # A healthy full review runs in a handful of minutes; cap it so a wedged
@@ -54,10 +63,30 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7 # base repo only — for action.yml + .lgtmaybe.yml config
+      # Dogfood the code in this repo, not the last release. `uses: ./` only ever
+      # ran action.yml from the checkout — the container itself came from the
+      # floating `ghcr.io/mattjcoles/lgtmaybe:v1` tag, so every review ran the
+      # previously published image. That gap is how a fix could sit on main for
+      # days while the reviews it was meant to change kept running the old code
+      # (and how a review's timeout could contradict the action.yml right next to
+      # it). Building here closes it.
+      #
+      # This builds the BASE checkout — `pull_request_target` deliberately never
+      # checks out PR code — so it dogfoods main, not the PR head. That is the
+      # trade: current trusted code instead of a stale release, without ever
+      # executing a contributor's diff.
+      - name: Build the reviewer image from this checkout
+        run: docker build --tag lgtmaybe:dogfood .
       - uses: ./
         with:
+          image: lgtmaybe:dogfood
           provider: openrouter
-          model: openai/gpt-5.6-terra-pro
+          # deepseek-v4-pro is cheap enough to run on every PR, which is what a
+          # per-PR dogfood needs: a pricier model exhausts the key's monthly
+          # limit, and OpenRouter then rejects each call with a 402 ("requires
+          # more credits, or fewer max_tokens") — every lens fails and the review
+          # posts nothing.
+          model: deepseek/deepseek-v4-pro
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_identity: lgtmaybe

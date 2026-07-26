@@ -77,7 +77,12 @@ autocrlf before checkout.
 - **Posting:** REST review API — batched inline comments + one summary.
   Idempotent updates via a hidden marker comment (which also carries the
   last-reviewed-SHA watermark driving incremental review). Each inline comment also carries
-  a hidden per-finding fingerprint (`finding_fingerprint(path, title)`); on a
+  **two** hidden per-finding ids: `finding_fingerprint(path, title)` — which keys
+  the user-facing channels (`ignore_fingerprints`, 👎 feedback) — and
+  `finding_identity(path, category, anchor)`, which carries **no model prose**.
+  Both re-run dedupe and resolve-on-fix match on **either**: the fingerprint
+  hashes the title, so it changes whenever the model rewords the same finding,
+  and keyed on it alone a re-run re-posts findings it already made. On a
   re-run, conversations whose finding is gone **and** whose thread GitHub marks
   outdated are replied to and resolved (`ReviewConfig.resolve_fixed`, default on).
   Resolving a thread is the one op the REST review API can't do, so it uses the

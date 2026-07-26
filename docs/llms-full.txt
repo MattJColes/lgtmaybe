@@ -539,7 +539,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `fallback_model` | — | Model to retry with if the primary model fails |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
-| `timeout` | provider default (ollama/openai-compatible/openrouter 1800s, cloud 600s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, timeouts, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) fail fast |
+| `timeout` | provider default (ollama/openai-compatible/openrouter 1800s, cloud 600s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, connection blips, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) and a call that blows this whole timeout fail fast — re-sending the identical request against the identical budget can only burn it twice |
 | `temperature` | `0.0` | Sampling temperature (0.0 = deterministic) |
 | `num_ctx` | `32768` | Ollama context window (ollama only; ignored for hosted providers) |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches (any provider) |
@@ -4861,7 +4861,8 @@ The provider wrapper (`LiteLLMProvider`) and the engine cooperate so a flaky
 network recovers but a dead-end failure surfaces fast:
 
 - **Retries are classified, not blanket.** Transient failures — capacity rate
-  limits (`429 rate_limit_exceeded`), timeouts, connection errors (e.g. an
+  limits (`429 rate_limit_exceeded`), the provider's own connect/read timeouts,
+  connection errors (e.g. an
   ollama server still warming up), 5xx — are retried with **exponential backoff
   and jitter** (up to four attempts). **Permanent** failures are *not* retried:
   bad credentials (`AuthenticationError`), malformed/unsupported requests
@@ -4871,6 +4872,26 @@ network recovers but a dead-end failure surfaces fast:
   quota error can never succeed; stacked across every lens it only turns an
   instant "out of credit" into many minutes of wasted runner time, so lgtmaybe
   raises it immediately. An optional `fallback_model` is still tried once.
+
+- **A blown wall clock is permanent too.** When a call outlives lgtmaybe's own
+  per-request timeout (below), the retry would re-send the identical messages to
+  the identical model against the identical budget — it can only fail the same
+  way and cost another full timeout doing it. So the wall timeout is raised after
+  one attempt, and the failure reports how many attempts it burned (the count
+  rides home on failures as well as successes, so a budget-burning call never
+  reads as one that was never retried). The `fallback_model` — a genuinely
+  different request — still gets its turn, with a fresh budget.
+
+- **Retried smaller, not repeated.** A wall timeout says something about the
+  *payload*, not the provider, and the payload is the one thing the engine can
+  change. So the batch is split and its pieces reviewed instead — halved by file,
+  or by hunk when the batch is a single file — each piece with its own fresh
+  budget. That keeps a slow lens from discarding the whole batch's review, and it
+  is the only retry a blown budget can benefit from. Bounded to **one** level: a
+  piece that times out again just fails, so a model that cannot answer at any
+  size can't cascade through the review budget. The summary says when a batch had
+  to be shrunk — a silent split would hide that every run is at the edge of what
+  the model finishes in time.
 
 - **One retry layer.** litellm's own internal retry loop is disabled
   (`num_retries=0`) so failures aren't ground through two stacked backoff layers

@@ -9,6 +9,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -24,8 +25,9 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     ReviewPreset,
     ReviewResult,
+    attempts_of,
 )
-from lgtmaybe.core.ports import Message, ProviderClient, ReviewEngine
+from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout, ReviewEngine
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
@@ -35,6 +37,7 @@ from .compress import (
     context_lines_for_budget,
     count_tokens,
     expand_hunks,
+    split_patch_into_hunks,
     trailing_context_lines,
 )
 from .injection import wrap_diff, wrap_hints, wrap_intent
@@ -214,6 +217,31 @@ _LensOutcome = tuple[list[ReviewFinding], str | None]
 _ReviewTask = partial[_LensOutcome]
 
 
+def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+    """Split a timed-out batch into smaller review units.
+
+    Multi-file: halve the file list — the coarsest cut that halves the payload,
+    and the one that keeps each file's patch intact. Single file: fall back to its
+    hunks, the same unit the recursive walk uses, so an oversized lone file still
+    shrinks. Returns fewer than two pieces when there is nothing smaller to try
+    (an empty batch, or one file with a single hunk).
+    """
+    if len(batch) > 1:
+        middle = len(batch) // 2
+        return [batch[:middle], batch[middle:]]
+    if not batch:
+        return []
+    path, patch = batch[0]
+    hunks = split_patch_into_hunks(patch)
+    if len(hunks) < 2:
+        return []
+    middle = len(hunks) // 2
+    return [
+        [(path, hunk) for hunk in hunks[:middle]],
+        [(path, hunk) for hunk in hunks[middle:]],
+    ]
+
+
 class ReviewIncompleteError(Exception):
     """Every review call failed (timeout or unparseable output) — no usable result.
 
@@ -252,6 +280,10 @@ class LLMReviewEngine(ReviewEngine):
         deadline_at = (
             time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
         )
+        # Batches a wall-clock timeout forced us to review in smaller pieces.
+        # Per-review state (reset here, not in __init__, so a reused engine starts
+        # clean); a set's add is atomic, which is all the fan-out threads need.
+        self._split_batches: set[int] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
         with profiler.stage("redact"):
@@ -412,6 +444,7 @@ class LLMReviewEngine(ReviewEngine):
                     cfg.language,
                     deadline_at,
                     lens,
+                    batch,
                 )
                 for lens in lenses
             ]
@@ -542,6 +575,17 @@ class LLMReviewEngine(ReviewEngine):
                 f"⚠️ {failed_calls} of {total_calls} review calls failed "
                 f"({detail}); results may be incomplete."
             )
+        # A batch that had to be shrunk is a standing signal that the diff is at
+        # the edge of what this model finishes in its budget — say it, or the next
+        # run's timeout looks like the first.
+        if self._split_batches:
+            count = len(self._split_batches)
+            plural = "es" if count != 1 else ""
+            notices.append(
+                f"⏱️ {count} batch{plural} timed out and {'were' if count != 1 else 'was'} "
+                "reviewed in smaller pieces instead. Consider a lower `max_input_tokens` "
+                "or a faster model."
+            )
         if reflection_skipped_by_deadline:
             notices.append(
                 f"⚠️ Review deadline ({cfg.max_review_seconds}s) reached — the "
@@ -635,6 +679,7 @@ class LLMReviewEngine(ReviewEngine):
         language: str | None,
         deadline_at: float | None,
         lens: _Lens,
+        batch: list[tuple[str, str]] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
 
@@ -642,6 +687,12 @@ class LLMReviewEngine(ReviewEngine):
         reason — the provider exception (e.g. a 429 quota error) or unparseable
         output — that the engine surfaces so a failure names its real cause instead
         of a generic "timeout". A failing lens never aborts the others.
+
+        ``batch`` is the file patches ``wrapped`` was built from. Supplying it opts
+        this call into the one retry a wall-clock timeout can actually benefit
+        from: the payload is split and the pieces reviewed (see
+        :meth:`_review_split`). None means "already a piece" — no further
+        splitting.
 
         ``split_prompt`` selects the message shape. True (``prompt_cache`` on —
         the default): shared system preamble, then the shared prefix (hints +
@@ -658,6 +709,23 @@ class LLMReviewEngine(ReviewEngine):
         if deadline_at is not None and time.perf_counter() >= deadline_at:
             _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
             return [], "review deadline (max_review_seconds) reached — call skipped"
+        on_wall_timeout = (
+            None
+            if batch is None
+            else partial(
+                self._review_split,
+                batch=batch,
+                intent_block=intent_block,
+                hint_block=hint_block,
+                model=model,
+                response_format=response_format,
+                batch_num=batch_num,
+                split_prompt=split_prompt,
+                language=language,
+                deadline_at=deadline_at,
+                lens=lens,
+            )
+        )
         if split_prompt:
             prefix = wrapped if hint_block is None else f"{hint_block}\n\n{wrapped}"
             suffix = lens.user_block
@@ -671,7 +739,9 @@ class LLMReviewEngine(ReviewEngine):
                 {"role": "user", "content": prefix},
                 {"role": "user", "content": suffix},
             ]
-            return self._complete_lens(messages, model, response_format, batch_num, lens)
+            return self._complete_lens(
+                messages, model, response_format, batch_num, lens, on_wall_timeout
+            )
 
         user_content = wrapped
         if lens.carries_intent and intent_block is not None:
@@ -686,7 +756,71 @@ class LLMReviewEngine(ReviewEngine):
             {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},
         ]
-        return self._complete_lens(messages, model, response_format, batch_num, lens)
+        return self._complete_lens(
+            messages, model, response_format, batch_num, lens, on_wall_timeout
+        )
+
+    def _review_split(
+        self,
+        reason: str,
+        *,
+        batch: list[tuple[str, str]],
+        intent_block: str | None,
+        hint_block: str | None,
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        split_prompt: bool,
+        language: str | None,
+        deadline_at: float | None,
+        lens: _Lens,
+    ) -> _LensOutcome:
+        """Re-review a timed-out batch as smaller pieces, one call each.
+
+        The only retry a wall-clock timeout can benefit from. Repeating the same
+        request is pointless — same payload, same model, same budget — but the
+        payload is the one thing we can change, and a smaller one both fits the
+        budget better and gets a fresh one. Failing the lens outright instead
+        would discard the whole batch's review over a size problem.
+
+        Bounded on purpose: exactly ONE level (the pieces are reviewed with
+        ``batch=None``, so a piece that times out again just fails), and the
+        pieces are re-wrapped from the same redacted patches, so nothing
+        unredacted or unwrapped reaches the model. Returns the original *reason*
+        unchanged when the batch cannot be split — a single-hunk file has no
+        smaller unit to fall back to.
+        """
+        pieces = _split_batch(batch)
+        if len(pieces) < 2:
+            return [], reason
+        _log.warning(
+            "review call timed out — retrying on smaller pieces",
+            extra={"lens": lens.id, "batch": batch_num, "pieces": len(pieces)},
+        )
+        findings: list[ReviewFinding] = []
+        errors: list[str] = []
+        for piece in pieces:
+            piece_findings, piece_error = self._review_lens(
+                wrap_diff("\n".join(patch for _, patch in piece)),
+                intent_block,
+                hint_block,
+                model,
+                response_format,
+                batch_num,
+                split_prompt,
+                language,
+                deadline_at,
+                lens,
+            )
+            findings.extend(piece_findings)
+            if piece_error is not None:
+                errors.append(piece_error)
+        if len(errors) == len(pieces):
+            # Every piece failed too: report the split's own failure, not the
+            # original timeout, so the notice names what actually went wrong last.
+            return findings, errors[-1]
+        self._split_batches.add(batch_num)
+        return findings, None
 
     def _complete_lens(
         self,
@@ -695,8 +829,14 @@ class LLMReviewEngine(ReviewEngine):
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
+        on_wall_timeout: Callable[[str], _LensOutcome] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
-        """The provider call + parse + stamp shared by both prompt shapes."""
+        """The provider call + parse + stamp shared by both prompt shapes.
+
+        ``on_wall_timeout`` handles the one failure that says something about the
+        *payload* rather than the provider: the call outlived its entire budget.
+        It is given the failure reason and returns the outcome to use instead.
+        """
         opts = {"response_format": response_format} if response_format is not None else {}
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.
@@ -710,9 +850,10 @@ class LLMReviewEngine(ReviewEngine):
                 label=lens.id,
                 batch=batch_num,
                 elapsed=time.perf_counter() - started,
-                # The exception path carries no attempt count — 0 means unknown
-                # (the adapter may have burned its whole retry budget in here).
-                attempts=0,
+                # What the adapter stamped on the exception: a failure that burned
+                # its retry budget must not read as one that was never retried.
+                # 0 only when the failure never reached the retry loop.
+                attempts=attempts_of(exc),
                 input_tokens=0,
                 output_tokens=0,
                 cache_read_tokens=0,
@@ -724,6 +865,8 @@ class LLMReviewEngine(ReviewEngine):
                 extra={"lens": lens.id, "reason": reason},
                 exc_info=True,
             )
+            if isinstance(exc, ProviderWallTimeout) and on_wall_timeout is not None:
+                return on_wall_timeout(reason)
             return [], reason
         profiler.record_call(
             label=lens.id,

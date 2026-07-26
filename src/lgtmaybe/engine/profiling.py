@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ProviderResult
+from lgtmaybe.core.models import ProviderResult, attempts_of
 from lgtmaybe.core.ports import Message, ProviderClient
 
 _log = get_logger(__name__)
@@ -185,7 +185,7 @@ def timed_complete(
             label=label,
             batch=batch,
             elapsed=time.perf_counter() - started,
-            attempts=0,  # unknown — the exception path carries no attempt count
+            attempts=attempts_of(exc),  # 0 only if it never reached the retry loop
             input_tokens=0,
             output_tokens=0,
             cache_read_tokens=0,
