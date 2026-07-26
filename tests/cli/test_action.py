@@ -423,6 +423,68 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert captured == {"timeout": 900, "temperature": 0.2}
 
+    def test_max_tokens_input_reaches_config(self, tmp_path, monkeypatch):
+        """INPUT_MAX_TOKENS caps generation from the Action.
+
+        The cap exists for prepaid routes that reserve prompt + max_tokens against
+        the balance before generating, and the Action is where those reviews
+        actually run — a knob wired only into the local CLI would leave the case
+        it was built for uncapped. Arrives as the env var's string, so this also
+        pins the coercion to int.
+        """
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["max_tokens"] = cfg.max_tokens
+            return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", fake_build)
+
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "openrouter")
+        monkeypatch.setenv("INPUT_MODEL", "vendor/m")
+        monkeypatch.setenv("INPUT_MAX_TOKENS", "8192")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"max_tokens": 8192}
+
+    def test_max_tokens_input_absent_leaves_generation_uncapped(self, tmp_path, monkeypatch):
+        """An empty/unset input must stay None, not become a cap — the Action's
+        inputs default to "" and a coerced 0 would reject every request."""
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["max_tokens"] = cfg.max_tokens
+            return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", fake_build)
+
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "openrouter")
+        monkeypatch.setenv("INPUT_MODEL", "vendor/m")
+        monkeypatch.setenv("INPUT_MAX_TOKENS", "")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"max_tokens": None}
+
     def test_reflect_model_input_reaches_config(self, tmp_path, monkeypatch):
         """INPUT_REFLECT_MODEL selects the reflection-pass model from the Action."""
         captured: dict[str, object] = {}
