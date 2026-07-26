@@ -557,10 +557,10 @@ keep this lens to "should this exist at all?" — leave readability nits to othe
 
 # ---------------------------------------------------------------------------
 # Fast-preset merged lenses. Written as integrated checklists (not a paste-up
-# of the per-lens sections): the bounded pool runs four calls when parallelism
-# is available, or three combined calls with one worker. Each merged prompt
-# condenses its members to their high-signal items and demands the per-finding
-# `category` field so downstream rules/labels keep working.
+# of the per-lens sections): the preset runs four calls, one per concern, on
+# every provider. Each merged prompt condenses its members to their high-signal
+# items and demands the per-finding `category` field so downstream rules/labels
+# keep working.
 # ---------------------------------------------------------------------------
 
 _CODE_HEALTH_SECTION = """\

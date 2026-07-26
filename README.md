@@ -77,7 +77,7 @@ the time and tokens went.
 **How the scope is bounded.** Every run is capped so a large PR can't blow up
 latency:
 
-- `preset` (default `fast`) — four focused/grouped calls when concurrency is available, three with one worker; `full` restores tests and documentation and runs one call per lens.
+- `preset` (default `fast`) — four calls, one per concern (security, correctness, code health, artefacts), the same on every provider; `full` runs one call per lens.
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
 - `max_concurrency` (default 8 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.

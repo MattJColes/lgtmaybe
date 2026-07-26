@@ -5027,9 +5027,9 @@ credentials are handled. No data flows occur beyond what is described here.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends four grouped model calls under the default `fast` preset when
-the provider can overlap work, or three combined calls with one worker. `full`
-sends one per category. The review calls fan out through one bounded pool and
+lgtmaybe sends four grouped model calls under the default `fast` preset — the
+same four on every provider, overlapping when there is more than one worker.
+`full` sends one per category. The review calls fan out through one bounded pool and
 are followed by a self-reflection call. Each call contains some subset of:
 
 - The **compressed PR diff** — the unified diff of changed files, after
