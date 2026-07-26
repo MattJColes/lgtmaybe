@@ -54,10 +54,20 @@ _FINDING_MARKER = re.compile(r"<!-- lgtmaybe-finding:([0-9a-f]+) -->")
 
 # When resolve-on-fix collapses a thread, the original comment's marker is
 # rewritten into this disjoint "resolved" family so the active-marker scan
-# (``_existing_finding_fingerprints``) no longer sees it — a finding that
+# (``_existing_finding_keys``) no longer sees it — a finding that
 # reappears after being fixed posts again instead of being suppressed forever.
 _ACTIVE_MARKER_PREFIX = "<!-- lgtmaybe-finding:"
 _RESOLVED_MARKER_PREFIX = "<!-- lgtmaybe-resolved-fingerprint:"
+
+# Second hidden marker, stamped alongside the fingerprint: the finding's
+# reword-robust identity (see ``finding_identity``). The fingerprint above hashes
+# the model's *title*, so it changes when the model rephrases the same finding on
+# a re-run — which is exactly when dedupe has to work. This family carries no
+# prose at all. Its own resolved-family prefix, mirroring the fingerprint's, so
+# collapsing a thread hides both of its markers from the active scan.
+_IDENTITY_MARKER = re.compile(r"<!-- lgtmaybe-identity:([0-9a-f]+) -->")
+_ACTIVE_IDENTITY_PREFIX = "<!-- lgtmaybe-identity:"
+_RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 
 # Hidden marker stamped into the summary review body recording the head SHA
 # this review covered, so the next run can review only the commits pushed
@@ -75,6 +85,59 @@ def finding_fingerprint(path: str, title: str) -> str:
     """
     digest = hashlib.sha256(f"{path}\n{title.strip().lower()}".encode())
     return digest.hexdigest()[:12]
+
+
+def finding_identity(finding: ReviewFinding) -> str:
+    """Stable short id for *what* a finding is about, independent of how it reads.
+
+    ``finding_fingerprint`` hashes the title, and the title is model prose: ask a
+    model to review the same diff twice and it flags the same problem in different
+    words, producing a different fingerprint each run. Dedupe keyed on that alone
+    cannot survive a re-run, so this is the key that can — built only from fields
+    the model does not paraphrase:
+
+    - ``path`` — the file.
+    - ``category`` — the lens that raised it (engine-stamped, a fixed vocabulary),
+      so two different concerns about one line stay distinct.
+    - ``anchor`` — the verbatim source line the finding is about. Copied out of the
+      diff rather than composed, so it is code, not prose. It also absorbs line
+      drift: the model miscounts diff line numbers (the reason anchors exist at
+      all), and the same flagged line reported at 428 on one run and 501 on the
+      next is one finding, not two.
+
+    With no anchor there is nothing to key on but the reported line, so identity
+    falls back to it — still prose-free, just less tolerant of a miscount.
+    """
+    # Collapse whitespace runs so re-indentation of the same statement doesn't read
+    # as a different line; keep case, because code is case-sensitive.
+    anchor = " ".join(finding.anchor.split()) if finding.anchor else ""
+    locator = anchor or f"L{finding.line}"
+    digest = hashlib.sha256(f"{finding.path}\n{finding.category or ''}\n{locator}".encode())
+    return digest.hexdigest()[:12]
+
+
+def _finding_keys(body: str) -> set[str]:
+    """Every active hidden id carried by a comment body (fingerprint + identity).
+
+    Two ids of the same finding, pooled into one set so "have we posted this?" is
+    a single intersection. A body predating the identity marker yields just its
+    fingerprint, which still matches whenever the title is unchanged — so old
+    conversations keep deduping exactly as they did.
+    """
+    return set(_FINDING_MARKER.findall(body)) | set(_IDENTITY_MARKER.findall(body))
+
+
+def _current_finding_keys(findings: list[ReviewFinding]) -> set[str]:
+    """Both hidden ids for every finding this run produced.
+
+    The counterpart to ``_finding_keys``: what an existing conversation is matched
+    against to decide whether its finding is still being reported.
+    """
+    keys: set[str] = set()
+    for f in findings:
+        keys.add(finding_fingerprint(f.path, f.title))
+        keys.add(finding_identity(f))
+    return keys
 
 
 # Concurrency for the per-file head-content fetch. The contents are independent
@@ -620,18 +683,32 @@ class RestGitHubGateway(GitHubGateway):
 
         The review-update endpoint only replaces the body, so on a re-run new
         findings are posted as individual review comments (anchored to
-        *head_sha*). Each comment body already carries its hidden fingerprint;
-        comments whose fingerprint is already present on the PR are skipped, so
-        a re-run never duplicates an open conversation. Best-effort as a whole
-        — without a head SHA there is nothing to anchor to, so nothing posts.
+        *head_sha*). Each comment body already carries its hidden ids
+        (fingerprint + identity), and a candidate is matched to an already-posted
+        comment when they share **either** — which is what makes dedupe survive
+        the model rephrasing the finding, since that changes the fingerprint but
+        not the identity.
+
+        Matching is **one-for-one**: each existing comment can absorb at most one
+        candidate, and only unmatched candidates post. Set membership alone would
+        be wrong, because an identity is not unique within a file — two findings
+        from the same lens on two *identical* source lines (``return None``
+        twice) share one identity. Counting occurrences keeps both behaviours:
+        a re-run of the same N findings posts nothing, while an N+1th occurrence
+        the last run missed is still a new finding and still posts.
+
+        Best-effort as a whole — without a head SHA there is nothing to anchor
+        to, so nothing posts.
         """
         if not comments or head_sha is None:
             return
-        existing = self._existing_finding_fingerprints()
+        unmatched = self._existing_finding_keys()
         url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/comments"
         for comment in comments:
-            match = _FINDING_MARKER.search(comment.get("body", ""))
-            if match is not None and match.group(1) in existing:
+            keys = _finding_keys(comment.get("body", ""))
+            already = next((i for i, e in enumerate(unmatched) if e & keys), None)
+            if already is not None:
+                unmatched.pop(already)  # consumed — it can't absorb a second candidate
                 continue
             resp = self._client.post(
                 url,
@@ -641,19 +718,27 @@ class RestGitHubGateway(GitHubGateway):
             )
             resp.raise_for_status()
 
-    def _existing_finding_fingerprints(self) -> set[str]:
-        """Fingerprints of every lgtmaybe finding already posted inline on the PR."""
+    def _existing_finding_keys(self) -> list[set[str]]:
+        """Hidden ids of the lgtmaybe findings already posted inline on the PR.
+
+        One entry **per posted comment** (its fingerprint and identity together),
+        not one pooled set, so the caller can match candidates to occurrences
+        one-for-one — an identity repeats when a file has two identical flagged
+        lines. Only the active marker families are collected, so a thread
+        collapsed by resolve-on-fix (its markers rewritten into the resolved
+        families) stops suppressing — a finding that comes back posts again.
+        """
         url = (
             f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
             "/comments?per_page=100"
         )
-        fingerprints: set[str] = set()
+        posted: list[set[str]] = []
         for resp in self._paginate(url):
             for item in resp.json():
-                match = _FINDING_MARKER.search(item.get("body", "") or "")
-                if match is not None:
-                    fingerprints.add(match.group(1))
-        return fingerprints
+                keys = _finding_keys(item.get("body", "") or "")
+                if keys:
+                    posted.append(keys)
+        return posted
 
     # ------------------------------------------------------------------
     # Conversational finding threads (adapter-only, beyond the frozen port)
@@ -839,8 +924,12 @@ class RestGitHubGateway(GitHubGateway):
     def _resolve_fixed_threads(self, findings: list[ReviewFinding]) -> None:
         """Resolve our prior conversations whose finding is gone and code changed.
 
-        A thread is "fixed" when its hidden fingerprint is no longer produced by
-        this run AND GitHub marks it outdated (the lines it anchored to changed).
+        A thread is "fixed" when neither of its hidden ids (fingerprint or
+        identity) is produced by this run AND GitHub marks it outdated (the lines
+        it anchored to changed). Matching on either id matters as much here as it
+        does for dedupe: keyed on the prose-derived fingerprint alone, a reworded
+        finding reads as gone, so the thread would be resolved and its markers
+        retired — and the "same" finding would post fresh on the next run.
         Each fixed thread gets a short reply for the audit trail, then collapses,
         and its opening comment's fingerprint marker is rewritten into the
         "resolved" family so a reintroduced finding is not suppressed forever.
@@ -852,7 +941,7 @@ class RestGitHubGateway(GitHubGateway):
         wherever the loop happened to stop.
         """
         try:
-            current = {finding_fingerprint(f.path, f.title) for f in findings}
+            current = _current_finding_keys(findings)
             fixed = self._fixed_threads(current)
         except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
             _log.warning("auto-resolve of fixed conversations failed: %s", exc)
@@ -1031,11 +1120,11 @@ class RestGitHubGateway(GitHubGateway):
                 comments = node.get("comments", {}).get("nodes", [])
                 first = comments[0] if comments else {}
                 first_body = first.get("body", "")
-                match = _FINDING_MARKER.search(first_body)
-                if match is None:
+                keys = _finding_keys(first_body)
+                if not keys:
                     continue  # not one of ours
-                if match.group(1) in current:
-                    continue  # still flagged this run — leave it open
+                if keys & current:
+                    continue  # still flagged this run (however worded) — leave it open
                 fixed.append((node["id"], first.get("databaseId"), first_body))
             page = conn.get("pageInfo", {})
             if not page.get("hasNextPage"):
@@ -1063,14 +1152,18 @@ class RestGitHubGateway(GitHubGateway):
     def _mark_comment_resolved(self, comment_id: int | None, body: str) -> None:
         """Rewrite a resolved comment's fingerprint marker into the "resolved" family.
 
-        ``_existing_finding_fingerprints`` matches only the active marker, so
+        ``_existing_finding_keys`` matches only the active marker families, so
         without this rewrite a finding fixed once would be skipped forever if it
-        reappeared. Best-effort on its own (beyond the pass-wide guard): a PATCH
+        reappeared. **Both** families are retired together — leaving the identity
+        marker active would keep suppressing the finding after its fingerprint
+        was retired. Best-effort on its own (beyond the pass-wide guard): a PATCH
         failure is logged and swallowed so the remaining threads still resolve.
         """
         if comment_id is None:
             return
-        rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX)
+        rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
+            _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
+        )
         url = f"https://api.github.com/repos/{self._repo}/pulls/comments/{comment_id}"
         try:
             resp = self._client.patch(
@@ -1238,9 +1331,15 @@ class RestGitHubGateway(GitHubGateway):
             }
             if f.suggestion is not None:
                 comment["body"] += f"\n\n```suggestion\n{_defang_fences(f.suggestion)}\n```"
-            # Stamp a hidden fingerprint so a later run can recognise this
-            # conversation and auto-resolve it once the finding is gone.
+            # Stamp two hidden ids so a later run can recognise this conversation
+            # — to skip re-posting the finding, and to auto-resolve the thread
+            # once the finding is gone. The fingerprint keys the user-facing
+            # channels (`ignore_fingerprints`, 👎 feedback) and hashes the title;
+            # the identity is prose-free, so it still matches after the model
+            # rewords the same finding on a re-run. Either one matching means
+            # "already posted".
             fp = finding_fingerprint(f.path, f.title)
             comment["body"] += f"\n\n<!-- lgtmaybe-finding:{fp} -->"
+            comment["body"] += f"\n<!-- lgtmaybe-identity:{finding_identity(f)} -->"
             comments.append(comment)
         return comments, demoted, broad
