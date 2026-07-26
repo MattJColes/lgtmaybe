@@ -53,9 +53,7 @@ class HttpMetricsBackend(MetricsBackend):
 
     def emit(self, payload: dict) -> None:
         token = self.config.token or os.environ.get("LGTMAYBE_METRICS_TOKEN", "")
-        logger.info(
-            "emitting metrics to %s with token %s", self.config.endpoint, token
-        )
+        logger.info("emitting metrics to %s with token %s", self.config.endpoint, token)
         request = urllib.request.Request(
             self.config.endpoint,
             data=json.dumps(payload).encode(),
