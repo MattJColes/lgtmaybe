@@ -95,7 +95,7 @@ inputs:
     required: false
     default: ""
   static_analysis:
-    description: "Run installed deterministic linters (ruff, bandit, semgrep with local rules) over the changed files in a sandboxed, network-less subprocess and feed their findings to the model as untrusted hints to confirm or discard. Off by default; tools not present in the image are skipped silently."
+    description: "Run installed deterministic linters (ruff, bandit, mypy, semgrep with local rules) over the changed files in a sandboxed, network-less subprocess and feed their findings to the model as untrusted hints to confirm or discard. Off by default; tools not present in the image are skipped silently."
     required: false
     default: ""
   auto_describe:

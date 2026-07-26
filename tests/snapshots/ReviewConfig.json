@@ -358,7 +358,8 @@
           "default": [
             "ruff",
             "bandit",
-            "semgrep"
+            "semgrep",
+            "mypy"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -375,7 +376,8 @@
       "enum": [
         "ruff",
         "bandit",
-        "semgrep"
+        "semgrep",
+        "mypy"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -637,7 +639,8 @@
         "tools": [
           "ruff",
           "bandit",
-          "semgrep"
+          "semgrep",
+          "mypy"
         ]
       }
     },

@@ -248,7 +248,7 @@ confidence score, filtered by `min_confidence`), and loud failure surfacing (a
 stage and model call is timed; `--profile` prints the breakdown.
 
 **Grounding** — optional static-analysis fusion (`static_analysis`, default
-off): installed deterministic linters (ruff, bandit, semgrep with local rules)
+off): installed deterministic linters (ruff, bandit, mypy, semgrep with local rules)
 run over the fetched changed-file texts in a sandboxed, network-less
 subprocess, and their findings enter each lens prompt as untrusted hints to
 confirm or discard — never posted verbatim.

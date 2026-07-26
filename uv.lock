@@ -1319,6 +1319,7 @@ identity-broker = [
 ]
 static-analysis = [
     { name = "bandit" },
+    { name = "mypy" },
     { name = "ruff" },
     { name = "semgrep" },
 ]
@@ -1361,6 +1362,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'identity-broker'", specifier = ">=0.28.1" },
     { name = "litellm", marker = "python_full_version < '3.14'", specifier = ">=1.87.1" },
     { name = "litellm", marker = "python_full_version >= '3.14'", specifier = ">=1.87.1,<1.94" },
+    { name = "mypy", marker = "extra == 'static-analysis'", specifier = ">=1.11" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'identity-broker'", specifier = ">=2.10" },
     { name = "pyyaml", specifier = ">=6.0.3" },

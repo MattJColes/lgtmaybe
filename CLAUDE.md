@@ -236,7 +236,7 @@ pattern, event bus, plugin framework.
      the Action's `synchronize` event, full elsewhere; Action input
      `incremental`); `/review full` forces a full re-review.
    - **Static-analysis fusion (default off):** with `static_analysis.enabled`,
-     installed deterministic tools (ruff, bandit, semgrep-with-local-rules —
+     installed deterministic tools (ruff, bandit, mypy, semgrep-with-local-rules —
      `pip install lgtmaybe[static-analysis]`) run over the already-fetched
      changed-file texts in a temp dir (`engine/static_analysis.py`; sandboxed
      subprocess: scrubbed env, no network — semgrep only ever runs with local
