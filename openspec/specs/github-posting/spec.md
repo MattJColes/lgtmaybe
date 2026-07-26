@@ -33,13 +33,21 @@ also carries the last-reviewed-SHA watermark that drives incremental review.
 
 ### Requirement: Findings carry fingerprints
 
-Each inline comment SHALL embed a hidden per-finding fingerprint derived from
-path and title, keying re-run dedupe and resolve-on-fix.
+Each inline comment SHALL embed two hidden per-finding ids — a fingerprint
+(path + title) and a prose-free identity (path + category + anchor, falling back
+to the line when a finding has no anchor) — and re-run dedupe and resolve-on-fix
+SHALL match on either. The fingerprint alone cannot key them: it hashes model
+prose, and a model rewords the same finding between runs.
 <!-- anchor: github.fingerprint -->
 
 #### Scenario: same finding, next run
 - **WHEN** a re-run produces a finding whose fingerprint is already posted
 - **THEN** it is not posted again
+
+#### Scenario: same finding, reworded
+- **WHEN** a re-run reports the same code and concern in different words
+- **THEN** its identity still matches, so it is neither posted again nor
+  treated as fixed
 
 ### Requirement: Unanchored findings are demoted, never guessed
 
