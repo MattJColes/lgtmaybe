@@ -17,6 +17,17 @@ from .models import PRContext, ProviderResult, ReviewConfig, ReviewFinding
 Message = dict[str, str]
 
 
+class ProviderWallTimeout(TimeoutError):
+    """Part of the provider contract: the call outlived its whole timeout budget.
+
+    Defined here, not in the adapter, because the engine reacts to it — a payload
+    the model could not finish in its budget is retried *smaller*, never repeated
+    unchanged. Distinct from a backend's transport timeout (a connect/read blip),
+    which stays an ordinary retryable error. A ``TimeoutError`` subclass, so
+    callers matching on that keep working.
+    """
+
+
 class ProviderClient(ABC):
     """Port: an LLM backend that returns a normalised completion."""
 

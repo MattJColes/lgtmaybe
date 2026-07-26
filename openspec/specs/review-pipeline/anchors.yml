@@ -48,6 +48,16 @@ engine.recursive-walk:
       has: { field: name, regex: '^batch_files$' }
     files: [src/lgtmaybe/engine/**/*.py]
 
+engine.timeout-split:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_review_split$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_split_batch$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
 engine.context-expansion:
   - rule:
       kind: function_definition

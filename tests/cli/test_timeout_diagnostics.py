@@ -9,13 +9,19 @@ logged before the first call.
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
+from typing import NoReturn
 
 import pytest
 
 from lgtmaybe.cli import build_provider_engine
 from lgtmaybe.core.models import Provider, ReviewConfig
 from lgtmaybe.providers.factory import default_timeout_for
+
+
+def _raise(exc: Exception) -> NoReturn:
+    raise exc
 
 
 class _ListHandler(logging.Handler):
@@ -72,6 +78,43 @@ def test_auto_timeout_is_logged_and_named_as_a_default(cli_logs) -> None:
     record = _timeout_record(cli_logs)
     assert getattr(record, "timeout_s", None) == default_timeout_for(Provider.openrouter)
     assert getattr(record, "timeout_source", None) == "provider default"
+
+
+def test_the_running_build_is_named_alongside_the_budget(cli_logs, monkeypatch) -> None:
+    """The Action pins a floating image tag, so a budget that looks impossible
+    against the documented default is usually an older build. The run has to say
+    which build it is, or the evidence can't be read at all.
+
+    The version is stubbed rather than read from the environment: what matters is
+    that the resolved value reaches the log record, not that this test host happens
+    to have distribution metadata installed.
+    """
+    import lgtmaybe.cli as cli_module
+
+    monkeypatch.setattr(cli_module.metadata, "version", lambda _name: "1.2.3")
+    cfg = ReviewConfig(provider=Provider.openrouter, model="m")
+    build_provider_engine(cfg, _runtime())
+
+    assert getattr(_timeout_record(cli_logs), "lgtmaybe_version", None) == "1.2.3"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # The expected case: a source checkout that was never installed.
+        lambda: _raise(importlib.metadata.PackageNotFoundError("lgtmaybe")),
+        # And anything else the metadata read can throw — an unreadable or
+        # half-written dist-info surfaces as an OSError, and a broken version
+        # lookup must never be the reason a review fails.
+        lambda: _raise(OSError("dist-info is unreadable")),
+    ],
+    ids=["not-installed", "unreadable-metadata"],
+)
+def test_an_unreadable_version_does_not_break_the_run(monkeypatch, failure) -> None:
+    import lgtmaybe.cli as cli_module
+
+    monkeypatch.setattr(cli_module.metadata, "version", lambda _name: failure())
+    assert cli_module.package_version() == "unknown"
 
 
 def test_the_two_sources_are_distinguishable_at_the_same_value(cli_logs) -> None:

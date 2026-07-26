@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
@@ -35,8 +36,8 @@ from tenacity import (
 )
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ProviderResult
-from lgtmaybe.core.ports import Message, ProviderClient
+from lgtmaybe.core.models import ProviderResult, attempts_of, stamp_attempts
+from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout
 
 _log = get_logger(__name__)
 
@@ -152,6 +153,14 @@ def _is_permanent(exc: BaseException) -> bool:
     """True when retrying *exc* cannot plausibly succeed, so we should not."""
     if isinstance(exc, _PERMANENT_ERROR_TYPES):
         return True
+    # A blown wall clock is not a blip: the retry re-sends the identical request
+    # against the identical budget, so attempts 2..N can only fail the same way
+    # and cost another full timeout each. On the generous slow-provider default
+    # that turned one stuck lens into an hour of runner time before the failure
+    # surfaced. One attempt, then say so — and let the fallback model (a genuinely
+    # different request) still have its turn.
+    if isinstance(exc, ProviderWallTimeout):
+        return True
     if isinstance(exc, RateLimitError):
         return _is_quota_rate_limit(exc)
     return _is_expired_credential(exc)
@@ -229,10 +238,19 @@ class LiteLLMProvider(ProviderClient):
         effective_model = self.model or model
         try:
             return self._complete_with_retry(messages, effective_model, **merged)
-        except Exception:
+        except Exception as exc:
             if self.fallback_model is None:
                 raise
-            return self._complete_with_retry(messages, self.fallback_model, **merged)
+            # The primary's requests were still issued and still billed, so they
+            # stay in the total: a fallback rescue that reported one request would
+            # hide the fact that the primary burned its budget first.
+            spent = attempts_of(exc)
+            try:
+                result = self._complete_with_retry(messages, self.fallback_model, **merged)
+            except BaseException as fallback_exc:
+                stamp_attempts(fallback_exc, spent + attempts_of(fallback_exc))
+                raise
+            return result.model_copy(update={"attempts": result.attempts + spent})
 
     def _complete_with_retry(
         self, messages: list[Message], model: str, **kwargs: Any
@@ -242,8 +260,17 @@ class LiteLLMProvider(ProviderClient):
         # to mutate.
         messages = self._with_cache_control(messages, model)
         # Counted here (not read from tenacity's statistics) so the number lands
-        # on the result even when the mocked/fake retry layer changes shape.
+        # on the result even when the mocked/fake retry layer changes shape — and
+        # counted per REQUEST, not per tenacity attempt: one attempt can issue a
+        # second request (the empty-structured-output and rejected-temperature
+        # re-sends below), and a count that missed those would understate what the
+        # call actually cost, which is the whole point of reporting it.
         attempts = 0
+
+        def count_request() -> None:
+            nonlocal attempts
+            attempts += 1
+
         # Attempts share one deadline derived from the per-request timeout (the
         # fallback model, when configured, gets its own fresh budget — it is a
         # separate recovery path, not another attempt).
@@ -257,13 +284,11 @@ class LiteLLMProvider(ProviderClient):
             reraise=True,
         )
         def _call() -> ProviderResult:
-            nonlocal attempts
-            attempts += 1
             # A prior call already proved this model's JSON-schema mode returns
             # empty, so don't pay the wasted round-trip again — drop it up front.
             if self._skip_response_format:
                 kwargs.pop("response_format", None)
-            result = self._raw_completion(model, messages, kwargs)
+            result = self._raw_completion(model, messages, kwargs, count_request)
             # Some grammar-constrained backends (notably LM Studio fronting a
             # "thinking" model like qwen3.x) return EMPTY content under a
             # response_format JSON schema — the schema decoder yields nothing. The
@@ -273,16 +298,33 @@ class LiteLLMProvider(ProviderClient):
             if not result.text.strip() and kwargs.get("response_format") is not None:
                 self._skip_response_format = True
                 kwargs.pop("response_format")
-                result = self._raw_completion(model, messages, kwargs)
+                result = self._raw_completion(model, messages, kwargs, count_request)
             return result
 
-        result = _call()
+        try:
+            result = _call()
+        except BaseException as exc:
+            # A failure has no ProviderResult to ride home on, so the count goes
+            # on the exception — else the instrumentation records a budget-burning
+            # failure as `attempts=0`, which reads as "never retried".
+            stamp_attempts(exc, attempts)
+            raise
         return result.model_copy(update={"attempts": attempts})
 
     def _raw_completion(
-        self, model: str, messages: list[Message], kwargs: dict[str, Any]
+        self,
+        model: str,
+        messages: list[Message],
+        kwargs: dict[str, Any],
+        count_request: Callable[[], None] = lambda: None,
     ) -> ProviderResult:
-        """One litellm call, with the temperature-value-rejection fallback applied."""
+        """One litellm call, with the temperature-value-rejection fallback applied.
+
+        ``count_request`` is called immediately before each request actually goes
+        out, so the reported attempt count matches the number of model calls this
+        made — including the re-send below, which is a second billed request.
+        """
+        count_request()
         try:
             response = _completion_with_wall_timeout(model, messages, kwargs)
         except Exception as exc:
@@ -291,6 +333,7 @@ class LiteLLMProvider(ProviderClient):
             # Drop temperature for this and every subsequent retry, letting the
             # model use its only supported value (its default).
             kwargs.pop("temperature")
+            count_request()
             response = _completion_with_wall_timeout(model, messages, kwargs)
         return self._map_response(response, model)
 
@@ -413,7 +456,8 @@ def _completion_with_wall_timeout(
 
     A call that *did* complete, even a hair past the deadline, is still honoured —
     discarding it would waste a response the provider already billed for and, worse,
-    resurface a permanent error (see ``_is_permanent``) as a retryable TimeoutError.
+    replace its real error (a quota 429, a bad key) with a bare timeout, hiding the
+    one thing that tells the user what to fix.
     """
     timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
     future: Future[Any] = Future()
@@ -437,7 +481,7 @@ def _completion_with_wall_timeout(
             continue  # the wait resolved early — trust the clock, not the wakeup
     if future.done():
         return future.result()
-    raise TimeoutError(
+    raise ProviderWallTimeout(
         f"provider request exceeded {timeout:g}s (waited {time.monotonic() - start:.3f}s)"
     )
 

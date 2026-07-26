@@ -113,6 +113,30 @@ call's context stays small. Files within budget are reviewed whole.
 - **WHEN** a file's patch alone is over `max_input_tokens` and `recursive` is on
 - **THEN** each of its hunks is reviewed as its own mini-diff
 
+### Requirement: A timed-out batch is retried smaller, never repeated
+
+A lens call that exhausts its whole per-request budget SHALL be retried on
+smaller pieces of the same batch rather than re-sent unchanged, bounded to one
+split level, with the shrink disclosed in the summary.
+<!-- anchor: engine.timeout-split -->
+
+#### Scenario: a multi-file batch times out
+- **WHEN** a lens call on a batch of several files exceeds its wall-clock budget
+- **THEN** the batch is halved by file and each half reviewed in its own call, and
+  the summary reports that a batch was shrunk
+
+#### Scenario: a single-file batch times out
+- **WHEN** the timed-out batch holds one file
+- **THEN** its hunks become the pieces, so an oversized lone file still shrinks
+
+#### Scenario: a piece times out as well
+- **WHEN** a piece of an already-split batch also exceeds its budget
+- **THEN** it fails as an ordinary failed call — the split does not recurse
+
+#### Scenario: the failure is not a timeout
+- **WHEN** a lens call fails for any other reason (quota, bad key, unparseable)
+- **THEN** no split happens, because nothing suggests the payload was the problem
+
 ### Requirement: Context expansion is asymmetric and bounded
 
 Hunks SHALL be padded with surrounding file content, budget-scaled and capped
