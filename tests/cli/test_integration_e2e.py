@@ -64,20 +64,25 @@ _FINDING = ReviewFinding(
 
 
 class _ReviewThenReflectProvider(FakeProvider):
-    """Returns findings on the first call, a keep-all reflection verdict after."""
+    """Answers every lens with the same finding, then a keep-all reflection verdict.
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._n = 0
+    Which call it is comes from the prompt, not a counter: a counter answered
+    lens 1 and fed the reflection verdict to lenses 2..N, so those calls parsed
+    as failures and the "review" under test was a partially-failed one carrying
+    an incomplete-results notice. Every lens answering makes this a complete
+    review — dedupe collapses the identical findings to the one comment asserted
+    below — and leaves the partial-failure path to
+    tests/test_incomplete_visibility.py.
+    """
 
     def complete(self, messages: list[Message], model: str, **opts: object) -> ProviderResult:
         self.calls.append({"messages": messages, "model": model, "opts": opts})
-        self._n += 1
-        if self._n == 1:
-            text = json.dumps([_FINDING.model_dump(mode="json")])
-            return ProviderResult(text=text, input_tokens=10, output_tokens=20)
-        verdict = json.dumps({0: True})
-        return ProviderResult(text=verdict, input_tokens=5, output_tokens=5)
+        prompt = "\n".join(str(m.get("content", "")) for m in messages)
+        if "auditing another reviewer" in prompt:
+            verdict = json.dumps({0: True})
+            return ProviderResult(text=verdict, input_tokens=5, output_tokens=5)
+        text = json.dumps([_FINDING.model_dump(mode="json")])
+        return ProviderResult(text=text, input_tokens=10, output_tokens=20)
 
 
 def _mock_github(captured: list[dict[object, object]]) -> None:

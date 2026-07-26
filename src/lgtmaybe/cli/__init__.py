@@ -39,7 +39,13 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
-from lgtmaybe.engine import FileFetcher, LLMReviewEngine, SymbolResolver, build_symbol_resolver
+from lgtmaybe.engine import (
+    INCOMPLETE_MARKER,
+    FileFetcher,
+    LLMReviewEngine,
+    SymbolResolver,
+    build_symbol_resolver,
+)
 from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
@@ -374,6 +380,19 @@ def run_review(
                 # Resolve-on-fix may only touch threads on files this run
                 # actually re-reviewed — absence elsewhere proves nothing.
                 set_scope(_diff_paths(review_ctx.diff))
+        # Make an incomplete run visible. On a re-run post_review can only PUT
+        # the summary onto the review the FIRST run created — a silent edit of an
+        # older comment that notifies nobody, while this run's new findings post
+        # as individual review comments (which GitHub wraps in bodiless reviews).
+        # A partial review would then be indistinguishable from a clean one, so
+        # the notice also posts as its own PR comment. Only when a call actually
+        # failed, so a healthy review adds no noise; not swallowed, because a
+        # disclosure that silently fails to post is the bug this fixes. Posted
+        # BEFORE the review for the reason given below: nothing may follow that
+        # write, and a disclosure lost to a cancelled run is the whole bug.
+        if INCOMPLETE_MARKER in summary:
+            _log.warning("review incomplete — posting a visible notice on the PR")
+            github.post_issue_comment(summary)
         if cfg.pr_labels:
             # Effort/risk labels from data already computed — best-effort,
             # and only on gateways that support them (fakes don't).
@@ -784,6 +803,17 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.
+        pass
+    # Same visibility problem as an incomplete run, in its worst form: on a
+    # re-run the write above only edits the older review's body. Attempted in
+    # its OWN try, because the body update is the write most likely to fail for
+    # the very reason the review did (bad token, rate limit, deleted review) —
+    # sharing a try would make the visible disclosure contingent on the
+    # invisible one, which is the bug being fixed.
+    try:
+        github.post_issue_comment(notice)
+    except Exception:
+        # Best-effort, like the notice above: this path must never raise.
         pass
 
 
