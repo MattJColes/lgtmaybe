@@ -138,6 +138,37 @@ def test_the_split_is_reported_not_silent() -> None:
     assert "timed out" in summary.lower()
 
 
+def test_a_piece_that_fails_is_still_reported() -> None:
+    """Half a batch reviewed is not a reviewed batch.
+
+    The split's whole risk: findings come back, so the run looks healthy, while a
+    piece nobody reviewed is silently missing. The failure has to reach the
+    incomplete-results notice — otherwise a shrunk batch can report a clean bill
+    of health for code no model ever saw.
+    """
+
+    class _OneHalfRefuses(FakeProvider):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            diff = "\n".join(str(m.get("content", "")) for m in messages)
+            if "one.py" in diff and "two.py" in diff:
+                raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
+            if "two.py" in diff:
+                raise RuntimeError("insufficient_quota")
+            return ProviderResult(
+                text=_finding_json("one.py", "first_change = os.getcwd()"),
+                input_tokens=5,
+                output_tokens=5,
+            )
+
+    findings, summary = LLMReviewEngine(_OneHalfRefuses()).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert [f.path for f in findings] == ["one.py"]  # the half that answered
+    assert "results may be incomplete" in summary
+    assert "insufficient_quota" in summary  # naming the piece's real failure
+
+
 def test_a_single_file_batch_splits_by_hunk() -> None:
     """One file can still be too big; its hunks are the next unit down."""
 
