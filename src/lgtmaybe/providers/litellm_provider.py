@@ -36,8 +36,8 @@ from tenacity import (
 )
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ProviderResult, stamp_attempts
-from lgtmaybe.core.ports import Message, ProviderClient
+from lgtmaybe.core.models import ProviderResult, attempts_of, stamp_attempts
+from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout
 
 _log = get_logger(__name__)
 
@@ -135,16 +135,6 @@ _EXPIRED_CREDENTIAL_MARKERS = (
     "expired credential",
     "the credential provided is expired",
 )
-
-
-class ProviderWallTimeout(TimeoutError):
-    """Our own wall-clock bound fired: the request outlived its whole timeout.
-
-    Distinct from litellm's transport ``Timeout`` (a connect/read blip, worth
-    retrying) because re-sending THIS request cannot help — same messages, same
-    model, same wall — so it is treated as permanent (see :func:`_is_permanent`).
-    A ``TimeoutError`` subclass, so callers matching on that keep working.
-    """
 
 
 def _is_quota_rate_limit(exc: BaseException) -> bool:
@@ -248,10 +238,19 @@ class LiteLLMProvider(ProviderClient):
         effective_model = self.model or model
         try:
             return self._complete_with_retry(messages, effective_model, **merged)
-        except Exception:
+        except Exception as exc:
             if self.fallback_model is None:
                 raise
-            return self._complete_with_retry(messages, self.fallback_model, **merged)
+            # The primary's requests were still issued and still billed, so they
+            # stay in the total: a fallback rescue that reported one request would
+            # hide the fact that the primary burned its budget first.
+            spent = attempts_of(exc)
+            try:
+                result = self._complete_with_retry(messages, self.fallback_model, **merged)
+            except BaseException as fallback_exc:
+                stamp_attempts(fallback_exc, spent + attempts_of(fallback_exc))
+                raise
+            return result.model_copy(update={"attempts": result.attempts + spent})
 
     def _complete_with_retry(
         self, messages: list[Message], model: str, **kwargs: Any

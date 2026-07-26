@@ -9,13 +9,19 @@ logged before the first call.
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
+from typing import NoReturn
 
 import pytest
 
 from lgtmaybe.cli import build_provider_engine
 from lgtmaybe.core.models import Provider, ReviewConfig
 from lgtmaybe.providers.factory import default_timeout_for
+
+
+def _raise(exc: Exception) -> NoReturn:
+    raise exc
 
 
 class _ListHandler(logging.Handler):
@@ -92,14 +98,22 @@ def test_the_running_build_is_named_alongside_the_budget(cli_logs, monkeypatch) 
     assert getattr(_timeout_record(cli_logs), "lgtmaybe_version", None) == "1.2.3"
 
 
-def test_an_unreadable_version_does_not_break_the_run(monkeypatch) -> None:
-    """A source checkout with no installed metadata still reviews."""
+@pytest.mark.parametrize(
+    "failure",
+    [
+        # The expected case: a source checkout that was never installed.
+        lambda: _raise(importlib.metadata.PackageNotFoundError("lgtmaybe")),
+        # And anything else the metadata read can throw — an unreadable or
+        # half-written dist-info surfaces as an OSError, and a broken version
+        # lookup must never be the reason a review fails.
+        lambda: _raise(OSError("dist-info is unreadable")),
+    ],
+    ids=["not-installed", "unreadable-metadata"],
+)
+def test_an_unreadable_version_does_not_break_the_run(monkeypatch, failure) -> None:
     import lgtmaybe.cli as cli_module
 
-    def boom(_name: str) -> str:
-        raise cli_module.metadata.PackageNotFoundError("lgtmaybe")
-
-    monkeypatch.setattr(cli_module.metadata, "version", boom)
+    monkeypatch.setattr(cli_module.metadata, "version", lambda _name: failure())
     assert cli_module.package_version() == "unknown"
 
 

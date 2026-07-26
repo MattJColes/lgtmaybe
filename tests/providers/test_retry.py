@@ -190,6 +190,15 @@ class TestRetry:
         """An error raised before the adapter ever counted an attempt stays 0."""
         assert attempts_of(RuntimeError("never reached the adapter")) == 0
 
+    def test_a_failing_fallback_reports_both_models_requests(self) -> None:
+        """Both legs' requests were billed, so a total failure counts both."""
+        with patch("litellm.completion", side_effect=RuntimeError("both models fail")):
+            provider = LiteLLMProvider(model="openrouter/slow", fallback_model="openrouter/quick")
+            with pytest.raises(RuntimeError) as caught:
+                provider.complete([{"role": "user", "content": "hi"}], "ignored")
+
+        assert attempts_of(caught.value) == 2 * _MAX_ATTEMPTS
+
     def test_a_re_send_inside_one_attempt_still_counts(self) -> None:
         """Every request that goes out counts, not every tenacity attempt.
 
@@ -229,12 +238,20 @@ class TestWallTimeoutIsNotRetried:
     """
 
     def test_the_wall_timeout_is_attempted_once(self) -> None:
+        # The request runs on a daemon thread the wall timeout abandons, so the
+        # counter is read only after that thread confirms it started — otherwise a
+        # loaded runner could time out before the worker was ever scheduled and
+        # the assertion would be about thread scheduling, not about retries.
         release = threading.Event()
+        started = threading.Event()
+        counted = threading.Lock()
         calls = 0
 
         def hangs(*args: Any, **kwargs: Any) -> Any:
             nonlocal calls
-            calls += 1
+            with counted:
+                calls += 1
+            started.set()
             release.wait(timeout=5)
             return _fake_response()
 
@@ -246,7 +263,9 @@ class TestWallTimeoutIsNotRetried:
         finally:
             release.set()
 
-        assert calls == 1
+        assert started.wait(timeout=5), "the one request never reached the provider"
+        with counted:
+            assert calls == 1
 
     def test_it_still_reads_as_a_timeout_error(self) -> None:
         """Callers (and the review's failure notice) keep seeing a TimeoutError."""
@@ -294,6 +313,10 @@ class TestWallTimeoutIsNotRetried:
 
         assert result.text == "fallback answered"
         assert seen == ["openrouter/slow", "openrouter/quick"]
+        # Two requests went out and both were billed, so both are in the total —
+        # a fallback rescue reported as one request would hide the primary's
+        # burnt budget entirely.
+        assert result.attempts == 2
 
 
 class TestTemperatureRejection:

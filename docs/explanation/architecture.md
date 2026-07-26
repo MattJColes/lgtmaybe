@@ -194,6 +194,17 @@ network recovers but a dead-end failure surfaces fast:
   reads as one that was never retried). The `fallback_model` — a genuinely
   different request — still gets its turn, with a fresh budget.
 
+- **Retried smaller, not repeated.** A wall timeout says something about the
+  *payload*, not the provider, and the payload is the one thing the engine can
+  change. So the batch is split and its pieces reviewed instead — halved by file,
+  or by hunk when the batch is a single file — each piece with its own fresh
+  budget. That keeps a slow lens from discarding the whole batch's review, and it
+  is the only retry a blown budget can benefit from. Bounded to **one** level: a
+  piece that times out again just fails, so a model that cannot answer at any
+  size can't cascade through the review budget. The summary says when a batch had
+  to be shrunk — a silent split would hide that every run is at the edge of what
+  the model finishes in time.
+
 - **One retry layer.** litellm's own internal retry loop is disabled
   (`num_retries=0`) so failures aren't ground through two stacked backoff layers
   — lgtmaybe owns the retry policy in one place.
