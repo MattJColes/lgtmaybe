@@ -172,15 +172,17 @@ any triage failure reviews everything, and skips are named in the summary.
 
 Installed tools SHALL run sandboxed when static analysis is enabled — scrubbed
 env, no network, hard timeout, throwaway temp dir, never a checkout, and rules
-only from local configuration. Paths MUST be canonical forward-slash repository
+read only from a local path — bundled with the package or configured — never a
+network rule registry. Paths MUST be canonical forward-slash repository
 paths. On Windows the scrubbed environment MUST pass through process-critical
 system variables while pinning user config and profile directories to the temp
 root. A tool that is not installed is skipped, and any tool failure degrades to
 no output from that tool rather than failing the review.
 <!-- anchor: engine.static-analysis -->
 
-#### Scenario: a tool needs rules it does not have locally
-- **WHEN** static analysis runs a rules-driven tool with no local rules
+#### Scenario: a rules-driven tool has no rules
+- **WHEN** static analysis runs a rules-driven tool for which no rules exist,
+  neither bundled nor configured
 - **THEN** that tool does not run at all (never a network rule registry)
 
 #### Scenario: a Windows tool reports a backslash path
