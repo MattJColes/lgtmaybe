@@ -545,6 +545,9 @@ def test_resolve_fixed_resolves_outdated_disappeared_thread() -> None:
     gone_fp = finding_fingerprint("src/old.py", "Removed bug")
     graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+    # The marker rewrite is part of resolving; mock it rather than relying on an
+    # exception guard to swallow an unmocked request.
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
@@ -1056,3 +1059,145 @@ def test_reviews_list_fetched_once_per_run() -> None:
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert len(reviews_calls) == 1, "the unchanged reviews list must not be re-paginated"
+
+
+@respx.mock
+def test_resolve_fixed_threads_are_resolved_concurrently() -> None:
+    """Each fixed thread costs a reply + a resolve + a marker rewrite. A PR where
+    several findings were fixed at once paid all of that serially; the threads are
+    independent, so they overlap."""
+    import threading
+
+    _mark_existing_review()
+    fps = [finding_fingerprint(f"src/gone{i}.py", "Removed bug") for i in range(4)]
+    threads = [
+        _thread(fp, outdated=True, tid=f"THREAD{i}", comment_id=600 + i) for i, fp in enumerate(fps)
+    ]
+
+    lock = threading.Lock()
+    events: list[str] = []
+    graphql = _GraphQL(threads)
+
+    def slow_graphql(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "mutation" in payload.get("query", ""):
+            with lock:
+                events.append("start")
+            threading.Event().wait(0.05)
+            with lock:
+                events.append("end")
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=slow_graphql)
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert sorted(graphql.resolved) == [f"THREAD{i}" for i in range(4)]
+    first_end = next(i for i, e in enumerate(events) if e == "end")
+    assert events[:first_end].count("start") >= 2, f"threads resolved serially: {events}"
+
+
+@respx.mock
+def test_one_failing_thread_does_not_block_the_others() -> None:
+    """Pooling must not let a single bad thread take the rest down with it — the
+    pass is best-effort per thread, not all-or-nothing."""
+    _mark_existing_review()
+    fps = [finding_fingerprint(f"src/gone{i}.py", "Removed bug") for i in range(3)]
+    threads = [
+        _thread(fp, outdated=True, tid=f"THREAD{i}", comment_id=700 + i) for i, fp in enumerate(fps)
+    ]
+    graphql = _GraphQL(threads)
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "THREAD1" in json.dumps(payload.get("variables", {})):
+            raise httpx.ConnectError("boom")
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=flaky)
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert sorted(graphql.resolved) == ["THREAD0", "THREAD2"]
+
+
+@respx.mock
+def test_failed_resolve_posts_no_reply() -> None:
+    """The reply is the *record* of a resolution, so it must never outlive one.
+
+    Regression: the reply was posted before the resolve, so a `resolveReviewThread`
+    the app isn't permitted to make (GitHub answers FORBIDDEN, and GraphQL errors
+    come back as HTTP 200) left a "Looks resolved" on a thread that stayed open —
+    and the thread then re-qualified on every later run, adding another reply each
+    time. Unbounded, not merely duplicated.
+    """
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+
+    def forbid_resolve(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "resolveReviewThread" in payload.get("query", ""):
+            return httpx.Response(
+                200,
+                json={
+                    "data": None,
+                    "errors": [
+                        {"type": "FORBIDDEN", "message": "Resource not accessible by integration"}
+                    ],
+                },
+            )
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=forbid_resolve)
+    patched: list[httpx.Request] = []
+    respx.route(method="PATCH").mock(
+        side_effect=lambda request: (patched.append(request), httpx.Response(200, json={}))[1]
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.replies == [], "replied on a thread that was never resolved"
+    assert graphql.resolved == []
+    assert patched == [], "rewrote the fingerprint marker of an unresolved thread"
+
+
+@respx.mock
+def test_reply_failure_still_rewrites_the_fingerprint_marker() -> None:
+    """The marker rewrite is correctness-critical; the reply is cosmetic.
+
+    Once the thread is resolved it is skipped by `_fixed_threads` forever, so
+    this is the only chance to move its fingerprint into the "resolved" family.
+    A failing reply must not strand an active marker on a resolved thread — that
+    would let re-run dedupe suppress the finding permanently if it came back.
+    """
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+
+    def resolve_ok_reply_fails(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "addPullRequestReviewThreadReply" in payload.get("query", ""):
+            return httpx.Response(200, json={"errors": [{"message": "reply exploded"}]})
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=resolve_ok_reply_fails)
+    patched: list[str] = []
+
+    def capture_patch(request: httpx.Request) -> httpx.Response:
+        patched.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={})
+
+    respx.route(method="PATCH").mock(side_effect=capture_patch)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.resolved == ["THREAD1"]
+    assert patched, "resolved thread kept its active fingerprint marker"
+    assert "lgtmaybe-resolved-fingerprint:" in patched[0]

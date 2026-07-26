@@ -28,6 +28,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -82,7 +83,9 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
     worth failing a review over.
     """
     sa = cfg.static_analysis
-    if not sa.enabled or not file_contents:
+    # `not sa.tools` guards the executor below (max_workers must be > 0) and,
+    # more usefully, skips writing a corpus nothing would ever read.
+    if not sa.enabled or not sa.tools or not file_contents:
         return []
 
     findings: list[ToolFinding] = []
@@ -91,8 +94,15 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         written = _write_corpus(root, file_contents)
         if not written:
             return []
-        for tool in sa.tools:
-            findings.extend(_run_tool(tool, root, cfg))
+        # Each tool is an independent subprocess reading the same corpus
+        # read-only, and each carries its own _TOOL_TIMEOUT — run serially their
+        # worst cases stack. `map` yields in submission order, so the hint list
+        # stays ordered by `sa.tools` whatever order the processes finish in:
+        # hints feed the prompt, and a prompt that reorders run to run would
+        # bust the shared-prefix cache for nothing.
+        with ThreadPoolExecutor(max_workers=len(sa.tools)) as pool:
+            for tool_findings in pool.map(lambda tool: _run_tool(tool, root, cfg), sa.tools):
+                findings.extend(tool_findings)
 
     # Per-tool floors win over the global floor, in either direction.
     floors = {tool.value: floor for tool, floor in sa.tool_min_severity.items()}

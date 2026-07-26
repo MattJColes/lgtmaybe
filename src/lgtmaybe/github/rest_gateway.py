@@ -80,6 +80,11 @@ def finding_fingerprint(path: str, title: str) -> str:
 # GETs, so fetching them serially is pure round-trip latency on a many-file PR.
 _CONTENT_FETCH_WORKERS = 8
 
+# Concurrency for resolve-on-fix. Deliberately lower than the read pool above:
+# these are writes (reply, resolve, marker rewrite) against one PR, and GitHub
+# is stricter about concurrent mutations than concurrent reads.
+_RESOLVE_WORKERS = 4
+
 # Zero-width space, inserted to break up a triple-backtick run so it can't be
 # parsed as a Markdown fence delimiter.
 _ZWSP = "​"
@@ -830,14 +835,66 @@ class RestGitHubGateway(GitHubGateway):
 
         Entirely best-effort: any failure is logged and swallowed so an
         auto-resolve hiccup can never fail an otherwise-successful review.
+        Best-effort **per thread** — the threads are independent, so one that
+        fails is logged and the rest still resolve rather than being abandoned
+        wherever the loop happened to stop.
         """
         try:
             current = {finding_fingerprint(f.path, f.title) for f in findings}
-            for thread_id, comment_id, first_body in self._fixed_threads(current):
-                self._reply_and_resolve(thread_id)
-                self._mark_comment_resolved(comment_id, first_body)
+            fixed = self._fixed_threads(current)
         except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
             _log.warning("auto-resolve of fixed conversations failed: %s", exc)
+            return
+        if not fixed:
+            return
+
+        def resolve_one(thread: tuple[str, int | None, str]) -> None:
+            """Resolve one thread, then record it — in that order, deliberately.
+
+            Three steps with three different consequences, so they are sequenced
+            by how much a failure costs:
+
+            1. **Resolve** — the gate. Until it succeeds nothing else should
+               happen: a reply on a thread that stays open re-qualifies as fixed
+               on every later run and collects another reply each time.
+            2. **Rewrite the marker** — correctness-critical, and this is the
+               only chance. A resolved thread is skipped by `_fixed_threads`
+               forever, so an active fingerprint left behind would let re-run
+               dedupe suppress the finding permanently if it came back.
+            3. **Reply** — cosmetic audit trail. Last, because a failure here
+               must not skip step 2.
+            """
+            thread_id, comment_id, first_body = thread
+            try:
+                self._resolve_thread(thread_id)
+            except Exception as exc:  # noqa: BLE001 — one thread never blocks the rest
+                if "FORBIDDEN" in str(exc) or "not accessible by integration" in str(exc):
+                    # Not transient: the identity simply cannot resolve threads,
+                    # so this recurs every run until someone changes the setup.
+                    # Say what to do about it rather than repeating a bare error.
+                    _log.warning(
+                        "auto-resolve is not permitted for this identity — threads stay open. "
+                        "Grant the token/App pull-request write access, or set "
+                        "resolve_fixed: false to stop attempting it. (%s)",
+                        exc,
+                    )
+                else:
+                    _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
+                return
+            try:
+                self._mark_comment_resolved(comment_id, first_body)
+            except Exception as exc:  # noqa: BLE001 — the thread is already resolved
+                _log.warning("resolved-marker rewrite on %s failed: %s", thread_id, exc)
+            try:
+                self.reply_in_thread(thread_id, "✅ Looks resolved.")
+            except Exception as exc:  # noqa: BLE001 — nothing depends on the reply
+                _log.warning("resolved-thread reply on %s failed: %s", thread_id, exc)
+
+        # Each thread costs a reply + a resolve + a marker rewrite; a PR with
+        # several fixed findings paid all of it serially. They touch different
+        # threads, so they overlap on the shared (thread-safe) httpx client.
+        with ThreadPoolExecutor(max_workers=min(_RESOLVE_WORKERS, len(fixed))) as pool:
+            list(pool.map(resolve_one, fixed))
 
     def _fixed_threads(self, current: set[str]) -> list[tuple[str, int | None, str]]:
         """Our unresolved, outdated conversations whose finding is gone.
@@ -899,9 +956,16 @@ class RestGitHubGateway(GitHubGateway):
             cursor = page.get("endCursor")
         return fixed
 
-    def _reply_and_resolve(self, thread_id: str) -> None:
-        """Post a short reply on a thread, then mark it resolved."""
-        self.reply_in_thread(thread_id, "✅ Looks resolved.")
+    def _resolve_thread(self, thread_id: str) -> None:
+        """Mark a review thread resolved. Raises if the identity may not.
+
+        The gate for the whole resolve-on-fix step (see `resolve_one`): nothing
+        else may happen until this succeeds. Replying first meant a resolve the
+        app isn't permitted to make (GitHub answers FORBIDDEN, and GraphQL errors
+        arrive as HTTP 200) left "✅ Looks resolved." on a thread that stayed
+        open — which then re-qualified as fixed on every later run and collected
+        another reply each time.
+        """
         resolve = """
         mutation($threadId:ID!){
           resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }

@@ -72,12 +72,30 @@ When a finding is gone and GitHub marks its thread outdated, the thread SHALL
 be replied to and resolved via GraphQL (the one op REST can't do), and the
 opening comment's fingerprint marker rewritten into a disjoint "resolved"
 family so a finding that reappears later posts again instead of staying
-suppressed by re-run dedupe — best-effort, never failing the review.
+suppressed by re-run dedupe. The three steps SHALL run in order of consequence:
+resolve (the gate), rewrite the marker (the only chance — a resolved thread is
+never revisited), then reply (cosmetic). Each is independently best-effort, and
+best-effort is PER THREAD: threads are independent and resolve concurrently, so
+one that fails never stops the others.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: GraphQL call errors
 - **WHEN** `resolveReviewThread` fails
 - **THEN** the review still completes and posts normally
+
+#### Scenario: one thread of several fails
+- **WHEN** several threads are fixed and one errors mid-resolve
+- **THEN** the remaining threads are still replied to and resolved
+
+#### Scenario: the identity may not resolve threads
+- **WHEN** `resolveReviewThread` is refused for the configured identity
+- **THEN** no reply is posted and no marker is rewritten, so the step is a no-op
+  that cannot accumulate a reply on every subsequent run
+
+#### Scenario: the reply fails after a successful resolve
+- **WHEN** the thread resolves but its reply errors
+- **THEN** the fingerprint marker is still rewritten — a resolved thread is never
+  revisited, so leaving an active marker would suppress the finding forever
 
 ### Requirement: Downvoted findings are read from 👎 reactions
 

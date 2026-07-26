@@ -374,3 +374,85 @@ def test_per_tool_floor_defaults_to_the_global_floor(monkeypatch) -> None:  # ty
     )
 
     assert [f.tool for f in findings] == ["bandit"]
+
+
+def test_tools_run_concurrently(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Each tool is an independent subprocess with its own 180s cap, so running
+    them one after another stacks their worst cases. Nothing is shared but the
+    read-only corpus, so they overlap."""
+    import threading
+
+    lock = threading.Lock()
+    events: list[str] = []
+
+    def slow_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        tool = Path(argv[0]).name
+        with lock:
+            events.append(f"start-{tool}")
+        threading.Event().wait(0.05)
+        with lock:
+            events.append(f"end-{tool}")
+        return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(static_analysis.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(subprocess, "run", slow_run)
+
+    cfg = _cfg(enabled=True, tools=list(StaticAnalysisTool))
+    static_analysis.run_static_analysis({"a.py": "x = 1\n"}, cfg)
+
+    first_end = next(i for i, e in enumerate(events) if e.startswith("end-"))
+    starts_before = [e for e in events[:first_end] if e.startswith("start-")]
+    assert len(starts_before) >= 2, f"tools ran serially: {events}"
+
+
+def test_concurrent_tools_keep_deterministic_finding_order(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Whichever subprocess finishes first, the hint list must be ordered by the
+    configured tool list — hints feed the prompt, and a prompt that reorders run
+    to run defeats the shared-prefix cache."""
+    payloads = {
+        "ruff": json.dumps(
+            [{"filename": "a.py", "location": {"row": 1}, "code": "F401", "message": "ruff msg"}]
+        ),
+        "bandit": json.dumps(
+            {
+                "results": [
+                    {
+                        "filename": "a.py",
+                        "line_number": 1,
+                        "test_id": "B101",
+                        "issue_text": "bandit msg",
+                        "issue_severity": "HIGH",
+                    }
+                ]
+            }
+        ),
+    }
+
+    import threading
+
+    def run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        tool = Path(argv[0]).name
+        # ruff is configured first but deliberately made the slower one.
+        threading.Event().wait(0.05 if tool == "ruff" else 0.0)
+        return subprocess.CompletedProcess(argv, 0, stdout=payloads.get(tool, "[]"), stderr="")
+
+    monkeypatch.setattr(static_analysis.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(subprocess, "run", run)
+
+    cfg = _cfg(enabled=True, tools=[StaticAnalysisTool.ruff, StaticAnalysisTool.bandit])
+    findings = static_analysis.run_static_analysis({"a.py": "x = 1\n"}, cfg)
+
+    assert [f.tool for f in findings] == ["ruff", "bandit"]
+
+
+def test_enabled_with_no_tools_returns_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Enabling the feature but selecting no tools must degrade to no hints, not
+    raise — every other "nothing to do" path here returns [] quietly."""
+    run = _FakeRun()
+    _patch_tools(monkeypatch, run, present={"ruff", "bandit", "semgrep"})
+
+    cfg = _cfg(enabled=True, tools=[])
+    findings = static_analysis.run_static_analysis({"a.py": "x = 1\n"}, cfg)
+
+    assert findings == []
+    assert run.calls == []
