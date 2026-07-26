@@ -472,8 +472,14 @@ class LLMReviewEngine(ReviewEngine):
                 all_findings.extend(findings)
 
         # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
-        #     have no signal — never pass that off as a clean review.
-        if total_calls > 0 and failed_calls == total_calls:
+        #     have no signal — never pass that off as a clean review. Findings are
+        #     part of that test now that a call can be partially successful: a
+        #     timed-out batch whose split produced findings from one piece and a
+        #     failure from another has real signal to post, and throwing it away to
+        #     raise "every review call failed" would lose a genuine finding. The
+        #     failure still reaches the summary through the incomplete-results
+        #     notice, so nothing is hidden either way.
+        if total_calls > 0 and failed_calls == total_calls and not all_findings:
             detail = errors[-1] if errors else "no usable output"
             raise ReviewIncompleteError(
                 f"review incomplete — every review call failed ({detail}). "
@@ -827,12 +833,16 @@ class LLMReviewEngine(ReviewEngine):
             findings.extend(piece_findings)
             if piece_error is not None:
                 errors.append(piece_error)
-        if len(errors) == len(pieces):
-            # Every piece failed too: report the split's own failure, not the
-            # original timeout, so the notice names what actually went wrong last.
-            return findings, errors[-1]
-        self._split_batches.add(batch_num)
-        return findings, None
+        if len(errors) < len(pieces):
+            # At least one piece answered, so the shrink did produce a review —
+            # only then is "reviewed in smaller pieces" a true claim.
+            self._split_batches.add(batch_num)
+        # ANY failed piece is still a failed call. Swallowing it because a sibling
+        # succeeded would drop the incomplete-results notice while the summary
+        # claimed the batch was reviewed — a clean bill of health for code no model
+        # ever saw. The last error is reported (the split's own failure, not the
+        # original timeout) so the notice names what actually went wrong.
+        return findings, errors[-1] if errors else None
 
     def _complete_lens(
         self,
