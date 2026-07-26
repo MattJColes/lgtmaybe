@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import httpx
 import respx
 
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
-from lgtmaybe.github.rest_gateway import finding_fingerprint
+from lgtmaybe.github.rest_gateway import _RESOLVE_WORKERS, finding_fingerprint
 
 REPO = "owner/repo"
 PR_NUMBER = 42
@@ -1201,3 +1202,65 @@ def test_reply_failure_still_rewrites_the_fingerprint_marker() -> None:
     assert graphql.resolved == ["THREAD1"]
     assert patched, "resolved thread kept its active fingerprint marker"
     assert "lgtmaybe-resolved-fingerprint:" in patched[0]
+
+
+@respx.mock
+def test_forbidden_resolve_is_attempted_once_per_run() -> None:
+    """A refusal is a property of the identity, not of the thread.
+
+    `resolveReviewThread` being forbidden recurs on every thread and every run
+    until someone changes the setup, so retrying it per thread just burns API
+    calls and repeats the same warning N times. The first refusal stops the rest.
+
+    Bounded to one WAVE, not one call: workers already in flight when the flag is
+    set have passed the check. Asserting "exactly one" would pass only because
+    the mock answers instantly — with real latency the whole first wave gets
+    through — so the assertion is the guarantee the code actually makes.
+    """
+    _mark_existing_review()
+    # Comfortably more threads than the pool is wide, so "at most one wave" is a
+    # real constraint rather than something the thread count satisfies anyway.
+    fps = [finding_fingerprint(f"src/gone{i}.py", "Removed bug") for i in range(12)]
+    threads = [
+        _thread(fp, outdated=True, tid=f"THREAD{i}", comment_id=800 + i) for i, fp in enumerate(fps)
+    ]
+    graphql = _GraphQL(threads)
+    attempts: list[str] = []
+    lock = threading.Lock()
+    # Hold the first full wave inside the mutation until all of them have arrived,
+    # so every one of them provably passes the refusal check BEFORE any response
+    # lands. Without this the test would pass on luck: respx answers instantly, so
+    # the first worker usually trips the flag before the second even starts.
+    wave = threading.Barrier(_RESOLVE_WORKERS, timeout=5)
+
+    def forbid_resolve(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "resolveReviewThread" in payload.get("query", ""):
+            with lock:
+                attempts.append(payload["variables"]["threadId"])
+                first_wave = len(attempts) <= _RESOLVE_WORKERS
+            if first_wave:
+                wave.wait()
+            return httpx.Response(
+                200,
+                json={
+                    "errors": [
+                        {"type": "FORBIDDEN", "message": "Resource not accessible by integration"}
+                    ]
+                },
+            )
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=forbid_resolve)
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    # Deterministic: the barrier forces the whole first wave through the check,
+    # so this is exactly the worst case — and threads beyond it are still skipped.
+    assert len(attempts) == _RESOLVE_WORKERS, (
+        f"a refused mutation was retried past the first wave "
+        f"({len(attempts)} of {len(threads)} threads)"
+    )
+    assert graphql.replies == []

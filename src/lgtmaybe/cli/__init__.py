@@ -43,7 +43,11 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
-from lgtmaybe.providers.factory import build_provider, cheaper_reflect_sibling
+from lgtmaybe.providers.factory import (
+    build_provider,
+    cheaper_reflect_sibling,
+    default_timeout_for,
+)
 
 _log = get_logger(__name__)
 
@@ -180,6 +184,23 @@ def build_provider_engine(
     extra: dict[str, Any] = {}
     if cfg.provider is Provider.ollama and cfg.num_ctx is not None:
         extra["num_ctx"] = cfg.num_ctx
+    # Announce the per-call budget AND where it came from, before any call runs.
+    # A timeout failure reports the budget it blew ("provider request exceeded
+    # 60s") but never its origin, so an explicit `timeout: 60` in a repo's
+    # .lgtmaybe.yml and a 60s built-in default leave identical evidence — which
+    # is exactly the ambiguity that makes "why is this timing out?" unanswerable
+    # from a log. `source` is what separates them.
+    effective_timeout = (
+        cfg.timeout if cfg.timeout is not None else default_timeout_for(cfg.provider)
+    )
+    _log.info(
+        "per-call timeout resolved",
+        extra={
+            "provider": cfg.provider.value,
+            "timeout_s": effective_timeout,
+            "timeout_source": "configured" if cfg.timeout is not None else "provider default",
+        },
+    )
     provider = build_provider(
         cfg.provider,
         cfg.model,

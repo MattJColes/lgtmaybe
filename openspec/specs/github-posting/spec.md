@@ -90,7 +90,9 @@ one that fails never stops the others.
 #### Scenario: the identity may not resolve threads
 - **WHEN** `resolveReviewThread` is refused for the configured identity
 - **THEN** no reply is posted and no marker is rewritten, so the step is a no-op
-  that cannot accumulate a reply on every subsequent run
+  that cannot accumulate a reply on every subsequent run, and threads not yet
+  started are skipped — a refusal belongs to the identity, not the thread, so it
+  is retried at most once per concurrent wave rather than once per thread
 
 #### Scenario: the reply fails after a successful resolve
 - **WHEN** the thread resolves but its reply errors
