@@ -80,6 +80,11 @@ def finding_fingerprint(path: str, title: str) -> str:
 # GETs, so fetching them serially is pure round-trip latency on a many-file PR.
 _CONTENT_FETCH_WORKERS = 8
 
+# Concurrency for resolve-on-fix. Deliberately lower than the read pool above:
+# these are writes (reply, resolve, marker rewrite) against one PR, and GitHub
+# is stricter about concurrent mutations than concurrent reads.
+_RESOLVE_WORKERS = 4
+
 # Zero-width space, inserted to break up a triple-backtick run so it can't be
 # parsed as a Markdown fence delimiter.
 _ZWSP = "​"
@@ -830,14 +835,32 @@ class RestGitHubGateway(GitHubGateway):
 
         Entirely best-effort: any failure is logged and swallowed so an
         auto-resolve hiccup can never fail an otherwise-successful review.
+        Best-effort **per thread** — the threads are independent, so one that
+        fails is logged and the rest still resolve rather than being abandoned
+        wherever the loop happened to stop.
         """
         try:
             current = {finding_fingerprint(f.path, f.title) for f in findings}
-            for thread_id, comment_id, first_body in self._fixed_threads(current):
-                self._reply_and_resolve(thread_id)
-                self._mark_comment_resolved(comment_id, first_body)
+            fixed = self._fixed_threads(current)
         except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
             _log.warning("auto-resolve of fixed conversations failed: %s", exc)
+            return
+        if not fixed:
+            return
+
+        def resolve_one(thread: tuple[str, int | None, str]) -> None:
+            thread_id, comment_id, first_body = thread
+            try:
+                self._reply_and_resolve(thread_id)
+                self._mark_comment_resolved(comment_id, first_body)
+            except Exception as exc:  # noqa: BLE001 — one thread never blocks the rest
+                _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
+
+        # Each thread costs a reply + a resolve + a marker rewrite; a PR with
+        # several fixed findings paid all of it serially. They touch different
+        # threads, so they overlap on the shared (thread-safe) httpx client.
+        with ThreadPoolExecutor(max_workers=min(_RESOLVE_WORKERS, len(fixed))) as pool:
+            list(pool.map(resolve_one, fixed))
 
     def _fixed_threads(self, current: set[str]) -> list[tuple[str, int | None, str]]:
         """Our unresolved, outdated conversations whose finding is gone.

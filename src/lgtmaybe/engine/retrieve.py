@@ -15,7 +15,8 @@ loop and its hop cap live in ``reflect.py``; the hard stops it relies on
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 
 from .astgrep import SymbolResolver
 from .compress import count_tokens
@@ -31,6 +32,12 @@ FileFetcher = Callable[[str], "str | None"]
 # hard stops that keep a deferral from looping or fetching the whole repo.
 MAX_HOPS = 2
 MAX_FETCH_FILES = 5
+
+# Concurrent read-only fetches per wave. The deferral fetch sits on the review's
+# serial tail — reflection cannot begin until every lens has returned — so these
+# round-trips are pure added wall clock, and they are independent of each other.
+# Bounded so a long `needs` list can't open a connection per entry.
+_FETCH_WORKERS = 8
 
 
 def resolve_needs(
@@ -61,35 +68,63 @@ def resolve_needs(
     out: dict[str, str] = {}
     used = 0
     seen: set[str] = set()
+    fetched: dict[str, str | None] = {}
 
-    def accept(path: str) -> None:
-        """Fetch + redact *path* into *out*, respecting the token + file caps."""
+    def prefetch(paths: Iterable[str]) -> None:
+        """Fetch *paths* concurrently into the raw cache, once each.
+
+        Only the I/O is overlapped. Acceptance below still walks `needs` in
+        order, so the token budget and file cap allocate exactly as they did
+        when each fetch blocked — the same `needs` list must always resolve to
+        the same files, whatever order the responses happen to land in.
+        """
+        todo = [p for p in dict.fromkeys(paths) if p not in seen and p not in already]
+        if not todo:
+            return
+        seen.update(todo)
+        with ThreadPoolExecutor(max_workers=min(_FETCH_WORKERS, len(todo))) as pool:
+            fetched.update(zip(todo, pool.map(fetch_file, todo), strict=True))
+
+    def accept(path: str) -> bool:
+        """Take an already-fetched *path* into *out*, respecting the caps.
+
+        False when it was not fetched, is already in, or would blow the budget —
+        the same three cases that used to leave `out` unchanged.
+        """
         nonlocal used
-        if path in already or path in seen or path in out:
-            return
-        seen.add(path)
-        raw = fetch_file(path)
+        if path in out:
+            return False
+        raw = fetched.get(path)
         if not raw:
-            return
+            return False
         text = redact(raw)
         cost = count_tokens(text)
         if used + cost > budget_tokens:
-            return  # would blow the per-hop budget — skip this file
+            return False  # would blow the per-hop budget — skip this file
         out[path] = text
         used += cost
+        return True
 
-    for need in needs:
-        if len(out) >= max_files:
-            break
-        before = len(out)
-        accept(need)
-        if len(out) > before or resolve_symbol is None:
-            continue
-        # Not a fetchable path — try resolving it as a symbol to its defining
-        # file(s), then fetch those through the same read-only boundary.
-        for candidate in resolve_symbol(need):
+    # Fetch in waves of at most `max_files`, so a long needs list never pulls
+    # (and pays for) far more files than the cap can ever accept.
+    pending = list(needs)
+    while pending and len(out) < max_files:
+        wave, pending = pending[:max_files], pending[max_files:]
+        prefetch(wave)
+        for need in wave:
             if len(out) >= max_files:
                 break
-            accept(candidate)
+            if accept(need) or resolve_symbol is None:
+                continue
+            # Not a fetchable path — try resolving it as a symbol to its defining
+            # file(s), then fetch those through the same read-only boundary.
+            # ast-grep is a local scan, so this stays on the ordered walk; only
+            # its resulting fetches are batched.
+            candidates = resolve_symbol(need)
+            prefetch(candidates)
+            for candidate in candidates:
+                if len(out) >= max_files:
+                    break
+                accept(candidate)
 
     return out

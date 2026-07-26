@@ -1056,3 +1056,67 @@ def test_reviews_list_fetched_once_per_run() -> None:
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert len(reviews_calls) == 1, "the unchanged reviews list must not be re-paginated"
+
+
+@respx.mock
+def test_resolve_fixed_threads_are_resolved_concurrently() -> None:
+    """Each fixed thread costs a reply + a resolve + a marker rewrite. A PR where
+    several findings were fixed at once paid all of that serially; the threads are
+    independent, so they overlap."""
+    import threading
+
+    _mark_existing_review()
+    fps = [finding_fingerprint(f"src/gone{i}.py", "Removed bug") for i in range(4)]
+    threads = [
+        _thread(fp, outdated=True, tid=f"THREAD{i}", comment_id=600 + i) for i, fp in enumerate(fps)
+    ]
+
+    lock = threading.Lock()
+    events: list[str] = []
+    graphql = _GraphQL(threads)
+
+    def slow_graphql(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "mutation" in payload.get("query", ""):
+            with lock:
+                events.append("start")
+            threading.Event().wait(0.05)
+            with lock:
+                events.append("end")
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=slow_graphql)
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert sorted(graphql.resolved) == [f"THREAD{i}" for i in range(4)]
+    first_end = next(i for i, e in enumerate(events) if e == "end")
+    assert events[:first_end].count("start") >= 2, f"threads resolved serially: {events}"
+
+
+@respx.mock
+def test_one_failing_thread_does_not_block_the_others() -> None:
+    """Pooling must not let a single bad thread take the rest down with it — the
+    pass is best-effort per thread, not all-or-nothing."""
+    _mark_existing_review()
+    fps = [finding_fingerprint(f"src/gone{i}.py", "Removed bug") for i in range(3)]
+    threads = [
+        _thread(fp, outdated=True, tid=f"THREAD{i}", comment_id=700 + i) for i, fp in enumerate(fps)
+    ]
+    graphql = _GraphQL(threads)
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "THREAD1" in json.dumps(payload.get("variables", {})):
+            raise httpx.ConnectError("boom")
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=flaky)
+    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert sorted(graphql.resolved) == ["THREAD0", "THREAD2"]

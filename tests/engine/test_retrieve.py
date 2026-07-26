@@ -194,3 +194,75 @@ def test_resolve_needs_symbol_resolution_respects_caps() -> None:
 def test_module_bounds_are_small() -> None:
     assert MAX_HOPS == 2
     assert MAX_FETCH_FILES == 5
+
+
+class TestConcurrentFetching:
+    """The deferral fetch is on the critical path: reflection can't start until
+    every lens returns, so its round-trips are pure serial tail. They're
+    independent, so they overlap — but the budget/cap accounting stays strictly
+    ordered, or the same needs list could resolve differently run to run.
+    """
+
+    @staticmethod
+    def _ordering_fetcher(delay: float = 0.05):
+        """Records start/end order; each fetch sleeps so serial runs interleave."""
+        import threading
+
+        lock = threading.Lock()
+        events: list[str] = []
+
+        def fetch(path: str) -> str | None:
+            with lock:
+                events.append(f"start-{path}")
+            threading.Event().wait(delay)
+            with lock:
+                events.append(f"end-{path}")
+            return f"# {path}\nx = 1\n"
+
+        return fetch, events
+
+    def test_independent_fetches_overlap(self) -> None:
+        fetch, events = self._ordering_fetcher()
+        resolve_needs(
+            ["a.py", "b.py", "c.py"], fetch, already=set(), budget_tokens=10_000, max_files=5
+        )
+        # Serial would be start-a, end-a, start-b, ... — at least two starts must
+        # land before the first end.
+        first_end = next(i for i, e in enumerate(events) if e.startswith("end-"))
+        assert len([e for e in events[:first_end] if e.startswith("start-")]) >= 2
+
+    def test_budget_still_applied_in_needs_order(self) -> None:
+        """Concurrency must not reorder budget accounting: the first-named file
+        takes the budget, the second is skipped — the same either way."""
+        big = "\n".join(f"line {i} of a reasonably large file" for i in range(400)) + "\n"
+
+        def fetch(path: str) -> str | None:
+            return big
+
+        out = resolve_needs(
+            ["first.py", "second.py"],
+            fetch,
+            already=set(),
+            budget_tokens=count_tokens(big) + 10,
+            max_files=5,
+        )
+        assert list(out) == ["first.py"]
+
+    def test_cap_bounds_the_number_of_fetches(self) -> None:
+        """Overlapping must not fetch every candidate when the cap is far lower —
+        an unbounded prefetch would burn API calls on files it then discards."""
+        calls: list[str] = []
+
+        def fetch(path: str) -> str | None:
+            calls.append(path)
+            return "x = 1\n"
+
+        out = resolve_needs(
+            [f"f{i}.py" for i in range(40)],
+            fetch,
+            already=set(),
+            budget_tokens=10_000,
+            max_files=2,
+        )
+        assert len(out) == 2
+        assert len(calls) <= 10, f"fetched {len(calls)} files for a cap of 2"
