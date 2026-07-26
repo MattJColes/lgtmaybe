@@ -17,8 +17,9 @@ Sandboxing posture:
 - subprocesses get a **scrubbed environment** (PATH plus process-critical
   Windows variables when applicable; no proxy vars or cloud credentials;
   user profile/config roots pinned inside the sandbox) and a hard timeout;
-- semgrep runs only with locally configured rules — its registry configs
-  (``--config auto``) fetch over the network, which is forbidden here;
+- semgrep always runs against LOCAL rules — the bundled MIT pack by default,
+  or `semgrep_rules` — never its registry configs (``--config auto``), which
+  fetch over the network;
 - tool output is untrusted text: a `hint`-mode tool's output is redacted and
   wrapped in a neutralised injection block before it reaches the model; a
   `finding`-mode tool's output is redacted before it becomes a finding, and its
@@ -84,6 +85,7 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.semgrep: ToolMode.hint,
     StaticAnalysisTool.gitleaks: ToolMode.finding,
     StaticAnalysisTool.zizmor: ToolMode.finding,
+    StaticAnalysisTool.ast_grep: ToolMode.finding,
 }
 
 # Category prefix for a finding that came from a tool rather than a lens. Keeps
@@ -106,6 +108,15 @@ _ZIZMOR_SEVERITY = {
     "LOW": Severity.low,
     "MEDIUM": Severity.medium,
     "HIGH": Severity.high,
+}
+
+# ast-grep's rule severities. `hint` and `off` are the rule author saying "this
+# is not a defect", so they floor at info rather than being promoted.
+_ASTGREP_SEVERITY = {
+    "ERROR": Severity.high,
+    "WARNING": Severity.medium,
+    "INFO": Severity.low,
+    "HINT": Severity.info,
 }
 
 _SEMGREP_SEVERITY = {
@@ -195,6 +206,22 @@ def _has_relevant_input(tool: StaticAnalysisTool, paths: list[str]) -> bool:
     """Whether *tool* has anything in the corpus worth running over."""
     predicate = _RELEVANT_PATHS.get(tool)
     return predicate is None or any(predicate(path) for path in paths)
+
+
+def bundled_semgrep_rules() -> Path:
+    """The MIT semgrep rules shipped inside the package.
+
+    Located relative to this module rather than via importlib.resources: semgrep
+    needs a real filesystem path for --config, and this resolves correctly both
+    from an installed wheel and from inside the PyInstaller one-file executable
+    (where __file__ points into the extracted _MEIPASS tree).
+
+    We ship our own rules because the widely-used upstream packs are LGPL-2.1
+    **plus a Commons Clause** — not open source, and not something an MIT wheel
+    can redistribute honestly. Point `semgrep_rules` at a local directory to use
+    a fuller pack instead.
+    """
+    return Path(__file__).resolve().parent.parent / "rules" / "semgrep"
 
 
 def mode_for(tool: StaticAnalysisTool, cfg: ReviewConfig) -> ToolMode:
@@ -407,17 +434,28 @@ def _run_tool(
             "--report-path",
             str(report),
         ]
+    elif tool is StaticAnalysisTool.ast_grep:
+        rules = cfg.static_analysis.ast_grep_rules
+        if not rules:
+            # ast-grep ships no rules of its own — with none configured there is
+            # nothing for it to look for.
+            _log.info("ast-grep skipped — no ast_grep_rules configured")
+            return []
+        # Deliberately a copy of scripts/check_spec_drift.py's invocation rather
+        # than an import: that script lives outside the package and importing it
+        # would put a dev tool on the runtime import path. Keep the two in step.
+        argv = [binary, "scan", "--rule", str(Path(rules).resolve()), "--json=compact", "."]
     elif tool is StaticAnalysisTool.zizmor:
         # --offline forbids the online audits that resolve actions against the
         # GitHub API; --no-progress keeps the machine-readable output clean.
         argv = [binary, "--format", "json", "--no-progress", "--offline", "."]
     else:  # semgrep
-        rules = cfg.static_analysis.semgrep_rules
-        if not rules:
-            # Without local rules semgrep would need its network registry
-            # (--config auto), which the sandbox forbids — skip silently.
-            _log.info("semgrep skipped — no local semgrep_rules configured")
-            return []
+        # Unset now means the bundled MIT pack, not "skip". Before, semgrep sat
+        # out every review unless someone configured rules, which nobody did —
+        # so the one multi-language tool never ran at all. Never `--config auto`:
+        # the registry is a network fetch the sandbox forbids.
+        configured = cfg.static_analysis.semgrep_rules
+        semgrep_rules = Path(configured).resolve() if configured else bundled_semgrep_rules()
         argv = [
             binary,
             "scan",
@@ -425,8 +463,12 @@ def _run_tool(
             "--quiet",
             "--metrics=off",
             "--disable-version-check",
+            # The corpus carries no .gitignore of its own, but a PR that changes
+            # one puts it there — and semgrep would then honour it and silently
+            # skip the very files under review.
+            "--no-git-ignore",
             "--config",
-            str(Path(rules).resolve()),
+            str(semgrep_rules),
             ".",
         ]
 
@@ -509,6 +551,8 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
         return [_gitleaks_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.zizmor:
         return [_zizmor_finding(item) for item in data or []]
+    if tool is StaticAnalysisTool.ast_grep:
+        return [_astgrep_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.bandit:
         return [_bandit_finding(item) for item in data.get("results", [])]
     return [_semgrep_finding(item) for item in data.get("results", [])]
@@ -584,6 +628,23 @@ def _gitleaks_finding(item: dict[str, Any]) -> ToolFinding:
         # gitleaks has no severity of its own: a committed credential is high by
         # definition, and nothing it reports is worth grading lower.
         severity=Severity.high,
+    )
+
+
+def _astgrep_finding(item: dict[str, Any]) -> ToolFinding:
+    """Map one ast-grep match; `range.start.line` is 0-based, like zizmor's.
+
+    Note ast-grep exits non-zero when it matches an error-level rule, so the
+    runner must read stdout rather than the exit status — it already does.
+    """
+    start = item.get("range", {}).get("start", {})
+    return ToolFinding(
+        tool="ast-grep",
+        path=_posix_rel(str(item.get("file", ""))),
+        line=int(start.get("line", 0)) + 1,
+        rule=str(item.get("ruleId", "")),
+        message=str(item.get("message", "")),
+        severity=_ASTGREP_SEVERITY.get(str(item.get("severity", "")).upper(), Severity.low),
     )
 
 

@@ -143,6 +143,9 @@ class StaticAnalysisTool(StrEnum):
     mypy = "mypy"
     gitleaks = "gitleaks"
     zizmor = "zizmor"
+    # Member name differs from the binary: enum members cannot be hyphenated,
+    # and `_run_tool` looks up `tool.value` on PATH.
+    ast_grep = "ast-grep"
 
 
 class ToolMode(StrEnum):
@@ -201,6 +204,10 @@ class StaticAnalysisConfig(_Strict):
     # unset: its registry configs (`--config auto`) fetch over the network,
     # which the sandbox forbids.
     semgrep_rules: str | None = None
+    # Local ast-grep rule file/dir. ast-grep ships no rules of its own, so it is
+    # SKIPPED when unset — this is the deterministic sibling of `extra_lenses`:
+    # your own structural rules, matched on code shape rather than by a model.
+    ast_grep_rules: str | None = None
 
 
 class ReviewFinding(_Strict):

@@ -2424,8 +2424,8 @@ Each tool reaches the review in one of two **modes**:
   without posting raw linter noise; only findings the model itself confirms are
   reported. The default for **ruff**, **bandit**, **mypy** and **semgrep**.
 - **`finding`** — findings are posted directly, with **no model call at all**.
-  The default for **gitleaks** and **zizmor**. Deterministic, free, and
-  identical run to run.
+  The default for **gitleaks**, **zizmor** and **ast-grep**. Deterministic,
+  free, and identical run to run.
 
 The split is about the tool, not taste: a committed credential is present or it
 isn't, so asking a model to "confirm or discard" a regex match only adds latency
@@ -2436,9 +2436,22 @@ what the model is good at filtering. Override either way with `tool_mode`.
 Supported tools: **ruff**, **bandit**, and **mypy** (Python), **gitleaks**
 (secrets, any language), **zizmor** (GitHub Actions workflow security — template
 injection, unpinned `uses`, over-broad permissions; it runs only when the PR
-changes a workflow file), and **semgrep** (multi-language) when you point
-`semgrep_rules` at local rules — semgrep's registry configs need the network,
-which the sandbox forbids.
+changes a workflow file), **ast-grep** (your own structural rules — the
+deterministic sibling of `extra_lenses`; set `ast_grep_rules`), and **semgrep**
+(multi-language SAST).
+
+**semgrep now works out of the box.** It used to skip itself unless you set
+`semgrep_rules`, which almost nobody did — so the one multi-language tool never
+ran. It now falls back to a small, high-precision **MIT rule pack shipped with
+lgtmaybe**, and `semgrep_rules` overrides which rules it uses. Rules are always
+read from a local path: semgrep's registry configs need the network, which the
+sandbox forbids.
+
+We ship our own rules rather than bundling a well-known upstream pack because
+the widely-used semgrep-rules / opengrep-rules collections are LGPL-2.1 **plus a
+Commons Clause** — not an open-source licence, and not something an MIT package
+can redistribute honestly. Point `semgrep_rules` at a directory to use a fuller
+pack you have obtained yourself.
 
 Two rules keep direct posting honest. Tools read **whole files**, but only the
 diff is under review, so a finding on a line this PR did not change is dropped
@@ -2481,7 +2494,8 @@ static_analysis:
     ruff: medium               # only medium+ from ruff; bandit keeps `low`
   tool_mode:                   # per-tool overrides of hint vs finding
     gitleaks: hint             # route secrets through the model instead
-  # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
+  # semgrep_rules: .semgrep.yml  # override the bundled MIT pack
+  # ast_grep_rules: .ast-grep/  # your own structural rules (skipped when unset)
 ```
 
 Default: `enabled: false` — no subprocess ever runs and behaviour is
@@ -3285,7 +3299,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -3704,6 +3718,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "additionalProperties": false,
       "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nWhen enabled, the installed tools run over the already-fetched changed-file\ntexts (sandboxed subprocess, scrubbed environment, no network, never a\ncheckout) and their findings enter each lens prompt as untrusted HINTS \u2014\n\"confirm, contextualise, or discard\" \u2014 raising recall on the deterministic\nbugs models miss without posting raw linter noise. A tool that isn't\ninstalled is skipped silently, so the feature degrades to nothing on a\nminimal install.",
       "properties": {
+        "ast_grep_rules": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ast Grep Rules"
+        },
         "enabled": {
           "default": false,
           "title": "Enabled",
@@ -3752,7 +3778,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
             "semgrep",
             "mypy",
             "gitleaks",
-            "zizmor"
+            "zizmor",
+            "ast-grep"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -3772,7 +3799,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "semgrep",
         "mypy",
         "gitleaks",
-        "zizmor"
+        "zizmor",
+        "ast-grep"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -4036,6 +4064,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "static_analysis": {
       "$ref": "#/$defs/StaticAnalysisConfig",
       "default": {
+        "ast_grep_rules": null,
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
@@ -4047,7 +4076,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "semgrep",
           "mypy",
           "gitleaks",
-          "zizmor"
+          "zizmor",
+          "ast-grep"
         ]
       }
     },

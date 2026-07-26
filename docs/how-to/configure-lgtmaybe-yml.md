@@ -380,8 +380,8 @@ Each tool reaches the review in one of two **modes**:
   without posting raw linter noise; only findings the model itself confirms are
   reported. The default for **ruff**, **bandit**, **mypy** and **semgrep**.
 - **`finding`** — findings are posted directly, with **no model call at all**.
-  The default for **gitleaks** and **zizmor**. Deterministic, free, and
-  identical run to run.
+  The default for **gitleaks**, **zizmor** and **ast-grep**. Deterministic,
+  free, and identical run to run.
 
 The split is about the tool, not taste: a committed credential is present or it
 isn't, so asking a model to "confirm or discard" a regex match only adds latency
@@ -392,9 +392,22 @@ what the model is good at filtering. Override either way with `tool_mode`.
 Supported tools: **ruff**, **bandit**, and **mypy** (Python), **gitleaks**
 (secrets, any language), **zizmor** (GitHub Actions workflow security — template
 injection, unpinned `uses`, over-broad permissions; it runs only when the PR
-changes a workflow file), and **semgrep** (multi-language) when you point
-`semgrep_rules` at local rules — semgrep's registry configs need the network,
-which the sandbox forbids.
+changes a workflow file), **ast-grep** (your own structural rules — the
+deterministic sibling of `extra_lenses`; set `ast_grep_rules`), and **semgrep**
+(multi-language SAST).
+
+**semgrep now works out of the box.** It used to skip itself unless you set
+`semgrep_rules`, which almost nobody did — so the one multi-language tool never
+ran. It now falls back to a small, high-precision **MIT rule pack shipped with
+lgtmaybe**, and `semgrep_rules` overrides which rules it uses. Rules are always
+read from a local path: semgrep's registry configs need the network, which the
+sandbox forbids.
+
+We ship our own rules rather than bundling a well-known upstream pack because
+the widely-used semgrep-rules / opengrep-rules collections are LGPL-2.1 **plus a
+Commons Clause** — not an open-source licence, and not something an MIT package
+can redistribute honestly. Point `semgrep_rules` at a directory to use a fuller
+pack you have obtained yourself.
 
 Two rules keep direct posting honest. Tools read **whole files**, but only the
 diff is under review, so a finding on a line this PR did not change is dropped
@@ -437,7 +450,8 @@ static_analysis:
     ruff: medium               # only medium+ from ruff; bandit keeps `low`
   tool_mode:                   # per-tool overrides of hint vs finding
     gitleaks: hint             # route secrets through the model instead
-  # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
+  # semgrep_rules: .semgrep.yml  # override the bundled MIT pack
+  # ast_grep_rules: .ast-grep/  # your own structural rules (skipped when unset)
 ```
 
 Default: `enabled: false` — no subprocess ever runs and behaviour is

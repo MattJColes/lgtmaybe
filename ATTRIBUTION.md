@@ -44,6 +44,25 @@ Two honesty notes up front:
 | `i18n` | **Original synthesis** from general localization practice (externalized strings; locale-safe formatting; Unicode handling). | [cldr.unicode.org](https://cldr.unicode.org/) |
 | `portability` | **Original synthesis** from cross-platform practice (POSIX, `pathlib`/temp-dir APIs, no hardcoded paths). | — |
 
+## Bundled semgrep rules
+
+`src/lgtmaybe/rules/semgrep/` is **our own work, MIT-licensed** — not a vendored
+copy of anyone's pack.
+
+That is deliberate. The obvious move would be to bundle a curated subset of
+[semgrep-rules](https://github.com/semgrep/semgrep-rules) (or its
+[opengrep-rules](https://github.com/opengrep/opengrep-rules) fork), which is
+what most tools do. Both are **LGPL-2.1 plus a Commons Clause** condition, and
+the Commons Clause is not an open-source licence: it forbids providing "a
+product or service whose value derives, entirely or substantially, from the
+functionality of the Software". Shipping that inside an MIT wheel published to
+PyPI, Homebrew and GHCR would misrepresent what users are getting and restrict
+them in ways MIT promises it does not.
+
+So the bundled pack is small and ours. It is not a replacement for those
+collections — point `static_analysis.semgrep_rules` at a fuller pack you have
+obtained yourself if you want their coverage and accept their terms.
+
 ## Ecosystems scanned
 
 These collections were surveyed while curating the packs; ideas already covered by
