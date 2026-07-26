@@ -49,6 +49,25 @@ index 0000001..0000002 100644
 """
 
 
+# Two *identical* added lines ("    return None" at new-file lines 2 and 5), the
+# case where an anchor alone cannot tell two findings apart.
+DUP_DIFF = """\
+diff --git a/src/dup.py b/src/dup.py
+index 0000001..0000002 100644
+--- a/src/dup.py
++++ b/src/dup.py
+@@ -1,1 +1,8 @@
+ def a():
++    return None
++
++def b():
++    return None
++
++def c():
++    pass
+"""
+
+
 def _finding(title: str, body: str, *, line: int = 2, anchor: str = "import sys") -> ReviewFinding:
     return ReviewFinding(
         path="src/app.py",
@@ -58,6 +77,20 @@ def _finding(title: str, body: str, *, line: int = 2, anchor: str = "import sys"
         title=title,
         body=body,
         anchor=anchor,
+        category="correctness",
+    )
+
+
+def _dup_finding(title: str, *, line: int) -> ReviewFinding:
+    """A finding on one of ``DUP_DIFF``'s two identical ``return None`` lines."""
+    return ReviewFinding(
+        path="src/dup.py",
+        line=line,
+        side="RIGHT",
+        severity=Severity.medium,
+        title=title,
+        body="body",
+        anchor="    return None",
         category="correctness",
     )
 
@@ -150,10 +183,14 @@ def _mount(pr: _FakePR) -> None:
     )
 
 
-def _run(findings: list[ReviewFinding], summary: str) -> None:
+def _run_diff(findings: list[ReviewFinding], diff: str, summary: str = "Summary text") -> None:
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     gw.mark_reviewed(HEAD_SHA)
-    gw.post_review(findings, summary, diff=SAMPLE_DIFF)
+    gw.post_review(findings, summary, diff=diff)
+
+
+def _run(findings: list[ReviewFinding], summary: str) -> None:
+    _run_diff(findings, SAMPLE_DIFF, summary)
 
 
 @respx.mock
@@ -186,6 +223,56 @@ def test_rerun_still_posts_a_genuinely_new_finding() -> None:
 
     assert len(pr.inline_bodies) == 2
     assert "Return value unused" in pr.inline_bodies[1]
+
+
+@respx.mock
+def test_two_findings_on_identical_source_lines_both_post() -> None:
+    """Identical source text in one file and lens is not one finding: both
+    occurrences must post, even though they share an identity."""
+    pr = _FakePR()
+    _mount(pr)
+
+    _run_diff(
+        [_dup_finding("first", line=2), _dup_finding("second", line=5)],
+        DUP_DIFF,
+    )
+
+    assert len(pr.inline_bodies) == 2
+
+
+@respx.mock
+def test_new_occurrence_of_a_duplicated_line_still_posts() -> None:
+    """The reword-robust key must not swallow a *genuinely new* finding that
+    happens to sit on source text identical to an already-flagged line."""
+    pr = _FakePR()
+    _mount(pr)
+
+    _run_diff([_dup_finding("first", line=2)], DUP_DIFF)
+    # Re-run: the original (reworded) plus a second occurrence the first run missed.
+    _run_diff(
+        [_dup_finding("first, reworded", line=2), _dup_finding("second", line=5)],
+        DUP_DIFF,
+    )
+
+    assert len(pr.inline_bodies) == 2, (
+        "a new occurrence of a duplicated line was suppressed by its twin's identity"
+    )
+    assert "second" in pr.inline_bodies[1]
+
+
+@respx.mock
+def test_reworded_duplicate_lines_do_not_multiply() -> None:
+    """Both occurrences already posted: a reworded re-run adds nothing."""
+    pr = _FakePR()
+    _mount(pr)
+
+    _run_diff([_dup_finding("first", line=2), _dup_finding("second", line=5)], DUP_DIFF)
+    _run_diff(
+        [_dup_finding("1st reworded", line=2), _dup_finding("2nd reworded", line=5)],
+        DUP_DIFF,
+    )
+
+    assert len(pr.inline_bodies) == 2
 
 
 def test_finding_identity_ignores_prose() -> None:
@@ -319,7 +406,16 @@ def test_genuinely_fixed_thread_is_still_resolved() -> None:
     respx.route(method="POST", url=PR_COMMENTS_URL).mock(
         return_value=httpx.Response(201, json={"id": 1})
     )
-    respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
+    # Capture the marker rewrite rather than asserting inside the mock: resolve-on-fix
+    # is best-effort and swallows per-thread exceptions, so an assertion raised in
+    # here would be logged away and the test would pass regardless.
+    patched: list[str] = []
+
+    def capture_patch(request: httpx.Request) -> httpx.Response:
+        patched.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={})
+
+    respx.route(method="PATCH").mock(side_effect=capture_patch)
     gone = _finding("Removed bug", "body", line=6, anchor="    return 0")
     thread_body = (
         "**[MEDIUM] Removed bug**\n\nbody\n\n"
@@ -332,3 +428,11 @@ def test_genuinely_fixed_thread_is_still_resolved() -> None:
     _run([RUN_2[0]], "New summary")  # a different finding entirely
 
     assert graphql.resolved == ["THREAD1"]
+    # Both marker families must be retired together. Leaving the identity marker
+    # active would keep suppressing this finding forever if it were reintroduced —
+    # exactly the trap the fingerprint rewrite already exists to avoid.
+    assert len(patched) == 1
+    assert "<!-- lgtmaybe-resolved-fingerprint:" in patched[0]
+    assert "<!-- lgtmaybe-resolved-identity:" in patched[0]
+    assert "<!-- lgtmaybe-finding:" not in patched[0]
+    assert "<!-- lgtmaybe-identity:" not in patched[0]

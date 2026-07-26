@@ -684,18 +684,31 @@ class RestGitHubGateway(GitHubGateway):
         The review-update endpoint only replaces the body, so on a re-run new
         findings are posted as individual review comments (anchored to
         *head_sha*). Each comment body already carries its hidden ids
-        (fingerprint + identity); a comment is skipped when **either** is already
-        present on the PR, so a re-run never duplicates an open conversation —
-        including when the model rephrased the finding, which changes its
-        fingerprint but not its identity. Best-effort as a whole — without a head
-        SHA there is nothing to anchor to, so nothing posts.
+        (fingerprint + identity), and a candidate is matched to an already-posted
+        comment when they share **either** — which is what makes dedupe survive
+        the model rephrasing the finding, since that changes the fingerprint but
+        not the identity.
+
+        Matching is **one-for-one**: each existing comment can absorb at most one
+        candidate, and only unmatched candidates post. Set membership alone would
+        be wrong, because an identity is not unique within a file — two findings
+        from the same lens on two *identical* source lines (``return None``
+        twice) share one identity. Counting occurrences keeps both behaviours:
+        a re-run of the same N findings posts nothing, while an N+1th occurrence
+        the last run missed is still a new finding and still posts.
+
+        Best-effort as a whole — without a head SHA there is nothing to anchor
+        to, so nothing posts.
         """
         if not comments or head_sha is None:
             return
-        existing = self._existing_finding_keys()
+        unmatched = self._existing_finding_keys()
         url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/comments"
         for comment in comments:
-            if _finding_keys(comment.get("body", "")) & existing:
+            keys = _finding_keys(comment.get("body", ""))
+            already = next((i for i, e in enumerate(unmatched) if e & keys), None)
+            if already is not None:
+                unmatched.pop(already)  # consumed — it can't absorb a second candidate
                 continue
             resp = self._client.post(
                 url,
@@ -705,24 +718,27 @@ class RestGitHubGateway(GitHubGateway):
             )
             resp.raise_for_status()
 
-    def _existing_finding_keys(self) -> set[str]:
-        """Hidden ids of every lgtmaybe finding already posted inline on the PR.
+    def _existing_finding_keys(self) -> list[set[str]]:
+        """Hidden ids of the lgtmaybe findings already posted inline on the PR.
 
-        Both marker families pooled into one set: a candidate comment is a
-        duplicate if it shares *any* id with what is already there. Only the
-        active families are collected, so a thread collapsed by resolve-on-fix
-        (its markers rewritten into the resolved families) stops suppressing —
-        a finding that comes back posts again.
+        One entry **per posted comment** (its fingerprint and identity together),
+        not one pooled set, so the caller can match candidates to occurrences
+        one-for-one — an identity repeats when a file has two identical flagged
+        lines. Only the active marker families are collected, so a thread
+        collapsed by resolve-on-fix (its markers rewritten into the resolved
+        families) stops suppressing — a finding that comes back posts again.
         """
         url = (
             f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
             "/comments?per_page=100"
         )
-        keys: set[str] = set()
+        posted: list[set[str]] = []
         for resp in self._paginate(url):
             for item in resp.json():
-                keys |= _finding_keys(item.get("body", "") or "")
-        return keys
+                keys = _finding_keys(item.get("body", "") or "")
+                if keys:
+                    posted.append(keys)
+        return posted
 
     # ------------------------------------------------------------------
     # Conversational finding threads (adapter-only, beyond the frozen port)

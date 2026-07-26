@@ -37,7 +37,10 @@ Each inline comment SHALL embed two hidden per-finding ids — a fingerprint
 (path + title) and a prose-free identity (path + category + anchor, falling back
 to the line when a finding has no anchor) — and re-run dedupe and resolve-on-fix
 SHALL match on either. The fingerprint alone cannot key them: it hashes model
-prose, and a model rewords the same finding between runs.
+prose, and a model rewords the same finding between runs. An identity is not
+unique within a file — two findings from one lens on identical source lines
+share one — so re-run dedupe SHALL match candidates to posted comments
+one-for-one rather than by set membership.
 <!-- anchor: github.fingerprint -->
 
 #### Scenario: same finding, next run
@@ -48,6 +51,10 @@ prose, and a model rewords the same finding between runs.
 - **WHEN** a re-run reports the same code and concern in different words
 - **THEN** its identity still matches, so it is neither posted again nor
   treated as fixed
+
+#### Scenario: a second occurrence of an identical line
+- **WHEN** a re-run flags one more occurrence than is already posted
+- **THEN** the extra occurrence posts rather than being absorbed by its twin
 
 ### Requirement: Unanchored findings are demoted, never guessed
 
