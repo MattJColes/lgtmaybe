@@ -299,7 +299,7 @@
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers seven built-in lenses in four calls when the\nprovider can overlap work: security, correctness flow/intent, correctness\nstate/lifecycle, and code health. With one worker, correctness stays\ncombined for three calls.\n``full`` restores tests and documentation and runs each of the nine lenses\nas its own call for release branches and deep audits. An explicit\n``categories`` list always wins over the preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in categories in FOUR calls,\none per concern: security, correctness (with stated intent folded in), code\nhealth, and artefacts (tests + documentation). The same four run on every\nprovider \u2014 worker count changes the schedule, not the call count.\n``full`` runs each of the nine categories as its own call for release\nbranches and deep audits. An explicit ``categories`` list always wins over\nthe preset.",
       "enum": [
         "fast",
         "full"
