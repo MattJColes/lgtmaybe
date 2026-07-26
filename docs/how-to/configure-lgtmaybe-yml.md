@@ -256,23 +256,37 @@ Default: `true`. See
 
 ### prompt_cache
 
-Cache the static system prompt across the per-lens review calls and the
-reflection call. lgtmaybe fans out one model call per lens, and every one of
-those calls shares the same large, static system prompt — on providers with an
-explicit cache breakpoint (**anthropic**, and **bedrock** Claude/Nova models)
-lgtmaybe marks that prompt with `cache_control` so every call after the first
-reads it from the provider's prompt cache at the cached-input discount instead
-of re-paying full input price. The diff and other per-PR content always stay
-outside the cached region.
+Reuse the expensive shared prefix — system preamble plus the wrapped diff —
+across the per-lens review calls and the reflection call, instead of re-paying
+full input price for it on every one. lgtmaybe fans out several model calls per
+review and they all begin with that same prefix, so it shapes every call
+identically and lets the backend serve it from cache.
 
-Support is feature-detected per model, and on every other provider (ollama,
-`openai-compatible`, and providers that cache automatically server-side like
-OpenAI) the request is sent unchanged — so leaving it on costs nothing. Turn it
-off only to rule caching out while debugging provider behaviour. CLI:
-`--no-prompt-cache`.
+Two mechanisms, picked per route:
+
+| Route | How it caches |
+|---|---|
+| **anthropic**, **bedrock** Claude/Nova, **Claude on vertex**, **zai** GLM, **openrouter** (claude / gemini / glm / minimax models) | lgtmaybe marks the prefix with an explicit `cache_control` breakpoint |
+| **openai**, **azure**, **deepseek** (direct or via openrouter) | the backend caches a repeated prefix automatically — the identical shape is all it needs |
+| **ollama**, `openai-compatible` | the request is sent unchanged |
+
+Support is feature-detected per model, so a route in the first row whose model
+litellm doesn't know about simply falls back to the second behaviour — a missed
+discount, never an error. The diff-independent parts of the prompt are what get
+reused; per-PR content still enters the prefix, which is why it is only ever
+shared *within* one review.
+
+On a large diff lgtmaybe also runs a **warm-up primer**: the first lens of a
+batch is dispatched alone and the rest release when it returns, so a fully
+concurrent first wave doesn't all miss the cache (and, on breakpoint routes, all
+pay the cache-write surcharge). This applies on every provider — it is about the
+shape of the first wave, not about the marker.
+
+Leaving it on costs nothing. Turn it off only to rule caching out while
+debugging provider behaviour. CLI: `--no-prompt-cache`.
 
 ```yaml
-prompt_cache: false   # send every call uncached, even on anthropic/bedrock
+prompt_cache: false   # send every call uncached, and never warm the batch
 ```
 
 Default: `true`.

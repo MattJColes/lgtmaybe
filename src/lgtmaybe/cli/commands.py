@@ -291,9 +291,10 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
 @click.option(
     "--prompt-cache/--no-prompt-cache",
     default=None,
-    help="Cache the static system prompt across the per-lens calls on providers "
-    "that support it (anthropic, bedrock Claude/Nova) — cached reads are billed "
-    "at a steep discount. Safe no-op elsewhere (--no-prompt-cache disables)",
+    help="Shape every call as a shared cacheable prefix, and mark an explicit "
+    "cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, "
+    "Claude on vertex, zai GLM, openrouter) — cached reads are billed at a steep "
+    "discount. Safe no-op elsewhere (--no-prompt-cache disables)",
 )
 @click.option(
     "--static-analysis/--no-static-analysis",

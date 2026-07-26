@@ -9,8 +9,9 @@ so those calls read the prefix from cache instead of re-paying for it.
 Everything here monkeypatches ``litellm.completion`` at the boundary — no
 network. The contract under test:
 
-- the marker is attached ONLY on cache-capable provider routes (``anthropic/``,
-  ``bedrock/``) whose model litellm's capability map says supports caching;
+- the marker is attached ONLY on routes that take an explicit breakpoint
+  (``anthropic/``, ``bedrock/``, ``vertex_ai/claude*``, ``zai/``, ``openrouter/``)
+  whose model litellm's capability map says supports caching;
 - only the (static) system message is marked — the user message (diff, intent)
   stays outside the cached prefix;
 - below the documented 1,024-token minimum cacheable block the request is sent
@@ -41,6 +42,19 @@ _CACHEABLE_MODELS = [
     "anthropic/claude-sonnet-4-20250514",
     "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
     "bedrock/us.amazon.nova-pro-v1:0",
+    # Claude on Vertex: litellm's anthropic partner-model route reads
+    # cache_control off the messages and sets the prompt-caching beta from it.
+    "vertex_ai/claude-sonnet-4-5",
+    # GLM / Zhipu: ZAIChatConfig overrides the strip step to always preserve
+    # cache_control, so the breakpoint reaches the API.
+    "zai/glm-4.6",
+    # OpenRouter passes cache_control through for the model families that take
+    # it (claude, gemini, minimax, glm, z-ai) and STRIPS it for the rest, so we
+    # mark broadly and let litellm decide per model — see the deepseek case in
+    # TestOpenRouterBreakpoints.
+    "openrouter/anthropic/claude-sonnet-4.5",
+    "openrouter/z-ai/glm-4.6",
+    "openrouter/minimax/minimax-m2",
 ]
 
 _UNCACHEABLE_MODELS = [
@@ -48,10 +62,17 @@ _UNCACHEABLE_MODELS = [
     "openai/gpt-4o",  # OpenAI caches automatically server-side — no marker
     "openai/local-model",  # openai-compatible route
     "azure/gpt-4o",
-    "openrouter/anthropic/claude-3.5-sonnet",
+    # Gemini on Vertex caches via the separate cachedContent API, not an inline
+    # breakpoint — only the Claude partner models take one.
     "vertex_ai/gemini-1.5-pro",
-    "zai/glm-4.6",
 ]
+
+
+def _block(text: str, *, cached: bool = False) -> dict[str, Any]:
+    block: dict[str, Any] = {"type": "text", "text": text}
+    if cached:
+        block["cache_control"] = {"type": "ephemeral"}
+    return block
 
 
 def _fake_response(content: str = "ok", **usage_extra: Any) -> Any:
@@ -200,6 +221,63 @@ class TestSplitShapeCacheMarking:
         sent = _sent_split(_CACHEABLE_MODELS[0], prompt_cache=False)
         assert sent[1] == {"role": "user", "content": f"{_DIFF_PREFIX}\n\n{_LENS_BLOCK}"}
         assert sent[0]["content"] == _BIG_SYSTEM
+
+
+class TestOpenRouterBreakpoints:
+    """OpenRouter is marked broadly on purpose — litellm gates it per model.
+
+    ``OpenrouterConfig`` preserves ``cache_control`` for the model families that
+    accept it (claude, gemini, minimax, glm, z-ai) and removes it for every
+    other model before the request goes out. So the adapter does not need its
+    own per-model allowlist for this route: marking a deepseek or qwen model is
+    a no-op, not an error, and those backends cache the shared prefix
+    automatically anyway.
+
+    These assertions run litellm's real transform (no network) so a litellm
+    upgrade that changes the supported-family list fails here rather than
+    silently costing money on every review.
+    """
+
+    @staticmethod
+    def _breakpoints_reaching_the_api(model: str) -> int:
+        import copy
+        import json
+
+        from litellm.llms.openrouter.chat.transformation import OpenrouterConfig
+
+        messages = [
+            {"role": "system", "content": [_block("PREAMBLE", cached=True)]},
+            {"role": "user", "content": [_block("DIFF", cached=True), _block("LENS")]},
+        ]
+        out = OpenrouterConfig().transform_request(
+            model=model,
+            messages=copy.deepcopy(messages),
+            optional_params={},
+            litellm_params={"custom_llm_provider": "openrouter"},
+            headers={},
+        )
+        return json.dumps(out["messages"]).count("cache_control")
+
+    @pytest.mark.parametrize(
+        "model",
+        ["anthropic/claude-sonnet-4.5", "z-ai/glm-4.6", "minimax/minimax-m2"],
+    )
+    def test_breakpoints_survive_for_supported_families(self, model: str) -> None:
+        assert self._breakpoints_reaching_the_api(model) == 2
+
+    @pytest.mark.parametrize("model", ["deepseek/deepseek-chat", "qwen/qwen3-max"])
+    def test_breakpoints_are_stripped_for_the_rest_not_rejected(self, model: str) -> None:
+        """The reason we can mark the whole openrouter route: an unsupported
+        model loses the marker upstream instead of erroring on it."""
+        assert self._breakpoints_reaching_the_api(model) == 0
+
+    def test_adapter_marks_a_stripped_model_anyway(self) -> None:
+        """deepseek via openrouter still gets our breakpoint — harmless (litellm
+        removes it) and it keeps the split prefix identical across lenses, which
+        is what deepseek's automatic caching keys on."""
+        sent = _sent_split("openrouter/deepseek/deepseek-chat", prompt_cache=True)
+        assert len(sent) == 2
+        assert sent[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
 class TestCacheUsageMapping:

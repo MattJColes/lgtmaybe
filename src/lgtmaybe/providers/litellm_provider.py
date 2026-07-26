@@ -54,13 +54,36 @@ _MAX_ATTEMPTS = 4
 # that is better failed and surfaced than ground on.
 _CALL_BUDGET_MULTIPLIER = 2.5
 
-# Prompt caching (of the static system prompt) is applied only on routes where
-# an EXPLICIT cache breakpoint is the mechanism: Anthropic direct (cache_control)
-# and Bedrock (litellm translates cache_control to a Converse cachePoint for
-# Claude and Nova). Other providers either cache automatically server-side with
-# no marker (OpenAI, Azure) or don't cache at all (ollama, most
-# openai-compatible servers) — for all of them the request is sent unchanged.
-_CACHE_CONTROL_PREFIXES = ("anthropic/", "bedrock/")
+# Prompt caching (of the shared prefix) is applied on routes where an EXPLICIT
+# cache breakpoint is the mechanism:
+#
+# - ``anthropic/`` — cache_control, natively;
+# - ``bedrock/`` — litellm translates cache_control to a Converse cachePoint
+#   for Claude and Nova;
+# - ``vertex_ai/claude`` — the Anthropic partner-model route reads cache_control
+#   off the messages and sets the prompt-caching beta from it. Only the Claude
+#   models: Gemini on Vertex caches through the separate cachedContent API, not
+#   an inline breakpoint;
+# - ``zai/`` — ZAIChatConfig overrides litellm's strip step to always preserve
+#   cache_control, so GLM / Zhipu gets the breakpoint;
+# - ``openrouter/`` — marked for the WHOLE route on purpose. litellm's
+#   OpenrouterConfig keeps cache_control for the families that accept it
+#   (claude, gemini, minimax, glm, z-ai) and removes it for every other model
+#   before the request goes out, so a per-model allowlist here would only
+#   duplicate — and drift from — that list. Marking a deepseek or qwen model is
+#   a no-op upstream, not an error.
+#
+# Other providers either cache automatically server-side with no marker (OpenAI,
+# Azure, DeepSeek direct) or don't cache at all — for them the request is sent
+# unchanged. They still benefit from the split prefix shape, which keeps the
+# cached region byte-identical across the lens fan-out.
+_CACHE_CONTROL_PREFIXES = (
+    "anthropic/",
+    "bedrock/",
+    "vertex_ai/claude",
+    "zai/",
+    "openrouter/",
+)
 
 # Anthropic's documented minimum cacheable block. A smaller prefix is silently
 # not cached (some models require even more), so below this the marker is pure
@@ -418,10 +441,15 @@ def _supports_cache_control(model: str) -> bool:
     """Whether *model*'s route takes an explicit cache_control breakpoint.
 
     Feature detection, not configuration: the route must be one where litellm
-    forwards ``cache_control`` (Anthropic direct; Bedrock, where it becomes a
-    Converse ``cachePoint``), and litellm's model-capability map must say the
-    model itself caches. Any lookup failure (an unknown or freshly released
-    model) means "don't mark" — caching is an optimisation, never worth an error.
+    forwards ``cache_control`` (see :data:`_CACHE_CONTROL_PREFIXES`), and
+    litellm's model-capability map must say the model itself caches. Any lookup
+    failure (an unknown or freshly released model) means "don't mark" — caching
+    is an optimisation, never worth an error.
+
+    That capability map has gaps (it answers False for, say, a dated
+    ``vertex_ai/claude-3-5-sonnet@…`` id that does cache). A gap costs a missed
+    discount, never a broken call, so the conservative answer stays the right
+    one — and the split prefix shape still helps a model we decline to mark.
     """
     if not model.startswith(_CACHE_CONTROL_PREFIXES):
         return False
