@@ -28,6 +28,7 @@ from lgtmaybe.core.models import (
     attempts_of,
 )
 from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout, ReviewEngine
+from lgtmaybe.core.version import package_version
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
@@ -936,10 +937,11 @@ def _summary_line(count: int, cfg: ReviewConfig) -> str:
     logged and falls back to the default — a cosmetic option must never fail
     a review.
     """
+    version = package_version()
     if cfg.summary_template:
         try:
             return cfg.summary_template.format(
-                count=count, provider=cfg.provider.value, model=cfg.model
+                count=count, provider=cfg.provider.value, model=cfg.model, version=version
             )
         except (KeyError, IndexError, ValueError) as exc:
             _log.warning(
@@ -947,7 +949,10 @@ def _summary_line(count: int, cfg: ReviewConfig) -> str:
                 extra={"error": str(exc)},
             )
     plural = "s" if count != 1 else ""
-    return f"{count} finding{plural} · provider {cfg.provider} · model {cfg.model}"
+    return (
+        f"{count} finding{plural} · provider {cfg.provider} · model {cfg.model} "
+        f"· lgtmaybe {version}"
+    )
 
 
 def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) -> bool:

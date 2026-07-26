@@ -18,6 +18,7 @@ from lgtmaybe.core.models import (
     ReviewResult,
     Severity,
 )
+from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.engine.compress import count_tokens
 from lgtmaybe.engine.engine import passes_path_filters
@@ -1722,6 +1723,53 @@ def test_bad_summary_template_falls_back_to_default() -> None:
     _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
 
     assert "provider ollama · model llama3" in summary
+
+
+def test_summary_line_names_the_lgtmaybe_version() -> None:
+    """The built-in line carries the running version alongside the model.
+
+    Provider + model alone don't identify a review: the same model on the same
+    provider behaves differently across lgtmaybe releases (prompt, lenses,
+    reflection all move), so troubleshooting a surprising review needs the
+    version that produced it.
+    """
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert f"lgtmaybe {package_version()}" in summary
+
+
+def test_summary_template_can_name_the_version() -> None:
+    """A restyled line can keep the version — otherwise opting into a template
+    silently costs you the troubleshooting handle."""
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        summary_template="{count} issue(s) via {model} (lgtmaybe {version})",
+    )
+
+    _findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert f"issue(s) via llama3 (lgtmaybe {package_version()})" in summary
+
+
+def test_clean_review_summary_names_the_version() -> None:
+    """👍 LGTM! carries it too — a clean review is exactly the outcome someone
+    doubts, so it needs the version that produced it."""
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, summary = engine.review(_CTX_WITH_CONTENT, cfg)
+
+    assert findings == []
+    assert "LGTM" in summary
+    assert f"lgtmaybe {package_version()}" in summary
 
 
 def test_finding_rules_run_before_the_summary_count(monkeypatch) -> None:  # type: ignore[no-untyped-def]

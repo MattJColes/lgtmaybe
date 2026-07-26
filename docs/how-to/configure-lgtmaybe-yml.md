@@ -496,14 +496,20 @@ Default: no rules.
 ### summary_template
 
 Custom template for the review summary line, for teams matching a house
-style. Placeholders: `{count}` (findings posted), `{provider}`, `{model}`. A
-template that fails to format falls back to the built-in line.
+style. Placeholders: `{count}` (findings posted), `{provider}`, `{model}`,
+`{version}` (the lgtmaybe release that produced the review). A template that
+fails to format falls back to the built-in line.
 
 ```yaml
-summary_template: "🤖 {count} finding(s) · {model}"
+summary_template: "🤖 {count} finding(s) · {model} · lgtmaybe {version}"
 ```
 
-Default: unset (the built-in `N findings · provider X · model Y` line).
+Keep `{version}` if you can: the same model on the same provider reviews
+differently across releases, so it is the handle that makes a surprising review
+traceable to the code that produced it.
+
+Default: unset (the built-in
+`N findings · provider X · model Y · lgtmaybe Z` line).
 
 ### resolve_fixed
 
