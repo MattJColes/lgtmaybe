@@ -276,6 +276,26 @@ class TestGitHubReviewErrorSurfacing:
         assert posted_findings == []
         assert "fail" in posted_summary.lower()
 
+    def test_auto_extras_still_post_when_the_review_fails(self, monkeypatch):
+        """Deferring the extras behind the review must not make them conditional on
+        it: a failed review still gets its diagram, exactly as when they ran first."""
+        import click
+
+        import lgtmaybe.cli as cli_module
+
+        github = FakeGitHub()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, _BoomEngine(), FakeProvider()),
+        )
+
+        with pytest.raises(click.ClickException):
+            cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"), diagram=True)
+
+        assert len(github.diagrams) == 1
+        assert "fail" in github.posted[0][1].lower()
+
     def test_post_review_failure_clears_the_reviewed_watermark(self, monkeypatch):
         """A failed post must not leave the reviewed watermark stamped — the
         failure notice would carry it and the next incremental run would skip

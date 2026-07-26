@@ -359,11 +359,6 @@ def run_review(
                 # Resolve-on-fix may only touch threads on files this run
                 # actually re-reviewed — absence elsewhere proves nothing.
                 set_scope(_diff_paths(review_ctx.diff))
-        # Pass the FULL PR diff (already fetched) so the commentable-line
-        # index is built from the diff the comments will anchor to — the
-        # incremental diff's context lines aren't necessarily in the PR diff.
-        with profiler.stage("post"):
-            github.post_review(findings, summary, diff=ctx.diff)
         # Make an incomplete run visible. On a re-run post_review can only PUT
         # the summary onto the review the FIRST run created — a silent edit of an
         # older comment that notifies nobody, while this run's new findings post
@@ -371,7 +366,9 @@ def run_review(
         # A partial review would then be indistinguishable from a clean one, so
         # the notice also posts as its own PR comment. Only when a call actually
         # failed, so a healthy review adds no noise; not swallowed, because a
-        # disclosure that silently fails to post is the bug this fixes.
+        # disclosure that silently fails to post is the bug this fixes. Posted
+        # BEFORE the review for the reason given below: nothing may follow that
+        # write, and a disclosure lost to a cancelled run is the whole bug.
         if INCOMPLETE_MARKER in summary:
             _log.warning("review incomplete — posting a visible notice on the PR")
             github.post_issue_comment(summary)
@@ -391,6 +388,16 @@ def run_review(
             if create_check_run is not None:
                 conclusion, title, check_summary = _fail_on_check(findings, cfg.fail_on)
                 create_check_run(ctx.head_sha, conclusion, title, check_summary)
+        # Last write of the run, on purpose: the inline comments this posts fire
+        # pull_request_review_comment events, so a consumer whose concurrency
+        # group isn't discriminated by event name can have the resulting run
+        # cancel this one. Nothing may follow that we would lose.
+        #
+        # Pass the FULL PR diff (already fetched) so the commentable-line
+        # index is built from the diff the comments will anchor to — the
+        # incremental diff's context lines aren't necessarily in the PR diff.
+        with profiler.stage("post"):
+            github.post_review(findings, summary, diff=ctx.diff)
 
     return findings, summary
 
@@ -546,6 +553,31 @@ def execute_local_diagram(
     click.echo(body)
 
 
+def _post_extras(
+    github: GitHubGateway,
+    provider: ProviderClient,
+    cfg: ReviewConfig,
+    ctx: PRContext,
+    *,
+    describe: bool,
+    diagram: bool,
+) -> None:
+    """Post the auto extras (description, diagram) over a prefetched context.
+
+    Each is independently best-effort: a failure is logged and swallowed so an
+    extra can never turn a completed review into a failed run.
+    """
+    for enabled, run, name in (
+        (describe, run_describe, "describe"),
+        (diagram, run_diagram, "diagram"),
+    ):
+        if enabled:
+            try:
+                run(github, provider, cfg, ctx=ctx)
+            except Exception:
+                _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
+
+
 def execute_review(
     cfg: ReviewConfig,
     runtime: RuntimeOptions,
@@ -571,21 +603,13 @@ def execute_review(
     ctx: PRContext | None = None
     if describe or diagram:
         # The extras are best-effort and must never block the review. A failed
-        # prefetch just means run_review fetches (and surfaces) it itself.
+        # prefetch just means run_review fetches (and surfaces) it itself. The
+        # fetch happens here, before the review, so the review reuses it — only
+        # the posting is deferred (see _post_extras).
         try:
             ctx = github.get_pr_context()
         except Exception:
             _log.warning("PR context prefetch failed — extras skipped", exc_info=True)
-        if ctx is not None:
-            for enabled, run, name in (
-                (describe, run_describe, "describe"),
-                (diagram, run_diagram, "diagram"),
-            ):
-                if enabled:
-                    try:
-                        run(github, provider, cfg, ctx=ctx)
-                    except Exception:
-                        _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
 
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
@@ -594,6 +618,16 @@ def execute_review(
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
+    finally:
+        # Deferred deliberately: posting a comment fires an issue_comment
+        # workflow run, and a consumer whose concurrency group isn't
+        # discriminated by event name puts that run in the same group as this
+        # review — cancel-in-progress then kills the review that posted the
+        # comment. With the review already on the PR, such a cancellation is
+        # harmless. In a `finally` so a failed review still gets its extras,
+        # exactly as when they ran first.
+        if ctx is not None:
+            _post_extras(github, provider, cfg, ctx, describe=describe, diagram=diagram)
 
     if runtime.profile:
         click.echo(profiler.render())

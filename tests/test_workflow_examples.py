@@ -12,6 +12,38 @@ _PROJECT_VERSION = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encod
 ]["version"]
 _ACTION_REF = f"MattJColes/lgtmaybe@v{_PROJECT_VERSION.split('.', maxsplit=1)[0]}"
 _STARTER_WORKFLOWS = _REPO_ROOT / "examples" / "workflows"
+# The events lgtmaybe itself fires: posting a comment (auto-diagram, /ask, the
+# summary) emits issue_comment, and posting inline findings emits
+# pull_request_review_comment.
+_SELF_TRIGGERED_EVENTS = {
+    "issue_comment",
+    "pull_request_review",
+    "pull_request_review_comment",
+}
+
+
+def _workflows() -> list[Path]:
+    return [_DOGFOOD_WORKFLOW, *sorted(_STARTER_WORKFLOWS.glob("*.yml"))]
+
+
+def _triggers(workflow: dict) -> set[str]:
+    # YAML 1.1 parses the `on:` key as the boolean True, so the trigger mapping
+    # lands under True, not "on".
+    on = workflow.get("on", workflow.get(True))
+    if isinstance(on, str):
+        return {on}
+    return set(on or ())
+
+
+def _concurrency_blocks(workflow: dict) -> list[tuple[str, dict]]:
+    """Every concurrency block in the file: workflow-level and each job's."""
+    blocks = []
+    if isinstance(workflow.get("concurrency"), dict):
+        blocks.append(("workflow", workflow["concurrency"]))
+    for name, job in (workflow.get("jobs") or {}).items():
+        if isinstance(job.get("concurrency"), dict):
+            blocks.append((f"jobs.{name}", job["concurrency"]))
+    return blocks
 
 
 def test_supplied_workflows_rely_on_the_auto_diagram_default() -> None:
@@ -50,9 +82,36 @@ def test_dogfood_concurrency_only_applies_to_eligible_review_job() -> None:
     assert "concurrency" not in workflow
     assert "if" in review_job
     assert review_job["concurrency"] == {
-        "group": "lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}",
+        "group": (
+            "lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}"
+            "-${{ github.event_name }}"
+        ),
         "cancel-in-progress": True,
     }
+
+
+def test_self_triggered_workflows_discriminate_concurrency_by_event() -> None:
+    # lgtmaybe posts comments during a review, and those comments fire the very
+    # events these workflows subscribe to. A concurrency group keyed only on the
+    # PR number puts the resulting run in the same group as the review, so
+    # cancel-in-progress kills the review that posted the comment. The job-level
+    # `if` guard cannot prevent this at workflow scope: the run joins the group
+    # when it is created, before any job condition is evaluated. Keying the group
+    # on the event name as well keeps a new push cancelling an in-flight review
+    # while making lgtmaybe's own comments land in a different group.
+    for path in _workflows():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self_triggered = _triggers(workflow) & _SELF_TRIGGERED_EVENTS
+        if not self_triggered:
+            continue
+        for scope, block in _concurrency_blocks(workflow):
+            if not block.get("cancel-in-progress"):
+                continue
+            assert "github.event_name" in str(block.get("group", "")), (
+                f"{path.name} subscribes to {sorted(self_triggered)} and cancels in progress, "
+                f"but its {scope} concurrency group is not discriminated by event: "
+                f"{block.get('group')!r} — lgtmaybe's own comments will cancel its reviews"
+            )
 
 
 def test_dogfood_workflow_uses_the_public_app_identity() -> None:
