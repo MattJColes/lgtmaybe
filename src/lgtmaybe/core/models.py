@@ -648,10 +648,10 @@ class ReviewConfig(_Strict):
     # replies and resolves the conversation. GitHub posting only — ignored by the
     # local CLI review, which has no conversations to resolve.
     resolve_fixed: bool = True
-    # Call-count preset (see ReviewPreset): `fast` (default) covers seven
-    # built-in lenses in four calls when the provider can overlap work (three
-    # with one worker); `full` restores tests/documentation and runs one call
-    # per lens. An explicit `categories` list overrides it.
+    # Call-count preset (see ReviewPreset): `fast` (default) covers all nine
+    # built-in categories in four calls, one per concern — security,
+    # correctness, code health, artefacts — the same four on every provider;
+    # `full` runs one call per lens. An explicit `categories` list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the
