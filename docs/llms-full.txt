@@ -552,7 +552,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
 | `max_concurrency` | auto (8 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
-| `prompt_cache` | `true` | Shape calls as a shared cacheable prefix on providers with an explicit cache breakpoint (anthropic, bedrock Claude/Nova); safe no-op elsewhere |
+| `prompt_cache` | `true` | Shape calls as a shared cacheable prefix, with an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax); safe no-op elsewhere |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
@@ -2256,23 +2256,52 @@ Default: `true`. See
 
 ### prompt_cache
 
-Cache the static system prompt across the per-lens review calls and the
-reflection call. lgtmaybe fans out one model call per lens, and every one of
-those calls shares the same large, static system prompt — on providers with an
-explicit cache breakpoint (**anthropic**, and **bedrock** Claude/Nova models)
-lgtmaybe marks that prompt with `cache_control` so every call after the first
-reads it from the provider's prompt cache at the cached-input discount instead
-of re-paying full input price. The diff and other per-PR content always stay
-outside the cached region.
+Reuse the expensive shared prefix — system preamble plus the wrapped diff —
+across the per-lens review calls and the reflection call, instead of re-paying
+full input price for it on every one. lgtmaybe fans out several model calls per
+review and they all begin with that same prefix, so it shapes every call
+identically and lets the backend serve it from cache.
 
-Support is feature-detected per model, and on every other provider (ollama,
-`openai-compatible`, and providers that cache automatically server-side like
-OpenAI) the request is sent unchanged — so leaving it on costs nothing. Turn it
-off only to rule caching out while debugging provider behaviour. CLI:
-`--no-prompt-cache`.
+Two mechanisms, picked per route:
+
+| Route | How it caches |
+|---|---|
+| **anthropic**, **bedrock** Claude/Nova, **vertex** (Claude and Gemini), **zai** GLM, **openrouter** (claude / gemini / glm / minimax / z-ai models) | lgtmaybe marks the prefix with an explicit `cache_control` breakpoint |
+| **openai**, **azure**, **deepseek** (direct or via openrouter) | the backend caches a repeated prefix automatically — the identical shape is all it needs |
+| **ollama**, `openai-compatible` | the request is sent unchanged |
+
+Support is feature-detected per model, so a route in the first row whose model
+litellm doesn't know about simply falls back to the second behaviour — a missed
+discount, never an error. The diff-independent parts of the prompt are what get
+reused; per-PR content still enters the prefix, which is why it is only ever
+shared *within* one review.
+
+On a large diff lgtmaybe also runs a **warm-up primer**: the first lens of a
+batch is dispatched alone and the rest release when it returns, so a fully
+concurrent first wave doesn't all miss the cache (and, on breakpoint routes, all
+pay the cache-write surcharge). This applies on every provider — it is about the
+shape of the first wave, not about the marker.
+
+Every call also carries a `prompt_cache_key` derived from the prefix itself:
+identical across the lenses of one batch, different for another PR. OpenRouter
+uses it to pin the whole fan-out to a single provider endpoint from the first
+call (without a key it only starts doing that *after* it notices a cache hit,
+which a concurrent wave reaches too late), and OpenAI takes the same field as a
+cache-routing hint. It is a digest, not prompt content.
+
+**Minimums are per model**, and a prefix below one is silently not cached — no
+error, just no discount. Roughly: 1,024 tokens for Claude Sonnet 4.x / Opus
+4–4.1 and Gemini 2.5 Flash, 2,048 for Claude Haiku 3.5, 4,096 for Claude Opus
+4.5+ / Haiku 4.5 and Gemini 2.5 Pro. lgtmaybe marks from 1,024 up so it never
+misses a chance on the lower-minimum models; on a higher-minimum model a small
+diff simply won't cache. Check with `--profile`, which reports cache read and
+write tokens.
+
+Leaving it on costs nothing. Turn it off only to rule caching out while
+debugging provider behaviour. CLI: `--no-prompt-cache`.
 
 ```yaml
-prompt_cache: false   # send every call uncached, even on anthropic/bedrock
+prompt_cache: false   # send every call uncached, and never warm the batch
 ```
 
 Default: `true`.
@@ -4724,10 +4753,17 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
 
    With `prompt_cache` on, each call is shaped as a shared cacheable prefix —
    a lens-independent system preamble, then the wrapped diff — followed by
-   the lens-specific instruction as the final user block. On anthropic and
-   bedrock, every call after a batch's first reads that preamble-plus-diff
-   prefix from cache (on big diffs a warm-up primer runs the first lens
-   alone). Each lens's focused structured prompt requests JSON output with
+   the lens-specific instruction as the final user block. On routes that
+   take an explicit cache breakpoint (anthropic, bedrock Claude/Nova, vertex
+   Claude and Gemini, zai GLM, and openrouter's claude/gemini/glm/minimax
+   families)
+   the prefix is marked with `cache_control`; on backends that cache
+   automatically (OpenAI, Azure, DeepSeek) the identical prefix is enough on
+   its own. Either way every call after a batch's first reads that
+   preamble-plus-diff prefix from cache, and on big diffs a warm-up primer
+   runs the first lens alone so a concurrent wave doesn't all miss it.
+
+   Each lens's focused structured prompt requests JSON output with
    the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,
    `body`, `failure_scenario`, `suggestion`, `anchor`) and carries
    prompt-injection defense instructions. Each response is parsed and validated against

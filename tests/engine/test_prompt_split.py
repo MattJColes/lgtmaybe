@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from lgtmaybe.core.models import (
     CustomLens,
     PRContext,
@@ -193,10 +195,31 @@ class TestCacheWarmup:
         ]
         assert len(starts_before_first_end) >= 2
 
-    def test_no_warmup_on_providers_without_a_cache_breakpoint(self) -> None:
+    @pytest.mark.parametrize(
+        "provider_kind",
+        [Provider.openai, Provider.azure, Provider.openrouter, Provider.zai, Provider.vertex],
+    )
+    def test_primer_warms_automatic_caching_providers_too(self, provider_kind: Provider) -> None:
+        """The primer is not about the cache_control marker — it is about not
+        letting a concurrent first wave all miss the shared prefix. Providers
+        that cache automatically server-side (OpenAI, Azure, DeepSeek via
+        openrouter) pay that same N-way miss, so they get warmed as well."""
         provider = _EventOrderProvider()
         cfg = _cfg(
-            provider=Provider.openai,
+            provider=provider_kind,
+            categories=[ReviewCategory.security, ReviewCategory.performance, ReviewCategory.tests],
+        )
+        LLMReviewEngine(provider).review(_big_ctx(), cfg)
+        assert provider.events[0] == "start-0"
+        assert provider.events[1] == "end-0"
+
+    def test_no_warmup_when_prompt_cache_is_off(self) -> None:
+        """`prompt_cache: false` restores the legacy shape byte-for-byte, and
+        that includes dispatching the batch fully concurrently."""
+        provider = _EventOrderProvider()
+        cfg = _cfg(
+            provider=Provider.anthropic,
+            prompt_cache=False,
             categories=[ReviewCategory.security, ReviewCategory.performance, ReviewCategory.tests],
         )
         LLMReviewEngine(provider).review(_big_ctx(), cfg)

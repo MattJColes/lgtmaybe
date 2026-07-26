@@ -83,7 +83,7 @@ inputs:
     required: false
     default: ""
   prompt_cache:
-    description: "Cache the static system prompt across the per-lens calls on providers with an explicit cache breakpoint (anthropic, bedrock Claude/Nova) — cached reads are billed at a steep discount. Feature-detected per model and a safe no-op elsewhere. On by default; set to false to disable."
+    description: "Shape every per-lens call as a shared cacheable prefix, and mark an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax) — cached reads are billed at a steep discount. Feature-detected per model and a safe no-op elsewhere. On by default; set to false to disable."
     required: false
     default: ""
   incremental:

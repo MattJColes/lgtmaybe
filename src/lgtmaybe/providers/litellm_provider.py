@@ -6,6 +6,7 @@ optional fallback model.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from concurrent.futures import Future
@@ -54,17 +55,46 @@ _MAX_ATTEMPTS = 4
 # that is better failed and surfaced than ground on.
 _CALL_BUDGET_MULTIPLIER = 2.5
 
-# Prompt caching (of the static system prompt) is applied only on routes where
-# an EXPLICIT cache breakpoint is the mechanism: Anthropic direct (cache_control)
-# and Bedrock (litellm translates cache_control to a Converse cachePoint for
-# Claude and Nova). Other providers either cache automatically server-side with
-# no marker (OpenAI, Azure) or don't cache at all (ollama, most
-# openai-compatible servers) — for all of them the request is sent unchanged.
-_CACHE_CONTROL_PREFIXES = ("anthropic/", "bedrock/")
+# Prompt caching (of the shared prefix) is applied on routes where an EXPLICIT
+# cache breakpoint is the mechanism:
+#
+# - ``anthropic/`` — cache_control, natively;
+# - ``bedrock/`` — litellm translates cache_control to a Converse cachePoint
+#   for Claude and Nova;
+# - ``vertex_ai/`` — both families, per litellm's documented support: the
+#   Anthropic partner-model route reads cache_control off the messages and sets
+#   the prompt-caching beta from it, and for Gemini litellm translates the same
+#   marker into Google's cachedContents API;
+# - ``zai/`` — ZAIChatConfig overrides litellm's strip step to always preserve
+#   cache_control, so GLM / Zhipu gets the breakpoint;
+# - ``openrouter/`` — marked for the WHOLE route on purpose. litellm's
+#   OpenrouterConfig keeps cache_control for the families that accept it
+#   (claude, gemini, minimax, glm, z-ai) and removes it for every other model
+#   before the request goes out, so a per-model allowlist here would only
+#   duplicate — and drift from — that list. Marking a deepseek or qwen model is
+#   a no-op upstream, not an error.
+#
+# Other providers either cache automatically server-side with no marker (OpenAI,
+# Azure, DeepSeek direct) or don't cache at all — for them the request is sent
+# unchanged. They still benefit from the split prefix shape, which keeps the
+# cached region byte-identical across the lens fan-out.
+_CACHE_CONTROL_PREFIXES = (
+    "anthropic/",
+    "bedrock/",
+    "vertex_ai/",
+    "zai/",
+    "openrouter/",
+)
 
-# Anthropic's documented minimum cacheable block. A smaller prefix is silently
-# not cached (some models require even more), so below this the marker is pure
-# request-shape churn — skip it and send the message unchanged.
+# The LOWEST documented minimum cacheable block across the marked routes, not
+# the highest. A prefix under a model's own minimum is silently not cached (no
+# error), and the minimum is per-model: 1,024 for Claude Sonnet 4.x/Opus 4-4.1
+# and Gemini 2.5 Flash; 2,048 for Claude Haiku 3.5; 4,096 for Claude Opus
+# 4.5+/Haiku 4.5 and Gemini 2.5 Pro. Gating on the lowest means we mark
+# whenever caching *could* engage — raising this to the highest would stop
+# marking in the 1k-4k range and lose real caching on the 1,024-token models.
+# Below the floor, though, no model can cache, so the marker is pure
+# request-shape churn: skip it and send the message unchanged.
 _MIN_CACHEABLE_TOKENS = 1024
 
 # Errors that retrying cannot fix: bad credentials, a malformed/unsupported
@@ -186,6 +216,14 @@ class LiteLLMProvider(ProviderClient):
         # failure isn't ground through two stacked backoff layers — the doubling
         # that helped a quota error run ~13 min before it surfaced.
         merged.setdefault("num_retries", 0)
+        # Sticky-routing / cache-routing hint, keyed on the shared prefix.
+        # OpenRouter pins a conversation to one provider endpoint to keep its
+        # cache warm, but with no key it only starts doing so AFTER it observes
+        # a cache hit — too late for a fan-out that dispatches its lenses at
+        # once. OpenAI uses the same field as a hint for prefix-sharing
+        # requests, so one param serves both; drop_params strips it elsewhere.
+        if self.prompt_cache:
+            merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
         effective_model = self.model or model
@@ -341,6 +379,21 @@ class LiteLLMProvider(ProviderClient):
         )
 
 
+def _prefix_cache_key(messages: list[Message]) -> str:
+    """A stable routing key identifying this call's *cacheable prefix*.
+
+    Everything except the final message, which is the per-lens block that sits
+    outside the cached region. So every lens of a batch produces the same key
+    (they share a prefix and should share a cache), while another PR — or the
+    reflection pass, which has its own preamble — produces a different one.
+
+    A digest, not the content: it travels to the provider as a routing hint,
+    and it is bounded well inside OpenRouter's 256-character ceiling.
+    """
+    prefix = "".join(f"{m.get('role')}:{m.get('content')!r}\n" for m in messages[:-1])
+    return "lgtmaybe-" + hashlib.sha256(prefix.encode("utf-8", "replace")).hexdigest()[:32]
+
+
 def _cache_block(text: str) -> dict[str, Any]:
     """A text content block carrying an ephemeral cache breakpoint."""
     return {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
@@ -418,10 +471,15 @@ def _supports_cache_control(model: str) -> bool:
     """Whether *model*'s route takes an explicit cache_control breakpoint.
 
     Feature detection, not configuration: the route must be one where litellm
-    forwards ``cache_control`` (Anthropic direct; Bedrock, where it becomes a
-    Converse ``cachePoint``), and litellm's model-capability map must say the
-    model itself caches. Any lookup failure (an unknown or freshly released
-    model) means "don't mark" — caching is an optimisation, never worth an error.
+    forwards ``cache_control`` (see :data:`_CACHE_CONTROL_PREFIXES`), and
+    litellm's model-capability map must say the model itself caches. Any lookup
+    failure (an unknown or freshly released model) means "don't mark" — caching
+    is an optimisation, never worth an error.
+
+    That capability map has gaps (it answers False for, say, a dated
+    ``vertex_ai/claude-3-5-sonnet@…`` id that does cache). A gap costs a missed
+    discount, never a broken call, so the conservative answer stays the right
+    one — and the split prefix shape still helps a model we decline to mark.
     """
     if not model.startswith(_CACHE_CONTROL_PREFIXES):
         return False
@@ -435,14 +493,31 @@ def _cache_usage(usage: Any) -> tuple[int, int]:
     """Extract (cache_read, cache_creation) token counts from a usage object.
 
     Anthropic/Bedrock report ``cache_read_input_tokens`` /
-    ``cache_creation_input_tokens``; OpenAI-style responses report reads under
-    ``prompt_tokens_details.cached_tokens``. All optional — absent means 0.
+    ``cache_creation_input_tokens`` at the top level. Everything else arrives
+    through litellm's normalised ``prompt_tokens_details`` wrapper —
+    OpenAI-style ``cached_tokens`` (which is also where DeepSeek's
+    ``prompt_cache_hit_tokens`` and an OpenRouter response land), plus a write
+    count under one of two names: litellm's own ``cache_creation_tokens`` or
+    OpenRouter's ``cache_write_tokens``, which litellm passes straight through
+    (its wrapper accepts extra fields, and it does not translate the name).
+
+    Every name is checked, because a count that exists but isn't read back
+    reports 0 — and in ``--profile`` a zero is indistinguishable from caching
+    never having engaged at all. All optional; genuinely absent means 0.
     """
-    cache_read = getattr(usage, "cache_read_input_tokens", None)
-    if not cache_read:
-        details = getattr(usage, "prompt_tokens_details", None)
-        cache_read = getattr(details, "cached_tokens", None) if details is not None else None
-    cache_creation = getattr(usage, "cache_creation_input_tokens", None)
+    details = getattr(usage, "prompt_tokens_details", None)
+
+    def _detail(*names: str) -> Any:
+        for name in names:
+            value = getattr(details, name, None) if details is not None else None
+            if value:
+                return value
+        return None
+
+    cache_read = getattr(usage, "cache_read_input_tokens", None) or _detail("cached_tokens")
+    cache_creation = getattr(usage, "cache_creation_input_tokens", None) or _detail(
+        "cache_creation_tokens", "cache_write_tokens"
+    )
     return int(cache_read or 0), int(cache_creation or 0)
 
 

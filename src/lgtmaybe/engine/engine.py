@@ -87,16 +87,6 @@ _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 
-# Providers whose litellm route takes an explicit cache_control breakpoint —
-# the ones where a batch's first call WRITES the shared preamble-plus-diff
-# prefix to the cache and the rest read it. Mirrors the adapter's
-# _CACHE_CONTROL_PREFIXES (providers/litellm_provider.py); keep the two in
-# sync. Provider-level only: whether the specific *model* caches is the
-# adapter's call, so warming here is an approximation — for a non-caching
-# model on these routes the primer costs one serialised call and buys nothing,
-# which the token floor below keeps cheap.
-_CACHE_BREAKPOINT_PROVIDERS = frozenset({Provider.anthropic, Provider.bedrock})
-
 # Don't warm the cache for a small diff. On wall-clock the primer is roughly
 # neutral — either the primer pays the one uncached pass and the rest read, or
 # a concurrent first wave all pays it in parallel — so the primer's real win
@@ -107,6 +97,13 @@ _CACHE_BREAKPOINT_PROVIDERS = frozenset({Provider.anthropic, Provider.bedrock})
 # Below ~2k tokens of wrapped diff the waste is too small to buy anything —
 # keep full concurrency. (Simulated A/B on a 5k-token prefix, 9 lenses:
 # warm-up ≈ +4s wall, −39k cache-write tokens.)
+#
+# Deliberately NOT gated on a provider list. The primer is about the shape of
+# the first wave, not about the cache_control marker: a backend that caches
+# automatically (OpenAI, Azure, DeepSeek — including via openrouter) pays the
+# same N-way miss when N identical prefixes arrive at once, and profits from
+# the same fix. A provider allowlist here would only be a second copy of the
+# adapter's route list, drifting from it every time a backend adds caching.
 _WARMUP_MIN_TOKENS = 2048
 
 
@@ -416,15 +413,15 @@ class LLMReviewEngine(ReviewEngine):
             batch_hints = [h for h in sa_hints if h.path in batch_paths]
             hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
             # Warm the prompt cache for this batch: a fully concurrent first
-            # wave defeats it (every call misses and pays the cache write), so
-            # on breakpoint routes one lens is dispatched alone and the rest of
-            # the batch releases on its completion — reading the shared
-            # preamble-plus-diff prefix instead of re-writing it. Gated on diff
-            # size (see _WARMUP_MIN_TOKENS) so a small diff keeps full
-            # concurrency.
+            # wave defeats it (every call misses, and on explicit-breakpoint
+            # routes each also pays the cache write), so one lens is dispatched
+            # alone and the rest of the batch releases on its completion —
+            # reading the shared preamble-plus-diff prefix instead of
+            # re-writing it. Gated on diff size (see _WARMUP_MIN_TOKENS) so a
+            # small diff keeps full concurrency, and on a fan-out wide enough
+            # for there to be a wave at all.
             warm = (
                 cfg.prompt_cache
-                and cfg.provider in _CACHE_BREAKPOINT_PROVIDERS
                 and workers > 1
                 and len(lenses) > 1
                 and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS

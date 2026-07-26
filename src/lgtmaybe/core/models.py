@@ -687,13 +687,16 @@ class ReviewConfig(_Strict):
     # prose/reasoning instead of findings. Disable for a model/provider that
     # doesn't support it (the lenient parser is the fallback).
     structured_output: bool = True
-    # Cache the static system prompt across the per-lens fan-out and reflection
-    # call. On providers with an explicit cache breakpoint (anthropic, bedrock
-    # Claude/Nova) the adapter marks the system prompt with cache_control —
-    # every call after the first reads the shared prefix at the provider's
-    # cached-input discount. Feature-detected per model and a safe no-op
-    # everywhere else (ollama, openai-compatible, and providers that cache
-    # automatically server-side), so leaving it on costs nothing.
+    # Reuse the shared prefix (system preamble + wrapped diff) across the
+    # per-lens fan-out and the reflection call instead of re-paying full input
+    # price for it on every call. On routes taking an explicit breakpoint
+    # (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM,
+    # openrouter's claude/gemini/glm/minimax) the adapter marks it with
+    # cache_control;
+    # backends that cache a repeated prefix automatically (openai, azure,
+    # deepseek) need only the identical shape, which this also gives them. Also
+    # enables the per-batch warm-up primer. Feature-detected per model and a
+    # safe no-op on ollama/openai-compatible, so leaving it on costs nothing.
     prompt_cache: bool = True
 
     @model_validator(mode="after")

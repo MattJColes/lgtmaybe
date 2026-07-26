@@ -93,10 +93,17 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
 
    With `prompt_cache` on, each call is shaped as a shared cacheable prefix —
    a lens-independent system preamble, then the wrapped diff — followed by
-   the lens-specific instruction as the final user block. On anthropic and
-   bedrock, every call after a batch's first reads that preamble-plus-diff
-   prefix from cache (on big diffs a warm-up primer runs the first lens
-   alone). Each lens's focused structured prompt requests JSON output with
+   the lens-specific instruction as the final user block. On routes that
+   take an explicit cache breakpoint (anthropic, bedrock Claude/Nova, vertex
+   Claude and Gemini, zai GLM, and openrouter's claude/gemini/glm/minimax
+   families)
+   the prefix is marked with `cache_control`; on backends that cache
+   automatically (OpenAI, Azure, DeepSeek) the identical prefix is enough on
+   its own. Either way every call after a batch's first reads that
+   preamble-plus-diff prefix from cache, and on big diffs a warm-up primer
+   runs the first lens alone so a concurrent wave doesn't all miss it.
+
+   Each lens's focused structured prompt requests JSON output with
    the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,
    `body`, `failure_scenario`, `suggestion`, `anchor`) and carries
    prompt-injection defense instructions. Each response is parsed and validated against
