@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from aws_cdk import (
+    Acknowledgment,
     CfnOutput,
     Duration,
     RemovalPolicy,
     Stack,
     Tags,
+    Validations,
 )
 from aws_cdk import (
     aws_apigatewayv2 as apigwv2,
@@ -42,7 +44,6 @@ from aws_cdk import (
 from aws_cdk.aws_apigatewayv2_authorizers import HttpJwtAuthorizer
 from aws_cdk.aws_apigatewayv2_integrations import HttpLambdaIntegration
 from aws_cdk.aws_lambda_python_alpha import BundlingOptions, PythonFunction
-from cdk_nag import NagSuppressions
 from constructs import Construct
 from services.github_app_identity.broker import OIDC_AUDIENCE, OIDC_ISSUER
 
@@ -69,17 +70,14 @@ class IdentityBrokerStack(Stack):
             description="Private key for the public lgtmaybe GitHub App",
             removal_policy=RemovalPolicy.RETAIN,
         )
-        NagSuppressions.add_resource_suppressions(
-            private_key,
-            [
-                {
-                    "id": "AwsSolutions-SMG4",
-                    "reason": (
-                        "GitHub App private keys are rotated in GitHub and cannot use "
-                        "Secrets Manager's database rotation contract."
-                    ),
-                }
-            ],
+        Validations.of(private_key).acknowledge(
+            Acknowledgment(
+                id="AwsSolutions::AwsSolutions-SMG4",
+                reason=(
+                    "GitHub App private keys are rotated in GitHub and cannot use "
+                    "Secrets Manager's database rotation contract."
+                ),
+            )
         )
         log_group = logs.LogGroup(
             self,
@@ -141,17 +139,14 @@ class IdentityBrokerStack(Stack):
                 ),
             },
         )
-        NagSuppressions.add_resource_suppressions(
-            stage,
-            [
-                {
-                    "id": "AwsSolutions-APIG1",
-                    "reason": (
-                        "Access logging is applied directly to the underlying CfnStage "
-                        "because this CDK HttpStage L2 has no concrete access-log settings type."
-                    ),
-                }
-            ],
+        Validations.of(stage).acknowledge(
+            Acknowledgment(
+                id="AwsSolutions::AwsSolutions-APIG1",
+                reason=(
+                    "Access logging is applied directly to the underlying CfnStage "
+                    "because this CDK HttpStage L2 has no concrete access-log settings type."
+                ),
+            )
         )
 
         alarm_topic = sns.Topic(
