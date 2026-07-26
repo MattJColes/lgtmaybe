@@ -479,6 +479,13 @@ class PRContext(_Strict):
     # drops matching findings, except high/critical security findings, which a
     # downvote can never hide. Populated by the CLI, empty by default.
     feedback_downvotes: frozenset[str] = frozenset()
+    # How many of our OWN finding conversations from earlier runs are still
+    # unresolved on this PR. Not findings of this run — they are the business
+    # this run's count cannot see, because an incremental run may not re-review
+    # their files at all. Reported so a "0 findings" result is never dressed up
+    # as a clean PR while earlier findings sit unaddressed. Populated by the
+    # GitHub gateway, 0 for the local CLI (no conversations to track).
+    open_finding_threads: int = Field(default=0, ge=0)
 
 
 class ReviewConfig(_Strict):

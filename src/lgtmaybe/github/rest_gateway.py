@@ -265,13 +265,23 @@ class RestGitHubGateway(GitHubGateway):
         # with surrounding context. Read-only API fetch — never a checkout — and
         # the engine redacts it before it leaves the process. The fetches are
         # independent, so run them concurrently to cut round-trip latency.
+        # The open-conversation count walks the reviewThreads connection, which is
+        # a round trip (more on a PR with hundreds of threads) for what is only
+        # disclosure metadata. It shares nothing with the content fetches, so it
+        # rides the same pool rather than sitting in front of them: on the common
+        # single-page PR the whole count hides inside the file-fetch latency.
         reviewable = [path for path in changed_files if is_reviewable(path)]
         file_contents: dict[str, str] = {}
-        if reviewable:
-            workers = min(_CONTENT_FETCH_WORKERS, len(reviewable))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
+        # +1, not a shared slot: the count must be free, and taking a worker
+        # from the pool would narrow content fetching to
+        # _CONTENT_FETCH_WORKERS - 1 for as long as the count runs — turning an
+        # overlap into a slowdown on exactly the wide PRs the pool sizing is for.
+        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 1) as pool:
+            open_threads = pool.submit(self.count_open_finding_threads)
+            if reviewable:
                 results = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
                 file_contents = {path: content for path, content in results if content is not None}
+            open_finding_threads = open_threads.result()
 
         return PRContext(
             diff=diff,
@@ -284,6 +294,7 @@ class RestGitHubGateway(GitHubGateway):
             title=meta.get("title") or "",
             description=meta.get("body") or "",
             commit_messages=self._fetch_commit_subjects(),
+            open_finding_threads=open_finding_threads,
         )
 
     def post_review(
@@ -912,6 +923,65 @@ class RestGitHubGateway(GitHubGateway):
         # threads, so they overlap on the shared (thread-safe) httpx client.
         with ThreadPoolExecutor(max_workers=min(_RESOLVE_WORKERS, len(fixed))) as pool:
             list(pool.map(resolve_one, fixed))
+
+    def count_open_finding_threads(self) -> int:
+        """How many of OUR finding conversations are still unresolved on this PR.
+
+        The business a run's own finding count cannot see. An incremental run
+        reviews only the newest commits, so an earlier finding on an untouched
+        file never reappears — its absence is not evidence it was fixed. The
+        engine uses this to keep "👍 LGTM!" off a PR that still has open
+        conversations (see `PRContext.open_finding_threads`).
+
+        Counts only threads whose opening comment carries our ACTIVE finding
+        marker: resolve-on-fix rewrites that marker into the "resolved" family,
+        so a thread we already closed is excluded by construction, as is any
+        thread we did not open. Best-effort and read-only — any failure returns
+        0 rather than blocking a review over a disclosure nicety. Adapter-only,
+        beyond the frozen port.
+        """
+        query = """
+        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){
+            pullRequest(number:$number){
+              reviewThreads(first:100, after:$cursor){
+                pageInfo{ hasNextPage endCursor }
+                nodes{ isResolved comments(first:1){ nodes{ body } } }
+              }
+            }
+          }
+        }
+        """
+        owner, _, name = self._repo.partition("/")
+        open_threads = 0
+        cursor: str | None = None
+        try:
+            while True:
+                data = self._graphql(
+                    query,
+                    {
+                        "owner": owner,
+                        "name": name,
+                        "number": self._pr_number,
+                        "cursor": cursor,
+                    },
+                )
+                conn = data["repository"]["pullRequest"]["reviewThreads"]
+                for node in conn["nodes"]:
+                    if node.get("isResolved"):
+                        continue
+                    comments = node.get("comments", {}).get("nodes", [])
+                    body = comments[0].get("body", "") if comments else ""
+                    if _FINDING_MARKER.search(body):
+                        open_threads += 1
+                page = conn.get("pageInfo", {})
+                if not page.get("hasNextPage"):
+                    break
+                cursor = page.get("endCursor")
+        except Exception as exc:  # noqa: BLE001 — disclosure is never worth a failed review
+            _log.warning("counting open finding conversations failed: %s", exc)
+            return 0
+        return open_threads
 
     def _fixed_threads(self, current: set[str]) -> list[tuple[str, int | None, str]]:
         """Our unresolved, outdated conversations whose finding is gone.

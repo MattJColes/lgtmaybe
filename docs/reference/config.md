@@ -130,6 +130,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `feedback_downvotes` | list[string] | No | `[]` | Feedback Downvotes |
 | `file_contents` | object | No | — | File Contents |
 | `head_sha` | string | Yes | — | Head Sha |
+| `open_finding_threads` | integer | No | `0` | Open Finding Threads |
 | `pr_number` | integer | Yes | — | Pr Number |
 | `repo` | string | Yes | — | Repo |
 | `title` | string | No | `` | Title |
@@ -1070,6 +1071,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "head_sha": {
       "title": "Head Sha",
       "type": "string"
+    },
+    "open_finding_threads": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Open Finding Threads",
+      "type": "integer"
     },
     "pr_number": {
       "title": "Pr Number",
