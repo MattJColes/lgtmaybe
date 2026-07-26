@@ -74,15 +74,22 @@ def test_auto_timeout_is_logged_and_named_as_a_default(cli_logs) -> None:
     assert getattr(record, "timeout_source", None) == "provider default"
 
 
-def test_the_running_build_is_named_alongside_the_budget(cli_logs) -> None:
+def test_the_running_build_is_named_alongside_the_budget(cli_logs, monkeypatch) -> None:
     """The Action pins a floating image tag, so a budget that looks impossible
     against the documented default is usually an older build. The run has to say
-    which build it is, or the evidence can't be read at all."""
+    which build it is, or the evidence can't be read at all.
+
+    The version is stubbed rather than read from the environment: what matters is
+    that the resolved value reaches the log record, not that this test host happens
+    to have distribution metadata installed.
+    """
+    import lgtmaybe.cli as cli_module
+
+    monkeypatch.setattr(cli_module.metadata, "version", lambda _name: "1.2.3")
     cfg = ReviewConfig(provider=Provider.openrouter, model="m")
     build_provider_engine(cfg, _runtime())
 
-    version = getattr(_timeout_record(cli_logs), "lgtmaybe_version", None)
-    assert version and version != "unknown"
+    assert getattr(_timeout_record(cli_logs), "lgtmaybe_version", None) == "1.2.3"
 
 
 def test_an_unreadable_version_does_not_break_the_run(monkeypatch) -> None:

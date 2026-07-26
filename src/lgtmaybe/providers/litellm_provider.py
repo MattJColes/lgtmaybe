@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
@@ -260,8 +261,17 @@ class LiteLLMProvider(ProviderClient):
         # to mutate.
         messages = self._with_cache_control(messages, model)
         # Counted here (not read from tenacity's statistics) so the number lands
-        # on the result even when the mocked/fake retry layer changes shape.
+        # on the result even when the mocked/fake retry layer changes shape — and
+        # counted per REQUEST, not per tenacity attempt: one attempt can issue a
+        # second request (the empty-structured-output and rejected-temperature
+        # re-sends below), and a count that missed those would understate what the
+        # call actually cost, which is the whole point of reporting it.
         attempts = 0
+
+        def count_request() -> None:
+            nonlocal attempts
+            attempts += 1
+
         # Attempts share one deadline derived from the per-request timeout (the
         # fallback model, when configured, gets its own fresh budget — it is a
         # separate recovery path, not another attempt).
@@ -275,13 +285,11 @@ class LiteLLMProvider(ProviderClient):
             reraise=True,
         )
         def _call() -> ProviderResult:
-            nonlocal attempts
-            attempts += 1
             # A prior call already proved this model's JSON-schema mode returns
             # empty, so don't pay the wasted round-trip again — drop it up front.
             if self._skip_response_format:
                 kwargs.pop("response_format", None)
-            result = self._raw_completion(model, messages, kwargs)
+            result = self._raw_completion(model, messages, kwargs, count_request)
             # Some grammar-constrained backends (notably LM Studio fronting a
             # "thinking" model like qwen3.x) return EMPTY content under a
             # response_format JSON schema — the schema decoder yields nothing. The
@@ -291,7 +299,7 @@ class LiteLLMProvider(ProviderClient):
             if not result.text.strip() and kwargs.get("response_format") is not None:
                 self._skip_response_format = True
                 kwargs.pop("response_format")
-                result = self._raw_completion(model, messages, kwargs)
+                result = self._raw_completion(model, messages, kwargs, count_request)
             return result
 
         try:
@@ -305,9 +313,19 @@ class LiteLLMProvider(ProviderClient):
         return result.model_copy(update={"attempts": attempts})
 
     def _raw_completion(
-        self, model: str, messages: list[Message], kwargs: dict[str, Any]
+        self,
+        model: str,
+        messages: list[Message],
+        kwargs: dict[str, Any],
+        count_request: Callable[[], None] = lambda: None,
     ) -> ProviderResult:
-        """One litellm call, with the temperature-value-rejection fallback applied."""
+        """One litellm call, with the temperature-value-rejection fallback applied.
+
+        ``count_request`` is called immediately before each request actually goes
+        out, so the reported attempt count matches the number of model calls this
+        made — including the re-send below, which is a second billed request.
+        """
+        count_request()
         try:
             response = _completion_with_wall_timeout(model, messages, kwargs)
         except Exception as exc:
@@ -316,6 +334,7 @@ class LiteLLMProvider(ProviderClient):
             # Drop temperature for this and every subsequent retry, letting the
             # model use its only supported value (its default).
             kwargs.pop("temperature")
+            count_request()
             response = _completion_with_wall_timeout(model, messages, kwargs)
         return self._map_response(response, model)
 

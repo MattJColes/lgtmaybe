@@ -43,6 +43,23 @@ def _states_seconds(text: str, seconds: int) -> bool:
     return re.search(rf"(?<!\d){seconds}(?!\d)", text) is not None
 
 
+def _documents_the_split(text: str, *, slow_seconds: int, cloud_seconds: int) -> bool:
+    """Whether *text* attaches each budget to the providers it applies to.
+
+    Checking the names and the numbers independently would pass a description that
+    swapped them ("openrouter 600, cloud 1800") — the very drift being guarded — so
+    the slow budget must appear in the span that names the slow providers, and the
+    cloud budget in the span introduced by "cloud". Both documented forms run
+    "<slow providers> <slow>s, cloud <cloud>s".
+    """
+    match = re.search(r"(?P<slow>ollama.*?)(?P<cloud>cloud\D*\d+)", text, re.IGNORECASE)
+    if match is None:
+        return False
+    return _states_seconds(match["slow"], slow_seconds) and _states_seconds(
+        match["cloud"], cloud_seconds
+    )
+
+
 class TestModelCallBudgets:
     def test_whole_review_ceiling_holds_two_slow_calls(self) -> None:
         """The soft whole-review deadline must stay at least 2× the most generous
@@ -83,8 +100,11 @@ class TestDocumentedProviderDefaults:
 
         for provider in sorted(p.value for p in _SLOW_PROVIDERS):
             assert provider in description, f"action.yml must name {provider} as slow-capable"
-        assert _states_seconds(description, default_timeout_for(Provider.openrouter))
-        assert _states_seconds(description, default_timeout_for(Provider.openai))
+        assert _documents_the_split(
+            description,
+            slow_seconds=default_timeout_for(Provider.openrouter),
+            cloud_seconds=default_timeout_for(Provider.openai),
+        )
 
     def test_action_guide_documents_the_resolved_timeouts(self) -> None:
         """The Action how-to's input table is the other place a user reads these
@@ -96,8 +116,11 @@ class TestDocumentedProviderDefaults:
         )
         for provider in sorted(p.value for p in _SLOW_PROVIDERS):
             assert provider in row, f"the input table must name {provider} as slow-capable"
-        assert _states_seconds(row, default_timeout_for(Provider.openrouter))
-        assert _states_seconds(row, default_timeout_for(Provider.openai))
+        assert _documents_the_split(
+            row,
+            slow_seconds=default_timeout_for(Provider.openrouter),
+            cloud_seconds=default_timeout_for(Provider.openai),
+        )
 
 
 class TestSupportingBudgets:

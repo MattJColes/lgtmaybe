@@ -190,6 +190,34 @@ class TestRetry:
         """An error raised before the adapter ever counted an attempt stays 0."""
         assert attempts_of(RuntimeError("never reached the adapter")) == 0
 
+    def test_a_re_send_inside_one_attempt_still_counts(self) -> None:
+        """Every request that goes out counts, not every tenacity attempt.
+
+        The empty-structured-output path issues a SECOND model request inside one
+        attempt. Counting attempts rather than requests reported that failure as
+        one call when the provider had been asked twice.
+        """
+        calls = 0
+
+        def empty_then_fail(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if "response_format" in kwargs:
+                return _fake_response("")  # schema decoder yielded nothing
+            raise litellm.AuthenticationError(
+                message="invalid api key", model="gpt-4o", llm_provider="openai"
+            )
+
+        with patch("litellm.completion", side_effect=empty_then_fail):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.AuthenticationError) as caught:
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "openai/gpt-4o", response_format={}
+                )
+
+        assert calls == 2
+        assert attempts_of(caught.value) == 2
+
 
 class TestWallTimeoutIsNotRetried:
     """A wall-clock timeout re-sent unchanged cannot do anything but burn budget.
