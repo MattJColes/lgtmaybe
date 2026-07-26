@@ -114,6 +114,11 @@ def resolve_needs(
         accepted. Successive waves keep going, so an unfetchable entry doesn't
         end the search early — the same reach the blocking version had.
         """
+        # Copied, not aliased: the slicing below rebinds rather than mutates, so
+        # aliasing would work today — but it would make that an invariant a
+        # later `pending.pop(0)` could silently break, corrupting the caller's
+        # list. The lists here are bounded by the auditor's `needs`, so the copy
+        # is not worth reasoning about.
         pending = list(paths)
         while pending and len(out) < max_files:
             width = max_files - len(out)
@@ -130,5 +135,5 @@ def resolve_needs(
                 # walk; only its resulting fetches are batched.
                 take_in_waves(resolve_symbol(path), resolve_symbols=False)
 
-    take_in_waves(list(needs), resolve_symbols=True)
+    take_in_waves(needs, resolve_symbols=True)
     return out
