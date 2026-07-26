@@ -341,3 +341,82 @@ def test_open_thread_count_overlaps_the_file_fetches() -> None:
     assert len([e for e in events[:first_end] if e.startswith("start-")]) >= 2, (
         f"the thread count did not overlap the content fetches: {events}"
     )
+
+
+@respx.mock
+def test_content_fetches_keep_full_concurrency_while_the_count_runs() -> None:
+    """The count rides the pool on a dedicated worker, not a borrowed one.
+
+    Sizing the pool at `_CONTENT_FETCH_WORKERS` let the count take a slot from
+    the content fetches, so a PR with at least that many reviewable files
+    fetched content one worker narrower for as long as the count ran — the
+    overlap became a slowdown on exactly the wide PRs the sizing exists for.
+
+    Asserted as a property (how many fetches are actually in flight together),
+    not by mocking the executor to read back its `max_workers`: the latter only
+    restates the line of code, and would still pass if the count were moved
+    somewhere that genuinely stole capacity.
+    """
+    import threading
+
+    from lgtmaybe.github.rest_gateway import _CONTENT_FETCH_WORKERS
+
+    files = [{"filename": f"src/mod{i}.py", "status": "modified"} for i in range(20)]
+    respx.route(
+        method="GET", url=PR_URL, headers={"Accept": "application/vnd.github.v3.diff"}
+    ).mock(return_value=httpx.Response(200, content=_load("pr_diff.patch").encode()))
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_detail.json"))
+    )
+    respx.route(method="GET", url__startswith=FILES_URL).mock(
+        return_value=httpx.Response(200, json=files)
+    )
+    respx.route(method="GET", url__startswith=COMMITS_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_commits.json"))
+    )
+
+    lock = threading.Lock()
+    in_flight = 0
+    peak = 0
+
+    def content(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        with lock:
+            in_flight += 1
+            peak = max(peak, in_flight)
+        threading.Event().wait(0.02)
+        with lock:
+            in_flight -= 1
+        return httpx.Response(200, text="raw file content")
+
+    def slow_count(request: httpx.Request) -> httpx.Response:
+        # Outlives the content fetches, so it is in flight for all of them.
+        threading.Event().wait(0.2)
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                "nodes": [],
+                            }
+                        }
+                    }
+                }
+            },
+        )
+
+    respx.route(method="GET", url__startswith=f"{BASE_URL}/repos/{REPO}/contents/").mock(
+        side_effect=content
+    )
+    respx.route(method="POST", url="https://api.github.com/graphql").mock(side_effect=slow_count)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.get_pr_context()
+
+    assert peak >= _CONTENT_FETCH_WORKERS, (
+        f"content fetches peaked at {peak} concurrent while the count ran; "
+        f"the count is taking a worker from them (expected {_CONTENT_FETCH_WORKERS})"
+    )
