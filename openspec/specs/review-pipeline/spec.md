@@ -119,11 +119,17 @@ split level, with the shrink disclosed in the summary.
 
 #### Scenario: a single-file batch times out
 - **WHEN** the timed-out batch holds one file
-- **THEN** its hunks become the pieces, so an oversized lone file still shrinks
+- **THEN** its hunks are divided into two groups, one review call each, so an
+  oversized lone file still shrinks
 
 #### Scenario: a piece times out as well
 - **WHEN** a piece of an already-split batch also exceeds its budget
 - **THEN** it fails as an ordinary failed call — the split does not recurse
+
+#### Scenario: one piece answers and another fails
+- **WHEN** part of a split batch is reviewed and part fails
+- **THEN** the findings are kept AND the failure is reported, so the summary never
+  claims a shrunk batch was reviewed when some of it was not
 
 #### Scenario: the failure is not a timeout
 - **WHEN** a lens call fails for any other reason (quota, bad key, unparseable)
