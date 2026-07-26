@@ -20,6 +20,7 @@ from collections import Counter
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,19 @@ from lgtmaybe.providers.factory import (
 _log = get_logger(__name__)
 
 _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
+
+
+def package_version() -> str:
+    """The installed lgtmaybe version, or ``"unknown"`` when it can't be read.
+
+    Reading it is best-effort by design: a source checkout that was never
+    installed has no distribution metadata, and a missing version must never be
+    the reason a review fails.
+    """
+    try:
+        return metadata.version("lgtmaybe")
+    except Exception:
+        return "unknown"
 
 
 def _should_auto_post(enabled: bool, event_action: str) -> bool:
@@ -190,12 +204,19 @@ def build_provider_engine(
     # .lgtmaybe.yml and a 60s built-in default leave identical evidence — which
     # is exactly the ambiguity that makes "why is this timing out?" unanswerable
     # from a log. `source` is what separates them.
+    #
+    # The version is here for the same reason. The Action's `image` input pins a
+    # FLOATING tag, so the action.yml a user reads and the code that runs are
+    # versioned independently: a budget that looks impossible against the
+    # documented default is usually an older image, and the only way to tell from
+    # a log is for the run to name its own build.
     effective_timeout = (
         cfg.timeout if cfg.timeout is not None else default_timeout_for(cfg.provider)
     )
     _log.info(
         "per-call timeout resolved",
         extra={
+            "lgtmaybe_version": package_version(),
             "provider": cfg.provider.value,
             "timeout_s": effective_timeout,
             "timeout_source": "configured" if cfg.timeout is not None else "provider default",
