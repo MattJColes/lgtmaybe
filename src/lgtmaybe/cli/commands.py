@@ -172,6 +172,15 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "(any provider; raise it to send a big diff in fewer calls)",
 )
 @click.option(
+    "--max-tokens",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Cap the tokens each model call may generate (any provider; unset = the "
+    "model's own ceiling). Set it on a prepaid route like OpenRouter, which "
+    "reserves prompt + max_tokens against your balance before generating and "
+    "assumes the model's full ceiling when the request omits it",
+)
+@click.option(
     "--num-ctx",
     default=None,
     type=int,
@@ -334,6 +343,7 @@ def review(
     unanchored_min_severity: str | None,
     max_files: int | None,
     max_input_tokens: int | None,
+    max_tokens: int | None,
     num_ctx: int | None,
     max_concurrency: int | None,
     base: str | None,
@@ -375,6 +385,7 @@ def review(
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
         max_input_tokens=max_input_tokens,
+        max_tokens=max_tokens,
         num_ctx=num_ctx,
         max_concurrency=max_concurrency,
         context_lines=context_lines,
@@ -535,6 +546,7 @@ def action() -> None:
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],
+        max_tokens=inputs["max_tokens"],
         max_concurrency=inputs["max_concurrency"],
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],

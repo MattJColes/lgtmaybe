@@ -291,3 +291,51 @@ def test_num_ctx_flag_is_ignored_for_hosted_provider(
 
     assert result.exit_code == 0, result.output
     assert "num_ctx" not in captured_completion[0]
+
+
+def test_max_tokens_flag_reaches_litellm(captured_completion: list[dict[str, Any]]) -> None:
+    """`--max-tokens` caps each completion. Prepaid routes (OpenRouter) reserve
+    prompt + max_tokens against the balance BEFORE generating, and fall back to the
+    model's full output ceiling when the request omits it — so an uncapped review
+    can be refused for credit it was never going to spend. The cap has to reach
+    litellm to shrink that reservation."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openrouter",
+            "--model",
+            "vendor/m",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+            "--max-tokens",
+            "8192",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("max_tokens") == 8192
+
+
+def test_max_tokens_is_absent_by_default(captured_completion: list[dict[str, Any]]) -> None:
+    """Unset means uncapped — the request must carry no max_tokens at all, so the
+    model's own ceiling applies and nothing silently truncates a long findings
+    payload."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "max_tokens" not in captured_completion[0]

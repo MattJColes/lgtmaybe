@@ -62,6 +62,10 @@ inputs:
     description: "Token budget per model call before the diff is split into batches (any provider). Leave empty for the default (100000)."
     required: false
     default: ""
+  max_tokens:
+    description: "Cap the tokens each model call may generate (any provider). Leave empty to send no cap, so the model's own ceiling applies. Set it on a prepaid route like OpenRouter, which reserves prompt + max_tokens against your balance before generating and assumes the model's full ceiling when the request omits it."
+    required: false
+    default: ""
   max_concurrency:
     description: "Concurrent review calls across the whole fan-out (all batches and lenses share one pool). Leave empty for the provider-aware default: 8 for cloud providers, 1 for ollama and openai-compatible (a single-slot llama.cpp/LM Studio server wants 1; raise it explicitly for a batching vLLM server)."
     required: false
@@ -274,6 +278,7 @@ runs:
         INPUT_TEMPERATURE: ${{ inputs.temperature }}
         INPUT_NUM_CTX: ${{ inputs.num_ctx }}
         INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
+        INPUT_MAX_TOKENS: ${{ inputs.max_tokens }}
         INPUT_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}
         INPUT_RESOLVE_FIXED: ${{ inputs.resolve_fixed }}
         INPUT_RECURSIVE: ${{ inputs.recursive }}
