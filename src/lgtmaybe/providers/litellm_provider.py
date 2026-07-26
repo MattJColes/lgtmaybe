@@ -39,15 +39,19 @@ from lgtmaybe.core.ports import Message, ProviderClient
 
 _log = get_logger(__name__)
 
-_DEFAULT_TIMEOUT = 60  # seconds
+# Last-resort per-request timeout (seconds), used only when a caller builds this
+# adapter outside the factory or passes no timeout at all. Kept at the factory's
+# shortest provider default (see providers.factory) rather than something tighter:
+# a fallback that silently undercuts the configured budget is how a reasoning
+# model's review turns into "1 of 8 review calls failed" with zero findings.
+_DEFAULT_TIMEOUT = 600  # seconds
 _MAX_ATTEMPTS = 4
 
 # All attempts for one completion share a total wall-clock budget of this many
 # times the per-request timeout, so a flaky model can't burn
-# attempts × timeout + backoff per call (four 60s timeouts plus waits is over
-# four minutes — per lens). 2.5× leaves room for one full-length failure, a
-# retry, and the backoff between them; a call that needs more than that is
-# better failed and surfaced than ground on.
+# attempts × timeout + backoff per call. 2.5× leaves room for one full-length
+# failure, a retry, and the backoff between them; a call that needs more than
+# that is better failed and surfaced than ground on.
 _CALL_BUDGET_MULTIPLIER = 2.5
 
 # Prompt caching (of the static system prompt) is applied only on routes where

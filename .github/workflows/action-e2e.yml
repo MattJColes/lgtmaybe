@@ -42,8 +42,9 @@ jobs:
     if: contains(github.event.pull_request.labels.*.name, 'lgtmaybe-e2e')
     runs-on: ubuntu-latest
     # Each leg builds an image + runs one real review; cap it so a hung provider
-    # call can't hold the runner for GitHub's 6-hour default.
-    timeout-minutes: 20
+    # call can't hold the runner for GitHub's 6-hour default. Above the review's
+    # own `max_review_seconds` ceiling so the soft deadline fires first.
+    timeout-minutes: 75
     name: ${{ matrix.provider }}
     strategy:
       fail-fast: false

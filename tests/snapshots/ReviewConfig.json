@@ -538,7 +538,7 @@
       "type": "integer"
     },
     "max_review_seconds": {
-      "default": 1800,
+      "default": 3600,
       "minimum": 0,
       "title": "Max Review Seconds",
       "type": "integer"

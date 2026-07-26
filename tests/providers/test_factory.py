@@ -121,7 +121,7 @@ class TestBuildProvider:
             api_key="sk-x",
             api_base="https://api.deepseek.com/v1",
         )
-        assert provider.default_opts.get("timeout") == 900
+        assert provider.default_opts.get("timeout") == 1800
 
     def test_openai_compatible_timeout_is_overridable(self) -> None:
         provider = build_provider(
@@ -147,11 +147,11 @@ class TestBuildProvider:
 
     def test_ollama_gets_a_long_default_timeout_when_unset(self) -> None:
         provider = build_provider(Provider.ollama, "llama2")
-        assert provider.default_opts.get("timeout") == 900
+        assert provider.default_opts.get("timeout") == 1800
 
     def test_cloud_gets_a_short_default_timeout_when_unset(self) -> None:
         provider = build_provider(Provider.openai, "gpt-4o", api_key="sk-test")
-        assert provider.default_opts.get("timeout") == 300
+        assert provider.default_opts.get("timeout") == 600
 
     def test_explicit_timeout_overrides_the_provider_default(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", timeout=45)
@@ -199,11 +199,28 @@ class TestDefaultTimeout:
 
     def test_openrouter_default_matches_ollama(self) -> None:
         # openrouter is a gateway to arbitrary models, including reasoning models
-        # that routinely think past the 60s cloud default — it gets the generous
-        # default too.
+        # that routinely think well past a cloud-sized budget — it gets the
+        # generous default too.
         from lgtmaybe.providers.factory import default_timeout_for
 
         assert default_timeout_for(Provider.openrouter) == default_timeout_for(Provider.ollama)
+
+    def test_every_provider_default_clears_ten_minutes(self) -> None:
+        """No provider may default to a budget a reasoning model can blow through:
+        a 60s-class default is what turned real reviews into 'call failed'
+        notices with zero findings."""
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        assert all(default_timeout_for(p) >= 600 for p in Provider)
+
+    def test_adapter_fallback_is_never_tighter_than_a_provider_default(self) -> None:
+        """The adapter's last-resort timeout applies whenever a caller builds a
+        provider outside the factory (or passes timeout=None through), so it must
+        not silently reimpose a budget shorter than the factory would have."""
+        from lgtmaybe.providers.factory import default_timeout_for
+        from lgtmaybe.providers.litellm_provider import _DEFAULT_TIMEOUT
+
+        assert _DEFAULT_TIMEOUT >= min(default_timeout_for(p) for p in Provider)
 
     def test_build_provider_threads_temperature_into_default_opts(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", temperature=0.0)

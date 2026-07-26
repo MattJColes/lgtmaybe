@@ -45,8 +45,13 @@ _PREFIXES: dict[Provider, str] = {
 # default; direct cloud providers get a shorter one that still leaves room
 # for a reasoning model to think. An explicit --timeout always wins, so a
 # fast endpoint can dial it down.
-_SLOW_TIMEOUT = 900
-_CLOUD_TIMEOUT = 300
+#
+# Both are sized for the failure that matters: a timed-out lens call posts
+# "results may be incomplete" with no findings, which a human reads as a clean
+# review. Waiting longer for an answer beats reporting a confident nothing, so
+# these are deliberately far above what a healthy call needs.
+_SLOW_TIMEOUT = 1800
+_CLOUD_TIMEOUT = 600
 
 # Providers whose endpoint may be a slow model (local server or open gateway).
 _SLOW_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})

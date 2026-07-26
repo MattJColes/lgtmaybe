@@ -670,10 +670,10 @@ class ReviewConfig(_Strict):
     # findings post, and the summary carries the existing "results may be
     # incomplete" notice naming the skipped calls. It can never turn a total
     # failure into a silent LGTM — a run where every call failed or was
-    # skipped still fails loud. Generous by default (30 minutes — 2× the
+    # skipped still fails loud. Generous by default (60 minutes — 2× the
     # generous per-call timeout, so one slow gateway/local call can't eat the
     # whole review budget); 0 disables the ceiling entirely.
-    max_review_seconds: int = Field(default=1800, ge=0)
+    max_review_seconds: int = Field(default=3600, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
     # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
     # providers (their retry layer absorbs a capacity 429, and on bedrock cache

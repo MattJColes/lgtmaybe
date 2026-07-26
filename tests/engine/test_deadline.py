@@ -79,9 +79,9 @@ class TestReviewDeadline:
     def test_generous_default_never_trips_a_normal_run(self) -> None:
         provider = _SlowProvider(delay=0.0)
         cfg = _cfg()
-        # 2× the generous per-call timeout (900s), so one slow gateway/local
+        # 2× the generous per-call timeout (1800s), so one slow gateway/local
         # call can't eat the whole review budget on its own.
-        assert cfg.max_review_seconds == 1800
+        assert cfg.max_review_seconds == 3600
         _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
         assert len(provider.calls) == 3
         assert "deadline" not in summary
