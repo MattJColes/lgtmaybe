@@ -215,7 +215,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix, with an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax); safe no-op elsewhere |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
-| `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
+| `static_analysis` | `false` | Run installed linters (ruff, bandit, mypy, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
 | `auto_diagram` | `true` | Post a compact Mermaid flowchart comment when a PR is opened/reopened, before the review; set `false` to opt out |
 | `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |

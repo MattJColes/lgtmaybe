@@ -1,8 +1,9 @@
 """Static-analysis fusion (F1): deterministic tool findings as LLM grounding.
 
-Runs fast linters/SAST (ruff, bandit, and semgrep with local rules) over the
-**already-fetched changed-file texts**, written to a throwaway temp dir — never
-a checkout, never executing PR code (linting is parsing, like ast-grep). The
+Runs fast linters/SAST (ruff, bandit, mypy, and semgrep with local rules) over
+the **already-fetched changed-file texts**, written to a throwaway temp dir —
+never a checkout, never executing PR code (linting and type checking are
+parsing plus inference, like ast-grep; no module is ever imported). The
 findings are formatted as untrusted HINTS for the lens prompts ("confirm,
 contextualise, or discard"), raising recall on the deterministic bugs LLMs miss
 while letting the model suppress raw linter noise.
@@ -165,6 +166,27 @@ def _run_tool(tool: StaticAnalysisTool, root: Path, cfg: ReviewConfig) -> list[T
         argv = [binary, "check", "--output-format", "json", "--exit-zero", "--no-cache", "."]
     elif tool is StaticAnalysisTool.bandit:
         argv = [binary, "-f", "json", "-q", "-r", "."]
+    elif tool is StaticAnalysisTool.mypy:
+        # The corpus holds only the CHANGED files, so everything they import is
+        # absent by construction. Without these flags mypy reports one error per
+        # unresolvable import and the real findings drown: --ignore-missing-imports
+        # silences the absent third-party/stdlib stubs, --follow-imports=skip stops
+        # it chasing sibling modules that were never fetched. What survives is
+        # exactly what it can prove from a single file's own text — which is where
+        # the unguarded-Optional bugs live.
+        argv = [
+            binary,
+            "--output",
+            "json",
+            "--ignore-missing-imports",
+            "--follow-imports=skip",
+            "--no-error-summary",
+            "--no-color-output",
+            # Never read or write a cache: the corpus is a throwaway temp dir and
+            # a stale cache keyed to another run's files would be worse than none.
+            "--no-incremental",
+            ".",
+        ]
     else:  # semgrep
         rules = cfg.static_analysis.semgrep_rules
         if not rules:
@@ -240,6 +262,11 @@ def _scrubbed_env(root: Path) -> dict[str, str]:
 
 
 def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[ToolFinding]:
+    # mypy is the odd one out: JSON Lines, one object per diagnostic, where the
+    # others emit a single document. Parsed as one it raises and the tool
+    # degrades to silence.
+    if tool is StaticAnalysisTool.mypy:
+        return [_mypy_finding(json.loads(line)) for line in stdout.splitlines() if line.strip()]
     data = json.loads(stdout)
     if tool is StaticAnalysisTool.ruff:
         return [_ruff_finding(item, root) for item in data]
@@ -279,6 +306,25 @@ def _bandit_finding(item: dict[str, Any]) -> ToolFinding:
         rule=str(item.get("test_id", "")),
         message=str(item.get("issue_text", "")),
         severity=_BANDIT_SEVERITY.get(str(item.get("issue_severity", "")).upper(), Severity.low),
+    )
+
+
+def _mypy_finding(item: dict[str, Any]) -> ToolFinding:
+    severity = str(item.get("severity", "")).lower()
+    return ToolFinding(
+        tool="mypy",
+        path=_posix_rel(str(item.get("file", ""))),
+        line=int(item.get("line") or 1),
+        # A diagnostic without an error code is a `note` — mypy's follow-up
+        # explanation of the error above it. Keep the tie to its parent visible
+        # rather than rendering an empty rule.
+        rule=str(item.get("code") or "note"),
+        message=str(item.get("message", "")),
+        # A type error is a provable contradiction in the code as written, so it
+        # outranks a ruff lint (low) — but mypy on a single file out of its
+        # project also can't see every runtime guard, so it is not automatically
+        # high. Notes only elaborate on the error they follow: info.
+        severity=Severity.medium if severity == "error" else Severity.info,
     )
 
 

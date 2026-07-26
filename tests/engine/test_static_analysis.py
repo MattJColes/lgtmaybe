@@ -25,6 +25,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import lgtmaybe.engine.static_analysis as static_analysis
 from lgtmaybe.core.models import Provider, ReviewConfig, Severity, StaticAnalysisTool
 from lgtmaybe.engine.static_analysis import (
@@ -53,6 +55,34 @@ def _ruff_output(root: str) -> str:
                 "location": {"row": 1, "column": 1},
             }
         ]
+    )
+
+
+def _mypy_output() -> str:
+    """mypy --output json: JSON Lines, one object per diagnostic."""
+    return (
+        json.dumps(
+            {
+                "file": "src/app.py",
+                "line": 9,
+                "column": 16,
+                "message": 'Item "None" of "str | None" has no attribute "splitlines"',
+                "code": "union-attr",
+                "severity": "error",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "file": "src/app.py",
+                "line": 9,
+                "column": 16,
+                "message": "Consider using an explicit None check",
+                "code": None,
+                "severity": "note",
+            }
+        )
+        + "\n"
     )
 
 
@@ -184,6 +214,75 @@ def test_bandit_findings_parsed_with_severity_mapping(monkeypatch) -> None:  # t
     assert findings[0].line == 2
     assert findings[0].rule == "B307"
     assert findings[0].severity is Severity.medium
+
+
+def test_mypy_findings_parsed_from_json_lines(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """mypy emits JSON Lines — one object per line, not an array like ruff.
+
+    Parsed with json.loads over the whole payload it raises, and the tool would
+    degrade to silence with only a warning in the log.
+    """
+    run = _FakeRun(outputs={"mypy": _mypy_output()})
+    _patch_tools(monkeypatch, run, present={"mypy"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.mypy]))
+
+    assert [(f.rule, f.line, f.severity) for f in findings] == [
+        ("union-attr", 9, Severity.medium),
+        ("note", 9, Severity.info),
+    ]
+    assert findings[0].path == "src/app.py"
+    assert findings[0].tool == "mypy"
+
+
+def test_mypy_blank_lines_are_skipped(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A clean run prints nothing; a trailing newline must not parse as garbage
+    and take the whole tool's findings down with it."""
+    run = _FakeRun(outputs={"mypy": "\n\n"})
+    _patch_tools(monkeypatch, run, present={"mypy"})
+
+    assert run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.mypy])) == []
+
+
+def test_mypy_runs_isolated_from_the_wider_codebase(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The corpus is only the CHANGED files, so mypy must not treat every
+    unresolvable import as an error — that noise would bury the real hits and
+    blow the MAX_HINTS cap on any normal PR."""
+    run = _FakeRun(outputs={"mypy": ""})
+    _patch_tools(monkeypatch, run, present={"mypy"})
+
+    run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.mypy]))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]  # type: ignore[union-attr]
+    assert "--ignore-missing-imports" in argv
+    assert "--follow-imports=skip" in argv
+    # Never reuse or write a cache keyed to another run's corpus.
+    assert "--no-incremental" in argv
+
+
+@pytest.mark.skipif(shutil.which("mypy") is None, reason="mypy not installed")
+def test_mypy_really_catches_an_unguarded_none_deref(tmp_path: Path) -> None:
+    """The regression this tool was added for, run against the real binary.
+
+    A faked subprocess proves we parse mypy's output; it cannot prove the flags
+    we pass still surface the finding. This is the bug a live review missed and
+    mypy caught: `dict.get()` narrows to `str | None`, and `.splitlines()` on it
+    crashes at runtime.
+    """
+    files = {
+        "src/metrics.py": (
+            "def summarise(findings: list, file_contents: dict[str, str]) -> int:\n"
+            "    total = 0\n"
+            "    for finding in findings:\n"
+            "        text = file_contents.get(finding.path)\n"
+            "        total += len(text.splitlines())\n"
+            "    return total\n"
+        )
+    }
+
+    findings = run_static_analysis(files, _cfg(tools=[StaticAnalysisTool.mypy]))
+
+    assert any(f.rule == "union-attr" and f.line == 5 for f in findings), findings
 
 
 def test_min_severity_floor_drops_weak_hints(monkeypatch) -> None:  # type: ignore[no-untyped-def]

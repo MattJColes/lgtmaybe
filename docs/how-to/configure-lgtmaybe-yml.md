@@ -376,9 +376,17 @@ Static-analysis fusion: run fast, deterministic linters over the changed files
 and feed their findings to the model as **hints to confirm, contextualise, or
 discard**. This raises recall on exactly the mechanical bugs LLMs miss without
 posting raw linter noise — only findings the model itself confirms are
-reported. Supported tools: **ruff** and **bandit** (Python), and **semgrep**
-(multi-language) when you point `semgrep_rules` at local rules — semgrep's
-registry configs need the network, which the sandbox forbids.
+reported. Supported tools: **ruff**, **bandit**, and **mypy** (Python), and
+**semgrep** (multi-language) when you point `semgrep_rules` at local rules —
+semgrep's registry configs need the network, which the sandbox forbids.
+
+**mypy** earns its place on unguarded-`Optional` bugs: a `dict.get()` narrowed
+to `str | None` and then dereferenced is a crash a review lens reads straight
+past, and mypy proves it from the file's own text in seconds. It runs with
+`--ignore-missing-imports --follow-imports=skip`, because the sandbox holds only
+the changed files and everything they import is absent by construction —
+so it reports what it can prove from a single file, and stays quiet about the
+rest (untyped code and unresolvable imports produce nothing).
 
 The tools run against the already-fetched file texts in a throwaway directory
 (never a checkout, never executing PR code), in a subprocess with a scrubbed
@@ -392,7 +400,7 @@ injection-wrapped before it reaches the model. CLI:
 ```yaml
 static_analysis:
   enabled: true
-  tools: [ruff, bandit]        # default: ruff, bandit, semgrep
+  tools: [ruff, bandit, mypy]  # default: ruff, bandit, semgrep, mypy
   min_severity: low            # floor on mapped tool severity (default info)
   tool_min_severity:           # per-tool overrides of the global floor
     ruff: medium               # only medium+ from ruff; bandit keeps `low`

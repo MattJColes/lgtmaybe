@@ -554,7 +554,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix, with an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax); safe no-op elsewhere |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
-| `static_analysis` | `false` | Run installed linters (ruff, bandit, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
+| `static_analysis` | `false` | Run installed linters (ruff, bandit, mypy, semgrep with local rules) sandboxed over the changed files and feed their findings to the model as untrusted hints |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
 | `auto_diagram` | `true` | Post a compact Mermaid flowchart comment when a PR is opened/reopened, before the review; set `false` to opt out |
 | `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
@@ -2420,9 +2420,17 @@ Static-analysis fusion: run fast, deterministic linters over the changed files
 and feed their findings to the model as **hints to confirm, contextualise, or
 discard**. This raises recall on exactly the mechanical bugs LLMs miss without
 posting raw linter noise — only findings the model itself confirms are
-reported. Supported tools: **ruff** and **bandit** (Python), and **semgrep**
-(multi-language) when you point `semgrep_rules` at local rules — semgrep's
-registry configs need the network, which the sandbox forbids.
+reported. Supported tools: **ruff**, **bandit**, and **mypy** (Python), and
+**semgrep** (multi-language) when you point `semgrep_rules` at local rules —
+semgrep's registry configs need the network, which the sandbox forbids.
+
+**mypy** earns its place on unguarded-`Optional` bugs: a `dict.get()` narrowed
+to `str | None` and then dereferenced is a crash a review lens reads straight
+past, and mypy proves it from the file's own text in seconds. It runs with
+`--ignore-missing-imports --follow-imports=skip`, because the sandbox holds only
+the changed files and everything they import is absent by construction —
+so it reports what it can prove from a single file, and stays quiet about the
+rest (untyped code and unresolvable imports produce nothing).
 
 The tools run against the already-fetched file texts in a throwaway directory
 (never a checkout, never executing PR code), in a subprocess with a scrubbed
@@ -2436,7 +2444,7 @@ injection-wrapped before it reaches the model. CLI:
 ```yaml
 static_analysis:
   enabled: true
-  tools: [ruff, bandit]        # default: ruff, bandit, semgrep
+  tools: [ruff, bandit, mypy]  # default: ruff, bandit, semgrep, mypy
   min_severity: low            # floor on mapped tool severity (default info)
   tool_min_severity:           # per-tool overrides of the global floor
     ruff: medium               # only medium+ from ruff; bandit keeps `low`
@@ -3244,7 +3252,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep'], 'min_severity': 'info', 'tool_min_severity': {}, 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy'], 'min_severity': 'info', 'tool_min_severity': {}, 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -3698,7 +3706,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "default": [
             "ruff",
             "bandit",
-            "semgrep"
+            "semgrep",
+            "mypy"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -3715,7 +3724,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "enum": [
         "ruff",
         "bandit",
-        "semgrep"
+        "semgrep",
+        "mypy"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -3977,7 +3987,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "tools": [
           "ruff",
           "bandit",
-          "semgrep"
+          "semgrep",
+          "mypy"
         ]
       }
     },

@@ -46,6 +46,8 @@ static-analysis = [
     "ruff>=0.5",
     "bandit>=1.7",
     "semgrep>=1.60",
+    # --output json landed in mypy 1.11; the runner parses that shape only.
+    "mypy>=1.11",
 ]
 # Hosted identity broker only; not installed by CLI or Action users.
 identity-broker = [

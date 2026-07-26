@@ -136,6 +136,7 @@ class StaticAnalysisTool(StrEnum):
     ruff = "ruff"
     bandit = "bandit"
     semgrep = "semgrep"
+    mypy = "mypy"
 
 
 class StaticAnalysisConfig(_Strict):
@@ -159,7 +160,8 @@ class StaticAnalysisConfig(_Strict):
     tools: list[StaticAnalysisTool] = Field(default=list(StaticAnalysisTool))
     # Floor on the MAPPED severity of tool findings (ruff → low; bandit
     # LOW/MEDIUM/HIGH → low/medium/high; semgrep INFO/WARNING/ERROR →
-    # info/medium/high). Hints below it are dropped before prompting.
+    # info/medium/high; mypy error → medium, note → info). Hints below it are
+    # dropped before prompting.
     min_severity: Severity = Severity.info
     # Per-tool overrides of `min_severity` — e.g. keep every bandit hit but
     # take only medium+ from ruff. A tool without an entry uses the global
