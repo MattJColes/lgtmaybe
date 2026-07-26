@@ -272,7 +272,11 @@ class RestGitHubGateway(GitHubGateway):
         # single-page PR the whole count hides inside the file-fetch latency.
         reviewable = [path for path in changed_files if is_reviewable(path)]
         file_contents: dict[str, str] = {}
-        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
+        # +1, not a shared slot: the count must be free, and taking a worker
+        # from the pool would narrow content fetching to
+        # _CONTENT_FETCH_WORKERS - 1 for as long as the count runs — turning an
+        # overlap into a slowdown on exactly the wide PRs the pool sizing is for.
+        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 1) as pool:
             open_threads = pool.submit(self.count_open_finding_threads)
             if reviewable:
                 results = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
