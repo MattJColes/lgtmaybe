@@ -111,6 +111,28 @@ def test_contract_requires_suggestion_to_be_replacement_code() -> None:
     assert "prose" in prompt
 
 
+def test_contract_binds_suggestion_names_to_the_target_file() -> None:
+    """A suggestion is committed verbatim, so its names must resolve in the file
+    being changed — not in whichever worked example this prompt happened to show.
+
+    The failure this guards against is real and example-seeded: the deprecation
+    example fixes `datetime.utcnow()` in a file that does `import datetime`, so it
+    suggests `datetime.timezone.utc`. Shown a file that does
+    `from datetime import datetime`, a model carried that qualifier across and
+    produced `datetime.now(tz=datetime.timezone.utc)` — an AttributeError, since
+    there `datetime` is the class, not the module. Committing that suggestion
+    replaces working code with a crash.
+    """
+    # Asserted on BOTH prompt shapes: prompt_cache defaults on, so the shared
+    # preamble is the one production actually sends. A rule that lived only in
+    # the legacy system prompt would be absent from every default review.
+    for prompt in (_union_prompt().lower(), build_shared_preamble().lower()):
+        # The contract must scope name resolution to the file under review...
+        assert "imports" in prompt
+        # ...and say what to do when the fix needs a name the file lacks.
+        assert "import" in prompt and "body" in prompt
+
+
 def test_worked_example_suggestions_are_code_not_prose() -> None:
     """Every non-null worked-example suggestion must read as code, not an English
     instruction — the model copies these verbatim."""
