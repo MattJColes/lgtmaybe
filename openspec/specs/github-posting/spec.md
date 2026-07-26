@@ -72,8 +72,10 @@ When a finding is gone and GitHub marks its thread outdated, the thread SHALL
 be replied to and resolved via GraphQL (the one op REST can't do), and the
 opening comment's fingerprint marker rewritten into a disjoint "resolved"
 family so a finding that reappears later posts again instead of staying
-suppressed by re-run dedupe. Best-effort is PER THREAD: threads are independent
-and resolve concurrently, so one that fails never stops the others.
+suppressed by re-run dedupe. The thread SHALL be resolved BEFORE the reply is
+posted — the reply records a resolution and must never outlive one. Best-effort
+is PER THREAD: threads are independent and resolve concurrently, so one that
+fails never stops the others.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: GraphQL call errors
@@ -83,6 +85,11 @@ and resolve concurrently, so one that fails never stops the others.
 #### Scenario: one thread of several fails
 - **WHEN** several threads are fixed and one errors mid-resolve
 - **THEN** the remaining threads are still replied to and resolved
+
+#### Scenario: the identity may not resolve threads
+- **WHEN** `resolveReviewThread` is refused for the configured identity
+- **THEN** no reply is posted and no marker is rewritten, so the step is a no-op
+  that cannot accumulate a reply on every subsequent run
 
 ### Requirement: Downvoted findings are read from 👎 reactions
 

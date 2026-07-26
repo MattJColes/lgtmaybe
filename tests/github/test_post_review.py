@@ -1120,3 +1120,45 @@ def test_one_failing_thread_does_not_block_the_others() -> None:
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert sorted(graphql.resolved) == ["THREAD0", "THREAD2"]
+
+
+@respx.mock
+def test_failed_resolve_posts_no_reply() -> None:
+    """The reply is the *record* of a resolution, so it must never outlive one.
+
+    Regression: the reply was posted before the resolve, so a `resolveReviewThread`
+    the app isn't permitted to make (GitHub answers FORBIDDEN, and GraphQL errors
+    come back as HTTP 200) left a "Looks resolved" on a thread that stayed open —
+    and the thread then re-qualified on every later run, adding another reply each
+    time. Unbounded, not merely duplicated.
+    """
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+
+    def forbid_resolve(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "resolveReviewThread" in payload.get("query", ""):
+            return httpx.Response(
+                200,
+                json={
+                    "data": None,
+                    "errors": [
+                        {"type": "FORBIDDEN", "message": "Resource not accessible by integration"}
+                    ],
+                },
+            )
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=forbid_resolve)
+    patched: list[httpx.Request] = []
+    respx.route(method="PATCH").mock(
+        side_effect=lambda request: (patched.append(request), httpx.Response(200, json={}))[1]
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.replies == [], "replied on a thread that was never resolved"
+    assert graphql.resolved == []
+    assert patched == [], "rewrote the fingerprint marker of an unresolved thread"

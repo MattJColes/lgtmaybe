@@ -854,7 +854,18 @@ class RestGitHubGateway(GitHubGateway):
                 self._reply_and_resolve(thread_id)
                 self._mark_comment_resolved(comment_id, first_body)
             except Exception as exc:  # noqa: BLE001 — one thread never blocks the rest
-                _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
+                if "FORBIDDEN" in str(exc) or "not accessible by integration" in str(exc):
+                    # Not transient: the identity simply cannot resolve threads,
+                    # so this recurs every run until someone changes the setup.
+                    # Say what to do about it rather than repeating a bare error.
+                    _log.warning(
+                        "auto-resolve is not permitted for this identity — threads stay open. "
+                        "Grant the token/App pull-request write access, or set "
+                        "resolve_fixed: false to stop attempting it. (%s)",
+                        exc,
+                    )
+                else:
+                    _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
 
         # Each thread costs a reply + a resolve + a marker rewrite; a PR with
         # several fixed findings paid all of it serially. They touch different
@@ -923,14 +934,23 @@ class RestGitHubGateway(GitHubGateway):
         return fixed
 
     def _reply_and_resolve(self, thread_id: str) -> None:
-        """Post a short reply on a thread, then mark it resolved."""
-        self.reply_in_thread(thread_id, "✅ Looks resolved.")
+        """Mark a thread resolved, then post the short reply recording it.
+
+        Resolve FIRST. The reply is the record of a resolution, so it must never
+        outlive one: replying first meant a resolve the app isn't permitted to
+        make (GitHub answers FORBIDDEN, and GraphQL errors arrive as HTTP 200)
+        left "✅ Looks resolved." on a thread that stayed open — which then
+        re-qualified as fixed on every later run and collected another reply each
+        time. Resolving first makes the whole step no-op when it can't complete,
+        instead of unboundedly noisy.
+        """
         resolve = """
         mutation($threadId:ID!){
           resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
         }
         """
         self._graphql(resolve, {"threadId": thread_id})
+        self.reply_in_thread(thread_id, "✅ Looks resolved.")
 
     def _mark_comment_resolved(self, comment_id: int | None, body: str) -> None:
         """Rewrite a resolved comment's fingerprint marker into the "resolved" family.
