@@ -105,6 +105,16 @@ _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
 # adapter's route list, drifting from it every time a backend adds caching.
 _WARMUP_MIN_TOKENS = 2048
 
+# Hidden flag on the summary of a run that did not complete every lens call —
+# a failed call, or one skipped past the max_review_seconds deadline (which
+# reports itself as a failed call). Invisible in rendered Markdown, so it costs
+# the review body nothing, and machine-readable, so the posting step can make
+# the incompleteness *visible on the PR* rather than leaving it in a body edit
+# nobody is notified about (see cli.run_review). Its own marker family:
+# deliberately disjoint from the summary/finding/reviewed markers the GitHub
+# adapter matches on.
+INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
+
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
     """The fan-out pool size: the explicit cap, else the provider-aware default."""
@@ -574,12 +584,14 @@ class LLMReviewEngine(ReviewEngine):
                 f"{listed}{more} (`/review full` reviews everything)."
             )
         # Some — but not all — lenses failed: the result may be incomplete, so say
-        # so and don't claim a clean bill of health.
+        # so and don't claim a clean bill of health. The hidden marker rides along
+        # so the posting step can tell an incomplete run from a complete one
+        # without matching prose the user may have restyled (summary_template).
         if failed_calls:
             detail = errors[-1] if errors else "timeout or unparseable output"
             notices.append(
                 f"⚠️ {failed_calls} of {total_calls} review calls failed "
-                f"({detail}); results may be incomplete."
+                f"({detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
             )
         # A batch that had to be shrunk is a standing signal that the diff is at
         # the edge of what this model finishes in its budget — say it, or the next

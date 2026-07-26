@@ -31,6 +31,12 @@ also carries the last-reviewed-SHA watermark that drives incremental review.
 - **WHEN** a review already exists from a prior run
 - **THEN** the summary is updated in place, not duplicated
 
+#### Scenario: an incomplete run re-runs on the same PR
+- **WHEN** the summary carries the hidden incomplete marker and the body update
+  is an in-place edit nobody is notified about
+- **THEN** the notice also posts as a PR comment, so a partial review is never
+  indistinguishable from a clean one
+
 ### Requirement: Findings carry fingerprints
 
 Each inline comment SHALL embed two hidden per-finding ids — a fingerprint

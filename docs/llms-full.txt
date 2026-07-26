@@ -4915,6 +4915,16 @@ network recovers but a dead-end failure surfaces fast:
   explicit incomplete-results notice. It can never produce a silent LGTM: a
   run where every call failed or was skipped still fails loud.
 
+- **Incompleteness is visible on the PR, not just in the log.** The notice above
+  is not specific to the deadline: *any* failed lens call (a per-call timeout, a
+  provider error, unparseable output) raises it, and the engine stamps a hidden
+  `<!-- lgtmaybe-incomplete -->` marker alongside it. Because a re-run can only
+  update the *first* run's review body in place — a silent edit, while this run's
+  new findings arrive as individual review comments GitHub wraps in bodyless
+  reviews — an incomplete run also posts the notice as its own PR comment. A
+  half-complete review must never look like a clean one. A review that failed
+  outright posts its failure notice the same way.
+
 - **One global fan-out pool.** Every (batch, lens) call runs through a single
   `ThreadPoolExecutor` sized by `max_concurrency` — default **8 workers** for
   hosted providers (the classified retry backoff absorbs a capacity 429 on a
