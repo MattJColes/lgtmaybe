@@ -134,6 +134,7 @@ def test_no_default_encoding_io() -> None:
                 _run_tool(
                     StaticAnalysisTool.ruff,
                     root,
+                    root,
                     ReviewConfig(provider="ollama", model="llama3"),
                 )
             try:

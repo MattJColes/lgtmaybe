@@ -168,27 +168,47 @@ any triage failure reviews everything, and skips are named in the summary.
 - **WHEN** a file the cheap model would skip matches the security floor
 - **THEN** the strong model reviews it anyway
 
-### Requirement: Static analysis grounds, never posts
+### Requirement: Static analysis runs sandboxed
 
-Installed tools SHALL run sandboxed when static analysis is enabled — ruff,
-bandit, and semgrep with local rules only; scrubbed env, no network, hard
-timeout, temp dir, never a checkout — and their findings enter the prompt only
-as an untrusted HINTS block ("confirm, contextualise, or discard"). Paths MUST
-be canonical forward-slash repository paths. On Windows the scrubbed
-environment MUST pass through process-critical system variables while pinning
-user config and profile directories to the temp root. Raw tool findings are
-never posted; a missing tool is skipped silently.
+Installed tools SHALL run sandboxed when static analysis is enabled — scrubbed
+env, no network, hard timeout, throwaway temp dir, never a checkout, and rules
+only from local configuration. Paths MUST be canonical forward-slash repository
+paths. On Windows the scrubbed environment MUST pass through process-critical
+system variables while pinning user config and profile directories to the temp
+root. A tool that is not installed is skipped, and any tool failure degrades to
+no output from that tool rather than failing the review.
 <!-- anchor: engine.static-analysis -->
 
-#### Scenario: semgrep has no local rules
-- **WHEN** static analysis runs without `semgrep_rules` configured
-- **THEN** semgrep does not run at all (never `--config auto`)
+#### Scenario: a tool needs rules it does not have locally
+- **WHEN** static analysis runs a rules-driven tool with no local rules
+- **THEN** that tool does not run at all (never a network rule registry)
 
 #### Scenario: a Windows tool reports a backslash path
 - **WHEN** static analysis reports `.\src\app.py`
-- **THEN** the hint is associated with the canonical diff path `src/app.py`
+- **THEN** the finding is associated with the canonical diff path `src/app.py`
 
 #### Scenario: static analysis runs on Windows
 - **WHEN** a child analyzer starts under Windows
 - **THEN** it receives the minimal process-critical system variables and temp-
   rooted user directories without inheriting cloud credentials
+
+### Requirement: Tool findings ground or post, by mode
+
+Each tool's findings SHALL reach the review by its configured mode: `hint`
+wraps them as untrusted grounding for the lens calls, while `finding` maps them
+onto review findings posted with no model call. Direct-posted findings MUST be
+redacted, MUST carry a `scan:<tool>` category, and MUST be re-anchored, deduped,
+suppressed and rule-filtered like any other finding — but never reflected, since
+there is no model judgement to audit. A direct finding whose anchor matches no
+changed line MUST be dropped and counted in the summary, because the tools read
+whole files and only the diff is under review.
+<!-- anchor: engine.tool-findings -->
+
+#### Scenario: a scanner hits a line the PR changed
+- **WHEN** a `finding`-mode tool reports a credential on a changed line
+- **THEN** the review posts it without any model call, and no raw secret value
+  appears in the finding
+
+#### Scenario: a scanner hits pre-existing code
+- **WHEN** a `finding`-mode tool reports an issue on an unchanged line
+- **THEN** the finding is dropped and the summary states how many were skipped

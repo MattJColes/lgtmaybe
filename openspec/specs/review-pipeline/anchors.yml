@@ -83,3 +83,9 @@ engine.static-analysis:
     kind: function_definition
     has: { field: name, regex: '^run_static_analysis$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+engine.tool-findings:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^tool_review_findings$' }
+  files: [src/lgtmaybe/engine/**/*.py]

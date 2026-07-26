@@ -49,7 +49,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy'], 'min_severity': 'info', 'tool_min_severity': {}, 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -499,12 +499,23 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Tool Min Severity",
           "type": "object"
         },
+        "tool_mode": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolMode"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/StaticAnalysisTool"
+          },
+          "title": "Tool Mode",
+          "type": "object"
+        },
         "tools": {
           "default": [
             "ruff",
             "bandit",
             "semgrep",
-            "mypy"
+            "mypy",
+            "gitleaks"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -517,14 +528,24 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "StaticAnalysisTool": {
-      "description": "A deterministic linter/SAST tool whose findings ground the LLM review.",
+      "description": "A deterministic linter/SAST tool whose findings feed the review.\n\nThe value is the binary name looked up on PATH, so it may differ from the\nmember name where the binary is hyphenated.",
       "enum": [
         "ruff",
         "bandit",
         "semgrep",
-        "mypy"
+        "mypy",
+        "gitleaks"
       ],
       "title": "StaticAnalysisTool",
+      "type": "string"
+    },
+    "ToolMode": {
+      "description": "How a tool's findings reach the review.\n\n``hint`` is the original fusion behaviour: findings become an untrusted\nHINTS block the model confirms, contextualises, or discards. ``finding``\nskips the model entirely and posts the tool's result as a review comment.\n\nWhich one is right is a property of the tool's precision, not a user\npreference: a secret is present or it isn't, so asking a model to \"confirm\nor discard\" a deterministic regex match only adds cost and doubt. A lint or\na SAST heuristic genuinely benefits from a model judging whether it matters\nhere. Per-tool defaults live in ``engine.static_analysis``; this enum is the\noverride users reach for via ``static_analysis.tool_mode``.",
+      "enum": [
+        "hint",
+        "finding"
+      ],
+      "title": "ToolMode",
       "type": "string"
     }
   },
@@ -781,11 +802,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "min_severity": "info",
         "semgrep_rules": null,
         "tool_min_severity": {},
+        "tool_mode": {},
         "tools": [
           "ruff",
           "bandit",
           "semgrep",
-          "mypy"
+          "mypy",
+          "gitleaks"
         ]
       }
     },

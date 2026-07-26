@@ -1697,6 +1697,90 @@ def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: i
 
 
 # ---------------------------------------------------------------------------
+# static-analysis fusion: finding mode posts directly, with no model in the loop
+# ---------------------------------------------------------------------------
+
+
+def _scan_hit(path: str = "f.py", line: int = 2):  # type: ignore[no-untyped-def]
+    """A gitleaks hit — a finding-mode tool by default."""
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    return ToolFinding(
+        tool="gitleaks",
+        path=path,
+        line=line,
+        rule="aws-access-key-id",
+        message="AWS Access Key",
+        severity=Severity.high,
+    )
+
+
+def test_finding_mode_posts_without_the_model_reporting_it(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The whole point: a deterministic hit becomes a comment with no model call."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
+
+    assert [(f.category, f.line, f.severity) for f in findings] == [
+        ("scan:gitleaks", 2, Severity.high)
+    ]
+
+
+def test_finding_mode_output_never_becomes_a_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A tool posts or it grounds — never both, or the model re-reports it."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    engine.review(_HINT_CTX, _sa_cfg())
+
+    assert "HINTS" not in _first_user_diff(provider)
+
+
+def test_scan_findings_never_reach_reflection(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Reflection is a model call; a deterministic finding has nothing to audit.
+
+    Sending them would reintroduce the cost and the false-negative risk the
+    direct-post path exists to remove.
+    """
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=False)  # would drop everything
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
+
+    assert len(findings) == 1, "the auditor must not be able to drop a scan finding"
+    assert not any(_REFLECT_MARKER in c["messages"][0]["content"] for c in provider.calls)
+
+
+def test_scan_finding_on_an_unchanged_line_is_dropped(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Tools scan whole files; only what the PR actually changed may be reported.
+
+    Line 1 of the fixture is unchanged context. Without this, a pre-existing
+    credential in a test fixture would post on every PR that touches the file,
+    forever — which is why teams switch scanners off.
+    """
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit(line=1)]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, summary = engine.review(_HINT_CTX, _sa_cfg())
+
+    assert findings == []
+    assert "unchanged" in summary.lower()
+
+
+# ---------------------------------------------------------------------------
 # summary template (F5b)
 # ---------------------------------------------------------------------------
 

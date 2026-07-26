@@ -131,12 +131,36 @@ class _Strict(BaseModel):
 
 
 class StaticAnalysisTool(StrEnum):
-    """A deterministic linter/SAST tool whose findings ground the LLM review."""
+    """A deterministic linter/SAST tool whose findings feed the review.
+
+    The value is the binary name looked up on PATH, so it may differ from the
+    member name where the binary is hyphenated.
+    """
 
     ruff = "ruff"
     bandit = "bandit"
     semgrep = "semgrep"
     mypy = "mypy"
+    gitleaks = "gitleaks"
+
+
+class ToolMode(StrEnum):
+    """How a tool's findings reach the review.
+
+    ``hint`` is the original fusion behaviour: findings become an untrusted
+    HINTS block the model confirms, contextualises, or discards. ``finding``
+    skips the model entirely and posts the tool's result as a review comment.
+
+    Which one is right is a property of the tool's precision, not a user
+    preference: a secret is present or it isn't, so asking a model to "confirm
+    or discard" a deterministic regex match only adds cost and doubt. A lint or
+    a SAST heuristic genuinely benefits from a model judging whether it matters
+    here. Per-tool defaults live in ``engine.static_analysis``; this enum is the
+    override users reach for via ``static_analysis.tool_mode``.
+    """
+
+    hint = "hint"
+    finding = "finding"
 
 
 class StaticAnalysisConfig(_Strict):
@@ -167,6 +191,11 @@ class StaticAnalysisConfig(_Strict):
     # take only medium+ from ruff. A tool without an entry uses the global
     # floor; a tool's own entry always wins, in either direction.
     tool_min_severity: dict[StaticAnalysisTool, Severity] = Field(default_factory=dict)
+    # Per-tool overrides of how findings reach the review (hint vs finding). A
+    # tool without an entry uses the built-in default for that tool — see
+    # `engine.static_analysis._DEFAULT_MODE`, which routes deterministic-claim
+    # tools straight to posting and interpretive ones through the model.
+    tool_mode: dict[StaticAnalysisTool, ToolMode] = Field(default_factory=dict)
     # Local semgrep rules file/dir passed as --config. semgrep is SKIPPED when
     # unset: its registry configs (`--config auto`) fetch over the network,
     # which the sandbox forbids.
@@ -238,6 +267,11 @@ class ReviewFinding(_Strict):
 
 _BUILTIN_LENS_IDS: frozenset[str] = frozenset(c.value for c in ReviewCategory)
 
+# Category prefix stamped on a finding that came from a deterministic tool
+# rather than a lens. Lives here, not in the engine, so the CustomLens id
+# validator can reserve it without importing the engine.
+_SCAN_CATEGORY_PREFIX = "scan:"
+
 
 class CustomLens(_Strict):
     """A user-defined review lens — a "skill file" run alongside the built-ins.
@@ -264,6 +298,15 @@ class CustomLens(_Strict):
             raise ValueError("custom lens id must be a non-empty string")
         if cleaned in _BUILTIN_LENS_IDS:
             raise ValueError(f"custom lens id {cleaned!r} collides with a built-in category")
+        # The engine keys "did a deterministic tool produce this?" on the `scan:`
+        # category prefix, and treats such findings differently: they skip the
+        # reflection audit and are dropped when they land off the diff. A lens
+        # must not be able to claim that status for a model's output.
+        if cleaned.startswith(_SCAN_CATEGORY_PREFIX):
+            raise ValueError(
+                f"custom lens id {cleaned!r} is reserved: the "
+                f"{_SCAN_CATEGORY_PREFIX!r} prefix marks deterministic tool findings"
+            )
         return cleaned
 
     @model_validator(mode="after")
