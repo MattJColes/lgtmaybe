@@ -69,8 +69,14 @@ on `ProviderResult`.
 #### Scenario: provider SDK ignores its timeout
 - **WHEN** the underlying completion call remains blocked past the configured
   timeout
-- **THEN** the adapter raises a timeout error reporting the measured wait, and the
-  existing bounded retry policy decides whether to retry
+- **THEN** the adapter raises a timeout error reporting the measured wait, and does
+  not retry it — an identical request against an identical budget can only fail the
+  same way — while a configured fallback model is still tried
+
+#### Scenario: a failed call reports what it cost
+- **WHEN** a completion fails after exhausting its retries
+- **THEN** the raised error carries the attempt count, so instrumentation
+  distinguishes a budget-burning failure from a first-try one
 
 #### Scenario: the call completes just past the deadline
 - **WHEN** the completion finishes within the platform timer's granularity after
@@ -98,3 +104,9 @@ model ids.
 #### Scenario: openrouter gets the generous default
 - **WHEN** `timeout` is unset and the provider is openrouter
 - **THEN** the generous (long) default applies, not the cloud one
+
+#### Scenario: the documented default and the resolved one disagree
+- **WHEN** a provider's resolved default stops matching the seconds the Action
+  input and the Action how-to advertise
+- **THEN** the test suite fails, because a silently reclassified provider leaves
+  every timeout floor green while breaking the promise a user read

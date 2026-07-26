@@ -1,5 +1,6 @@
 """Structural guards for the supplied lgtmaybe workflows."""
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -73,6 +74,45 @@ def test_dogfood_workflow_prints_the_timing_profile() -> None:
         if step.get("uses") == "./"
     ]
     assert action_step.get("with", {}).get("profile") is True
+
+
+def test_dogfood_workflow_reviews_with_the_image_it_builds() -> None:
+    """The dogfood review must run this repo's code, not the last release.
+
+    `uses: ./` only makes action.yml local; the container still defaults to the
+    floating published tag, so reviews ran whatever was last released. That skew
+    let a merged fix go unexercised for days — and let a review's own timeout
+    contradict the action.yml sitting beside it. The job therefore builds the
+    image from the (base) checkout and passes that tag to the action.
+    """
+    workflow = yaml.safe_load(_DOGFOOD_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["review"]["steps"]
+
+    builds = [step for step in steps if "docker build" in str(step.get("run", ""))]
+    assert builds, "the dogfood job must build the reviewer image from the checkout"
+    build_command = str(builds[0]["run"])
+    tag_match = re.search(r"--tag\s+(\S+)", build_command)
+    assert tag_match, f"the build step must tag its image: {build_command!r}"
+
+    [action_step] = [step for step in steps if step.get("uses") == "./"]
+    assert action_step["with"]["image"] == tag_match.group(1), (
+        "the dogfood review must run the locally built image, not the published tag"
+    )
+
+
+def test_starter_workflows_use_the_published_image() -> None:
+    """The opposite guard for the examples users copy: they must NOT build from a
+    checkout — they consume the released image via the published action ref."""
+    for path in sorted(_STARTER_WORKFLOWS.glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in workflow["jobs"].values():
+            for step in job["steps"]:
+                assert "docker build" not in str(step.get("run", "")), (
+                    f"{path.name} builds an image; starter workflows use the released one"
+                )
+                assert "image" not in (step.get("with") or {}), (
+                    f"{path.name} overrides the container image; starters take the default"
+                )
 
 
 def test_dogfood_concurrency_only_applies_to_eligible_review_job() -> None:

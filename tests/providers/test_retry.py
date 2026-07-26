@@ -12,6 +12,7 @@ import httpx
 import litellm
 import pytest
 
+from lgtmaybe.core.models import attempts_of
 from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
 
@@ -72,9 +73,10 @@ class TestRetry:
         """A call that finished just past the deadline is honoured, not thrown away.
 
         Discarding it would waste a response the provider already billed for, and
-        (worse) surface a *permanent* error as a retryable TimeoutError. Driven with
-        a fake clock and an inline worker so it pins the behaviour deterministically
-        rather than racing a real deadline.
+        (worse) replace its real error — a quota 429, a bad key — with a bare
+        timeout that says nothing about what to fix. Driven with a fake clock and
+        an inline worker so it pins the behaviour deterministically rather than
+        racing a real deadline.
         """
         # start=0.0, then every check is past the 0.05s deadline.
         clock = iter([0.0] + [100.0] * 20)
@@ -100,9 +102,9 @@ class TestRetry:
         assert response.choices[0].message.content == "late but complete"
 
     def test_permanent_error_is_not_converted_into_a_retryable_timeout(self) -> None:
-        """A permanent failure must surface as itself. TimeoutError is retryable
-        (it is not in _PERMANENT_ERROR_TYPES), so masking one as a timeout would
-        turn fail-fast into a retry storm."""
+        """A permanent failure must surface as itself, not as a timeout: the review's
+        failure notice quotes the error, and "provider request exceeded 60s" tells
+        a user nothing about an invalid API key."""
         calls = 0
 
         def bad_auth(*args: Any, **kwargs: Any) -> Any:
@@ -154,6 +156,167 @@ class TestRetry:
             provider = LiteLLMProvider()
             with pytest.raises(RuntimeError):
                 provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+    def test_terminal_failure_carries_the_attempts_it_burned(self) -> None:
+        """A failed call must say how many attempts it cost.
+
+        The count only ever rode home on a successful ProviderResult, so a
+        three-attempt failure was recorded as ``attempts=0`` — reading as
+        "never retried" in the timing profile, while it had in fact burned the
+        whole retry budget.
+        """
+        with patch("litellm.completion", side_effect=RuntimeError("always fails")):
+            provider = LiteLLMProvider()
+            with pytest.raises(RuntimeError) as caught:
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert attempts_of(caught.value) == _MAX_ATTEMPTS
+
+    def test_fail_fast_error_reports_its_single_attempt(self) -> None:
+        """A permanent error is tried once, and says so."""
+        with patch(
+            "litellm.completion",
+            side_effect=litellm.AuthenticationError(
+                message="invalid api key", model="gpt-4o", llm_provider="openai"
+            ),
+        ):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.AuthenticationError) as caught:
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert attempts_of(caught.value) == 1
+
+    def test_an_unstamped_exception_reports_no_attempts(self) -> None:
+        """An error raised before the adapter ever counted an attempt stays 0."""
+        assert attempts_of(RuntimeError("never reached the adapter")) == 0
+
+    def test_a_failing_fallback_reports_both_models_requests(self) -> None:
+        """Both legs' requests were billed, so a total failure counts both."""
+        with patch("litellm.completion", side_effect=RuntimeError("both models fail")):
+            provider = LiteLLMProvider(model="openrouter/slow", fallback_model="openrouter/quick")
+            with pytest.raises(RuntimeError) as caught:
+                provider.complete([{"role": "user", "content": "hi"}], "ignored")
+
+        assert attempts_of(caught.value) == 2 * _MAX_ATTEMPTS
+
+    def test_a_re_send_inside_one_attempt_still_counts(self) -> None:
+        """Every request that goes out counts, not every tenacity attempt.
+
+        The empty-structured-output path issues a SECOND model request inside one
+        attempt. Counting attempts rather than requests reported that failure as
+        one call when the provider had been asked twice.
+        """
+        calls = 0
+
+        def empty_then_fail(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if "response_format" in kwargs:
+                return _fake_response("")  # schema decoder yielded nothing
+            raise litellm.AuthenticationError(
+                message="invalid api key", model="gpt-4o", llm_provider="openai"
+            )
+
+        with patch("litellm.completion", side_effect=empty_then_fail):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.AuthenticationError) as caught:
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "openai/gpt-4o", response_format={}
+                )
+
+        assert calls == 2
+        assert attempts_of(caught.value) == 2
+
+
+class TestWallTimeoutIsNotRetried:
+    """A wall-clock timeout re-sent unchanged cannot do anything but burn budget.
+
+    The request, the model and the wall are all identical on the retry, so
+    attempts 2..N buy nothing and cost another full timeout each — at the
+    generous 1800s default that is an hour of runner time per lens before the
+    failure surfaces.
+    """
+
+    def test_the_wall_timeout_is_attempted_once(self) -> None:
+        # The request runs on a daemon thread the wall timeout abandons, so the
+        # counter is read only after that thread confirms it started — otherwise a
+        # loaded runner could time out before the worker was ever scheduled and
+        # the assertion would be about thread scheduling, not about retries.
+        release = threading.Event()
+        started = threading.Event()
+        counted = threading.Lock()
+        calls = 0
+
+        def hangs(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            with counted:
+                calls += 1
+            started.set()
+            release.wait(timeout=5)
+            return _fake_response()
+
+        try:
+            with patch("litellm.completion", side_effect=hangs):
+                provider = LiteLLMProvider(timeout=0.05)
+                with pytest.raises(provider_module.ProviderWallTimeout, match="exceeded 0.05"):
+                    provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+        finally:
+            release.set()
+
+        assert started.wait(timeout=5), "the one request never reached the provider"
+        with counted:
+            assert calls == 1
+
+    def test_it_still_reads_as_a_timeout_error(self) -> None:
+        """Callers (and the review's failure notice) keep seeing a TimeoutError."""
+        assert issubclass(provider_module.ProviderWallTimeout, TimeoutError)
+
+    def test_a_transport_timeout_is_still_retried(self) -> None:
+        """litellm's own connect/read timeout is a blip, not a blown wall — it
+        keeps its retries."""
+        calls = 0
+
+        def transport_timeout(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.Timeout(
+                message="Connection timed out", model="deepseek", llm_provider="openrouter"
+            )
+
+        with patch("litellm.completion", side_effect=transport_timeout):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.Timeout):
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert calls == _MAX_ATTEMPTS
+
+    def test_the_fallback_model_still_gets_its_chance(self) -> None:
+        """Not retrying is about re-sending the SAME request; a different model is
+        a different request, and still worth trying."""
+        release = threading.Event()
+        seen: list[str] = []
+
+        def hang_then_answer(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs["model"])
+            if kwargs["model"] == "openrouter/slow":
+                release.wait(timeout=5)
+            return _fake_response("fallback answered")
+
+        try:
+            with patch("litellm.completion", side_effect=hang_then_answer):
+                provider = LiteLLMProvider(
+                    model="openrouter/slow", fallback_model="openrouter/quick", timeout=0.05
+                )
+                result = provider.complete([{"role": "user", "content": "hi"}], "ignored")
+        finally:
+            release.set()
+
+        assert result.text == "fallback answered"
+        assert seen == ["openrouter/slow", "openrouter/quick"]
+        # Two requests went out and both were billed, so both are in the total —
+        # a fallback rescue reported as one request would hide the primary's
+        # burnt budget entirely.
+        assert result.attempts == 2
 
 
 class TestTemperatureRejection:
