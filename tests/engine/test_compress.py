@@ -630,3 +630,32 @@ def test_no_overlap_when_head_text_is_shorter_than_the_hunks() -> None:
         assert next_start > prev_end, f"hunks overlap: {ranges}"
     # Both changes survive the trim.
     assert "x45" in expanded and "x47" in expanded
+
+
+def test_boundary_reach_is_proportionate_to_the_fixed_pad() -> None:
+    """The enclosing-definition pad may not dwarf the pad it widens.
+
+    The reach exists so a hunk deep in a function still sees the signature. But
+    it pads with every intervening line, not just the signature, so a reach many
+    times `_MAX_CONTEXT_LINES` stops adding context and starts replacing the
+    diff with an unrelated function body — the very thing the cap exists to
+    prevent. Keep it a small multiple of the largest fixed pad.
+    """
+    from lgtmaybe.engine.compress import _MAX_BOUNDARY_REACH, _MAX_CONTEXT_LINES
+
+    assert _MAX_BOUNDARY_REACH <= 2 * _MAX_CONTEXT_LINES
+
+
+def test_a_definition_far_above_the_hunk_is_out_of_reach() -> None:
+    """A hunk 60 lines into a long function keeps the fixed pad."""
+    content = "\n".join(["def long_one():"] + [f"    l{i}" for i in range(1, 100)])
+
+    expanded = expand_hunks(
+        "diff --git a/f.py b/f.py\n@@ -61,1 +61,1 @@\n     l60\n",
+        content,
+        2,
+        after=1,
+        boundaries=[(1, 100)],
+    )
+
+    assert "def long_one" not in expanded
