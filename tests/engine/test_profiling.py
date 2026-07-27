@@ -116,7 +116,7 @@ class TestProfiler:
         assert text.index("tests") < text.index("security")
         assert "RateLimitError" in text
         assert "900 tokens read / 200 created across 2 calls" in text
-        assert "tokens: 2100 billable (2000 in / 100 out) across 2 calls" in text
+        assert "tokens: 2,100 billable (2,000 in / 100 out) across 2 calls" in text
 
 
 class TestTotalTokens:
