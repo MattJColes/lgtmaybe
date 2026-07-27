@@ -414,6 +414,14 @@ the CLI, seed it once with `osv-scanner --download-offline-databases`; without a
 database the scanner reports nothing, and the review says so rather than passing
 it off as clean.
 
+When osv-scanner is set to post findings, the review prompt **stops asking the
+model** whether a version has a known advisory or a package is abandoned — a
+knowledge cutoff cannot answer either, so asking would only put a confident
+guess beside an accurate answer. Everything a vulnerability database cannot
+answer stays with the model: deprecated APIs, end-of-life runtimes, typosquats
+and licence conflicts. Demote osv-scanner to `hint` and the model takes those
+claims back.
+
 **semgrep now works out of the box.** It used to skip itself unless you set
 `semgrep_rules`, which almost nobody did — so the one multi-language tool never
 ran. It now falls back to a small, high-precision **MIT rule pack shipped with

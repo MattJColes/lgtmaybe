@@ -715,14 +715,17 @@ ARTEFACTS_GROUP = LensGroup(
 FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
 
 
-def build_group_prompt(group: LensGroup, language: str | None = None) -> str:
+def build_group_prompt(
+    group: LensGroup, language: str | None = None, dependency_health: bool = True
+) -> str:
     """A merged lens's system prompt (legacy shape, ``prompt_cache: false``)."""
-    return f"{_localised_header(language)}\n{group.example}\n\n{group.section}\n\n{_SHARED_RULES}\n"
+    section = _group_section(group, dependency_health)
+    return f"{_localised_header(language)}\n{group.example}\n\n{section}\n\n{_SHARED_RULES}\n"
 
 
-def build_group_block(group: LensGroup) -> str:
+def build_group_block(group: LensGroup, dependency_health: bool = True) -> str:
     """A merged lens's user block (split shape — see :func:`build_lens_block`)."""
-    return f"{_LENS_LEAD_IN}\n\n{group.section}\n\n{group.example}"
+    return f"{_LENS_LEAD_IN}\n\n{_group_section(group, dependency_health)}\n\n{group.example}"
 
 
 @lru_cache(maxsize=2)
@@ -745,6 +748,46 @@ def build_correctness_prompt(include_intent: bool, language: str | None = None) 
 def build_correctness_block(include_intent: bool) -> str:
     """The fast preset's correctness call, user-block (split) shape."""
     return f"{_LENS_LEAD_IN}\n\n{_correctness_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
+
+
+# The two bullets a vulnerability database answers and a language model cannot:
+# whether a version has a published advisory, and whether a package is
+# abandoned, both depend on what was disclosed since the model was trained. When
+# a scanner covers them, asking for them too only invites a confident wrong
+# answer next to an accurate one. Everything else in the section stays — a CVE
+# database knows nothing about deprecated APIs, EOL runtimes, typosquats or
+# licence conflicts.
+_ADVISORY_BULLETS = """\
+- **End-of-life or abandoned dependencies** — adding or pinning a package that
+  is unmaintained, yanked, or end-of-life.
+- **Versions with known advisories** — pinning a dependency to a version with a
+  publicly known vulnerability when a fixed release exists.
+"""
+
+_ADVISORY_LINE = "- abandoned, yanked, or known-vulnerable dependency versions;\n"
+
+# The grading clause goes with them: with advisory findings out of scope for
+# this lens, "higher when a security advisory is involved" points at a case
+# that can no longer arise here.
+_DEPRECATION_SECTION_NO_ADVISORIES = _DEPRECATION_SECTION.replace(_ADVISORY_BULLETS, "").replace(
+    "`medium`, or higher when a security advisory is involved):", "`medium`):"
+)
+_CODE_HEALTH_SECTION_NO_ADVISORIES = _CODE_HEALTH_SECTION.replace(_ADVISORY_LINE, "").replace(
+    "(`low` to `medium`,\nhigher when a security advisory is involved):", "(`low` to `medium`):"
+)
+
+
+def _category_section(category: ReviewCategory, dependency_health: bool) -> str:
+    """The lens body, minus the claims a scanner answers better when one runs."""
+    if category is ReviewCategory.deprecation and not dependency_health:
+        return _DEPRECATION_SECTION_NO_ADVISORIES
+    return _CATEGORY_SECTIONS[category]
+
+
+def _group_section(group: LensGroup, dependency_health: bool) -> str:
+    if group is CODE_HEALTH_GROUP and not dependency_health:
+        return _CODE_HEALTH_SECTION_NO_ADVISORIES
+    return group.section
 
 
 _CATEGORY_SECTIONS: dict[ReviewCategory, str] = {
@@ -856,7 +899,7 @@ _LENS_LEAD_IN = (
 
 
 @lru_cache(maxsize=len(ReviewCategory))
-def build_lens_block(category: ReviewCategory) -> str:
+def build_lens_block(category: ReviewCategory, dependency_health: bool = True) -> str:
     """One built-in lens's user-message block for the split (cache-shaped) layout.
 
     The lens section plus its category-matched worked example, sent as the
@@ -864,7 +907,8 @@ def build_lens_block(category: ReviewCategory) -> str:
     outside the cached prefix while the expensive content in front of it is
     shared by every lens call.
     """
-    return f"{_LENS_LEAD_IN}\n\n{_CATEGORY_SECTIONS[category]}\n\n{_CATEGORY_EXAMPLES[category]}"
+    section = _category_section(category, dependency_health)
+    return f"{_LENS_LEAD_IN}\n\n{section}\n\n{_CATEGORY_EXAMPLES[category]}"
 
 
 def build_custom_lens_block(lens: CustomLens) -> str:
@@ -883,7 +927,9 @@ def build_custom_lens_block(lens: CustomLens) -> str:
 
 
 @lru_cache(maxsize=len(ReviewCategory) * 4)
-def build_system_prompt(category: ReviewCategory, language: str | None = None) -> str:
+def build_system_prompt(
+    category: ReviewCategory, language: str | None = None, dependency_health: bool = True
+) -> str:
     """Return the system message for the review LLM's *category* lens.
 
     The prompt carries only that lens's section and a matching worked example.
@@ -894,7 +940,7 @@ def build_system_prompt(category: ReviewCategory, language: str | None = None) -
     pre-language prompt when unset.
     """
     example = _CATEGORY_EXAMPLES[category]
-    body = _CATEGORY_SECTIONS[category]
+    body = _category_section(category, dependency_health)
     return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
 
 

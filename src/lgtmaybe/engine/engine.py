@@ -25,6 +25,8 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     ReviewPreset,
     ReviewResult,
+    StaticAnalysisTool,
+    ToolMode,
     attempts_of,
 )
 from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout, ReviewEngine
@@ -64,6 +66,7 @@ from .static_analysis import (
     UNANCHORABLE_SCAN_CATEGORIES,
     ToolFinding,
     format_hints,
+    mode_for,
     partition_by_mode,
     run_static_analysis,
     tool_review_findings,
@@ -175,6 +178,11 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     list runs exactly its selected categories. Both skip intent when nothing
     states an intent.
     """
+    # Whether the model should still be asked for dependency-advisory claims.
+    # Config-derived on purpose: keying this on whether the binary happens to be
+    # installed would make the prompt — and the shared prefix cache — vary by
+    # machine. A configured-but-missing finding-mode tool warns instead.
+    deps = not _scanner_covers_dependency_health(cfg)
     fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
     if fast:
         lenses = [
@@ -201,8 +209,8 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses += [
             _Lens(
                 id=group.id,
-                system_prompt=build_group_prompt(group, cfg.language),
-                user_block=build_group_block(group),
+                system_prompt=build_group_prompt(group, cfg.language, dependency_health=deps),
+                user_block=build_group_block(group, dependency_health=deps),
                 allowed_categories=frozenset(c.value for c in group.members),
             )
             for group in FAST_GROUPS
@@ -211,8 +219,8 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses = [
             _Lens(
                 id=category.value,
-                system_prompt=build_system_prompt(category, cfg.language),
-                user_block=build_lens_block(category),
+                system_prompt=build_system_prompt(category, cfg.language, dependency_health=deps),
+                user_block=build_lens_block(category, dependency_health=deps),
                 carries_intent=category is ReviewCategory.intent,
             )
             for category in cfg.categories
@@ -1062,6 +1070,18 @@ def _error_reason(exc: BaseException) -> str:
     text = " ".join(str(exc).split())
     reason = f"{type(exc).__name__}: {text}" if text else type(exc).__name__
     return reason[:200]
+
+
+def _scanner_covers_dependency_health(cfg: ReviewConfig) -> bool:
+    """Whether a deterministic scanner will report dependency advisories itself.
+
+    When one will, the lens stops being asked for them: a model's knowledge
+    cutoff cannot answer "does this version have a published advisory?", so
+    asking anyway only puts a confident guess beside an accurate answer.
+    """
+    sa = cfg.static_analysis
+    tool = StaticAnalysisTool.osv_scanner
+    return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
 
 
 def _is_droppable_scan(finding: ReviewFinding) -> bool:

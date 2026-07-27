@@ -41,3 +41,9 @@ prompt.failure-scenario:
     kind: function_definition
     has: { field: name, regex: '^build_shared_preamble$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+prompt.dependency-health:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_category_section$' }
+  files: [src/lgtmaybe/engine/prompt.py]

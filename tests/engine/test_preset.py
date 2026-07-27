@@ -183,3 +183,41 @@ class TestCheaperReflectSibling:
         user-pulled ollama tags) drift — a wrong guess 404s every reflection
         pass, so those providers keep reflecting with the review model."""
         assert cheaper_reflect_sibling(provider, "claude-sonnet-4-6") is None
+
+
+def test_lenses_narrow_dependency_health_when_a_scanner_covers_it() -> None:
+    """Config-derived, not environment-derived.
+
+    Deciding this from `shutil.which` would make the prompt — and so the shared
+    prefix cache — depend on what happens to be installed on the machine. A
+    configured-but-missing scanner warns instead.
+    """
+    from lgtmaybe.core.models import (
+        Provider,
+        ReviewConfig,
+        StaticAnalysisTool,
+        ToolMode,
+    )
+    from lgtmaybe.engine.engine import _build_lenses
+
+    def _lens_text(cfg: ReviewConfig) -> str:
+        return " ".join(lens.user_block for lens in _build_lenses(cfg, has_intent=False))
+
+    off = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert "known-vulnerable" in _lens_text(off)
+
+    sa = off.static_analysis.model_copy(
+        update={"enabled": True, "tools": [StaticAnalysisTool.osv_scanner]}
+    )
+    on = off.model_copy(update={"static_analysis": sa})
+    assert "known-vulnerable" not in _lens_text(on)
+
+    # Demoted to a hint, the model is back to being the only reporter.
+    hinted = on.model_copy(
+        update={
+            "static_analysis": sa.model_copy(
+                update={"tool_mode": {StaticAnalysisTool.osv_scanner: ToolMode.hint}}
+            )
+        }
+    )
+    assert "known-vulnerable" in _lens_text(hinted)
