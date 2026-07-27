@@ -422,6 +422,15 @@ answer stays with the model: deprecated APIs, end-of-life runtimes, typosquats
 and licence conflicts. Demote osv-scanner to `hint` and the model takes those
 claims back.
 
+The same happens for **gitleaks**. When it is set to post findings, the review
+prompt **stops asking the model** for hardcoded secrets — and here the ask was
+close to unanswerable anyway: lgtmaybe redacts every secret it matches *before*
+the diff leaves for the provider, so the model was being asked to spot what it
+had been prevented from seeing, while gitleaks reads the unredacted file text
+and answers exactly. Secrets reaching a **log** are a different defect that no
+secret scanner reports, so the model keeps that one. Demote gitleaks to `hint`
+and the model takes the claim back.
+
 **semgrep now works out of the box.** It used to skip itself unless you set
 `semgrep_rules`, which almost nobody did — so the one multi-language tool never
 ran. It now falls back to a small, high-precision **MIT rule pack shipped with

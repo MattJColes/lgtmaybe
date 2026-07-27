@@ -61,12 +61,18 @@ the one pass that can drop every finding.
 Diffs, intent text, and expanded context SHALL be redacted before leaving for
 the LLM: AWS/OpenAI/GitHub (classic + fine-grained)/Slack/Google/Stripe keys,
 PEM private-key blocks, and quoted password / `Authorization` /
-connection-string credentials.
+connection-string credentials. The prompt SHALL identify the replacement marker
+as the reviewer's own, so no lens reports it as a leaked secret or a
+placeholder left in the source.
 <!-- anchor: hardening.redact -->
 
 #### Scenario: a committed key would leave the machine
 - **WHEN** a diff hunk contains an AWS access key
 - **THEN** the provider receives the hunk with the key replaced, never the key
+
+#### Scenario: the marker reaches the model
+- **WHEN** a lens reads a diff that redaction has rewritten
+- **THEN** the prompt has told it the marker is not the author's code
 
 ### Requirement: Parsing recovers leniently, validates strictly
 
