@@ -34,7 +34,7 @@ from lgtmaybe.core.version import package_version
 from lgtmaybe.github import is_reviewable
 
 from .astgrep import SymbolResolver
-from .boundaries import definition_starts
+from .boundaries import definition_spans
 from .compress import (
     batch_files,
     context_lines_for_budget,
@@ -415,7 +415,7 @@ class LLMReviewEngine(ReviewEngine):
                             # Enclosing function/class boundaries (ast-grep; [] on
                             # any failure) so the leading pad reaches the signature.
                             boundaries=(
-                                definition_starts(ctx.file_contents.get(path, ""), path)
+                                definition_spans(ctx.file_contents.get(path, ""), path)
                                 if cfg.function_context and ctx.file_contents.get(path)
                                 else None
                             ),

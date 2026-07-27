@@ -76,7 +76,7 @@ def test_no_default_encoding_io() -> None:
         from lgtmaybe.config.store import load, save
         from lgtmaybe.core.models import ReviewConfig, StaticAnalysisTool
         from lgtmaybe.engine.astgrep import _default_runner
-        from lgtmaybe.engine.boundaries import definition_starts
+        from lgtmaybe.engine.boundaries import definition_spans
         from lgtmaybe.engine.static_analysis import _run_tool, _write_corpus
         from lgtmaybe.local import _git
         from scripts.check_spec_drift import run_scan
@@ -99,7 +99,7 @@ def test_no_default_encoding_io() -> None:
             load_config(config_path=config)
 
             _write_corpus(root / "corpus", {"src/app.py": "print('👍')\\n"})
-            definition_starts(
+            definition_spans(
                 "def f():\\n    pass\\n",
                 "src/app.py",
                 runner=lambda *_args: "[]",

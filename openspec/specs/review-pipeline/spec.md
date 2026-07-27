@@ -157,7 +157,8 @@ line) after — the enclosing signature explains a change better than what
 follows. Inline positions stay bound to the real diff, so context-only lines
 never carry comments. Hunks whose padded windows meet are merged into one, with
 the span between them filled in as context, so the patch stays monotonic and no
-line is emitted twice.
+line is emitted twice. A definition widens the leading pad only while it still
+CONTAINS the hunk — one that closed above it encloses nothing.
 <!-- anchor: engine.context-expansion -->
 
 #### Scenario: context lines never take comments
@@ -167,6 +168,10 @@ line is emitted twice.
 #### Scenario: two nearby hunks are padded into each other
 - **WHEN** a hunk's leading pad reaches the previous hunk's trailing pad
 - **THEN** both are emitted as one hunk whose header describes what it holds
+
+#### Scenario: the change sits below a closed definition
+- **WHEN** a hunk is on module-level code after a function has ended
+- **THEN** the pad does not reach back into that function's body
 
 ### Requirement: Triage never skips past the security floor
 

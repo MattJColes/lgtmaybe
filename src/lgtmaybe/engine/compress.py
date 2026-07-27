@@ -6,6 +6,7 @@ Provides a dynamic context-line calculator for the remaining budget.
 
 from __future__ import annotations
 
+import sys
 from bisect import bisect_right
 from dataclasses import dataclass
 from functools import lru_cache
@@ -233,20 +234,35 @@ def context_lines_for_budget(remaining_tokens: int) -> int:
     return max(0, min(remaining_tokens // _SCALE, _MAX_CONTEXT_LINES))
 
 
-def _enclosing_boundary(boundaries: list[int], new_start: int) -> int | None:
-    """The nearest definition start at or above *new_start*, if within reach.
+def _enclosing_boundary(boundaries: list[tuple[int, int]], new_start: int) -> int | None:
+    """The start line of the innermost definition CONTAINING *new_start*.
 
-    *boundaries* is sorted ascending; the enclosing candidate is the last one
-    ``<= new_start``. None when there is none, or when it sits more than
-    :data:`_MAX_BOUNDARY_REACH` lines above (padding to it would drown the diff).
+    *boundaries* is a sorted list of inclusive ``(start, end)`` spans. A
+    definition encloses *new_start* only when it has not already closed above
+    it: matching on start alone made module-level code look enclosed by
+    whatever function happened to sit above it, padding the hunk back into an
+    unrelated body. Walking back from the nearest start yields the innermost
+    enclosing definition (a method before its class).
+
+    None when nothing encloses it, or when the enclosing definition begins more
+    than :data:`_MAX_BOUNDARY_REACH` lines above (padding would drown the diff).
     """
-    idx = bisect_right(boundaries, new_start) - 1
-    if idx < 0:
-        return None
-    candidate = boundaries[idx]
-    if new_start - candidate > _MAX_BOUNDARY_REACH:
-        return None
-    return candidate
+    idx = bisect_right(boundaries, (new_start, _UNBOUNDED_END)) - 1
+    while idx >= 0:
+        start, end = boundaries[idx]
+        if new_start - start > _MAX_BOUNDARY_REACH:
+            # Sorted by start, so everything left of here is further away still.
+            return None
+        if end >= new_start:
+            return start
+        idx -= 1
+    return None
+
+
+# Sentinel upper bound for the bisect probe: pairs compare element-wise, so this
+# has to sort above any real end line for the probe to find every span whose
+# start is at or below the hunk.
+_UNBOUNDED_END = sys.maxsize
 
 
 def trailing_context_lines(before: int) -> int:
@@ -274,7 +290,7 @@ def expand_hunks(
     file_content: str | None,
     n: int,
     after: int,
-    boundaries: list[int] | None = None,
+    boundaries: list[tuple[int, int]] | None = None,
 ) -> str:
     """Pad each hunk in *patch* with surrounding lines from *file_content*.
 
@@ -284,12 +300,14 @@ def expand_hunks(
     definitions around a change. Hunk headers are rewritten so each hunk's
     start/length still describes the lines it now contains.
 
-    ``boundaries`` (sorted 1-based definition start lines, from
-    :func:`~lgtmaybe.engine.boundaries.definition_starts`) extends the LEADING
-    pad up to the enclosing function/class signature when it sits above the
-    fixed window and within :data:`_MAX_BOUNDARY_REACH` lines — the enclosing
-    signature explains a change better than an arbitrary cut. A boundary can
-    only ever widen the window, never shrink it.
+    ``boundaries`` (sorted 1-based inclusive ``(start, end)`` definition spans,
+    from :func:`~lgtmaybe.engine.boundaries.definition_spans`) extends the
+    LEADING pad up to the enclosing function/class signature when it sits above
+    the fixed window and within :data:`_MAX_BOUNDARY_REACH` lines — the
+    enclosing signature explains a change better than an arbitrary cut. Only a
+    definition that still CONTAINS the hunk counts, so module-level code after a
+    function is not padded back into it. A boundary can only ever widen the
+    window, never shrink it.
 
     Hunks whose padded windows meet or overlap are **merged into one**, with the
     lines between them filled in as context. Padded independently they would
@@ -358,7 +376,7 @@ def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
     return preamble, hunks
 
 
-def _lead_start(hunk: _Hunk, n: int, boundaries: list[int] | None) -> int:
+def _lead_start(hunk: _Hunk, n: int, boundaries: list[tuple[int, int]] | None) -> int:
     """The first new-file line *hunk*'s leading pad should reach back to."""
     lead_start = max(1, hunk.new_start - n)
     if boundaries:
@@ -388,7 +406,7 @@ def _group_hunks(
     content_lines: list[str],
     n: int,
     n_after: int,
-    boundaries: list[int] | None,
+    boundaries: list[tuple[int, int]] | None,
 ) -> list[_Group]:
     """Group *hunks* into runs whose padded windows touch, in file order.
 
