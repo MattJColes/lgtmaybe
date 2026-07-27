@@ -7,6 +7,7 @@ Provides a dynamic context-line calculator for the remaining budget.
 from __future__ import annotations
 
 from bisect import bisect_right
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
@@ -290,6 +291,13 @@ def expand_hunks(
     signature explains a change better than an arbitrary cut. A boundary can
     only ever widen the window, never shrink it.
 
+    Hunks whose padded windows meet or overlap are **merged into one**, with the
+    lines between them filled in as context. Padded independently they would
+    each reach into the other's span, emitting a later hunk header that points
+    above where the previous one ended — a non-monotonic patch that breaks the
+    line arithmetic the model is asked to do, and that shows the same position
+    twice with two different contents (once changed, once as stale context).
+
     This is best-effort: with ``n <= 0`` or no file content the patch is returned
     unchanged, and reads are clamped to the file's bounds. The result is for the
     model only — inline-comment positions are always computed from the real diff.
@@ -299,56 +307,144 @@ def expand_hunks(
     n_after = max(0, after)
 
     content_lines = file_content.splitlines()
-    out: list[str] = []
-    pending_trailing: list[str] = []
+    preamble, hunks = _parse_hunks(patch)
+    if not hunks:
+        return patch
 
+    out = list(preamble)
+    for group in _group_hunks(hunks, content_lines, n, n_after, boundaries):
+        out.extend(_render_group(group, content_lines, n_after))
+    return "\n".join(out) + "\n"
+
+
+@dataclass(frozen=True)
+class _Hunk:
+    """One parsed hunk: its header positions plus its verbatim body lines."""
+
+    old_start: int
+    old_len: int
+    new_start: int
+    new_len: int
+    section: str
+    body: list[str]
+
+    @property
+    def last_new(self) -> int:
+        """The hunk's final new-file line number."""
+        return self.new_start + self.new_len - 1
+
+
+def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
+    """Split *patch* into its leading file-header lines and its hunks."""
+    preamble: list[str] = []
+    hunks: list[_Hunk] = []
     for line in patch.splitlines():
         header = parse_hunk_header(line)
-        if header is None:
-            out.append(line)
-            continue
+        if header is not None:
+            hunks.append(
+                _Hunk(
+                    old_start=header.old_start,
+                    old_len=header.old_len,
+                    new_start=header.new_start,
+                    new_len=header.new_len,
+                    section=header.section,
+                    body=[],
+                )
+            )
+        elif hunks:
+            hunks[-1].body.append(line)
+        else:
+            preamble.append(line)
+    return preamble, hunks
 
-        # A new hunk starts: flush the previous hunk's trailing context first.
-        out.extend(f" {text}" for text in pending_trailing)
 
-        old_start = header.old_start
-        old_len = header.old_len
-        new_start = header.new_start
-        new_len = header.new_len
-        section = header.section
+def _lead_start(hunk: _Hunk, n: int, boundaries: list[int] | None) -> int:
+    """The first new-file line *hunk*'s leading pad should reach back to."""
+    lead_start = max(1, hunk.new_start - n)
+    if boundaries:
+        enclosing = _enclosing_boundary(boundaries, hunk.new_start)
+        if enclosing is not None and enclosing < lead_start:
+            # The enclosing definition starts above the fixed window and
+            # within reach — widen the pad up to its signature line.
+            lead_start = enclosing
+    # The rewritten header's old start is `old_start - len(leading)`: when
+    # earlier hunks net-added lines, old_start sits far below new_start, so an
+    # unclamped pad drives it negative — an invalid header that
+    # parse_hunk_header rejects, mis-numbering every line downstream. Clamp the
+    # pad (after any boundary widening) so the old start stays >= 1.
+    return max(lead_start, hunk.new_start - (hunk.old_start - 1))
 
-        # Lines immediately before the hunk and after its last new-file line.
-        lead_start = max(1, new_start - n)
-        if boundaries:
-            enclosing = _enclosing_boundary(boundaries, new_start)
-            if enclosing is not None and enclosing < lead_start:
-                # The enclosing definition starts above the fixed window and
-                # within reach — widen the pad up to its signature line.
-                lead_start = enclosing
-        # The rewritten header's old start is `old_start - len(leading)`: when
-        # earlier hunks net-added lines, old_start sits far below new_start, so
-        # an unclamped pad drives it negative — an invalid header that
-        # parse_hunk_header rejects, mis-numbering every line downstream. Clamp
-        # the pad (after any boundary widening) so the old start stays >= 1.
-        lead_start = max(lead_start, new_start - (old_start - 1))
-        # Clamp reads to the file's real bounds: redaction or stale head text
-        # can leave the file shorter than the hunk positions — degrade to less
-        # padding, never an IndexError.
-        lead_end = min(new_start, len(content_lines) + 1)
-        leading = [content_lines[i - 1] for i in range(min(lead_start, lead_end), lead_end)]
-        last_new = new_start + new_len - 1
-        trailing = [
-            content_lines[i - 1]
-            for i in range(last_new + 1, min(len(content_lines), last_new + n_after) + 1)
-        ]
-        pending_trailing = trailing
 
-        pad = len(leading) + len(trailing)
-        out.append(
-            f"@@ -{old_start - len(leading)},{old_len + pad} "
-            f"+{new_start - len(leading)},{new_len + pad} @@{section}"
-        )
-        out.extend(f" {text}" for text in leading)
+@dataclass
+class _Group:
+    """A run of hunks rendered as one merged hunk, with its leading pad start."""
 
-    out.extend(f" {text}" for text in pending_trailing)
-    return "\n".join(out) + "\n"
+    hunks: list[_Hunk]
+    lead_start: int
+
+
+def _group_hunks(
+    hunks: list[_Hunk],
+    content_lines: list[str],
+    n: int,
+    n_after: int,
+    boundaries: list[int] | None,
+) -> list[_Group]:
+    """Group *hunks* into runs whose padded windows touch, in file order.
+
+    A group is rendered as a single merged hunk. Two hunks join when the later
+    one's leading pad reaches the earlier one's trailing pad (or the line just
+    after it) — the point at which independent padding would double up.
+    """
+    groups: list[_Group] = []
+    for hunk in hunks:
+        lead_start = _lead_start(hunk, n, boundaries)
+        if groups:
+            previous = groups[-1].hunks[-1]
+            trail_end = min(len(content_lines), previous.last_new + n_after)
+            # The gap between the two is filled from the head text, so only
+            # merge when that text actually reaches — a file shorter than the
+            # hunk positions (stale or redacted) would otherwise drop lines the
+            # merged header still claims.
+            reaches = lead_start <= trail_end + 1
+            fillable = hunk.new_start - 1 <= len(content_lines)
+            if reaches and fillable:
+                groups[-1].hunks.append(hunk)
+                continue
+        groups.append(_Group(hunks=[hunk], lead_start=lead_start))
+    return groups
+
+
+def _render_group(group: _Group, content_lines: list[str], n_after: int) -> list[str]:
+    """Render one group of hunks as a single padded hunk, header included.
+
+    Header lengths are counted off the emitted body rather than derived
+    arithmetically, so a merged hunk's counts cannot drift from what it holds.
+    """
+    first, last = group.hunks[0], group.hunks[-1]
+
+    # Clamp reads to the file's real bounds: redaction or stale head text can
+    # leave the file shorter than the hunk positions — degrade to less padding,
+    # never an IndexError.
+    lead_end = min(first.new_start, len(content_lines) + 1)
+    leading = content_lines[min(group.lead_start, lead_end) - 1 : lead_end - 1]
+
+    body: list[str] = []
+    for index, hunk in enumerate(group.hunks):
+        if index:
+            # Fill the gap between the previous hunk's last line and this one
+            # with the head text, as ordinary context.
+            previous_end = group.hunks[index - 1].last_new
+            body.extend(f" {text}" for text in content_lines[previous_end : hunk.new_start - 1])
+        body.extend(hunk.body)
+
+    trailing = content_lines[last.last_new : min(len(content_lines), last.last_new + n_after)]
+
+    lines = [f" {text}" for text in leading] + body + [f" {text}" for text in trailing]
+    # An empty body line is git's rendering of an empty context line, so it
+    # counts on both sides; "\ No newline at end of file" counts on neither.
+    old_len = sum(1 for line in lines if line[:1] in {" ", "-", ""})
+    new_len = sum(1 for line in lines if line[:1] in {" ", "+", ""})
+    old_start = first.old_start - len(leading)
+    new_start = first.new_start - len(leading)
+    return [f"@@ -{old_start},{old_len} +{new_start},{new_len} @@{first.section}", *lines]

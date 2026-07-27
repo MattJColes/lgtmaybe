@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header
 from lgtmaybe.engine.compress import (
     _token_encoder,
     batch_files,
@@ -189,15 +190,16 @@ _CONTENT = "\n".join("abcdefghij")  # lines 1..10: a, b, c, ... j
 
 def test_expand_hunks_adds_surrounding_lines() -> None:
     # Hunk covers new-file lines 5..6 (e, E2); ask for 2 lines either side.
-    patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
+    patch = "diff --git a/f.py b/f.py\n@@ -5,1 +5,2 @@\n e\n+E2\n"
 
     expanded = expand_hunks(patch, _CONTENT, 2, after=2)
 
     # Two leading lines (c, d) and two trailing lines (g, h) are added as context.
     assert "\n c\n d\n" in expanded
     assert "\n g\n h\n" in expanded
-    # Header line/length counts are widened by the added context on both sides.
-    assert "@@ -3,6 +3,6 @@" in expanded
+    # Header line/length counts are widened by the added context on both sides:
+    # one old line + 4 pads, two new lines + 4 pads, both starting two lines up.
+    assert "@@ -3,5 +3,6 @@" in expanded
 
 
 def test_expand_hunks_noop_when_n_zero() -> None:
@@ -225,7 +227,7 @@ def test_expand_hunks_clamps_at_file_edges() -> None:
 def test_expand_hunks_asymmetric_pads_fewer_after() -> None:
     # The code BEFORE a change (signature, setup) explains it better than the
     # code after, so an explicit `after` pads the two sides differently.
-    patch = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
+    patch = "diff --git a/f.py b/f.py\n@@ -5,1 +5,2 @@\n e\n+E2\n"
 
     expanded = expand_hunks(patch, _CONTENT, 3, after=1)
 
@@ -233,8 +235,8 @@ def test_expand_hunks_asymmetric_pads_fewer_after() -> None:
     assert "\n b\n c\n d\n" in expanded
     assert "\n g\n" in expanded
     assert " h\n" not in expanded
-    # Header widened by 3 leading + 1 trailing = 4.
-    assert "@@ -2,6 +2,6 @@" in expanded
+    # Header widened by 3 leading + 1 trailing = 4 on each side.
+    assert "@@ -2,5 +2,6 @@" in expanded
 
 
 def test_trailing_context_lines_ratio() -> None:
@@ -263,8 +265,10 @@ def test_expand_hunks_header_old_start_never_below_one() -> None:
 
     expanded = expand_hunks(patch, content, 20, after=5)
 
+    # The second hunk sits within the first one's trailing pad, so the two are
+    # emitted as one merged hunk — the clamp still has to hold for its header.
     headers = [ln for ln in expanded.splitlines() if ln.startswith("@@")]
-    assert len(headers) == 2
+    assert headers
     for line in headers:
         header = parse_hunk_header(line)
         assert header is not None, f"unparseable rewritten header: {line!r}"
@@ -469,3 +473,100 @@ def test_recursive_splits_a_single_oversize_hunk() -> None:
     assert len(walked) > 1
     for batch in walked:
         assert count_tokens("\n".join(p for _, p in batch)) <= budget
+
+
+# overlapping expansion
+# ---------------------------------------------------------------------------
+
+_LONG_CONTENT = "\n".join(f"line{i}" for i in range(1, 61))
+
+# Two hunks ten lines apart. A 15-line leading pad on the second reaches back
+# past the first hunk's own body, so unmerged expansion emits the span twice.
+_NEARBY_HUNKS = (
+    "diff --git a/f.py b/f.py\n"
+    "@@ -20,2 +20,2 @@\n line20\n-line21\n+CHANGED21\n"
+    "@@ -30,2 +30,2 @@\n line30\n-line31\n+CHANGED31\n"
+)
+
+
+def _hunk_ranges(expanded: str) -> list[tuple[int, int]]:
+    """(start, end) new-file line range of every hunk in *expanded*."""
+    ranges = []
+    for line in expanded.splitlines():
+        header = parse_hunk_header(line)
+        if header is not None:
+            ranges.append((header.new_start, header.new_start + header.new_len - 1))
+    return ranges
+
+
+def test_expanded_hunks_never_overlap() -> None:
+    """Expansion must not emit hunks whose line ranges overlap.
+
+    Each hunk is padded independently, so two nearby hunks can each reach into
+    the other's span. That yields a non-monotonic patch — a later hunk header
+    pointing *above* where the previous one ended — which breaks the line
+    arithmetic the model is asked to do, on top of paying for the span twice.
+    """
+    expanded = expand_hunks(_NEARBY_HUNKS, _LONG_CONTENT, 15, after=3)
+
+    ranges = _hunk_ranges(expanded)
+    for (_, prev_end), (next_start, _) in zip(ranges, ranges[1:], strict=False):
+        assert next_start > prev_end, f"hunks overlap: {ranges}"
+
+
+def test_expanded_hunks_do_not_repeat_context_lines() -> None:
+    """No source line may appear twice in the expanded patch.
+
+    Beyond the wasted tokens, a changed line repeated as unmerged context shows
+    the model the same position with two different contents.
+    """
+    expanded = expand_hunks(_NEARBY_HUNKS, _LONG_CONTENT, 15, after=3)
+
+    body = [ln[1:] for ln in expanded.splitlines() if ln[:1] in {" ", "+", "-"}]
+    assert len(body) == len(set(body)), f"duplicated lines: {expanded}"
+
+
+def test_merged_hunk_keeps_every_change() -> None:
+    """Merging two overlapping hunks keeps both changes, in file order."""
+    expanded = expand_hunks(_NEARBY_HUNKS, _LONG_CONTENT, 15, after=3)
+
+    assert expanded.count("+CHANGED21") == 1
+    assert expanded.count("+CHANGED31") == 1
+    assert expanded.index("CHANGED21") < expanded.index("CHANGED31")
+    assert expanded.count("-line21") == 1
+    assert expanded.count("-line31") == 1
+
+
+def _hunks_with_bodies(expanded: str) -> list[tuple[HunkHeader, list[str]]]:
+    """Every hunk in *expanded* paired with the body lines that follow it."""
+    hunks: list[tuple[HunkHeader, list[str]]] = []
+    for line in expanded.splitlines():
+        header = parse_hunk_header(line)
+        if header is not None:
+            hunks.append((header, []))
+        elif hunks:
+            hunks[-1][1].append(line)
+    return hunks
+
+
+def test_merged_hunk_header_counts_match_its_body() -> None:
+    """A merged hunk's header lengths must describe the lines it really holds."""
+    expanded = expand_hunks(_NEARBY_HUNKS, _LONG_CONTENT, 15, after=3)
+
+    hunks = _hunks_with_bodies(expanded)
+    assert hunks
+    for header, body in hunks:
+        assert header.old_len == sum(1 for ln in body if ln[:1] in {" ", "-"})
+        assert header.new_len == sum(1 for ln in body if ln[:1] in {" ", "+"})
+
+
+def test_distant_hunks_stay_separate() -> None:
+    """Hunks whose padded windows do not meet keep their own headers."""
+    patch = (
+        "diff --git a/f.py b/f.py\n"
+        "@@ -5,1 +5,1 @@\n-line5\n+CHANGED5\n"
+        "@@ -50,1 +50,1 @@\n-line50\n+CHANGED50\n"
+    )
+    expanded = expand_hunks(patch, _LONG_CONTENT, 2, after=1)
+
+    assert len(_hunk_ranges(expanded)) == 2
