@@ -97,3 +97,22 @@ SHALL return `null` rather than invent a causal story.
 #### Scenario: tests lens reports missing coverage
 - **WHEN** the tests lens reports a real coverage gap
 - **THEN** it returns `failure_scenario: null`
+
+### Requirement: The model is not asked what a scanner answers better
+
+The review prompt SHALL drop the dependency claims that depend on knowledge
+published after training — whether a version has a known advisory, and whether a
+package is abandoned — from both the focused and the merged lens whenever a
+deterministic scanner reports those advisories itself. Claims a vulnerability database cannot
+answer (deprecated APIs, end-of-life runtimes, typosquats, licence conflicts)
+MUST remain. The decision SHALL derive from configuration, not from which
+binaries happen to be installed, so prompts stay reproducible.
+<!-- anchor: prompt.dependency-health -->
+
+#### Scenario: a vulnerability scanner posts findings
+- **WHEN** a scanner is configured to report dependency advisories directly
+- **THEN** neither lens asks the model for advisory or abandonment claims
+
+#### Scenario: no scanner covers dependencies
+- **WHEN** no such scanner will run
+- **THEN** the prompt is unchanged and the model reports them as before

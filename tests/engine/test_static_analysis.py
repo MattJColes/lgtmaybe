@@ -10,8 +10,8 @@ the LLM pass or, for a `finding`-mode tool, is redacted and mapped onto findings
 - a tool missing from PATH is skipped silently (no error, no subprocess);
 - subprocesses get a scrubbed environment (no proxy vars to phone home
   through, HOME pinned inside the sandbox) and a timeout;
-- semgrep runs ONLY with locally configured rules (``--config auto`` would
-  fetch from the network registry);
+- semgrep always runs against local rules — the bundled MIT pack by default —
+  never ``--config auto``, which would fetch from the network registry;
 - a crashing tool / garbage JSON degrades to no hints for that tool;
 - severity is mapped onto the shared Severity scale and floored by
   ``static_analysis.min_severity``;
@@ -338,6 +338,7 @@ def test_scrubbed_env_posix_stays_minimal(monkeypatch, tmp_path: Path) -> None: 
     monkeypatch.setattr(static_analysis, "_WINDOWS", False, raising=False)
     monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must-not-leak")
+    monkeypatch.delenv("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", raising=False)
 
     assert static_analysis._scrubbed_env(tmp_path) == {
         "PATH": static_analysis.os.environ.get("PATH", ""),
@@ -347,16 +348,42 @@ def test_scrubbed_env_posix_stays_minimal(monkeypatch, tmp_path: Path) -> None: 
     }
 
 
-def test_semgrep_skipped_without_local_rules(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """semgrep with no --config would need the network registry — never run it
-    unless the user configured local rules."""
-    run = _FakeRun()
+def test_scrubbed_env_passes_through_the_offline_vulnerability_database(  # type: ignore[no-untyped-def]
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The one path variable the sandbox forwards, and why it is safe to.
+
+    osv-scanner cannot fetch a database from inside a network-less sandbox, so
+    the image bakes one in and points at it with this variable. It names a
+    read-only local directory — no credential, no endpoint — and without it the
+    scanner silently finds nothing, which reads like a clean bill of health.
+    """
+    monkeypatch.setattr(static_analysis, "_WINDOWS", False, raising=False)
+    monkeypatch.setenv("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", "/opt/osv-db")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
+
+    env = static_analysis._scrubbed_env(tmp_path)
+
+    assert env["OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"] == "/opt/osv-db"
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+
+
+def test_semgrep_never_uses_the_network_registry(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """semgrep must always run against local rules, never `--config auto`.
+
+    It used to satisfy this by refusing to run at all without configured rules,
+    which meant it never ran. It now falls back to the bundled MIT pack, so the
+    contract to protect is the narrower one: the rules are always local.
+    """
+    run = _FakeRun(outputs={"semgrep": json.dumps({"results": []})})
     _patch_tools(monkeypatch, run, present={"semgrep"})
 
-    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.semgrep]))
+    run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.semgrep]))
 
-    assert findings == []
-    assert run.calls == []
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert "auto" not in argv
+    config = argv[argv.index("--config") + 1]
+    assert Path(config).is_dir() or Path(config).is_file(), "rules must be a local path"
 
 
 def test_semgrep_runs_offline_with_local_rules(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -469,6 +496,70 @@ def test_gitleaks_report_is_written_outside_the_scanned_corpus(monkeypatch) -> N
     report = Path(argv[argv.index("--report-path") + 1])
     corpus = Path(str(run.calls[0]["cwd"]))
     assert corpus not in report.parents
+
+
+def _astgrep_output() -> str:
+    """ast-grep --json=compact. `range.start.line` is 0-BASED, like zizmor's."""
+    return json.dumps(
+        [
+            {
+                "ruleId": "no-eval",
+                "severity": "error",
+                "message": "eval on untrusted input",
+                "file": "src/app.py",
+                "range": {"start": {"line": 1, "column": 4}},
+            }
+        ]
+    )
+
+
+def test_astgrep_is_skipped_without_configured_rules(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """ast-grep has no built-in rules: with none configured there is nothing to run."""
+    run = _FakeRun(outputs={"ast-grep": _astgrep_output()})
+    _patch_tools(monkeypatch, run, present={"ast-grep"})
+
+    assert run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.ast_grep])) == []
+    assert run.calls == []
+
+
+def test_astgrep_findings_parsed_with_one_based_lines(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    rules = tmp_path / "rules.yml"
+    rules.write_text("id: no-eval\n", encoding="utf-8")
+    run = _FakeRun(outputs={"ast-grep": _astgrep_output()})
+    _patch_tools(monkeypatch, run, present={"ast-grep"})
+
+    findings = run_static_analysis(
+        FILES, _cfg(tools=[StaticAnalysisTool.ast_grep], ast_grep_rules=str(rules))
+    )
+
+    assert len(findings) == 1
+    assert findings[0].rule == "no-eval"
+    assert findings[0].path == "src/app.py"
+    assert findings[0].line == 2  # 0-based row 1 is line 2
+    assert findings[0].severity is Severity.high
+    assert str(rules) in [str(a) for a in run.calls[0]["argv"]]
+
+
+@pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep not installed")
+def test_astgrep_really_matches_a_structural_rule(tmp_path: Path) -> None:
+    """A user's own rule, run against the real binary.
+
+    ast-grep exits non-zero when it finds error-level matches and still writes
+    valid JSON to stdout — the runner must read the output, not the exit code.
+    """
+    rules = tmp_path / "rules.yml"
+    rules.write_text(
+        "id: no-eval\nlanguage: python\nseverity: error\n"
+        "message: eval on untrusted input\nrule:\n  pattern: eval($$$ARGS)\n",
+        encoding="utf-8",
+    )
+
+    findings = run_static_analysis(
+        {"src/app.py": "y = 1\nx = eval(input())\n"},
+        _cfg(tools=[StaticAnalysisTool.ast_grep], ast_grep_rules=str(rules)),
+    )
+
+    assert [(f.rule, f.path, f.line) for f in findings] == [("no-eval", "src/app.py", 2)]
 
 
 def _zizmor_output() -> str:
@@ -745,6 +836,114 @@ def test_enabled_with_no_tools_returns_nothing(monkeypatch) -> None:  # type: ig
 
     cfg = _cfg(enabled=True, tools=[])
     findings = static_analysis.run_static_analysis({"a.py": "x = 1\n"}, cfg)
+
+    assert findings == []
+    assert run.calls == []
+
+
+def test_semgrep_uses_the_bundled_pack_when_no_rules_are_configured(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The un-crippling: semgrep used to skip itself whenever rules were unset.
+
+    Nobody set `semgrep_rules`, so the one multi-language tool never ran. It now
+    falls back to the MIT pack we ship, and only a deliberate override changes
+    which rules it uses.
+    """
+    run = _FakeRun(outputs={"semgrep": json.dumps({"results": []})})
+    _patch_tools(monkeypatch, run, present={"semgrep"})
+
+    run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.semgrep]))
+
+    assert run.calls, "semgrep must run without explicitly configured rules"
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert str(static_analysis.bundled_semgrep_rules()) in argv
+    assert "--config" in argv
+    assert "auto" not in argv, "the network registry is forbidden in the sandbox"
+
+
+@pytest.mark.skipif(shutil.which("semgrep") is None, reason="semgrep not installed")
+def test_bundled_rules_really_catch_their_targets() -> None:
+    """The shipped pack, run by the real engine — rules that parse but never
+    match would be invisible without this."""
+    findings = run_static_analysis(
+        {
+            "src/app.py": (
+                'import subprocess, os\nsubprocess.run("ls " + os.environ["X"], shell=True)\n'
+            )
+        },
+        _cfg(tools=[StaticAnalysisTool.semgrep]),
+    )
+
+    assert any("shell-true" in f.rule for f in findings), [f.rule for f in findings]
+
+
+def _osv_output(root: str) -> str:
+    """osv-scanner scan source --format json (v2 shape).
+
+    `source.path` is ABSOLUTE, under the directory scanned — so the parser has
+    to relativise it back to the repository path.
+    """
+    return json.dumps(
+        {
+            "results": [
+                {
+                    "source": {"path": f"{root}/uv.lock", "type": "lockfile"},
+                    "packages": [
+                        {
+                            "package": {"name": "jinja2", "version": "2.4.1", "ecosystem": "PyPI"},
+                            "vulnerabilities": [
+                                {
+                                    "id": "GHSA-462w-v97r-4m45",
+                                    "summary": "Jinja2 sandbox escape",
+                                    "database_specific": {"severity": "HIGH"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+
+MANIFEST_FILES = {"uv.lock": 'name = "jinja2"\nversion = "2.4.1"\n'}
+
+
+def test_osv_findings_name_the_package_and_advisory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    class _Run(_FakeRun):
+        def __call__(self, argv: list[str], **kwargs: object) -> SimpleNamespace:
+            self.calls.append({"argv": argv, **kwargs})
+            return SimpleNamespace(stdout=_osv_output(str(kwargs["cwd"])), stderr="", returncode=0)
+
+    run = _Run()
+    _patch_tools(monkeypatch, run, present={"osv-scanner"})
+
+    findings = run_static_analysis(MANIFEST_FILES, _cfg(tools=[StaticAnalysisTool.osv_scanner]))
+
+    assert len(findings) == 1
+    assert findings[0].rule == "GHSA-462w-v97r-4m45"
+    assert findings[0].path == "uv.lock"
+    assert "jinja2" in findings[0].message
+    assert "2.4.1" in findings[0].message
+    assert findings[0].severity is Severity.high
+
+
+def test_osv_runs_offline(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The vulnerability database must be local — the sandbox has no network."""
+    run = _FakeRun(outputs={"osv-scanner": _osv_output("/x")})
+    _patch_tools(monkeypatch, run, present={"osv-scanner"})
+
+    run_static_analysis(MANIFEST_FILES, _cfg(tools=[StaticAnalysisTool.osv_scanner]))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert "--offline-vulnerabilities" in argv
+    assert "--download-offline-databases" not in argv, "downloading is a network call"
+
+
+def test_osv_is_skipped_when_no_manifest_changed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    run = _FakeRun(outputs={"osv-scanner": _osv_output("/x")})
+    _patch_tools(monkeypatch, run, present={"osv-scanner"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.osv_scanner]))
 
     assert findings == []
     assert run.calls == []

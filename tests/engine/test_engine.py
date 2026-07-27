@@ -1914,3 +1914,50 @@ def test_function_context_off_keeps_the_fixed_pad(monkeypatch) -> None:  # type:
 
     sent = _first_user_diff(provider)
     assert "def enclosing():" not in sent
+
+
+def _osv_hit(path: str = "uv.lock"):  # type: ignore[no-untyped-def]
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    return ToolFinding(
+        tool="osv-scanner",
+        path=path,
+        line=1,
+        rule="GHSA-1234",
+        message="jinja2 2.4.1: sandbox escape",
+        severity=Severity.high,
+    )
+
+
+_LOCKFILE_CTX = PRContext(
+    diff=(
+        "diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n"
+        "diff --git a/uv.lock b/uv.lock\n@@ -1 +1,2 @@\n a\n+b\n"
+    ),
+    changed_files=["f.py", "uv.lock"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=3,
+    file_contents={"f.py": "old\nnew\n"},
+    scan_contents={"uv.lock": "a\nb\n"},
+)
+
+
+def test_dependency_findings_survive_the_off_diff_drop(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A CVE is about the dependency, not about a line of a resolved lockfile.
+
+    Lockfiles are never reviewable, so their patches are absent from the diff the
+    engine re-anchors against — every osv finding is unanchorable by
+    construction. The rule that scopes scanners to changed lines would therefore
+    delete all of them, which is why dependency findings are exempt.
+    """
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_LOCKFILE_CTX, _sa_cfg())
+
+    assert [(f.category, f.path) for f in findings] == [("scan:osv-scanner", "uv.lock")]

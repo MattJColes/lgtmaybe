@@ -613,3 +613,51 @@ def test_custom_lens_prompt_carries_language_directive() -> None:
     lens = CustomLens(id="naming", instructions="Flag bad names.")
     assert build_lens_prompt(lens, None) == build_lens_prompt(lens)
     assert _LANG in build_lens_prompt(lens, _LANG)
+
+
+# ---------------------------------------------------------------------------
+# dependency health: the model stops guessing once a scanner covers it
+# ---------------------------------------------------------------------------
+
+
+def test_dependency_health_bullets_are_present_by_default() -> None:
+    """Nothing changes for the vast majority — static analysis is opt-in."""
+    prompt = build_system_prompt(ReviewCategory.deprecation).lower()
+
+    assert "known" in prompt and "advisor" in prompt
+    assert "abandoned" in prompt or "yanked" in prompt
+
+
+def test_advisory_claims_drop_when_a_scanner_covers_them() -> None:
+    """A knowledge cutoff cannot answer "is this version vulnerable?".
+
+    With osv-scanner reporting advisories deterministically, asking the model
+    for them too only invites a confident wrong answer beside an accurate one.
+    """
+    narrowed = build_system_prompt(ReviewCategory.deprecation, dependency_health=False).lower()
+
+    assert "advisor" not in narrowed
+    assert "abandoned" not in narrowed and "yanked" not in narrowed
+
+
+def test_narrowing_keeps_what_a_scanner_cannot_answer() -> None:
+    """Deprecated APIs, EOL runtimes and typosquats are not in a CVE database."""
+    narrowed = build_system_prompt(ReviewCategory.deprecation, dependency_health=False).lower()
+
+    assert "deprecat" in narrowed
+    assert "end-of-life" in narrowed
+    assert "typosquat" in narrowed
+    assert "license" in narrowed
+
+
+def test_the_merged_code_health_lens_narrows_too() -> None:
+    """Under the default fast preset deprecation is not its own call."""
+    from lgtmaybe.engine.prompt import CODE_HEALTH_GROUP, build_group_block
+
+    full = build_group_block(CODE_HEALTH_GROUP).lower()
+    narrowed = build_group_block(CODE_HEALTH_GROUP, dependency_health=False).lower()
+
+    assert "known-vulnerable" in full
+    assert "known-vulnerable" not in narrowed
+    # The category attribution the fast preset depends on must survive.
+    assert '"deprecation"' in build_group_block(CODE_HEALTH_GROUP, dependency_health=False)

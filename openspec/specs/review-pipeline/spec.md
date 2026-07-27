@@ -172,15 +172,17 @@ any triage failure reviews everything, and skips are named in the summary.
 
 Installed tools SHALL run sandboxed when static analysis is enabled — scrubbed
 env, no network, hard timeout, throwaway temp dir, never a checkout, and rules
-only from local configuration. Paths MUST be canonical forward-slash repository
+read only from a local path — bundled with the package or configured — never a
+network rule registry. Paths MUST be canonical forward-slash repository
 paths. On Windows the scrubbed environment MUST pass through process-critical
 system variables while pinning user config and profile directories to the temp
 root. A tool that is not installed is skipped, and any tool failure degrades to
 no output from that tool rather than failing the review.
 <!-- anchor: engine.static-analysis -->
 
-#### Scenario: a tool needs rules it does not have locally
-- **WHEN** static analysis runs a rules-driven tool with no local rules
+#### Scenario: a rules-driven tool has no rules
+- **WHEN** static analysis runs a rules-driven tool for which no rules exist,
+  neither bundled nor configured
 - **THEN** that tool does not run at all (never a network rule registry)
 
 #### Scenario: a Windows tool reports a backslash path
@@ -191,6 +193,22 @@ no output from that tool rather than failing the review.
 - **WHEN** a child analyzer starts under Windows
 - **THEN** it receives the minimal process-critical system variables and temp-
   rooted user directories without inheriting cloud credentials
+
+### Requirement: Scan-only file texts never reach a prompt
+
+Dependency manifests and lockfiles fetched for scanning SHALL travel in their
+own context channel, separate from reviewed file texts. They MUST NOT enter the
+diff, any prompt, a hint block, or the reflection pass, and they are fetched
+only when a scanner will read them.
+<!-- anchor: engine.scan-manifests -->
+
+#### Scenario: a PR changes a lockfile
+- **WHEN** a reviewed PR changes a lockfile and static analysis is enabled
+- **THEN** the scanner reads it and no model call contains any of its content
+
+#### Scenario: static analysis is off
+- **WHEN** static analysis is disabled
+- **THEN** no dependency manifest is fetched at all
 
 ### Requirement: Tool findings ground or post, by mode
 
@@ -212,3 +230,8 @@ whole files and only the diff is under review.
 #### Scenario: a scanner hits pre-existing code
 - **WHEN** a `finding`-mode tool reports an issue on an unchanged line
 - **THEN** the finding is dropped and the summary states how many were skipped
+
+#### Scenario: a dependency advisory has no line to anchor to
+- **WHEN** a vulnerability scanner reports an advisory against a lockfile the
+  review never anchors against
+- **THEN** the finding is exempt from that drop and renders in the review body

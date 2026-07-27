@@ -17,8 +17,9 @@ Sandboxing posture:
 - subprocesses get a **scrubbed environment** (PATH plus process-critical
   Windows variables when applicable; no proxy vars or cloud credentials;
   user profile/config roots pinned inside the sandbox) and a hard timeout;
-- semgrep runs only with locally configured rules — its registry configs
-  (``--config auto``) fetch over the network, which is forbidden here;
+- semgrep always runs against LOCAL rules — the bundled MIT pack by default,
+  or `semgrep_rules` — never its registry configs (``--config auto``), which
+  fetch over the network;
 - tool output is untrusted text: a `hint`-mode tool's output is redacted and
   wrapped in a neutralised injection block before it reaches the model; a
   `finding`-mode tool's output is redacted before it becomes a finding, and its
@@ -47,6 +48,7 @@ from lgtmaybe.core.models import (
     StaticAnalysisTool,
     ToolMode,
 )
+from lgtmaybe.github.diff import is_scannable_manifest
 
 from .redact import redact
 
@@ -84,6 +86,8 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.semgrep: ToolMode.hint,
     StaticAnalysisTool.gitleaks: ToolMode.finding,
     StaticAnalysisTool.zizmor: ToolMode.finding,
+    StaticAnalysisTool.ast_grep: ToolMode.finding,
+    StaticAnalysisTool.osv_scanner: ToolMode.finding,
 }
 
 # Category prefix for a finding that came from a tool rather than a lens. Keeps
@@ -91,6 +95,16 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
 # of the built-in defect categories whose failure_scenario gate they'd fail.
 # Defined in core.models so the CustomLens validator can reserve it there.
 SCAN_CATEGORY_PREFIX = _SCAN_CATEGORY_PREFIX
+
+# Scanners whose findings can never anchor to a changed line, by construction.
+# A CVE is about the dependency, not about a position in a resolved lockfile —
+# and lockfiles are not reviewable, so their patches never reach the diff the
+# engine re-anchors against. The engine exempts these from the rule that scopes
+# scan findings to changed lines; the stricter unanchored severity floor then
+# keeps them to advisories worth acting on.
+UNANCHORABLE_SCAN_CATEGORIES: frozenset[str] = frozenset(
+    {f"{_SCAN_CATEGORY_PREFIX}{StaticAnalysisTool.osv_scanner.value}"}
+)
 
 _BANDIT_SEVERITY = {
     "LOW": Severity.low,
@@ -106,6 +120,25 @@ _ZIZMOR_SEVERITY = {
     "LOW": Severity.low,
     "MEDIUM": Severity.medium,
     "HIGH": Severity.high,
+}
+
+# OSV grades advisories on GitHub's scale, which has no "critical" between
+# HIGH and the CVSS score — treat CRITICAL when present, else HIGH.
+_OSV_SEVERITY = {
+    "LOW": Severity.low,
+    "MODERATE": Severity.medium,
+    "MEDIUM": Severity.medium,
+    "HIGH": Severity.high,
+    "CRITICAL": Severity.critical,
+}
+
+# ast-grep's rule severities. `hint` and `off` are the rule author saying "this
+# is not a defect", so they floor at info rather than being promoted.
+_ASTGREP_SEVERITY = {
+    "ERROR": Severity.high,
+    "WARNING": Severity.medium,
+    "INFO": Severity.low,
+    "HINT": Severity.info,
 }
 
 _SEMGREP_SEVERITY = {
@@ -188,6 +221,7 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
 _WORKFLOW_PREFIX = ".github/workflows/"
 _RELEVANT_PATHS: dict[StaticAnalysisTool, Callable[[str], bool]] = {
     StaticAnalysisTool.zizmor: lambda path: path.startswith(_WORKFLOW_PREFIX),
+    StaticAnalysisTool.osv_scanner: is_scannable_manifest,
 }
 
 
@@ -195,6 +229,22 @@ def _has_relevant_input(tool: StaticAnalysisTool, paths: list[str]) -> bool:
     """Whether *tool* has anything in the corpus worth running over."""
     predicate = _RELEVANT_PATHS.get(tool)
     return predicate is None or any(predicate(path) for path in paths)
+
+
+def bundled_semgrep_rules() -> Path:
+    """The MIT semgrep rules shipped inside the package.
+
+    Located relative to this module rather than via importlib.resources: semgrep
+    needs a real filesystem path for --config, and this resolves correctly both
+    from an installed wheel and from inside the PyInstaller one-file executable
+    (where __file__ points into the extracted _MEIPASS tree).
+
+    We ship our own rules because the widely-used upstream packs are LGPL-2.1
+    **plus a Commons Clause** — not open source, and not something an MIT wheel
+    can redistribute honestly. Point `semgrep_rules` at a local directory to use
+    a fuller pack instead.
+    """
+    return Path(__file__).resolve().parent.parent / "rules" / "semgrep"
 
 
 def mode_for(tool: StaticAnalysisTool, cfg: ReviewConfig) -> ToolMode:
@@ -407,17 +457,46 @@ def _run_tool(
             "--report-path",
             str(report),
         ]
+    elif tool is StaticAnalysisTool.osv_scanner:
+        # --offline-vulnerabilities uses a LOCAL database only. Never
+        # --download-offline-databases: that fetches, and the sandbox has no
+        # network. With no database present osv reports nothing, which is why a
+        # configured-but-unseeded scanner must not read as a clean bill of
+        # health — see the missing-database notice.
+        argv = [
+            binary,
+            "scan",
+            "source",
+            "--format",
+            "json",
+            "--offline-vulnerabilities",
+            # The corpus is loose files, not a resolvable project: without this
+            # osv tries to resolve transitive dependencies, which needs network.
+            "--no-resolve",
+            ".",
+        ]
+    elif tool is StaticAnalysisTool.ast_grep:
+        rules = cfg.static_analysis.ast_grep_rules
+        if not rules:
+            # ast-grep ships no rules of its own — with none configured there is
+            # nothing for it to look for.
+            _log.info("ast-grep skipped — no ast_grep_rules configured")
+            return []
+        # Deliberately a copy of scripts/check_spec_drift.py's invocation rather
+        # than an import: that script lives outside the package and importing it
+        # would put a dev tool on the runtime import path. Keep the two in step.
+        argv = [binary, "scan", "--rule", str(Path(rules).resolve()), "--json=compact", "."]
     elif tool is StaticAnalysisTool.zizmor:
         # --offline forbids the online audits that resolve actions against the
         # GitHub API; --no-progress keeps the machine-readable output clean.
         argv = [binary, "--format", "json", "--no-progress", "--offline", "."]
     else:  # semgrep
-        rules = cfg.static_analysis.semgrep_rules
-        if not rules:
-            # Without local rules semgrep would need its network registry
-            # (--config auto), which the sandbox forbids — skip silently.
-            _log.info("semgrep skipped — no local semgrep_rules configured")
-            return []
+        # Unset now means the bundled MIT pack, not "skip". Before, semgrep sat
+        # out every review unless someone configured rules, which nobody did —
+        # so the one multi-language tool never ran at all. Never `--config auto`:
+        # the registry is a network fetch the sandbox forbids.
+        configured = cfg.static_analysis.semgrep_rules
+        semgrep_rules = Path(configured).resolve() if configured else bundled_semgrep_rules()
         argv = [
             binary,
             "scan",
@@ -425,8 +504,12 @@ def _run_tool(
             "--quiet",
             "--metrics=off",
             "--disable-version-check",
+            # The corpus carries no .gitignore of its own, but a PR that changes
+            # one puts it there — and semgrep would then honour it and silently
+            # skip the very files under review.
+            "--no-git-ignore",
             "--config",
-            str(Path(rules).resolve()),
+            str(semgrep_rules),
             ".",
         ]
 
@@ -474,6 +557,14 @@ def _scrubbed_env(root: Path) -> dict[str, str]:
         # Belt and braces for semgrep even with --metrics=off.
         "SEMGREP_SEND_METRICS": "off",
     }
+    # The one variable forwarded from the parent environment. It names a
+    # read-only local directory holding the offline vulnerability database —
+    # not a credential, not an endpoint — and osv-scanner cannot fetch a
+    # database from inside a network-less sandbox. Without it the scanner
+    # silently reports nothing, which is indistinguishable from a clean result.
+    osv_db = os.environ.get("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY")
+    if osv_db:
+        env["OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"] = osv_db
     if not _WINDOWS:
         return env
 
@@ -509,6 +600,10 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
         return [_gitleaks_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.zizmor:
         return [_zizmor_finding(item) for item in data or []]
+    if tool is StaticAnalysisTool.ast_grep:
+        return [_astgrep_finding(item) for item in data or []]
+    if tool is StaticAnalysisTool.osv_scanner:
+        return _osv_findings(data, root)
     if tool is StaticAnalysisTool.bandit:
         return [_bandit_finding(item) for item in data.get("results", [])]
     return [_semgrep_finding(item) for item in data.get("results", [])]
@@ -584,6 +679,54 @@ def _gitleaks_finding(item: dict[str, Any]) -> ToolFinding:
         # gitleaks has no severity of its own: a committed credential is high by
         # definition, and nothing it reports is worth grading lower.
         severity=Severity.high,
+    )
+
+
+def _osv_findings(data: dict[str, Any], root: Path) -> list[ToolFinding]:
+    """Flatten osv-scanner's source → packages → vulnerabilities nesting.
+
+    One finding per advisory per package. The line is always 1: a lockfile hunk
+    is machine-generated and the useful anchor is the file, not a position in a
+    resolved dependency tree — these findings are expected to render in the
+    review body rather than inline.
+    """
+    findings: list[ToolFinding] = []
+    for result in data.get("results", []):
+        path = _posix_rel(str(result.get("source", {}).get("path", "")), root)
+        for entry in result.get("packages", []):
+            package = entry.get("package", {})
+            name = str(package.get("name", ""))
+            version = str(package.get("version", ""))
+            for vuln in entry.get("vulnerabilities", []):
+                severity = str(vuln.get("database_specific", {}).get("severity", "")).upper()
+                summary = str(vuln.get("summary") or "known vulnerability")
+                findings.append(
+                    ToolFinding(
+                        tool="osv-scanner",
+                        path=path,
+                        line=1,
+                        rule=str(vuln.get("id", "")),
+                        message=f"{name} {version}: {summary}",
+                        severity=_OSV_SEVERITY.get(severity, Severity.medium),
+                    )
+                )
+    return findings
+
+
+def _astgrep_finding(item: dict[str, Any]) -> ToolFinding:
+    """Map one ast-grep match; `range.start.line` is 0-based, like zizmor's.
+
+    Note ast-grep exits non-zero when it matches an error-level rule, so the
+    runner must read stdout rather than the exit status — it already does.
+    """
+    start = item.get("range", {}).get("start", {})
+    return ToolFinding(
+        tool="ast-grep",
+        path=_posix_rel(str(item.get("file", ""))),
+        line=int(start.get("line", 0)) + 1,
+        rule=str(item.get("ruleId", "")),
+        message=str(item.get("message", "")),
+        severity=_ASTGREP_SEVERITY.get(str(item.get("severity", "")).upper(), Severity.low),
     )
 
 

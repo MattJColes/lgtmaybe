@@ -38,6 +38,38 @@ RUN set -eux; \
     rm /tmp/gitleaks.tgz; \
     gitleaks version
 
+# osv-scanner, likewise a Go binary with no wheel, pinned the same way.
+ARG OSV_SCANNER_VERSION=2.0.2
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) sha=3abcfd7126c453a00421487e721b296e0cb68085bd431d6cef60872774170fc8 ;; \
+      arm64) sha=5da413cb77ddb99bd115961e25ddf02490f6e1415abea1e15c9557057a457c08 ;; \
+      *) echo "no pinned osv-scanner build for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_${TARGETARCH}"; \
+    curl -fsSL "${url}" -o /usr/local/bin/osv-scanner; \
+    echo "${sha}  /usr/local/bin/osv-scanner" | sha256sum -c -; \
+    chmod +x /usr/local/bin/osv-scanner; \
+    osv-scanner --version
+
+# Bake the OSV vulnerability database in at build time. The scanner runs inside
+# the network-less sandbox, so it cannot fetch one itself — and with no database
+# it reports nothing, which reads exactly like a clean bill of health. Fetching
+# it here keeps the sandbox rule intact and bounds staleness to the release
+# cadence. Per-ecosystem and modest (~30 MB each), so this is tens of megabytes,
+# not the gigabyte a full mirror would cost.
+ENV OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=/opt/osv-db
+RUN set -eux; \
+    mkdir -p /tmp/osv-seed /opt/osv-db; \
+    : > /tmp/osv-seed/requirements.txt; \
+    printf '{"dependencies":{}}' > /tmp/osv-seed/package.json; \
+    printf 'module seed\n' > /tmp/osv-seed/go.mod; \
+    cd /tmp/osv-seed; \
+    osv-scanner scan source --offline-vulnerabilities --download-offline-databases \
+        --no-resolve . > /dev/null 2>&1 || true; \
+    rm -rf /tmp/osv-seed; \
+    du -sh /opt/osv-db
+
 WORKDIR /app
 COPY pyproject.toml README.md uv.lock ./
 COPY src ./src

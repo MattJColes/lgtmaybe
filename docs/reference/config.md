@@ -49,7 +49,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -134,6 +134,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `open_finding_threads` | integer | No | `0` | Open Finding Threads |
 | `pr_number` | integer | Yes | — | Pr Number |
 | `repo` | string | Yes | — | Repo |
+| `scan_contents` | object | No | — | Scan Contents |
 | `title` | string | No | `` | Title |
 
 ## Raw JSON schemas
@@ -468,6 +469,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "additionalProperties": false,
       "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nWhen enabled, the installed tools run over the already-fetched changed-file\ntexts (sandboxed subprocess, scrubbed environment, no network, never a\ncheckout) and their findings enter each lens prompt as untrusted HINTS \u2014\n\"confirm, contextualise, or discard\" \u2014 raising recall on the deterministic\nbugs models miss without posting raw linter noise. A tool that isn't\ninstalled is skipped silently, so the feature degrades to nothing on a\nminimal install.",
       "properties": {
+        "ast_grep_rules": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ast Grep Rules"
+        },
         "enabled": {
           "default": false,
           "title": "Enabled",
@@ -516,7 +529,9 @@ The canonical machine-readable schemas. These are the source of truth for provid
             "semgrep",
             "mypy",
             "gitleaks",
-            "zizmor"
+            "zizmor",
+            "ast-grep",
+            "osv-scanner"
           ],
           "items": {
             "$ref": "#/$defs/StaticAnalysisTool"
@@ -536,7 +551,9 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "semgrep",
         "mypy",
         "gitleaks",
-        "zizmor"
+        "zizmor",
+        "ast-grep",
+        "osv-scanner"
       ],
       "title": "StaticAnalysisTool",
       "type": "string"
@@ -800,6 +817,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "static_analysis": {
       "$ref": "#/$defs/StaticAnalysisConfig",
       "default": {
+        "ast_grep_rules": null,
         "enabled": false,
         "min_severity": "info",
         "semgrep_rules": null,
@@ -811,7 +829,9 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "semgrep",
           "mypy",
           "gitleaks",
-          "zizmor"
+          "zizmor",
+          "ast-grep",
+          "osv-scanner"
         ]
       }
     },
@@ -1128,6 +1148,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "repo": {
       "title": "Repo",
       "type": "string"
+    },
+    "scan_contents": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Scan Contents",
+      "type": "object"
     },
     "title": {
       "default": "",

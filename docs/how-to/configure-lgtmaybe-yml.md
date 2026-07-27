@@ -380,8 +380,8 @@ Each tool reaches the review in one of two **modes**:
   without posting raw linter noise; only findings the model itself confirms are
   reported. The default for **ruff**, **bandit**, **mypy** and **semgrep**.
 - **`finding`** — findings are posted directly, with **no model call at all**.
-  The default for **gitleaks** and **zizmor**. Deterministic, free, and
-  identical run to run.
+  The default for **gitleaks**, **zizmor**, **ast-grep** and **osv-scanner**.
+  Deterministic, free, and identical run to run.
 
 The split is about the tool, not taste: a committed credential is present or it
 isn't, so asking a model to "confirm or discard" a regex match only adds latency
@@ -392,9 +392,48 @@ what the model is good at filtering. Override either way with `tool_mode`.
 Supported tools: **ruff**, **bandit**, and **mypy** (Python), **gitleaks**
 (secrets, any language), **zizmor** (GitHub Actions workflow security — template
 injection, unpinned `uses`, over-broad permissions; it runs only when the PR
-changes a workflow file), and **semgrep** (multi-language) when you point
-`semgrep_rules` at local rules — semgrep's registry configs need the network,
-which the sandbox forbids.
+changes a workflow file), **ast-grep** (your own structural rules — the
+deterministic sibling of `extra_lenses`; set `ast_grep_rules`), **osv-scanner**
+(known vulnerabilities in your dependencies), and **semgrep** (multi-language
+SAST).
+
+**osv-scanner** is the one check a model genuinely cannot do: whether a pinned
+dependency has a published advisory depends on what was disclosed this week, and
+a model's knowledge cutoff makes any answer it gives unreliable. It reads the
+dependency manifests and lockfiles your PR changes — fetched into a **scan-only
+channel** that never enters the diff, a prompt, or the reflection pass, because
+nobody wants a model commenting on line 84,000 of a lockfile.
+
+Its findings are about the dependency rather than a line, so they render in the
+review body rather than as inline comments, and only `high`/`critical`
+advisories surface by default (`unanchored_min_severity`).
+
+It needs a local vulnerability database — the sandbox has no network, so it can
+never fetch one. The GitHub Action image ships one, baked in at build time. On
+the CLI, seed it once with `osv-scanner --download-offline-databases`; without a
+database the scanner reports nothing, and the review says so rather than passing
+it off as clean.
+
+When osv-scanner is set to post findings, the review prompt **stops asking the
+model** whether a version has a known advisory or a package is abandoned — a
+knowledge cutoff cannot answer either, so asking would only put a confident
+guess beside an accurate answer. Everything a vulnerability database cannot
+answer stays with the model: deprecated APIs, end-of-life runtimes, typosquats
+and licence conflicts. Demote osv-scanner to `hint` and the model takes those
+claims back.
+
+**semgrep now works out of the box.** It used to skip itself unless you set
+`semgrep_rules`, which almost nobody did — so the one multi-language tool never
+ran. It now falls back to a small, high-precision **MIT rule pack shipped with
+lgtmaybe**, and `semgrep_rules` overrides which rules it uses. Rules are always
+read from a local path: semgrep's registry configs need the network, which the
+sandbox forbids.
+
+We ship our own rules rather than bundling a well-known upstream pack because
+the widely-used semgrep-rules / opengrep-rules collections are LGPL-2.1 **plus a
+Commons Clause** — not an open-source licence, and not something an MIT package
+can redistribute honestly. Point `semgrep_rules` at a directory to use a fuller
+pack you have obtained yourself.
 
 Two rules keep direct posting honest. Tools read **whole files**, but only the
 diff is under review, so a finding on a line this PR did not change is dropped
@@ -437,7 +476,8 @@ static_analysis:
     ruff: medium               # only medium+ from ruff; bandit keeps `low`
   tool_mode:                   # per-tool overrides of hint vs finding
     gitleaks: hint             # route secrets through the model instead
-  # semgrep_rules: .semgrep.yml  # local rules; semgrep is skipped without them
+  # semgrep_rules: .semgrep.yml  # override the bundled MIT pack
+  # ast_grep_rules: .ast-grep/  # your own structural rules (skipped when unset)
 ```
 
 Default: `enabled: false` — no subprocess ever runs and behaviour is

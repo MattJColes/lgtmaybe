@@ -1,0 +1,195 @@
+# lgtmaybe's own semgrep rules — MIT, written for this project.
+#
+# Why we ship our own rather than vendoring an upstream pack: the widely-used
+# semgrep-rules / opengrep-rules collections are LGPL-2.1 **plus a Commons
+# Clause**, which is not an open-source licence. Bundling them would put
+# use-restricted content inside an MIT wheel published to PyPI, Homebrew and
+# GHCR, and would restrict lgtmaybe's users in ways MIT promises it does not.
+#
+# Point `static_analysis.semgrep_rules` at any local rules directory to use a
+# fuller pack instead of this one — see docs/how-to/configure-lgtmaybe-yml.md.
+#
+# Scope: deliberately small and high-precision. These run in `hint` mode by
+# default, so the model still gets to discard a false positive — but a noisy
+# rule wastes prompt budget on every review, so each rule here should be one a
+# reviewer would act on nearly every time it fires. Prefer missing a case over
+# crying wolf; the review lenses cover the fuzzy half.
+rules:
+  # --- Command / code execution ------------------------------------------
+  - id: lgtmaybe-python-shell-true
+    languages: [python]
+    severity: WARNING
+    message: >-
+      subprocess called with shell=True. If any part of the command is
+      caller-controlled this is command injection; pass an argument list instead.
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.check_call(..., shell=True, ...)
+          - pattern: subprocess.check_output(..., shell=True, ...)
+
+  - id: lgtmaybe-python-os-system
+    languages: [python]
+    severity: WARNING
+    message: >-
+      os.system runs its argument through a shell. Use subprocess with an
+      argument list so arguments cannot be reinterpreted as shell syntax.
+    pattern: os.system(...)
+
+  - id: lgtmaybe-python-eval-exec
+    languages: [python]
+    severity: ERROR
+    message: >-
+      eval/exec on a runtime value executes arbitrary code. Parse the input
+      instead (ast.literal_eval for data, an explicit dispatch table for names).
+    pattern-either:
+      - pattern: eval($X, ...)
+      - pattern: exec($X, ...)
+
+  - id: lgtmaybe-js-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      eval / new Function on a runtime value executes arbitrary code. Use a
+      parser or an explicit dispatch table instead.
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+
+  # --- Deserialisation ----------------------------------------------------
+  - id: lgtmaybe-python-unsafe-deserialisation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Deserialising untrusted data with pickle/marshal/shelve executes arbitrary
+      code during load. Use JSON, or verify the payload's origin cryptographically.
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+      - pattern: marshal.loads(...)
+      - pattern: shelve.open(...)
+
+  - id: lgtmaybe-python-yaml-unsafe-load
+    languages: [python]
+    severity: ERROR
+    message: >-
+      yaml.load without a safe loader can construct arbitrary Python objects.
+      Use yaml.safe_load, or pass Loader=yaml.SafeLoader.
+    patterns:
+      - pattern: yaml.load($X)
+
+  # --- Crypto / randomness ------------------------------------------------
+  - id: lgtmaybe-python-weak-hash
+    languages: [python]
+    severity: WARNING
+    message: >-
+      MD5/SHA1 are broken for security use. Use SHA-256 or better; if this hash
+      is non-security (a cache key), pass usedforsecurity=False to say so.
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: hashlib.sha1(...)
+      - pattern-not: hashlib.md5(..., usedforsecurity=False, ...)
+      - pattern-not: hashlib.sha1(..., usedforsecurity=False, ...)
+
+  - id: lgtmaybe-python-random-for-secrets
+    languages: [python]
+    severity: WARNING
+    message: >-
+      random is a predictable PRNG and must not generate tokens, passwords, or
+      keys. Use the secrets module.
+    pattern-either:
+      - pattern: random.random()
+      - pattern: random.randint(...)
+      - pattern: random.choice(...)
+
+  # --- Transport / verification -------------------------------------------
+  - id: lgtmaybe-python-tls-verify-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS certificate verification is disabled, so this connection can be
+      transparently intercepted. Fix the trust store rather than skipping the check.
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - pattern: httpx.$M(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+
+  # --- Web framework footguns ---------------------------------------------
+  - id: lgtmaybe-python-flask-debug
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Flask debug mode exposes an interactive debugger that executes code.
+      It must never be enabled where the app is reachable by others.
+    pattern: $APP.run(..., debug=True, ...)
+
+  - id: lgtmaybe-python-bind-all-interfaces
+    languages: [python]
+    severity: INFO
+    message: >-
+      Binding 0.0.0.0 exposes this service on every interface. Confirm that is
+      intended and that something else restricts who can reach it.
+    pattern-either:
+      - pattern: $APP.run(..., host="0.0.0.0", ...)
+      - pattern: $S.bind(("0.0.0.0", ...))
+
+  - id: lgtmaybe-js-react-dangerous-html
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      dangerouslySetInnerHTML renders raw HTML and is an XSS sink if the value
+      is not sanitised. Render text, or sanitise with a vetted library first.
+    pattern: <$EL dangerouslySetInnerHTML={...} />
+
+  - id: lgtmaybe-js-document-write
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      document.write / innerHTML with a runtime value is an XSS sink. Use
+      textContent, or sanitise before assigning.
+    pattern-either:
+      - pattern: document.write(...)
+      - pattern: $EL.innerHTML = $X
+      - pattern: $EL.outerHTML = $X
+
+  # --- Correctness traps a linter catches and a reader does not -----------
+  - id: lgtmaybe-python-mutable-default-argument
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A mutable default is created once and shared by every call, so state leaks
+      between callers. Default to None and build the value inside the function.
+    # Quoted: an unquoted scalar containing ": " parses as a nested mapping.
+    pattern-either:
+      - pattern: "def $F(..., $A=[], ...): ..."
+      - pattern: "def $F(..., $A={}, ...): ..."
+      - pattern: "def $F(..., $A=set(), ...): ..."
+
+  - id: lgtmaybe-python-assert-in-production-path
+    languages: [python]
+    severity: INFO
+    message: >-
+      assert is removed under python -O, so it must not enforce a security or
+      validation rule. Raise an explicit exception instead.
+    pattern: assert $X, ...
+
+  - id: lgtmaybe-python-except-pass
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Swallowing every exception silently hides real failures, including
+      KeyboardInterrupt and bugs in the try body. Catch a specific type, and log.
+    pattern-either:
+      - pattern: |
+          try:
+              ...
+          except:
+              pass
+      - pattern: |
+          try:
+              ...
+          except Exception:
+              pass

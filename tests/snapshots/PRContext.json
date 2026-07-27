@@ -63,6 +63,13 @@
       "title": "Repo",
       "type": "string"
     },
+    "scan_contents": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Scan Contents",
+      "type": "object"
+    },
     "title": {
       "default": "",
       "title": "Title",
