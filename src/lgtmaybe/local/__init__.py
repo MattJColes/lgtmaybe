@@ -57,6 +57,12 @@ def local_pr_context(
         raise ValueError("--working and --uncommitted are mutually exclusive")
 
     _ensure_repo(cwd)
+    # Everything downstream — the patch headers, `--name-only`, the reader that
+    # opens each changed file — speaks repo-relative paths, because that is what
+    # `git diff` reports wherever it is invoked from. Anchor on the repo root so
+    # a review run from a subdirectory sees the same worktree as one run from
+    # the top, rather than half of it against the wrong base directory.
+    cwd = _repo_root(cwd)
 
     head_sha = _git(cwd, "rev-parse", "HEAD").strip()
 
@@ -128,9 +134,14 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     missing or unreadable. Lets the local CLI resolve a deferred reflection verdict
     the same way the GitHub gateway does, and finally gives local reviews grounding
     content. Paths that escape the repo root are refused.
+
+    ``cwd`` is the root to resolve against, used verbatim — the eval harness
+    points it at a fixture corpus that is not a repo of its own. Omitting it
+    means "this repo", which resolves the worktree's top level rather than the
+    process's directory: the paths handed to the reader are repo-relative,
+    because that is what git reports wherever it runs.
     """
-    root = Path(cwd) if cwd is not None else Path.cwd()
-    root = root.resolve()
+    root = (Path(cwd) if cwd is not None else _repo_root(None)).resolve()
 
     def read(path: str) -> str | None:
         try:
@@ -141,6 +152,19 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
             return None
 
     return read
+
+
+def _repo_root(cwd: Path | None) -> Path:
+    """The worktree's top level, or *cwd* itself when git can't say.
+
+    Falling back rather than raising keeps a non-repo caller (the file reader's
+    default) behaving exactly as it did before, instead of turning a "no such
+    file" into a crash.
+    """
+    try:
+        return Path(_git(cwd, "rev-parse", "--show-toplevel").strip())
+    except ValueError:
+        return Path(cwd) if cwd is not None else Path.cwd()
 
 
 def _untracked_files(cwd: Path | None) -> list[str]:

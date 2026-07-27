@@ -338,6 +338,19 @@ def test_non_ascii_filename_is_reviewed(repo: Path, stub: StubServer) -> None:
     assert {f["title"] for f in findings} == {"Accented file finding"}
 
 
+def test_review_from_a_subdirectory_sees_the_whole_worktree(repo: Path, stub: StubServer) -> None:
+    """git names paths from the repo root wherever it runs, so a review started
+    in a subdirectory has to resolve them there too."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "nested.py").write_text(f"n = 1  {_flag('high', 'Nested finding')}\n")
+    (repo / "top.py").write_text(f"t = 1  {_flag('high', 'Top-level finding')}\n")
+
+    result = _run(repo / "pkg", "--format", "json", "--uncommitted", stub=stub)
+
+    assert _titles(result) == {"Nested finding", "Top-level finding"}
+    assert {f["path"] for f in _findings(result)} == {"pkg/nested.py", "top.py"}
+
+
 def test_empty_diff_reports_a_clean_review(repo: Path, stub: StubServer) -> None:
     _git(repo, "checkout", "main")
 

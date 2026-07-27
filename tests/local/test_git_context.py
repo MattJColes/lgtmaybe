@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lgtmaybe.local import local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -372,3 +372,64 @@ def test_non_ascii_path_in_working_mode(repo: Path) -> None:
 
     assert ctx.changed_files == ["日本語.py"]
     assert "+value = 4" in ctx.diff
+
+
+# ---------------------------------------------------------------------------
+# running from a subdirectory — git reports repo-relative paths, so must we
+# ---------------------------------------------------------------------------
+
+
+def test_file_contents_populated_when_run_from_a_subdirectory(repo: Path) -> None:
+    """`git diff` names paths from the repo root wherever it runs, so resolving
+    them against the caller's cwd finds nothing: every file's head text came
+    back empty, silently disabling grounding, static analysis, pragmas and
+    context expansion for anyone not standing in the repo root."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("def f():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "feat: nested module")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo / "pkg")
+
+    assert ctx.changed_files == ["pkg/mod.py"]
+    assert ctx.file_contents.get("pkg/mod.py") == "def f():\n    return 1\n"
+
+
+def test_untracked_files_outside_the_cwd_are_still_found(repo: Path) -> None:
+    """`git ls-files --others` lists only what is under the cwd, and names it
+    relative to the cwd — both wrong for a review of the whole worktree."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "nested.py").write_text("x = 1\n")
+    (repo / "top.py").write_text("y = 2\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo / "pkg")
+
+    assert set(ctx.changed_files) == {"pkg/nested.py", "top.py"}
+    assert "+++ b/pkg/nested.py" in ctx.diff
+    assert "+++ b/top.py" in ctx.diff
+
+
+def test_default_file_reader_resolves_against_the_repo_root(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no explicit root the reader means "this repo", not "this directory"."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("value = 1\n")
+    monkeypatch.chdir(repo / "pkg")
+
+    read = local_file_reader()
+
+    assert read("pkg/mod.py") == "value = 1\n"
+    assert read("../outside.py") is None
+
+
+def test_explicit_file_reader_root_is_used_verbatim(tmp_path: Path) -> None:
+    """An explicit root is a root, not a hint — the eval harness points this at a
+    fixture corpus that is not a git repo of its own."""
+    corpus = tmp_path / "corpus"
+    (corpus / "migrations").mkdir(parents=True)
+    (corpus / "migrations" / "ledger.py").write_text("def pending():\n    return []\n")
+
+    read = local_file_reader(corpus)
+
+    assert read("migrations/ledger.py") == "def pending():\n    return []\n"

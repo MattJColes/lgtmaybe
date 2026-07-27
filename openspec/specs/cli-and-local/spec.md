@@ -88,7 +88,8 @@ diff against the resolved base (`origin/HEAD` → `origin/main` →
 whole worktree vs the merge-base, `--uncommitted` for edits vs HEAD, with
 commit subjects feeding the intent lens. Both worktree modes include untracked
 files (`.gitignore` honoured) as new-file patches, since `git diff` never
-reports them; branch mode reviews committed history only.
+reports them; branch mode reviews committed history only. Paths are resolved
+against the worktree's top level, not the caller's directory.
 <!-- anchor: cli.local-context -->
 
 #### Scenario: developer reviews before pushing
@@ -98,6 +99,10 @@ reports them; branch mode reviews committed history only.
 #### Scenario: developer reviews a file they have not added yet
 - **WHEN** `lgtmaybe review --uncommitted` runs and a new file is untracked
 - **THEN** the file is reviewed, unless `.gitignore` excludes it
+
+#### Scenario: review is started from a subdirectory
+- **WHEN** `lgtmaybe review` runs from a package directory, not the repo root
+- **THEN** it sees the whole worktree, with each file's head text loaded
 
 ### Requirement: Config layers merge, secrets never persist
 
