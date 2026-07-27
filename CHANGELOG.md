@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.8.1...lgtmaybe-v1.9.0) (2026-07-27)
+
+
+### Features
+
+* **cli:** report what a local review spent ([#299](https://github.com/MattJColes/lgtmaybe/issues/299)) ([78af30b](https://github.com/MattJColes/lgtmaybe/commit/78af30b3754915e0a7e18604170fd5898235253e))
+* **engine:** cap a review's spend with max_review_tokens ([#297](https://github.com/MattJColes/lgtmaybe/issues/297)) ([78987a6](https://github.com/MattJColes/lgtmaybe/commit/78987a60d66afe7b77dda7252306ab8d83717dba))
+
 ## [1.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.8.0...lgtmaybe-v1.8.1) (2026-07-27)
 
 
