@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.7.0...lgtmaybe-v1.8.0) (2026-07-27)
+
+
+### Features
+
+* **engine:** name the lgtmaybe version alongside the model in posts ([#284](https://github.com/MattJColes/lgtmaybe/issues/284)) ([a295cd8](https://github.com/MattJColes/lgtmaybe/commit/a295cd8309acc5c093d07e7789d3d7ff8547d375))
+* **static-analysis:** add mypy to the fusion runner ([#287](https://github.com/MattJColes/lgtmaybe/issues/287)) ([b8f8739](https://github.com/MattJColes/lgtmaybe/commit/b8f8739ebcb061aea096347c5c33d7ab6a00b644))
+* **static-analysis:** deterministic scan tools that replace LLM work ([#288](https://github.com/MattJColes/lgtmaybe/issues/288)) ([4eee72c](https://github.com/MattJColes/lgtmaybe/commit/4eee72cc25a312b8f00e136fac54a1fdd263ad77))
+* **static-analysis:** semgrep rule pack, ast-grep, osv-scanner, and prompt narrowing ([#289](https://github.com/MattJColes/lgtmaybe/issues/289)) ([1cddf6b](https://github.com/MattJColes/lgtmaybe/commit/1cddf6b6acc28c978154e1408bfd40b3dc886771))
+
+
+### Bug Fixes
+
+* **prompt:** bind suggestion names to the file being changed ([#286](https://github.com/MattJColes/lgtmaybe/issues/286)) ([7bb2f02](https://github.com/MattJColes/lgtmaybe/commit/7bb2f02ae3df13437b1ceb20a3c59bb8a7310888))
+
 ## [1.7.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.6.0...lgtmaybe-v1.7.0) (2026-07-26)
 
 
