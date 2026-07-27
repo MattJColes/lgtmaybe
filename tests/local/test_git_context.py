@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lgtmaybe.local import local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -260,3 +260,176 @@ def test_uncommitted_resolves_head_with_a_single_rev_parse(
 
     assert head_calls == 1
     assert ctx.base_sha == ctx.head_sha
+
+
+# ---------------------------------------------------------------------------
+# untracked files — a brand-new file is the most common thing to review locally
+# ---------------------------------------------------------------------------
+
+
+def test_working_includes_a_brand_new_untracked_file(repo: Path) -> None:
+    """`git diff` never shows untracked files, so a file you just wrote was
+    invisible to --working — the exact case local review exists for."""
+    (repo / "brand_new.py").write_text("def g():\n    return 7\n")
+
+    ctx = local_pr_context(working=True, cwd=repo)
+
+    assert "brand_new.py" in ctx.changed_files
+    assert "+    return 7" in ctx.diff
+    assert "+++ b/brand_new.py" in ctx.diff
+    assert ctx.file_contents.get("brand_new.py") == "def g():\n    return 7\n"
+
+
+def test_uncommitted_includes_a_brand_new_untracked_file(repo: Path) -> None:
+    (repo / "brand_new.py").write_text("def g():\n    return 7\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert ctx.changed_files == ["brand_new.py"]
+    assert "+    return 7" in ctx.diff
+
+
+def test_untracked_file_in_a_subdirectory_is_repo_relative(repo: Path) -> None:
+    """The synthesised patch header must carry the repo-relative path, or every
+    finding on it anchors to a path GitHub/the CLI can't resolve."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("x = 1\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert ctx.changed_files == ["pkg/mod.py"]
+    assert "+++ b/pkg/mod.py" in ctx.diff
+
+
+def test_gitignored_file_is_not_reviewed(repo: Path) -> None:
+    """Untracked is not the same as unwanted: honour .gitignore."""
+    (repo / ".gitignore").write_text("secrets.env\n")
+    (repo / "secrets.env").write_text("TOKEN=abc\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert "secrets.env" not in ctx.changed_files
+
+
+def test_branch_mode_ignores_untracked_files(repo: Path) -> None:
+    """Branch mode reviews committed history only — an untracked file is not
+    part of it."""
+    (repo / "brand_new.py").write_text("x = 1\n")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo)
+
+    assert "brand_new.py" not in ctx.changed_files
+
+
+def test_untracked_and_tracked_edits_appear_together(repo: Path) -> None:
+    (repo / "app.py").write_text("def f():\n    return 99\n")
+    (repo / "brand_new.py").write_text("y = 2\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert set(ctx.changed_files) == {"app.py", "brand_new.py"}
+    assert "+    return 99" in ctx.diff
+    assert "+y = 2" in ctx.diff
+
+
+# ---------------------------------------------------------------------------
+# non-ASCII paths — git C-quotes them by default, which is not a real path
+# ---------------------------------------------------------------------------
+
+
+def test_non_ascii_path_is_not_c_quoted(repo: Path) -> None:
+    """git's default `core.quotePath` renders `café.py` as `"caf\\303\\251.py"`
+    — quotes, octal escapes and all. Left alone, that string is not a path any
+    reader can open and not an extension `is_reviewable` recognises, so the file
+    is silently dropped from the review."""
+    (repo / "café.py").write_text("value = 1\n", encoding="utf-8")
+    _git(repo, "add", "café.py")
+    _git(repo, "commit", "-m", "feat: accented filename")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo)
+
+    assert ctx.changed_files == ["café.py"]
+    assert "+++ b/café.py" in ctx.diff
+    assert ctx.file_contents.get("café.py") == "value = 1\n"
+
+
+def test_non_ascii_untracked_path_is_not_c_quoted(repo: Path) -> None:
+    (repo / "naïve.py").write_text("value = 2\n", encoding="utf-8")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert ctx.changed_files == ["naïve.py"]
+    assert "+++ b/naïve.py" in ctx.diff
+
+
+def test_non_ascii_path_in_working_mode(repo: Path) -> None:
+    (repo / "日本語.py").write_text("value = 3\n", encoding="utf-8")
+    _git(repo, "add", "日本語.py")
+    _git(repo, "commit", "-m", "feat: cjk filename")
+    (repo / "日本語.py").write_text("value = 4\n", encoding="utf-8")
+
+    ctx = local_pr_context(working=True, cwd=repo)
+
+    assert ctx.changed_files == ["日本語.py"]
+    assert "+value = 4" in ctx.diff
+
+
+# ---------------------------------------------------------------------------
+# running from a subdirectory — git reports repo-relative paths, so must we
+# ---------------------------------------------------------------------------
+
+
+def test_file_contents_populated_when_run_from_a_subdirectory(repo: Path) -> None:
+    """`git diff` names paths from the repo root wherever it runs, so resolving
+    them against the caller's cwd finds nothing: every file's head text came
+    back empty, silently disabling grounding, static analysis, pragmas and
+    context expansion for anyone not standing in the repo root."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("def f():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "feat: nested module")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo / "pkg")
+
+    assert ctx.changed_files == ["pkg/mod.py"]
+    assert ctx.file_contents.get("pkg/mod.py") == "def f():\n    return 1\n"
+
+
+def test_untracked_files_outside_the_cwd_are_still_found(repo: Path) -> None:
+    """`git ls-files --others` lists only what is under the cwd, and names it
+    relative to the cwd — both wrong for a review of the whole worktree."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "nested.py").write_text("x = 1\n")
+    (repo / "top.py").write_text("y = 2\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo / "pkg")
+
+    assert set(ctx.changed_files) == {"pkg/nested.py", "top.py"}
+    assert "+++ b/pkg/nested.py" in ctx.diff
+    assert "+++ b/top.py" in ctx.diff
+
+
+def test_default_file_reader_resolves_against_the_repo_root(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no explicit root the reader means "this repo", not "this directory"."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("value = 1\n")
+    monkeypatch.chdir(repo / "pkg")
+
+    read = local_file_reader()
+
+    assert read("pkg/mod.py") == "value = 1\n"
+    assert read("../outside.py") is None
+
+
+def test_explicit_file_reader_root_is_used_verbatim(tmp_path: Path) -> None:
+    """An explicit root is a root, not a hint — the eval harness points this at a
+    fixture corpus that is not a git repo of its own."""
+    corpus = tmp_path / "corpus"
+    (corpus / "migrations").mkdir(parents=True)
+    (corpus / "migrations" / "ledger.py").write_text("def pending():\n    return []\n")
+
+    read = local_file_reader(corpus)
+
+    assert read("migrations/ledger.py") == "def pending():\n    return []\n"

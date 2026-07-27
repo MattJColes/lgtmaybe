@@ -106,12 +106,18 @@ on every host.
 When one file's diff exceeds `max_input_tokens`, the engine SHALL decompose it
 into per-hunk mini-diffs (each keeping its file header so line/side still bind
 to the real diff) and batch those normally — nothing is dropped and each
-call's context stays small. Files within budget are reviewed whole.
+call's context stays small. A hunk still over budget on its own SHALL be cut
+further into budget-sized slices, each given a recomputed `@@` header. Files
+within budget are reviewed whole.
 <!-- anchor: engine.recursive-walk -->
 
 #### Scenario: single file exceeds the budget
 - **WHEN** a file's patch alone is over `max_input_tokens` and `recursive` is on
 - **THEN** each of its hunks is reviewed as its own mini-diff
+
+#### Scenario: a brand-new file is one enormous hunk
+- **WHEN** the file has no hunk boundary to cut at and is over budget
+- **THEN** the hunk itself is sliced to fit, line numbers still binding
 
 ### Requirement: A timed-out batch is retried smaller, never repeated
 

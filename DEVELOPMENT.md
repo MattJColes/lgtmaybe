@@ -220,12 +220,40 @@ LLM or the GitHub API. Test layout mirrors `src/`:
   `openspec/specs/*/spec.md` has an ast-grep anchor in its `anchors.yml` that
   resolves to exactly one place in `src/` (see "Living specs" in `CLAUDE.md`;
   the non-blocking PR drift warning is `scripts/check_spec_drift.py`)
-- `tests/e2e/` — live end-to-end against a local model server (deselected by
+- `tests/e2e/` — end-to-end through the real CLI: one suite against a stub
+  provider (no setup), one against a live local model server (deselected by
   default; see below)
 
-### Live provider e2e (tests/e2e/)
+### CLI scenario e2e (tests/e2e/test_cli_scenarios.py)
 
-`tests/e2e/test_local_providers.py` drives the **real `lgtmaybe` CLI** against a
+Ten scenarios of rising complexity — a one-file review up to an oversize diff,
+path filters, line anchoring, secret redaction, the worktree modes, output
+formats, and a provider that has fallen over — driven through the **real CLI**
+against `tests/e2e/stub_provider.py`, an in-process OpenAI-compatible server.
+
+The stub answers from **planted markers** in the diff it is actually sent, so
+each scenario has exact ground truth:
+
+```python
+value = compute()  # @flag sev=high title=Something is wrong
+```
+
+Only the model's judgement is stubbed; git-diff resolution, redaction, injection
+wrapping, batching, parsing, re-anchoring, dedupe, reflection, filtering and
+rendering are the real code. That covers the seams a unit test never crosses —
+and catches whole-pipeline bugs (a file silently skipped, a token budget
+ignored, an unwrapped prompt) that per-module tests cannot see.
+
+Hermetic: no model, no network, no GitHub, no setup. Marked `e2e` only because
+a few dozen CLI subprocesses is too slow for the per-commit gate:
+
+```bash
+uv run pytest -m e2e tests/e2e/test_cli_scenarios.py
+```
+
+### Live provider e2e (tests/e2e/test_local_providers.py)
+
+This one drives the **real `lgtmaybe` CLI** against a
 local model server, proving the app round-trips end-to-end through each local
 serving stack — **ollama**, **llama.cpp**, and **vLLM** — on a tiny qwen model.
 It exercises the whole path (arg parsing, `.lgtmaybe.yml`, the local git diff,

@@ -19,6 +19,14 @@ from lgtmaybe.github.diff import is_reviewable, is_scannable_manifest
 # take a while; the timeout only caps a hung git, never a slow one.
 _TIMEOUT = 120
 
+# git's default `core.quotePath` renders a non-ASCII path as a C-quoted string:
+# `café.py` comes back as `"caf\303\251.py"`, quotes and octal escapes included.
+# That is not a path anything can open, its apparent extension is `py"`, and the
+# patch header stops matching `b/<path>` — so an accented or CJK filename was
+# silently dropped from the review. We already decode git's output as UTF-8, so
+# turning the quoting off gives us the real bytes.
+_QUOTE_PATH_OFF = ("-c", "core.quotePath=false")
+
 
 def local_pr_context(
     *,
@@ -49,6 +57,12 @@ def local_pr_context(
         raise ValueError("--working and --uncommitted are mutually exclusive")
 
     _ensure_repo(cwd)
+    # Everything downstream — the patch headers, `--name-only`, the reader that
+    # opens each changed file — speaks repo-relative paths, because that is what
+    # `git diff` reports wherever it is invoked from. Anchor on the repo root so
+    # a review run from a subdirectory sees the same worktree as one run from
+    # the top, rather than half of it against the wrong base directory.
+    cwd = _repo_root(cwd)
 
     head_sha = _git(cwd, "rev-parse", "HEAD").strip()
 
@@ -72,6 +86,16 @@ def local_pr_context(
     diff = _git(cwd, "diff", spec)
     name_output = _git(cwd, "diff", "--name-only", spec)
     changed_files = [line for line in name_output.splitlines() if line]
+
+    # `git diff` only ever reports content git already tracks, so a file you
+    # just created is invisible to it — and "review my working tree" almost
+    # always means "review the file I just wrote". Branch mode reviews committed
+    # history, where an untracked file genuinely has no place.
+    if working or uncommitted:
+        untracked = _untracked_files(cwd)
+        if untracked:
+            diff += _untracked_patches(cwd, untracked)
+            changed_files += untracked
 
     # Working-tree text for the changed files. Static analysis has never run on
     # the local CLI because nothing populated these; the reader is the same
@@ -110,9 +134,14 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     missing or unreadable. Lets the local CLI resolve a deferred reflection verdict
     the same way the GitHub gateway does, and finally gives local reviews grounding
     content. Paths that escape the repo root are refused.
+
+    ``cwd`` is the root to resolve against, used verbatim — the eval harness
+    points it at a fixture corpus that is not a repo of its own. Omitting it
+    means "this repo", which resolves the worktree's top level rather than the
+    process's directory: the paths handed to the reader are repo-relative,
+    because that is what git reports wherever it runs.
     """
-    root = Path(cwd) if cwd is not None else Path.cwd()
-    root = root.resolve()
+    root = (Path(cwd) if cwd is not None else _repo_root(None)).resolve()
 
     def read(path: str) -> str | None:
         try:
@@ -125,11 +154,70 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     return read
 
 
+def _repo_root(cwd: Path | None) -> Path:
+    """The worktree's top level, or *cwd* itself when git can't say.
+
+    Falling back rather than raising keeps a non-repo caller (the file reader's
+    default) behaving exactly as it did before, instead of turning a "no such
+    file" into a crash.
+    """
+    try:
+        return Path(_git(cwd, "rev-parse", "--show-toplevel").strip())
+    except ValueError:
+        return Path(cwd) if cwd is not None else Path.cwd()
+
+
+def _untracked_files(cwd: Path | None) -> list[str]:
+    """Repo-relative paths of untracked files worth reviewing, .gitignore honoured.
+
+    ``--exclude-standard`` applies the same ignore rules git itself uses, so a
+    build directory or a local ``.env`` never shows up. The reviewability filter
+    is applied here rather than downstream so a repo full of un-ignored
+    junk (images, archives) costs no ``git diff`` subprocesses at all.
+    """
+    listing = _git(cwd, "ls-files", "--others", "--exclude-standard", "-z")
+    return [
+        path
+        for path in listing.split("\0")
+        if path and (is_reviewable(path) or is_scannable_manifest(path))
+    ]
+
+
+def _untracked_patches(cwd: Path | None, paths: list[str]) -> str:
+    """New-file patches for untracked *paths*, in the shape `git diff` would emit.
+
+    ``git diff --no-index`` renders each file as the add-everything patch git
+    would have produced had it been staged, without touching the user's index.
+    It exits 1 when the two inputs differ — the normal case here — so the exit
+    code is read as "there is a diff", not as failure. A file that vanishes
+    between the listing and the diff is skipped rather than failing the review.
+    """
+    patches: list[str] = []
+    for path in paths:
+        try:
+            result = subprocess.run(
+                ["git", *_QUOTE_PATH_OFF, "diff", "--no-index", "--", "/dev/null", path],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=_TIMEOUT,
+            )
+        except (FileNotFoundError, subprocess.SubprocessError):
+            continue
+        # 0 = identical (an empty file), 1 = differs. Anything else is a real
+        # git failure on this one path; skip it rather than lose the review.
+        if result.returncode in (0, 1) and result.stdout:
+            patches.append(result.stdout)
+    return "".join(patches)
+
+
 def _git(cwd: Path | None, *args: str) -> str:
     """Run a git command and return stdout; raise ValueError on failure."""
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", *_QUOTE_PATH_OFF, *args],
             cwd=cwd,
             check=True,
             capture_output=True,

@@ -44,6 +44,18 @@ own neutralised marker family, framed as "confirm, contextualise, or discard".
 - **WHEN** static analysis produced findings for a batch
 - **THEN** they are prepended wrapped, never as trusted instructions
 
+### Requirement: The reflection audit treats its inputs as untrusted too
+
+The audit call SHALL carry the same posture as a lens call: the diff and the
+grounding head text are neutralised against marker forgery, and the auditor is
+told not to follow instructions found in them — otherwise a diff could steer
+the one pass that can drop every finding.
+<!-- anchor: hardening.audit-untrusted -->
+
+#### Scenario: a diff tells the auditor to drop everything
+- **WHEN** a diff embeds instructions aimed at the false-positive auditor
+- **THEN** they arrive neutralised, under an explicit untrusted-data guard
+
 ### Requirement: Secrets are redacted before egress
 
 Diffs, intent text, and expanded context SHALL be redacted before leaving for

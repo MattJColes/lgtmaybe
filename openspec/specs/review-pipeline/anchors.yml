@@ -45,6 +45,10 @@ engine.recursive-walk:
     files: [src/lgtmaybe/engine/**/*.py]
   - rule:
       kind: function_definition
+      has: { field: name, regex: '^split_hunk_by_budget$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
       has: { field: name, regex: '^batch_files$' }
     files: [src/lgtmaybe/engine/**/*.py]
 

@@ -4839,7 +4839,10 @@ the current branch against the remote primary branch (`origin/HEAD`, falling
 back to `origin/main`/`origin/master`, then a local `main`/`master`).
 `--working` reviews the whole worktree — branch commits plus uncommitted edits —
 against that same base. `--uncommitted` reviews only the uncommitted edits
-against HEAD, and `--base <ref>` picks a different base. The default output is a
+against HEAD, and `--base <ref>` picks a different base. Both worktree modes
+include files you haven't `git add`ed yet — a brand-new file is usually the
+thing you most want a second pair of eyes on — while anything `.gitignore`
+excludes stays out. The default output is a
 readable listing followed by the summary line:
 
 ```console

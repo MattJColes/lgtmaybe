@@ -8,6 +8,7 @@ from lgtmaybe.engine.compress import (
     batch_files,
     count_tokens,
     expand_hunks,
+    split_hunk_by_budget,
     split_patch_into_hunks,
     trailing_context_lines,
 )
@@ -354,6 +355,126 @@ def test_count_tokens_memoizes_repeated_text() -> None:
 
 
 # ---------------------------------------------------------------------------
+# split_hunk_by_budget: the tail of the RLM walk — one hunk bigger than the budget
+# ---------------------------------------------------------------------------
+
+
+def _new_file_patch(path: str, lines: int) -> str:
+    """A brand-new file: one file header, ONE hunk covering every line."""
+    header = f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n"
+    body = f"@@ -0,0 +1,{lines} @@\n" + "".join(f"+line_{i} = {i}\n" for i in range(lines))
+    return header + body
+
+
+def _added_line_numbers(unit: str) -> list[int]:
+    """(line number, text) of every added line in *unit*, per its own @@ header."""
+    out: list[int] = []
+    new_line = 0
+    for raw in unit.splitlines():
+        if raw.startswith("@@"):
+            new_line = int(raw.split("+")[1].split(",")[0].split(" ")[0])
+            continue
+        if raw.startswith("---") or raw.startswith("+++") or raw.startswith("diff --git"):
+            continue
+        if raw.startswith("-"):
+            continue
+        if raw.startswith("+"):
+            out.append(new_line)
+        new_line += 1
+    return out
+
+
+def test_split_hunk_by_budget_fits_every_piece() -> None:
+    patch = _new_file_patch("new.py", 400)
+    budget = count_tokens(patch) // 4
+
+    pieces = split_hunk_by_budget(patch, budget)
+
+    assert len(pieces) > 1
+    for piece in pieces:
+        assert count_tokens(piece) <= budget
+
+
+def test_split_hunk_by_budget_preserves_line_numbers() -> None:
+    """A finding's line must still bind to the real file, so each piece's @@
+    header has to say where in the file its slice starts."""
+    patch = _new_file_patch("new.py", 200)
+    pieces = split_hunk_by_budget(patch, count_tokens(patch) // 5)
+
+    seen = [n for piece in pieces for n in _added_line_numbers(piece)]
+    assert seen == list(range(1, 201))
+
+
+def test_split_hunk_by_budget_keeps_the_file_header() -> None:
+    patch = _new_file_patch("pkg/new.py", 200)
+    for piece in split_hunk_by_budget(patch, count_tokens(patch) // 4):
+        assert "+++ b/pkg/new.py" in piece
+        assert piece.count("@@ -") == 1
+
+
+def test_split_hunk_by_budget_loses_no_content() -> None:
+    patch = _new_file_patch("new.py", 150)
+    pieces = split_hunk_by_budget(patch, count_tokens(patch) // 3)
+
+    body = [ln for p in pieces for ln in p.splitlines() if ln.startswith("+line_")]
+    original = [ln for ln in patch.splitlines() if ln.startswith("+line_")]
+    assert body == original
+
+
+def test_split_hunk_by_budget_counts_both_sides() -> None:
+    """A mixed hunk moves the old-side and new-side counters independently."""
+    header = "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n"
+    body = "@@ -10,60 +20,60 @@\n" + "".join(f" ctx_{i}\n-old_{i}\n+new_{i}\n" for i in range(30))
+    pieces = split_hunk_by_budget(header + body, 60)
+
+    assert len(pieces) > 1
+    spans = []
+    for piece in pieces:
+        text = piece.split("@@ ")[1].split(" @@")[0]
+        old, new = text.split(" ")
+        spans.append(tuple(int(v) for v in old[1:].split(",") + new[1:].split(",")))
+    # Each side is counted independently and every piece resumes exactly where
+    # the previous one stopped — no gap, no overlap, on either side.
+    assert spans[0][0] == 10 and spans[0][2] == 20
+    for (o_start, o_count, n_start, n_count), nxt in zip(spans, spans[1:], strict=False):
+        assert nxt[0] == o_start + o_count
+        assert nxt[2] == n_start + n_count
+    # A hunk of ctx/-/+ triples moves the old side and the new side by the same
+    # amount overall, but neither counter is derived from the other.
+    assert sum(s[1] for s in spans) == 60
+    assert sum(s[3] for s in spans) == 60
+
+
+def test_split_hunk_by_budget_returns_whole_when_it_cannot_split() -> None:
+    """One line bigger than the whole budget can't be divided any further —
+    return it rather than loop forever or drop it."""
+    header = "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n"
+    patch = header + "@@ -0,0 +1,1 @@\n+" + "x " * 5000 + "\n"
+
+    pieces = split_hunk_by_budget(patch, 10)
+
+    assert len(pieces) == 1
+    assert pieces[0] == patch
+
+
+def test_split_hunk_by_budget_no_hunk_returns_whole() -> None:
+    patch = "diff --git a/old.py b/new.py\nrename from old.py\nrename to new.py\n"
+    assert split_hunk_by_budget(patch, 10) == [patch]
+
+
+def test_recursive_splits_a_single_oversize_hunk() -> None:
+    """A brand-new file is ONE hunk, so hunk-splitting alone left it whole and
+    the token budget was silently ignored."""
+    patch = _new_file_patch("new.py", 600)
+    budget = count_tokens(patch) // 5
+
+    walked = batch_files([("new.py", patch)], max_tokens=budget, recursive=True)
+
+    assert len(walked) > 1
+    for batch in walked:
+        assert count_tokens("\n".join(p for _, p in batch)) <= budget
+
+
 # overlapping expansion
 # ---------------------------------------------------------------------------
 
