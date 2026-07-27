@@ -6,6 +6,7 @@ import pytest
 
 from lgtmaybe.core.models import CustomLens, ReviewCategory, ReviewFinding, Severity
 from lgtmaybe.engine.prompt import build_lens_prompt, build_shared_preamble, build_system_prompt
+from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 
 
 def _union_prompt() -> str:
@@ -661,3 +662,71 @@ def test_the_merged_code_health_lens_narrows_too() -> None:
     assert "known-vulnerable" not in narrowed
     # The category attribution the fast preset depends on must survive.
     assert '"deprecation"' in build_group_block(CODE_HEALTH_GROUP, dependency_health=False)
+
+
+# ---------------------------------------------------------------------------
+# the redaction marker: lgtmaybe's own placeholder is not a finding
+# ---------------------------------------------------------------------------
+
+
+def test_shared_rules_name_the_redaction_marker() -> None:
+    """`redact()` rewrites every secret it matches to `[REDACTED]` before the
+    diff is sent, so that token is lgtmaybe's own marker, never source content.
+    Nothing in the prompt said so, and the security lens actively invited a
+    finding on it — a false positive manufactured by our own redaction."""
+    preamble = build_shared_preamble()
+
+    assert REDACTED_PLACEHOLDER in preamble
+
+
+def test_no_lens_is_told_to_flag_redacted_placeholders() -> None:
+    """The security lens used to say "even if they look redacted, flag the
+    practice" — which turns every redacted diff into a finding."""
+    for category in ReviewCategory:
+        prompt = build_system_prompt(category).lower()
+        assert "look redacted" not in prompt
+        assert "even if they look" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# secret scanning: the model stops guessing once gitleaks covers it
+# ---------------------------------------------------------------------------
+
+
+def test_hardcoded_secret_bullet_is_present_by_default() -> None:
+    """Static analysis is opt-in, so the default prompt is unchanged."""
+    prompt = build_system_prompt(ReviewCategory.security).lower()
+
+    assert "hardcoded secrets" in prompt
+
+
+def test_secret_claims_drop_when_a_scanner_covers_them() -> None:
+    """gitleaks reports committed secrets deterministically, and redaction has
+    already stripped them from the diff — so the lens cannot see what it is
+    being asked to find, while the ask still costs tokens on every call."""
+    narrowed = build_system_prompt(ReviewCategory.security, secret_scanning=False).lower()
+
+    assert "hardcoded secrets" not in narrowed
+
+
+def test_secret_narrowing_keeps_the_rest_of_the_security_lens() -> None:
+    """Only the bullet a scanner owns goes; the OWASP checklist stays."""
+    narrowed = build_system_prompt(ReviewCategory.security, secret_scanning=False).lower()
+
+    assert "owasp" in narrowed
+    assert "ssrf" in narrowed
+    assert "injection" in narrowed
+    # Secrets *reaching a log* are a different defect from a committed literal,
+    # and no secret scanner reports it — it must survive the narrowing.
+    assert "pii" in narrowed
+
+
+def test_secret_narrowing_applies_to_the_lens_block_too() -> None:
+    """The fast preset sends the lens as a user block, not a system prompt."""
+    from lgtmaybe.engine.prompt import build_lens_block
+
+    full = build_lens_block(ReviewCategory.security).lower()
+    narrowed = build_lens_block(ReviewCategory.security, secret_scanning=False).lower()
+
+    assert "hardcoded secrets" in full
+    assert "hardcoded secrets" not in narrowed

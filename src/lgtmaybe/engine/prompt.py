@@ -382,7 +382,7 @@ classes, aligned with the OWASP Top 10, to watch for:
 - **CSRF & open redirect** — state-changing endpoints without CSRF protection;
   redirect targets taken from user input without validation.
 - **Hardcoded secrets** — API keys, passwords, tokens, or private keys committed
-  in the diff (even if they look redacted, flag the practice).
+  in the diff as literals.
 - **Broken authn / authz** — missing permission checks, IDOR, auth bypass,
   privilege escalation, trusting client-supplied identity, or JWT/session
   pitfalls: unverified signatures, `alg` confusion, missing expiry checks.
@@ -776,11 +776,26 @@ _CODE_HEALTH_SECTION_NO_ADVISORIES = _CODE_HEALTH_SECTION.replace(_ADVISORY_LINE
     "(`low` to `medium`,\nhigher when a security advisory is involved):", "(`low` to `medium`):"
 )
 
+# The committed-secret bullet. Dropped when a secret scanner runs: redaction has
+# already rewritten every secret it matched to `[REDACTED]` before the diff is
+# sent, so the lens is being asked for something it largely cannot see, while
+# gitleaks reads the unredacted file text and answers it exactly.
+_SECRET_BULLET = """\
+- **Hardcoded secrets** — API keys, passwords, tokens, or private keys committed
+  in the diff as literals.
+"""
 
-def _category_section(category: ReviewCategory, dependency_health: bool) -> str:
+_SECURITY_SECTION_NO_SECRETS = _SECURITY_SECTION.replace(_SECRET_BULLET, "")
+
+
+def _category_section(
+    category: ReviewCategory, dependency_health: bool, secret_scanning: bool = True
+) -> str:
     """The lens body, minus the claims a scanner answers better when one runs."""
     if category is ReviewCategory.deprecation and not dependency_health:
         return _DEPRECATION_SECTION_NO_ADVISORIES
+    if category is ReviewCategory.security and not secret_scanning:
+        return _SECURITY_SECTION_NO_SECRETS
     return _CATEGORY_SECTIONS[category]
 
 
@@ -866,6 +881,10 @@ verify (hedge, lower the severity), never as confident `high`/`critical` fixes �
   ("X was removed", "Y now takes a new parameter", "this method is now async") — narration
   that restates the diff is not a finding. If the content is only a restatement of the
   change with no problem attached, omit it entirely.
+- `[REDACTED]` is the reviewer's OWN marker: secrets were stripped from this diff before
+  it reached you. It is never the author's source code, so never report it as a hardcoded
+  secret, a leaked credential, a placeholder left behind, or a bug of any kind. The real
+  text it replaced is not available to you, and its absence is not a defect.
 - Return `{"findings": []}` only when there are genuinely no issues."""
 
 
@@ -898,8 +917,10 @@ _LENS_LEAD_IN = (
 )
 
 
-@lru_cache(maxsize=len(ReviewCategory))
-def build_lens_block(category: ReviewCategory, dependency_health: bool = True) -> str:
+@lru_cache(maxsize=len(ReviewCategory) * 4)
+def build_lens_block(
+    category: ReviewCategory, dependency_health: bool = True, secret_scanning: bool = True
+) -> str:
     """One built-in lens's user-message block for the split (cache-shaped) layout.
 
     The lens section plus its category-matched worked example, sent as the
@@ -907,7 +928,7 @@ def build_lens_block(category: ReviewCategory, dependency_health: bool = True) -
     outside the cached prefix while the expensive content in front of it is
     shared by every lens call.
     """
-    section = _category_section(category, dependency_health)
+    section = _category_section(category, dependency_health, secret_scanning)
     return f"{_LENS_LEAD_IN}\n\n{section}\n\n{_CATEGORY_EXAMPLES[category]}"
 
 
@@ -926,9 +947,12 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     return f"{_LENS_LEAD_IN}\n\n{body}\n\n{example}"
 
 
-@lru_cache(maxsize=len(ReviewCategory) * 4)
+@lru_cache(maxsize=len(ReviewCategory) * 8)
 def build_system_prompt(
-    category: ReviewCategory, language: str | None = None, dependency_health: bool = True
+    category: ReviewCategory,
+    language: str | None = None,
+    dependency_health: bool = True,
+    secret_scanning: bool = True,
 ) -> str:
     """Return the system message for the review LLM's *category* lens.
 
@@ -940,7 +964,7 @@ def build_system_prompt(
     pre-language prompt when unset.
     """
     example = _CATEGORY_EXAMPLES[category]
-    body = _category_section(category, dependency_health)
+    body = _category_section(category, dependency_health, secret_scanning)
     return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
 
 

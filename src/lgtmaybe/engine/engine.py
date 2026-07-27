@@ -183,13 +183,19 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     # installed would make the prompt — and the shared prefix cache — vary by
     # machine. A configured-but-missing finding-mode tool warns instead.
     deps = not _scanner_covers_dependency_health(cfg)
+    # Likewise for committed secrets: redaction has already rewritten every
+    # secret it matched to `[REDACTED]` before the diff leaves, so a scanner
+    # reading the unredacted text answers this far better than the lens can.
+    secrets = not _scanner_covers_secrets(cfg)
     fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
     if fast:
         lenses = [
             _Lens(
                 id=ReviewCategory.security.value,
-                system_prompt=build_system_prompt(ReviewCategory.security, cfg.language),
-                user_block=build_lens_block(ReviewCategory.security),
+                system_prompt=build_system_prompt(
+                    ReviewCategory.security, cfg.language, secret_scanning=secrets
+                ),
+                user_block=build_lens_block(ReviewCategory.security, secret_scanning=secrets),
             ),
         ]
         correctness_categories = (
@@ -219,8 +225,12 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses = [
             _Lens(
                 id=category.value,
-                system_prompt=build_system_prompt(category, cfg.language, dependency_health=deps),
-                user_block=build_lens_block(category, dependency_health=deps),
+                system_prompt=build_system_prompt(
+                    category, cfg.language, dependency_health=deps, secret_scanning=secrets
+                ),
+                user_block=build_lens_block(
+                    category, dependency_health=deps, secret_scanning=secrets
+                ),
                 carries_intent=category is ReviewCategory.intent,
             )
             for category in cfg.categories
@@ -1081,6 +1091,19 @@ def _scanner_covers_dependency_health(cfg: ReviewConfig) -> bool:
     """
     sa = cfg.static_analysis
     tool = StaticAnalysisTool.osv_scanner
+    return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
+
+
+def _scanner_covers_secrets(cfg: ReviewConfig) -> bool:
+    """Whether a deterministic scanner will report committed secrets itself.
+
+    When one will, the lens stops being asked for them. Redaction rewrites every
+    secret it matches to ``[REDACTED]`` before the diff is sent, so the model is
+    largely being asked to find what it has been prevented from seeing — while
+    gitleaks reads the unredacted head text and answers it exactly.
+    """
+    sa = cfg.static_analysis
+    tool = StaticAnalysisTool.gitleaks
     return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
 
 

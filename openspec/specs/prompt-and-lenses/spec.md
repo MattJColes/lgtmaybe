@@ -100,19 +100,27 @@ SHALL return `null` rather than invent a causal story.
 
 ### Requirement: The model is not asked what a scanner answers better
 
-The review prompt SHALL drop the dependency claims that depend on knowledge
-published after training — whether a version has a known advisory, and whether a
-package is abandoned — from both the focused and the merged lens whenever a
-deterministic scanner reports those advisories itself. Claims a vulnerability database cannot
-answer (deprecated APIs, end-of-life runtimes, typosquats, licence conflicts)
-MUST remain. The decision SHALL derive from configuration, not from which
-binaries happen to be installed, so prompts stay reproducible.
+The review prompt SHALL drop an ask whenever a deterministic scanner is
+configured to report that class of finding itself. Dependency claims resting on
+knowledge published after training — whether a version has a known advisory,
+whether a package is abandoned — go when a vulnerability scanner reports them,
+from both the focused and the merged lens. The committed-secret ask goes when a
+secret scanner reports them: redaction has already rewritten matched secrets to
+the reviewer's own marker, so the lens is asked for what it was prevented from
+seeing. Claims no scanner answers (deprecated APIs, end-of-life runtimes,
+typosquats, licence conflicts; secrets reaching a log) MUST remain. The decision
+SHALL derive from configuration, not from which binaries happen to be installed,
+so prompts stay reproducible.
 <!-- anchor: prompt.dependency-health -->
 
 #### Scenario: a vulnerability scanner posts findings
 - **WHEN** a scanner is configured to report dependency advisories directly
 - **THEN** neither lens asks the model for advisory or abandonment claims
 
-#### Scenario: no scanner covers dependencies
+#### Scenario: a secret scanner posts findings
+- **WHEN** a scanner is configured to report committed secrets directly
+- **THEN** the security lens drops the hardcoded-secret ask, keeping the rest
+
+#### Scenario: no scanner covers the class
 - **WHEN** no such scanner will run
 - **THEN** the prompt is unchanged and the model reports them as before

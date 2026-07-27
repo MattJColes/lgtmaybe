@@ -1961,3 +1961,67 @@ def test_dependency_findings_survive_the_off_diff_drop(monkeypatch) -> None:  # 
     findings, _summary = engine.review(_LOCKFILE_CTX, _sa_cfg())
 
     assert [(f.category, f.path) for f in findings] == [("scan:osv-scanner", "uv.lock")]
+
+
+# ---------------------------------------------------------------------------
+# secret scanning narrows the security lens
+# ---------------------------------------------------------------------------
+
+
+def _security_lens_text(cfg: ReviewConfig) -> str:
+    from lgtmaybe.engine.engine import _build_lenses
+
+    lenses = _build_lenses(cfg, has_intent=False)
+    lens = next(lo for lo in lenses if lo.id == ReviewCategory.security.value)
+    return (lens.system_prompt + lens.user_block).lower()
+
+
+def test_security_lens_asks_for_secrets_by_default() -> None:
+    """Static analysis is opt-in, so a default run's prompt is unchanged."""
+    cfg = ReviewConfig(provider=Provider.openai, model="m")
+
+    assert "hardcoded secrets" in _security_lens_text(cfg)
+
+
+def test_gitleaks_in_finding_mode_drops_the_secret_ask() -> None:
+    """gitleaks posts committed secrets itself, so the lens stops paying for
+    an ask that redaction has already made unanswerable."""
+    from lgtmaybe.core.models import StaticAnalysisConfig, StaticAnalysisTool
+
+    cfg = ReviewConfig(
+        provider=Provider.openai,
+        model="m",
+        static_analysis=StaticAnalysisConfig(enabled=True, tools=[StaticAnalysisTool.gitleaks]),
+    )
+
+    text = _security_lens_text(cfg)
+    assert "hardcoded secrets" not in text
+    # The rest of the lens is untouched.
+    assert "ssrf" in text and "owasp" in text
+
+
+def test_gitleaks_in_hint_mode_keeps_the_secret_ask() -> None:
+    """In hint mode the tool does not post, so the model must still look."""
+    from lgtmaybe.core.models import StaticAnalysisConfig, StaticAnalysisTool, ToolMode
+
+    cfg = ReviewConfig(
+        provider=Provider.openai,
+        model="m",
+        static_analysis=StaticAnalysisConfig(
+            enabled=True,
+            tools=[StaticAnalysisTool.gitleaks],
+            tool_mode={StaticAnalysisTool.gitleaks: ToolMode.hint},
+        ),
+    )
+
+    assert "hardcoded secrets" in _security_lens_text(cfg)
+
+
+def test_every_lens_is_told_the_redaction_marker_is_not_a_finding() -> None:
+    """redact() puts REDACTED_PLACEHOLDER in the diff the model reads; without
+    being told what it is, a lens reports our own marker as a leaked secret."""
+    cfg = ReviewConfig(provider=Provider.openai, model="m")
+    from lgtmaybe.engine.engine import _build_lenses
+
+    for lens in _build_lenses(cfg, has_intent=False):
+        assert REDACTED_PLACEHOLDER in lens.system_prompt
