@@ -584,6 +584,12 @@
       "title": "Max Review Seconds",
       "type": "integer"
     },
+    "max_review_tokens": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Max Review Tokens",
+      "type": "integer"
+    },
     "max_tokens": {
       "anyOf": [
         {

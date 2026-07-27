@@ -252,6 +252,15 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "review returns partial results with an incomplete-results notice. 0 disables",
 )
 @click.option(
+    "--max-review-tokens",
+    default=None,
+    type=click.IntRange(min=0),
+    help="Soft billable-token ceiling for the whole review — input + output "
+    "across every model call (0, the default, disables it). Past it, no further "
+    "model calls are dispatched and the review returns partial results with a "
+    "notice. Run once with --profile to see a real total, then set this above it",
+)
+@click.option(
     "--temperature",
     default=None,
     type=float,
@@ -356,6 +365,7 @@ def review(
     context_lines: int | None,
     timeout: int | None,
     max_review_seconds: int | None,
+    max_review_tokens: int | None,
     temperature: float | None,
     reflect: bool | None,
     learn_feedback: bool | None,
@@ -393,6 +403,7 @@ def review(
         context_lines=context_lines,
         timeout=timeout,
         max_review_seconds=max_review_seconds,
+        max_review_tokens=max_review_tokens,
         temperature=temperature,
         reflect=reflect,
         learn_feedback=learn_feedback,
@@ -545,6 +556,7 @@ def action() -> None:
         triage_model=inputs["triage_model"],
         timeout=inputs["timeout"],
         max_review_seconds=inputs["max_review_seconds"],
+        max_review_tokens=inputs["max_review_tokens"],
         temperature=inputs["temperature"],
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],

@@ -50,6 +50,10 @@ inputs:
     description: "Soft wall-clock ceiling for the whole review, in seconds (default 3600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with the incomplete-results notice every failed or skipped call raises. Set 0 to disable."
     required: false
     default: ""
+  max_review_tokens:
+    description: "Soft billable-token ceiling for the whole review — input plus output summed across every model call (lens fan-out, triage, reflection). Once it passes, no further model calls are dispatched: in-flight calls finish, their findings post, and the review carries a notice naming this input. Empty or 0 (the default) disables it. There is no safe generous default because token spend scales with diff size and lens count — run once with profile: true, read the total, then set this above it."
+    required: false
+    default: ""
   temperature:
     description: "Sampling temperature (default 0.0 for deterministic reviews)."
     required: false
@@ -275,6 +279,7 @@ runs:
         INPUT_API_BASE: ${{ inputs.api_base }}
         INPUT_TIMEOUT: ${{ inputs.timeout }}
         INPUT_MAX_REVIEW_SECONDS: ${{ inputs.max_review_seconds }}
+        INPUT_MAX_REVIEW_TOKENS: ${{ inputs.max_review_tokens }}
         INPUT_TEMPERATURE: ${{ inputs.temperature }}
         INPUT_NUM_CTX: ${{ inputs.num_ctx }}
         INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
@@ -310,7 +315,8 @@ runs:
           -e INPUT_LANGUAGE \
           -e INPUT_TRIAGE_MODEL \
           -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
-          -e INPUT_TIMEOUT -e INPUT_MAX_REVIEW_SECONDS -e INPUT_TEMPERATURE \
+          -e INPUT_TIMEOUT -e INPUT_MAX_REVIEW_SECONDS -e INPUT_MAX_REVIEW_TOKENS \
+          -e INPUT_TEMPERATURE \
           -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS -e INPUT_MAX_TOKENS \
           -e INPUT_MAX_CONCURRENCY \
           -e INPUT_RESOLVE_FIXED \

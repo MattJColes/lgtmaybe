@@ -788,6 +788,20 @@ class ReviewConfig(_Strict):
     # generous per-call timeout, so one slow gateway/local call can't eat the
     # whole review budget); 0 disables the ceiling entirely.
     max_review_seconds: int = Field(default=3600, ge=0)
+    # Soft billable-token ceiling for one review run (input + output summed
+    # across every model call: lens fan-out, triage, reflection). Behaves
+    # exactly like max_review_seconds — once passed, no further model calls are
+    # dispatched, in-flight calls finish, their findings post, and the summary
+    # carries a notice naming this knob. It can never turn a total failure into
+    # a silent LGTM.
+    #
+    # 0 (the default) disables it. Unlike the wall-clock ceiling there is no
+    # safe generous default: token spend scales with diff size, lens count and
+    # batch count, so any figure that protects a small repo silently truncates
+    # a large one's review. Measurement is always on (`--profile`, and the
+    # structured `provider call` log lines) — read a real run's total, then set
+    # this above it. See docs/how-to/reduce-review-cost.md.
+    max_review_tokens: int = Field(default=0, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
     # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
     # providers (their retry layer absorbs a capacity 429, and on bedrock cache
