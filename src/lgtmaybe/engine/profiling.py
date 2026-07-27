@@ -110,6 +110,22 @@ class Profiler:
             },
         )
 
+    def total_tokens(self) -> int:
+        """Billable tokens recorded so far: input + output across every call.
+
+        Cache reads/writes are deliberately NOT added on top. Providers differ
+        on whether a cached read is already inside the reported prompt count
+        (litellm's ``prompt_tokens_details.cached_tokens`` is a subset of
+        ``prompt_tokens``; Anthropic reports it alongside), so adding them would
+        double-count on some routes and not others. Input + output is the one
+        figure every route agrees on — which is what a budget needs to be.
+
+        Backs :attr:`ReviewConfig.max_review_tokens`, so it is read from the
+        fan-out threads: the lock is not decoration.
+        """
+        with self._lock:
+            return sum(c.input_tokens + c.output_tokens for c in self.calls)
+
     @contextmanager
     def stage(self, name: str) -> Iterator[None]:
         """Time one pipeline stage; records and logs even when the stage raises."""
@@ -152,6 +168,12 @@ class Profiler:
         read = sum(c.cache_read_tokens for c in calls)
         created = sum(c.cache_creation_tokens for c in calls)
         lines.append(f"cache: {read} tokens read / {created} created across {len(calls)} calls")
+        billed_in = sum(c.input_tokens for c in calls)
+        billed_out = sum(c.output_tokens for c in calls)
+        lines.append(
+            f"tokens: {billed_in + billed_out} billable "
+            f"({billed_in} in / {billed_out} out) across {len(calls)} calls"
+        )
         return "\n".join(lines)
 
 

@@ -127,6 +127,11 @@ _WARMUP_MIN_TOKENS = 2048
 # adapter matches on.
 INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 
+# The reason string a call skipped by the token ceiling reports. Shared with the
+# summary step, which counts these to tell a budget stop (spend the user chose)
+# apart from the provider failures the generic incomplete notice covers.
+_BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
+
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
     """The fan-out pool size: the explicit cap, else the provider-aware default."""
@@ -317,6 +322,13 @@ class LLMReviewEngine(ReviewEngine):
         deadline_at = (
             time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
         )
+        # Soft whole-review token ceiling, the spend-shaped twin of the deadline
+        # above. Measured from the profiler's running total AT THIS INSTANT, not
+        # from zero: the profiler is a process-wide singleton, so a second review
+        # in one process must not inherit the first one's spend as its budget.
+        budget_at = (
+            profiler.total_tokens() + cfg.max_review_tokens if cfg.max_review_tokens else None
+        )
         # Batches a wall-clock timeout forced us to review in smaller pieces.
         # Per-review state (reset here, not in __init__, so a reused engine starts
         # clean); a set's add is atomic, which is all the fan-out threads need.
@@ -492,6 +504,7 @@ class LLMReviewEngine(ReviewEngine):
                     cfg.prompt_cache,
                     cfg.language,
                     deadline_at,
+                    budget_at,
                     lens,
                     batch,
                 )
@@ -588,16 +601,25 @@ class LLMReviewEngine(ReviewEngine):
         #    model talking itself into a false positive, and there is no model
         #    here to audit. Partitioned rather than filtered afterwards so they
         #    cost no reflection tokens and the auditor cannot drop them.
-        reflection_skipped_by_deadline = False
+        # None, or the name of the ceiling that stopped the audit — it feeds the
+        # notice below, so a skipped audit always says which knob to raise.
+        reflection_skipped: str | None = None
         scanned = [f for f in all_findings if _is_scan_finding(f)]
         all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
             if deadline_at is not None and time.perf_counter() >= deadline_at:
                 # Better unaudited findings with an honest notice than more
                 # minutes past the ceiling — and never a silent quality drop.
-                reflection_skipped_by_deadline = True
+                reflection_skipped = f"Review deadline ({cfg.max_review_seconds}s)"
                 _log.warning(
                     "review deadline reached — skipping reflection",
+                    extra={"findings": len(all_findings)},
+                )
+            elif budget_at is not None and profiler.total_tokens() >= budget_at:
+                # Same trade, spend instead of time.
+                reflection_skipped = f"Token budget (max_review_tokens = {cfg.max_review_tokens})"
+                _log.warning(
+                    "review token budget reached — skipping reflection",
                     extra={"findings": len(all_findings)},
                 )
             else:
@@ -651,6 +673,19 @@ class LLMReviewEngine(ReviewEngine):
                 f"🔎 Triage skipped {len(skipped_by_triage)} low-risk file{plural_files}: "
                 f"{listed}{more} (`/review full` reviews everything)."
             )
+        # A budget stop is not a fault — it is the spend ceiling the user asked
+        # for — so it gets its own notice naming the knob, ahead of the generic
+        # incomplete notice below (which still fires, because the review IS
+        # partial and that must never be softened into a clean bill of health).
+        budget_skips = sum(1 for e in errors if e == _BUDGET_SKIP_REASON)
+        if budget_skips:
+            plural = "s were" if budget_skips != 1 else " was"
+            notices.append(
+                f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens) — "
+                f"{budget_skips} of {total_calls} review call{plural} skipped, so this "
+                "review is partial. Raise `max_review_tokens`, or spend less per run "
+                "(a `triage_model`, fewer `categories`, lower `context_lines`)."
+            )
         # Some — but not all — lenses failed: the result may be incomplete, so say
         # so and don't claim a clean bill of health. The hidden marker rides along
         # so the posting step can tell an incomplete run from a complete one
@@ -672,11 +707,10 @@ class LLMReviewEngine(ReviewEngine):
                 "reviewed in smaller pieces instead. Consider a lower `max_input_tokens` "
                 "or a faster model."
             )
-        if reflection_skipped_by_deadline:
+        if reflection_skipped:
             notices.append(
-                f"⚠️ Review deadline ({cfg.max_review_seconds}s) reached — the "
-                "self-reflection audit was skipped, so findings may include "
-                "false positives."
+                f"⚠️ {reflection_skipped} reached — the self-reflection audit was "
+                "skipped, so findings may include false positives."
             )
         # Findings the model DID raise and the run then hid: an ignore
         # fingerprint, an inline pragma, or a 👎 from a previous run. Reporting
@@ -774,6 +808,7 @@ class LLMReviewEngine(ReviewEngine):
         split_prompt: bool,
         language: str | None,
         deadline_at: float | None,
+        budget_at: int | None,
         lens: _Lens,
         batch: list[tuple[str, str]] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
@@ -805,6 +840,12 @@ class LLMReviewEngine(ReviewEngine):
         if deadline_at is not None and time.perf_counter() >= deadline_at:
             _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
             return [], "review deadline (max_review_seconds) reached — call skipped"
+        # Same check, spend instead of time: queued calls are dropped once the
+        # run's billable tokens pass the ceiling. Read at EXECUTION time so the
+        # figure includes everything that landed while this task sat in the pool.
+        if budget_at is not None and profiler.total_tokens() >= budget_at:
+            _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
+            return [], _BUDGET_SKIP_REASON
         on_wall_timeout = (
             None
             if batch is None
@@ -819,6 +860,7 @@ class LLMReviewEngine(ReviewEngine):
                 split_prompt=split_prompt,
                 language=language,
                 deadline_at=deadline_at,
+                budget_at=budget_at,
                 lens=lens,
             )
         )
@@ -869,6 +911,7 @@ class LLMReviewEngine(ReviewEngine):
         split_prompt: bool,
         language: str | None,
         deadline_at: float | None,
+        budget_at: int | None,
         lens: _Lens,
     ) -> _LensOutcome:
         """Re-review a timed-out batch as smaller pieces, one call each.
@@ -906,6 +949,7 @@ class LLMReviewEngine(ReviewEngine):
                 split_prompt,
                 language,
                 deadline_at,
+                budget_at,
                 lens,
             )
             findings.extend(piece_findings)

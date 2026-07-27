@@ -116,6 +116,67 @@ class TestProfiler:
         assert text.index("tests") < text.index("security")
         assert "RateLimitError" in text
         assert "900 tokens read / 200 created across 2 calls" in text
+        assert "tokens: 2100 billable (2000 in / 100 out) across 2 calls" in text
+
+
+class TestTotalTokens:
+    """`total_tokens` backs the max_review_tokens ceiling, so it must count the
+    one figure every provider route agrees on and nothing else."""
+
+    def _record(self, p: Profiler, **usage: int) -> None:
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
+        )
+
+    def test_empty_profiler_has_spent_nothing(self) -> None:
+        assert Profiler().total_tokens() == 0
+
+    def test_sums_input_and_output_across_calls(self) -> None:
+        p = Profiler()
+        self._record(p, input_tokens=1000, output_tokens=50)
+        self._record(p, input_tokens=300, output_tokens=7)
+        assert p.total_tokens() == 1357
+
+    def test_cache_counters_are_not_added_on_top(self) -> None:
+        """Routes disagree on whether a cached read sits inside the prompt count;
+        adding it would double-count on some and not others."""
+        p = Profiler()
+        self._record(
+            p,
+            input_tokens=1000,
+            output_tokens=50,
+            cache_read_tokens=800,
+            cache_creation_tokens=200,
+        )
+        assert p.total_tokens() == 1050
+
+    def test_a_failed_call_contributes_its_recorded_zero(self) -> None:
+        p = Profiler()
+        p.record_call(
+            label="tests",
+            batch=1,
+            elapsed=1.0,
+            attempts=2,
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            error="RateLimitError",
+        )
+        assert p.total_tokens() == 0
+
+    def test_reset_clears_the_running_total(self) -> None:
+        p = Profiler()
+        self._record(p, input_tokens=1000, output_tokens=50)
+        p.reset()
+        assert p.total_tokens() == 0
 
 
 class TestTimedComplete:
