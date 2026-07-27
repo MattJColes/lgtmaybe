@@ -22,6 +22,12 @@ hardening.wrap-hints:
     has: { field: name, regex: '^wrap_hints$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+hardening.audit-untrusted:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_audit$' }
+  files: [src/lgtmaybe/engine/reflect.py]
+
 hardening.redact:
   rule:
     kind: function_definition
