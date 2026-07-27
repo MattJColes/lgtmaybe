@@ -24,6 +24,7 @@
 - [Add a custom review lens](https://lgtmaybe.coles.codes/how-to/add-a-custom-lens/): Add a custom review lens to lgtmaybe — a bring-your-own skill file that runs alongside the nine built-in lenses.
 - [Generate a change diagram](https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/): Post a compact Mermaid flowchart of a pull request's changes as a GitHub comment, or print one from the CLI.
 - [Fix findings with an AI agent](https://lgtmaybe.coles.codes/how-to/fix-findings-with-an-ai-agent/): Turn lgtmaybe findings into instructions an AI coding agent can apply, for a local review-and-fix loop before you push.
+- [Reduce review cost](https://lgtmaybe.coles.codes/how-to/reduce-review-cost/): Measure what a lgtmaybe review actually spends, then cut it — triage, static analysis, prompt caching, narrower lenses, and a hard token ceiling.
 - [Releasing](https://lgtmaybe.coles.codes/how-to/releasing/): Maintainer guide to publishing lgtmaybe with release-please, PyPI, GHCR, Homebrew, a Windows executable, and winget.
 
 ## Reference

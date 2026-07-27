@@ -43,6 +43,10 @@ Two built-in caps also keep any single run modest regardless of who starts it:
 `max_files` (default 50) and `max_input_tokens` (default 100k). See
 [What gets reviewed](what-gets-reviewed.md) for how the diff is bounded.
 
+To measure what a run actually spends and bring it down — triage, static
+analysis, prompt caching, and a hard `max_review_tokens` ceiling — see
+[Reduce review cost](../how-to/reduce-review-cost.md).
+
 ## How the choice is expressed
 
 The example workflows gate the `review` job on the triggering user's

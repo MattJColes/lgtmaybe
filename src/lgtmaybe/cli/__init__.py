@@ -516,6 +516,12 @@ def execute_local_review(
     click.echo(render_findings(findings, summary, fmt=fmt))
     if runtime.profile:
         click.echo(profiler.render())
+    elif profiler.total_tokens():
+        # The meter. A local review is the one that runs dozens of times a day
+        # against a metered API, so what it spent is reported by default rather
+        # than only under --profile (whose table already ends with this line —
+        # hence the elif). stderr keeps --json / --agent output pipeable.
+        click.echo(profiler.render_total(), err=True)
 
 
 def _execute_auxiliary(

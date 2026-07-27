@@ -168,13 +168,24 @@ class Profiler:
         read = sum(c.cache_read_tokens for c in calls)
         created = sum(c.cache_creation_tokens for c in calls)
         lines.append(f"cache: {read} tokens read / {created} created across {len(calls)} calls")
+        lines.append(self.render_total())
+        return "\n".join(lines)
+
+    def render_total(self) -> str:
+        """One line: what this run spent, formatted for a human.
+
+        Shared by the ``--profile`` table and the local CLI's footer so the two
+        can never drift into quoting different numbers for the same run.
+        """
+        with self._lock:
+            calls = list(self.calls)
         billed_in = sum(c.input_tokens for c in calls)
         billed_out = sum(c.output_tokens for c in calls)
-        lines.append(
-            f"tokens: {billed_in + billed_out} billable "
-            f"({billed_in} in / {billed_out} out) across {len(calls)} calls"
+        plural = "" if len(calls) == 1 else "s"
+        return (
+            f"tokens: {billed_in + billed_out:,} billable "
+            f"({billed_in:,} in / {billed_out:,} out) across {len(calls)} call{plural}"
         )
-        return "\n".join(lines)
 
 
 # The process-wide collection point. One review runs per CLI invocation, so a

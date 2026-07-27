@@ -3135,6 +3135,214 @@ you are happy, then open your PR. To post reviews on the PR itself, wire up the
 
 ---
 
+<!-- Source: https://lgtmaybe.coles.codes/how-to/reduce-review-cost/ -->
+
+# Reduce Review Cost
+
+A review's token cost is a **product, not a sum**: every lens re-sends the whole
+diff, and every batch pays that again. On a hosted provider that multiplies into
+real money faster than most people expect, and the first you usually hear about
+it is the provider invoice.
+
+This guide shows you how to see the number, then how to bring it down without
+giving up the findings you actually want.
+
+> Deciding **who** can trigger a review is a related but separate question —
+> see [Trust and Cost](../explanation/trust-and-cost.md). Every setting below is
+> documented field-by-field in the [configuration reference](../reference/config.md).
+
+## Contents
+
+- [First, measure](#first-measure)
+- [Where the tokens go](#where-the-tokens-go)
+- [The levers, in order of payoff](#the-levers-in-order-of-payoff)
+- [Put a hard ceiling on it](#put-a-hard-ceiling-on-it)
+- [What isn't worth changing](#what-isnt-worth-changing)
+
+## First, measure
+
+Do not tune blind. Run once with `--profile`:
+
+```bash
+lgtmaybe review --profile
+```
+
+The last line is the meter:
+
+```
+tokens: 158,076 billable (154,200 in / 3,876 out) across 12 calls
+```
+
+Every local review prints that same line to stderr even without `--profile`, so
+the meter is always in view; redirect with `2>/dev/null` if you want it gone.
+
+`in` dwarfing `out` is normal and is the whole story: you are paying to *send*
+the diff, over and over, once per lens per batch. The per-call table above it
+shows exactly which lens and which batch each call belongs to, so you can see
+whether the cost is lens count, batch count, or one enormous file.
+
+In the GitHub Action, set `profile: true` and the same breakdown lands in the
+job log. Every provider call also emits a structured `provider call` log line
+with its own token counts, so you can total a run without the summary.
+
+## Where the tokens go
+
+For one review:
+
+```
+input tokens  ≈  batches × lenses × (diff + context padding + hints)
+```
+
+- **lenses** — the `fast` preset (the default) makes **four** calls per batch;
+  `full` makes one per category, up to nine. This is the biggest multiplier in
+  the formula.
+- **batches** — a diff larger than `max_input_tokens` (default 100k) is split,
+  and *each* batch pays the full lens fan-out again.
+- **reflection** — one more pass over the findings, on top.
+- **triage / describe / diagram** — extra calls when enabled.
+
+Two things that look expensive but are not: `max_concurrency` only changes how
+many calls run at once, never how many there are, and `temperature` costs
+nothing.
+
+## The levers, in order of payoff
+
+### 1. Turn on triage
+
+A cheap model reads every file first and drops the ones that plainly do not
+need a review; the expensive model only sees the survivors, riskiest first.
+
+```yaml
+triage_model: claude-haiku-4-5
+```
+
+This is usually the single biggest win on a repo with lots of low-substance
+churn (generated files, config bumps, test fixtures). A deterministic security
+floor always escalates past triage, any triage failure reviews everything, and
+skipped files are named in the summary — so it cannot quietly hide a problem.
+All three model slots share one provider and one set of credentials.
+
+### 2. Let deterministic tools do the deterministic work
+
+Findings a linter can prove do not need a language model at all:
+
+```bash
+pip install 'lgtmaybe[static-analysis]'
+```
+
+```yaml
+static_analysis:
+  enabled: true
+```
+
+Installed tools (ruff, bandit, mypy, semgrep with local rules) run over the
+changed files and their findings are fed to the lenses as hints to confirm or
+discard. The tools cost no tokens, and grounding the model tends to reduce
+low-value findings as well as spend.
+
+### 3. Check prompt caching is actually working
+
+`prompt_cache` is **on by default**, and when it works it takes most of the
+sting out of the lens multiplier: lenses 2..N read the shared system-preamble
+plus diff prefix from cache instead of paying full input price for it.
+
+Verify it from the profile's cache line:
+
+```
+cache: 412000 tokens read / 38000 created across 12 calls
+```
+
+Reads climbing across a run means it is working. **Reads stuck near zero means
+you are paying full price for every lens.** Caching needs an explicit
+breakpoint on some routes (anthropic, bedrock Claude/Nova, vertex, and several
+openrouter models) and identical prefixes on the rest — a route without either
+gets no benefit, which is a strong argument for picking one that has it.
+
+### 4. Narrow the lenses
+
+Each lens you drop removes one call per batch:
+
+```yaml
+categories: [security, correctness]
+```
+
+Keep the default `fast` preset unless you have a reason not to; `preset: full`
+roughly doubles the call count for a modest recall gain.
+
+### 5. Review less
+
+```yaml
+exclude_paths: ["**/migrations/**", "**/*.generated.ts"]
+max_files: 25
+```
+
+Generated, vendored and binary files are already skipped. Path filters cut the
+rest before any model call is made, so they are pure saving.
+
+### 6. Let re-runs be incremental
+
+On the Action's `synchronize` event, a re-run reviews only the commits since the
+last reviewed SHA rather than the whole PR again. That is the default — leave
+`incremental` unset. Use `/review full` when you deliberately want everything
+re-reviewed.
+
+Locally there is no such watermark: **every `lgtmaybe review` re-reviews the
+whole branch at full price.** If you are iterating, review only what you just
+changed:
+
+```bash
+lgtmaybe review --uncommitted    # working-tree edits vs HEAD
+```
+
+### 7. Right-size the model
+
+A smaller model on the common path with a stronger `--fallback-model` behind it
+is often indistinguishable in output and much cheaper. And if cost is the
+binding constraint rather than latency, ollama is free:
+
+```bash
+lgtmaybe review --provider ollama --model qwen2.5-coder:14b
+```
+
+## Put a hard ceiling on it
+
+Tuning changes the expected cost; a ceiling bounds the worst case.
+
+```yaml
+max_review_tokens: 300000
+```
+
+Once a run's billable tokens (input + output across every model call) reach the
+ceiling, no further calls are dispatched. In-flight calls finish, their findings
+post, and the summary says plainly that the budget stopped the run and how many
+calls were skipped. It never turns a failure into a silent `LGTM`.
+
+It is **off by default on purpose**: spend scales with diff size, lens count and
+batch count, so any figure that protects a small repo would silently truncate a
+large one's review. Read a real run's total with `--profile` first, then set the
+ceiling comfortably above it — it is a runaway guard, not a tuning knob.
+
+## What isn't worth changing
+
+**`context_lines`.** The obvious-looking saving is not there. Measured across
+four real multi-file commits in this repository, the padding that surrounds each
+hunk costs about **41% over sending no context at all** — but only about **17%
+between `context_lines: 5` and the default `20`**, because hunks with
+overlapping windows merge and the enclosing-definition reach does most of the
+useful widening either way:
+
+| `context_lines` | 0 | 5 | 10 | 20 (default) |
+| --- | --- | --- | --- | --- |
+| diff payload tokens | 28,316 | 34,265 | 36,072 | 40,041 |
+| vs. no context | 1.00× | 1.21× | 1.27× | 1.41× |
+
+Trading roughly a seventh of your input tokens for the model no longer seeing
+the function a change sits in is a bad deal — that context is what keeps
+findings anchored and cuts false positives. Turn the multiplier down (fewer
+lenses, triage, caching) before you turn the context down.
+
+---
+
 <!-- Source: https://lgtmaybe.coles.codes/how-to/releasing/ -->
 
 # Releasing lgtmaybe (maintainers)
@@ -5485,6 +5693,10 @@ want.
 Two built-in caps also keep any single run modest regardless of who starts it:
 `max_files` (default 50) and `max_input_tokens` (default 100k). See
 [What gets reviewed](what-gets-reviewed.md) for how the diff is bounded.
+
+To measure what a run actually spends and bring it down — triage, static
+analysis, prompt caching, and a hard `max_review_tokens` ceiling — see
+[Reduce review cost](../how-to/reduce-review-cost.md).
 
 ## How the choice is expressed
 
