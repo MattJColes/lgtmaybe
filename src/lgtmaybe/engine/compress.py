@@ -79,6 +79,77 @@ def split_patch_into_hunks(patch: str) -> list[str]:
     return units
 
 
+def split_hunk_by_budget(unit: str, max_tokens: int) -> list[str]:
+    """Split one over-budget single-hunk mini-diff into budget-sized slices.
+
+    :func:`split_patch_into_hunks` can only cut at ``@@`` boundaries, so a file
+    whose diff is ONE enormous hunk — every brand-new file is exactly that —
+    came back undivided and was sent whole, silently ignoring the token budget
+    the RLM walk exists to respect. This is the tail of that walk: it cuts
+    *inside* a hunk and writes each slice a fresh ``@@`` header, so a finding's
+    line still binds to the real file.
+
+    Each slice carries the original file header and one synthesised hunk header.
+    A hunk with no ``@@`` line, or one whose very first body line already blows
+    the budget, is returned whole — there is nothing smaller to cut it into, and
+    dropping it would be worse than sending it oversized.
+    """
+    lines = unit.splitlines(keepends=True)
+    hunk_at = next((i for i, ln in enumerate(lines) if ln.startswith("@@")), None)
+    if hunk_at is None:
+        return [unit]
+    parsed = parse_hunk_header(lines[hunk_at])
+    if parsed is None:
+        return [unit]
+
+    header = "".join(lines[:hunk_at])
+    tail = parsed.section
+    body = lines[hunk_at + 1 :]
+    if not body:
+        return [unit]
+
+    # Running position of each body line on both sides. A "\ No newline at end
+    # of file" marker annotates the line before it and counts on neither side.
+    old_at = [parsed.old_start]
+    new_at = [parsed.new_start]
+    for line in body:
+        marker = line[:1]
+        old_at.append(old_at[-1] + (0 if marker in ("+", "\\") else 1))
+        new_at.append(new_at[-1] + (0 if marker in ("-", "\\") else 1))
+    costs = [count_tokens(line) for line in body]
+
+    def render(start: int, end: int) -> str:
+        return (
+            f"{header}@@ -{old_at[start]},{old_at[end] - old_at[start]} "
+            f"+{new_at[start]},{new_at[end] - new_at[start]} @@{tail}\n" + "".join(body[start:end])
+        )
+
+    slices: list[str] = []
+    start = 0
+    while start < len(body):
+        # Grow greedily on the per-line estimate, then verify: summing token
+        # counts line by line misses the merges a tokenizer makes across a line
+        # break, so the estimate runs under the truth by a good 10%. Shrink
+        # proportionally until the rendered slice really fits — a couple of
+        # measurements, not a scan.
+        end = start + 1
+        used = costs[start]
+        while end < len(body) and used + costs[end] <= max_tokens:
+            used += costs[end]
+            end += 1
+        while end > start + 1:
+            actual = count_tokens(render(start, end))
+            if actual <= max_tokens:
+                break
+            end = max(start + 1, start + (end - start) * max_tokens // actual)
+        slices.append(render(start, end))
+        start = end
+
+    # One body line larger than the whole budget yields a single slice — no
+    # progress over the input, so hand back the original rather than a rewrite.
+    return slices if len(slices) > 1 else [unit]
+
+
 def batch_files(
     files: list[tuple[str, str]],
     max_tokens: int,
@@ -107,12 +178,17 @@ def batch_files(
     if recursive:
         units: list[tuple[str, str]] = []
         for path, patch in files:
-            if count_tokens(patch) >= max_tokens:
-                hunks = split_patch_into_hunks(patch)
-                if len(hunks) > 1:
-                    units.extend((path, hunk) for hunk in hunks)
-                    continue
-            units.append((path, patch))
+            if count_tokens(patch) < max_tokens:
+                units.append((path, patch))
+                continue
+            # Cut at hunk boundaries first (the natural seams), then cut inside
+            # any hunk that is still too big on its own — otherwise a one-hunk
+            # file, which is what every new file looks like, escapes the budget.
+            for hunk in split_patch_into_hunks(patch):
+                if count_tokens(hunk) >= max_tokens:
+                    units.extend((path, piece) for piece in split_hunk_by_budget(hunk, max_tokens))
+                else:
+                    units.append((path, hunk))
         files = units
 
     batches: list[list[tuple[str, str]]] = []
