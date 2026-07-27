@@ -260,3 +260,73 @@ def test_uncommitted_resolves_head_with_a_single_rev_parse(
 
     assert head_calls == 1
     assert ctx.base_sha == ctx.head_sha
+
+
+# ---------------------------------------------------------------------------
+# untracked files — a brand-new file is the most common thing to review locally
+# ---------------------------------------------------------------------------
+
+
+def test_working_includes_a_brand_new_untracked_file(repo: Path) -> None:
+    """`git diff` never shows untracked files, so a file you just wrote was
+    invisible to --working — the exact case local review exists for."""
+    (repo / "brand_new.py").write_text("def g():\n    return 7\n")
+
+    ctx = local_pr_context(working=True, cwd=repo)
+
+    assert "brand_new.py" in ctx.changed_files
+    assert "+    return 7" in ctx.diff
+    assert "+++ b/brand_new.py" in ctx.diff
+    assert ctx.file_contents.get("brand_new.py") == "def g():\n    return 7\n"
+
+
+def test_uncommitted_includes_a_brand_new_untracked_file(repo: Path) -> None:
+    (repo / "brand_new.py").write_text("def g():\n    return 7\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert ctx.changed_files == ["brand_new.py"]
+    assert "+    return 7" in ctx.diff
+
+
+def test_untracked_file_in_a_subdirectory_is_repo_relative(repo: Path) -> None:
+    """The synthesised patch header must carry the repo-relative path, or every
+    finding on it anchors to a path GitHub/the CLI can't resolve."""
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("x = 1\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert ctx.changed_files == ["pkg/mod.py"]
+    assert "+++ b/pkg/mod.py" in ctx.diff
+
+
+def test_gitignored_file_is_not_reviewed(repo: Path) -> None:
+    """Untracked is not the same as unwanted: honour .gitignore."""
+    (repo / ".gitignore").write_text("secrets.env\n")
+    (repo / "secrets.env").write_text("TOKEN=abc\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert "secrets.env" not in ctx.changed_files
+
+
+def test_branch_mode_ignores_untracked_files(repo: Path) -> None:
+    """Branch mode reviews committed history only — an untracked file is not
+    part of it."""
+    (repo / "brand_new.py").write_text("x = 1\n")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo)
+
+    assert "brand_new.py" not in ctx.changed_files
+
+
+def test_untracked_and_tracked_edits_appear_together(repo: Path) -> None:
+    (repo / "app.py").write_text("def f():\n    return 99\n")
+    (repo / "brand_new.py").write_text("y = 2\n")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert set(ctx.changed_files) == {"app.py", "brand_new.py"}
+    assert "+    return 99" in ctx.diff
+    assert "+y = 2" in ctx.diff

@@ -86,12 +86,18 @@ the reviewer never answers itself.
 diff against the resolved base (`origin/HEAD` → `origin/main` →
 `origin/master` → `main` → `master`, `--base` overrides), `--working` for the
 whole worktree vs the merge-base, `--uncommitted` for edits vs HEAD, with
-commit subjects feeding the intent lens.
+commit subjects feeding the intent lens. Both worktree modes include untracked
+files (`.gitignore` honoured) as new-file patches, since `git diff` never
+reports them; branch mode reviews committed history only.
 <!-- anchor: cli.local-context -->
 
 #### Scenario: developer reviews before pushing
 - **WHEN** `lgtmaybe review --working` runs in a repo with no PR
 - **THEN** findings print locally (human/json/agent format); nothing posts
+
+#### Scenario: developer reviews a file they have not added yet
+- **WHEN** `lgtmaybe review --uncommitted` runs and a new file is untracked
+- **THEN** the file is reviewed, unless `.gitignore` excludes it
 
 ### Requirement: Config layers merge, secrets never persist
 

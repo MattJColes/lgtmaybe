@@ -73,6 +73,16 @@ def local_pr_context(
     name_output = _git(cwd, "diff", "--name-only", spec)
     changed_files = [line for line in name_output.splitlines() if line]
 
+    # `git diff` only ever reports content git already tracks, so a file you
+    # just created is invisible to it — and "review my working tree" almost
+    # always means "review the file I just wrote". Branch mode reviews committed
+    # history, where an untracked file genuinely has no place.
+    if working or uncommitted:
+        untracked = _untracked_files(cwd)
+        if untracked:
+            diff += _untracked_patches(cwd, untracked)
+            changed_files += untracked
+
     # Working-tree text for the changed files. Static analysis has never run on
     # the local CLI because nothing populated these; the reader is the same
     # traversal-guarded one reflection already uses.
@@ -123,6 +133,52 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
             return None
 
     return read
+
+
+def _untracked_files(cwd: Path | None) -> list[str]:
+    """Repo-relative paths of untracked files worth reviewing, .gitignore honoured.
+
+    ``--exclude-standard`` applies the same ignore rules git itself uses, so a
+    build directory or a local ``.env`` never shows up. The reviewability filter
+    is applied here rather than downstream so a repo full of un-ignored
+    junk (images, archives) costs no ``git diff`` subprocesses at all.
+    """
+    listing = _git(cwd, "ls-files", "--others", "--exclude-standard", "-z")
+    return [
+        path
+        for path in listing.split("\0")
+        if path and (is_reviewable(path) or is_scannable_manifest(path))
+    ]
+
+
+def _untracked_patches(cwd: Path | None, paths: list[str]) -> str:
+    """New-file patches for untracked *paths*, in the shape `git diff` would emit.
+
+    ``git diff --no-index`` renders each file as the add-everything patch git
+    would have produced had it been staged, without touching the user's index.
+    It exits 1 when the two inputs differ — the normal case here — so the exit
+    code is read as "there is a diff", not as failure. A file that vanishes
+    between the listing and the diff is skipped rather than failing the review.
+    """
+    patches: list[str] = []
+    for path in paths:
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--no-index", "--", "/dev/null", path],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=_TIMEOUT,
+            )
+        except (FileNotFoundError, subprocess.SubprocessError):
+            continue
+        # 0 = identical (an empty file), 1 = differs. Anything else is a real
+        # git failure on this one path; skip it rather than lose the review.
+        if result.returncode in (0, 1) and result.stdout:
+            patches.append(result.stdout)
+    return "".join(patches)
 
 
 def _git(cwd: Path | None, *args: str) -> str:
