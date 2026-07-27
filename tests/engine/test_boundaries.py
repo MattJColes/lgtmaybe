@@ -112,7 +112,13 @@ def test_definition_spans_report_where_a_definition_ends() -> None:
 
 
 def test_module_level_code_is_enclosed_by_nothing() -> None:
-    """A hunk on module-level code after a function is inside no definition."""
+    """A hunk on module-level code after a function is inside no definition.
+
+    Deliberately white-box: pairing the real ast-grep spans with the consumer
+    pins down which line the lookup resolves to, which the behavioural test in
+    test_compress.py (through the public ``expand_hunks``) can only show
+    indirectly. Both exist on purpose — this one names the cause.
+    """
     from lgtmaybe.engine.compress import _enclosing_boundary
 
     spans = definition_spans(_PY_TRAILING_MODULE_CODE, "src/sample.py")

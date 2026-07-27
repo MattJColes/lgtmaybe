@@ -581,18 +581,26 @@ def test_module_level_hunk_is_not_padded_into_a_closed_definition() -> None:
     to sit above it: wrong context for the model, and paid for on every lens.
     """
     content = "\n".join(
+        # 1: import os   2: (blank)   3: def helper(a)   4..23: step_1..step_20
         ["import os", ""]
         + ["def helper(a):"]
         + [f"    step_{i}()" for i in range(1, 21)]
+        # 24: return a   25,26: (blank)   27: CONFIG = {   28: alpha  29: beta  30: }
         + ["    return a", "", "", "CONFIG = {", '    "alpha": 1,', '    "beta": 2,', "}"]
     )
-    # helper() spans lines 3..23; CONFIG starts at line 26.
-    patch = 'diff --git a/f.py b/f.py\n@@ -28,1 +28,1 @@\n     "beta": 2,\n'
+    # helper() spans lines 3..24; the change is on line 29, inside CONFIG.
+    patch = 'diff --git a/f.py b/f.py\n@@ -29,1 +29,1 @@\n     "beta": 2,\n'
 
-    expanded = expand_hunks(patch, content, 2, after=1, boundaries=[(3, 23)])
+    expanded = expand_hunks(patch, content, 2, after=1, boundaries=[(3, 24)])
 
     assert "def helper" not in expanded
-    assert "step_1()" not in expanded
+    assert "step_20()" not in expanded
+    # The pad is still doing its job — the two lines above the change and the
+    # one below are there, so an expansion that broke entirely (or returned an
+    # empty string) could not pass on the absences alone.
+    assert "CONFIG = {" in expanded
+    assert '"alpha": 1,' in expanded
+    assert expanded.rstrip().endswith("}")
 
 
 def test_innermost_enclosing_definition_wins() -> None:
@@ -602,3 +610,23 @@ def test_innermost_enclosing_definition_wins() -> None:
     assert _enclosing_boundary(spans, 15) == 10
     # Above the method but still inside the class body.
     assert _enclosing_boundary(spans, 5) == 1
+
+
+def test_no_overlap_when_head_text_is_shorter_than_the_hunks() -> None:
+    """The non-overlap invariant must hold on truncated/stale head text too.
+
+    When two hunks' pads reach each other but the gap cannot be filled — the
+    file is shorter than the hunk positions — they cannot be merged without
+    dropping lines the merged header would claim. The later hunk's leading pad
+    is trimmed to clear the previous one instead. Found by fuzzing.
+    """
+    content = "\n".join(f"c{i}" for i in range(1, 42))  # 41 lines
+    patch = "diff --git a/f.py b/f.py\n@@ -45,1 +45,1 @@\n x45\n@@ -47,1 +47,1 @@\n x47\n"
+
+    expanded = expand_hunks(patch, content, 16, after=4)
+
+    ranges = _hunk_ranges(expanded)
+    for (_, prev_end), (next_start, _) in zip(ranges, ranges[1:], strict=False):
+        assert next_start > prev_end, f"hunks overlap: {ranges}"
+    # Both changes survive the trim.
+    assert "x45" in expanded and "x47" in expanded

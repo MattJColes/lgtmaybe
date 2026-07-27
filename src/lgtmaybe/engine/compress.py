@@ -413,6 +413,12 @@ def _group_hunks(
     A group is rendered as a single merged hunk. Two hunks join when the later
     one's leading pad reaches the earlier one's trailing pad (or the line just
     after it) — the point at which independent padding would double up.
+
+    When they reach but the gap CANNOT be filled — head text shorter than the
+    hunk positions, so merging would drop lines the merged header still claims —
+    the later hunk instead starts its own group with its leading pad trimmed to
+    clear the previous group. The pad is decoration; an overlapping header is
+    not, and the non-overlap invariant has to hold in the degenerate case too.
     """
     groups: list[_Group] = []
     for hunk in hunks:
@@ -420,15 +426,13 @@ def _group_hunks(
         if groups:
             previous = groups[-1].hunks[-1]
             trail_end = min(len(content_lines), previous.last_new + n_after)
-            # The gap between the two is filled from the head text, so only
-            # merge when that text actually reaches — a file shorter than the
-            # hunk positions (stale or redacted) would otherwise drop lines the
-            # merged header still claims.
             reaches = lead_start <= trail_end + 1
             fillable = hunk.new_start - 1 <= len(content_lines)
             if reaches and fillable:
                 groups[-1].hunks.append(hunk)
                 continue
+            if reaches:
+                lead_start = max(lead_start, trail_end + 1)
         groups.append(_Group(hunks=[hunk], lead_start=lead_start))
     return groups
 
