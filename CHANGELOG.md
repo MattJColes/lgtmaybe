@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.8.0...lgtmaybe-v1.8.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* bugs found driving the CLI end-to-end across 10 scenarios ([#291](https://github.com/MattJColes/lgtmaybe/issues/291)) ([1a9f0f0](https://github.com/MattJColes/lgtmaybe/commit/1a9f0f03d023c5e0a8e79515f088c57e6e6a6feb))
+* **compress:** merge hunks whose context pads overlap ([#290](https://github.com/MattJColes/lgtmaybe/issues/290)) ([6fcb279](https://github.com/MattJColes/lgtmaybe/commit/6fcb279561229905ea6b9ef0b44943b58deb61ee))
+* **context:** only pad to a definition that still contains the hunk ([#294](https://github.com/MattJColes/lgtmaybe/issues/294)) ([7cb9129](https://github.com/MattJColes/lgtmaybe/commit/7cb91294e502a7ad5cd0aed422dd2a5e78aec384))
+* **identity:** stop asking for branded identity on an event that cannot mint it ([#296](https://github.com/MattJColes/lgtmaybe/issues/296)) ([f4c3bdd](https://github.com/MattJColes/lgtmaybe/commit/f4c3bdd279e6022c42a70328d94dd932fe16509d))
+* **prompt:** stop asking lenses to flag our own redaction marker ([#293](https://github.com/MattJColes/lgtmaybe/issues/293)) ([054a4ce](https://github.com/MattJColes/lgtmaybe/commit/054a4ce1f363da2b85f167a673f9f9e5c0dbe7f0))
+
+
+### Performance Improvements
+
+* **context:** size the enclosing-definition reach against the fixed pad ([#295](https://github.com/MattJColes/lgtmaybe/issues/295)) ([eb586f1](https://github.com/MattJColes/lgtmaybe/commit/eb586f15752be418672ebef868c12d41b3bcb373))
+
 ## [1.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.7.0...lgtmaybe-v1.8.0) (2026-07-27)
 
 
