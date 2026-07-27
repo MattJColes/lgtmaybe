@@ -1891,7 +1891,7 @@ _FN_CTX = PRContext(
 
 
 def test_function_context_pads_to_the_enclosing_def(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("lgtmaybe.engine.engine.definition_starts", lambda text, path: [1])
+    monkeypatch.setattr("lgtmaybe.engine.engine.definition_spans", lambda text, path: [(1, 1000)])
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", context_lines=3)
@@ -1903,7 +1903,7 @@ def test_function_context_pads_to_the_enclosing_def(monkeypatch) -> None:  # typ
 
 
 def test_function_context_off_keeps_the_fixed_pad(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("lgtmaybe.engine.engine.definition_starts", lambda text, path: [1])
+    monkeypatch.setattr("lgtmaybe.engine.engine.definition_spans", lambda text, path: [(1, 1000)])
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     cfg = ReviewConfig(

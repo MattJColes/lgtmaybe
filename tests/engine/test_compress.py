@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header
 from lgtmaybe.engine.compress import (
+    _enclosing_boundary,
     _token_encoder,
     batch_files,
     count_tokens,
@@ -306,7 +307,7 @@ def test_boundary_extends_the_leading_pad_to_the_enclosing_def() -> None:
     # line 3 — well above the fixed window, within reach.
     patch = "diff --git a/f.py b/f.py\n@@ -20,1 +20,1 @@\n step_17()\n"
 
-    expanded = expand_hunks(patch, _FN_CONTENT, 2, after=1, boundaries=[3])
+    expanded = expand_hunks(patch, _FN_CONTENT, 2, after=1, boundaries=[(3, 29)])
 
     assert "\ndef handler(req):\n" in expanded or "\n def handler(req):\n" in expanded
     # Header start moved up to the boundary line.
@@ -316,7 +317,7 @@ def test_boundary_extends_the_leading_pad_to_the_enclosing_def() -> None:
 def test_boundary_inside_the_fixed_window_changes_nothing() -> None:
     patch = "diff --git a/f.py b/f.py\n@@ -4,1 +4,1 @@\n step_1()\n"
 
-    with_boundary = expand_hunks(patch, _FN_CONTENT, 5, after=1, boundaries=[3])
+    with_boundary = expand_hunks(patch, _FN_CONTENT, 5, after=1, boundaries=[(3, 29)])
     without = expand_hunks(patch, _FN_CONTENT, 5, after=1)
 
     # The def on line 3 is already inside the 5-line fixed pad — the boundary
@@ -329,7 +330,7 @@ def test_boundary_beyond_reach_is_ignored() -> None:
     content = "\n".join(lines)
     patch = "diff --git a/f.py b/f.py\n@@ -300,1 +300,1 @@\n l299\n"
 
-    expanded = expand_hunks(patch, content, 2, after=1, boundaries=[1])
+    expanded = expand_hunks(patch, content, 2, after=1, boundaries=[(1, 400)])
 
     assert "def far_away" not in expanded  # 299 lines up: past the reach cap
 
@@ -570,3 +571,62 @@ def test_distant_hunks_stay_separate() -> None:
     expanded = expand_hunks(patch, _LONG_CONTENT, 2, after=1)
 
     assert len(_hunk_ranges(expanded)) == 2
+
+
+def test_module_level_hunk_is_not_padded_into_a_closed_definition() -> None:
+    """A definition that has already ended does not enclose a later hunk.
+
+    Matching on the nearest start alone pulled module-level code — constants,
+    config tables, registries — back into the body of whatever function happened
+    to sit above it: wrong context for the model, and paid for on every lens.
+    """
+    content = "\n".join(
+        # 1: import os   2: (blank)   3: def helper(a)   4..23: step_1..step_20
+        ["import os", ""]
+        + ["def helper(a):"]
+        + [f"    step_{i}()" for i in range(1, 21)]
+        # 24: return a   25,26: (blank)   27: CONFIG = {   28: alpha  29: beta  30: }
+        + ["    return a", "", "", "CONFIG = {", '    "alpha": 1,', '    "beta": 2,', "}"]
+    )
+    # helper() spans lines 3..24; the change is on line 29, inside CONFIG.
+    patch = 'diff --git a/f.py b/f.py\n@@ -29,1 +29,1 @@\n     "beta": 2,\n'
+
+    expanded = expand_hunks(patch, content, 2, after=1, boundaries=[(3, 24)])
+
+    assert "def helper" not in expanded
+    assert "step_20()" not in expanded
+    # The pad is still doing its job — the two lines above the change and the
+    # one below are there, so an expansion that broke entirely (or returned an
+    # empty string) could not pass on the absences alone.
+    assert "CONFIG = {" in expanded
+    assert '"alpha": 1,' in expanded
+    assert expanded.rstrip().endswith("}")
+
+
+def test_innermost_enclosing_definition_wins() -> None:
+    """A method inside a class resolves to the method, not the class."""
+    spans = [(1, 40), (10, 20)]  # class 1..40, method 10..20
+
+    assert _enclosing_boundary(spans, 15) == 10
+    # Above the method but still inside the class body.
+    assert _enclosing_boundary(spans, 5) == 1
+
+
+def test_no_overlap_when_head_text_is_shorter_than_the_hunks() -> None:
+    """The non-overlap invariant must hold on truncated/stale head text too.
+
+    When two hunks' pads reach each other but the gap cannot be filled — the
+    file is shorter than the hunk positions — they cannot be merged without
+    dropping lines the merged header would claim. The later hunk's leading pad
+    is trimmed to clear the previous one instead. Found by fuzzing.
+    """
+    content = "\n".join(f"c{i}" for i in range(1, 42))  # 41 lines
+    patch = "diff --git a/f.py b/f.py\n@@ -45,1 +45,1 @@\n x45\n@@ -47,1 +47,1 @@\n x47\n"
+
+    expanded = expand_hunks(patch, content, 16, after=4)
+
+    ranges = _hunk_ranges(expanded)
+    for (_, prev_end), (next_start, _) in zip(ranges, ranges[1:], strict=False):
+        assert next_start > prev_end, f"hunks overlap: {ranges}"
+    # Both changes survive the trim.
+    assert "x45" in expanded and "x47" in expanded

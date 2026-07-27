@@ -50,14 +50,19 @@ _LANG_DEFS: dict[str, tuple[str, tuple[str, ...]]] = {
 }
 
 
-def definition_starts(
+def definition_spans(
     text: str,
     path: str,
     *,
     runner: BoundaryRunner | None = None,
     find_binary: Callable[[], str | None] = _find_binary,
-) -> list[int]:
-    """Sorted 1-based start lines of function/class definitions in *text*.
+) -> list[tuple[int, int]]:
+    """Sorted 1-based ``(start, end)`` lines of definitions in *text*, inclusive.
+
+    The END matters as much as the start: a definition that has already closed
+    does not enclose a later line. Without it, module-level code sitting after a
+    function looked "enclosed" by that function, and the caller padded a hunk
+    back into an unrelated body.
 
     ``[]`` whenever boundaries can't be found cheaply and safely: unsupported
     extension, no ast-grep binary, or any scan/parse failure — the caller then
@@ -77,14 +82,20 @@ def definition_starts(
         target = Path(tmp) / f"file{Path(path).suffix.lower()}"
         target.write_text(text, encoding="utf-8")
         stdout = run(binary, rule, target)
-    return _parse_starts(stdout)
+    return _parse_spans(stdout)
 
 
-def _parse_starts(stdout: str) -> list[int]:
-    """1-based, de-duplicated, sorted start lines from ast-grep's match array."""
-    starts: set[int] = set()
+def _parse_spans(stdout: str) -> list[tuple[int, int]]:
+    """1-based, de-duplicated, sorted ``(start, end)`` spans from ast-grep's matches.
+
+    A match whose range is missing, malformed, or inverted is dropped rather
+    than guessed at — a wrong span would pad a hunk to the wrong place.
+    """
+    spans: set[tuple[int, int]] = set()
     for match in iter_matches(stdout):
-        line = match.get("range", {}).get("start", {}).get("line")
-        if isinstance(line, int) and line >= 0:
-            starts.add(line + 1)  # ast-grep lines are 0-based
-    return sorted(starts)
+        span = match.get("range", {})
+        start = span.get("start", {}).get("line")
+        end = span.get("end", {}).get("line")
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start <= end:
+            spans.add((start + 1, end + 1))  # ast-grep lines are 0-based
+    return sorted(spans)
