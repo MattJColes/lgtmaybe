@@ -52,9 +52,15 @@ def test_docs_explain_permissions_privacy_failure_and_uninstall() -> None:
         "issues: write",
         "cannot be combined with `fail_on`",
         "never receives your diff",
-        "does not fall back",
+        "never papered over",
         "uninstall",
     ):
+        assert phrase in guide
+
+    # The one sanctioned downgrade must be documented, not discovered in a log:
+    # a reply in a review thread runs from the PR's branch, so branded identity
+    # cannot be minted and the reply posts as github-actions[bot].
+    for phrase in ("pull_request_review_comment", "github-actions[bot]"):
         assert phrase in guide
 
     assert not re.search(r"copy (?:our|the lgtmaybe) private key", guide)

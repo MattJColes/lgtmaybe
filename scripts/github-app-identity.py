@@ -17,6 +17,19 @@ OIDC_AUDIENCE = "https://lgtmaybe.coles.codes/github-app-identity"
 GITHUB_API_URL = "https://api.github.com"
 TIMEOUT_SECONDS = 10.0
 
+# Events whose workflow run does NOT come from the repository's default branch,
+# so the broker's default-branch assertion can never be satisfied.
+#
+# That assertion is not an obstacle to work around — it is what stops a
+# contributor from editing `.github/workflows/` on their own PR branch and
+# minting an lgtmaybe App token from it. The right response is therefore not to
+# ask: attempting the exchange only turns a reply into a failed review job.
+#
+# `issue_comment` and `pull_request_target` are deliberately absent. Both DO run
+# from the default branch and mint branded identity normally, so widening this
+# set would downgrade identity for the review path that works today.
+_NON_DEFAULT_BRANCH_EVENTS = frozenset({"pull_request_review_comment"})
+
 
 class IdentitySetupError(RuntimeError):
     """A user-actionable GitHub identity configuration error."""
@@ -57,6 +70,17 @@ def exchange(
     opener: Opener = _open_url,
     stdout: IO[str] = sys.stdout,
 ) -> None:
+    if env.get("GITHUB_EVENT_NAME", "") in _NON_DEFAULT_BRANCH_EVENTS:
+        # Write no token: action.yml falls back to the workflow token via
+        # `steps.lgtmaybe-token.outputs.token || ... || inputs.github_token`,
+        # and the revoke step stays skipped because it guards on that output.
+        stdout.write(
+            "::notice::lgtmaybe posts as github-actions[bot] on this event. "
+            "Branded App identity needs a workflow run from the default branch, "
+            "which this event does not provide.\n"
+        )
+        return
+
     oidc_url = env.get("ACTIONS_ID_TOKEN_REQUEST_URL")
     oidc_request_token = env.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
     if not oidc_url or not oidc_request_token:

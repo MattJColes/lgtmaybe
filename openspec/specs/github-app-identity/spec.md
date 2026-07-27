@@ -75,9 +75,17 @@ OIDC or installation tokens.
 ### Requirement: Branded identity fails loud
 
 The Action SHALL NOT fall back to `github-actions[bot]` after a user explicitly
-selects lgtmaybe identity.
+selects lgtmaybe identity: a misconfiguration, an uninstalled App, or an
+unavailable broker fails loud with guidance. The sole exception is an event
+GitHub does not run from the repository's default branch, where the broker's
+default-branch check can never pass and the exchange is therefore not attempted
+— the workflow token is used and the downgrade is announced in the job log.
 <!-- anchor: github-app.failure -->
 
 #### Scenario: Broker is unavailable
 - **WHEN** the bounded exchange cannot complete
 - **THEN** the Action fails with setup or service guidance before posting
+
+#### Scenario: Event cannot run from the default branch
+- **WHEN** the workflow is triggered by a reply in a review thread
+- **THEN** no exchange is attempted and the reply posts as `github-actions[bot]`

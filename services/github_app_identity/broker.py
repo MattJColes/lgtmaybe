@@ -16,6 +16,15 @@ OIDC_JWKS_URL = f"{OIDC_ISSUER}/.well-known/jwks"
 INSTALL_URL = "https://github.com/apps/lgtmaybe/installations/new"
 GITHUB_API = "https://api.github.com"
 GITHUB_API_VERSION = "2022-11-28"
+# NOTE: `pull_request_review_comment` is accepted here but, in practice, GitHub
+# runs that event from the pull request's branch rather than the default branch,
+# so it always fails `_validate_repository`'s default-branch assertion below.
+# That rejection is correct — the assertion is what stops a contributor editing
+# `.github/workflows/` on their own branch and minting an App token from it — so
+# the action skips the exchange for that event client-side and falls back to the
+# workflow token (see scripts/github-app-identity.py). The entry stays so a
+# request that does somehow arrive is rejected by the branch check with its
+# specific message, rather than by the coarser pre-mint event check.
 ALLOWED_EVENTS = frozenset({"pull_request_target", "issue_comment", "pull_request_review_comment"})
 TOKEN_PERMISSIONS = {
     "contents": "read",
