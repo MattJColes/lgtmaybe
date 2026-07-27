@@ -169,3 +169,74 @@ def test_revoke_is_best_effort_and_never_prints_the_token() -> None:
     assert request_seen[0].method == "DELETE"
     assert request_seen[0].headers["Authorization"] == "Bearer ghs_scoped"
     assert "ghs_scoped" not in stdout.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# events that cannot run from the default branch
+# ---------------------------------------------------------------------------
+
+
+def test_exchange_skips_an_event_that_cannot_mint_branded_identity(tmp_path: Path) -> None:
+    """`pull_request_review_comment` runs from the PR branch, not the default
+    branch, so the broker's default-branch assertion can never be satisfied.
+
+    That guard is correct — it is what stops a contributor editing the workflow
+    on their own branch and minting an App token — so the client must not ask.
+    Asking anyway failed the whole review job every time somebody replied to a
+    finding, which is how `answer_replies` came to be dead on GitHub.
+    """
+    module = _module()
+    output = tmp_path / "github-output"
+    stdout = io.StringIO()
+
+    def open_request(request: Request, *, timeout: float):
+        raise AssertionError("no identity exchange should be attempted")
+
+    module.exchange(
+        {
+            "GITHUB_EVENT_NAME": "pull_request_review_comment",
+            "ACTIONS_ID_TOKEN_REQUEST_URL": "https://oidc.example/token?x=1",
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "request-token",
+            "IDENTITY_BROKER_URL": "https://identity.example/token",
+            "GITHUB_OUTPUT": str(output),
+        },
+        opener=open_request,
+        stdout=stdout,
+    )
+
+    # No token output — action.yml's `|| inputs.github_token` chain then falls
+    # back to the workflow token, and the revoke step stays skipped.
+    assert not output.exists() or "token=" not in output.read_text(encoding="utf-8")
+    # The downgrade is announced, never silent.
+    assert "::notice::" in stdout.getvalue()
+    assert "github-actions[bot]" in stdout.getvalue()
+
+
+def test_exchange_still_runs_for_events_that_use_the_default_branch(tmp_path: Path) -> None:
+    """issue_comment and pull_request_target do run from the default branch and
+    mint branded identity normally — the skip must not widen to them."""
+    module = _module()
+
+    for event in ("issue_comment", "pull_request_target", ""):
+        calls: list[Request] = []
+
+        def open_request(request: Request, *, timeout: float, _c: list[Request] = calls):
+            _c.append(request)
+            if len(_c) == 1:
+                return Response({"value": "oidc-token"})
+            return Response({"token": "ghs_scoped"})
+
+        output = tmp_path / f"out-{event or 'unset'}"
+        module.exchange(
+            {
+                "GITHUB_EVENT_NAME": event,
+                "ACTIONS_ID_TOKEN_REQUEST_URL": "https://oidc.example/token?x=1",
+                "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "request-token",
+                "IDENTITY_BROKER_URL": "https://identity.example/token",
+                "GITHUB_OUTPUT": str(output),
+            },
+            opener=open_request,
+            stdout=io.StringIO(),
+        )
+
+        assert output.read_text(encoding="utf-8") == "token=ghs_scoped\n", event

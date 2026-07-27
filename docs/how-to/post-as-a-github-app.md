@@ -72,7 +72,17 @@ review findings.
 Selecting `github_identity: lgtmaybe` is explicit: if `id-token: write` is
 missing, the App is not installed on the repository, the workflow is not
 trusted, or the identity service is unavailable, the job fails with setup
-guidance. It does not fall back to `github-actions[bot]`.
+guidance. A misconfiguration is never papered over with `github-actions[bot]`.
+
+The one exception is `pull_request_review_comment`, the trigger that answers
+replies in a finding thread (`answer_replies`). GitHub runs that event from the
+**pull request's branch** rather than the default branch, so the broker cannot
+mint branded identity for it — and that check is doing real work: it is what
+stops a contributor editing the workflow on their own branch and minting an App
+token from it. Replies are therefore posted by `github-actions[bot]`, announced
+with a notice in the job log. Reviews, `/review`, `/describe` and `/diagram` all
+arrive on `pull_request_target` or `issue_comment`, which do run from the
+default branch, so they still post as `lgtmaybe[bot]`.
 
 To remove access, uninstall the App from the repository or remove that
 repository from the installation. Remove `github_identity: lgtmaybe` and

@@ -65,7 +65,10 @@ the diff). This needs the `pull_request_review_comment` trigger in your workflow
 (the example workflows include it), and it never answers itself — only a freshly
 created reply from a human author, on a thread lgtmaybe started, is answered. It
 is on by default; set `answer_replies: false` to leave finding threads
-unanswered.
+unanswered. With `github_identity: lgtmaybe`, replies post as
+`github-actions[bot]` rather than `lgtmaybe[bot]` — GitHub runs this event from
+the PR's branch, so branded identity cannot be minted for it (see
+[Post as lgtmaybe\[bot\]](post-as-a-github-app.md)).
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
 > are free. On a hosted provider each run uses tokens you pay for, so it's worth

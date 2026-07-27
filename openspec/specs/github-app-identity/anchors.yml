@@ -38,7 +38,13 @@ github-app.boundary:
   files: [services/github_app_identity/**/*.py]
 
 github-app.failure:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_http_error_message$' }
-  files: [scripts/github-app-identity.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_http_error_message$' }
+    files: [scripts/github-app-identity.py]
+  # The one sanctioned fallback: the exchange is skipped for an event GitHub
+  # does not run from the default branch, so the broker is never asked.
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^exchange$' }
+    files: [scripts/github-app-identity.py]
