@@ -142,8 +142,9 @@ authentication, review configuration, or local CLI behavior.
 
 The CLI, local git adapter, and configuration store SHALL read and write owned
 text as UTF-8 on every host. External subprocess output MUST decode as UTF-8
-with undecodable bytes replaced, and CLI stdout and stderr MUST emit safely
-when the inherited stream uses a legacy Windows encoding.
+with undecodable bytes replaced, path names MUST arrive unescaped rather than
+C-quoted, and CLI stdout and stderr MUST emit safely when the inherited stream
+uses a legacy Windows encoding.
 <!-- anchor: cli.utf8-boundaries -->
 
 #### Scenario: configuration contains non-Latin text
@@ -158,6 +159,10 @@ when the inherited stream uses a legacy Windows encoding.
 - **WHEN** the local git subprocess returns output that is not valid UTF-8
 - **THEN** the command retains the decodable output and replaces only the
   malformed byte sequence
+
+#### Scenario: a changed file has a non-ASCII name
+- **WHEN** `café.py` changes and git would C-quote it as `"caf\303\251.py"`
+- **THEN** the path arrives as `café.py`, so the file is reviewed like any other
 
 ### Requirement: Starter workflows enable automatic diagrams
 

@@ -57,10 +57,16 @@ cli.github-identity-provider:
   files: [scripts/github-app-identity.py]
 
 cli.utf8-boundaries:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_utf8_stdio$' }
-  files: [src/lgtmaybe/cli/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_utf8_stdio$' }
+    files: [src/lgtmaybe/cli/**/*.py]
+  # The local git adapter's own text boundary: UTF-8 decoding plus unescaped
+  # (non-C-quoted) path names on every `git` invocation.
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_git$' }
+    files: [src/lgtmaybe/local/__init__.py]
 
 cli.starter-workflow-diagrams:
   rule:

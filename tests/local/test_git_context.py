@@ -330,3 +330,45 @@ def test_untracked_and_tracked_edits_appear_together(repo: Path) -> None:
     assert set(ctx.changed_files) == {"app.py", "brand_new.py"}
     assert "+    return 99" in ctx.diff
     assert "+y = 2" in ctx.diff
+
+
+# ---------------------------------------------------------------------------
+# non-ASCII paths — git C-quotes them by default, which is not a real path
+# ---------------------------------------------------------------------------
+
+
+def test_non_ascii_path_is_not_c_quoted(repo: Path) -> None:
+    """git's default `core.quotePath` renders `café.py` as `"caf\\303\\251.py"`
+    — quotes, octal escapes and all. Left alone, that string is not a path any
+    reader can open and not an extension `is_reviewable` recognises, so the file
+    is silently dropped from the review."""
+    (repo / "café.py").write_text("value = 1\n", encoding="utf-8")
+    _git(repo, "add", "café.py")
+    _git(repo, "commit", "-m", "feat: accented filename")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo)
+
+    assert ctx.changed_files == ["café.py"]
+    assert "+++ b/café.py" in ctx.diff
+    assert ctx.file_contents.get("café.py") == "value = 1\n"
+
+
+def test_non_ascii_untracked_path_is_not_c_quoted(repo: Path) -> None:
+    (repo / "naïve.py").write_text("value = 2\n", encoding="utf-8")
+
+    ctx = local_pr_context(uncommitted=True, cwd=repo)
+
+    assert ctx.changed_files == ["naïve.py"]
+    assert "+++ b/naïve.py" in ctx.diff
+
+
+def test_non_ascii_path_in_working_mode(repo: Path) -> None:
+    (repo / "日本語.py").write_text("value = 3\n", encoding="utf-8")
+    _git(repo, "add", "日本語.py")
+    _git(repo, "commit", "-m", "feat: cjk filename")
+    (repo / "日本語.py").write_text("value = 4\n", encoding="utf-8")
+
+    ctx = local_pr_context(working=True, cwd=repo)
+
+    assert ctx.changed_files == ["日本語.py"]
+    assert "+value = 4" in ctx.diff

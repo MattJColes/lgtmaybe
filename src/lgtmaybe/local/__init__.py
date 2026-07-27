@@ -19,6 +19,14 @@ from lgtmaybe.github.diff import is_reviewable, is_scannable_manifest
 # take a while; the timeout only caps a hung git, never a slow one.
 _TIMEOUT = 120
 
+# git's default `core.quotePath` renders a non-ASCII path as a C-quoted string:
+# `café.py` comes back as `"caf\303\251.py"`, quotes and octal escapes included.
+# That is not a path anything can open, its apparent extension is `py"`, and the
+# patch header stops matching `b/<path>` — so an accented or CJK filename was
+# silently dropped from the review. We already decode git's output as UTF-8, so
+# turning the quoting off gives us the real bytes.
+_QUOTE_PATH_OFF = ("-c", "core.quotePath=false")
+
 
 def local_pr_context(
     *,
@@ -164,7 +172,7 @@ def _untracked_patches(cwd: Path | None, paths: list[str]) -> str:
     for path in paths:
         try:
             result = subprocess.run(
-                ["git", "diff", "--no-index", "--", "/dev/null", path],
+                ["git", *_QUOTE_PATH_OFF, "diff", "--no-index", "--", "/dev/null", path],
                 cwd=cwd,
                 capture_output=True,
                 text=True,
@@ -185,7 +193,7 @@ def _git(cwd: Path | None, *args: str) -> str:
     """Run a git command and return stdout; raise ValueError on failure."""
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", *_QUOTE_PATH_OFF, *args],
             cwd=cwd,
             check=True,
             capture_output=True,
