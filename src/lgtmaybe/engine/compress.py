@@ -282,7 +282,14 @@ def trailing_context_lines(before: int) -> int:
 # How far above a hunk the enclosing-definition pad may reach (lines). Beyond
 # this the "enclosing function" is so far away that padding to it would drown
 # the diff; the fixed-line pad applies instead.
-_MAX_BOUNDARY_REACH = 120
+#
+# Sized against `_MAX_CONTEXT_LINES`, because the two pads compete for the same
+# attention. Reaching the signature is worth a pad somewhat larger than the
+# fixed one — but the reach reproduces EVERY intervening line, not just the
+# signature, so at several times the fixed pad a hunk stops gaining context and
+# starts being buried in an unrelated function body. Twice the largest fixed pad
+# keeps the signature of a normal-sized function in view while bounding that.
+_MAX_BOUNDARY_REACH = 2 * _MAX_CONTEXT_LINES
 
 
 def expand_hunks(
