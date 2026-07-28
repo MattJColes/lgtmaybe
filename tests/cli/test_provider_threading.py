@@ -16,6 +16,7 @@ litellm) is exercised.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -45,11 +46,17 @@ def _fake_response() -> SimpleNamespace:
 
 
 @pytest.fixture
-def captured_completion(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+def captured_completion(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[str, Any]]:
     """Mock litellm at the boundary and feed the engine a local diff.
 
     Returns the list of kwargs every ``litellm.completion`` call received.
+
+    Runs from an empty directory: the CLI probes ``.lgtmaybe.yml`` relative to
+    the cwd, so a suite run from the repo root would otherwise assert against
+    lgtmaybe's own dogfood config rather than against the defaults these tests
+    are about — silently, until someone adds a key to it.
     """
+    monkeypatch.chdir(tmp_path)
     calls: list[dict[str, Any]] = []
 
     def fake_completion(**kwargs: Any) -> SimpleNamespace:

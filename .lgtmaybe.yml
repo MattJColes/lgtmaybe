@@ -7,3 +7,16 @@
 exclude_paths:
   - docs/llms*.txt            # whole-docs corpus + index (generate_llms_txt.py)
   - docs/reference/config.md  # generated from ReviewConfig (generate_reference.py)
+
+# Bound what one call may generate. A correctness lens once ran to this model's
+# full 65,536-token output ceiling and came back cut off mid-JSON — 21 minutes
+# and 65k tokens for a single lens, against ~5.5k for the other three combined.
+# The truncation is legible now (it names itself, and the findings it finished
+# emitting survive), but nothing bounded the cost of getting there.
+#
+# 16k is ~7x the largest output a healthy lens has produced here (2,261 tokens),
+# so an ordinary review — including a reasoning model's thinking tokens, which
+# come out of this same budget — never reaches it, while a runaway stops in
+# about a quarter of the time. It also shrinks the pre-flight reservation
+# OpenRouter charges against max_tokens before generating anything.
+max_tokens: 16384

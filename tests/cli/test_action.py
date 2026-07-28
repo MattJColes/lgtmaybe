@@ -459,7 +459,13 @@ class TestActionRouting:
 
     def test_max_tokens_input_absent_leaves_generation_uncapped(self, tmp_path, monkeypatch):
         """An empty/unset input must stay None, not become a cap — the Action's
-        inputs default to "" and a coerced 0 would reject every request."""
+        inputs default to "" and a coerced 0 would reject every request.
+
+        Run from an empty directory: the config probe reads ``.lgtmaybe.yml``
+        relative to the cwd, and lgtmaybe's own sets ``max_tokens``, so a suite
+        run from the repo root would test that file instead of input coercion.
+        """
+        monkeypatch.chdir(tmp_path)
         captured: dict[str, object] = {}
 
         import lgtmaybe.cli as cli_module
