@@ -93,3 +93,13 @@ different causes and different fixes.
   objects parse but fail the strict schema
 - **THEN** it is reported as truncated, not as a schema violation — the missing
   tail is the cause and the validation failure only its symptom
+
+#### Scenario: findings survive the cut
+- **WHEN** a truncated reply contains whole findings before the cut
+- **THEN** every one that validates is recovered and posted, the half-written
+  trailing object is not, and the recovery travels with the truncation report
+  so the lens is never read as complete
+
+#### Scenario: one finding, nothing cut off
+- **WHEN** a complete reply is a single bare finding object
+- **THEN** it parses as the whole answer, unchanged by the recovery path

@@ -1022,44 +1022,68 @@ class LLMReviewEngine(ReviewEngine):
             cache_read_tokens=result.cache_read_tokens,
             cache_creation_tokens=result.cache_creation_tokens,
         )
+        salvaged = 0
         try:
             findings = parse_findings(result.text)
         except ParseError as exc:
+            if not exc.truncated:
+                _log.warning("unparseable model output", extra={"lens": lens.id})
+                return [], "unparseable model output"
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a
             # prompt bug instead of the ceiling they hit. The notice on the PR is
-            # the only place this is ever seen, so it names which fault it was.
+            # the only place this is ever seen, so it names which fault it was —
+            # and how much of the lens survived, because "3 findings recovered"
+            # and "0 recovered" are very different states to be told about.
+            findings, salvaged = exc.recovered, len(exc.recovered)
+            recovered_note = (
+                f"; {salvaged} finding{'s' if salvaged != 1 else ''} completed before the cut "
+                f"{'are' if salvaged != 1 else 'is'} included"
+                if salvaged
+                else ""
+            )
             reason = (
                 f"response truncated at the model's output limit after "
                 f"{result.output_tokens} tokens — lower `max_input_tokens`, or raise "
-                f"`max_tokens` if the model supports a higher ceiling"
-                if exc.truncated
-                else "unparseable model output"
+                f"`max_tokens` if the model supports a higher ceiling{recovered_note}"
             )
-            _log.warning(reason, extra={"lens": lens.id})
-            return [], reason
-        # Stamp the originating lens (engine-derived): it drives the security
-        # label and category-matched finding_rules, and surfaces in JSON output.
-        # A focused lens overwrites the model's value outright; a merged
-        # (fast-preset) lens covers several categories, so a model-supplied
-        # value from its member set is kept and anything else falls back to
-        # the lens id.
-        allowed = lens.allowed_categories
-        fallback_category = lens.finding_category or lens.id
-        findings = [
-            f.model_copy(
-                update={
-                    "category": (
-                        f.category
-                        if allowed is not None and f.category in allowed
-                        else fallback_category
-                    )
-                }
-            )
-            for f in findings
-        ]
+            _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
+            # The findings fall through to be stamped like any others, but the
+            # reason travels with them: the call still counts as failed, so the
+            # incomplete notice fires and a partial lens is never read as a clean
+            # one. Returning the salvage without it would be the silent
+            # half-answer this whole path exists to prevent.
+            return _stamp_categories(findings, lens), reason
+        findings = _stamp_categories(findings, lens)
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
+    """Stamp the originating lens on each finding (engine-derived).
+
+    It drives the security label and category-matched `finding_rules`, and
+    surfaces in JSON output. A focused lens overwrites the model's value
+    outright; a merged (fast-preset) lens covers several categories, so a
+    model-supplied value from its member set is kept and anything else falls
+    back to the lens id. Applied to salvaged findings too — a finding recovered
+    from a truncated response is posted like any other, so it must be labelled
+    like any other.
+    """
+    allowed = lens.allowed_categories
+    fallback_category = lens.finding_category or lens.id
+    return [
+        f.model_copy(
+            update={
+                "category": (
+                    f.category
+                    if allowed is not None and f.category in allowed
+                    else fallback_category
+                )
+            }
+        )
+        for f in findings
+    ]
 
 
 def _summary_line(count: int, cfg: ReviewConfig) -> str:
