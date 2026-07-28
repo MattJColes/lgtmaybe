@@ -164,6 +164,15 @@ account and region. For an inference-profile id (`us.`/`eu.`/`apac.`-prefixed),
 the policy must also allow the `inference-profile/*` ARN, not just
 `foundation-model/*`.
 
+**`output_config.format: Extra inputs are not permitted`** — the model's Converse
+route doesn't accept the structured-output field lgtmaybe asks for, and Bedrock
+rejects the whole request with a 400. lgtmaybe detects that rejection, re-sends
+without the field, and remembers the drop for the rest of the run, so no action
+is needed — the prompt asks for JSON anyway and the parser is lenient. If you're
+on a build from before that (the symptom is every lens failing at once, and the
+review reporting `every review call failed`), upgrade, or pass
+`--no-structured-output` / set `structured_output: false` as a stopgap.
+
 **`The provided model identifier is invalid`** — the `model` is not a Bedrock
 model id. Two common causes: (1) it's a non-Bedrock id such as `openai.gpt-5.5`
 or another provider's name — Bedrock hosts Claude / Nova / Llama / Mistral /

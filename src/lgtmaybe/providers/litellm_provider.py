@@ -186,6 +186,35 @@ def _is_permanent(exc: BaseException) -> bool:
     return _is_expired_credential(exc) or _is_insufficient_credit(exc)
 
 
+def _rejects_response_format(exc: Exception) -> bool:
+    """True when an API error means the model won't take our structured-output param.
+
+    Bedrock's Converse endpoint is the case that matters. For a model whose route
+    doesn't implement structured outputs, litellm still translates
+    ``response_format`` into a Converse ``output_config.format`` field, and the
+    service rejects the whole request: ``BedrockException - {"message":"The model
+    returned the following errors: output_config.format: Extra inputs are not
+    permitted"}``. That arrives as a 400 — permanent, so it is never retried —
+    and since every lens sends the same shape, one unsupported field failed the
+    entire review with "every review call failed".
+
+    ``drop_params`` cannot help here: it drops params litellm's capability map
+    says a model lacks, and for these models the map says the param is supported.
+    So the rejection is read off the error instead: the field name plus a
+    rejection phrase, matched loosely because the wording is the backend's, not
+    litellm's. A false positive costs one re-send without the param (the prompt
+    still asks for JSON and the parser is lenient); a false negative costs the
+    whole review.
+    """
+    msg = str(exc).lower()
+    if not any(field in msg for field in ("response_format", "output_config", "responseformat")):
+        return False
+    return any(
+        phrase in msg
+        for phrase in ("not permitted", "not supported", "unsupported", "unknown", "unexpected")
+    )
+
+
 def _rejects_temperature(exc: Exception) -> bool:
     """True when an API error means the model accepts the ``temperature`` param
     but not the value we sent (e.g. OpenAI's gpt-5.x: "'temperature' does not
@@ -206,6 +235,15 @@ def _rejects_temperature(exc: Exception) -> bool:
 # (ollama) and cloud models that do support them. The prompt also asks for JSON,
 # and the parser is lenient, so a dropped ``response_format`` still parses.
 litellm.drop_params = True
+
+# litellm prints a "Give Feedback / Get Help" + "LiteLLM.Info:" banner (and a
+# "Provider List:" one) straight to STDOUT whenever it maps a provider error.
+# stdout is our machine-readable channel: on `lgtmaybe review --json` the banner
+# lands in front of the findings array and breaks json.load on the output — and
+# it contains a "[", so even a "find the first bracket" recovery picks the wrong
+# one. Nothing is lost by silencing it: the error itself still surfaces through
+# the exception and our own structured logging, which goes to stderr.
+litellm.suppress_debug_info = True
 
 
 class LiteLLMProvider(ProviderClient):
@@ -338,24 +376,47 @@ class LiteLLMProvider(ProviderClient):
         kwargs: dict[str, Any],
         count_request: Callable[[], None] = lambda: None,
     ) -> ProviderResult:
-        """One litellm call, with the temperature-value-rejection fallback applied.
+        """One litellm call, re-sent without any param the model just rejected.
 
         ``count_request`` is called immediately before each request actually goes
         out, so the reported attempt count matches the number of model calls this
-        made — including the re-send below, which is a second billed request.
+        made — including the re-sends below, each a second billed request.
         """
-        count_request()
-        try:
-            response = _completion_with_wall_timeout(model, messages, kwargs)
-        except Exception as exc:
-            if "temperature" not in kwargs or not _rejects_temperature(exc):
-                raise
-            # Drop temperature for this and every subsequent retry, letting the
-            # model use its only supported value (its default).
-            kwargs.pop("temperature")
+        while True:
             count_request()
-            response = _completion_with_wall_timeout(model, messages, kwargs)
-        return self._map_response(response, model)
+            try:
+                return self._map_response(
+                    _completion_with_wall_timeout(model, messages, kwargs), model
+                )
+            except Exception as exc:
+                if not self._drop_rejected_param(exc, kwargs):
+                    raise
+
+    def _drop_rejected_param(self, exc: Exception, kwargs: dict[str, Any]) -> bool:
+        """Strip the one request param *exc* says this model won't take.
+
+        Two params are sent for review quality rather than necessity —
+        ``temperature`` (determinism) and ``response_format`` (structured output)
+        — and a model that refuses either would otherwise fail the whole review
+        over a preference. Both refusals are permanent 400s, so the recovery is
+        to drop the param and re-send; ``kwargs`` is the dict every later retry
+        of this call reuses, so the drop sticks for them too.
+
+        Returns True when something was dropped and the call is worth re-sending.
+        """
+        if "temperature" in kwargs and _rejects_temperature(exc):
+            # The param is accepted, only our value isn't — let the model use its
+            # own default.
+            kwargs.pop("temperature")
+            return True
+        if kwargs.get("response_format") is not None and _rejects_response_format(exc):
+            # Remembered for the whole provider, not just this call: the lens
+            # fan-out sends the same shape N times, and without this every one of
+            # them pays its own rejected round-trip first.
+            self._skip_response_format = True
+            kwargs.pop("response_format")
+            return True
+        return False
 
     def _with_cache_control(self, messages: list[Message], model: str) -> list[Message]:
         """Return *messages* shaped for the model's caching route, when it pays.
