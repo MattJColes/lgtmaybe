@@ -355,6 +355,128 @@ class TestTemperatureRejection:
                 )
 
 
+class TestRejectedStructuredOutputParam:
+    """Bedrock's Converse endpoint rejects the structured-output field outright
+    for some models: litellm still translates ``response_format`` into
+    ``output_config.format`` and the service 400s the whole request. A 400 is
+    permanent, so without a fallback every lens of the review dies at once and
+    the run reports "every review call failed"."""
+
+    BEDROCK_400 = (
+        "litellm.BadRequestError: BedrockException - "
+        '{"message":"The model returned the following errors: '
+        'output_config.format: Extra inputs are not permitted"}'
+    )
+
+    def test_bedrock_rejection_retries_without_response_format(self) -> None:
+        seen_response_format: list[bool] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            seen_response_format.append(has_rf)
+            if has_rf:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "bedrock/us.anthropic.claude-opus-4-8",
+                response_format={"type": "json_schema"},
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen_response_format == [True, False]
+
+    def test_rejection_makes_later_calls_skip_response_format_up_front(self) -> None:
+        """The drop is sticky, so the rest of the lens fan-out doesn't each pay a
+        wasted rejected round-trip first."""
+        seen_response_format: list[bool] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            seen_response_format.append(has_rf)
+            if has_rf:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            model = "bedrock/us.anthropic.claude-opus-4-8"
+            provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
+            provider.complete([{"role": "user", "content": "b"}], model, response_format={"x": 1})
+
+        assert seen_response_format == [True, False, False]
+
+    def test_both_rejected_params_are_dropped_across_attempts(self) -> None:
+        """A model can reject the temperature value *and* the structured-output
+        field; each rejection drops one param, so the call still lands."""
+        seen: list[tuple[bool, bool]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_temp, has_rf = "temperature" in kwargs, "response_format" in kwargs
+            seen.append((has_temp, has_rf))
+            if has_rf:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            if has_temp:
+                raise RuntimeError(
+                    "litellm.BadRequestError: 'temperature' does not support 0 with this model."
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "bedrock/us.anthropic.claude-opus-4-8",
+                temperature=0.0,
+                response_format={"type": "json_schema"},
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen == [(True, True), (True, False), (False, False)]
+
+    def test_unrelated_bad_request_still_propagates(self) -> None:
+        """An error that merely happens under response_format must not be
+        swallowed as a param rejection — it surfaces as itself."""
+        with patch("litellm.completion", side_effect=RuntimeError("invalid api key")):
+            provider = LiteLLMProvider()
+            with pytest.raises(RuntimeError, match="invalid api key"):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    "bedrock/us.anthropic.claude-opus-4-8",
+                    response_format={"type": "json_schema"},
+                )
+
+    def test_rejection_without_response_format_is_not_retried(self) -> None:
+        """Nothing to drop → the error surfaces immediately, no retry loop."""
+        calls = 0
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise litellm.BadRequestError(
+                message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+            )
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.BadRequestError):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    "bedrock/us.anthropic.claude-opus-4-8",
+                )
+
+        assert calls == 1
+
+
 class TestEmptyStructuredOutputFallback:
     """Some grammar-constrained backends (LM Studio fronting a thinking qwen
     model) return empty content under a response_format JSON schema. The provider

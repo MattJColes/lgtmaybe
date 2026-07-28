@@ -22,6 +22,12 @@ provider.complete:
       stopBy: end
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.param-drop:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_drop_rejected_param$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.defaults:
   - rule:
       kind: function_definition

@@ -6,11 +6,14 @@ calls are made.
 
 from __future__ import annotations
 
+import contextlib
+import io
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import litellm
+import pytest
 
 from lgtmaybe.core.models import ProviderResult
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
@@ -110,3 +113,22 @@ class TestLiteLLMProvider:
         ``openai.gpt-5.5``) drops them instead of failing the whole review,
         while models that support them keep them."""
         assert litellm.drop_params is True
+
+    def test_litellm_never_prints_its_banner_to_stdout(self) -> None:
+        """litellm prints a "Give Feedback / Get Help" + "LiteLLM.Info:" banner
+        straight to stdout when it maps a provider error. On ``lgtmaybe review
+        --json`` that lands in front of the findings array and breaks
+        ``json.load`` on the output — and the banner text contains a ``[``, so
+        even a naive "find the first bracket" recovery picks the wrong one.
+        Importing the provider suppresses it; the errors themselves still
+        surface, through the exception and our own stderr logging."""
+        assert litellm.suppress_debug_info is True
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured), pytest.raises(litellm.BadRequestError):
+            # A real (offline) litellm call through its error-mapping path — the
+            # code that does the printing. A flag assertion alone would still
+            # pass if litellm moved the banner behind a different switch.
+            litellm.completion(model="no-such-provider/x", messages=[{"role": "user", "x": "hi"}])
+
+        assert captured.getvalue() == ""

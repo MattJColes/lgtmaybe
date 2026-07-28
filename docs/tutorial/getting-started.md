@@ -89,7 +89,27 @@ lgtmaybe review --provider ollama --model qwen3.6:27b \
 coding agent can read and apply, for a local review-and-fix loop — see
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-## Step 5 — Post reviews on real pull requests
+## Step 5 — Diagram what you touched
+
+`lgtmaybe diagram` runs the same local diff through one model call and prints a
+C4-style picture of the components your change touches:
+
+```bash
+lgtmaybe diagram \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434
+```
+
+It takes the same `--base` / `--working` / `--uncommitted` flags as `review`, so
+`review` then `diagram` is a natural pair before you open a pull request: what's
+wrong with the change, then what the change reaches. The output is Mermaid
+source plus an ASCII rendering — the ASCII is what reads in a terminal; paste
+the Mermaid into a GitHub comment or [mermaid.live](https://mermaid.live) to see
+it drawn. See
+[Generate a change diagram](../how-to/generate-a-change-diagram.md).
+
+## Step 6 — Post reviews on real pull requests
 
 The CLI reviews local changes. To run lgtmaybe on actual pull requests — inline
 comments and a summary posted back to GitHub — add the GitHub Action to your

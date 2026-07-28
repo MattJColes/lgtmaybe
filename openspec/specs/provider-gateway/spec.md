@@ -95,6 +95,33 @@ on `ProviderResult`.
 - **WHEN** retries on the primary model are exhausted and a fallback is set
 - **THEN** the call completes on the fallback model instead of failing the review
 
+### Requirement: A rejected request param degrades, it does not fail the review
+
+The adapter SHALL drop a request param the model refuses and re-send once
+rather than fail — `temperature` when only the default value is accepted, and
+the structured-output `response_format` when the route rejects the field it
+becomes (Bedrock Converse answers `output_config.format: Extra inputs are not
+permitted`). `drop_params` cannot cover these: the capability map reports the
+param supported, and the refusal is only visible in the error. A dropped
+`response_format` SHALL be remembered for the provider's later calls. litellm's
+stdout banner SHALL be suppressed, since stdout carries machine-readable output.
+<!-- anchor: provider.param-drop -->
+
+#### Scenario: the route rejects the structured-output field
+- **WHEN** a Bedrock model 400s on the `output_config.format` field litellm
+  derived from `response_format`
+- **THEN** the call is re-sent without it and the rest of the lens fan-out skips
+  it up front, instead of every lens failing on a permanent 400
+
+#### Scenario: an unrelated error arrives on the same call
+- **WHEN** a failure under those params names neither a rejected param nor a
+  rejected value
+- **THEN** it propagates unchanged, rather than being retried bare and masked
+
+#### Scenario: a provider error is mapped during a machine-readable run
+- **WHEN** litellm maps a provider error while `--format json` is in force
+- **THEN** nothing is printed to stdout, so the findings array stays parseable
+
 ### Requirement: Defaults are provider-aware
 
 Timeouts SHALL default long for providers that may front a slow model —
