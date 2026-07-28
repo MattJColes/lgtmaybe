@@ -30,7 +30,17 @@ from lgtmaybe.core.models import ReviewFinding
 
 
 class ParseError(Exception):
-    """Raised when the LLM response cannot be parsed into findings."""
+    """Raised when the LLM response cannot be parsed into findings.
+
+    ``truncated`` distinguishes the two faults behind that: a response cut off
+    mid-JSON (the model ran out of output tokens) versus one that is simply not
+    findings JSON (prose, or a schema violation). They send a maintainer to
+    different fixes, so the reviewer must not report them as the same thing.
+    """
+
+    def __init__(self, message: str, *, truncated: bool = False) -> None:
+        super().__init__(message)
+        self.truncated = truncated
 
 
 # Regex to strip trailing commas before ] or }
@@ -118,6 +128,40 @@ def iter_json_values(raw: str) -> Iterator[Any]:
                 yield from _try(span)
 
 
+def _is_unterminated(text: str) -> bool:
+    """True when *text* opens a JSON container it never closes.
+
+    The provider-independent truncation signal, and the only one available when
+    the route misreports why it stopped: litellm rewrites a finish reason it
+    doesn't recognise to ``stop`` (OpenRouter answers ``error`` on a ceiling
+    hit), so the response arrives looking clean and cut off in the same breath.
+
+    String-aware, so a bracket inside a ``suggestion`` or a prose aside
+    (``"reviewed [a, b"``) is data, not an unclosed container. Only consulted
+    once parsing has already failed — a balanced payload followed by stray
+    prose parses fine and never reaches here.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in _CLOSER:
+            depth += 1
+        elif ch in _CLOSER.values():
+            depth -= 1
+    return depth > 0
+
+
 def _as_findings_list(data: Any) -> list[Any] | None:
     """Return *data* as a findings list if it is findings-shaped, else None.
 
@@ -164,6 +208,15 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
         except Exception as exc:
             last_error = exc
 
+    # Checked BEFORE the validation error below, which a truncated response can
+    # also produce: a cut-off array still contains complete earlier objects, and
+    # the first of those parses as a bare single finding and then fails schema
+    # validation. That failure is a symptom — the root cause is the missing tail,
+    # and reporting the symptom points at the wrong fix.
+    if _is_unterminated(_strip_think_blocks(raw)):
+        raise ParseError(
+            "Response ended mid-JSON — the model ran out of output tokens", truncated=True
+        )
     if last_error is not None:
         raise ParseError(f"Finding validation failed: {last_error}") from last_error
     raise ParseError("Cannot parse JSON findings from response")

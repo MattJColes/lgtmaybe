@@ -219,6 +219,52 @@ def test_whitespace_only_raises_parse_error() -> None:
 
 
 # ---------------------------------------------------------------------------
+# truncation — a response cut off mid-JSON is a different fault from prose, and
+# the reviewer must say which. Detected from the text itself because a provider
+# can misreport it: OpenRouter answered `finish_reason: 'error'` on a run that
+# hit the output ceiling, and litellm maps an unknown reason to 'stop'.
+# ---------------------------------------------------------------------------
+
+
+def test_truncated_findings_array_is_flagged_as_truncated() -> None:
+    """The response ran out of output tokens mid-array: the envelope opens and
+    never closes, so no balanced span exists to parse."""
+    raw = '{"findings": [{"path": "a.py", "line": 1, "side": "RIGHT", "severity": "high", "ti'
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+    assert exc_info.value.truncated is True
+
+
+def test_truncated_bare_array_is_flagged_as_truncated() -> None:
+    raw = '[{"path": "a.py", "line": 1}, {"path": "b.py"'
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+    assert exc_info.value.truncated is True
+
+
+def test_prose_without_json_is_not_flagged_as_truncated() -> None:
+    """A model that answered in prose is a different fault — reporting it as a
+    truncation would send the user to the wrong knob."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings("this is not json at all, just prose, no brackets")
+    assert exc_info.value.truncated is False
+
+
+def test_complete_but_invalid_json_is_not_flagged_as_truncated() -> None:
+    """Balanced delimiters that fail validation are malformed, not cut off."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('{"findings": [{"path": "a.py", "severity": "nope"}]}')
+    assert exc_info.value.truncated is False
+
+
+def test_string_containing_an_unclosed_bracket_is_not_truncated() -> None:
+    """A bracket inside a JSON string is data, not an unterminated container."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('{"note": "reviewed [a, b"}')
+    assert exc_info.value.truncated is False
+
+
+# ---------------------------------------------------------------------------
 # schema enforcement — the model output is untrusted; reject drift loudly
 # ---------------------------------------------------------------------------
 

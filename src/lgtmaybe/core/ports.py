@@ -28,6 +28,17 @@ class ProviderWallTimeout(TimeoutError):
     """
 
 
+class ProviderTruncated(Exception):
+    """Part of the provider contract: the answer ran out of output tokens.
+
+    Distinct from a model that answered badly. The response is cut off
+    mid-token, so it can never parse — but the cause is a ceiling, not a prompt,
+    and the two send a maintainer to different fixes. Reported as its own
+    failure so the notice on the PR names the ceiling and the knob that moves
+    it, rather than "unparseable model output".
+    """
+
+
 class ProviderClient(ABC):
     """Port: an LLM backend that returns a normalised completion."""
 

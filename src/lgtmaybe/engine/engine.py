@@ -1024,9 +1024,20 @@ class LLMReviewEngine(ReviewEngine):
         )
         try:
             findings = parse_findings(result.text)
-        except ParseError:
-            _log.warning("unparseable model output", extra={"lens": lens.id})
-            return [], "unparseable model output"
+        except ParseError as exc:
+            # A response cut off at the output ceiling is not a badly-behaved
+            # model, and saying "unparseable" sends the reader looking for a
+            # prompt bug instead of the ceiling they hit. The notice on the PR is
+            # the only place this is ever seen, so it names which fault it was.
+            reason = (
+                f"response truncated at the model's output limit after "
+                f"{result.output_tokens} tokens — lower `max_input_tokens`, or raise "
+                f"`max_tokens` if the model supports a higher ceiling"
+                if exc.truncated
+                else "unparseable model output"
+            )
+            _log.warning(reason, extra={"lens": lens.id})
+            return [], reason
         # Stamp the originating lens (engine-derived): it drives the security
         # label and category-matched finding_rules, and surfaces in JSON output.
         # A focused lens overwrites the model's value outright; a merged

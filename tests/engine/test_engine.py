@@ -1098,6 +1098,37 @@ def test_partial_failure_notice_names_the_provider_error() -> None:
     assert "insufficient_quota" in summary
 
 
+def test_partial_failure_notice_distinguishes_a_truncated_response() -> None:
+    """A lens cut off at the output ceiling must not be reported as unparseable
+    prose: the notice on the PR is the only place a maintainer sees why a
+    quarter of the review is missing, and the two faults need different fixes."""
+
+    class _TruncatedLensProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+            if "owasp" in prompt:
+                f = ReviewFinding(
+                    path="a.py", line=1, severity=Severity.high, title="bug", body="x"
+                )
+                return ProviderResult(
+                    text=json.dumps([f.model_dump(mode="json")]), input_tokens=10, output_tokens=5
+                )
+            # Ran to the ceiling and stopped mid-object.
+            return ProviderResult(
+                text='{"findings": [{"path": "a.py", "line": 1, "ti',
+                input_tokens=13215,
+                output_tokens=65536,
+            )
+
+    engine = LLMReviewEngine(_TruncatedLensProvider())
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4.1-mini", reflect=False)
+
+    _, summary = engine.review(_CTX, cfg)
+
+    assert "truncated" in summary.lower()
+
+
 # ---------------------------------------------------------------------------
 # Custom ("BYO") lenses
 # ---------------------------------------------------------------------------
