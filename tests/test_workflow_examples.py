@@ -167,3 +167,39 @@ def test_dogfood_workflow_uses_the_public_app_identity() -> None:
     assert inputs["github_identity"] == "lgtmaybe"
     assert "app_id" not in inputs
     assert "app_private_key" not in inputs
+
+
+# The largest output any healthy lens has been observed to generate on the
+# dogfood review (artefacts, 2,261 tokens; security and code-health were under
+# 1,800). The floor below is several times this, because `max_tokens` also pays
+# for a reasoning model's thinking tokens — a cap sized to a plain model's
+# findings payload would starve one that thinks first, and every lens would
+# truncate instead of the runaway this guards against.
+_OBSERVED_HEALTHY_OUTPUT = 2_261
+# The ceiling deepseek-v4-pro ran to when a lens went away: 65,536 tokens and
+# 21 minutes for a single call, against ~5.5k for the other three combined.
+_RUNAWAY_OUTPUT = 65_536
+
+
+def test_dogfood_config_caps_what_one_call_may_generate() -> None:
+    """A runaway generation is bounded, not just reported.
+
+    Truncation is now legible (it names itself and its salvaged findings survive),
+    but nothing stopped a lens burning a full output ceiling to get there. The cap
+    is what makes that cost seconds instead of minutes — and on a prepaid route
+    like OpenRouter it also shrinks the pre-flight reservation, which is charged
+    against `max_tokens` before a single token is generated.
+    """
+    config = yaml.safe_load((_REPO_ROOT / ".lgtmaybe.yml").read_text(encoding="utf-8"))
+    cap = config.get("max_tokens")
+
+    assert cap is not None, ".lgtmaybe.yml must cap max_tokens — see the reasoning above"
+    assert cap >= _OBSERVED_HEALTHY_OUTPUT * 3, (
+        f"max_tokens={cap} leaves too little headroom over the largest healthy lens "
+        f"({_OBSERVED_HEALTHY_OUTPUT} tokens) — a reasoning model spends this budget on "
+        "thinking too, and a starved cap truncates every lens rather than only a runaway"
+    )
+    assert cap < _RUNAWAY_OUTPUT, (
+        f"max_tokens={cap} does not bound the runaway it exists to bound "
+        f"({_RUNAWAY_OUTPUT} tokens, 21 minutes, one lens)"
+    )
