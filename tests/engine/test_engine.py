@@ -1129,6 +1129,120 @@ def test_partial_failure_notice_distinguishes_a_truncated_response() -> None:
     assert "truncated" in summary.lower()
 
 
+def test_findings_completed_before_a_truncation_are_kept() -> None:
+    """A lens cut off at the ceiling has usually already emitted real findings.
+    They are validated work the run has paid for, so they post — but the call
+    still counts as failed, so the notice never softens into a clean review."""
+
+    class _PartiallyTruncatedProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+            if "owasp" in prompt:
+                f = ReviewFinding(
+                    path="a.py", line=1, severity=Severity.high, title="sec", body="x"
+                )
+                return ProviderResult(
+                    text=json.dumps([f.model_dump(mode="json")]), input_tokens=10, output_tokens=5
+                )
+            done = ReviewFinding(
+                path="b.py",
+                line=2,
+                severity=Severity.medium,
+                title="salvaged",
+                body="y",
+                failure_scenario="a None id reaches the query and raises",
+            )
+            return ProviderResult(
+                text='{"findings": [' + json.dumps(done.model_dump(mode="json")) + ', {"path": "c',
+                input_tokens=13215,
+                output_tokens=65536,
+            )
+
+    engine = LLMReviewEngine(_PartiallyTruncatedProvider())
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4.1-mini", reflect=False)
+
+    findings, summary = engine.review(_CTX, cfg)
+
+    assert "salvaged" in [f.title for f in findings]
+    assert "truncated" in summary.lower()
+    assert "LGTM" not in summary
+
+
+@pytest.mark.parametrize(
+    "bad_output",
+    [
+        "I reviewed everything and it looks fine to me.",
+        '{"findings": [{"path": "a.py", "severity": "nope"}]}',
+    ],
+    ids=["prose", "schema-violation"],
+)
+def test_a_parse_failure_that_is_not_a_truncation_says_so(bad_output: str) -> None:
+    """The negative of the truncation notice, and the reason it is worth pinning
+    in both directions: telling a maintainer their output was cut off when the
+    model actually answered in prose (or broke the schema) sends them to
+    `max_tokens` when the fix is the prompt."""
+
+    class _BadOutputProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+            if "owasp" in prompt:
+                f = ReviewFinding(
+                    path="a.py",
+                    line=1,
+                    severity=Severity.high,
+                    title="sec",
+                    body="x",
+                    failure_scenario="an unescaped id reaches the query",
+                )
+                return ProviderResult(
+                    text=json.dumps([f.model_dump(mode="json")]), input_tokens=10, output_tokens=5
+                )
+            return ProviderResult(text=bad_output, input_tokens=10, output_tokens=5)
+
+    engine = LLMReviewEngine(_BadOutputProvider())
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4.1-mini", reflect=False)
+
+    findings, summary = engine.review(_CTX, cfg)
+
+    # The healthy lens still posts, so this is a partial review either way —
+    # what must differ is which fault it names.
+    assert [f.title for f in findings] == ["sec"]
+    assert "unparseable" in summary.lower()
+    assert "truncated" not in summary.lower()
+
+
+def test_a_wholly_truncated_review_that_salvaged_findings_is_not_an_error() -> None:
+    """Every call truncated, but findings came back: that is real signal, so it
+    posts as a partial review rather than raising "every review call failed"."""
+
+    class _AllTruncatedProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            done = ReviewFinding(
+                path="b.py",
+                line=2,
+                severity=Severity.medium,
+                title="salvaged",
+                body="y",
+                failure_scenario="a None id reaches the query and raises",
+            )
+            return ProviderResult(
+                text='{"findings": [' + json.dumps(done.model_dump(mode="json")) + ', {"path": "c',
+                input_tokens=10,
+                output_tokens=65536,
+            )
+
+    engine = LLMReviewEngine(_AllTruncatedProvider())
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4.1-mini", reflect=False)
+
+    findings, summary = engine.review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["salvaged"]
+    assert "truncated" in summary.lower()
+
+
 # ---------------------------------------------------------------------------
 # Custom ("BYO") lenses
 # ---------------------------------------------------------------------------

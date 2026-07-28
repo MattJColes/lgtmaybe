@@ -36,11 +36,23 @@ class ParseError(Exception):
     mid-JSON (the model ran out of output tokens) versus one that is simply not
     findings JSON (prose, or a schema violation). They send a maintainer to
     different fixes, so the reviewer must not report them as the same thing.
+
+    ``recovered`` carries the findings the model finished emitting before a
+    truncation — real, schema-valid work worth posting. It rides on the error
+    rather than being returned, because a caller must not be able to take the
+    salvage without also seeing that the lens was cut short.
     """
 
-    def __init__(self, message: str, *, truncated: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        truncated: bool = False,
+        recovered: list[ReviewFinding] | None = None,
+    ) -> None:
         super().__init__(message)
         self.truncated = truncated
+        self.recovered = recovered or []
 
 
 # Regex to strip trailing commas before ] or }
@@ -180,6 +192,39 @@ def _as_findings_list(data: Any) -> list[Any] | None:
     return None
 
 
+def _is_container(value: Any) -> bool:
+    """Whether *value* is a whole findings payload rather than one finding.
+
+    The ``{"findings": [...]}`` envelope or a bare array — both of which a model
+    can only emit once it has closed them, so seeing one means nothing was cut
+    off. A lone object is the ambiguous case: the entire answer when the model
+    found exactly one issue, or the first survivor of a truncated array.
+    """
+    if isinstance(value, list):
+        return True
+    return isinstance(value, dict) and isinstance(value.get("findings"), list)
+
+
+def _recover_complete_findings(raw: str) -> list[ReviewFinding]:
+    """Every valid finding the model finished emitting before it was cut off.
+
+    Findings already generated, already paid for, and already validated against
+    the strict schema — dropping them loses real signal, and a half-written
+    trailing object simply fails validation and is left out rather than guessed
+    at. Order follows the response, so the salvaged findings read as the model
+    emitted them.
+    """
+    recovered: list[ReviewFinding] = []
+    for value in iter_json_values(raw):
+        if not isinstance(value, dict) or _is_container(value):
+            continue
+        try:
+            recovered.append(ReviewFinding.model_validate(value))
+        except Exception:  # noqa: S110 — a non-finding object is simply not one
+            continue
+    return recovered
+
+
 def parse_findings(raw: str) -> list[ReviewFinding]:
     """Parse *raw* LLM text into a list of ReviewFinding objects.
 
@@ -199,24 +244,38 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     # later candidates instead of aborting on the first that doesn't validate, so
     # the real `{"findings": [...]}` that follows is still recovered.
     last_error: Exception | None = None
+    # A bare object is only the whole answer when nothing was cut off. In a
+    # truncated array it is the FIRST of several complete findings, and returning
+    # it here would report a fraction of the lens as the whole of it — silently,
+    # with no notice, which is the one outcome worth more than the findings.
+    # Held back until the truncation question is settled below.
+    single: list[ReviewFinding] | None = None
     for value in iter_json_values(raw):
         items = _as_findings_list(value)
         if items is None:
             continue
         try:
-            return [ReviewFinding.model_validate(item) for item in items]
+            parsed = [ReviewFinding.model_validate(item) for item in items]
         except Exception as exc:
             last_error = exc
+            continue
+        if _is_container(value):
+            return parsed
+        single = single if single is not None else parsed
 
-    # Checked BEFORE the validation error below, which a truncated response can
-    # also produce: a cut-off array still contains complete earlier objects, and
-    # the first of those parses as a bare single finding and then fails schema
-    # validation. That failure is a symptom — the root cause is the missing tail,
-    # and reporting the symptom points at the wrong fix.
+    # Checked BEFORE returning a bare object or reporting the validation error
+    # below, both of which a truncated response also produces: a cut-off array
+    # still holds complete earlier objects, and the first of those parses as a
+    # bare single finding — validating (and masking the truncation) or failing
+    # the schema (a symptom reported in place of the cause).
     if _is_unterminated(_strip_think_blocks(raw)):
         raise ParseError(
-            "Response ended mid-JSON — the model ran out of output tokens", truncated=True
+            "Response ended mid-JSON — the model ran out of output tokens",
+            truncated=True,
+            recovered=_recover_complete_findings(raw),
         )
+    if single is not None:
+        return single
     if last_error is not None:
         raise ParseError(f"Finding validation failed: {last_error}") from last_error
     raise ParseError("Cannot parse JSON findings from response")

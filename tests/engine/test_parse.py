@@ -257,6 +257,63 @@ def test_complete_but_invalid_json_is_not_flagged_as_truncated() -> None:
     assert exc_info.value.truncated is False
 
 
+def _truncated_after(findings: list[dict], tail: str) -> str:  # type: ignore[type-arg]
+    """A ``{"findings": [...]}`` envelope cut off partway through *tail*."""
+    complete = ", ".join(json.dumps(f) for f in findings)
+    return f'{{"findings": [{complete}, {tail}'
+
+
+def test_complete_findings_before_the_cut_are_recovered() -> None:
+    """The findings the model finished emitting are real work, already validated
+    — throwing them away loses genuine signal the run has already paid for."""
+    second = {**_VALID_FINDING, "path": "src/other.py", "title": "off by one"}
+    raw = _truncated_after([_VALID_FINDING, second], '{"path": "src/third.py", "li')
+
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+
+    recovered = exc_info.value.recovered
+    assert [f.path for f in recovered] == ["src/app.py", "src/other.py"]
+    assert all(isinstance(f, ReviewFinding) for f in recovered)
+    assert recovered[1].title == "off by one"
+
+
+def test_the_incomplete_finding_itself_is_not_recovered() -> None:
+    """Only whole objects — a half-written finding is not silently completed."""
+    raw = _truncated_after([_VALID_FINDING], '{"path": "src/third.py", "severity": "hi')
+
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+
+    assert [f.path for f in exc_info.value.recovered] == ["src/app.py"]
+
+
+def test_truncation_before_any_complete_finding_recovers_nothing() -> None:
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('{"findings": [{"path": "src/app.py", "li')
+
+    assert exc_info.value.recovered == []
+
+
+def test_a_non_truncated_parse_error_recovers_nothing() -> None:
+    """Recovery is the truncation path only; prose has nothing to salvage."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings("no json here at all")
+
+    assert exc_info.value.recovered == []
+
+
+def test_recovery_skips_objects_that_are_not_findings() -> None:
+    """A chatter object before the envelope is not a finding, and strict
+    validation is what keeps it out — recovery never widens the schema."""
+    raw = '{"note": "found 1 issue"} {"findings": [' + json.dumps(_VALID_FINDING) + ', {"path": "x'
+
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+
+    assert [f.path for f in exc_info.value.recovered] == ["src/app.py"]
+
+
 def test_string_containing_an_unclosed_bracket_is_not_truncated() -> None:
     """A bracket inside a JSON string is data, not an unterminated container."""
     with pytest.raises(ParseError) as exc_info:
