@@ -1169,6 +1169,50 @@ def test_findings_completed_before_a_truncation_are_kept() -> None:
     assert "LGTM" not in summary
 
 
+@pytest.mark.parametrize(
+    "bad_output",
+    [
+        "I reviewed everything and it looks fine to me.",
+        '{"findings": [{"path": "a.py", "severity": "nope"}]}',
+    ],
+    ids=["prose", "schema-violation"],
+)
+def test_a_parse_failure_that_is_not_a_truncation_says_so(bad_output: str) -> None:
+    """The negative of the truncation notice, and the reason it is worth pinning
+    in both directions: telling a maintainer their output was cut off when the
+    model actually answered in prose (or broke the schema) sends them to
+    `max_tokens` when the fix is the prompt."""
+
+    class _BadOutputProvider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages).lower()
+            if "owasp" in prompt:
+                f = ReviewFinding(
+                    path="a.py",
+                    line=1,
+                    severity=Severity.high,
+                    title="sec",
+                    body="x",
+                    failure_scenario="an unescaped id reaches the query",
+                )
+                return ProviderResult(
+                    text=json.dumps([f.model_dump(mode="json")]), input_tokens=10, output_tokens=5
+                )
+            return ProviderResult(text=bad_output, input_tokens=10, output_tokens=5)
+
+    engine = LLMReviewEngine(_BadOutputProvider())
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4.1-mini", reflect=False)
+
+    findings, summary = engine.review(_CTX, cfg)
+
+    # The healthy lens still posts, so this is a partial review either way —
+    # what must differ is which fault it names.
+    assert [f.title for f in findings] == ["sec"]
+    assert "unparseable" in summary.lower()
+    assert "truncated" not in summary.lower()
+
+
 def test_a_wholly_truncated_review_that_salvaged_findings_is_not_an_error() -> None:
     """Every call truncated, but findings came back: that is real signal, so it
     posts as a partial review rather than raising "every review call failed"."""
