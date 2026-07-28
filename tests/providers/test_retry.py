@@ -13,6 +13,7 @@ import litellm
 import pytest
 
 from lgtmaybe.core.models import attempts_of
+from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
 
@@ -353,6 +354,85 @@ class TestTemperatureRejection:
                 provider.complete(
                     [{"role": "user", "content": "hi"}], "openai/gpt-5.5", temperature=0.0
                 )
+
+
+class TestOutputCeilingTruncation:
+    """A generation that runs to the model's output ceiling comes back cut off
+    mid-JSON. Handing that to the parser reports it as "unparseable model
+    output", which sends the user hunting for a prompt bug instead of the
+    `max_tokens` ceiling they actually hit — and an identical re-send at
+    temperature 0 just runs to the ceiling again, at full price."""
+
+    @staticmethod
+    def _truncated(reason: str = "length") -> Any:
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"findings": [{"path": "a.py"'),
+                    finish_reason=reason,
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=13215, completion_tokens=65536),
+        )
+
+    def test_length_finish_reason_raises_truncated(self) -> None:
+        with patch("litellm.completion", return_value=self._truncated()):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        # The message must name the ceiling that was hit and the knob that moves
+        # it — the whole point is that "unparseable" told the user nothing.
+        assert "65536" in str(exc_info.value)
+        assert "max_tokens" in str(exc_info.value)
+
+    def test_truncation_is_not_retried(self) -> None:
+        """Permanent by design: the identical request against the identical
+        ceiling can only end the same way, and each attempt costs a full
+        ceiling-length generation (21 minutes, in the run that prompted this)."""
+        calls = 0
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            return self._truncated()
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated):
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert calls == 1
+
+    def test_truncation_still_falls_back_to_the_secondary_model(self) -> None:
+        """Permanent stops the *retry*, not the fallback — a different model is a
+        genuinely different request and may well fit its answer in budget."""
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["model"] == "openrouter/deepseek":
+                return self._truncated()
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(fallback_model="openrouter/backup")
+            result = provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert result.text == '{"findings": []}'
+
+    def test_stop_finish_reason_is_untouched(self) -> None:
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"), finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=10),
+        )
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            assert provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o").text
+
+    def test_absent_finish_reason_is_untouched(self) -> None:
+        """Not every route reports one; its absence is not a truncation."""
+        with patch("litellm.completion", return_value=_fake_response("ok")):
+            provider = LiteLLMProvider()
+            assert provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o").text
 
 
 class TestRejectedStructuredOutputParam:

@@ -122,6 +122,27 @@ stdout banner SHALL be suppressed, since stdout carries machine-readable output.
 - **WHEN** litellm maps a provider error while `--format json` is in force
 - **THEN** nothing is printed to stdout, so the findings array stays parseable
 
+### Requirement: A blown output ceiling is named, not retried
+
+A completion that stopped because it ran out of output tokens SHALL be raised
+as its own failure naming the ceiling reached and the knob that moves it, never
+passed on as content. It SHALL NOT be retried — at temperature 0 the identical
+request reaches the identical ceiling, and each attempt costs a full
+ceiling-length generation — while a configured fallback model is still tried.
+Detection reads the finish reason only where the route reports it plainly:
+litellm rewrites a reason it does not recognise to `stop`, so a route that
+names a ceiling hit its own way is caught downstream by the parser instead.
+<!-- anchor: provider.truncation -->
+
+#### Scenario: the model generates to its output limit
+- **WHEN** a completion returns with a `length` finish reason
+- **THEN** the call fails naming the token count reached, and is not retried
+
+#### Scenario: the route misreports why it stopped
+- **WHEN** a provider reports a ceiling hit under a name litellm maps to `stop`
+- **THEN** the response still reaches the parser, which reports the truncation
+  from the unclosed JSON itself
+
 ### Requirement: Defaults are provider-aware
 
 Timeouts SHALL default long for providers that may front a slow model —

@@ -28,6 +28,12 @@ provider.param-drop:
     has: { field: name, regex: '^_drop_rejected_param$' }
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.truncation:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_finish_reason$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.defaults:
   - rule:
       kind: function_definition

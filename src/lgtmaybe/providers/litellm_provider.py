@@ -37,7 +37,12 @@ from tenacity import (
 
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ProviderResult, attempts_of, stamp_attempts
-from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout
+from lgtmaybe.core.ports import (
+    Message,
+    ProviderClient,
+    ProviderTruncated,
+    ProviderWallTimeout,
+)
 
 _log = get_logger(__name__)
 
@@ -180,6 +185,12 @@ def _is_permanent(exc: BaseException) -> bool:
     # surfaced. One attempt, then say so — and let the fallback model (a genuinely
     # different request) still have its turn.
     if isinstance(exc, ProviderWallTimeout):
+        return True
+    # Nor is a blown output ceiling: at temperature 0 the identical request runs
+    # to the identical ceiling, and each attempt costs a full ceiling-length
+    # generation — 65,536 output tokens and 21 minutes, in the run that prompted
+    # this. Same bargain as above: one attempt, then say so, fallback still tried.
+    if isinstance(exc, ProviderTruncated):
         return True
     if isinstance(exc, RateLimitError):
         return _is_quota_rate_limit(exc)
@@ -481,6 +492,16 @@ class LiteLLMProvider(ProviderClient):
         usage = response.usage
         input_tokens: int = usage.prompt_tokens
         output_tokens: int = usage.completion_tokens
+        # A generation that stopped because it ran out of output tokens is cut off
+        # mid-token: it can never parse, and passing it on gets it reported as
+        # "unparseable model output", which points at the prompt rather than at
+        # the ceiling actually hit. Raised here so the failure names itself.
+        if _finish_reason(response) == "length":
+            raise ProviderTruncated(
+                f"response truncated at the model's output limit after {output_tokens} tokens — "
+                "lower `max_input_tokens` so each call has less to say about, or raise "
+                "`max_tokens` if the model supports a higher ceiling"
+            )
         cache_read, cache_creation = _cache_usage(usage)
         if cache_read or cache_creation:
             # Instrumentation: whether the static prefix hit or (re)wrote the
@@ -501,6 +522,22 @@ class LiteLLMProvider(ProviderClient):
             cache_read_tokens=cache_read,
             cache_creation_tokens=cache_creation,
         )
+
+
+def _finish_reason(response: Any) -> str | None:
+    """The response's finish reason, or None when the route doesn't report one.
+
+    Only ``length`` is acted on, and only when the provider says it plainly.
+    litellm normalises the field through a fixed map and quietly rewrites
+    anything it doesn't recognise to ``stop`` (it logs "Unmapped finish_reason
+    '<x>', defaulting to 'stop'"), so a route that reports a ceiling hit under
+    its own name — OpenRouter answers ``error`` — arrives here indistinguishable
+    from a clean finish. That case is caught downstream instead, by the parser
+    noticing the JSON never closed.
+    """
+    choice = response.choices[0]
+    reason = getattr(choice, "finish_reason", None)
+    return str(reason) if reason is not None else None
 
 
 def _prefix_cache_key(messages: list[Message]) -> str:

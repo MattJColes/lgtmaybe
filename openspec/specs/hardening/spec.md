@@ -79,9 +79,17 @@ placeholder left in the source.
 Model output SHALL be parsed as JSON with repair for common wrappers (fences,
 prose preamble), then validated against the strict finding schema — recovery
 never widens what is accepted, and unparseable output yields an error, not
-invented findings.
+invented findings. A reply that opens a JSON container and never closes it
+SHALL be reported as truncated rather than as unparseable — the two have
+different causes and different fixes.
 <!-- anchor: hardening.parse -->
 
 #### Scenario: model wraps JSON in a code fence
 - **WHEN** the reply is valid findings JSON inside markdown fences
 - **THEN** parsing succeeds; fields still validate against the strict schema
+
+#### Scenario: the reply is cut off mid-findings
+- **WHEN** a reply ends inside an unclosed array, so its earlier complete
+  objects parse but fail the strict schema
+- **THEN** it is reported as truncated, not as a schema violation — the missing
+  tail is the cause and the validation failure only its symptom
