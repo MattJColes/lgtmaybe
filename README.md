@@ -135,9 +135,14 @@ lgtmaybe review \
 ```
 
 No GitHub token and no pull request needed — `lgtmaybe review` reads your local
-`git` diff and prints the findings. `lgtmaybe help` lists every command with
-usage examples; `lgtmaybe help review` shows the full option reference. To post
-reviews on real pull requests, wire up the
+`git` diff and prints the findings. Its companion, `lgtmaybe diagram`, takes the
+same flags and prints a C4-style picture of the components your change touches —
+`review` then `diagram` is the pair to run before opening a pull request. See
+[Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
+
+`lgtmaybe help` lists every command with usage examples; `lgtmaybe help review`
+shows the full option reference. To post reviews on real pull requests, wire up
+the
 [GitHub Action](#use-as-a-github-action). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
 

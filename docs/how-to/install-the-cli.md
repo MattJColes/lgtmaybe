@@ -124,4 +124,5 @@ bundles all three and wires up the OIDC/WIF auth for you.
 ## Next steps
 
 - Run your first local review: [Getting started](../tutorial/getting-started.md).
+- Diagram what a change touches: [Generate a change diagram](generate-a-change-diagram.md).
 - Post reviews on real pull requests: [Use as a GitHub Action](use-as-github-action.md).

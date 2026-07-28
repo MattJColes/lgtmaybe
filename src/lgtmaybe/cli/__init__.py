@@ -892,6 +892,7 @@ Examples:
   lgtmaybe review --working                Include uncommitted edits too
   lgtmaybe review --provider ollama --model qwen3:27b
   lgtmaybe review --format json            Machine-readable findings
+  lgtmaybe diagram                         Diagram the components you touched
   lgtmaybe config init                     One-time provider/model setup
   lgtmaybe help COMMAND                    Detailed help for any command
 \b

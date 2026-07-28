@@ -12,11 +12,21 @@ from lgtmaybe.cli import main
 def test_help_lists_commands_and_examples() -> None:
     result = CliRunner().invoke(main, ["help"])
     assert result.exit_code == 0
-    for command in ("review", "comment", "action", "config", "help"):
+    for command in ("review", "diagram", "comment", "action", "config", "help"):
         assert command in result.output
     assert "Examples:" in result.output
     assert "lgtmaybe review" in result.output
     assert "https://lgtmaybe.coles.codes/" in result.output
+
+
+def test_help_examples_cover_every_local_command() -> None:
+    """The worked examples are the suggested CLI workflow, so a local command
+    missing from them reads as one that doesn't exist — which is exactly how
+    `lgtmaybe diagram` got reported as unshipped."""
+    result = CliRunner().invoke(main, ["help"])
+    examples = result.output.split("Examples:", 1)[1]
+    for command in ("review", "diagram", "config"):
+        assert f"lgtmaybe {command}" in examples
 
 
 def test_help_command_matches_dash_dash_help() -> None:

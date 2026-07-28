@@ -182,7 +182,27 @@ lgtmaybe review --provider ollama --model qwen3.6:27b \
 coding agent can read and apply, for a local review-and-fix loop — see
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-## Step 5 — Post reviews on real pull requests
+## Step 5 — Diagram what you touched
+
+`lgtmaybe diagram` runs the same local diff through one model call and prints a
+C4-style picture of the components your change touches:
+
+```bash
+lgtmaybe diagram \
+  --provider ollama \
+  --model qwen3.6:27b \
+  --api-base http://localhost:11434
+```
+
+It takes the same `--base` / `--working` / `--uncommitted` flags as `review`, so
+`review` then `diagram` is a natural pair before you open a pull request: what's
+wrong with the change, then what the change reaches. The output is Mermaid
+source plus an ASCII rendering — the ASCII is what reads in a terminal; paste
+the Mermaid into a GitHub comment or [mermaid.live](https://mermaid.live) to see
+it drawn. See
+[Generate a change diagram](../how-to/generate-a-change-diagram.md).
+
+## Step 6 — Post reviews on real pull requests
 
 The CLI reviews local changes. To run lgtmaybe on actual pull requests — inline
 comments and a summary posted back to GitHub — add the GitHub Action to your
@@ -335,6 +355,7 @@ bundles all three and wires up the OIDC/WIF auth for you.
 ## Next steps
 
 - Run your first local review: [Getting started](../tutorial/getting-started.md).
+- Diagram what a change touches: [Generate a change diagram](generate-a-change-diagram.md).
 - Post reviews on real pull requests: [Use as a GitHub Action](use-as-github-action.md).
 
 ---
@@ -1291,6 +1312,15 @@ selected model, or the model is not enabled in the Bedrock console for your
 account and region. For an inference-profile id (`us.`/`eu.`/`apac.`-prefixed),
 the policy must also allow the `inference-profile/*` ARN, not just
 `foundation-model/*`.
+
+**`output_config.format: Extra inputs are not permitted`** — the model's Converse
+route doesn't accept the structured-output field lgtmaybe asks for, and Bedrock
+rejects the whole request with a 400. lgtmaybe detects that rejection, re-sends
+without the field, and remembers the drop for the rest of the run, so no action
+is needed — the prompt asks for JSON anyway and the parser is lenient. If you're
+on a build from before that (the symptom is every lens failing at once, and the
+review reporting `every review call failed`), upgrade, or pass
+`--no-structured-output` / set `structured_output: false` as a stopgap.
 
 **`The provided model identifier is invalid`** — the `model` is not a Bedrock
 model id. Two common causes: (1) it's a non-Bedrock id such as `openai.gpt-5.5`
