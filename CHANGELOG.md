@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.9.0...lgtmaybe-v1.9.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **parse:** keep the findings a truncated response finished emitting ([#306](https://github.com/MattJColes/lgtmaybe/issues/306)) ([b8d9193](https://github.com/MattJColes/lgtmaybe/commit/b8d9193b759cb4fd7b728f777dee3a34636f6680))
+* **provider:** report a truncated response as truncated, and stop retrying it ([#305](https://github.com/MattJColes/lgtmaybe/issues/305)) ([cadca72](https://github.com/MattJColes/lgtmaybe/commit/cadca72631537c128024e79b072675790acadd13))
+* **provider:** survive a rejected response_format on Bedrock and keep --json stdout parseable ([#303](https://github.com/MattJColes/lgtmaybe/issues/303)) ([a11860c](https://github.com/MattJColes/lgtmaybe/commit/a11860c9a1eb99725ba27f53db8bb3197d9d1376))
+
 ## [1.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.8.1...lgtmaybe-v1.9.0) (2026-07-27)
 
 
