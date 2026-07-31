@@ -86,7 +86,7 @@ jobs:
           # limit, and OpenRouter then rejects each call with a 402 ("requires
           # more credits, or fewer max_tokens") — every lens fails and the review
           # posts nothing.
-          model: deepseek/deepseek-v4-pro
+          model: deepseek/deepseek-v4-flash-0731
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_identity: lgtmaybe
