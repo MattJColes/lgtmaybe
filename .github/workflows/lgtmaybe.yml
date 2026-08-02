@@ -86,7 +86,12 @@ jobs:
           # limit, and OpenRouter then rejects each call with a 402 ("requires
           # more credits, or fewer max_tokens") — every lens fails and the review
           # posts nothing.
-          model: deepseek/deepseek-v4-flash-latest
+          # The bare id is what OpenRouter rejected on #319 — `{"message":
+          # "deepseek/deepseek-v4-flash-latest is not a valid model ID","code":
+          # 400}` on every lens, so the review posted a failure instead of a
+          # review. The `~` prefix is the floating-alias form; quoted because a
+          # bare `~` is YAML's null and leading-`~` scalars are easy to misread.
+          model: "~deepseek/deepseek-v4-flash-latest"
           # The default 100k input budget hands one call more diff than it can
           # answer for: the response is cut off mid-JSON and the lens is lost
           # (three of four on #309). Smaller batches keep each answer inside the
