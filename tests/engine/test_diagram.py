@@ -5,9 +5,8 @@ plus an ASCII view locally. Contracts:
 
 - structured JSON renders the title, a ``mermaid`` fence, the ASCII in a
   collapsed ``<details>``, and the notes;
-- model-authored Mermaid never enters a ``mermaid`` fence;
-- legacy C4 output also drops to the ASCII fallback rather than rendering an
-  overlap-prone graph;
+- model-authored Mermaid never enters a ``mermaid`` fence — the prompt asks for
+  graph data only, so a response carrying syntax but no nodes is invalid;
 - unparseable model output becomes a safe explanatory comment;
 - a valid Mermaid fence is followed by an "Open full screen" mermaid.live link
   whose pako fragment round-trips to the exact fenced source;
@@ -179,6 +178,8 @@ def test_response_format_is_the_diagram_schema() -> None:
 
 
 def test_model_authored_mermaid_is_never_rendered() -> None:
+    """Syntax the model wrote is not a diagram: with no nodes it is invalid
+    output, not something to render."""
     body = build_diagram(
         _CTX,
         _CFG,
@@ -186,46 +187,22 @@ def test_model_authored_mermaid_is_never_rendered() -> None:
             nodes=[],
             edges=[],
             mermaid='```mermaid\nflowchart LR\n    a["A"]\n```',
-            ascii="[A]",
         ),
     )
 
     assert "```mermaid" not in body
-    assert "\n[A]\n" in body
+    assert "couldn't produce a valid change diagram" in body
 
 
-def test_reported_invalid_mermaid_falls_back_to_ascii_only() -> None:
+def test_legacy_c4_without_nodes_is_invalid() -> None:
     body = build_diagram(
         _CTX,
         _CFG,
-        _structured_provider(
-            nodes=[],
-            edges=[],
-            mermaid=_BROKEN_MERMAID,
-            ascii="[Bundled step reference] (changed)",
-        ),
+        _structured_provider(nodes=[], edges=[], mermaid=_LEGACY_C4),
     )
 
     assert "```mermaid" not in body
-    assert "<details>" not in body
-    assert "[Bundled step reference] (changed)" in body
-
-
-def test_legacy_c4_falls_back_to_ascii_only() -> None:
-    body = build_diagram(
-        _CTX,
-        _CFG,
-        _structured_provider(
-            nodes=[],
-            edges=[],
-            mermaid=_LEGACY_C4,
-            ascii="[Client] --> [App] (changed)",
-        ),
-    )
-
-    assert "```mermaid" not in body
-    assert "<details>" not in body
-    assert "[Client] --> [App] (changed)" in body
+    assert "couldn't produce a valid change diagram" in body
 
 
 def test_mermaid_gets_a_full_screen_link() -> None:
@@ -245,7 +222,7 @@ def test_no_full_screen_link_without_mermaid() -> None:
     body = build_diagram(
         _CTX,
         _CFG,
-        _structured_provider(nodes=[], edges=[], mermaid=_BROKEN_MERMAID, ascii="[Fallback]"),
+        _structured_provider(nodes=[], edges=[], mermaid=_BROKEN_MERMAID),
     )
 
     assert "mermaid.live" not in body

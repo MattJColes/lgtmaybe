@@ -28,7 +28,6 @@ from lgtmaybe.core.models import (
     ReviewResult,
     StaticAnalysisTool,
     ToolMode,
-    attempts_of,
 )
 from lgtmaybe.core.ports import (
     Message,
@@ -139,6 +138,11 @@ INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 # summary step, which counts these to tell a budget stop (spend the user chose)
 # apart from the provider failures the generic incomplete notice covers.
 _BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
+
+
+def _plural(n: int, one: str = "", many: str = "s") -> str:
+    """The word (or suffix) for a count of *n*: *one* when it is exactly 1, else *many*."""
+    return one if n == 1 else many
 
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
@@ -277,6 +281,30 @@ _LensOutcome = tuple[list[ReviewFinding], str | None]
 _ReviewTask = partial[_LensOutcome]
 
 
+@dataclass(frozen=True)
+class _Run:
+    """The settings that are fixed for a whole review, resolved once in ``review()``.
+
+    Every model call in the fan-out — the first one, an oversized batch's split
+    pieces, a deferral's re-run — reads exactly the same values, so they travel
+    as one object rather than as seven parameters re-declared at each hop.
+    """
+
+    model: str
+    # Constrains output to the findings schema (provider-native JSON mode) on
+    # review calls only — the reflection call keeps its own format.
+    response_format: type[ReviewResult] | None
+    # The message shape: True (prompt_cache on, the default) splits the prompt
+    # into a cacheable shared prefix plus the lens block; False is the legacy
+    # lens-in-system layout.
+    split_prompt: bool
+    language: str | None
+    deadline_at: float | None
+    budget_at: int | None
+    # Mid-review retrieval budget in tokens, or None when a lens may not defer.
+    retrieval_budget: int | None
+
+
 def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
     """Split a timed-out batch into smaller review units.
 
@@ -320,15 +348,13 @@ def _skip_reason(deadline_at: float | None, budget_at: int | None, lens: _Lens) 
 
 
 def _lens_messages(
+    run: _Run,
     wrapped: str,
     intent_block: str | None,
     hint_block: str | None,
     dir_block: str | None,
-    split_prompt: bool,
-    language: str | None,
     lens: _Lens,
     *,
-    retrieval: bool,
     context: str | None = None,
 ) -> list[Message]:
     """The messages for one lens call, in whichever prompt shape is configured.
@@ -340,29 +366,30 @@ def _lens_messages(
     ahead of the lens checklist for the same reason the diff does, so the trusted
     instructions stay closest to the answer.
     """
-    if split_prompt:
+    # Only the intent lens pays the intent-block tokens (and its injection
+    # surface); the other lenses never see PR-authored prose. In the split shape
+    # it rides the lens block — NOT the shared prefix — so their cached prefix
+    # stays identical.
+    intent = intent_block if lens.carries_intent else None
+    retrieval = run.retrieval_budget is not None
+    if run.split_prompt:
         # The directory block joins the ONE prefix string rather than adding
         # a fourth message: the adapter puts its cache breakpoint on the last
         # prefix block, and it varies per batch exactly like the hints do, so
         # it is warmed once by the primer and read by lenses 2..N.
         prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
         suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
-        if lens.carries_intent and intent_block is not None:
-            # Only the intent lens pays the intent-block tokens (and its
-            # injection surface). It rides the lens block — NOT the shared
-            # prefix — so the other lenses' cached prefix stays identical.
-            suffix = f"{intent_block}\n\n{suffix}"
+        if intent is not None:
+            suffix = f"{intent}\n\n{suffix}"
         return [
-            {"role": "system", "content": build_shared_preamble(language, retrieval)},
+            {"role": "system", "content": build_shared_preamble(run.language, retrieval)},
             {"role": "user", "content": prefix},
             {"role": "user", "content": suffix},
         ]
 
     user_content = wrapped
-    if lens.carries_intent and intent_block is not None:
-        # Only the intent lens pays the intent-block tokens (and its
-        # injection surface); the other lenses never see PR-authored prose.
-        user_content = f"{intent_block}\n\n{user_content}"
+    if intent is not None:
+        user_content = f"{intent}\n\n{user_content}"
     if hint_block is not None:
         # Static-analysis grounding: every lens sees the hints (each judges
         # relevance to its own concern) ahead of the diff they refer to.
@@ -583,9 +610,20 @@ class LLMReviewEngine(ReviewEngine):
         #    waves; flattened, it is `ceil(batches × lenses / workers)`. Each
         #    lens gets a focused prompt; findings are merged afterwards.
         #    Concurrency is provider-aware (see _resolve_workers).
-        # Constrain output to the findings schema (provider-native JSON mode) per
-        # review call — NOT globally, so the reflection call keeps its own format.
-        response_format = ReviewResult if cfg.structured_output else None
+        # Everything a model call needs that does not vary across the run, in one
+        # object: resolved here, then carried unchanged through the fan-out, the
+        # oversized-batch split, and a deferral's re-run.
+        run = _Run(
+            model=cfg.model,
+            # Constrain output to the findings schema (provider-native JSON mode) per
+            # review call — NOT globally, so the reflection call keeps its own format.
+            response_format=ReviewResult if cfg.structured_output else None,
+            split_prompt=cfg.prompt_cache,
+            language=cfg.language,
+            deadline_at=deadline_at,
+            budget_at=budget_at,
+            retrieval_budget=retrieval_budget,
+        )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_ReviewTask]]] = []
         for batch_num, batch in enumerate(batches, start=1):
@@ -629,18 +667,12 @@ class LLMReviewEngine(ReviewEngine):
             batch_tasks = [
                 partial(
                     self._review_lens,
+                    run,
                     wrapped,
                     intent_block,
                     hint_block,
                     dir_block,
-                    cfg.model,
-                    response_format,
                     batch_num,
-                    cfg.prompt_cache,
-                    cfg.language,
-                    deadline_at,
-                    budget_at,
-                    retrieval_budget,
                     lens,
                     batch,
                 )
@@ -802,7 +834,7 @@ class LLMReviewEngine(ReviewEngine):
             )
         if skipped_by_triage:
             # Transparency: a triage skip must be visible, never silent.
-            plural_files = "s" if len(skipped_by_triage) != 1 else ""
+            plural_files = _plural(len(skipped_by_triage))
             listed = ", ".join(f"`{p}`" for p in skipped_by_triage[:10])
             more = ", …" if len(skipped_by_triage) > 10 else ""
             notices.append(
@@ -815,7 +847,7 @@ class LLMReviewEngine(ReviewEngine):
         # partial and that must never be softened into a clean bill of health).
         budget_skips = sum(1 for e in errors if e == _BUDGET_SKIP_REASON)
         if budget_skips:
-            plural = "s were" if budget_skips != 1 else " was"
+            plural = _plural(budget_skips, " was", "s were")
             notices.append(
                 f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens) — "
                 f"{budget_skips} of {total_calls} review call{plural} skipped, so this "
@@ -838,11 +870,12 @@ class LLMReviewEngine(ReviewEngine):
         # wall clock and a blown output ceiling), because the remedy is the same.
         if self._split_batches:
             count = len(self._split_batches)
-            plural = "es" if count != 1 else ""
+            plural = _plural(count, many="es")
+            was = _plural(count, "was", "were")
             notices.append(
-                f"⏱️ {count} batch{plural} {'were' if count != 1 else 'was'} too big for one "
+                f"⏱️ {count} batch{plural} {was} too big for one "
                 "call (timed out, or ran past the `max_tokens` ceiling) and "
-                f"{'were' if count != 1 else 'was'} reviewed in smaller pieces instead. "
+                f"{was} reviewed in smaller pieces instead. "
                 "Consider a lower `max_input_tokens`, a higher `max_tokens`, or a faster model."
             )
         if reflection_skipped:
@@ -855,7 +888,7 @@ class LLMReviewEngine(ReviewEngine):
         # the remaining count as a clean bill of health would let a suppression
         # quietly convert a real finding into "LGTM".
         if suppressed:
-            plural = "s" if suppressed != 1 else ""
+            plural = _plural(suppressed)
             notices.append(
                 f"🙈 {suppressed} finding{plural} suppressed (ignored fingerprint, "
                 "inline `lgtmaybe: ignore`, or a 👎 from a previous run) — not "
@@ -866,7 +899,7 @@ class LLMReviewEngine(ReviewEngine):
         # them would make a repo with a pre-existing secret look clean, so say
         # the number and where to look.
         if off_diff:
-            plural = "s" if off_diff != 1 else ""
+            plural = _plural(off_diff)
             notices.append(
                 f"🔍 {off_diff} scan finding{plural} skipped — on unchanged lines "
                 "outside this PR's diff. Run the tool over the repository to see them."
@@ -877,7 +910,7 @@ class LLMReviewEngine(ReviewEngine):
         # they were fixed.
         if ctx.open_finding_threads:
             count = ctx.open_finding_threads
-            subject = "conversation is" if count == 1 else "conversations are"
+            subject = _plural(count, "conversation is", "conversations are")
             notices.append(
                 f"💬 {count} earlier lgtmaybe {subject} still unresolved on this PR — "
                 "this run's count covers what it reviewed now, not those."
@@ -937,18 +970,12 @@ class LLMReviewEngine(ReviewEngine):
 
     def _review_lens(
         self,
+        run: _Run,
         wrapped: str,
         intent_block: str | None,
         hint_block: str | None,
         dir_block: str | None,
-        model: str,
-        response_format: type[ReviewResult] | None,
         batch_num: int,
-        split_prompt: bool,
-        language: str | None,
-        deadline_at: float | None,
-        budget_at: int | None,
-        retrieval_budget: int | None,
         lens: _Lens,
         batch: list[tuple[str, str]] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
@@ -965,7 +992,7 @@ class LLMReviewEngine(ReviewEngine):
         :meth:`_review_split`). None means "already a piece" — no further
         splitting.
 
-        ``split_prompt`` selects the message shape. True (``prompt_cache`` on —
+        ``run.split_prompt`` selects the message shape. True (``prompt_cache`` on —
         the default): shared system preamble, then the shared prefix (hints +
         diff) as one user message, then the lens block (intent + checklist +
         example) as a final user message — every lens call shares the same
@@ -974,13 +1001,13 @@ class LLMReviewEngine(ReviewEngine):
         kept as the escape hatch for a model that reviews worse under the
         split layout.
 
-        ``retrieval_budget`` (None = off) opts this call into the one deferral a
-        lens may make: answering with ``needs``, it is re-run once with that code
+        ``run.retrieval_budget`` (None = off) opts this call into the one deferral
+        a lens may make: answering with ``needs``, it is re-run once with that code
         fetched read-only (see :meth:`_review_with_context`). Like the
         oversized-payload split, it is offered only when ``batch`` is supplied —
         so a re-run, which passes none, can never defer again.
         """
-        skip = _skip_reason(deadline_at, budget_at, lens)
+        skip = _skip_reason(run.deadline_at, run.budget_at, lens)
         if skip is not None:
             return [], skip
         on_oversized = (
@@ -988,54 +1015,33 @@ class LLMReviewEngine(ReviewEngine):
             if batch is None
             else partial(
                 self._review_split,
+                run=run,
                 batch=batch,
                 intent_block=intent_block,
                 hint_block=hint_block,
                 dir_block=dir_block,
-                model=model,
-                response_format=response_format,
                 batch_num=batch_num,
-                split_prompt=split_prompt,
-                language=language,
-                deadline_at=deadline_at,
-                budget_at=budget_at,
-                retrieval_budget=retrieval_budget,
                 lens=lens,
             )
         )
         on_needs = (
             None
-            if batch is None or retrieval_budget is None
+            if batch is None or run.retrieval_budget is None
             else partial(
                 self._review_with_context,
+                run=run,
                 wrapped=wrapped,
                 batch=batch,
                 intent_block=intent_block,
                 hint_block=hint_block,
                 dir_block=dir_block,
-                model=model,
-                response_format=response_format,
                 batch_num=batch_num,
-                split_prompt=split_prompt,
-                language=language,
-                deadline_at=deadline_at,
-                budget_at=budget_at,
-                retrieval_budget=retrieval_budget,
                 lens=lens,
             )
         )
-        messages = _lens_messages(
-            wrapped,
-            intent_block,
-            hint_block,
-            dir_block,
-            split_prompt,
-            language,
-            lens,
-            retrieval=retrieval_budget is not None,
-        )
+        messages = _lens_messages(run, wrapped, intent_block, hint_block, dir_block, lens)
         return self._complete_lens(
-            messages, model, response_format, batch_num, lens, on_oversized, on_needs
+            messages, run.model, run.response_format, batch_num, lens, on_oversized, on_needs
         )
 
     def _review_with_context(
@@ -1043,19 +1049,13 @@ class LLMReviewEngine(ReviewEngine):
         needs: list[str],
         findings: list[ReviewFinding],
         *,
+        run: _Run,
         wrapped: str,
         batch: list[tuple[str, str]],
         intent_block: str | None,
         hint_block: str | None,
         dir_block: str | None,
-        model: str,
-        response_format: type[ReviewResult] | None,
         batch_num: int,
-        split_prompt: bool,
-        language: str | None,
-        deadline_at: float | None,
-        budget_at: int | None,
-        retrieval_budget: int,
         lens: _Lens,
     ) -> _LensOutcome:
         """Re-run one lens with the bounded, read-only code it asked to read.
@@ -1069,9 +1069,9 @@ class LLMReviewEngine(ReviewEngine):
 
         Bounded on every axis. One hop (the re-run is issued with ``batch=None``, so
         a second ``needs`` is ignored); at most ``MAX_FETCH_FILES`` files inside
-        ``retrieval_budget`` tokens; and the deadline/budget guards are re-checked
-        first, so a deferral arriving past a ceiling degrades into the existing
-        incomplete-results notice instead of spending past it.
+        ``run.retrieval_budget`` tokens; and the deadline/budget guards are
+        re-checked first, so a deferral arriving past a ceiling degrades into the
+        existing incomplete-results notice instead of spending past it.
 
         Returns ``first + retry`` findings, left for the pipeline's ``_dedupe`` to
         collapse. Replacing the first call's findings wholesale would be simpler and
@@ -1079,19 +1079,20 @@ class LLMReviewEngine(ReviewEngine):
         something else. The cost is a duplicate pair when the re-run repeats itself —
         which dedupe (keyed path/line/side) is exactly what removes.
         """
-        skip = _skip_reason(deadline_at, budget_at, lens)
+        skip = _skip_reason(run.deadline_at, run.budget_at, lens)
         if skip is not None:
             # The lens asked for code we may no longer spend on. Keep what it
             # already found and report the skip: the run IS incomplete, and the
             # existing notice is how that reaches the PR.
             return findings, skip
-        if self._fetch_file is None:  # pragma: no cover — never offered without one
+        # Never offered without both; the guard is here so the types line up.
+        if self._fetch_file is None or run.retrieval_budget is None:  # pragma: no cover
             return findings, None
         fetched = resolve_needs(
             needs,
             self._fetch_file,
             already={path for path, _ in batch},
-            budget_tokens=retrieval_budget,
+            budget_tokens=run.retrieval_budget,
             max_files=MAX_FETCH_FILES,
             resolve_symbol=self._resolve_symbol,
         )
@@ -1109,18 +1110,16 @@ class LLMReviewEngine(ReviewEngine):
             extra={"lens": lens.id, "batch": batch_num, "files": sorted(fetched)},
         )
         messages = _lens_messages(
+            run,
             wrapped,
             intent_block,
             hint_block,
             dir_block,
-            split_prompt,
-            language,
             lens,
-            retrieval=True,
             context=wrap_context(fetched),
         )
         retry, error = self._complete_lens(
-            messages, model, response_format, batch_num, lens, None, None
+            messages, run.model, run.response_format, batch_num, lens, None, None
         )
         return findings + retry, error
 
@@ -1128,18 +1127,12 @@ class LLMReviewEngine(ReviewEngine):
         self,
         reason: str,
         *,
+        run: _Run,
         batch: list[tuple[str, str]],
         intent_block: str | None,
         hint_block: str | None,
         dir_block: str | None,
-        model: str,
-        response_format: type[ReviewResult] | None,
         batch_num: int,
-        split_prompt: bool,
-        language: str | None,
-        deadline_at: float | None,
-        budget_at: int | None,
-        retrieval_budget: int | None,
         lens: _Lens,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
@@ -1172,18 +1165,12 @@ class LLMReviewEngine(ReviewEngine):
         errors: list[str] = []
         for piece in pieces:
             piece_findings, piece_error = self._review_lens(
+                run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
                 intent_block,
                 hint_block,
                 dir_block,
-                model,
-                response_format,
                 batch_num,
-                split_prompt,
-                language,
-                deadline_at,
-                budget_at,
-                retrieval_budget,
                 lens,
             )
             findings.extend(piece_findings)
@@ -1235,20 +1222,7 @@ class LLMReviewEngine(ReviewEngine):
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
             reason = _error_reason(exc)
-            profiler.record_call(
-                label=lens.id,
-                batch=batch_num,
-                elapsed=time.perf_counter() - started,
-                # What the adapter stamped on the exception: a failure that burned
-                # its retry budget must not read as one that was never retried.
-                # 0 only when the failure never reached the retry loop.
-                attempts=attempts_of(exc),
-                input_tokens=0,
-                output_tokens=0,
-                cache_read_tokens=0,
-                cache_creation_tokens=0,
-                error=reason,
-            )
+            profiler.record_error(lens.id, batch_num, time.perf_counter() - started, exc, reason)
             _log.warning(
                 "review call failed",
                 extra={"lens": lens.id, "reason": reason},
@@ -1267,17 +1241,7 @@ class LLMReviewEngine(ReviewEngine):
                 findings, split_reason = on_oversized(reason)
                 return completed + findings, split_reason
             return [], reason
-        profiler.record_call(
-            label=lens.id,
-            batch=batch_num,
-            elapsed=time.perf_counter() - started,
-            attempts=result.attempts,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            cache_read_tokens=result.cache_read_tokens,
-            cache_creation_tokens=result.cache_creation_tokens,
-            reasoning_tokens=result.reasoning_tokens,
-        )
+        profiler.record_result(lens.id, batch_num, time.perf_counter() - started, result)
         salvaged = 0
         try:
             findings = parse_findings(result.text)
@@ -1293,8 +1257,8 @@ class LLMReviewEngine(ReviewEngine):
             # and "0 recovered" are very different states to be told about.
             findings, salvaged = exc.recovered, len(exc.recovered)
             recovered_note = (
-                f"; {salvaged} finding{'s' if salvaged != 1 else ''} completed before the cut "
-                f"{'are' if salvaged != 1 else 'is'} included"
+                f"; {salvaged} finding{_plural(salvaged)} completed before the cut "
+                f"{_plural(salvaged, 'is', 'are')} included"
                 if salvaged
                 else ""
             )
@@ -1383,7 +1347,7 @@ def _summary_line(count: int, cfg: ReviewConfig) -> str:
                 "summary_template failed to format — using the default",
                 extra={"error": str(exc)},
             )
-    plural = "s" if count != 1 else ""
+    plural = _plural(count)
     return (
         f"{count} finding{plural} · provider {cfg.provider} · model {cfg.model} "
         f"· lgtmaybe {version}"
@@ -1525,21 +1489,14 @@ def _filter_missing_failure_scenarios(
     findings: list[ReviewFinding],
 ) -> list[ReviewFinding]:
     """Drop built-in defect findings that provide no concrete causal evidence."""
-    kept: list[ReviewFinding] = []
-    for finding in findings:
-        scenario = finding.failure_scenario
-        if finding.category in _FAILURE_SCENARIO_CATEGORIES and not (scenario and scenario.strip()):
-            _log.info(
-                "finding missing failure scenario — dropping",
-                extra={
-                    "path": finding.path,
-                    "line": finding.line,
-                    "title": finding.title,
-                    "category": finding.category,
-                },
-            )
-            continue
-        kept.append(finding)
+    kept = [
+        f
+        for f in findings
+        if f.category not in _FAILURE_SCENARIO_CATEGORIES or (f.failure_scenario or "").strip()
+    ]
+    dropped = len(findings) - len(kept)
+    if dropped:
+        _log.info("findings missing a failure scenario dropped", extra={"count": dropped})
     return kept
 
 

@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable, Iterator
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
 
 from lgtmaybe.core.models import ReviewFinding
+
+_M = TypeVar("_M", bound=BaseModel)
 
 
 class ParseError(Exception):
@@ -70,6 +74,30 @@ def _strip_think_blocks(text: str) -> str:
     return _THINK_RE.sub("", text)
 
 
+def _outside_strings(text: str, start: int = 0) -> Iterator[tuple[int, str]]:
+    """Yield ``(index, char)`` for each character of *text* outside a string literal.
+
+    The single home of the quote/escape state machine this module sells as its
+    whole point: a brace inside a ``suggestion`` is data, not nesting. Both
+    delimiter walks below read it, so a fix to the invariant can no longer be a
+    silent bug in the other one.
+    """
+    in_string = escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        else:
+            yield i, ch
+
+
 def _balanced_span(text: str, start: int) -> str | None:
     """Return the balanced ``{...}`` / ``[...]`` span beginning at *start*.
 
@@ -80,21 +108,8 @@ def _balanced_span(text: str, start: int) -> str | None:
     opener = text[start]
     closer = _CLOSER[opener]
     depth = 0
-    in_string = False
-    escaped = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == opener:
+    for i, ch in _outside_strings(text, start):
+        if ch == opener:
             depth += 1
         elif ch == closer:
             depth -= 1
@@ -150,20 +165,8 @@ def _is_unterminated(text: str) -> bool:
     prose parses fine and never reaches here.
     """
     depth = 0
-    in_string = False
-    escaped = False
-    for ch in text:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch in _CLOSER:
+    for _, ch in _outside_strings(text):
+        if ch in _CLOSER:
             depth += 1
         elif ch in _CLOSER.values():
             depth -= 1
@@ -183,8 +186,7 @@ def _as_findings_list(data: Any) -> list[Any] | None:
             return findings
         return [data]  # a bare single finding object
     if isinstance(data, list):
-        if all(isinstance(item, dict) for item in data):
-            return data
+        return data if all(isinstance(item, dict) for item in data) else None
     return None
 
 
@@ -310,3 +312,19 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     if last_error is not None:
         raise ParseError(f"Finding validation failed: {last_error}") from last_error
     raise ParseError("Cannot parse JSON findings from response")
+
+
+def parse_structured(
+    raw: str, result_model: type[_M], wanted: Callable[[dict[str, Any]], bool]
+) -> _M | None:
+    """Leniently extract the first *wanted* JSON object from *raw*; None when absent."""
+    for data in iter_json_values(raw):
+        if not isinstance(data, dict) or not wanted(data):
+            continue
+        try:
+            return result_model.model_validate(
+                {k: v for k, v in data.items() if k in result_model.model_fields}
+            )
+        except Exception:  # noqa: BLE001 — fall through to the raw-text fallback
+            continue
+    return None

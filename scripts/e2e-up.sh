@@ -67,7 +67,10 @@ start_ollama() {
   if ! curl -sf "$OLLAMA_BASE/api/tags" >/dev/null 2>&1; then
     log "starting ollama serve in the background"
     ollama serve >/tmp/lgtmaybe-e2e-ollama.log 2>&1 &
-    wait_for "$OLLAMA_BASE/api/tags" "ollama" || return 0
+    # Installed but never ready is a real failure (a bad install, a port clash) —
+    # say so loudly rather than silently skipping the pull. Not-installed above
+    # is the only case that sits out.
+    wait_for "$OLLAMA_BASE/api/tags" "ollama" || return 1
   fi
   log "pulling $OLLAMA_MODEL"
   ollama pull "$OLLAMA_MODEL"

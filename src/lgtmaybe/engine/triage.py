@@ -26,7 +26,7 @@ from lgtmaybe.core.models import ReviewConfig, TriageResult
 from lgtmaybe.core.ports import ProviderClient
 
 from .injection import neutralise
-from .parse import iter_json_values
+from .parse import parse_structured
 from .profiling import timed_complete
 from .static_analysis import ToolFinding
 
@@ -180,24 +180,12 @@ def _ask_triage(
 
 
 def _parse_triage(raw: str) -> dict[str, tuple[bool, int]] | None:
-    """Leniently parse the triage verdict; None when no usable shape is found."""
-    for data in iter_json_values(raw):
-        if not isinstance(data, dict) or not isinstance(data.get("files"), list):
-            continue
-        out: dict[str, tuple[bool, int]] = {}
-        for item in data["files"]:
-            if not isinstance(item, dict) or "path" not in item:
-                continue
-            out[str(item["path"])] = (
-                bool(item.get("review", True)),
-                _coerce_risk(item.get("risk")),
-            )
-        return out
-    return None
+    """Leniently parse the triage verdict; None when no usable shape is found.
 
-
-def _coerce_risk(value: object) -> int:
-    """Clamp a verdict's risk to 0-10; anything non-numeric means mid-scale."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return 5
-    return max(0, min(10, int(value)))
+    :class:`TriageResult` already declares the defaults and the 0–10 risk range,
+    so validation is the whole parser. A verdict pydantic rejects (a risk out of
+    range, a file entry without a path) yields None — which routes to "review
+    everything", the safe direction triage may never depart from.
+    """
+    parsed = parse_structured(raw, TriageResult, lambda d: isinstance(d.get("files"), list))
+    return None if parsed is None else {v.path: (v.review, v.risk) for v in parsed.files}

@@ -6,13 +6,14 @@ Provides a dynamic context-line calculator for the remaining budget.
 
 from __future__ import annotations
 
-import sys
 from bisect import bisect_right
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
+from operator import itemgetter
 from typing import Any
 
-from lgtmaybe.core.diffparse import parse_hunk_header
+from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header
 
 _MAX_CONTEXT_LINES = 20
 
@@ -51,6 +52,24 @@ def count_tokens(text: str) -> int:
     if enc is not None:
         return len(enc.encode(text))
     return max(1, len(text) // 4)
+
+
+def take_lines(lines: Iterable[str], budget: int) -> list[str]:
+    """The longest prefix of *lines* whose token cost stays within *budget*.
+
+    Each line is charged its own tokens plus one for the newline that rejoins it.
+    The estimate runs under the truth (a tokenizer merges tokens across a line
+    break), so a caller that must not overflow re-counts the assembled text —
+    which is also why this returns the lines rather than a joined string.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        used += count_tokens(line) + 1
+        if used > budget:
+            break
+        kept.append(line)
+    return kept
 
 
 def split_patch_into_hunks(patch: str) -> list[str]:
@@ -244,7 +263,7 @@ def _enclosing_boundary(boundaries: list[tuple[int, int]], new_start: int) -> in
     None when nothing encloses it, or when the enclosing definition begins more
     than :data:`_MAX_BOUNDARY_REACH` lines above (padding would drown the diff).
     """
-    idx = bisect_right(boundaries, (new_start, _UNBOUNDED_END)) - 1
+    idx = bisect_right(boundaries, new_start, key=itemgetter(0)) - 1
     while idx >= 0:
         start, end = boundaries[idx]
         if new_start - start > _MAX_BOUNDARY_REACH:
@@ -254,12 +273,6 @@ def _enclosing_boundary(boundaries: list[tuple[int, int]], new_start: int) -> in
             return start
         idx -= 1
     return None
-
-
-# Sentinel upper bound for the bisect probe: pairs compare element-wise, so this
-# has to sort above any real end line for the probe to find every span whose
-# start is at or below the hunk.
-_UNBOUNDED_END = sys.maxsize
 
 
 def trailing_context_lines(before: int) -> int:
@@ -341,18 +354,15 @@ def expand_hunks(
 
 @dataclass(frozen=True)
 class _Hunk:
-    """One parsed hunk: its header positions plus its verbatim body lines."""
+    """One parsed hunk: its parsed header plus its verbatim body lines."""
 
-    old_start: int
-    new_start: int
-    new_len: int
-    section: str
+    header: HunkHeader
     body: list[str]
 
     @property
     def last_new(self) -> int:
         """The hunk's final new-file line number."""
-        return self.new_start + self.new_len - 1
+        return self.header.new_start + self.header.new_len - 1
 
 
 def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
@@ -362,15 +372,7 @@ def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
     for line in patch.splitlines():
         header = parse_hunk_header(line)
         if header is not None:
-            hunks.append(
-                _Hunk(
-                    old_start=header.old_start,
-                    new_start=header.new_start,
-                    new_len=header.new_len,
-                    section=header.section,
-                    body=[],
-                )
-            )
+            hunks.append(_Hunk(header, []))
         elif hunks:
             hunks[-1].body.append(line)
         else:
@@ -380,9 +382,9 @@ def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
 
 def _lead_start(hunk: _Hunk, n: int, boundaries: list[tuple[int, int]] | None) -> int:
     """The first new-file line *hunk*'s leading pad should reach back to."""
-    lead_start = max(1, hunk.new_start - n)
+    lead_start = max(1, hunk.header.new_start - n)
     if boundaries:
-        enclosing = _enclosing_boundary(boundaries, hunk.new_start)
+        enclosing = _enclosing_boundary(boundaries, hunk.header.new_start)
         if enclosing is not None and enclosing < lead_start:
             # The enclosing definition starts above the fixed window and
             # within reach — widen the pad up to its signature line.
@@ -392,7 +394,7 @@ def _lead_start(hunk: _Hunk, n: int, boundaries: list[tuple[int, int]] | None) -
     # unclamped pad drives it negative — an invalid header that
     # parse_hunk_header rejects, mis-numbering every line downstream. Clamp the
     # pad (after any boundary widening) so the old start stays >= 1.
-    return max(lead_start, hunk.new_start - (hunk.old_start - 1))
+    return max(lead_start, hunk.header.new_start - (hunk.header.old_start - 1))
 
 
 @dataclass
@@ -429,7 +431,7 @@ def _group_hunks(
             previous = groups[-1].hunks[-1]
             trail_end = min(len(content_lines), previous.last_new + n_after)
             reaches = lead_start <= trail_end + 1
-            fillable = hunk.new_start - 1 <= len(content_lines)
+            fillable = hunk.header.new_start - 1 <= len(content_lines)
             if reaches and fillable:
                 groups[-1].hunks.append(hunk)
                 continue
@@ -450,7 +452,7 @@ def _render_group(group: _Group, content_lines: list[str], n_after: int) -> list
     # Clamp reads to the file's real bounds: redaction or stale head text can
     # leave the file shorter than the hunk positions — degrade to less padding,
     # never an IndexError.
-    lead_end = min(first.new_start, len(content_lines) + 1)
+    lead_end = min(first.header.new_start, len(content_lines) + 1)
     leading = content_lines[min(group.lead_start, lead_end) - 1 : lead_end - 1]
 
     body: list[str] = []
@@ -459,7 +461,9 @@ def _render_group(group: _Group, content_lines: list[str], n_after: int) -> list
             # Fill the gap between the previous hunk's last line and this one
             # with the head text, as ordinary context.
             previous_end = group.hunks[index - 1].last_new
-            body.extend(f" {text}" for text in content_lines[previous_end : hunk.new_start - 1])
+            body.extend(
+                f" {text}" for text in content_lines[previous_end : hunk.header.new_start - 1]
+            )
         body.extend(hunk.body)
 
     trailing = content_lines[last.last_new : min(len(content_lines), last.last_new + n_after)]
@@ -469,6 +473,6 @@ def _render_group(group: _Group, content_lines: list[str], n_after: int) -> list
     # counts on both sides; "\ No newline at end of file" counts on neither.
     old_len = sum(1 for line in lines if line[:1] in {" ", "-", ""})
     new_len = sum(1 for line in lines if line[:1] in {" ", "+", ""})
-    old_start = first.old_start - len(leading)
-    new_start = first.new_start - len(leading)
-    return [f"@@ -{old_start},{old_len} +{new_start},{new_len} @@{first.section}", *lines]
+    old_start = first.header.old_start - len(leading)
+    new_start = first.header.new_start - len(leading)
+    return [f"@@ -{old_start},{old_len} +{new_start},{new_len} @@{first.header.section}", *lines]

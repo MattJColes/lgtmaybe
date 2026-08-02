@@ -84,19 +84,23 @@ is what actually places the comment: it must match a changed line character-for-
 """
 
 
-def _language_directive(language: str) -> str:
-    """The output-language directive appended to the shared header when set.
+def language_directive(
+    language: str | None, *, translate: str, keep: str, heading: str | None = None
+) -> str:
+    """The "write *translate* in *language*, leave the rest alone" directive.
 
-    Only the prose fields are translated: the structural fields and the
-    ``suggestion`` (literal replacement code) must stay in the source language so
-    anchoring, severity comparison, and one-click apply keep working.
+    Shared by the review, describe and diagram prompts, which differ only in
+    which fields are prose and which are structural: only prose is translated,
+    so ids, enums, line numbers and literal replacement code keep working.
+
+    Empty string when *language* is falsy — every caller appends this, so the
+    unset prompt stays a zero-byte change, which the prompt-cache contract
+    depends on.
     """
-    return (
-        "\n## Output language\n\n"
-        f"Write the `title` and `body` fields in {language}. Leave `path`, `line`, "
-        "`side`, `severity`, and `anchor` unchanged, and keep `suggestion` as literal "
-        "replacement code — do not translate it.\n"
-    )
+    if not language:
+        return ""
+    lead_in = f"\n## {heading}\n\n" if heading else "\n"
+    return f"{lead_in}Write the {translate} in {language}. {keep}\n"
 
 
 @lru_cache(maxsize=8)
@@ -108,9 +112,15 @@ def _localised_header(language: str | None) -> str:
     *language* (constant within a run), so every lens in a fan-out reads the same
     cached header.
     """
-    if not language:
-        return _SHARED_HEADER
-    return _SHARED_HEADER + _language_directive(language)
+    return _SHARED_HEADER + language_directive(
+        language,
+        translate="`title` and `body` fields",
+        keep=(
+            "Leave `path`, `line`, `side`, `severity`, and `anchor` unchanged, and keep "
+            "`suggestion` as literal replacement code — do not translate it."
+        ),
+        heading="Output language",
+    )
 
 
 def _example_block(
@@ -722,6 +732,21 @@ ARTEFACTS_GROUP = LensGroup(
 FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
 
 
+def _legacy(section: str, example: str, language: str | None, retrieval: bool) -> str:
+    """The legacy (``prompt_cache: false``) lens layout: it all rides the system message.
+
+    Every legacy builder below is this one assembly with a different
+    ``(section, example)`` pair, so the layout lives here once.
+    """
+    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
+    return f"{_localised_header(language)}\n{example}\n\n{section}\n\n{rules}\n"
+
+
+def _block(section: str, example: str) -> str:
+    """The split layout's final user block — the uncached lens half of :func:`_legacy`."""
+    return f"{_LENS_LEAD_IN}\n\n{section}\n\n{example}"
+
+
 def build_group_prompt(
     group: LensGroup,
     language: str | None = None,
@@ -729,14 +754,12 @@ def build_group_prompt(
     retrieval: bool = False,
 ) -> str:
     """A merged lens's system prompt (legacy shape, ``prompt_cache: false``)."""
-    section = _group_section(group, dependency_health)
-    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
-    return f"{_localised_header(language)}\n{group.example}\n\n{section}\n\n{rules}\n"
+    return _legacy(_group_section(group, dependency_health), group.example, language, retrieval)
 
 
 def build_group_block(group: LensGroup, dependency_health: bool = True) -> str:
     """A merged lens's user block (split shape — see :func:`build_lens_block`)."""
-    return f"{_LENS_LEAD_IN}\n\n{_group_section(group, dependency_health)}\n\n{group.example}"
+    return _block(_group_section(group, dependency_health), group.example)
 
 
 @lru_cache(maxsize=2)
@@ -753,15 +776,12 @@ def build_correctness_prompt(
     include_intent: bool, language: str | None = None, retrieval: bool = False
 ) -> str:
     """The fast preset's correctness call, system-prompt (legacy) shape."""
-    section = _correctness_section(include_intent)
-    header = _localised_header(language)
-    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
-    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{rules}\n"
+    return _legacy(_correctness_section(include_intent), _CORRECTNESS_EXAMPLE, language, retrieval)
 
 
 def build_correctness_block(include_intent: bool) -> str:
     """The fast preset's correctness call, user-block (split) shape."""
-    return f"{_LENS_LEAD_IN}\n\n{_correctness_section(include_intent)}\n\n{_CORRECTNESS_EXAMPLE}"
+    return _block(_correctness_section(include_intent), _CORRECTNESS_EXAMPLE)
 
 
 # The two bullets a vulnerability database answers and a language model cannot:
@@ -985,7 +1005,21 @@ def build_lens_block(
     shared by every lens call.
     """
     section = _category_section(category, dependency_health, secret_scanning)
-    return f"{_LENS_LEAD_IN}\n\n{section}\n\n{_CATEGORY_EXAMPLES[category]}"
+    return _block(section, _CATEGORY_EXAMPLES[category])
+
+
+def _custom_lens_parts(lens: CustomLens) -> tuple[str, str]:
+    """A user-defined lens's ``(section, example)`` pair.
+
+    The example is the lens's own when it supplied one, else the generic one;
+    the section is its instructions under its title (falling back to its id).
+    """
+    if lens.example_diff is not None and lens.example_finding is not None:
+        example = _example_block(lens.example_diff, lens.example_finding.model_dump(mode="json"))
+    else:
+        example = _GENERIC_EXAMPLE
+    heading = lens.title.strip() or lens.id
+    return f"## {heading}\n\n{lens.instructions.strip()}", example
 
 
 def build_custom_lens_block(lens: CustomLens) -> str:
@@ -994,13 +1028,7 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     Mirrors :func:`build_lens_block` — same lead-in and scaffold — so a custom
     lens rides the shared cached prefix exactly like a built-in one.
     """
-    if lens.example_diff is not None and lens.example_finding is not None:
-        example = _example_block(lens.example_diff, lens.example_finding.model_dump(mode="json"))
-    else:
-        example = _GENERIC_EXAMPLE
-    heading = lens.title.strip() or lens.id
-    body = f"## {heading}\n\n{lens.instructions.strip()}"
-    return f"{_LENS_LEAD_IN}\n\n{body}\n\n{example}"
+    return _block(*_custom_lens_parts(lens))
 
 
 @lru_cache(maxsize=len(ReviewCategory) * 16)
@@ -1020,10 +1048,8 @@ def build_system_prompt(
     *language* too (constant within a run), and byte-identical to the
     pre-language prompt when unset.
     """
-    example = _CATEGORY_EXAMPLES[category]
-    body = _category_section(category, dependency_health, secret_scanning)
-    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
-    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{rules}\n"
+    section = _category_section(category, dependency_health, secret_scanning)
+    return _legacy(section, _CATEGORY_EXAMPLES[category], language, retrieval)
 
 
 def build_lens_prompt(
@@ -1035,11 +1061,5 @@ def build_lens_prompt(
     lens section, shared rules — so a custom lens behaves like any other in the
     fan-out. The example is the lens's own when supplied, else the generic one.
     """
-    if lens.example_diff is not None and lens.example_finding is not None:
-        example = _example_block(lens.example_diff, lens.example_finding.model_dump(mode="json"))
-    else:
-        example = _GENERIC_EXAMPLE
-    heading = lens.title.strip() or lens.id
-    body = f"## {heading}\n\n{lens.instructions.strip()}"
-    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
-    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{rules}\n"
+    section, example = _custom_lens_parts(lens)
+    return _legacy(section, example, language, retrieval)

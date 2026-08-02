@@ -19,7 +19,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
@@ -100,22 +100,47 @@ class Profiler:
         )
         with self._lock:
             self.calls.append(record)
-        _log.info(
-            "provider call",
-            extra={
-                "label": label,
-                "batch": batch,
-                "elapsed_s": round(elapsed, 3),
-                "attempts": attempts,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cache_read_tokens": cache_read_tokens,
-                "cache_creation_tokens": cache_creation_tokens,
-                # Only when reported: a 0 on every line would read as a claim
-                # that the model did no thinking, which is not what it means.
-                **({"reasoning_tokens": reasoning_tokens} if reasoning_tokens else {}),
-                **({"error": error} if error else {}),
-            },
+        extra = asdict(record)
+        extra["elapsed_s"] = round(extra.pop("elapsed"), 3)
+        # Only when reported: a 0 on every line would read as a claim that the
+        # model did no thinking, which is not what it means.
+        if not reasoning_tokens:
+            del extra["reasoning_tokens"]
+        if not error:
+            del extra["error"]
+        _log.info("provider call", extra=extra)
+
+    def record_result(self, label: str, batch: int, elapsed: float, result: ProviderResult) -> None:
+        """Record a successful call: usage counters straight off *result*."""
+        self.record_call(
+            label=label,
+            batch=batch,
+            elapsed=elapsed,
+            attempts=result.attempts,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cache_read_tokens=result.cache_read_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+            reasoning_tokens=result.reasoning_tokens,
+        )
+
+    def record_error(
+        self, label: str, batch: int, elapsed: float, exc: BaseException, reason: str | None = None
+    ) -> None:
+        """Record a failed call: no usage to report, so every counter is zero."""
+        self.record_call(
+            label=label,
+            batch=batch,
+            elapsed=elapsed,
+            # What the adapter stamped on the exception: a failure that burned its
+            # retry budget must not read as one that was never retried. 0 only when
+            # the failure never reached the retry loop.
+            attempts=attempts_of(exc),
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            error=reason or type(exc).__name__,
         )
 
     def total_tokens(self) -> int:
@@ -244,27 +269,7 @@ def timed_complete(
     try:
         result = provider.complete(messages, model=model, **opts)
     except Exception as exc:
-        profiler.record_call(
-            label=label,
-            batch=batch,
-            elapsed=time.perf_counter() - started,
-            attempts=attempts_of(exc),  # 0 only if it never reached the retry loop
-            input_tokens=0,
-            output_tokens=0,
-            cache_read_tokens=0,
-            cache_creation_tokens=0,
-            error=f"{type(exc).__name__}",
-        )
+        profiler.record_error(label, batch, time.perf_counter() - started, exc)
         raise
-    profiler.record_call(
-        label=label,
-        batch=batch,
-        elapsed=time.perf_counter() - started,
-        attempts=result.attempts,
-        input_tokens=result.input_tokens,
-        output_tokens=result.output_tokens,
-        cache_read_tokens=result.cache_read_tokens,
-        cache_creation_tokens=result.cache_creation_tokens,
-        reasoning_tokens=result.reasoning_tokens,
-    )
+    profiler.record_result(label, batch, time.perf_counter() - started, result)
     return result
