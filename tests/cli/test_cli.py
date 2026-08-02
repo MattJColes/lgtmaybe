@@ -159,7 +159,9 @@ class TestReviewCommandLocal:
             ["review", "--provider", "ollama", "--model", "llama3", "--working", "--uncommitted"],
         )
 
-        assert result.exit_code != 0
+        # Exit 2: a usage error, not a runtime failure — the shared
+        # command-level check must keep raising UsageError, not ClickException.
+        assert result.exit_code == 2, result.output
         assert "mutually exclusive" in result.output
 
     def test_uncommitted_flag_is_threaded_through(self, monkeypatch):
@@ -251,7 +253,9 @@ class TestDiagramCommand:
             ["diagram", "--provider", "ollama", "--model", "llama3", "--working", "--uncommitted"],
         )
 
-        assert result.exit_code != 0
+        # Exit 2: a usage error, not a runtime failure — the shared
+        # command-level check must keep raising UsageError, not ClickException.
+        assert result.exit_code == 2, result.output
         assert "mutually exclusive" in result.output
 
 
