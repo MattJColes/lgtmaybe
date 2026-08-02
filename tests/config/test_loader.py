@@ -269,6 +269,26 @@ def test_inline_extra_lenses_load_from_yml(tmp_path):
     assert [lens.id for lens in cfg.extra_lenses] == ["simplify"]
 
 
+def test_directory_rules_load_from_repo_config(tmp_path):
+    """`directory_rules` is YAML-only (a list of objects, like finding_rules)."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "provider: ollama\n"
+        "model: qwen3.6:27b\n"
+        "directory_rules:\n"
+        "  - paths: ['payments/**']\n"
+        "    instructions: Money code is strict.\n"
+        "    context_files: ['ARCHITECTURE.md']\n"
+        "  - instructions: Keep every review terse.\n"
+    )
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert [rule.paths for rule in cfg.directory_rules] == [["payments/**"], []]
+    assert cfg.directory_rules[0].context_files == ["ARCHITECTURE.md"]
+    assert cfg.directory_rules[1].instructions == "Keep every review terse."
+
+
 def test_lens_paths_load_skill_files_from_dir(tmp_path):
     """`lens_paths` pointing at a directory loads every *.yml lens file in it,
     and the directive itself is consumed (never reaches the strict ReviewConfig)."""

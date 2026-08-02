@@ -22,6 +22,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
+| `directory_rules` | list[DirectoryRule] | No | `[]` | Directory Rules |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
@@ -193,6 +194,33 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "instructions"
       ],
       "title": "CustomLens",
+      "type": "object"
+    },
+    "DirectoryRule": {
+      "additionalProperties": false,
+      "description": "Extra review instructions and context scoped to part of the repo.\n\nA monorepo is not uniform: ``payments/**`` wants strictness that would be\nnoise in ``tests/**``, and reviewing ``src/**`` well may need a design doc\nthe diff never shows. Each rule names the paths it applies to (fnmatch globs\nagainst the repo-relative path, a ``**/`` prefix also matching at the repo\nroot \u2014 the same matcher the path filters use; an EMPTY list applies the rule\neverywhere, mirroring ``FindingRuleMatch``), free-text ``instructions``, and\n``context_files`` read from the checked-out workspace.\n\nBoth are trusted configuration: on ``pull_request_target`` the workspace is\nthe BASE branch, so neither the instructions nor the context text is ever\nPR-author content.",
+      "properties": {
+        "context_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Context Files",
+          "type": "array"
+        },
+        "instructions": {
+          "default": "",
+          "title": "Instructions",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "title": "DirectoryRule",
       "type": "object"
     },
     "FindingRule": {
@@ -621,6 +649,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": 20,
       "title": "Context Lines",
       "type": "integer"
+    },
+    "directory_rules": {
+      "items": {
+        "$ref": "#/$defs/DirectoryRule"
+      },
+      "title": "Directory Rules",
+      "type": "array"
     },
     "exclude_paths": {
       "items": {

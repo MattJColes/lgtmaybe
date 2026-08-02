@@ -36,6 +36,12 @@ prompt.groups:
       has: { field: name, regex: '^_build_lenses$' }
     files: [src/lgtmaybe/engine/**/*.py]
 
+prompt.directory-rules:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_directory_block$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 prompt.failure-scenario:
   rule:
     kind: function_definition
