@@ -74,6 +74,30 @@ def _strip_think_blocks(text: str) -> str:
     return _THINK_RE.sub("", text)
 
 
+def _outside_strings(text: str, start: int = 0) -> Iterator[tuple[int, str]]:
+    """Yield ``(index, char)`` for each character of *text* outside a string literal.
+
+    The single home of the quote/escape state machine this module sells as its
+    whole point: a brace inside a ``suggestion`` is data, not nesting. Both
+    delimiter walks below read it, so a fix to the invariant can no longer be a
+    silent bug in the other one.
+    """
+    in_string = escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        else:
+            yield i, ch
+
+
 def _balanced_span(text: str, start: int) -> str | None:
     """Return the balanced ``{...}`` / ``[...]`` span beginning at *start*.
 
@@ -84,21 +108,8 @@ def _balanced_span(text: str, start: int) -> str | None:
     opener = text[start]
     closer = _CLOSER[opener]
     depth = 0
-    in_string = False
-    escaped = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == opener:
+    for i, ch in _outside_strings(text, start):
+        if ch == opener:
             depth += 1
         elif ch == closer:
             depth -= 1
@@ -154,20 +165,8 @@ def _is_unterminated(text: str) -> bool:
     prose parses fine and never reaches here.
     """
     depth = 0
-    in_string = False
-    escaped = False
-    for ch in text:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch in _CLOSER:
+    for _, ch in _outside_strings(text):
+        if ch in _CLOSER:
             depth += 1
         elif ch in _CLOSER.values():
             depth -= 1
@@ -187,8 +186,7 @@ def _as_findings_list(data: Any) -> list[Any] | None:
             return findings
         return [data]  # a bare single finding object
     if isinstance(data, list):
-        if all(isinstance(item, dict) for item in data):
-            return data
+        return data if all(isinstance(item, dict) for item in data) else None
     return None
 
 

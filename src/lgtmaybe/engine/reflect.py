@@ -23,7 +23,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import ProviderClient
 
 from .astgrep import SymbolResolver
-from .compress import count_tokens
+from .compress import count_tokens, take_lines
 from .injection import neutralise
 from .parse import coerce_needs, iter_json_values
 from .profiling import timed_complete
@@ -126,6 +126,9 @@ def reflect_findings(
     provider: ProviderClient,
     fetch_file: FileFetcher | None = None,
     resolve_symbol: SymbolResolver | None = None,
+    *,
+    hop: int = 0,
+    fetched_paths: list[str] | None = None,
 ) -> list[ReviewFinding]:
     """Filter *findings* by asking the provider to score confidence.
 
@@ -142,35 +145,20 @@ def reflect_findings(
     the file that defines it so the same fetcher can pull it. With no fetcher (or
     once the hops/files are exhausted) an unresolved deferral is dropped, consistent
     with "don't assert a cross-file claim you can't verify".
+
+    The recheck recurses into this same function with the two keyword-only
+    arguments callers leave defaulted: ``hop`` counts the rounds already spent
+    and is the hard stop that guarantees termination (capped at
+    :data:`MAX_HOPS`), so an auditor that always defers can never loop forever;
+    ``fetched_paths`` are the files pulled for THIS pass's deferral, force-included
+    in the grounding so the recheck sees the cross-file code it deferred for.
     """
     if not findings:
         return []
-    return _reflect_pass(
-        findings, ctx, cfg, provider, fetch_file, resolve_symbol, hop=0, fetched_paths=[]
-    )
-
-
-def _reflect_pass(
-    findings: list[ReviewFinding],
-    ctx: PRContext,
-    cfg: ReviewConfig,
-    provider: ProviderClient,
-    fetch_file: FileFetcher | None,
-    resolve_symbol: SymbolResolver | None,
-    *,
-    hop: int,
-    fetched_paths: list[str],
-) -> list[ReviewFinding]:
-    """One auditor pass over *findings*, recursing once per resolved deferral.
-
-    ``hop`` counts the recheck rounds already spent; it is the hard stop that
-    guarantees termination (capped at :data:`MAX_HOPS`), so an auditor that always
-    defers can never loop forever. ``fetched_paths`` are the files pulled for THIS
-    pass's deferral (empty on the first pass) — force-included in the grounding so
-    the recheck sees the cross-file code it deferred for.
-    """
     try:
-        verdicts, grounded_paths = _audit(findings, ctx, cfg, provider, fetched_paths=fetched_paths)
+        verdicts, grounded_paths = _audit(
+            findings, ctx, cfg, provider, fetched_paths=fetched_paths or []
+        )
     except Exception:
         # If reflection fails (provider error, quota, unparseable output), keep all
         # findings (safe default), each non-broad — never silently drop a real
@@ -244,7 +232,7 @@ def _reflect_pass(
             )
             augmented = ctx.model_copy(update={"file_contents": {**ctx.file_contents, **fetched}})
             survivors.extend(
-                _reflect_pass(
+                reflect_findings(
                     deferred,
                     augmented,
                     cfg,
@@ -426,24 +414,8 @@ def _head_tail(text: str, max_tokens: int) -> tuple[str, int]:
         # attach nothing rather than overflow.
         return "", 0
 
-    head: list[str] = []
-    used = 0
-    for line in lines:
-        t = count_tokens(line) + 1
-        if used + t > half:
-            break
-        head.append(line)
-        used += t
-
-    tail: list[str] = []
-    used = 0
-    for line in reversed(lines):
-        t = count_tokens(line) + 1
-        if used + t > half:
-            break
-        tail.append(line)
-        used += t
-    tail.reverse()
+    head = take_lines(lines, half)
+    tail = take_lines(reversed(lines), half)[::-1]
 
     result = "\n".join([*head, marker, *tail])
     # Joining can merge tokens at the head/marker/tail seams, so the assembled
