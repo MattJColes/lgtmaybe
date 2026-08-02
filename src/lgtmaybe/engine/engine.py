@@ -30,7 +30,13 @@ from lgtmaybe.core.models import (
     ToolMode,
     attempts_of,
 )
-from lgtmaybe.core.ports import Message, ProviderClient, ProviderWallTimeout, ReviewEngine
+from lgtmaybe.core.ports import (
+    Message,
+    ProviderClient,
+    ProviderTruncated,
+    ProviderWallTimeout,
+    ReviewEngine,
+)
 from lgtmaybe.core.version import package_version
 from lgtmaybe.github import is_reviewable
 
@@ -331,7 +337,8 @@ class LLMReviewEngine(ReviewEngine):
         budget_at = (
             profiler.total_tokens() + cfg.max_review_tokens if cfg.max_review_tokens else None
         )
-        # Batches a wall-clock timeout forced us to review in smaller pieces.
+        # Batches an oversized-payload failure (wall timeout or output ceiling)
+        # forced us to review in smaller pieces.
         # Per-review state (reset here, not in __init__, so a reused engine starts
         # clean); a set's add is atomic, which is all the fan-out threads need.
         self._split_batches: set[int] = set()
@@ -715,15 +722,17 @@ class LLMReviewEngine(ReviewEngine):
                 f"({detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
             )
         # A batch that had to be shrunk is a standing signal that the diff is at
-        # the edge of what this model finishes in its budget — say it, or the next
-        # run's timeout looks like the first.
+        # the edge of what this model finishes in one call — say it, or the next
+        # run's failure looks like the first. Worded for both triggers (a blown
+        # wall clock and a blown output ceiling), because the remedy is the same.
         if self._split_batches:
             count = len(self._split_batches)
             plural = "es" if count != 1 else ""
             notices.append(
-                f"⏱️ {count} batch{plural} timed out and {'were' if count != 1 else 'was'} "
-                "reviewed in smaller pieces instead. Consider a lower `max_input_tokens` "
-                "or a faster model."
+                f"⏱️ {count} batch{plural} {'were' if count != 1 else 'was'} too big for one "
+                "call (timed out, or ran past the `max_tokens` ceiling) and "
+                f"{'were' if count != 1 else 'was'} reviewed in smaller pieces instead. "
+                "Consider a lower `max_input_tokens`, a higher `max_tokens`, or a faster model."
             )
         if reflection_skipped:
             notices.append(
@@ -839,7 +848,7 @@ class LLMReviewEngine(ReviewEngine):
         of a generic "timeout". A failing lens never aborts the others.
 
         ``batch`` is the file patches ``wrapped`` was built from. Supplying it opts
-        this call into the one retry a wall-clock timeout can actually benefit
+        this call into the one retry an oversized payload can actually benefit
         from: the payload is split and the pieces reviewed (see
         :meth:`_review_split`). None means "already a piece" — no further
         splitting.
@@ -865,7 +874,7 @@ class LLMReviewEngine(ReviewEngine):
         if budget_at is not None and profiler.total_tokens() >= budget_at:
             _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
             return [], _BUDGET_SKIP_REASON
-        on_wall_timeout = (
+        on_oversized = (
             None
             if batch is None
             else partial(
@@ -904,7 +913,7 @@ class LLMReviewEngine(ReviewEngine):
                 {"role": "user", "content": suffix},
             ]
             return self._complete_lens(
-                messages, model, response_format, batch_num, lens, on_wall_timeout
+                messages, model, response_format, batch_num, lens, on_oversized
             )
 
         user_content = wrapped
@@ -924,9 +933,7 @@ class LLMReviewEngine(ReviewEngine):
             {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},
         ]
-        return self._complete_lens(
-            messages, model, response_format, batch_num, lens, on_wall_timeout
-        )
+        return self._complete_lens(messages, model, response_format, batch_num, lens, on_oversized)
 
     def _review_split(
         self,
@@ -945,17 +952,21 @@ class LLMReviewEngine(ReviewEngine):
         budget_at: int | None,
         lens: _Lens,
     ) -> _LensOutcome:
-        """Re-review a timed-out batch as smaller pieces, one call each.
+        """Re-review an oversized batch as smaller pieces, one call each.
 
-        The only retry a wall-clock timeout can benefit from. Repeating the same
-        request is pointless — same payload, same model, same budget — but the
-        payload is the one thing we can change, and a smaller one both fits the
-        budget better and gets a fresh one. Failing the lens outright instead
-        would discard the whole batch's review over a size problem.
+        The only retry a payload-sized failure can benefit from — whether the call
+        ran out of *time* (a wall timeout) or ran out of *room to answer* (the
+        model's output ceiling). Repeating the same request is pointless — same
+        payload, same model, same budget, same ceiling — but the payload is the one
+        thing we can change, and a smaller one both fits the budgets better and gets
+        fresh ones. Failing the lens outright instead would discard the whole
+        batch's review over a size problem, which is what a real run did: three of
+        four lenses produced nothing because each had more to say than one response
+        could hold.
 
         Bounded on purpose: exactly ONE level (the pieces are reviewed with
-        ``batch=None``, so a piece that times out again just fails), and the
-        pieces are re-wrapped from the same redacted patches, so nothing
+        ``batch=None``, so a piece that fails the same way again just fails), and
+        the pieces are re-wrapped from the same redacted patches, so nothing
         unredacted or unwrapped reaches the model. Returns the original *reason*
         unchanged when the batch cannot be split — a single-hunk file has no
         smaller unit to fall back to.
@@ -964,7 +975,7 @@ class LLMReviewEngine(ReviewEngine):
         if len(pieces) < 2:
             return [], reason
         _log.warning(
-            "review call timed out — retrying on smaller pieces",
+            "review call was too big for one response — retrying on smaller pieces",
             extra={"lens": lens.id, "batch": batch_num, "pieces": len(pieces)},
         )
         findings: list[ReviewFinding] = []
@@ -1005,13 +1016,16 @@ class LLMReviewEngine(ReviewEngine):
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
-        on_wall_timeout: Callable[[str], _LensOutcome] | None = None,
+        on_oversized: Callable[[str], _LensOutcome] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
-        ``on_wall_timeout`` handles the one failure that says something about the
-        *payload* rather than the provider: the call outlived its entire budget.
-        It is given the failure reason and returns the outcome to use instead.
+        ``on_oversized`` handles the failures that say something about the
+        *payload* rather than the provider: the call outlived its entire budget,
+        or its answer hit the model's output ceiling. Both mean one call was
+        asked to cover more than it could finish, and both are fixed by covering
+        less. It is given the failure reason and returns the outcome to use
+        instead. None when there is nothing left to split.
         """
         opts = {"response_format": response_format} if response_format is not None else {}
         # Heartbeat: log the call going out and coming back so the Action shows
@@ -1041,8 +1055,18 @@ class LLMReviewEngine(ReviewEngine):
                 extra={"lens": lens.id, "reason": reason},
                 exc_info=True,
             )
-            if isinstance(exc, ProviderWallTimeout) and on_wall_timeout is not None:
-                return on_wall_timeout(reason)
+            if isinstance(exc, ProviderWallTimeout | ProviderTruncated):
+                # Whatever the model finished before the ceiling cut it off is real,
+                # schema-valid work — kept, exactly as the parse path keeps it, so
+                # the exception path is not the one place a partial answer is binned.
+                completed = _salvage_truncated(exc, lens)
+                if on_oversized is None:
+                    # Already a piece: nothing smaller to try. Report the reason
+                    # rather than recurse — an unbounded cascade would spend the
+                    # whole review on a model that cannot answer at any size.
+                    return completed, reason
+                findings, split_reason = on_oversized(reason)
+                return completed + findings, split_reason
             return [], reason
         profiler.record_call(
             label=lens.id,
@@ -1074,10 +1098,13 @@ class LLMReviewEngine(ReviewEngine):
                 if salvaged
                 else ""
             )
+            # Worded like the adapter's own ceiling error (see
+            # litellm_provider._map_response): the ceiling is `max_tokens`, which
+            # is usually a value the user set, not the model's own limit.
             reason = (
-                f"response truncated at the model's output limit after "
-                f"{result.output_tokens} tokens — lower `max_input_tokens`, or raise "
-                f"`max_tokens` if the model supports a higher ceiling{recovered_note}"
+                f"response truncated at the {result.output_tokens}-token `max_tokens` "
+                f"ceiling — raise `max_tokens`, or lower `max_input_tokens` so each "
+                f"call covers less{recovered_note}"
             )
             _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
             # The findings fall through to be stamped like any others, but the
@@ -1089,6 +1116,25 @@ class LLMReviewEngine(ReviewEngine):
         findings = _stamp_categories(findings, lens)
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:
+    """Findings the model completed before the output ceiling cut it off.
+
+    The adapter raises the ceiling as its own failure and carries the cut-off body
+    with it, so the salvage the parser already performs on a truncation it detects
+    itself is available here too. Anything else (a wall timeout has no body at all)
+    salvages nothing, and an unparseable remnant is simply empty — never a guess.
+    """
+    if not isinstance(exc, ProviderTruncated) or not exc.text:
+        return []
+    try:
+        findings = parse_findings(exc.text)
+    except ParseError as parse_exc:
+        findings = parse_exc.recovered
+    if findings:
+        _log.info("salvaged findings from truncated response", extra={"lens": lens.id})
+    return _stamp_categories(findings, lens)
 
 
 def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:

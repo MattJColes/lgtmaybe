@@ -404,6 +404,69 @@ class TestOutputCeilingTruncation:
 
         assert calls == 1
 
+    def test_the_ceiling_is_named_as_max_tokens_not_as_the_model_s_limit(self) -> None:
+        """The ceiling hit is almost always `max_tokens`, not the model's own.
+
+        In the run that prompted this it was lgtmaybe's own configured 16,384
+        against a model that would have gone to 65,536 — so calling it "the
+        model's output limit" points the reader at the wrong knob, and at one
+        they cannot move.
+        """
+        with patch("litellm.completion", return_value=self._truncated()):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        message = str(exc_info.value)
+        assert "max_tokens" in message
+        assert "model's output limit" not in message
+
+    def test_the_truncated_body_travels_with_the_failure(self) -> None:
+        """The engine salvages the findings finished before the cut from it."""
+        with patch("litellm.completion", return_value=self._truncated()):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert exc_info.value.text == '{"findings": [{"path": "a.py"'
+
+    def test_reasoning_tokens_are_named_when_the_route_reports_them(self) -> None:
+        """A reasoning model spends the same `max_tokens` budget on thinking.
+
+        That is how a fifteen-line diff truncates: the cap went on thought, not
+        on findings. Saying so is the difference between "my diff is too big"
+        (wrong) and "my cap is too low for this model" (right).
+        """
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=""),
+                    finish_reason="length",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=900,
+                completion_tokens=16384,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=16200),
+            ),
+        )
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert "16200 reasoning" in str(exc_info.value)
+
+    def test_a_route_without_reasoning_detail_still_reports_the_ceiling(self) -> None:
+        """No detail is not zero detail — the message simply omits the breakdown."""
+        with patch("litellm.completion", return_value=self._truncated()):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert "reasoning" not in str(exc_info.value)
+        assert "65536" in str(exc_info.value)
+
     def test_truncation_still_falls_back_to_the_secondary_model(self) -> None:
         """Permanent stops the *retry*, not the fallback — a different model is a
         genuinely different request and may well fit its answer in budget."""
