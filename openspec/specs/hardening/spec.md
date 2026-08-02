@@ -27,12 +27,19 @@ different block's markers.
 
 PR title/body/commit text SHALL be wrapped in its own untrusted block
 (`INTENT_START`/`INTENT_END`, both marker families neutralised) and sent only
-on the intent call — author-controlled text never rides along unmarked.
+on the intent call — author-controlled text never rides along unmarked. Any
+not-visible file list riding that block SHALL be neutralised with it: filenames
+are author-controlled too.
 <!-- anchor: hardening.wrap-intent -->
 
 #### Scenario: intent text tries to steer the reviewer
 - **WHEN** a PR description contains instructions to the model
 - **THEN** they arrive inside the neutralised intent block, marked untrusted
+
+#### Scenario: a filename forges the block delimiter
+- **WHEN** a PR changes a file whose name embeds an `INTENT_END` marker
+- **THEN** it is neutralised like the prose, so the path list cannot close the
+  block early
 
 ### Requirement: Static-analysis hints are their own untrusted block
 

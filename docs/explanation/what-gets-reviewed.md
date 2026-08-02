@@ -245,6 +245,26 @@ Where the stated intent comes from:
   mode too. With no commits beyond the base yet, nothing states an intent and
   the lens is skipped.
 
+### The lens is told what it was not shown
+
+An intent lens judging "did the author keep their promise?" against a *filtered*
+diff will call a kept promise broken. Files go missing for six different
+reasons — the generated/binary/vendored skip, your `include_paths` /
+`exclude_paths` globs, the `max_files` cap, a triage skip, an incremental
+scope, and simply being in another batch (the lens runs once **per batch**, so
+on a large PR each call sees only part of the change).
+
+So each intent call is told which of the PR's files it cannot see, and the rule
+that goes with it: a claim about a file that was not shown is **not shown, not
+undone**. The list is derived from what is left of the PR after the batch, so
+it covers every one of those mechanisms without caring which applied — and it
+is capped, then wrapped and neutralised inside the untrusted intent block,
+because filenames are attacker-controlled on a fork PR too.
+
+This is why lgtmaybe no longer reports "the stated intent to regenerate X is
+not reflected in the diff" when X is a generated file it was never allowed to
+read.
+
 The intent text is attacker-controlled on a fork PR, so it is treated exactly
 like the diff: secrets are redacted, it is wrapped as untrusted data with
 neutralised delimiters, and the model is told never to follow instructions

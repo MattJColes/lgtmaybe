@@ -9,7 +9,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -438,11 +438,14 @@ class LLMReviewEngine(ReviewEngine):
             clean_diff = redact(ctx.diff)
 
             # 1b. Stated intent (PR title/description/commit names) for the intent
-            #     lens: redacted like the diff, wrapped as untrusted data, and only
-            #     ever sent on the intent call. No stated intent → skip that lens
-            #     rather than burn a model call judging the diff against nothing.
+            #     lens: redacted like the diff, and only ever sent on the intent
+            #     call. No stated intent → skip that lens rather than burn a model
+            #     call judging the diff against nothing.
+            #
+            #     Only REDACTED here; the wrapping happens per batch, because the
+            #     block also has to name the files that batch cannot see.
             intent_text = _intent_text(ctx)
-            intent_block = wrap_intent(redact(intent_text)) if intent_text else None
+            clean_intent = redact(intent_text) if intent_text else None
         # Mid-review retrieval budget, or None when a lens may not defer at all:
         # the feature is off, or nothing injected a read-only reader to fetch
         # with. One scalar rather than a config-plus-fetcher pair threaded down
@@ -455,7 +458,7 @@ class LLMReviewEngine(ReviewEngine):
             else None
         )
         lenses = _build_lenses(
-            cfg, has_intent=intent_block is not None, retrieval=retrieval_budget is not None
+            cfg, has_intent=clean_intent is not None, retrieval=retrieval_budget is not None
         )
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
@@ -603,6 +606,13 @@ class LLMReviewEngine(ReviewEngine):
             dir_block = (
                 build_directory_block(rules_for(batch_paths, cfg), dir_contents)
                 if cfg.directory_rules
+                else None
+            )
+            # The intent block is built PER BATCH, not once, because it has to
+            # name the files this particular call cannot see.
+            intent_block = (
+                wrap_intent(clean_intent, files_not_visible(ctx.changed_files, batch_paths))
+                if clean_intent is not None
                 else None
             )
             # Warm the prompt cache for this batch: a fully concurrent first
@@ -1404,6 +1414,30 @@ def _matches_glob(path: str, pattern: str) -> bool:
     if fnmatchcase(path, pattern):
         return True
     return pattern.startswith("**/") and fnmatchcase(path, pattern[3:])
+
+
+def files_not_visible(changed_files: Sequence[str], batch_paths: set[str]) -> list[str]:
+    """The PR's changed files that this batch's diff does NOT show.
+
+    Derived, not captured. One subtraction covers every way a file goes missing
+    before a lens sees it — the hardcoded generated/binary/vendored skip, the
+    include/exclude globs, the ``max_files`` cap, a triage skip, an incremental
+    scope, and simply being in another batch — because it asks what is left of
+    the PR after this batch rather than which filter removed what.
+
+    Capturing at each filter instead would mean five call sites kept in sync,
+    three of which have no pattern list to report (the skip filter is hardcoded
+    rules, the cap is a count, triage is a per-file model verdict) — and it
+    would still miss batching, which has the widest reach of the six: the intent
+    lens runs once PER BATCH, so on a multi-batch PR every call is judging the
+    whole PR's promise against a fraction of the change.
+
+    ``changed_files`` stays the full PR list even under incremental review (the
+    incremental context replaces only ``diff``), so that case is covered for
+    free — at file granularity. A file present in the increment still hides its
+    *earlier* commits' changes, which this cannot express.
+    """
+    return sorted(set(changed_files) - batch_paths)
 
 
 def _intent_text(ctx: PRContext) -> str:

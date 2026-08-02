@@ -111,6 +111,29 @@ preamble byte-identical to a review with no rules configured.
 - **THEN** no workspace file is read and the prompt is byte-identical to before
   the feature
 
+### Requirement: The intent lens is told which files it cannot see
+
+Each intent call SHALL name the PR's changed files absent from the diff it is
+given, and the rubric SHALL rule that a claim about such a file is not shown,
+not undone. The list SHALL be derived by subtracting the batch's paths from the
+PR's changed files — covering the skip filter, path globs, file cap, triage,
+incremental scope, and batching alike — capped, and carried inside the
+neutralised intent block.
+<!-- anchor: prompt.intent-visibility -->
+
+#### Scenario: a generated file the skip filter dropped
+- **WHEN** a PR states it regenerated a file that `is_reviewable` excludes
+- **THEN** the intent call names it as not visible, so the kept promise is not
+  reported as unfulfilled intent
+
+#### Scenario: the PR spans several batches
+- **WHEN** the diff is batched across multiple calls
+- **THEN** each intent call names the files carried by the other batches
+
+#### Scenario: the batch shows the whole PR
+- **WHEN** no changed file is missing from the batch
+- **THEN** no list is added and the block is byte-identical to before the feature
+
 ### Requirement: Defect prompts require a concrete failure scenario
 
 Every built-in review prompt SHALL request a nullable `failure_scenario`.
