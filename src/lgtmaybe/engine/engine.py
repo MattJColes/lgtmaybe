@@ -51,8 +51,8 @@ from .compress import (
     trailing_context_lines,
 )
 from .directory import build_directory_block, load_context_files, rules_for
-from .injection import wrap_diff, wrap_hints, wrap_intent
-from .parse import ParseError, parse_findings
+from .injection import wrap_context, wrap_diff, wrap_hints, wrap_intent
+from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
 from .prompt import (
     FAST_GROUPS,
@@ -68,7 +68,7 @@ from .prompt import (
 )
 from .redact import redact
 from .reflect import reflect_findings
-from .retrieve import FileFetcher
+from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
 from .static_analysis import (
     SCAN_CATEGORY_PREFIX,
     UNANCHORABLE_SCAN_CATEGORIES,
@@ -178,7 +178,7 @@ class _Lens:
     finding_category: str | None = None
 
 
-def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
+def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = False) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
     The fast preset runs all nine built-ins as FOUR distinct lenses — security,
@@ -190,6 +190,10 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     preset never regroups them. The full preset runs every category; an explicit
     list runs exactly its selected categories. Both skip intent when nothing
     states an intent.
+
+    ``retrieval`` adds the one-round deferral ask to the legacy (``prompt_cache:
+    false``) system prompts — the split shape carries it on the shared preamble
+    instead, built per call. Off, every prompt here is byte-identical.
     """
     # Whether the model should still be asked for dependency-advisory claims.
     # Config-derived on purpose: keying this on whether the binary happens to be
@@ -206,7 +210,10 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
             _Lens(
                 id=ReviewCategory.security.value,
                 system_prompt=build_system_prompt(
-                    ReviewCategory.security, cfg.language, secret_scanning=secrets
+                    ReviewCategory.security,
+                    cfg.language,
+                    secret_scanning=secrets,
+                    retrieval=retrieval,
                 ),
                 user_block=build_lens_block(ReviewCategory.security, secret_scanning=secrets),
             ),
@@ -219,7 +226,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses.append(
             _Lens(
                 id=ReviewCategory.correctness.value,
-                system_prompt=build_correctness_prompt(has_intent, cfg.language),
+                system_prompt=build_correctness_prompt(has_intent, cfg.language, retrieval),
                 user_block=build_correctness_block(has_intent),
                 carries_intent=has_intent,
                 allowed_categories=correctness_categories if has_intent else None,
@@ -228,7 +235,9 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
         lenses += [
             _Lens(
                 id=group.id,
-                system_prompt=build_group_prompt(group, cfg.language, dependency_health=deps),
+                system_prompt=build_group_prompt(
+                    group, cfg.language, dependency_health=deps, retrieval=retrieval
+                ),
                 user_block=build_group_block(group, dependency_health=deps),
                 allowed_categories=frozenset(c.value for c in group.members),
             )
@@ -239,7 +248,11 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
             _Lens(
                 id=category.value,
                 system_prompt=build_system_prompt(
-                    category, cfg.language, dependency_health=deps, secret_scanning=secrets
+                    category,
+                    cfg.language,
+                    dependency_health=deps,
+                    secret_scanning=secrets,
+                    retrieval=retrieval,
                 ),
                 user_block=build_lens_block(
                     category, dependency_health=deps, secret_scanning=secrets
@@ -254,7 +267,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool) -> list[_Lens]:
     lenses += [
         _Lens(
             id=lens.id,
-            system_prompt=build_lens_prompt(lens, cfg.language),
+            system_prompt=build_lens_prompt(lens, cfg.language, retrieval),
             user_block=build_custom_lens_block(lens),
         )
         for lens in cfg.extra_lenses
@@ -289,6 +302,83 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
     return [
         [(path, hunk) for hunk in hunks[:middle]],
         [(path, hunk) for hunk in hunks[middle:]],
+    ]
+
+
+def _skip_reason(deadline_at: float | None, budget_at: int | None, lens: _Lens) -> str | None:
+    """Why this model call must not be made, or None to go ahead.
+
+    Both ceilings are checked at EXECUTION time (tasks queue in the pool long
+    before a worker picks them up, and a deferral is decided later still), so the
+    figures include everything that landed in the meantime. One function, so the
+    first call and a deferral's re-run can never drift apart on when to stop.
+    """
+    if deadline_at is not None and time.perf_counter() >= deadline_at:
+        _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
+        return "review deadline (max_review_seconds) reached — call skipped"
+    if budget_at is not None and profiler.total_tokens() >= budget_at:
+        _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
+        return _BUDGET_SKIP_REASON
+    return None
+
+
+def _lens_messages(
+    wrapped: str,
+    intent_block: str | None,
+    hint_block: str | None,
+    dir_block: str | None,
+    split_prompt: bool,
+    language: str | None,
+    lens: _Lens,
+    *,
+    retrieval: bool,
+    context: str | None = None,
+) -> list[Message]:
+    """The messages for one lens call, in whichever prompt shape is configured.
+
+    ``context`` is the fetched-for-a-deferral file text (see
+    :meth:`LLMReviewEngine._review_with_context`). It rides the lens's own block —
+    never the shared prefix: that prefix is the cache entry this batch's sibling
+    lenses read, and one deferral must not make every one of them miss. It sits
+    ahead of the lens checklist for the same reason the diff does, so the trusted
+    instructions stay closest to the answer.
+    """
+    if split_prompt:
+        # The directory block joins the ONE prefix string rather than adding
+        # a fourth message: the adapter puts its cache breakpoint on the last
+        # prefix block, and it varies per batch exactly like the hints do, so
+        # it is warmed once by the primer and read by lenses 2..N.
+        prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
+        suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
+        if lens.carries_intent and intent_block is not None:
+            # Only the intent lens pays the intent-block tokens (and its
+            # injection surface). It rides the lens block — NOT the shared
+            # prefix — so the other lenses' cached prefix stays identical.
+            suffix = f"{intent_block}\n\n{suffix}"
+        return [
+            {"role": "system", "content": build_shared_preamble(language, retrieval)},
+            {"role": "user", "content": prefix},
+            {"role": "user", "content": suffix},
+        ]
+
+    user_content = wrapped
+    if lens.carries_intent and intent_block is not None:
+        # Only the intent lens pays the intent-block tokens (and its
+        # injection surface); the other lenses never see PR-authored prose.
+        user_content = f"{intent_block}\n\n{user_content}"
+    if hint_block is not None:
+        # Static-analysis grounding: every lens sees the hints (each judges
+        # relevance to its own concern) ahead of the diff they refer to.
+        user_content = f"{hint_block}\n\n{user_content}"
+    if dir_block is not None:
+        # Directory-scoped instructions/context lead, same as in the split
+        # shape, so the two layouts stay behaviourally comparable.
+        user_content = f"{dir_block}\n\n{user_content}"
+    if context is not None:
+        user_content = f"{user_content}\n\n{context}"
+    return [
+        {"role": "system", "content": lens.system_prompt},
+        {"role": "user", "content": user_content},
     ]
 
 
@@ -353,7 +443,20 @@ class LLMReviewEngine(ReviewEngine):
             #     rather than burn a model call judging the diff against nothing.
             intent_text = _intent_text(ctx)
             intent_block = wrap_intent(redact(intent_text)) if intent_text else None
-        lenses = _build_lenses(cfg, has_intent=intent_block is not None)
+        # Mid-review retrieval budget, or None when a lens may not defer at all:
+        # the feature is off, or nothing injected a read-only reader to fetch
+        # with. One scalar rather than a config-plus-fetcher pair threaded down
+        # the call chain — it answers both "may this lens defer?" and "with how
+        # many tokens?". A quarter of the input budget, the same slice
+        # reflection's deferral takes.
+        retrieval_budget = (
+            max(0, cfg.max_input_tokens // 4)
+            if cfg.mid_review_retrieval and self._fetch_file is not None
+            else None
+        )
+        lenses = _build_lenses(
+            cfg, has_intent=intent_block is not None, retrieval=retrieval_budget is not None
+        )
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
         #    then apply the user's path filters (include_paths allowlist, then
@@ -530,6 +633,7 @@ class LLMReviewEngine(ReviewEngine):
                     cfg.language,
                     deadline_at,
                     budget_at,
+                    retrieval_budget,
                     lens,
                     batch,
                 )
@@ -837,6 +941,7 @@ class LLMReviewEngine(ReviewEngine):
         language: str | None,
         deadline_at: float | None,
         budget_at: int | None,
+        retrieval_budget: int | None,
         lens: _Lens,
         batch: list[tuple[str, str]] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
@@ -861,19 +966,16 @@ class LLMReviewEngine(ReviewEngine):
         the legacy shape (lens text in the system prompt, one user message),
         kept as the escape hatch for a model that reviews worse under the
         split layout.
+
+        ``retrieval_budget`` (None = off) opts this call into the one deferral a
+        lens may make: answering with ``needs``, it is re-run once with that code
+        fetched read-only (see :meth:`_review_with_context`). Like the
+        oversized-payload split, it is offered only when ``batch`` is supplied —
+        so a re-run, which passes none, can never defer again.
         """
-        # The whole-review deadline is checked at EXECUTION time (tasks queue in
-        # the pool long before a worker picks them up): past it, skip the model
-        # call and surface the skip through the incomplete-results notice.
-        if deadline_at is not None and time.perf_counter() >= deadline_at:
-            _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
-            return [], "review deadline (max_review_seconds) reached — call skipped"
-        # Same check, spend instead of time: queued calls are dropped once the
-        # run's billable tokens pass the ceiling. Read at EXECUTION time so the
-        # figure includes everything that landed while this task sat in the pool.
-        if budget_at is not None and profiler.total_tokens() >= budget_at:
-            _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
-            return [], _BUDGET_SKIP_REASON
+        skip = _skip_reason(deadline_at, budget_at, lens)
+        if skip is not None:
+            return [], skip
         on_oversized = (
             None
             if batch is None
@@ -890,50 +992,130 @@ class LLMReviewEngine(ReviewEngine):
                 language=language,
                 deadline_at=deadline_at,
                 budget_at=budget_at,
+                retrieval_budget=retrieval_budget,
                 lens=lens,
             )
         )
-        if split_prompt:
-            # The directory block joins the ONE prefix string rather than adding
-            # a fourth message: the adapter puts its cache breakpoint on the last
-            # prefix block, and it varies per batch exactly like the hints do, so
-            # it is warmed once by the primer and read by lenses 2..N.
-            prefix = "\n\n".join(
-                part for part in (dir_block, hint_block, wrapped) if part is not None
+        on_needs = (
+            None
+            if batch is None or retrieval_budget is None
+            else partial(
+                self._review_with_context,
+                wrapped=wrapped,
+                batch=batch,
+                intent_block=intent_block,
+                hint_block=hint_block,
+                dir_block=dir_block,
+                model=model,
+                response_format=response_format,
+                batch_num=batch_num,
+                split_prompt=split_prompt,
+                language=language,
+                deadline_at=deadline_at,
+                budget_at=budget_at,
+                retrieval_budget=retrieval_budget,
+                lens=lens,
             )
-            suffix = lens.user_block
-            if lens.carries_intent and intent_block is not None:
-                # Only the intent lens pays the intent-block tokens (and its
-                # injection surface). It rides the lens block — NOT the shared
-                # prefix — so the other lenses' cached prefix stays identical.
-                suffix = f"{intent_block}\n\n{suffix}"
-            messages: list[Message] = [
-                {"role": "system", "content": build_shared_preamble(language)},
-                {"role": "user", "content": prefix},
-                {"role": "user", "content": suffix},
-            ]
-            return self._complete_lens(
-                messages, model, response_format, batch_num, lens, on_oversized
-            )
+        )
+        messages = _lens_messages(
+            wrapped,
+            intent_block,
+            hint_block,
+            dir_block,
+            split_prompt,
+            language,
+            lens,
+            retrieval=retrieval_budget is not None,
+        )
+        return self._complete_lens(
+            messages, model, response_format, batch_num, lens, on_oversized, on_needs
+        )
 
-        user_content = wrapped
-        if lens.carries_intent and intent_block is not None:
-            # Only the intent lens pays the intent-block tokens (and its
-            # injection surface); the other lenses never see PR-authored prose.
-            user_content = f"{intent_block}\n\n{wrapped}"
-        if hint_block is not None:
-            # Static-analysis grounding: every lens sees the hints (each judges
-            # relevance to its own concern) ahead of the diff they refer to.
-            user_content = f"{hint_block}\n\n{user_content}"
-        if dir_block is not None:
-            # Directory-scoped instructions/context lead, same as in the split
-            # shape, so the two layouts stay behaviourally comparable.
-            user_content = f"{dir_block}\n\n{user_content}"
-        messages = [
-            {"role": "system", "content": lens.system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-        return self._complete_lens(messages, model, response_format, batch_num, lens, on_oversized)
+    def _review_with_context(
+        self,
+        needs: list[str],
+        findings: list[ReviewFinding],
+        *,
+        wrapped: str,
+        batch: list[tuple[str, str]],
+        intent_block: str | None,
+        hint_block: str | None,
+        dir_block: str | None,
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        split_prompt: bool,
+        language: str | None,
+        deadline_at: float | None,
+        budget_at: int | None,
+        retrieval_budget: int,
+        lens: _Lens,
+    ) -> _LensOutcome:
+        """Re-run one lens with the bounded, read-only code it asked to read.
+
+        The shared rules tell every lens the diff is a slice of the codebase, so a
+        claim resting on unshown code must be hedged or dropped — precision bought
+        by throwing recall away. This is the third option: the lens names what it
+        must read (``needs``), that text is fetched through the SAME read-only,
+        redacting boundary reflection's deferral uses (never a checkout — fork-safe),
+        and the lens answers once more with it in front of it.
+
+        Bounded on every axis. One hop (the re-run is issued with ``batch=None``, so
+        a second ``needs`` is ignored); at most ``MAX_FETCH_FILES`` files inside
+        ``retrieval_budget`` tokens; and the deadline/budget guards are re-checked
+        first, so a deferral arriving past a ceiling degrades into the existing
+        incomplete-results notice instead of spending past it.
+
+        Returns ``first + retry`` findings, left for the pipeline's ``_dedupe`` to
+        collapse. Replacing the first call's findings wholesale would be simpler and
+        wrong: the lens was already confident about those, and the deferral was about
+        something else. The cost is a duplicate pair when the re-run repeats itself —
+        which dedupe (keyed path/line/side) is exactly what removes.
+        """
+        skip = _skip_reason(deadline_at, budget_at, lens)
+        if skip is not None:
+            # The lens asked for code we may no longer spend on. Keep what it
+            # already found and report the skip: the run IS incomplete, and the
+            # existing notice is how that reaches the PR.
+            return findings, skip
+        if self._fetch_file is None:  # pragma: no cover — never offered without one
+            return findings, None
+        fetched = resolve_needs(
+            needs,
+            self._fetch_file,
+            already={path for path, _ in batch},
+            budget_tokens=retrieval_budget,
+            max_files=MAX_FETCH_FILES,
+            resolve_symbol=self._resolve_symbol,
+        )
+        if not fetched:
+            # Nothing readable came back (bad paths, a symbol with no definition,
+            # everything over budget). Re-asking with no new information would buy
+            # a second identical answer, so keep the first one.
+            _log.info(
+                "lens deferral resolved to nothing — keeping the first answer",
+                extra={"lens": lens.id, "batch": batch_num, "needs": needs},
+            )
+            return findings, None
+        _log.info(
+            "lens deferred for context — re-reviewing with fetched files",
+            extra={"lens": lens.id, "batch": batch_num, "files": sorted(fetched)},
+        )
+        messages = _lens_messages(
+            wrapped,
+            intent_block,
+            hint_block,
+            dir_block,
+            split_prompt,
+            language,
+            lens,
+            retrieval=True,
+            context=wrap_context(fetched),
+        )
+        retry, error = self._complete_lens(
+            messages, model, response_format, batch_num, lens, None, None
+        )
+        return findings + retry, error
 
     def _review_split(
         self,
@@ -950,6 +1132,7 @@ class LLMReviewEngine(ReviewEngine):
         language: str | None,
         deadline_at: float | None,
         budget_at: int | None,
+        retrieval_budget: int | None,
         lens: _Lens,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
@@ -993,6 +1176,7 @@ class LLMReviewEngine(ReviewEngine):
                 language,
                 deadline_at,
                 budget_at,
+                retrieval_budget,
                 lens,
             )
             findings.extend(piece_findings)
@@ -1017,6 +1201,7 @@ class LLMReviewEngine(ReviewEngine):
         batch_num: int,
         lens: _Lens,
         on_oversized: Callable[[str], _LensOutcome] | None = None,
+        on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
@@ -1026,6 +1211,13 @@ class LLMReviewEngine(ReviewEngine):
         asked to cover more than it could finish, and both are fixed by covering
         less. It is given the failure reason and returns the outcome to use
         instead. None when there is nothing left to split.
+
+        ``on_needs`` is its twin on the SUCCESS path: the lens parsed, but
+        answered that it must read code outside the diff before it can decide. It
+        is given the requested paths and the findings this call did make, and
+        returns the outcome to use instead. None (a re-run, or the feature off)
+        means a ``needs`` in the response is simply ignored — nothing is parsed
+        for it, so a review without the feature costs exactly what it did before.
         """
         opts = {"response_format": response_format} if response_format is not None else {}
         # Heartbeat: log the call going out and coming back so the Action shows
@@ -1114,6 +1306,10 @@ class LLMReviewEngine(ReviewEngine):
             # half-answer this whole path exists to prevent.
             return _stamp_categories(findings, lens), reason
         findings = _stamp_categories(findings, lens)
+        if on_needs is not None:
+            needs = parse_needs(result.text)
+            if needs:
+                return on_needs(needs, findings)
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
 

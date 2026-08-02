@@ -334,6 +334,14 @@ class ReviewResult(_Strict):
     """
 
     findings: list[ReviewFinding]
+    # One-round deferral (mid-review retrieval): file path(s) — and/or symbol
+    # names — this lens must READ before it can decide. When non-empty and
+    # `mid_review_retrieval` is on, the engine fetches that text read-only,
+    # redacts it, and re-runs THIS lens once with it appended to the lens's
+    # (uncached) block; the findings of both calls are merged. Optional with a
+    # back-compat default, so a model that omits it — every model, when the
+    # feature is off and the prompt never asks — still validates.
+    needs: list[str] = Field(default_factory=list)
 
 
 class Verdict(_Strict):
@@ -648,6 +656,17 @@ class ReviewConfig(_Strict):
     # each call's context stays small — better recall on big files, especially for
     # smaller models. Files within budget are reviewed whole (context preserved).
     recursive: bool = True
+    # Mid-review retrieval: let a review LENS defer once for bounded, read-only
+    # codebase context. The shared rules tell every lens to hedge or omit a claim
+    # that hinges on code outside the diff; with this on it may instead answer
+    # `needs` (paths/symbols), and the engine fetches them (redacted, capped at
+    # engine.retrieve.MAX_FETCH_FILES files and a quarter of max_input_tokens)
+    # and re-runs that one lens with them. Bounded to ONE extra call per (batch,
+    # lens) — which is exactly why it defaults OFF: a weak model defers
+    # constantly and the recall win is unmeasured. Needs an injected file reader
+    # (the GitHub gateway, or the local worktree), and reuses the same read-only
+    # fetch path reflection's deferral uses. See docs/how-to/reduce-review-cost.md.
+    mid_review_retrieval: bool = False
     # Cross-file symbol resolution during reflection: when the auditor defers a
     # finding because it needs to see a SYMBOL (function/class/type) defined outside
     # the diff, ast-grep locates that symbol's file in the corpus (the local

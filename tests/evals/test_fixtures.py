@@ -101,6 +101,32 @@ def test_cross_file_fp_fixture_has_expected_and_forbidden() -> None:
     assert manifest.forbidden, "needs forbidden (cross-file false-positive) traps"
 
 
+def test_cross_file_recall_fixture_hides_its_bug_in_an_unshown_file() -> None:
+    """The mirror image of ``cross-file-fp``: there the unshown file REFUTES a claim
+    made from the diff alone, here it CONVICTS. The diff's window check reads fine
+    until you open ``ledger.py`` and find the window is in hours — which is what the
+    one-round lens deferral (``mid_review_retrieval``) exists to reach.
+
+    Structural only (no model): the corpus must be wired, the evidence must live
+    OUTSIDE the diff, and both the catch and the trap must sit on real changed lines.
+    """
+    diff, manifest = _fixture("cross-file-recall")
+
+    assert manifest.corpus_root is not None, "the unshown files must be on disk to fetch"
+    corpus = {p.name for p in manifest.corpus_root.rglob("*.py")}
+    assert {"ledger.py", "gateway.py"} <= corpus
+
+    ledger = (manifest.corpus_root / "payments" / "ledger.py").read_text(encoding="utf-8")
+    assert "hours" in ledger.lower(), "the corpus must carry the evidence for the catch"
+    assert "hour" not in diff.lower(), "…and the diff must NOT — else retrieval buys nothing"
+
+    assert manifest.expected and manifest.forbidden
+    changed = _changed_lines(diff, manifest.changed_file)
+    for entry in [*manifest.expected, *manifest.forbidden]:
+        assert entry.keywords, f"{entry.label}: needs keywords to score against"
+        assert entry.line in changed, f"{entry.label}: line {entry.line} is not a changed line"
+
+
 def _changed_lines(diff: str, path: str, side: str = "RIGHT") -> set[int]:
     """The set of new-file (RIGHT) line numbers that the diff actually changes."""
     index = changed_line_index(diff)

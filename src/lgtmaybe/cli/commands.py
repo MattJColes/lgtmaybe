@@ -300,6 +300,14 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "parser still handles fenced/prose output either way)",
 )
 @click.option(
+    "--mid-review-retrieval/--no-mid-review-retrieval",
+    default=None,
+    help="Let a review lens defer once for bounded read-only context: rather than "
+    "hedging a finding that hinges on code outside the diff, it names the files or "
+    "symbols it must read and is re-run with them (off by default — up to one extra "
+    "model call per batch and lens)",
+)
+@click.option(
     "--symbol-resolution/--no-symbol-resolution",
     default=None,
     help="During reflection, use ast-grep to resolve a deferred finding's "
@@ -372,6 +380,7 @@ def review(
     min_confidence: int | None,
     recursive: bool | None,
     structured_output: bool | None,
+    mid_review_retrieval: bool | None,
     symbol_resolution: bool | None,
     prompt_cache: bool | None,
     static_analysis: bool | None,
@@ -410,6 +419,7 @@ def review(
         min_confidence=min_confidence,
         recursive=recursive,
         structured_output=structured_output,
+        mid_review_retrieval=mid_review_retrieval,
         symbol_resolution=symbol_resolution,
         prompt_cache=prompt_cache,
     )
@@ -565,6 +575,7 @@ def action() -> None:
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],
         structured_output=inputs["structured_output"],
+        mid_review_retrieval=inputs["mid_review_retrieval"],
         symbol_resolution=inputs["symbol_resolution"],
         prompt_cache=inputs["prompt_cache"],
         incremental=inputs["incremental"],

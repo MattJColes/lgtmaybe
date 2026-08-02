@@ -86,6 +86,10 @@ inputs:
     description: "Constrain model output to the findings JSON schema via the provider's response_format (JSON mode). On by default; set to false for an openai-compatible gateway/proxy that rejects response_format (the lenient parser still handles fenced/prose output either way)."
     required: false
     default: ""
+  mid_review_retrieval:
+    description: "Let a review lens defer ONCE for bounded, read-only codebase context: instead of hedging or dropping a finding that hinges on code outside the diff, the lens names the files (or symbols) it must read, lgtmaybe fetches them read-only, and re-runs that one lens with them. Off by default — it costs at most one extra model call per (batch, lens); set to true to trade tokens for cross-file recall."
+    required: false
+    default: ""
   symbol_resolution:
     description: "During reflection, use ast-grep to resolve a deferred finding's referenced symbol to the file that defines it — searched in a read-only shallow clone of the PR's base branch — so the auditor re-judges a cross-file finding against the real definition. On by default; set to false to disable."
     required: false
@@ -288,6 +292,7 @@ runs:
         INPUT_RESOLVE_FIXED: ${{ inputs.resolve_fixed }}
         INPUT_RECURSIVE: ${{ inputs.recursive }}
         INPUT_STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
+        INPUT_MID_REVIEW_RETRIEVAL: ${{ inputs.mid_review_retrieval }}
         INPUT_SYMBOL_RESOLUTION: ${{ inputs.symbol_resolution }}
         INPUT_PROMPT_CACHE: ${{ inputs.prompt_cache }}
         INPUT_INCREMENTAL: ${{ inputs.incremental }}
@@ -321,6 +326,7 @@ runs:
           -e INPUT_MAX_CONCURRENCY \
           -e INPUT_RESOLVE_FIXED \
           -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \
+          -e INPUT_MID_REVIEW_RETRIEVAL \
           -e INPUT_PROMPT_CACHE -e INPUT_INCREMENTAL -e INPUT_STATIC_ANALYSIS \
           -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_ANSWER_REPLIES \
           -e INPUT_PR_LABELS -e INPUT_LEARN_FEEDBACK -e INPUT_FAIL_ON -e INPUT_PROFILE \

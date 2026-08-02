@@ -39,6 +39,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
 | `max_review_tokens` | integer | No | `0` | Max Review Tokens |
 | `max_tokens` | integer / null | No | `null` | Max Tokens |
+| `mid_review_retrieval` | boolean | No | `False` | Mid Review Retrieval |
 | `min_confidence` | integer | No | `0` | Min Confidence |
 | `min_severity` | `critical` / `high` / `info` / `low` / `medium` | No | `low` |  |
 | `model` | string | Yes | — | Model |
@@ -784,6 +785,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Max Tokens"
+    },
+    "mid_review_retrieval": {
+      "default": false,
+      "title": "Mid Review Retrieval",
+      "type": "boolean"
     },
     "min_confidence": {
       "default": 0,

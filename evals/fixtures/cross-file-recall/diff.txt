@@ -1,0 +1,24 @@
+diff --git a/payments/refund.py b/payments/refund.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/payments/refund.py
+@@ -0,0 +1,18 @@
++from datetime import datetime
++
++from .gateway import capture_refund
++from .ledger import mark_refunded, refund_window
++
++
++class TooLate(Exception):
++    """Raised when a refund is requested outside the order's window."""
++
++
++def refund(order, requested_at: datetime) -> int:
++    """Refund *order* when the request is inside its refund window."""
++    elapsed = requested_at - order.paid_at
++    if elapsed.days > refund_window(order.kind):
++        raise TooLate(order.id)
++    capture_refund(order.id, order.total_cents)
++    mark_refunded(order.id)
++    return order.total_cents

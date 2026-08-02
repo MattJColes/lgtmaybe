@@ -133,6 +133,7 @@ def _review(
     reflect: bool = True,
     recursive: bool = True,
     symbol_resolution: bool = True,
+    mid_review_retrieval: bool = False,
     temperature: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
@@ -156,6 +157,10 @@ def _review(
         cfg_overrides["static_analysis"] = StaticAnalysisConfig(enabled=True)
     if triage_model is not None:
         cfg_overrides["triage_model"] = triage_model
+    if mid_review_retrieval:
+        # A/B the cross-file recall the one-round lens deferral buys: the same
+        # fixtures, the same model, with and without the extra call.
+        cfg_overrides["mid_review_retrieval"] = True
     if preset is not None:
         cfg_overrides["preset"] = preset
     cfg = ReviewConfig(
@@ -341,6 +346,15 @@ def main(argv: list[str] | None = None) -> int:
         "path-only fetch so a run can A/B the cross-file false-positive rate",
     )
     ap.add_argument(
+        "--mid-review-retrieval",
+        dest="mid_review_retrieval",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="let a review lens defer once for bounded read-only context from the "
+        "fixture's repo/ corpus (default off) — run the same model with and without "
+        "to measure what the extra call buys in cross-file recall and costs in tokens",
+    )
+    ap.add_argument(
         "--static-analysis",
         dest="static_analysis",
         action=argparse.BooleanOptionalAction,
@@ -386,6 +400,7 @@ def main(argv: list[str] | None = None) -> int:
             reflect=args.reflect,
             recursive=args.recursive,
             symbol_resolution=args.symbol_resolution,
+            mid_review_retrieval=args.mid_review_retrieval,
             temperature=args.temperature,
             top_p=args.top_p,
             top_k=args.top_k,
