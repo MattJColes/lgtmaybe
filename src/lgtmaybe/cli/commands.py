@@ -181,6 +181,15 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "assumes the model's full ceiling when the request omits it",
 )
 @click.option(
+    "--reasoning-effort",
+    default=None,
+    type=click.Choice(["none", "minimal", "low", "medium", "high", "xhigh", "default"]),
+    help="Bound what a reasoning model spends THINKING per call (unset = the "
+    "route's own default). Use it when lens calls truncate or run long: "
+    "max_tokens caps thinking and findings together, and the model spends the "
+    "thinking first, so raising the cap grows the reasoning instead of the answer",
+)
+@click.option(
     "--num-ctx",
     default=None,
     type=int,
@@ -363,6 +372,7 @@ def review(
     max_files: int | None,
     max_input_tokens: int | None,
     max_tokens: int | None,
+    reasoning_effort: str | None,
     num_ctx: int | None,
     max_concurrency: int | None,
     base: str | None,
@@ -407,6 +417,7 @@ def review(
         max_files=max_files,
         max_input_tokens=max_input_tokens,
         max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
         num_ctx=num_ctx,
         max_concurrency=max_concurrency,
         context_lines=context_lines,
@@ -571,6 +582,7 @@ def action() -> None:
         num_ctx=inputs["num_ctx"],
         max_input_tokens=inputs["max_input_tokens"],
         max_tokens=inputs["max_tokens"],
+        reasoning_effort=inputs["reasoning_effort"],
         max_concurrency=inputs["max_concurrency"],
         resolve_fixed=inputs["resolve_fixed"],
         recursive=inputs["recursive"],

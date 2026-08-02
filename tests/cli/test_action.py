@@ -457,6 +457,73 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert captured == {"max_tokens": 8192}
 
+    def test_reasoning_effort_input_reaches_config(self, tmp_path, monkeypatch):
+        """INPUT_REASONING_EFFORT bounds thinking from the Action.
+
+        The Action is where the problem was measured — this repo's own dogfood
+        review truncated 5 of 9 lens calls on reasoning alone — so a knob wired
+        only into the local CLI would miss the case it exists for.
+        """
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["reasoning_effort"] = cfg.reasoning_effort
+            return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", fake_build)
+
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "openrouter")
+        monkeypatch.setenv("INPUT_MODEL", "vendor/m")
+        monkeypatch.setenv("INPUT_REASONING_EFFORT", "low")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"reasoning_effort": "low"}
+
+    def test_reasoning_effort_input_absent_stays_unset(self, tmp_path, monkeypatch):
+        """Action inputs default to "" — which must stay None, not become a
+        literal empty effort the provider would reject.
+
+        Run from an empty directory: the config probe reads ``.lgtmaybe.yml``
+        relative to the cwd, and lgtmaybe's own now sets ``reasoning_effort``, so
+        a suite run from the repo root would test that file instead of input
+        coercion.
+        """
+        monkeypatch.chdir(tmp_path)
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["reasoning_effort"] = cfg.reasoning_effort
+            return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", fake_build)
+
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "openrouter")
+        monkeypatch.setenv("INPUT_MODEL", "vendor/m")
+        monkeypatch.setenv("INPUT_REASONING_EFFORT", "")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"reasoning_effort": None}
+
     def test_max_tokens_input_absent_leaves_generation_uncapped(self, tmp_path, monkeypatch):
         """An empty/unset input must stay None, not become a cap — the Action's
         inputs default to "" and a coerced 0 would reject every request.

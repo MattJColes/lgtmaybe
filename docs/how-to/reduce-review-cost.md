@@ -240,6 +240,25 @@ total), which is the comparison a truncated call cannot give you: a call that
 hit the ceiling spent reasoning + findings ≥ `max_tokens` by definition, so it
 tells you nothing about the healthy calls sitting beside it.
 
+### When the cap is not the lever
+
+If `think_tok` is most of `out_tok`, raising `max_tokens` will not fix the
+truncation — the reasoning simply expands into the new headroom. Bound the
+thinking instead:
+
+```yaml
+reasoning_effort: low   # none | minimal | low | medium | high | xhigh | default
+```
+
+This is measured, not theoretical. On lgtmaybe's own dogfood review, 5 of 9
+lens calls spent **32,000–35,000 reasoning tokens** — at or above the entire
+32,768 `max_tokens` ceiling — before writing a single finding. The one large
+call that did complete wrote roughly 733 tokens of findings after 28,909 tokens
+of thought. Raising the cap from 16k to 32k had not helped; it only bought the
+model more room to think.
+
+Unset sends nothing, so a route without a reasoning channel is unaffected.
+
 ## What costs more, on purpose
 
 One setting in this guide runs the other way: **`mid_review_retrieval`** buys

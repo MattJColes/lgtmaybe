@@ -70,6 +70,10 @@ inputs:
     description: "Cap the tokens each model call may generate (any provider). Leave empty to send no cap, so the model's own ceiling applies. Set it on a prepaid route like OpenRouter, which reserves prompt + max_tokens against your balance before generating and assumes the model's full ceiling when the request omits it."
     required: false
     default: ""
+  reasoning_effort:
+    description: "Bound what a reasoning model spends thinking per call: none, minimal, low, medium, high, xhigh, or default. Leave empty to send nothing, so the route's own default applies. Use it when lens calls truncate or run long — max_tokens caps thinking and findings together and the model spends the thinking first, so raising the cap grows the reasoning rather than the answer."
+    required: false
+    default: ""
   max_concurrency:
     description: "Concurrent review calls across the whole fan-out (all batches and lenses share one pool). Leave empty for the provider-aware default: 8 for cloud providers, 1 for ollama and openai-compatible (a single-slot llama.cpp/LM Studio server wants 1; raise it explicitly for a batching vLLM server)."
     required: false
@@ -288,6 +292,7 @@ runs:
         INPUT_NUM_CTX: ${{ inputs.num_ctx }}
         INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
         INPUT_MAX_TOKENS: ${{ inputs.max_tokens }}
+        INPUT_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
         INPUT_MAX_CONCURRENCY: ${{ inputs.max_concurrency }}
         INPUT_RESOLVE_FIXED: ${{ inputs.resolve_fixed }}
         INPUT_RECURSIVE: ${{ inputs.recursive }}
@@ -323,6 +328,7 @@ runs:
           -e INPUT_TIMEOUT -e INPUT_MAX_REVIEW_SECONDS -e INPUT_MAX_REVIEW_TOKENS \
           -e INPUT_TEMPERATURE \
           -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS -e INPUT_MAX_TOKENS \
+          -e INPUT_REASONING_EFFORT \
           -e INPUT_MAX_CONCURRENCY \
           -e INPUT_RESOLVE_FIXED \
           -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \

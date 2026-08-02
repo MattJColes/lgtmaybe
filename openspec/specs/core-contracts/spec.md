@@ -83,6 +83,11 @@ driving the merge-gate Check Run.
 - **WHEN** `answer_replies` is unset
 - **THEN** it defaults to `true`, enabling finding-thread replies
 
+#### Scenario: an unknown reasoning effort is rejected at load
+- **WHEN** `reasoning_effort` is set to a value outside the normalised set
+- **THEN** config validation fails, rather than the route rejecting every lens
+  call mid-review
+
 ### Requirement: Nine built-in lenses, provider-aware preset fan-out
 
 `ReviewCategory` SHALL enumerate the nine built-in lenses. `ReviewPreset` SHALL
