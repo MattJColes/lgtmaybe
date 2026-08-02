@@ -16,7 +16,7 @@ import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -47,6 +47,22 @@ _log = get_logger(__name__)
 _TIMEOUT = httpx.Timeout(60.0)
 _MARKER = "<!-- lgtmaybe -->"
 _GRAPHQL_URL = "https://api.github.com/graphql"
+
+# The PR's review-thread connection, paginated. Every caller wants the same
+# connection and differs only in the ``nodes{…}`` selection it asks for, which
+# is what the ``%s`` takes — see ``_walk_review_threads``.
+_THREADS_QUERY = """
+        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$name){
+            pullRequest(number:$number){
+              reviewThreads(first:100, after:$cursor){
+                pageInfo{ hasNextPage endCursor }
+                nodes{ %s }
+              }
+            }
+          }
+        }
+        """
 
 # Stable name for the merge-gate Check Run (`fail_on`). Teams mark this exact
 # name as a required status check in branch protection, so it must not change.
@@ -196,6 +212,31 @@ def _finding_badge(f: ReviewFinding) -> str:
     return badge if f.confidence is None else f"{badge} · {f.confidence}/10"
 
 
+def _marker(family: str, key: str | None) -> str:
+    """A hidden idempotency marker for one comment *family*.
+
+    Scoped to *key* (a provider/model) when there is one, so concurrent reviews
+    from different backends update their own comment instead of clobbering each
+    other; an unkeyed gateway keeps the legacy unscoped marker (``_MARKER`` and
+    its describe/diagram siblings).
+    """
+    return f"<!-- {family}:{key} -->" if key else f"<!-- {family} -->"
+
+
+def _first_comment(node: dict[str, Any]) -> dict[str, Any]:
+    """A review thread's opening comment, or ``{}`` when it has none."""
+    comments = node.get("comments", {}).get("nodes", [])
+    return comments[0] if comments else {}
+
+
+def _finding_bullet(f: ReviewFinding) -> str:
+    """One finding as a Markdown list item — shared by both body sections."""
+    return (
+        f"- **[{f.severity.upper()}{_finding_badge(f)}] {_defang_fences(f.title)}** "
+        f"(`{f.path}`) — {_defang_fences(f.body)}"
+    )
+
+
 def _render_demoted(demoted: list[ReviewFinding]) -> str:
     """Render findings that couldn't be confidently placed inline as a body section.
 
@@ -213,11 +254,7 @@ def _render_demoted(demoted: list[ReviewFinding]) -> str:
         "_These relate to the changes but aren't tied to a single line:_",
         "",
     ]
-    for f in demoted:
-        lines.append(
-            f"- **[{f.severity.upper()}{_finding_badge(f)}] {_defang_fences(f.title)}** "
-            f"(`{f.path}`) — {_defang_fences(f.body)}"
-        )
+    lines += [_finding_bullet(f) for f in demoted]
     return "\n".join(lines)
 
 
@@ -241,11 +278,7 @@ def _render_broad(broad: list[ReviewFinding]) -> str:
         "pinned to a line:_",
         "",
     ]
-    for f in broad:
-        lines.append(
-            f"- **[{f.severity.upper()}{_finding_badge(f)}] {_defang_fences(f.title)}** "
-            f"(`{f.path}`) — {_defang_fences(f.body)}"
-        )
+    lines += [_finding_bullet(f) for f in broad]
     lines += ["", "</details>"]
     return "\n".join(lines)
 
@@ -276,23 +309,20 @@ class RestGitHubGateway(GitHubGateway):
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        # The JSON Accept header rides every REST call bar the raw-content and
+        # ``.diff`` ones; the auth header stays out of the client's defaults so an
+        # injected client (the tests') is never mutated.
+        self._json_headers = {**self._headers, "Accept": "application/vnd.github+json"}
+        self._api = f"https://api.github.com/repos/{repo}"
+        self._pr_api = f"{self._api}/pulls/{pr_number}"
+        self._issue_api = f"{self._api}/issues/{pr_number}"
         self._client = client if client is not None else httpx.Client(timeout=_TIMEOUT)
-        # Scope the idempotency marker to a provider/model so concurrent reviews
-        # from different backends on one PR update their own comment instead of
-        # clobbering each other. Unkeyed gateways keep the legacy marker.
-        self._marker = f"<!-- lgtmaybe:{marker_key} -->" if marker_key else _MARKER
-        # Idempotency marker for the describe comment — its own family so a
-        # description update never clobbers the review summary (or vice versa).
-        self._describe_marker = (
-            f"<!-- lgtmaybe-describe:{marker_key} -->"
-            if marker_key
-            else "<!-- lgtmaybe-describe -->"
-        )
-        # Idempotency marker for the change-diagram comment — its own family so a
-        # diagram update never clobbers the description or the review summary.
-        self._diagram_marker = (
-            f"<!-- lgtmaybe-diagram:{marker_key} -->" if marker_key else "<!-- lgtmaybe-diagram -->"
-        )
+        # Three disjoint marker families: the review summary, the describe
+        # comment, and the change diagram, so an update of one never clobbers
+        # another. Each is scoped to the provider/model key when there is one.
+        self._marker = _marker("lgtmaybe", marker_key)
+        self._describe_marker = _marker("lgtmaybe-describe", marker_key)
+        self._diagram_marker = _marker("lgtmaybe-diagram", marker_key)
         self._resolve_fixed = resolve_fixed
         # Per-run cache of "does this login have write+ access?" — feedback
         # learning only trusts a 👎 from someone who can push, and a PR's
@@ -301,6 +331,9 @@ class RestGitHubGateway(GitHubGateway):
         # Cached PR head SHA for read-only on-demand file fetches (get_file_contents),
         # populated lazily and reused so a deferral recheck doesn't re-fetch metadata.
         self._head_sha: str | None = None
+        # Memoized PR metadata resource: three callers each want one field out of
+        # the same GET, and nothing mutates the PR within a run.
+        self._meta: Any | None = None
         # Lazily-cloned base tree for ast-grep symbol resolution (cloned at most once,
         # and only if a symbol deferral actually needs it). _done guards the one-shot.
         self._base_root: Path | None = None
@@ -324,9 +357,10 @@ class RestGitHubGateway(GitHubGateway):
         # Memoized marker-review lookup: last_reviewed_sha (incremental) and
         # post_review both walk the full paginated reviews list for the same
         # marker, and nothing posts a review between the two reads within one
-        # run — so the second walk is always identical. False = not looked up
-        # yet (None is a valid "no marker review" result).
-        self._existing_review_entry: tuple[int, str] | None | Literal[False] = False
+        # run — so the second walk is always identical. _done guards the
+        # one-shot, since None is a valid "no marker review" result.
+        self._existing_review_entry: tuple[int, str] | None = None
+        self._existing_review_done = False
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -334,10 +368,8 @@ class RestGitHubGateway(GitHubGateway):
 
     def get_pr_context(self) -> PRContext:
         """Fetch PR metadata, unified diff, and the full paginated files list."""
-        pr_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
-
         # Fetch metadata (base/head SHAs)
-        meta = self._get_json(pr_url)
+        meta = self._pr_meta()
         try:
             base_sha: str = meta["base"]["sha"]
             head_sha: str = meta["head"]["sha"]
@@ -352,11 +384,10 @@ class RestGitHubGateway(GitHubGateway):
         diff = self._fetch_pr_diff()
 
         # Fetch paginated files list
-        files_url = (
-            f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/files?per_page=100"
-        )
         changed_files = [
-            item["filename"] for resp in self._paginate(files_url) for item in resp.json()
+            item["filename"]
+            for resp in self._paginate(f"{self._pr_api}/files?per_page=100")
+            for item in resp.json()
         ]
 
         # Fetch head-revision text of reviewable files so the engine can pad hunks
@@ -444,7 +475,7 @@ class RestGitHubGateway(GitHubGateway):
             body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
         existing = self._find_existing_review_entry()
 
-        reviews_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
+        reviews_url = f"{self._pr_api}/reviews"
 
         if existing is not None:
             # Update the existing review body (inline comments cannot be changed
@@ -452,7 +483,7 @@ class RestGitHubGateway(GitHubGateway):
             update_url = f"{reviews_url}/{existing[0]}"
             resp = self._client.put(
                 update_url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                headers=self._json_headers,
                 json={"body": body},
                 timeout=_TIMEOUT,
             )
@@ -475,7 +506,7 @@ class RestGitHubGateway(GitHubGateway):
             }
             resp = self._client.post(
                 reviews_url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                headers=self._json_headers,
                 json=payload,
                 timeout=_TIMEOUT,
             )
@@ -491,10 +522,9 @@ class RestGitHubGateway(GitHubGateway):
         checkout, never executing PR code (fork-safe). The head SHA is fetched once
         and cached so repeated lookups in one review don't re-hit the PR metadata.
         """
-        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
         if self._head_sha is None:
             try:
-                self._head_sha = self._get_json(url)["head"]["sha"]
+                self._head_sha = self._pr_meta()["head"]["sha"]
             except httpx.HTTPError:
                 return None
         return self._get_file_content(path, self._head_sha)
@@ -516,11 +546,23 @@ class RestGitHubGateway(GitHubGateway):
             self._base_root = clone_base_tree(self._repo, ref, self._token) if ref else None
         return self._base_root
 
+    def _pr_meta(self) -> Any:
+        """The PR metadata resource, fetched at most once per run.
+
+        The base/head SHAs, the base ref, and the title/body all live in this one
+        GET, and nothing mutates the PR mid-run — so the callers share it rather
+        than each paying their own round trip. A failure is not cached: it raises
+        (and the callers that must degrade to None still catch it), so a later
+        caller retries rather than inheriting a transient error.
+        """
+        if self._meta is None:
+            self._meta = self._get_json(self._pr_api)
+        return self._meta
+
     def _get_base_ref(self) -> str | None:
         """The PR's base branch name (e.g. ``main``), or None if it can't be fetched."""
-        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
         try:
-            ref = self._get_json(url)["base"]["ref"]
+            ref = self._pr_meta()["base"]["ref"]
         except (httpx.HTTPError, KeyError, TypeError):
             return None
         return ref if isinstance(ref, str) and ref else None
@@ -531,10 +573,10 @@ class RestGitHubGateway(GitHubGateway):
         Used by slash commands (/ask, /describe). Beyond the frozen GitHubGateway
         port, which only models reviews.
         """
-        url = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}/comments"
+        url = f"{self._issue_api}/comments"
         resp = self._client.post(
             url,
-            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            headers=self._json_headers,
             json={"body": body},
             timeout=_TIMEOUT,
         )
@@ -562,16 +604,13 @@ class RestGitHubGateway(GitHubGateway):
         """Post *body* as an issue comment stamped with *marker*, or edit the
         existing comment carrying that marker in place."""
         stamped = f"{body}\n\n{marker}"
-        url = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}/comments"
+        url = f"{self._issue_api}/comments"
         for resp in self._paginate(f"{url}?per_page=100"):
             for comment in resp.json():
                 if marker in (comment.get("body") or ""):
-                    edit_url = (
-                        f"https://api.github.com/repos/{self._repo}/issues/comments/{comment['id']}"
-                    )
                     patched = self._client.patch(
-                        edit_url,
-                        headers={**self._headers, "Accept": "application/vnd.github+json"},
+                        f"{self._api}/issues/comments/{comment['id']}",
+                        headers=self._json_headers,
                         json={"body": stamped},
                         timeout=_TIMEOUT,
                     )
@@ -579,7 +618,7 @@ class RestGitHubGateway(GitHubGateway):
                     return
         created = self._client.post(
             url,
-            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            headers=self._json_headers,
             json={"body": stamped},
             timeout=_TIMEOUT,
         )
@@ -595,7 +634,7 @@ class RestGitHubGateway(GitHubGateway):
         review. Adapter-only, beyond the frozen port.
         """
         try:
-            base = f"https://api.github.com/repos/{self._repo}/issues/{self._pr_number}"
+            base = self._issue_api
             current: set[str] = {
                 item["name"]
                 for resp in self._paginate(f"{base}/labels?per_page=100")
@@ -611,7 +650,7 @@ class RestGitHubGateway(GitHubGateway):
                 # the slash in "review-effort/2" would read as a path separator.
                 resp = self._client.delete(
                     f"{base}/labels/{quote(stale, safe='')}",
-                    headers={**self._headers, "Accept": "application/vnd.github+json"},
+                    headers=self._json_headers,
                     timeout=_TIMEOUT,
                 )
                 resp.raise_for_status()
@@ -619,7 +658,7 @@ class RestGitHubGateway(GitHubGateway):
             if to_add:
                 resp = self._client.post(
                     f"{base}/labels",
-                    headers={**self._headers, "Accept": "application/vnd.github+json"},
+                    headers=self._json_headers,
                     json={"labels": to_add},
                     timeout=_TIMEOUT,
                 )
@@ -635,10 +674,10 @@ class RestGitHubGateway(GitHubGateway):
         merge. Enforcement rides the Check Run, never PR approval state (lgtmaybe
         never sets approval state). Adapter-only, beyond the frozen port.
         """
-        url = f"https://api.github.com/repos/{self._repo}/check-runs"
+        url = f"{self._api}/check-runs"
         resp = self._client.post(
             url,
-            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            headers=self._json_headers,
             json={
                 "name": _CHECK_RUN_NAME,
                 "head_sha": head_sha,
@@ -682,7 +721,7 @@ class RestGitHubGateway(GitHubGateway):
         force-push) all return None — the caller falls back to a full review
         rather than trusting a meaningless increment.
         """
-        url = f"https://api.github.com/repos/{self._repo}/compare/{base_sha}...{head_sha}"
+        url = f"{self._api}/compare/{base_sha}...{head_sha}"
         try:
             status = self._get_json(url).get("status")
             if status != "ahead":
@@ -761,7 +800,7 @@ class RestGitHubGateway(GitHubGateway):
         if not comments or head_sha is None:
             return
         unmatched = self._existing_finding_keys()
-        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/comments"
+        url = f"{self._pr_api}/comments"
         for comment in comments:
             keys = _finding_keys(comment.get("body", ""))
             already = next((i for i, e in enumerate(unmatched) if e & keys), None)
@@ -770,7 +809,7 @@ class RestGitHubGateway(GitHubGateway):
                 continue
             resp = self._client.post(
                 url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                headers=self._json_headers,
                 json={**comment, "commit_id": head_sha},
                 timeout=_TIMEOUT,
             )
@@ -786,10 +825,7 @@ class RestGitHubGateway(GitHubGateway):
         collapsed by resolve-on-fix (its markers rewritten into the resolved
         families) stops suppressing — a finding that comes back posts again.
         """
-        url = (
-            f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
-            "/comments?per_page=100"
-        )
+        url = f"{self._pr_api}/comments?per_page=100"
         posted: list[set[str]] = []
         for resp in self._paginate(url):
             for item in resp.json():
@@ -812,38 +848,10 @@ class RestGitHubGateway(GitHubGateway):
         whether the thread is one lgtmaybe opened. Returns None when no thread
         carries that comment. Read-only; adapter-only, beyond the frozen port.
         """
-        query = """
-        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
-          repository(owner:$owner,name:$name){
-            pullRequest(number:$number){
-              reviewThreads(first:100, after:$cursor){
-                pageInfo{ hasNextPage endCursor }
-                nodes{
-                  id
-                  comments(first:100){ nodes{ databaseId body } }
-                }
-              }
-            }
-          }
-        }
-        """
-        owner, _, name = self._repo.partition("/")
-        cursor: str | None = None
-        while True:
-            data = self._graphql(
-                query,
-                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
-            )
-            conn = data["repository"]["pullRequest"]["reviewThreads"]
-            for node in conn["nodes"]:
-                comments = node.get("comments", {}).get("nodes", [])
-                if any(c.get("databaseId") == comment_id for c in comments):
-                    root_body = comments[0].get("body", "") if comments else ""
-                    return node["id"], root_body
-            page = conn.get("pageInfo", {})
-            if not page.get("hasNextPage"):
-                break
-            cursor = page.get("endCursor")
+        for node in self._walk_review_threads("id comments(first:100){ nodes{ databaseId body } }"):
+            comments = node.get("comments", {}).get("nodes", [])
+            if any(c.get("databaseId") == comment_id for c in comments):
+                return node["id"], _first_comment(node).get("body", "")
         return None
 
     def reply_in_thread(self, thread_id: str, body: str) -> None:
@@ -866,10 +874,31 @@ class RestGitHubGateway(GitHubGateway):
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _walk_review_threads(self, node_fields: str) -> Iterator[dict[str, Any]]:
+        """Yield every review thread on the PR, following GraphQL pagination.
+
+        *node_fields* is the ``nodes{…}`` selection the caller needs; everything
+        else — the query skeleton, the four variables, the connection unwrap and
+        the cursor advance — is the same for every caller. Read-only.
+        """
+        owner, _, name = self._repo.partition("/")
+        cursor: str | None = None
+        while True:
+            data = self._graphql(
+                _THREADS_QUERY % node_fields,
+                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
+            )
+            conn = data["repository"]["pullRequest"]["reviewThreads"]
+            yield from conn["nodes"]
+            page = conn.get("pageInfo", {})
+            if not page.get("hasNextPage"):
+                return
+            cursor = page.get("endCursor")
+
     def _get_json(self, url: str) -> Any:
         resp = self._client.get(
             url,
-            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            headers=self._json_headers,
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
@@ -877,9 +906,8 @@ class RestGitHubGateway(GitHubGateway):
 
     def _fetch_pr_diff(self) -> str:
         """The PR's unified diff — a single GET with the ``.diff`` Accept header."""
-        pr_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
         resp = self._client.get(
-            pr_url,
+            self._pr_api,
             headers={**self._headers, "Accept": "application/vnd.github.v3.diff"},
             timeout=_TIMEOUT,
         )
@@ -892,7 +920,7 @@ class RestGitHubGateway(GitHubGateway):
         Deleted/renamed-away files (404) and any other fetch error degrade to
         None so the engine simply reviews the bare diff for that file.
         """
-        url = f"https://api.github.com/repos/{self._repo}/contents/{path}?ref={ref}"
+        url = f"{self._api}/contents/{path}?ref={ref}"
         try:
             resp = self._client.get(
                 url,
@@ -911,10 +939,7 @@ class RestGitHubGateway(GitHubGateway):
         degrades like file contents: any fetch error returns [] (the intent lens
         still has the PR title/description) rather than failing the review.
         """
-        url = (
-            f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}"
-            "/commits?per_page=100"
-        )
+        url = f"{self._pr_api}/commits?per_page=100"
         subjects: list[str] = []
         try:
             for resp in self._paginate(url):
@@ -932,7 +957,7 @@ class RestGitHubGateway(GitHubGateway):
         while next_url is not None:
             resp = self._client.get(
                 next_url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                headers=self._json_headers,
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
@@ -948,17 +973,17 @@ class RestGitHubGateway(GitHubGateway):
         instead of updating it. Memoized for the run: the incremental watermark
         read and the post both need it, and no review is posted in between.
         """
-        if self._existing_review_entry is not False:
+        if self._existing_review_done:
             return self._existing_review_entry
-        url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
-        for resp in self._paginate(url):
+        for resp in self._paginate(f"{self._pr_api}/reviews"):
             for review in resp.json():
                 body: str = review.get("body", "") or ""
                 if self._marker in body:
                     review_id: int = review["id"]
                     self._existing_review_entry = (review_id, body)
+                    self._existing_review_done = True
                     return self._existing_review_entry
-        self._existing_review_entry = None
+        self._existing_review_done = True
         return None
 
     # ------------------------------------------------------------------
@@ -1074,44 +1099,13 @@ class RestGitHubGateway(GitHubGateway):
         0 rather than blocking a review over a disclosure nicety. Adapter-only,
         beyond the frozen port.
         """
-        query = """
-        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
-          repository(owner:$owner,name:$name){
-            pullRequest(number:$number){
-              reviewThreads(first:100, after:$cursor){
-                pageInfo{ hasNextPage endCursor }
-                nodes{ isResolved comments(first:1){ nodes{ body } } }
-              }
-            }
-          }
-        }
-        """
-        owner, _, name = self._repo.partition("/")
         open_threads = 0
-        cursor: str | None = None
         try:
-            while True:
-                data = self._graphql(
-                    query,
-                    {
-                        "owner": owner,
-                        "name": name,
-                        "number": self._pr_number,
-                        "cursor": cursor,
-                    },
-                )
-                conn = data["repository"]["pullRequest"]["reviewThreads"]
-                for node in conn["nodes"]:
-                    if node.get("isResolved"):
-                        continue
-                    comments = node.get("comments", {}).get("nodes", [])
-                    body = comments[0].get("body", "") if comments else ""
-                    if _FINDING_MARKER.search(body):
-                        open_threads += 1
-                page = conn.get("pageInfo", {})
-                if not page.get("hasNextPage"):
-                    break
-                cursor = page.get("endCursor")
+            for node in self._walk_review_threads("isResolved comments(first:1){ nodes{ body } }"):
+                if node.get("isResolved"):
+                    continue
+                if _FINDING_MARKER.search(_first_comment(node).get("body", "")):
+                    open_threads += 1
         except Exception as exc:  # noqa: BLE001 — disclosure is never worth a failed review
             _log.warning("counting open finding conversations failed: %s", exc)
             return 0
@@ -1123,58 +1117,29 @@ class RestGitHubGateway(GitHubGateway):
         Each entry is ``(thread_id, opening comment's REST id or None, opening
         comment's body)`` — the comment id/body feed the resolved-marker rewrite.
         """
-        query = """
-        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
-          repository(owner:$owner,name:$name){
-            pullRequest(number:$number){
-              reviewThreads(first:100, after:$cursor){
-                pageInfo{ hasNextPage endCursor }
-                nodes{
-                  id
-                  isResolved
-                  isOutdated
-                  path
-                  comments(first:1){ nodes{ body databaseId } }
-                }
-              }
-            }
-          }
-        }
-        """
-        owner, _, name = self._repo.partition("/")
         fixed: list[tuple[str, int | None, str]] = []
-        cursor: str | None = None
-        while True:
-            data = self._graphql(
-                query,
-                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
-            )
-            conn = data["repository"]["pullRequest"]["reviewThreads"]
-            for node in conn["nodes"]:
-                if node.get("isResolved"):
-                    continue
-                if not node.get("isOutdated"):
-                    continue
-                if (
-                    self._incremental_paths is not None
-                    and node.get("path") not in self._incremental_paths
-                ):
-                    # Incremental run: this file wasn't re-reviewed, so its
-                    # finding's absence is no evidence it was fixed.
-                    continue
-                comments = node.get("comments", {}).get("nodes", [])
-                first = comments[0] if comments else {}
-                first_body = first.get("body", "")
-                keys = _finding_keys(first_body)
-                if not keys:
-                    continue  # not one of ours
-                if keys & current:
-                    continue  # still flagged this run (however worded) — leave it open
-                fixed.append((node["id"], first.get("databaseId"), first_body))
-            page = conn.get("pageInfo", {})
-            if not page.get("hasNextPage"):
-                break
-            cursor = page.get("endCursor")
+        for node in self._walk_review_threads(
+            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+        ):
+            if node.get("isResolved"):
+                continue
+            if not node.get("isOutdated"):
+                continue
+            if (
+                self._incremental_paths is not None
+                and node.get("path") not in self._incremental_paths
+            ):
+                # Incremental run: this file wasn't re-reviewed, so its
+                # finding's absence is no evidence it was fixed.
+                continue
+            first = _first_comment(node)
+            first_body = first.get("body", "")
+            keys = _finding_keys(first_body)
+            if not keys:
+                continue  # not one of ours
+            if keys & current:
+                continue  # still flagged this run (however worded) — leave it open
+            fixed.append((node["id"], first.get("databaseId"), first_body))
         return fixed
 
     def _resolve_thread(self, thread_id: str) -> None:
@@ -1209,11 +1174,11 @@ class RestGitHubGateway(GitHubGateway):
         rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
             _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
         )
-        url = f"https://api.github.com/repos/{self._repo}/pulls/comments/{comment_id}"
+        url = f"{self._api}/pulls/comments/{comment_id}"
         try:
             resp = self._client.patch(
                 url,
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                headers=self._json_headers,
                 json={"body": rewritten},
                 timeout=_TIMEOUT,
             )
@@ -1243,58 +1208,27 @@ class RestGitHubGateway(GitHubGateway):
         critical security findings are never suppressed this way (enforced at
         suppression time), so a downvote can't hide a serious vulnerability.
         """
-        query = """
-        query($owner:String!,$name:String!,$number:Int!,$cursor:String){
-          repository(owner:$owner,name:$name){
-            pullRequest(number:$number){
-              reviewThreads(first:100, after:$cursor){
-                pageInfo{ hasNextPage endCursor }
-                nodes{
-                  comments(first:1){
-                    nodes{
-                      body
-                      reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
-        owner, _, name = self._repo.partition("/")
         downvoted: set[str] = set()
-        cursor: str | None = None
-        while True:
-            data = self._graphql(
-                query,
-                {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
-            )
-            conn = data["repository"]["pullRequest"]["reviewThreads"]
-            for node in conn["nodes"]:
-                comments = node.get("comments", {}).get("nodes", [])
-                if not comments:
-                    continue
-                first = comments[0]
-                match = _FINDING_MARKER.search(first.get("body", "") or "")
-                if match is None:
-                    continue  # not one of ours
-                reactors = (first.get("reactions") or {}).get("nodes") or []
-                logins: set[str] = set()
-                for reaction in reactors:
-                    user = reaction.get("user") or {}
-                    login = user.get("login")
-                    if login:
-                        logins.add(login)
-                # Only an authorised (write+) reviewer's 👎 counts — on a public
-                # repo anyone can react, and an unprivileged reaction must never
-                # suppress a finding.
-                if any(self._has_repo_write(login) for login in logins):
-                    downvoted.add(match.group(1))
-            page = conn.get("pageInfo", {})
-            if not page.get("hasNextPage"):
-                break
-            cursor = page.get("endCursor")
+        for node in self._walk_review_threads(
+            "comments(first:1){ nodes{ body "
+            "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
+        ):
+            first = _first_comment(node)
+            match = _FINDING_MARKER.search(first.get("body", "") or "")
+            if match is None:
+                continue  # not one of ours (or a thread with no comments)
+            reactors = (first.get("reactions") or {}).get("nodes") or []
+            logins: set[str] = set()
+            for reaction in reactors:
+                user = reaction.get("user") or {}
+                login = user.get("login")
+                if login:
+                    logins.add(login)
+            # Only an authorised (write+) reviewer's 👎 counts — on a public
+            # repo anyone can react, and an unprivileged reaction must never
+            # suppress a finding.
+            if any(self._has_repo_write(login) for login in logins):
+                downvoted.add(match.group(1))
         return downvoted
 
     def _has_repo_write(self, login: str) -> bool:
@@ -1311,8 +1245,8 @@ class RestGitHubGateway(GitHubGateway):
         allowed = False
         try:
             resp = self._client.get(
-                f"https://api.github.com/repos/{self._repo}/collaborators/{login}/permission",
-                headers={**self._headers, "Accept": "application/vnd.github+json"},
+                f"{self._api}/collaborators/{login}/permission",
+                headers=self._json_headers,
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
@@ -1327,7 +1261,7 @@ class RestGitHubGateway(GitHubGateway):
         """Run one GraphQL operation and return its ``data`` (raising on errors)."""
         resp = self._client.post(
             _GRAPHQL_URL,
-            headers={**self._headers, "Accept": "application/vnd.github+json"},
+            headers=self._json_headers,
             json={"query": query, "variables": variables},
             timeout=_TIMEOUT,
         )
