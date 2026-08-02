@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.11.0...lgtmaybe-v1.11.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **engine:** tell the intent lens which files it was not shown ([#321](https://github.com/MattJColes/lgtmaybe/issues/321)) ([cfa8742](https://github.com/MattJColes/lgtmaybe/commit/cfa87423c2ac4ebdb38c81d8c0f1d0e88e2f39b6))
+
 ## [1.11.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.10.0...lgtmaybe-v1.11.0) (2026-08-02)
 
 
