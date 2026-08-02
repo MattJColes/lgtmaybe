@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from lgtmaybe.core.models import (
     CustomLens,
+    DirectoryRule,
     PRContext,
     Provider,
     ProviderResult,
@@ -298,6 +299,41 @@ def test_review_config_extra_lens_ids_must_be_unique() -> None:
 def test_review_config_extra_lenses_defaults_empty() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     assert cfg.extra_lenses == []
+
+
+def test_directory_rule_defaults_to_every_path() -> None:
+    """An empty `paths` is the 'everywhere' rule, mirroring FindingRuleMatch."""
+    rule = DirectoryRule(instructions="Be strict.")
+    assert rule.paths == []
+    assert rule.context_files == []
+
+
+def test_directory_rule_rejects_unknown_keys() -> None:
+    with pytest.raises(ValidationError):
+        DirectoryRule(instructions="x", path="payments/**")  # type: ignore[call-arg]
+
+
+def test_review_config_accepts_directory_rules() -> None:
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        directory_rules=[
+            {
+                "paths": ["payments/**"],
+                "instructions": "Money code is strict.",
+                "context_files": ["ARCHITECTURE.md"],
+            }
+        ],
+    )
+    assert cfg.directory_rules[0].paths == ["payments/**"]
+    assert cfg.directory_rules[0].context_files == ["ARCHITECTURE.md"]
+    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
+    assert restored.directory_rules[0].instructions == "Money code is strict."
+
+
+def test_review_config_directory_rules_default_empty() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert cfg.directory_rules == []
 
 
 def test_review_config_reflect_defaults_to_true() -> None:

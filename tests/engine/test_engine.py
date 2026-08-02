@@ -1370,6 +1370,52 @@ def test_custom_lens_runs_as_an_extra_review_call() -> None:
     assert findings  # the custom lens's finding survived the pipeline
 
 
+def test_directory_instructions_reach_only_the_matching_batch(tmp_path, monkeypatch) -> None:
+    """A directory rule's instructions ride the batch whose files it matches —
+    and no other batch pays for them."""
+    payments = _multi_hunk_diff("payments/charge.py", n_hunks=3, lines_per_hunk=40)
+    docs = _multi_hunk_diff("docs/guide.py", n_hunks=3, lines_per_hunk=40)
+    diff = payments + docs
+    ctx = PRContext(
+        diff=diff,
+        changed_files=["payments/charge.py", "docs/guide.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    (tmp_path / "PAYMENTS.md").write_text("Every charge is idempotent.")
+    monkeypatch.chdir(tmp_path)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.security],
+        # Below the two files together, above either alone: one batch per file.
+        max_input_tokens=count_tokens(diff) * 2 // 3,
+        reflect=False,
+        recursive=False,
+        directory_rules=[
+            {
+                "paths": ["payments/**"],
+                "instructions": "Money code is strict.",
+                "context_files": ["PAYMENTS.md"],
+            }
+        ],
+    )
+
+    provider = _PerHunkProvider()
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    review_calls = _review_calls(provider)
+    assert len(review_calls) == 2
+    with_rule = [c for c in review_calls if "Money code is strict." in _all_text(c)]
+    assert len(with_rule) == 1
+    assert "marker_0_line_0" in _all_text(with_rule[0])
+    assert "Every charge is idempotent." in _all_text(with_rule[0])
+    without = [c for c in review_calls if c not in with_rule]
+    assert "Every charge is idempotent." not in _all_text(without[0])
+
+
 # ---------------------------------------------------------------------------
 # deterministic re-anchoring: a finding's drifted line is snapped to the real
 # changed line its verbatim `anchor` matches (the model can't count reliably)

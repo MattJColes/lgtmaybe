@@ -14,6 +14,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from functools import partial
+from pathlib import Path
 
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
@@ -43,6 +44,7 @@ from .compress import (
     split_patch_into_hunks,
     trailing_context_lines,
 )
+from .directory import build_directory_block, load_context_files, rules_for
 from .injection import wrap_diff, wrap_hints, wrap_intent
 from .parse import ParseError, parse_findings
 from .profiling import profiler
@@ -441,6 +443,13 @@ class LLMReviewEngine(ReviewEngine):
                 file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
             )
 
+        # 4b. Directory-scoped context files, read ONCE for the whole review from
+        #     the checked-out workspace (trusted base content — never the PR
+        #     head, which is why no gateway fetcher is involved). Which of them
+        #     a given batch actually sees is decided per batch below.
+        with profiler.stage("directory_context"):
+            dir_contents = load_context_files(cfg, Path.cwd()) if cfg.directory_rules else {}
+
         # Announce the queued work before any model call returns, so a long run
         # on a slow provider shows up immediately in the Action log instead of
         # looking stuck until the first review comment lands.
@@ -478,6 +487,14 @@ class LLMReviewEngine(ReviewEngine):
             batch_paths = {path for path, _ in batch}
             batch_hints = [h for h in sa_hints if h.path in batch_paths]
             hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
+            # Directory rules matching THIS batch's files, with the context
+            # files they name. Batch-scoped like the hints above, so a batch
+            # never pays for another directory's instructions.
+            dir_block = (
+                build_directory_block(rules_for(batch_paths, cfg), dir_contents)
+                if cfg.directory_rules
+                else None
+            )
             # Warm the prompt cache for this batch: a fully concurrent first
             # wave defeats it (every call misses, and on explicit-breakpoint
             # routes each also pays the cache write), so one lens is dispatched
@@ -498,6 +515,7 @@ class LLMReviewEngine(ReviewEngine):
                     wrapped,
                     intent_block,
                     hint_block,
+                    dir_block,
                     cfg.model,
                     response_format,
                     batch_num,
@@ -802,6 +820,7 @@ class LLMReviewEngine(ReviewEngine):
         wrapped: str,
         intent_block: str | None,
         hint_block: str | None,
+        dir_block: str | None,
         model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
@@ -854,6 +873,7 @@ class LLMReviewEngine(ReviewEngine):
                 batch=batch,
                 intent_block=intent_block,
                 hint_block=hint_block,
+                dir_block=dir_block,
                 model=model,
                 response_format=response_format,
                 batch_num=batch_num,
@@ -865,7 +885,13 @@ class LLMReviewEngine(ReviewEngine):
             )
         )
         if split_prompt:
-            prefix = wrapped if hint_block is None else f"{hint_block}\n\n{wrapped}"
+            # The directory block joins the ONE prefix string rather than adding
+            # a fourth message: the adapter puts its cache breakpoint on the last
+            # prefix block, and it varies per batch exactly like the hints do, so
+            # it is warmed once by the primer and read by lenses 2..N.
+            prefix = "\n\n".join(
+                part for part in (dir_block, hint_block, wrapped) if part is not None
+            )
             suffix = lens.user_block
             if lens.carries_intent and intent_block is not None:
                 # Only the intent lens pays the intent-block tokens (and its
@@ -890,6 +916,10 @@ class LLMReviewEngine(ReviewEngine):
             # Static-analysis grounding: every lens sees the hints (each judges
             # relevance to its own concern) ahead of the diff they refer to.
             user_content = f"{hint_block}\n\n{user_content}"
+        if dir_block is not None:
+            # Directory-scoped instructions/context lead, same as in the split
+            # shape, so the two layouts stay behaviourally comparable.
+            user_content = f"{dir_block}\n\n{user_content}"
         messages = [
             {"role": "system", "content": lens.system_prompt},
             {"role": "user", "content": user_content},
@@ -905,6 +935,7 @@ class LLMReviewEngine(ReviewEngine):
         batch: list[tuple[str, str]],
         intent_block: str | None,
         hint_block: str | None,
+        dir_block: str | None,
         model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
@@ -943,6 +974,7 @@ class LLMReviewEngine(ReviewEngine):
                 wrap_diff("\n".join(patch for _, patch in piece)),
                 intent_block,
                 hint_block,
+                dir_block,
                 model,
                 response_format,
                 batch_num,

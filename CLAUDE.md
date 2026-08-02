@@ -296,6 +296,23 @@ pattern, event bus, plugin framework.
      `pull_request_target` config comes from the base, not the PR head). Covered by
      `tests/engine/test_prompt.py`, `tests/engine/test_engine.py`,
      `tests/config/test_loader.py`, and `tests/test_models.py`.
+   - **Directory-scoped instructions + context (BYO, per path):**
+     `ReviewConfig.directory_rules` (a `DirectoryRule`: `paths` globs — empty =
+     everywhere — plus `instructions` and `context_files`) lets a monorepo say
+     "`payments/**` is strict, `tests/**` is lenient, read `ARCHITECTURE.md`
+     before `src/**`". `engine/directory.py` reuses `passes_path_filters` to
+     match a batch, `retrieve.resolve_needs` with a **local-filesystem** fetcher
+     to read the context files (inheriting redaction, the `max_input_tokens // 8`
+     budget, and `MAX_FETCH_FILES`), and renders one block. The block joins the
+     **same per-batch prefix string** as the hints + wrapped diff — not a fourth
+     message — so `build_shared_preamble` stays byte-identical, the existing
+     primer warms it once, and the adapter needs no change. Context comes from
+     the checked-out workspace (`Path.cwd()`), i.e. the **base** branch on
+     `pull_request_target` — never `github.get_file_contents`, which resolves at
+     the PR head. Instructions ride verbatim under a trusted-config lead-in;
+     context text is `injection.neutralise`d. YAML-only (list-of-objects, like
+     `finding_rules`): no CLI flag, no Action input. **No `BUGBOT.md` walk-up** —
+     it stays available later as a pure loader desugar needing no engine change.
    - **Intent lens:** "does the PR do what it says?" — `PRContext` carries the
      stated intent (`title`, `description`, `commit_messages`): PR title/body +
      commit names via the REST gateway, or `git log` commit names from the local

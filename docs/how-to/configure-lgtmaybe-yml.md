@@ -37,6 +37,7 @@ provides defaults for all runs.
   - [resolve_fixed](#resolve_fixed)
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
+  - [directory_rules](#directory_rules)
 - [CLI flag overrides](#cli-flag-overrides)
 
 ## Full example
@@ -677,6 +678,40 @@ lens_paths:
 ```
 
 Default: none.
+
+### directory_rules
+
+Scope extra review instructions and reference files to **part of** the repo —
+what a monorepo needs when `payments/**` and `tests/**` deserve different
+treatment. Each rule has `paths` (fnmatch globs; a `**/` prefix also matches at
+the repo root, and an **empty or omitted** list applies the rule everywhere),
+free-text `instructions`, and `context_files` read from the checked-out
+workspace. A rule reaches every lens reviewing a file it matches, and no other.
+
+```yaml
+directory_rules:
+  - paths: ["payments/**", "billing/**"]
+    instructions: |
+      Money-handling code. Treat rounding, currency-conversion and retry
+      changes as high severity, and flag any write path that is not idempotent.
+
+  - paths: ["tests/**"]
+    instructions: |
+      Test code — do not flag duplication, long functions, or missing
+      docstrings here.
+
+  - paths: ["src/**"]
+    instructions: Check changes against the architecture described below.
+    context_files: [ARCHITECTURE.md]
+```
+
+Context files are redacted like the diff, share `max_input_tokens / 8`, and are
+capped at five files per review; a missing or over-budget path is skipped
+silently. Both the instructions and the context text are **trusted config** — on
+`pull_request_target` they come from the base branch, never the PR head. See
+[Scope review instructions to a directory](scope-review-instructions-to-a-directory.md).
+
+Default: no rules.
 
 ## CLI flag overrides
 

@@ -411,6 +411,27 @@ class FindingRule(_Strict):
     action: FindingRuleAction
 
 
+class DirectoryRule(_Strict):
+    """Extra review instructions and context scoped to part of the repo.
+
+    A monorepo is not uniform: ``payments/**`` wants strictness that would be
+    noise in ``tests/**``, and reviewing ``src/**`` well may need a design doc
+    the diff never shows. Each rule names the paths it applies to (fnmatch globs
+    against the repo-relative path, a ``**/`` prefix also matching at the repo
+    root — the same matcher the path filters use; an EMPTY list applies the rule
+    everywhere, mirroring ``FindingRuleMatch``), free-text ``instructions``, and
+    ``context_files`` read from the checked-out workspace.
+
+    Both are trusted configuration: on ``pull_request_target`` the workspace is
+    the BASE branch, so neither the instructions nor the context text is ever
+    PR-author content.
+    """
+
+    paths: list[str] = Field(default_factory=list)
+    instructions: str = ""
+    context_files: list[str] = Field(default_factory=list)
+
+
 class FileWalkthrough(_Strict):
     """One entry of a PR description's per-file walkthrough."""
 
@@ -700,6 +721,15 @@ class ReviewConfig(_Strict):
     # remaps their severity. A safe alternative to arbitrary user hooks — no
     # user code ever runs. Empty (default) = no post-processing.
     finding_rules: list[FindingRule] = Field(default_factory=list)
+    # Directory-scoped review instructions and context files: each rule's path
+    # globs select the files it applies to (empty = everywhere), its
+    # `instructions` are handed to every lens reviewing a batch that touches
+    # them, and its `context_files` are read from the checked-out workspace and
+    # included alongside. Both are trusted configuration (on
+    # pull_request_target the workspace is the base branch, never the PR head).
+    # Empty (default) = one uniform review across the whole repo. YAML-only,
+    # like finding_rules and extra_lenses.
+    directory_rules: list[DirectoryRule] = Field(default_factory=list)
     # Custom template for the review summary line. Placeholders: {count}
     # (findings posted), {provider}, {model}, {version} (the running lgtmaybe
     # release). None (default) keeps the built-in line, which names all of them;

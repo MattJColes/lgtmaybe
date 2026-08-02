@@ -133,6 +133,49 @@ class TestSplitShape:
         assert custom[0]["messages"][0]["content"] == build_shared_preamble()
 
 
+class TestDirectoryBlockPlacement:
+    """A directory rule must not disturb the cacheable prefix contract.
+
+    It varies per batch — exactly like the static-analysis hints block — so it
+    joins the SAME single prefix user message, never a fourth message and never
+    the cross-batch system preamble.
+    """
+
+    def test_shared_preamble_is_byte_identical_with_and_without_rules(self) -> None:
+        plain = FakeProvider()
+        LLMReviewEngine(plain).review(_CTX, _cfg())
+        scoped = FakeProvider()
+        LLMReviewEngine(scoped).review(
+            _CTX,
+            _cfg(directory_rules=[{"instructions": "Money code is strict."}]),
+        )
+        assert {c["messages"][0]["content"] for c in plain.calls} == {
+            c["messages"][0]["content"] for c in scoped.calls
+        }
+        assert {c["messages"][0]["content"] for c in scoped.calls} == {build_shared_preamble()}
+
+    def test_the_block_rides_the_prefix_not_the_lens_block(self) -> None:
+        provider = FakeProvider()
+        LLMReviewEngine(provider).review(
+            _CTX,
+            _cfg(directory_rules=[{"instructions": "Money code is strict."}]),
+        )
+        for call in provider.calls:
+            messages = call["messages"]
+            assert [m["role"] for m in messages] == ["system", "user", "user"]
+            assert "Money code is strict." in messages[1]["content"]
+            assert "Money code is strict." not in messages[2]["content"]
+
+    def test_the_prefix_stays_identical_across_lenses(self) -> None:
+        """Still one cache entry per batch — the block is lens-independent."""
+        provider = FakeProvider()
+        LLMReviewEngine(provider).review(
+            _CTX,
+            _cfg(directory_rules=[{"instructions": "Money code is strict."}]),
+        )
+        assert len({c["messages"][1]["content"] for c in provider.calls}) == 1
+
+
 class _EventOrderProvider(FakeProvider):
     """Records call start/end events so warm-up serialisation is observable."""
 
