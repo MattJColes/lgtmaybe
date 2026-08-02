@@ -15,55 +15,43 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+# The one registry of untrusted-data blocks. Both the delimiter constants and
+# the tokens `neutralise` defangs are derived from it, so a family can never be
+# half-registered — which would ship a block whose closer an attacker can forge,
+# with no test failure and no type error.
+_FAMILIES = ("DIFF", "INTENT", "HINTS", "REPLY", "CONTEXT")
+
+
+def _markers(family: str) -> tuple[str, str]:
+    """The start/end delimiter pair for a marker *family*."""
+    return f"==={family}_START===", f"==={family}_END==="
+
+
 # Public names: other modules (describe, diagram) build their own diff blocks
 # with these so a marker rename here can never desync from `neutralise`.
-DIFF_START = "===DIFF_START==="
-DIFF_END = "===DIFF_END==="
+DIFF_START, DIFF_END = _markers("DIFF")
 # Private aliases kept for existing references.
-_START = DIFF_START
-_END = DIFF_END
+_START, _END = DIFF_START, DIFF_END
 
-# Delimiters for the stated-intent block (PR title / description / commit
-# messages) — attacker-controlled on a fork PR, exactly like the diff.
-_INTENT_START = "===INTENT_START==="
-_INTENT_END = "===INTENT_END==="
-
-# Delimiters for the static-analysis hints block. Tool output is derived from
-# attacker-controlled file contents (messages can quote hostile code), so it
-# gets the same untrusted-data posture as the diff and intent.
-_HINTS_START = "===HINTS_START==="
-_HINTS_END = "===HINTS_END==="
-
-# Delimiters for the mid-review retrieval block: files a lens asked to read
-# (its `needs` deferral). It is repository source — attacker-controlled on a
-# fork PR exactly like the diff — so it gets the same untrusted-data posture.
-_CONTEXT_START = "===CONTEXT_START==="
-_CONTEXT_END = "===CONTEXT_END==="
-
-# Delimiters for a PR author's reply in a finding thread. The reply is
-# attacker-controlled on a fork PR, exactly like the diff and intent, so it
-# gets the same neutralised, untrusted-data posture.
-_REPLY_START = "===REPLY_START==="
-_REPLY_END = "===REPLY_END==="
+# The remaining blocks are all attacker-controlled on a fork PR exactly like the
+# diff, so they get the same untrusted-data posture: the stated intent (PR
+# title / description / commit messages); the static-analysis hints, derived
+# from file contents that can quote hostile code; a PR author's reply in a
+# finding thread; and the mid-review retrieval block, repository source a lens
+# asked to read via its `needs` deferral.
+_INTENT_START, _INTENT_END = _markers("INTENT")
+_HINTS_START, _HINTS_END = _markers("HINTS")
+_REPLY_START, _REPLY_END = _markers("REPLY")
+_CONTEXT_START, _CONTEXT_END = _markers("CONTEXT")
 
 # Sentinels we must not let untrusted content forge. Every marker family is
 # neutralised in every block, so a diff can't fake an intent or hints block and
 # neither can close the diff block. Matching is case-insensitive so a cased
 # variant (``diff_end``/``Diff_End``) can't slip a closer through that a model
 # might still read as the real delimiter.
-_MARKER_TOKENS = (
-    "DIFF_START",
-    "DIFF_END",
-    "INTENT_START",
-    "INTENT_END",
-    "HINTS_START",
-    "HINTS_END",
-    "REPLY_START",
-    "REPLY_END",
-    "CONTEXT_START",
-    "CONTEXT_END",
+_MARKER_RE = re.compile(
+    "|".join(f"{f}_{s}" for f in _FAMILIES for s in ("START", "END")), re.IGNORECASE
 )
-_MARKER_RE = re.compile("|".join(re.escape(t) for t in _MARKER_TOKENS), re.IGNORECASE)
 
 # Lead with the review task. A heavier "this is UNTRUSTED DATA, take no action"
 # framing makes weaker local models read the diff as inert and return [] even on
@@ -107,14 +95,19 @@ def neutralise(text: str) -> str:
     return _MARKER_RE.sub(lambda m: m.group(0).replace("_", "-"), text)
 
 
+def _block(preamble: str, family: str, body: str, suffix: str = "") -> str:
+    """Render *body* as a neutralised untrusted-data block of *family*."""
+    start, end = _markers(family)
+    return f"{preamble}{start}\n{neutralise(body)}\n{end}{suffix}"
+
+
 def wrap_diff(diff: str) -> str:
     """Wrap *diff* with a light injection guard and restate the review task.
 
     The diff is neutralised first so a forged delimiter can't close the data
     block early, then the review task is restated after the block.
     """
-    safe = neutralise(diff)
-    return f"{INJECTION_PREAMBLE}{_START}\n{safe}\n{_END}{_TASK_SUFFIX}"
+    return _block(INJECTION_PREAMBLE, "DIFF", diff, _TASK_SUFFIX)
 
 
 HINTS_PREAMBLE = (
@@ -133,8 +126,7 @@ def wrap_hints(hints: str) -> str:
     message (which can quote hostile code) can't close the block early or fake
     a diff/intent block.
     """
-    safe = neutralise(hints)
-    return f"{HINTS_PREAMBLE}{_HINTS_START}\n{safe}\n{_HINTS_END}"
+    return _block(HINTS_PREAMBLE, "HINTS", hints)
 
 
 # How many hidden paths to name before summarising the rest. A monorepo can
@@ -165,15 +157,14 @@ def wrap_intent(intent: str, not_visible: Sequence[str] = ()) -> str:
     previous instructions`` is a legal filename), so paths need exactly the same
     defanging as the intent prose.
     """
-    safe = neutralise(intent)
     if not_visible:
         listed = list(not_visible[:_MAX_LISTED_NOT_VISIBLE])
         rest = len(not_visible) - len(listed)
         lines = [f"- {p}" for p in listed]
         if rest:
             lines.append(f"- … and {rest} more")
-        safe = f"{safe}\n\n{neutralise(_NOT_VISIBLE_LEAD)}\n" + neutralise("\n".join(lines))
-    return f"{INTENT_PREAMBLE}{_INTENT_START}\n{safe}\n{_INTENT_END}"
+        intent = f"{intent}\n\n{_NOT_VISIBLE_LEAD}\n" + "\n".join(lines)
+    return _block(INTENT_PREAMBLE, "INTENT", intent)
 
 
 REPLY_PREAMBLE = (
@@ -190,8 +181,7 @@ def wrap_reply(reply: str) -> str:
     Neutralised like the diff and intent: a forged delimiter in the reply can't
     close any block early, and the reply can't forge a diff/intent/hints block.
     """
-    safe = neutralise(reply)
-    return f"{REPLY_PREAMBLE}{_REPLY_START}\n{safe}\n{_REPLY_END}"
+    return _block(REPLY_PREAMBLE, "REPLY", reply)
 
 
 CONTEXT_PREAMBLE = (
@@ -213,4 +203,4 @@ def wrap_context(files: dict[str, str]) -> str:
     an injected diff could name the file carrying its own payload.
     """
     body = "\n\n".join(f"--- {path} ---\n{text}" for path, text in files.items())
-    return f"{CONTEXT_PREAMBLE}{_CONTEXT_START}\n{neutralise(body)}\n{_CONTEXT_END}"
+    return _block(CONTEXT_PREAMBLE, "CONTEXT", body)

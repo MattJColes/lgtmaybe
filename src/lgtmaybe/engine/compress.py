@@ -171,9 +171,6 @@ def batch_files(
     Returns:
         A list of batches; each batch is a list of (path, patch) pairs.
     """
-    if not files:
-        return []
-
     # RLM walk: decompose any over-budget file into per-hunk units up front, so a
     # large file becomes several small calls that each fit instead of one
     # oversized call. Files within budget pass through whole (context preserved).

@@ -175,6 +175,39 @@ def test_relativise_returns_forward_slash_paths(tmp_path: Path) -> None:
     assert static_analysis._posix_rel("./src/app.py") == "src/app.py"
 
 
+def test_dotted_key_paths_tolerate_a_missing_level() -> None:
+    """`_get` walks a tool's nesting; a missing or non-dict level yields None.
+
+    The table-driven mappers read every field through this, so a tool that omits
+    an optional wrapper (semgrep's ``extra``, ast-grep's ``range``) must degrade
+    to the spec's default rather than raising and losing the whole tool's output.
+    """
+    item = {"start": {"line": 4}, "extra": {"severity": "ERROR"}, "check_id": None}
+
+    assert static_analysis._get(item, "start.line") == 4
+    assert static_analysis._get(item, "extra.severity") == "ERROR"
+    assert static_analysis._get(item, "missing.line") is None
+    assert static_analysis._get(item, "start.line.deeper") is None  # int is not a dict
+    assert static_analysis._get(item, "check_id") is None
+    # An empty path reads nothing — how an ungraded tool falls to its default.
+    assert static_analysis._get(item, "") is None
+
+
+def test_every_tool_is_either_table_driven_or_hand_written() -> None:
+    """The `_SPECS` table and the hand-written mappers must partition the tools.
+
+    `_parse_output` sends anything that is not osv-scanner or zizmor through the
+    table, so a tool added to the enum without a `_Spec` would raise a KeyError
+    at parse time and silently lose that tool's findings.
+    """
+    hand_written = {StaticAnalysisTool.osv_scanner, StaticAnalysisTool.zizmor}
+
+    assert set(static_analysis._SPECS) | hand_written == set(StaticAnalysisTool)
+    assert set(static_analysis._SPECS) & hand_written == set()
+    # The finding's tool label is the enum value, so the two cannot drift apart.
+    assert all(t.value for t in static_analysis._SPECS)
+
+
 def test_ruff_findings_parsed_and_relativised(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     captured_root: dict[str, str] = {}
 

@@ -178,9 +178,6 @@ class _Lens:
     # and falls back to the lens id otherwise; None (a focused lens) means the
     # lens id is always stamped — the model's value is ignored, as before.
     allowed_categories: frozenset[str] | None = None
-    # A split task can keep a distinct profiler label while attributing its
-    # findings to an existing public category.
-    finding_category: str | None = None
 
 
 def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = False) -> list[_Lens]:
@@ -1344,14 +1341,11 @@ def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[Review
     like any other.
     """
     allowed = lens.allowed_categories
-    fallback_category = lens.finding_category or lens.id
     return [
         f.model_copy(
             update={
                 "category": (
-                    f.category
-                    if allowed is not None and f.category in allowed
-                    else fallback_category
+                    f.category if allowed is not None and f.category in allowed else lens.id
                 )
             }
         )

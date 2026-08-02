@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from lgtmaybe.core.diffparse import changed_line_count
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ReviewConfig, TriageResult
 from lgtmaybe.core.ports import ProviderClient
@@ -97,8 +98,7 @@ def always_escalate(path: str, patch: str, hinted_paths: set[str]) -> bool:
         return True
     if _SECURITY_TOKEN_RE.search(patch):
         return True
-    changed = sum(1 for line in patch.splitlines() if line.startswith(("+", "-")))
-    return changed >= _MAX_SKIPPABLE_LINES
+    return changed_line_count(patch) >= _MAX_SKIPPABLE_LINES
 
 
 def triage_files(

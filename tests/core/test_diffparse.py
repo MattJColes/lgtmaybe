@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from lgtmaybe.core.diffparse import hunk_for_line, parse_hunk_header, split_by_file
+from lgtmaybe.core.diffparse import (
+    changed_line_count,
+    hunk_for_line,
+    parse_hunk_header,
+    split_by_file,
+    walk_diff,
+)
 
 _TWO_FILE_DIFF = """\
 diff --git a/src/a.py b/src/a.py
@@ -105,6 +111,41 @@ class TestHunkForLine:
         assert "-old" in hunk
 
 
+class TestWalkDiff:
+    def test_yields_kind_and_both_line_numbers_per_in_hunk_line(self):
+        assert list(walk_diff(_TWO_FILE_DIFF)) == [
+            ("src/a.py", " ", 1, 1, "x = 1"),
+            ("src/a.py", "+", 2, 2, "y = 2"),
+            ("src/a.py", " ", 2, 3, "z = 3"),
+            ("src/b.py", "-", 10, 10, "old"),
+            ("src/b.py", "+", 11, 10, "new"),
+        ]
+
+    def test_skips_everything_outside_a_hunk(self):
+        # Headers, index lines and ---/+++ preamble are not diff content.
+        assert [text for *_, text in walk_diff(_TWO_FILE_DIFF)] == [
+            "x = 1",
+            "y = 2",
+            "z = 3",
+            "old",
+            "new",
+        ]
+
+    def test_no_newline_marker_is_not_a_line(self):
+        diff = (
+            "diff --git a/f.txt b/f.txt\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-old line\n"
+            "\\ No newline at end of file\n"
+            "+new line\n"
+            "\\ No newline at end of file\n"
+        )
+        assert list(walk_diff(diff)) == [
+            ("f.txt", "-", 1, 1, "old line"),
+            ("f.txt", "+", 2, 1, "new line"),
+        ]
+
+
 class TestChangedLineIndex:
     def test_indexes_added_line_on_right_at_new_line(self):
         from lgtmaybe.core.diffparse import changed_line_index
@@ -146,3 +187,39 @@ class TestChangedLineIndex:
         # context is line 1, so the added line is the new-file line 2 (not 3).
         assert index[("f.txt", "RIGHT")] == [(2, "new line")]
         assert index[("f.txt", "LEFT")] == [(2, "old line")]
+
+
+class TestChangedLineCount:
+    def test_counts_added_and_removed_lines(self):
+        assert changed_line_count(_TWO_FILE_DIFF) == 3
+
+    def test_file_headers_are_not_changed_lines(self):
+        # The `---`/`+++` pair every per-file patch carries is diff metadata,
+        # not changed code — counting it inflates every file by two.
+        patch = (
+            "diff --git a/a.py b/a.py\n"
+            "index 111..222 100644\n"
+            "--- a/a.py\n"
+            "+++ b/a.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        assert changed_line_count(patch) == 2
+
+    def test_context_and_metadata_lines_are_ignored(self):
+        assert changed_line_count("diff --git a/a.py b/a.py\n@@ -1 +1 @@\n unchanged\n") == 0
+
+    def test_changed_lines_whose_content_looks_like_a_header_still_count(self):
+        # A line whose own content starts with `++` renders as `+++ ...` inside
+        # the hunk. Excluding by prefix would undercount it, letting a large
+        # patch duck the triage escalation floor.
+        patch = (
+            "diff --git a/a.py b/a.py\n"
+            "--- a/a.py\n"
+            "+++ b/a.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            "--- leading dashes\n"
+            "+++ leading pluses\n"
+        )
+        assert changed_line_count(patch) == 2

@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code agent worktrees — transient checkouts created under a tracked
+# directory, so without this a `git add .` stages nested copies of the repo.
+.claude/worktrees/
