@@ -98,6 +98,21 @@ def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]
     return index
 
 
+def changed_line_count(diff: str) -> int:
+    """Added/removed lines in *diff*, excluding the ``---``/``+++`` file headers.
+
+    The one home for "how big is this change": every per-file patch out of
+    :func:`split_by_file` carries a ``---``/``+++`` pair, so a naive
+    ``startswith(("+", "-"))`` inflates each file's count by two.
+    """
+    return sum(
+        1
+        for line in diff.splitlines()
+        if (line.startswith("+") and not line.startswith("+++"))
+        or (line.startswith("-") and not line.startswith("---"))
+    )
+
+
 def hunk_for_line(diff: str, path: str, line: int, side: str = "RIGHT") -> str | None:
     """Return the single hunk (with its file header) covering ``(path, line, side)``.
 

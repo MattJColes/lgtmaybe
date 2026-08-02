@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from lgtmaybe.core.diffparse import hunk_for_line, parse_hunk_header, split_by_file
+from lgtmaybe.core.diffparse import (
+    changed_line_count,
+    hunk_for_line,
+    parse_hunk_header,
+    split_by_file,
+)
 
 _TWO_FILE_DIFF = """\
 diff --git a/src/a.py b/src/a.py
@@ -146,3 +151,25 @@ class TestChangedLineIndex:
         # context is line 1, so the added line is the new-file line 2 (not 3).
         assert index[("f.txt", "RIGHT")] == [(2, "new line")]
         assert index[("f.txt", "LEFT")] == [(2, "old line")]
+
+
+class TestChangedLineCount:
+    def test_counts_added_and_removed_lines(self):
+        assert changed_line_count(_TWO_FILE_DIFF) == 3
+
+    def test_file_headers_are_not_changed_lines(self):
+        # The `---`/`+++` pair every per-file patch carries is diff metadata,
+        # not changed code — counting it inflates every file by two.
+        patch = (
+            "diff --git a/a.py b/a.py\n"
+            "index 111..222 100644\n"
+            "--- a/a.py\n"
+            "+++ b/a.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        assert changed_line_count(patch) == 2
+
+    def test_context_and_metadata_lines_are_ignored(self):
+        assert changed_line_count("diff --git a/a.py b/a.py\n@@ -1 +1 @@\n unchanged\n") == 0
