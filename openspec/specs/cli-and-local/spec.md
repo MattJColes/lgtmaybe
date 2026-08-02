@@ -83,6 +83,11 @@ when the model reports no run-time flow.
 - **THEN** the comment carries the flowchart alone, with no sequence section
   and no headings
 
+#### Scenario: the same diagram printed in a terminal
+- **WHEN** `lgtmaybe diagram` prints the body locally
+- **THEN** each collapsible text version becomes a labelled section with its
+  HTML wrapper removed, and the Mermaid source stays intact to paste elsewhere
+
 ### Requirement: Finding-thread replies are answered in-thread
 
 A `pull_request_review_comment` reply in a finding thread lgtmaybe opened SHALL

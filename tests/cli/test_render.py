@@ -1,10 +1,12 @@
-"""render_findings formats findings for the local CLI (human, json, agent)."""
+"""render_findings formats findings for the local CLI (human, json, agent),
+and flatten_details unwraps the comment-shaped collapsible blocks for a terminal."""
 
 from __future__ import annotations
 
 import json
 
 from lgtmaybe.cli import render_findings
+from lgtmaybe.cli.render import flatten_details
 from lgtmaybe.core.models import ReviewFinding, Severity
 
 _FINDING = ReviewFinding(
@@ -147,3 +149,46 @@ def test_hidden_markers_are_stripped_from_the_terminal_summary() -> None:
     agent = render_findings([], summary, fmt="agent")
     assert "results may be incomplete" in agent
     assert "<!--" not in agent
+
+
+def test_details_blocks_flatten_into_labelled_sections() -> None:
+    """The diagram comment tucks each text rendering in a <details> block GitHub
+    can collapse. A terminal shows the raw tags instead, so the label becomes a
+    heading and the tags go."""
+    body = (
+        "## Retry flow\n\n### Sequence\n\n```mermaid\nsequenceDiagram\n```\n\n"
+        "<details><summary>Text version</summary>\n\n"
+        "```\n1. [A] -> [B]: calls\n```\n\n"
+        "</details>\n\nA note."
+    )
+
+    out = flatten_details(body)
+
+    assert "<details>" not in out
+    assert "</summary>" not in out
+    assert "Text version:" in out
+    assert "1. [A] -> [B]: calls" in out
+    # The Mermaid source survives — it is what you paste into a GitHub comment.
+    assert "```mermaid" in out
+    assert "A note." in out
+
+
+def test_two_details_blocks_both_flatten() -> None:
+    """Structure and sequence each carry one, so a diagram body has two."""
+    body = (
+        "<details><summary>Text version</summary>\n\n```\nfirst\n```\n\n</details>\n\n"
+        "<details><summary>Text version</summary>\n\n```\nsecond\n```\n\n</details>"
+    )
+
+    out = flatten_details(body)
+
+    assert out.count("Text version:") == 2
+    assert "details" not in out
+    assert "first" in out
+    assert "second" in out
+
+
+def test_a_body_without_details_is_returned_unchanged() -> None:
+    body = '## Title\n\n```mermaid\nflowchart LR\n    n0["A"]\n```\n\nNotes.'
+
+    assert flatten_details(body) == body

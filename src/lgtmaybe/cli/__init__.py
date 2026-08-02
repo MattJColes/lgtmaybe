@@ -25,7 +25,7 @@ from typing import Any
 
 import click
 
-from lgtmaybe.cli.render import render_findings
+from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.cli.runtime import RuntimeOptions
 from lgtmaybe.core.diffparse import FILE_HEADER_RE, hunk_for_line
 from lgtmaybe.core.logging import get_logger
@@ -564,8 +564,9 @@ def execute_local_diagram(
 
     Builds the provider straight from config/runtime (no token, no gateway) and
     echoes the same Markdown body the ``/diagram`` comment would carry: the
-    Mermaid source (paste it into GitHub to render) plus the ASCII rendering,
-    which is what actually shows in a terminal.
+    Mermaid source (paste it into GitHub to render) plus the text rendering,
+    which is what actually shows in a terminal — with the comment's collapsible
+    wrappers flattened, since a terminal renders no HTML.
     """
     from lgtmaybe.engine.diagram import build_diagram
 
@@ -576,7 +577,7 @@ def execute_local_diagram(
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
-    click.echo(body)
+    click.echo(flatten_details(body))
 
 
 def _post_extras(

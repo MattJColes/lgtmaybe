@@ -3282,9 +3282,35 @@ $ lgtmaybe diagram --provider ollama --model llama3
 It diffs your branch against the base (the same base resolution as `lgtmaybe
 review`; `--base` overrides, `--working` includes uncommitted edits,
 `--uncommitted` reviews only the working-tree edits). The output is the same
-Markdown body the `/diagram` comment carries — each diagram's Mermaid source
-first, then its text rendering (which reads fine in a terminal) in a collapsed
-"Text version" block. Paste the Mermaid into a GitHub comment,
+body the `/diagram` comment carries — each diagram's Mermaid source first, then
+its text rendering — with one adaptation: a terminal renders no HTML, so the
+collapsible "Text version" wrapper is flattened into a plain labelled section:
+
+````console
+$ lgtmaybe diagram --provider ollama --model llama3
+
+### Sequence
+
+```mermaid
+sequenceDiagram
+    participant n0 as Order API (changed)
+    participant n1 as Payments
+    n0->>n1: POST /charge
+    n1-->>n0: 503 Unavailable
+    n0->>n0: backs off 200ms
+```
+
+Text version:
+
+```
+1. [Order API (changed)] -> [Payments]: POST /charge
+2. [Payments] --> [Order API (changed)]: 503 Unavailable
+3. [Order API (changed)] -> [Order API (changed)]: backs off 200ms
+```
+````
+
+The Mermaid source stays in the output on purpose: your terminal can't draw it,
+but it is what you paste into a GitHub comment,
 [mermaid.live](https://mermaid.live), or a Markdown file to render it.
 
 ## Why Mermaid (and what the ASCII is for)
@@ -3296,11 +3322,12 @@ hosting an image would mean committing a file or calling an external service,
 neither of which fits a fork-safe, idempotently-updated comment.
 
 A terminal, though, can't render Mermaid — which is exactly why each diagram
-also comes as **plain text**. Both the CLI output and the GitHub comment show
-the Mermaid with the text tucked in a collapsible "Text version" — the text is
-what you actually read in a terminal, and it doubles as the fallback body, so a
-reviewer never sees a red "unable to render" box if a diagram comes back
-malformed.
+also comes as **plain text**. In the GitHub comment that text sits in a
+collapsible "Text version" block, out of the way of the rendered diagram; in the
+terminal the same block is flattened to a labelled section, because HTML tags
+are noise in a shell. Either way the text is what you actually read without a
+renderer, and it doubles as the fallback body, so a reviewer never sees a red
+"unable to render" box if a diagram comes back malformed.
 
 The model never writes Mermaid. It returns typed graph data — components,
 relationships, ordered steps — and lgtmaybe renders the syntax itself, escaping
