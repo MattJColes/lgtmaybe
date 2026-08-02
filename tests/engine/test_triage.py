@@ -193,6 +193,18 @@ def test_unparseable_triage_reviews_everything() -> None:
     assert skipped == []
 
 
+def test_out_of_range_risk_reviews_everything() -> None:
+    """The verdict schema declares risk as 0-10, so a value outside it is a
+    verdict lgtmaybe cannot trust — and an untrusted verdict means review, never
+    a guessed-down score that could skip a file."""
+    provider = _verdict_provider([{"path": BORING[0], "review": False, "risk": 99}])
+
+    kept, skipped = triage_files([BORING, PLAIN], [], _cfg(triage_model="tiny"), provider)
+
+    assert [p for p, _ in kept] == [BORING[0], PLAIN[0]]
+    assert skipped == []
+
+
 def test_provider_failure_reviews_everything() -> None:
     class _Boom(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[no-untyped-def]

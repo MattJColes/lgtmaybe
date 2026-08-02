@@ -494,15 +494,13 @@ class DiagramResult(_Strict):
     The model returns presentation-agnostic nodes, edges, and ordered steps.
     lgtmaybe renders Mermaid (a flowchart of the structure, a sequence diagram
     of the flow) and text locally so model-authored syntax never reaches a
-    Mermaid fence. ``ascii`` remains only as a compatibility fallback for weak
-    models that return the legacy C4-plus-text shape.
+    Mermaid fence.
     """
 
     title: str = ""
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
     steps: list[DiagramStep] = Field(default_factory=list)
-    ascii: str = ""
     notes: str = ""
 
 
