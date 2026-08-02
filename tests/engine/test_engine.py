@@ -899,6 +899,124 @@ def test_non_intent_categories_do_not_carry_the_intent_block() -> None:
     assert "INTENT_START" not in _user_text(call)
 
 
+class TestIntentSeesWhatItWasNotShown:
+    """lgtmaybe told #315 its "regenerate docs/llms.txt" intent was unfulfilled.
+    The PR *had* regenerated it (+42 lines) — but `llms-full.txt` is hardcoded in
+    `_SKIP_FILENAMES`, so the file could never appear in the diff the model saw.
+    The lens compared a promise against a filtered diff, knowing nothing had been
+    filtered, and called a kept promise broken.
+    """
+
+    # A phrase unique to the not-shown NOTICE. The rubric itself also says "not
+    # shown" (it teaches the rule), and both ride the same user block — so that
+    # wording cannot distinguish "the lens was told what it is missing" from
+    # "the lens was told the rule".
+    _NOTICE = "part of this pr but are not in the diff"
+
+    @staticmethod
+    def _intent_block(provider) -> str:
+        """The intent lens's user text (the only call that carries the block)."""
+        return next(
+            _user_text(c) for c in _review_calls(provider) if "INTENT_START" in _user_text(c)
+        )
+
+    def test_a_file_dropped_by_the_hardcoded_skip_filter_is_named(self) -> None:
+        """#315's actual case. A fix keyed on `exclude_paths` would not have
+        fixed it: the skip filter drops this on ANY repo with ANY config."""
+        # The stated intent deliberately does NOT name the path: otherwise the
+        # assertion passes on the intent prose being echoed back, and never
+        # tests the not-shown notice at all.
+        ctx = _CTX_WITH_INTENT.model_copy(
+            update={
+                "title": "Regenerate the docs corpus",
+                "description": "Regenerates the generated docs corpus.",
+                "changed_files": ["a.py", "docs/llms-full.txt"],
+            }
+        )
+        provider = _provider_for([], reflection_keeps_all=True)
+        cfg = ReviewConfig(
+            provider=Provider.ollama, model="llama3", categories=[ReviewCategory.intent]
+        )
+
+        LLMReviewEngine(provider).review(ctx, cfg)
+
+        assert "docs/llms-full.txt" in self._intent_block(provider)
+
+    def test_a_file_excluded_by_config_is_named(self) -> None:
+        ctx = _CTX_WITH_INTENT.model_copy(update={"changed_files": ["a.py", "secret/notes.md"]})
+        provider = _provider_for([], reflection_keeps_all=True)
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.intent],
+            exclude_paths=["secret/**"],
+        )
+
+        LLMReviewEngine(provider).review(ctx, cfg)
+
+        assert "secret/notes.md" in self._intent_block(provider)
+
+    def test_no_notice_when_the_batch_shows_every_changed_file(self) -> None:
+        """The common case must be unchanged — no list, no wasted tokens."""
+        provider = _provider_for([], reflection_keeps_all=True)
+        cfg = ReviewConfig(
+            provider=Provider.ollama, model="llama3", categories=[ReviewCategory.intent]
+        )
+
+        LLMReviewEngine(provider).review(_CTX_WITH_INTENT, cfg)
+
+        assert self._NOTICE not in self._intent_block(provider).lower()
+
+    def test_a_file_in_another_batch_is_named(self) -> None:
+        """The mechanism with the largest blast radius, and the one a
+        capture-at-the-filter design would have missed entirely: the intent lens
+        runs once PER BATCH, so on any multi-batch PR it is structurally unable
+        to see most of the change whose promise it is judging."""
+        files = [f"mod{i}.py" for i in range(4)]
+        diff = "".join(
+            f"diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{f}\n"
+            f"@@ -1,2 +1,3 @@\n context\n+added in {f}\n context\n"
+            for f in files
+        )
+        ctx = _CTX_WITH_INTENT.model_copy(update={"diff": diff, "changed_files": files})
+        provider = _provider_for([], reflection_keeps_all=True)
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.intent],
+            max_input_tokens=60,  # forces several batches
+        )
+
+        LLMReviewEngine(provider).review(ctx, cfg)
+
+        intent_calls = [c for c in _review_calls(provider) if "INTENT_START" in _user_text(c)]
+        assert len(intent_calls) > 1, "expected the intent lens to fan out over batches"
+        # Each batch names the files it could not see — the ones in other batches.
+        for call in intent_calls:
+            text = _user_text(call)
+            unseen = [f for f in files if f"added in {f}" not in text]
+            assert unseen, "test setup: expected each batch to miss some file"
+            for path in unseen:
+                assert path in text, f"batch did not name {path} as not visible"
+
+    def test_only_the_intent_lens_pays_for_the_list(self) -> None:
+        """It rides the intent block, so no other lens and no cached prefix
+        carries it."""
+        ctx = _CTX_WITH_INTENT.model_copy(update={"changed_files": ["a.py", "docs/llms-full.txt"]})
+        provider = _provider_for([], reflection_keeps_all=True)
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.intent, ReviewCategory.security],
+        )
+
+        LLMReviewEngine(provider).review(ctx, cfg)
+
+        others = [c for c in _review_calls(provider) if "INTENT_START" not in _user_text(c)]
+        assert others, "expected a non-intent lens to have run"
+        assert all("docs/llms-full.txt" not in _user_text(c) for c in others)
+
+
 def test_intent_block_is_redacted_before_egress() -> None:
     """A secret pasted into the PR description must never reach the provider."""
     secret = "AKIAIOSFODNN7EXAMPLE"

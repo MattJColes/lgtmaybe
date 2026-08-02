@@ -432,6 +432,20 @@ def test_prompt_asks_for_intent_review() -> None:
     assert "commit" in prompt  # commit messages carry the intent on the CLI
 
 
+def test_intent_prompt_says_a_file_not_shown_is_not_a_broken_promise() -> None:
+    """The rubric's other escape hatch is "too vague to judge". This is the
+    missing one: a claim about a file the lens was never given is NOT SHOWN, not
+    UNDONE — the distinction lgtmaybe got wrong on #315.
+
+    It lives in the static rubric while the per-review file list rides the intent
+    DATA block; the two cannot swap, because `_correctness_section` is cached on
+    `include_intent` alone and per-review text here would poison that cache.
+    """
+    prompt = build_system_prompt(ReviewCategory.intent).lower()
+    assert "not shown" in prompt
+    assert "unfulfilled" in prompt
+
+
 def test_intent_prompt_treats_intent_text_as_data() -> None:
     """Intent text is attacker-controlled; the lens must not obey it."""
     prompt = build_system_prompt(ReviewCategory.intent).lower()

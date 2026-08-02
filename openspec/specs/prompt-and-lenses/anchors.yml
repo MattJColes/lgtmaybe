@@ -36,6 +36,12 @@ prompt.groups:
       has: { field: name, regex: '^_build_lenses$' }
     files: [src/lgtmaybe/engine/**/*.py]
 
+prompt.intent-visibility:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^files_not_visible$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 prompt.directory-rules:
   rule:
     kind: function_definition
