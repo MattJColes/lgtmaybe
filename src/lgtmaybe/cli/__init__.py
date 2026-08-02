@@ -872,6 +872,7 @@ def action_inputs() -> dict[str, str | None]:
         "recursive": get("RECURSIVE"),
         "structured_output": get("STRUCTURED_OUTPUT"),
         "symbol_resolution": get("SYMBOL_RESOLUTION"),
+        "mid_review_retrieval": get("MID_REVIEW_RETRIEVAL"),
         "prompt_cache": get("PROMPT_CACHE"),
         "incremental": get("INCREMENTAL"),
         "static_analysis": get("STATIC_ANALYSIS"),

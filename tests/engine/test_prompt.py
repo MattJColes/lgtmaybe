@@ -730,3 +730,52 @@ def test_secret_narrowing_applies_to_the_lens_block_too() -> None:
 
     assert "hardcoded secrets" in full
     assert "hardcoded secrets" not in narrowed
+
+
+# ---------------------------------------------------------------------------
+# mid-review retrieval: the deferral ask is gated, and OFF by default
+# ---------------------------------------------------------------------------
+
+
+def test_preamble_is_byte_identical_when_retrieval_is_off() -> None:
+    """`mid_review_retrieval` is off by default, so the shared prefix — the cache
+    entry every lens call reads — must not move by a single byte for the users
+    who never enable it."""
+    default = build_shared_preamble()
+
+    assert build_shared_preamble(retrieval=False) == default
+    assert '"needs"' not in default
+    for category in ReviewCategory:
+        assert build_system_prompt(category, retrieval=False) == build_system_prompt(category)
+
+
+def test_preamble_asks_for_needs_when_retrieval_is_on() -> None:
+    """With retrieval on, the lens is told it may defer ONCE by naming the files
+    or symbols it must see, instead of hedging or omitting a cross-file finding."""
+    preamble = build_shared_preamble(retrieval=True)
+
+    assert preamble != build_shared_preamble()
+    assert '"needs"' in preamble
+    assert "once" in preamble.lower()
+    # It must not become a default escape hatch from reviewing what it can see.
+    assert "only" in preamble.lower()
+
+
+def test_legacy_system_prompts_carry_the_same_gate() -> None:
+    """`prompt_cache: false` keeps the lens in the system prompt — the deferral
+    ask has to reach that shape too, or the feature is silently off there."""
+    from lgtmaybe.engine.prompt import (
+        CODE_HEALTH_GROUP,
+        build_correctness_prompt,
+        build_group_prompt,
+    )
+
+    assert '"needs"' in build_system_prompt(ReviewCategory.security, retrieval=True)
+    assert '"needs"' in build_group_prompt(CODE_HEALTH_GROUP, retrieval=True)
+    assert '"needs"' in build_correctness_prompt(False, retrieval=True)
+    assert '"needs"' in build_lens_prompt(CustomLens(id="x", instructions="y"), retrieval=True)
+    # …and every one of them is unchanged when it is off.
+    assert build_group_prompt(CODE_HEALTH_GROUP, retrieval=False) == build_group_prompt(
+        CODE_HEALTH_GROUP
+    )
+    assert build_correctness_prompt(False, retrieval=False) == build_correctness_prompt(False)

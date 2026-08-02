@@ -62,6 +62,12 @@ engine.timeout-split:
       has: { field: name, regex: '^_split_batch$' }
     files: [src/lgtmaybe/engine/**/*.py]
 
+engine.mid-review-retrieval:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_review_with_context$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.context-expansion:
   - rule:
       kind: function_definition
