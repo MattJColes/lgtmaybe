@@ -227,6 +227,22 @@ class TestDiagramCommand:
         assert "flowchart LR" in result.output
         assert "[Client] --calls--> [App (changed)]" in result.output
 
+    def test_diagram_output_flattens_the_collapsible_wrapper(self, monkeypatch):
+        """A terminal cannot collapse a <details> block, so the local view shows
+        each text rendering as a plain labelled section rather than raw HTML —
+        while the Mermaid source stays intact to paste into GitHub."""
+        self._patch_diagram_provider(monkeypatch)
+
+        result = CliRunner().invoke(main, ["diagram", "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code == 0, result.output
+        assert "<details>" not in result.output
+        assert "</details>" not in result.output
+        assert "<summary>" not in result.output
+        assert "Text version:" in result.output
+        assert "[Client] --calls--> [App (changed)]" in result.output
+        assert "```mermaid" in result.output
+
     def test_working_and_uncommitted_flags_conflict(self, monkeypatch):
         self._patch_diagram_provider(monkeypatch)
 
