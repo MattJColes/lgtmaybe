@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from bisect import bisect_right
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -51,6 +52,24 @@ def count_tokens(text: str) -> int:
     if enc is not None:
         return len(enc.encode(text))
     return max(1, len(text) // 4)
+
+
+def take_lines(lines: Iterable[str], budget: int) -> list[str]:
+    """The longest prefix of *lines* whose token cost stays within *budget*.
+
+    Each line is charged its own tokens plus one for the newline that rejoins it.
+    The estimate runs under the truth (a tokenizer merges tokens across a line
+    break), so a caller that must not overflow re-counts the assembled text —
+    which is also why this returns the lines rather than a joined string.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        used += count_tokens(line) + 1
+        if used > budget:
+            break
+        kept.append(line)
+    return kept
 
 
 def split_patch_into_hunks(patch: str) -> list[str]:
