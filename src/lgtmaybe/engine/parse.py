@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable, Iterator
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
 
 from lgtmaybe.core.models import ReviewFinding
+
+_M = TypeVar("_M", bound=BaseModel)
 
 
 class ParseError(Exception):
@@ -310,3 +314,19 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     if last_error is not None:
         raise ParseError(f"Finding validation failed: {last_error}") from last_error
     raise ParseError("Cannot parse JSON findings from response")
+
+
+def parse_structured(
+    raw: str, result_model: type[_M], wanted: Callable[[dict[str, Any]], bool]
+) -> _M | None:
+    """Leniently extract the first *wanted* JSON object from *raw*; None when absent."""
+    for data in iter_json_values(raw):
+        if not isinstance(data, dict) or not wanted(data):
+            continue
+        try:
+            return result_model.model_validate(
+                {k: v for k, v in data.items() if k in result_model.model_fields}
+            )
+        except Exception:  # noqa: BLE001 — fall through to the raw-text fallback
+            continue
+    return None

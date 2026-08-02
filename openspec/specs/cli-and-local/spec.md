@@ -56,11 +56,11 @@ stack.
 - **THEN** typed nodes and edges are rendered into Mermaid and text views with
   stable ids, escaped labels, compact cards, and change markers on nodes
 
-#### Scenario: provider returns legacy C4
-- **WHEN** the diagram provider ignores the graph contract and returns C4
-  source together with an ASCII rendering
-- **THEN** the C4 source is not posted as Mermaid and the ASCII rendering is
-  shown instead
+#### Scenario: provider returns diagram syntax instead of graph data
+- **WHEN** the diagram provider ignores the graph contract and returns diagram
+  source (C4, a Mermaid fence) with no nodes
+- **THEN** that source is not posted as Mermaid and the comment explains that no
+  valid diagram was produced
 
 ### Requirement: Change diagrams show structure and sequence
 

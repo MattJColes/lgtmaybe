@@ -26,7 +26,7 @@ from lgtmaybe.core.ports import ProviderClient
 from .compress import count_tokens
 from .engine import _intent_text  # same package; the one canonical intent extractor
 from .injection import DIFF_END, DIFF_START, neutralise, wrap_intent
-from .parse import iter_json_values
+from .parse import parse_structured
 from .redact import redact
 
 _M = TypeVar("_M", bound=BaseModel)
@@ -165,22 +165,6 @@ def _fit_diff(diff: str, max_tokens: int) -> str:
         kept.append(line)
         used += t
     return "\n".join([*kept, _MAX_DIFF_LINES_OVER_BUDGET_MARKER])
-
-
-def parse_structured(
-    raw: str, result_model: type[_M], wanted: Callable[[dict[str, Any]], bool]
-) -> _M | None:
-    """Leniently extract the first *wanted* JSON object from *raw*; None when absent."""
-    for data in iter_json_values(raw):
-        if not isinstance(data, dict) or not wanted(data):
-            continue
-        try:
-            return result_model.model_validate(
-                {k: v for k, v in data.items() if k in result_model.model_fields}
-            )
-        except Exception:  # noqa: BLE001 — fall through to the raw-text fallback
-            continue
-    return None
 
 
 def _render(desc: DescribeResult, *, has_intent: bool) -> str:
