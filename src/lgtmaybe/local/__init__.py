@@ -285,5 +285,4 @@ def _repo_name(cwd: Path | None) -> str:
     if url:
         parts = re.split(r"[:/]", url.removesuffix(".git"))
         return "/".join(parts[-2:])
-    toplevel = _git(cwd, "rev-parse", "--show-toplevel").strip()
-    return Path(toplevel).name
+    return _repo_root(cwd).name

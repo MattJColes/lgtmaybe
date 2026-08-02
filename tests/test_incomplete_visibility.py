@@ -24,7 +24,6 @@ import respx
 from lgtmaybe.cli import _post_failure, run_review
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ProviderResult,
     ReviewConfig,
     ReviewFinding,
@@ -32,6 +31,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.engine import INCOMPLETE_MARKER
+from tests.conftest import make_cfg
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 
 _DIFF = (
@@ -56,12 +56,6 @@ _FINDING = ReviewFinding(
     failure_scenario="When the changed line runs, it misbehaves.",
     anchor="new_line = 1",
 )
-
-
-def _cfg(**overrides: object) -> ReviewConfig:
-    base: dict[str, object] = {"provider": Provider.ollama, "model": "m", "reflect": False}
-    base.update(overrides)
-    return ReviewConfig(**base)  # type: ignore[arg-type]
 
 
 class _OneLensTimesOut(FakeProvider):
@@ -103,7 +97,7 @@ def test_failed_lens_call_posts_a_visible_notice() -> None:
     findings, summary = run_review(
         github=github,
         engine=LLMReviewEngine(_OneLensTimesOut()),
-        cfg=_cfg(),
+        cfg=make_cfg(),
         dry_run=False,
     )
 
@@ -120,7 +114,7 @@ def test_complete_run_posts_no_notice_comment() -> None:
     _, summary = run_review(
         github=github,
         engine=LLMReviewEngine(_EveryLensSucceeds()),
-        cfg=_cfg(),
+        cfg=make_cfg(),
         dry_run=False,
     )
 
@@ -135,7 +129,7 @@ def test_dry_run_posts_nothing_at_all() -> None:
     run_review(
         github=github,
         engine=LLMReviewEngine(_OneLensTimesOut()),
-        cfg=_cfg(),
+        cfg=make_cfg(),
         dry_run=True,
     )
 
@@ -148,7 +142,7 @@ def test_engine_marks_an_incomplete_summary_machine_readably() -> None:
     `summary_template` restyling can never silence the disclosure."""
     engine = LLMReviewEngine(_OneLensTimesOut())
 
-    _, summary = engine.review(_CTX, _cfg(summary_template="{count} findings"))
+    _, summary = engine.review(_CTX, make_cfg(summary_template="{count} findings"))
 
     assert INCOMPLETE_MARKER in summary
 
@@ -235,7 +229,7 @@ def test_incomplete_notice_failure_is_not_swallowed() -> None:
         run_review(
             github=_CommentFails(_CTX),
             engine=LLMReviewEngine(_OneLensTimesOut()),
-            cfg=_cfg(),
+            cfg=make_cfg(),
             dry_run=False,
         )
 
@@ -303,7 +297,7 @@ def test_notice_is_visible_on_a_re_run() -> None:
     run_review(
         github=gateway,
         engine=_IncompleteEngine(FakeProvider()),
-        cfg=_cfg(incremental=False),
+        cfg=make_cfg(incremental=False),
         dry_run=False,
         ctx=_CTX,
     )

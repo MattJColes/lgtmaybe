@@ -355,7 +355,9 @@ class RestGitHubGateway(GitHubGateway):
         files_url = (
             f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/files?per_page=100"
         )
-        changed_files = self._fetch_all_files(files_url)
+        changed_files = [
+            item["filename"] for resp in self._paginate(files_url) for item in resp.json()
+        ]
 
         # Fetch head-revision text of reviewable files so the engine can pad hunks
         # with surrounding context. Read-only API fetch — never a checkout — and
@@ -440,14 +442,14 @@ class RestGitHubGateway(GitHubGateway):
             # replacing the body it clears any stale stamp, so the next run
             # safely falls back to a full review).
             body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
-        existing_id = self._find_existing_review()
+        existing = self._find_existing_review_entry()
 
         reviews_url = f"https://api.github.com/repos/{self._repo}/pulls/{self._pr_number}/reviews"
 
-        if existing_id is not None:
+        if existing is not None:
             # Update the existing review body (inline comments cannot be changed
             # through this endpoint, but the summary is updated).
-            update_url = f"{reviews_url}/{existing_id}"
+            update_url = f"{reviews_url}/{existing[0]}"
             resp = self._client.put(
                 update_url,
                 headers={**self._headers, "Accept": "application/vnd.github+json"},
@@ -925,14 +927,6 @@ class RestGitHubGateway(GitHubGateway):
             return []
         return subjects
 
-    def _fetch_all_files(self, first_url: str) -> list[str]:
-        """Follow Link rel=next pagination and collect all filenames."""
-        files: list[str] = []
-        for resp in self._paginate(first_url):
-            for item in resp.json():
-                files.append(item["filename"])
-        return files
-
     def _paginate(self, url: str) -> Iterator[httpx.Response]:
         next_url: str | None = url
         while next_url is not None:
@@ -945,11 +939,6 @@ class RestGitHubGateway(GitHubGateway):
             yield resp
             # httpx parses the Link header for us.
             next_url = resp.links.get("next", {}).get("url")
-
-    def _find_existing_review(self) -> int | None:
-        """Return the ID of the first review whose body contains the marker, or None."""
-        entry = self._find_existing_review_entry()
-        return entry[0] if entry is not None else None
 
     def _find_existing_review_entry(self) -> tuple[int, str] | None:
         """Return ``(id, body)`` of the first review carrying our marker, or None.

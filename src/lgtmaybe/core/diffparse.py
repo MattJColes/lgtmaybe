@@ -9,6 +9,7 @@ off-by-one rules live in exactly one place.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 # "diff --git a/<old> b/<new>" — capture the new-side path. MULTILINE so it can
@@ -47,20 +48,20 @@ def parse_hunk_header(line: str) -> HunkHeader | None:
     )
 
 
-def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]]:
-    """Map ``(path, side)`` → ordered ``(line_number, text)`` for each changed line.
+def walk_diff(diff: str) -> Iterator[tuple[str, str, int, int, str]]:
+    """Yield ``(path, kind, old_line, new_line, text)`` per in-hunk line.
 
-    ``side`` is ``"RIGHT"`` for added (``+``) lines at their new-file line number
-    and ``"LEFT"`` for deleted (``-``) lines at their old-file line number — the
-    same coordinates GitHub anchors a review comment by. ``text`` is the line
-    content with the ``+``/``-`` marker stripped (surrounding whitespace kept).
+    The one home for the diff walk's off-by-one rules, so every consumer counts
+    lines identically. ``kind`` is the line's marker — ``"-"`` deleted, ``"+"``
+    added, ``" "`` context — and ``text`` is the line with that marker stripped.
+    ``old_line`` / ``new_line`` are the line's number in the old / new file at
+    the point it is yielded; only the sides the line exists on are meaningful
+    (a deleted line has no new-file line, an added line no old-file line), and
+    the counters advance only for the sides the line occupies.
 
-    Used to re-anchor a finding whose model-counted ``line`` drifted: the model
-    returns the verbatim flagged line, which is matched back to the real changed
-    line here. Context (unchanged) lines are skipped — a finding always anchors
-    on a changed line.
+    Lines outside a hunk (file/index headers, ``---``/``+++`` preamble) and the
+    ``\\ No newline at end of file`` marker are not diff content and are skipped.
     """
-    index: dict[tuple[str, str], list[tuple[int, str]]] = {}
     current_file: str | None = None
     new_line = 0
     old_line = 0
@@ -76,6 +77,8 @@ def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]
             continue
         hunk = parse_hunk_header(raw_line)
         if hunk is not None:
+            # Hunk header resets both counters to the hunk's starts. No position
+            # arithmetic — line/side bind directly to file lines.
             new_line = hunk.new_start
             old_line = hunk.old_start
             in_hunk = True
@@ -87,15 +90,61 @@ def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]
             # must not advance either counter or every later line shifts by one.
             continue
         if raw_line.startswith("-"):
-            index.setdefault((current_file, "LEFT"), []).append((old_line, raw_line[1:]))
+            yield current_file, "-", old_line, new_line, raw_line[1:]
             old_line += 1
         elif raw_line.startswith("+"):
-            index.setdefault((current_file, "RIGHT"), []).append((new_line, raw_line[1:]))
+            yield current_file, "+", old_line, new_line, raw_line[1:]
             new_line += 1
-        else:  # context line: advances both sides, anchors nothing
+        else:  # context line (leading " " or empty): advances both sides
+            yield current_file, " ", old_line, new_line, raw_line[1:]
             new_line += 1
             old_line += 1
+
+
+def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]]:
+    """Map ``(path, side)`` → ordered ``(line_number, text)`` for each changed line.
+
+    ``side`` is ``"RIGHT"`` for added (``+``) lines at their new-file line number
+    and ``"LEFT"`` for deleted (``-``) lines at their old-file line number — the
+    same coordinates GitHub anchors a review comment by. ``text`` is the line
+    content with the ``+``/``-`` marker stripped (surrounding whitespace kept).
+
+    Used to re-anchor a finding whose model-counted ``line`` drifted: the model
+    returns the verbatim flagged line, which is matched back to the real changed
+    line here. Context (unchanged) lines are skipped — a finding always anchors
+    on a changed line.
+    """
+    index: dict[tuple[str, str], list[tuple[int, str]]] = {}
+    for path, kind, old_line, new_line, text in walk_diff(diff):
+        if kind == "-":
+            index.setdefault((path, "LEFT"), []).append((old_line, text))
+        elif kind == "+":
+            index.setdefault((path, "RIGHT"), []).append((new_line, text))
+        # context lines advance both counters but anchor nothing
     return index
+
+
+def changed_line_count(diff: str) -> int:
+    """Added/removed lines in *diff*, counting only inside hunks.
+
+    The one home for "how big is this change". Every per-file patch out of
+    :func:`split_by_file` carries a ``---``/``+++`` pair, so a naive
+    ``startswith(("+", "-"))`` inflates each file's count by two. Excluding by
+    ``+++``/``---`` prefix instead would undercount: an added line whose own
+    content starts with ``++`` renders as ``+++ ...`` and is not a header.
+    Headers only ever appear before a hunk opens, so tracking that is both
+    shorter than special-casing them and exactly right.
+    """
+    count = 0
+    in_hunk = False
+    for line in diff.splitlines():
+        if HUNK_HEADER_RE.match(line):
+            in_hunk = True
+        elif FILE_HEADER_RE.match(line):
+            in_hunk = False
+        elif in_hunk and line[:1] in ("+", "-"):
+            count += 1
+    return count
 
 
 def hunk_for_line(diff: str, path: str, line: int, side: str = "RIGHT") -> str | None:

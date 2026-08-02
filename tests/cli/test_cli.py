@@ -7,7 +7,7 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from lgtmaybe.cli import RuntimeOptions, build_adapters, main, run_review
+from lgtmaybe.cli import RuntimeOptions, build_review_context, main, run_review
 from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import ReviewEngine
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
@@ -159,7 +159,9 @@ class TestReviewCommandLocal:
             ["review", "--provider", "ollama", "--model", "llama3", "--working", "--uncommitted"],
         )
 
-        assert result.exit_code != 0
+        # Exit 2: a usage error, not a runtime failure — the shared
+        # command-level check must keep raising UsageError, not ClickException.
+        assert result.exit_code == 2, result.output
         assert "mutually exclusive" in result.output
 
     def test_uncommitted_flag_is_threaded_through(self, monkeypatch):
@@ -251,7 +253,9 @@ class TestDiagramCommand:
             ["diagram", "--provider", "ollama", "--model", "llama3", "--working", "--uncommitted"],
         )
 
-        assert result.exit_code != 0
+        # Exit 2: a usage error, not a runtime failure — the shared
+        # command-level check must keep raising UsageError, not ClickException.
+        assert result.exit_code == 2, result.output
         assert "mutually exclusive" in result.output
 
 
@@ -440,9 +444,9 @@ class TestParsePrUrl:
             parse_pr_url("https://github.com/org/my-repo/issues/42")
 
 
-class TestBuildAdapters:
+class TestBuildReviewContext:
     def test_builds_real_adapters_for_ollama(self, monkeypatch):
-        """build_adapters returns a RestGitHubGateway + LLMReviewEngine wired from config."""
+        """build_review_context returns a RestGitHubGateway + LLMReviewEngine wired from config."""
         from lgtmaybe.engine import LLMReviewEngine
         from lgtmaybe.github import RestGitHubGateway
 
@@ -450,7 +454,7 @@ class TestBuildAdapters:
         cfg = _default_cfg(provider="ollama", model="llama3")
         runtime = RuntimeOptions(pr_url="https://github.com/org/repo/pull/7")
 
-        github, engine = build_adapters(cfg, runtime)
+        github, engine = build_review_context(cfg, runtime)[:2]
 
         assert isinstance(github, RestGitHubGateway)
         assert isinstance(engine, LLMReviewEngine)
@@ -461,7 +465,7 @@ class TestBuildAdapters:
         runtime = RuntimeOptions(pr_url="https://github.com/org/repo/pull/7")
 
         with pytest.raises(ValueError, match="GITHUB_TOKEN"):
-            build_adapters(cfg, runtime)
+            build_review_context(cfg, runtime)[:2]
 
     def test_surfaces_missing_provider_credentials(self, monkeypatch):
         """An API-key provider with no key raises the resolver's clear error."""
@@ -471,12 +475,10 @@ class TestBuildAdapters:
         runtime = RuntimeOptions(pr_url="https://github.com/org/repo/pull/7")
 
         with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-            build_adapters(cfg, runtime)
+            build_review_context(cfg, runtime)[:2]
 
     def test_fallback_model_threads_to_provider(self, monkeypatch):
         """A runtime fallback_model reaches the built LiteLLMProvider."""
-        from lgtmaybe.cli import build_review_context
-
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
         cfg = _default_cfg(provider="ollama", model="llama3")
         runtime = RuntimeOptions(
@@ -489,8 +491,6 @@ class TestBuildAdapters:
 
     def test_azure_keyless_ad_token_threads_to_provider(self, monkeypatch):
         """Keyless azure resolves an ambient AD token and threads it to litellm."""
-        from lgtmaybe.cli import build_review_context
-
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
         monkeypatch.delenv("AZURE_API_KEY", raising=False)
         monkeypatch.setattr(

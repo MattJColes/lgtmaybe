@@ -50,14 +50,10 @@ jobs:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-${{ runner.os }}-${{ env.LGTMAYBE_E2E_OLLAMA_MODEL }}
 
+      # The same script a developer runs locally (DEVELOPMENT.md) — serve,
+      # readiness wait, pull — so the bring-up can't drift from local either.
       - name: Start ollama and pull the model
-        run: |
-          ollama serve &
-          for _ in $(seq 1 60); do
-            curl -sf http://localhost:11434/api/tags >/dev/null && break
-            sleep 1
-          done
-          ollama pull "$LGTMAYBE_E2E_OLLAMA_MODEL"
+        run: scripts/e2e-up.sh ollama
 
       # llama.cpp + vLLM legs auto-skip (no server here); the ollama leg runs.
       - name: Run the e2e suite

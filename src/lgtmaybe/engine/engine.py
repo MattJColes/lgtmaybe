@@ -28,7 +28,6 @@ from lgtmaybe.core.models import (
     ReviewResult,
     StaticAnalysisTool,
     ToolMode,
-    attempts_of,
 )
 from lgtmaybe.core.ports import (
     Message,
@@ -173,9 +172,6 @@ class _Lens:
     # and falls back to the lens id otherwise; None (a focused lens) means the
     # lens id is always stamped — the model's value is ignored, as before.
     allowed_categories: frozenset[str] | None = None
-    # A split task can keep a distinct profiler label while attributing its
-    # findings to an existing public category.
-    finding_category: str | None = None
 
 
 def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = False) -> list[_Lens]:
@@ -1238,20 +1234,7 @@ class LLMReviewEngine(ReviewEngine):
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
             reason = _error_reason(exc)
-            profiler.record_call(
-                label=lens.id,
-                batch=batch_num,
-                elapsed=time.perf_counter() - started,
-                # What the adapter stamped on the exception: a failure that burned
-                # its retry budget must not read as one that was never retried.
-                # 0 only when the failure never reached the retry loop.
-                attempts=attempts_of(exc),
-                input_tokens=0,
-                output_tokens=0,
-                cache_read_tokens=0,
-                cache_creation_tokens=0,
-                error=reason,
-            )
+            profiler.record_error(lens.id, batch_num, time.perf_counter() - started, exc, reason)
             _log.warning(
                 "review call failed",
                 extra={"lens": lens.id, "reason": reason},
@@ -1270,17 +1253,7 @@ class LLMReviewEngine(ReviewEngine):
                 findings, split_reason = on_oversized(reason)
                 return completed + findings, split_reason
             return [], reason
-        profiler.record_call(
-            label=lens.id,
-            batch=batch_num,
-            elapsed=time.perf_counter() - started,
-            attempts=result.attempts,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            cache_read_tokens=result.cache_read_tokens,
-            cache_creation_tokens=result.cache_creation_tokens,
-            reasoning_tokens=result.reasoning_tokens,
-        )
+        profiler.record_result(lens.id, batch_num, time.perf_counter() - started, result)
         salvaged = 0
         try:
             findings = parse_findings(result.text)
@@ -1356,14 +1329,11 @@ def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[Review
     like any other.
     """
     allowed = lens.allowed_categories
-    fallback_category = lens.finding_category or lens.id
     return [
         f.model_copy(
             update={
                 "category": (
-                    f.category
-                    if allowed is not None and f.category in allowed
-                    else fallback_category
+                    f.category if allowed is not None and f.category in allowed else lens.id
                 )
             }
         )

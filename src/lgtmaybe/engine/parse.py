@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable, Iterator
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
 
 from lgtmaybe.core.models import ReviewFinding
+
+_M = TypeVar("_M", bound=BaseModel)
 
 
 class ParseError(Exception):
@@ -68,10 +72,6 @@ _CLOSER = {"{": "}", "[": "]"}
 def _strip_think_blocks(text: str) -> str:
     """Remove <think>...</think> reasoning blocks."""
     return _THINK_RE.sub("", text)
-
-
-def _repair_trailing_commas(text: str) -> str:
-    return _TRAILING_COMMA_RE.sub(r"\1", text)
 
 
 def _balanced_span(text: str, start: int) -> str | None:
@@ -123,7 +123,7 @@ def iter_json_values(raw: str) -> Iterator[Any]:
     seen: set[str] = set()
 
     def _try(candidate: str) -> Iterator[Any]:
-        repaired = _repair_trailing_commas(candidate)
+        repaired = _TRAILING_COMMA_RE.sub(r"\1", candidate)
         if repaired in seen:
             return
         seen.add(repaired)
@@ -314,3 +314,19 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     if last_error is not None:
         raise ParseError(f"Finding validation failed: {last_error}") from last_error
     raise ParseError("Cannot parse JSON findings from response")
+
+
+def parse_structured(
+    raw: str, result_model: type[_M], wanted: Callable[[dict[str, Any]], bool]
+) -> _M | None:
+    """Leniently extract the first *wanted* JSON object from *raw*; None when absent."""
+    for data in iter_json_values(raw):
+        if not isinstance(data, dict) or not wanted(data):
+            continue
+        try:
+            return result_model.model_validate(
+                {k: v for k, v in data.items() if k in result_model.model_fields}
+            )
+        except Exception:  # noqa: BLE001 — fall through to the raw-text fallback
+            continue
+    return None

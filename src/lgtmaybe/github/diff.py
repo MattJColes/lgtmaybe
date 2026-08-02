@@ -18,7 +18,7 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
-from lgtmaybe.core.diffparse import FILE_HEADER_RE, parse_hunk_header
+from lgtmaybe.core.diffparse import walk_diff
 
 # ---------------------------------------------------------------------------
 # Commentable-line index
@@ -46,56 +46,11 @@ def build_commentable_lines(diff: str) -> CommentableLines:
     lines) has no anchor and is dropped by the gateway rather than mis-posted.
     """
     commentable: CommentableLines = set()
-
-    current_file: str | None = None
-    new_line = 0  # current new-file line number
-    old_line = 0  # current old-file line number
-    in_hunk = False
-
-    for raw_line in diff.splitlines():
-        file_match = FILE_HEADER_RE.match(raw_line)
-        if file_match:
-            current_file = file_match.group(1)
-            new_line = 0
-            old_line = 0
-            in_hunk = False
-            continue
-
-        if current_file is None:
-            continue
-
-        hunk = parse_hunk_header(raw_line)
-        if hunk is not None:
-            # Hunk header resets both line counters to the hunk's starts. No
-            # position arithmetic — line/side bind directly to file lines.
-            new_line = hunk.new_start
-            old_line = hunk.old_start
-            in_hunk = True
-            continue
-
-        if not in_hunk:
-            continue
-
-        if raw_line.startswith("\\"):
-            # "\ No newline at end of file" — a diff marker, not a real line. It
-            # must not advance either counter or every later line shifts by one.
-            continue
-
-        if raw_line.startswith("-"):
-            # Deleted line: present on the old side only.
-            commentable.add((current_file, old_line, "LEFT"))
-            old_line += 1
-        elif raw_line.startswith("+"):
-            # Added line: present on the new side only.
-            commentable.add((current_file, new_line, "RIGHT"))
-            new_line += 1
-        else:
-            # Context line (leading " " or empty): present on both sides.
-            commentable.add((current_file, new_line, "RIGHT"))
-            commentable.add((current_file, old_line, "LEFT"))
-            new_line += 1
-            old_line += 1
-
+    for path, kind, old_line, new_line, _text in walk_diff(diff):
+        if kind != "+":  # deleted or context: present on the old side
+            commentable.add((path, old_line, "LEFT"))
+        if kind != "-":  # added or context: present on the new side
+            commentable.add((path, new_line, "RIGHT"))
     return commentable
 
 
@@ -241,29 +196,25 @@ def is_reviewable(path: str) -> bool:
     Rejects lockfiles, minified files, vendored/generated directories, snapshot
     files, and binary extensions. Everything else passes through.
     """
-    filename = path.rsplit("/", 1)[-1]
+    pure = PurePosixPath(path)
 
-    if filename in _SKIP_FILENAMES:
+    if pure.name in _SKIP_FILENAMES:
         return False
 
-    # Extension check
-    dot = filename.rfind(".")
-    if dot != -1:
-        ext = filename[dot:].lower()
-        if ext in _SKIP_EXTENSIONS:
-            return False
+    # Extension check. A bare dotfile (".png") has no suffix — it is a config
+    # file whose name starts with a dot, not an image.
+    if pure.suffix.lower() in _SKIP_EXTENSIONS:
+        return False
 
     # Directory prefix check (path must start with one of the blocked dirs)
     for prefix in _SKIP_DIR_PREFIXES:
         if path.startswith(prefix) or ("/" + prefix) in path:
             return False
 
-    # Glob pattern check on the full path
-    for pattern in _SKIP_GLOB_PATTERNS:
-        if fnmatchcase(path, pattern) or fnmatchcase(filename, pattern):
-            return False
-
-    return True
+    # Glob pattern check on the full path. Matching the path subsumes matching
+    # the bare filename because fnmatch's "*" also matches "/" and every pattern
+    # here is "*"-prefixed — a future pattern without one would need both arms.
+    return not any(fnmatchcase(path, pattern) for pattern in _SKIP_GLOB_PATTERNS)
 
 
 def is_scannable_manifest(path: str) -> bool:

@@ -135,11 +135,9 @@ def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -
 
 
 def _has_diagram(data: dict[str, Any]) -> bool:
-    """Whether a parsed object carries graph nodes or a legacy ASCII fallback."""
+    """Whether a parsed object carries graph nodes to render."""
     nodes = data.get("nodes")
-    return (isinstance(nodes, list) and bool(nodes)) or (
-        isinstance(data.get("ascii"), str) and bool(data["ascii"].strip())
-    )
+    return isinstance(nodes, list) and bool(nodes)
 
 
 def _single_line(value: str) -> str:
@@ -283,7 +281,7 @@ def _view(mermaid: str, text: str) -> list[str]:
 
 
 def _render(diagram: DiagramResult) -> str:
-    """Render a validated graph, or a legacy ASCII-only response."""
+    """Render a validated graph; the invalid-diagram notice when there is none."""
     title = _single_line(diagram.title) or "Architecture of this change"
     lines = [f"## {title}", ""]
     nodes, node_ids = _prepare_nodes(diagram)
@@ -297,8 +295,6 @@ def _render(diagram: DiagramResult) -> str:
         lines += _view(mermaid, ascii_art)
         if sequence:
             lines += ["", "### Sequence", "", *_view(sequence, sequence_text)]
-    elif diagram.ascii.strip():
-        lines += _fenced(diagram.ascii.strip())
     else:
         return _invalid_diagram("")
 

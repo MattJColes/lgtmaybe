@@ -17,9 +17,8 @@ from enum import StrEnum
 
 from lgtmaybe.core.models import AnswerResult, ReviewConfig
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
-from lgtmaybe.engine.describe import parse_structured
 from lgtmaybe.engine.injection import wrap_diff, wrap_reply
-from lgtmaybe.engine.parse import iter_json_values
+from lgtmaybe.engine.parse import iter_json_values, parse_structured
 from lgtmaybe.engine.redact import redact
 
 

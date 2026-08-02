@@ -1,4 +1,4 @@
-"""Shared test fixtures.
+"""Shared test fixtures and helpers.
 
 Provider-credential env vars leak in from the developer's shell or the CI runner
 and make the credential resolver non-deterministic: a real ``OPENAI_API_KEY`` in
@@ -10,7 +10,37 @@ should fail. Clear them by default; a test that needs one sets it explicitly via
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
+
+from lgtmaybe.core.models import Provider, ReviewConfig
+
+_WORKFLOWS = Path(__file__).parent.parent / ".github" / "workflows"
+
+
+def read_workflow(name: str) -> tuple[str, dict]:
+    """A workflow file as (raw text, parsed YAML).
+
+    Both halves matter: the parsed tree for job/step structure, the raw text for
+    the shell bodies and `${{ }}` expressions YAML flattens into plain strings.
+    """
+    text = (_WORKFLOWS / name).read_text(encoding="utf-8")
+    return text, yaml.safe_load(text)
+
+
+def make_cfg(**overrides: object) -> ReviewConfig:
+    """A ReviewConfig for tests that don't care which provider they name.
+
+    ollama needs no credentials and ``reflect=False`` keeps the fake provider's
+    call log to the lens fan-out, which is what most suites assert on. A plain
+    function rather than a fixture so call sites stay a one-line import.
+    """
+    base: dict[str, object] = {"provider": Provider.ollama, "model": "m", "reflect": False}
+    base.update(overrides)
+    return ReviewConfig(**base)  # type: ignore[arg-type]
+
 
 # Every env var the credential resolver / CLI probes consult to pick auth.
 _PROVIDER_CRED_ENV = (

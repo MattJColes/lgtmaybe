@@ -33,12 +33,6 @@ FileFetcher = Callable[[str], "str | None"]
 MAX_HOPS = 2
 MAX_FETCH_FILES = 5
 
-# Concurrent read-only fetches per wave. The deferral fetch sits on the review's
-# serial tail — reflection cannot begin until every lens has returned — so these
-# round-trips are pure added wall clock, and they are independent of each other.
-# Bounded so a long `needs` list can't open a connection per entry.
-_FETCH_WORKERS = 8
-
 
 def resolve_needs(
     needs: list[str],
@@ -77,12 +71,16 @@ def resolve_needs(
         order, so the token budget and file cap allocate exactly as they did
         when each fetch blocked — the same `needs` list must always resolve to
         the same files, whatever order the responses happen to land in.
+
+        The pool is as wide as the wave, which ``take_in_waves`` already slices
+        to the remaining ``max_files`` headroom — so a long `needs` list can
+        never open a connection per entry.
         """
         todo = [p for p in dict.fromkeys(paths) if p not in seen and p not in already]
         if not todo:
             return
         seen.update(todo)
-        with ThreadPoolExecutor(max_workers=min(_FETCH_WORKERS, len(todo))) as pool:
+        with ThreadPoolExecutor(max_workers=len(todo)) as pool:
             fetched.update(zip(todo, pool.map(fetch_file, todo), strict=True))
 
     def accept(path: str) -> bool:

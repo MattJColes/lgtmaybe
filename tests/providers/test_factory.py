@@ -217,10 +217,11 @@ class TestDefaultTimeout:
         """The adapter's last-resort timeout applies whenever a caller builds a
         provider outside the factory (or passes timeout=None through), so it must
         not silently reimpose a budget shorter than the factory would have."""
+        from lgtmaybe.providers.constants import CLOUD_TIMEOUT
         from lgtmaybe.providers.factory import default_timeout_for
-        from lgtmaybe.providers.litellm_provider import _DEFAULT_TIMEOUT
 
-        assert _DEFAULT_TIMEOUT >= min(default_timeout_for(p) for p in Provider)
+        # One definition, shared: >= would let the two 600s drift apart silently.
+        assert CLOUD_TIMEOUT == min(default_timeout_for(p) for p in Provider)
 
     def test_build_provider_threads_temperature_into_default_opts(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", temperature=0.0)

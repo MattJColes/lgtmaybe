@@ -35,6 +35,15 @@ class AuthConfig:
 # Data-plane scope for Azure OpenAI / Cognitive Services AD tokens.
 _AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
 
+# Env var carrying the key, for the plain API-key providers. Looked up (not
+# .get) on purpose: a provider missing here is a bug, and a KeyError names it
+# rather than resolving to a keyless AuthConfig that fails at the API.
+_ENV_VAR: dict[Provider, str] = {
+    Provider.openai: "OPENAI_API_KEY",
+    Provider.anthropic: "ANTHROPIC_API_KEY",
+    Provider.openrouter: "OPENROUTER_API_KEY",
+}
+
 
 def _default_aws_probe() -> bool:
     """Detect ambient AWS credentials.
@@ -221,11 +230,6 @@ def resolve_credentials(
         return AuthConfig(api_key=key, api_base=base)
 
     # API-key providers: openai, anthropic, openrouter
-    _ENV_VAR: dict[Provider, str] = {
-        Provider.openai: "OPENAI_API_KEY",
-        Provider.anthropic: "ANTHROPIC_API_KEY",
-        Provider.openrouter: "OPENROUTER_API_KEY",
-    }
     env_var = _ENV_VAR[provider]
 
     # An explicit --api-base (e.g. an OpenAI-format proxy) rides along with the
