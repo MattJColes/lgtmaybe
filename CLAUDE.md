@@ -74,7 +74,12 @@ autocrlf before checkout.
   bedrock, vertex, azure, ollama to one `completion()` call. A thin wrapper on
   top adds retries / fallback.
 - **License:** MIT (already in `LICENSE`).
-- **Posting:** REST review API — batched inline comments + one summary.
+- **Posting:** REST review API — batched inline comments + one summary. Every
+  posted finding's title line carries its provenance inside the severity
+  brackets — `**[HIGH · security · 8/10] Title**`, the originating lens and the
+  reflection auditor's confidence (`rest_gateway._finding_badge`, each half
+  omitted when absent; inline, demoted, and broad render it identically). It is
+  visible prose only — never part of the hidden ids below.
   Idempotent updates via a hidden marker comment (which also carries the
   last-reviewed-SHA watermark driving incremental review). Each inline comment also carries
   **two** hidden per-finding ids: `finding_fingerprint(path, title)` — which keys

@@ -2425,9 +2425,12 @@ During reflection the auditor also scores each kept finding's confidence from
 0 (certainly a false positive) to 10 (certain it is real), reached by actively
 trying to disprove the finding against the diff and the file text. Findings
 scored **below** `min_confidence` are dropped before posting; the surviving
-score is shown in the CLI output and the JSON export. A finding the auditor
-keeps but doesn't score always survives the threshold — a missing score never
-drops a real finding. CLI: `--min-confidence`.
+score is shown in the CLI output, the JSON export, and on the posted GitHub
+comment itself — `**[HIGH · security · 8/10] Title**`, alongside the lens that
+raised it. A finding the auditor keeps but doesn't score always survives the
+threshold — a missing score never drops a real finding, and the comment simply
+omits that half of the badge (as it does for every finding when `reflect:
+false`). CLI: `--min-confidence`.
 
 ```yaml
 min_confidence: 5   # drop findings the auditor scores 0-4
@@ -5135,6 +5138,33 @@ can commit straight from the PR:
 
 The summary carries a hidden marker (`<!-- lgtmaybe -->`), so re-running on the
 same PR **updates** the existing review instead of creating duplicates.
+
+#### Reading the title line
+
+A comment's title line carries the finding's provenance in its brackets:
+
+```
+**[HIGH · security · 8/10] User input is concatenated into the SQL string**
+```
+
+- **`HIGH`** — the severity.
+- **`security`** — the lens that raised it. One of the nine review categories
+  (or your own id if you added a [custom lens](../how-to/add-a-custom-lens.md)),
+  and the same value you match on in `finding_rules` — so a badge you keep seeing
+  and don't want tells you exactly what rule to write.
+- **`8/10`** — the self-reflection auditor's confidence that the finding is real,
+  reached by actively trying to disprove it. Set the `min_confidence` floor to
+  drop everything below a score you choose.
+
+Each half drops away when it isn't there: with `reflect: false` there is no score
+and the badge is just the lens.
+
+One asymmetry worth knowing: GitHub's review API can't edit an inline comment
+once it's posted, so an inline comment's score is **frozen at first post** — a
+later run that judges the same finding differently won't change it. Findings in
+the summary body (the "Additional findings" and "Broader observations" sections)
+are rewritten on every run, so those badges do track. That's how severity and
+title have always behaved too; the badge just makes it visible.
 
 ### Resolving conversations once they're fixed
 

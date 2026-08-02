@@ -172,6 +172,30 @@ def _defang_fences(text: str) -> str:
     return text.replace("```", f"`{_ZWSP}`{_ZWSP}`")
 
 
+def _finding_badge(f: ReviewFinding) -> str:
+    """The provenance suffix for a finding's title line: lens, then confidence.
+
+    Both values are already computed and already shown by the local CLI — the
+    lens the engine stamped (``category``) and the 0-10 score the reflection
+    auditor gave it (``confidence``) — but a GitHub reader could never see them.
+    They answer the two questions a reviewer asks of a bot comment: which pass
+    raised this, and how sure was it. Rendered inside the existing severity
+    brackets (``**[HIGH · security · 8/10] Title**``) so the title line gains no
+    new visual furniture, and appended by the caller so it can never displace the
+    hidden fingerprint/identity markers that key re-run dedupe.
+
+    Each half is omitted when absent, so nothing renders empty: no category (a
+    legacy finding) means no badge at all — byte-identical to the pre-badge
+    rendering — and no score (``--no-reflect``, or a deterministic
+    static-analysis finding) means just the lens. A ``0`` is a real verdict, not
+    a missing one, so it renders.
+    """
+    if not f.category:
+        return ""
+    badge = f" · {_defang_fences(f.category)}"
+    return badge if f.confidence is None else f"{badge} · {f.confidence}/10"
+
+
 def _render_demoted(demoted: list[ReviewFinding]) -> str:
     """Render findings that couldn't be confidently placed inline as a body section.
 
@@ -191,7 +215,7 @@ def _render_demoted(demoted: list[ReviewFinding]) -> str:
     ]
     for f in demoted:
         lines.append(
-            f"- **[{f.severity.upper()}] {_defang_fences(f.title)}** "
+            f"- **[{f.severity.upper()}{_finding_badge(f)}] {_defang_fences(f.title)}** "
             f"(`{f.path}`) — {_defang_fences(f.body)}"
         )
     return "\n".join(lines)
@@ -219,7 +243,7 @@ def _render_broad(broad: list[ReviewFinding]) -> str:
     ]
     for f in broad:
         lines.append(
-            f"- **[{f.severity.upper()}] {_defang_fences(f.title)}** "
+            f"- **[{f.severity.upper()}{_finding_badge(f)}] {_defang_fences(f.title)}** "
             f"(`{f.path}`) — {_defang_fences(f.body)}"
         )
     lines += ["", "</details>"]
@@ -1358,7 +1382,8 @@ class RestGitHubGateway(GitHubGateway):
                 "path": f.path,
                 "line": f.line,
                 "side": f.side,
-                "body": f"**[{f.severity.upper()}] {_defang_fences(f.title)}**"
+                "body": f"**[{f.severity.upper()}{_finding_badge(f)}] "
+                f"{_defang_fences(f.title)}**"
                 f"\n\n{_defang_fences(f.body)}",
             }
             if f.suggestion is not None:
