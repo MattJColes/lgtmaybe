@@ -15,32 +15,11 @@ from typing import Any
 _secrets: set[str] = set()
 
 # Standard LogRecord attributes; anything else is treated as a structured extra.
-_STD_ATTRS = frozenset(
-    {
-        "name",
-        "msg",
-        "args",
-        "levelname",
-        "levelno",
-        "pathname",
-        "filename",
-        "module",
-        "exc_info",
-        "exc_text",
-        "stack_info",
-        "lineno",
-        "funcName",
-        "created",
-        "msecs",
-        "relativeCreated",
-        "thread",
-        "threadName",
-        "processName",
-        "process",
-        "taskName",
-        "message",
-    }
-)
+# Read off an empty record rather than hand-listed, so an attribute CPython adds
+# (3.12's ``taskName``) is filtered out on the version that has it instead of
+# leaking into every log line's payload. ``message`` is the one manual entry:
+# ``Formatter.format`` sets it, ``LogRecord.__init__`` doesn't.
+_STD_ATTRS = frozenset(logging.makeLogRecord({}).__dict__) | {"message"}
 
 
 def register_secret(value: str | None) -> None:

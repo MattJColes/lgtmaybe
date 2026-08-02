@@ -36,7 +36,9 @@ class Severity(StrEnum):
 
     @property
     def rank(self) -> int:
-        return _SEVERITY_ORDER.index(self)
+        # Enum iteration order IS declaration order, so the members above are the
+        # single source of the ordering — no second list to keep in step.
+        return list(Severity).index(self)
 
     # All four order comparisons rank by severity. Defined explicitly (not via
     # functools.total_ordering, which skips operators str already defines) so
@@ -60,15 +62,6 @@ class Severity(StrEnum):
         if isinstance(other, Severity):
             return self.rank >= other.rank
         return NotImplemented
-
-
-_SEVERITY_ORDER: list[Severity] = [
-    Severity.info,
-    Severity.low,
-    Severity.medium,
-    Severity.high,
-    Severity.critical,
-]
 
 
 class ReviewCategory(StrEnum):
