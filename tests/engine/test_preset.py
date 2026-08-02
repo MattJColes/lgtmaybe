@@ -19,6 +19,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.engine import _build_lenses
 from lgtmaybe.providers.factory import cheaper_reflect_sibling
+from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -32,15 +33,9 @@ _CTX = PRContext(
 _CTX_WITH_INTENT = _CTX.model_copy(update={"title": "Fix pagination"})
 
 
-def _cfg(**overrides: object) -> ReviewConfig:
-    defaults: dict[str, object] = {"provider": Provider.ollama, "model": "m", "reflect": False}
-    defaults.update(overrides)
-    return ReviewConfig(**defaults)  # type: ignore[arg-type]
-
-
 class TestFastLensGrouping:
     def test_default_preset_is_fast(self) -> None:
-        assert _cfg().preset is ReviewPreset.fast
+        assert make_cfg().preset is ReviewPreset.fast
 
     _FOUR = ["security", "correctness", "code-health", "artefacts"]
 
@@ -59,13 +54,13 @@ class TestFastLensGrouping:
     ) -> None:
         """The lens set is a property of the preset, not of how many workers
         happen to be available: one concern per call, four calls, everywhere."""
-        lenses = _build_lenses(_cfg(**overrides), has_intent=False)
+        lenses = _build_lenses(make_cfg(**overrides), has_intent=False)
         assert [lens.id for lens in lenses] == self._FOUR
 
     def test_fast_covers_every_built_in_category(self) -> None:
         """Four distinct lenses, but still all nine categories — nothing that
         used to be reviewed silently stops being reviewed."""
-        lenses = _build_lenses(_cfg(), has_intent=True)
+        lenses = _build_lenses(make_cfg(), has_intent=True)
         covered: set[str] = set()
         for lens in lenses:
             covered.add(lens.id)
@@ -73,7 +68,7 @@ class TestFastLensGrouping:
         assert covered >= {c.value for c in ReviewCategory}
 
     def test_merged_prompts_name_their_member_categories(self) -> None:
-        lenses = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=False)}
+        lenses = {lens.id: lens for lens in _build_lenses(make_cfg(), has_intent=False)}
         code_health = lenses["code-health"].user_block
         for name in ("performance", "complexity", "ponytail", "deprecation"):
             assert f'"{name}"' in code_health
@@ -82,27 +77,27 @@ class TestFastLensGrouping:
             assert f'"{name}"' in artefacts
 
     def test_intent_folds_into_combined_correctness_when_stated(self) -> None:
-        lenses = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=True)}
+        lenses = {lens.id: lens for lens in _build_lenses(make_cfg(), has_intent=True)}
         correctness = lenses["correctness"]
         assert correctness.carries_intent
         assert correctness.allowed_categories == frozenset({"correctness", "intent"})
         assert "stated intent" in correctness.user_block
         # No stated intent → plain correctness call, no intent rubric.
-        plain = {lens.id: lens for lens in _build_lenses(_cfg(), has_intent=False)}
+        plain = {lens.id: lens for lens in _build_lenses(make_cfg(), has_intent=False)}
         assert not plain["correctness"].carries_intent
         assert "stated intent" not in plain["correctness"].user_block
 
     def test_full_preset_builds_one_lens_per_category(self) -> None:
-        lenses = _build_lenses(_cfg(preset="full"), has_intent=True)
+        lenses = _build_lenses(make_cfg(preset="full"), has_intent=True)
         assert [lens.id for lens in lenses] == [c.value for c in ReviewCategory]
         assert {"tests", "documentation"} <= {lens.id for lens in lenses}
 
     def test_full_preset_skips_intent_without_a_stated_intent(self) -> None:
-        lenses = _build_lenses(_cfg(preset="full"), has_intent=False)
+        lenses = _build_lenses(make_cfg(preset="full"), has_intent=False)
         assert "intent" not in [lens.id for lens in lenses]
 
     def test_explicit_categories_override_the_fast_grouping(self) -> None:
-        cfg = _cfg(categories=[ReviewCategory.security, ReviewCategory.performance])
+        cfg = make_cfg(categories=[ReviewCategory.security, ReviewCategory.performance])
         lenses = _build_lenses(cfg, has_intent=False)
         assert [lens.id for lens in lenses] == ["security", "performance"]
 
@@ -111,7 +106,7 @@ class TestFastLensGrouping:
         """Worker count changes how the four calls are scheduled, never how many
         there are — a single-slot provider runs the same four, serially."""
         fake = FakeProvider()
-        LLMReviewEngine(fake).review(_CTX, _cfg(provider=provider))
+        LLMReviewEngine(fake).review(_CTX, make_cfg(provider=provider))
         assert len(fake.calls) == 4
 
 
@@ -142,7 +137,7 @@ class TestMergedCategoryStamping:
                     return ProviderResult(text=finding_text, input_tokens=1, output_tokens=1)
                 return ProviderResult(text='{"findings": []}', input_tokens=1, output_tokens=1)
 
-        cfg = _cfg(min_severity="info")
+        cfg = make_cfg(min_severity="info")
         findings, _ = LLMReviewEngine(_CodeHealthOnly()).review(_CTX, cfg)
         return findings
 
