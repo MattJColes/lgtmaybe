@@ -17,6 +17,7 @@ from typing import Any
 import click
 
 from lgtmaybe.cli import (
+    _RUNTIME_INPUTS,
     RuntimeOptions,
     action_inputs,
     config_cmd,
@@ -569,34 +570,7 @@ def action() -> None:
     inputs = action_inputs()
     cfg = _load_cfg(
         inputs["config_path"],
-        provider=inputs["provider"],
-        model=inputs["model"],
-        preset=inputs["preset"],
-        reflect_model=inputs["reflect_model"],
-        language=inputs["language"],
-        triage_model=inputs["triage_model"],
-        timeout=inputs["timeout"],
-        max_review_seconds=inputs["max_review_seconds"],
-        max_review_tokens=inputs["max_review_tokens"],
-        temperature=inputs["temperature"],
-        num_ctx=inputs["num_ctx"],
-        max_input_tokens=inputs["max_input_tokens"],
-        max_tokens=inputs["max_tokens"],
-        reasoning_effort=inputs["reasoning_effort"],
-        max_concurrency=inputs["max_concurrency"],
-        resolve_fixed=inputs["resolve_fixed"],
-        recursive=inputs["recursive"],
-        structured_output=inputs["structured_output"],
-        mid_review_retrieval=inputs["mid_review_retrieval"],
-        symbol_resolution=inputs["symbol_resolution"],
-        prompt_cache=inputs["prompt_cache"],
-        incremental=inputs["incremental"],
-        auto_describe=inputs["auto_describe"],
-        auto_diagram=inputs["auto_diagram"],
-        answer_replies=inputs["answer_replies"],
-        pr_labels=inputs["pr_labels"],
-        learn_feedback=inputs["learn_feedback"],
-        fail_on=inputs["fail_on"],
+        **{key: value for key, value in inputs.items() if key not in _RUNTIME_INPUTS},
     )
     cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
     runtime = RuntimeOptions(

@@ -844,53 +844,62 @@ def pr_url_from_event(event: dict[str, Any]) -> str:
     return f"https://github.com/{repo}/pull/{number}"
 
 
+#: The action inputs the container reads, as an explicit allowlist. Written out
+#: rather than derived from ``ReviewConfig.model_fields`` on purpose: deriving
+#: would silently accept inputs ``action.yml`` never declares. Each name maps to
+#: the ``INPUT_<NAME.upper()>`` env var GitHub sets for it.
+_ACTION_INPUTS = (
+    "provider",
+    "model",
+    "preset",
+    "fallback_model",
+    "reflect_model",
+    "language",
+    "triage_model",
+    "api_key",
+    "api_base",
+    "timeout",
+    "max_review_seconds",
+    "max_review_tokens",
+    "temperature",
+    "num_ctx",
+    "max_input_tokens",
+    "max_tokens",
+    "reasoning_effort",
+    "max_concurrency",
+    "resolve_fixed",
+    "recursive",
+    "structured_output",
+    "symbol_resolution",
+    "mid_review_retrieval",
+    "prompt_cache",
+    "incremental",
+    "static_analysis",
+    "auto_describe",
+    "auto_diagram",
+    "answer_replies",
+    "pr_labels",
+    "learn_feedback",
+    "fail_on",
+    "profile",
+    "config_path",
+)
+
+#: Inputs ``action()`` handles itself rather than passing to ``ReviewConfig``:
+#: credentials and per-run options that live on ``RuntimeOptions``, the nested
+#: static-analysis toggle, and the config file path.
+_RUNTIME_INPUTS = frozenset(
+    {"api_key", "api_base", "fallback_model", "profile", "static_analysis", "config_path"}
+)
+
+
 def action_inputs() -> dict[str, str | None]:
     """Read the action's declared inputs from the ``INPUT_*`` env vars.
 
     GitHub sets ``INPUT_<NAME>`` for each input of a container action; empty
     strings (an unset optional input) are normalised to ``None``.
     """
-
-    def get(name: str) -> str | None:
-        value = os.environ.get(f"INPUT_{name}")
-        return value or None
-
-    return {
-        "provider": get("PROVIDER"),
-        "model": get("MODEL"),
-        "preset": get("PRESET"),
-        "fallback_model": get("FALLBACK_MODEL"),
-        "reflect_model": get("REFLECT_MODEL"),
-        "language": get("LANGUAGE"),
-        "triage_model": get("TRIAGE_MODEL"),
-        "api_key": get("API_KEY"),
-        "api_base": get("API_BASE"),
-        "timeout": get("TIMEOUT"),
-        "max_review_seconds": get("MAX_REVIEW_SECONDS"),
-        "max_review_tokens": get("MAX_REVIEW_TOKENS"),
-        "temperature": get("TEMPERATURE"),
-        "num_ctx": get("NUM_CTX"),
-        "max_input_tokens": get("MAX_INPUT_TOKENS"),
-        "max_tokens": get("MAX_TOKENS"),
-        "reasoning_effort": get("REASONING_EFFORT"),
-        "max_concurrency": get("MAX_CONCURRENCY"),
-        "resolve_fixed": get("RESOLVE_FIXED"),
-        "recursive": get("RECURSIVE"),
-        "structured_output": get("STRUCTURED_OUTPUT"),
-        "symbol_resolution": get("SYMBOL_RESOLUTION"),
-        "mid_review_retrieval": get("MID_REVIEW_RETRIEVAL"),
-        "prompt_cache": get("PROMPT_CACHE"),
-        "incremental": get("INCREMENTAL"),
-        "static_analysis": get("STATIC_ANALYSIS"),
-        "auto_describe": get("AUTO_DESCRIBE"),
-        "auto_diagram": get("AUTO_DIAGRAM"),
-        "answer_replies": get("ANSWER_REPLIES"),
-        "pr_labels": get("PR_LABELS"),
-        "learn_feedback": get("LEARN_FEEDBACK"),
-        "fail_on": get("FAIL_ON"),
-        "profile": get("PROFILE"),
-        "config_path": get("CONFIG_PATH"),
-    }
+    return {name: os.environ.get(f"INPUT_{name.upper()}") or None for name in _ACTION_INPUTS}
 
 
 _EPILOG = """\
