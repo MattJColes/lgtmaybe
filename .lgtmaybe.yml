@@ -14,9 +14,16 @@ exclude_paths:
 # The truncation is legible now (it names itself, and the findings it finished
 # emitting survive), but nothing bounded the cost of getting there.
 #
-# 16k is ~7x the largest output a healthy lens has produced here (2,261 tokens),
-# so an ordinary review — including a reasoning model's thinking tokens, which
-# come out of this same budget — never reaches it, while a runaway stops in
-# about a quarter of the time. It also shrinks the pre-flight reservation
-# OpenRouter charges against max_tokens before generating anything.
-max_tokens: 16384
+# 16k was ~7x the largest output a healthy lens had produced here (2,261 tokens),
+# and that turned out to be the wrong measure. Under a reasoning model the cap
+# also pays for thinking tokens, and this model spends most of it there: on #309
+# it truncated 3 of 4 lenses, and on #311 — a fifteen-line diff — it still
+# truncated 1 of 4 at the same 16,384. That is the starvation this comment
+# already warned about, observed: a cap sized to a plain model's findings
+# payload truncates every lens rather than only a runaway.
+#
+# 32k restores the thinking headroom while still bounding the runaway at half
+# the model's own 65,536 ceiling, so a lens that goes away still stops in half
+# the time instead of 21 minutes. It also keeps the pre-flight reservation
+# OpenRouter charges against max_tokens well under the full ceiling.
+max_tokens: 32768
