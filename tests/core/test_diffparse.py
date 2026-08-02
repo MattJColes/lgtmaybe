@@ -173,3 +173,17 @@ class TestChangedLineCount:
 
     def test_context_and_metadata_lines_are_ignored(self):
         assert changed_line_count("diff --git a/a.py b/a.py\n@@ -1 +1 @@\n unchanged\n") == 0
+
+    def test_changed_lines_whose_content_looks_like_a_header_still_count(self):
+        # A line whose own content starts with `++` renders as `+++ ...` inside
+        # the hunk. Excluding by prefix would undercount it, letting a large
+        # patch duck the triage escalation floor.
+        patch = (
+            "diff --git a/a.py b/a.py\n"
+            "--- a/a.py\n"
+            "+++ b/a.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            "--- leading dashes\n"
+            "+++ leading pluses\n"
+        )
+        assert changed_line_count(patch) == 2
