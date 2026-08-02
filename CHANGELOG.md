@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.11.1...lgtmaybe-v1.12.0) (2026-08-02)
+
+
+### Features
+
+* **config:** bound reasoning with reasoning_effort ([#323](https://github.com/MattJColes/lgtmaybe/issues/323)) ([0e0c83c](https://github.com/MattJColes/lgtmaybe/commit/0e0c83c1d44905fb5d311cc06e03cee24d7a1694))
+
 ## [1.11.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.11.0...lgtmaybe-v1.11.1) (2026-08-02)
 
 
