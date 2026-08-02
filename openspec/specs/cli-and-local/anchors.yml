@@ -22,6 +22,12 @@ cli.slash:
       has: { field: name, regex: '^dispatch$' }
     files: [src/lgtmaybe/cli/**/*.py]
 
+cli.diagram-sequence:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_sequence_views$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 cli.review-reply:
   rule:
     kind: function_definition

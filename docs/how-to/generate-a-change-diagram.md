@@ -1,17 +1,18 @@
 ---
-description: Post a compact Mermaid flowchart of a pull request's changes as a GitHub comment, or print one from the CLI.
+description: Post compact Mermaid diagrams of a pull request's changes — a flowchart of the structure and a sequence diagram of the flow — as a GitHub comment, or print them from the CLI.
 ---
 
 # Generate a change diagram
 
-lgtmaybe can post a **compact flowchart of what a pull request changes** — the
-components the PR touches plus their immediate relationships — so a reviewer
-gets a visual overview before they read the diff. It's a separate concern from
-the review and the description: enable any of them independently.
+lgtmaybe can post a **compact picture of what a pull request changes** — the
+components the PR touches and the run-time flow it alters — so a reviewer gets a
+visual overview before they read the diff. It's a separate concern from the
+review and the description: enable any of them independently.
 
 ## Contents
 
 - [What you get](#what-you-get)
+- [Structure and sequence](#structure-and-sequence)
 - [On GitHub: `/diagram` and `auto_diagram`](#on-github-diagram-and-auto_diagram)
 - [Locally: `lgtmaybe diagram`](#locally-lgtmaybe-diagram)
 - [Why Mermaid (and what the ASCII is for)](#why-mermaid-and-what-the-ascii-is-for)
@@ -19,12 +20,17 @@ the review and the description: enable any of them independently.
 
 ## What you get
 
-One model call returns two renderings of the same graph:
+One model call returns up to two diagrams, each in two renderings:
 
-- a **Mermaid flowchart**, which GitHub renders natively inside the comment —
-  no image, no external hosting; and
-- a **plain-text ASCII** rendering of the same diagram, which is what shows in a
-  terminal and serves as the fallback if the Mermaid can't be rendered.
+- a **Mermaid flowchart** of the structure — what the change touches and how
+  those pieces connect;
+- a **Mermaid sequence diagram** of the flow — what happens at run time, and in
+  what order — included only when the change actually alters a flow;
+- a **plain-text rendering** of each, which is what shows in a terminal and
+  serves as the fallback if the Mermaid can't be rendered.
+
+GitHub renders both Mermaid diagrams natively inside the comment — no image, no
+external hosting.
 
 The flowchart is intentionally sparse: it uses at most six nodes, short
 relationship labels, and Mermaid's automatic layout. Changed elements are
@@ -43,6 +49,8 @@ front of a user service — the Mermaid renders in place, with the ASCII tucked
 in a collapsible "Text version" underneath:
 
 > **Cache user lookups in Redis**
+
+> ### Structure
 
 ```mermaid
 flowchart LR
@@ -69,7 +77,60 @@ flowchart LR
 
 </details>
 
+> ### Sequence
+
+```mermaid
+sequenceDiagram
+    participant client as Client
+    participant api as User API (changed)
+    participant cache as Redis cache (new)
+    participant db as User DB
+    client->>api: GET /users/{id}
+    api->>cache: read cached row
+    cache-->>api: miss
+    api->>db: SELECT user
+    api->>cache: store row, 60s TTL
+    api-->>client: user JSON
+```
+
+<details>
+<summary>Text version</summary>
+
+```
+1. [Client] -> [User API (changed)]: GET /users/{id}
+2. [User API (changed)] -> [Redis cache (new)]: read cached row
+3. [Redis cache (new)] --> [User API (changed)]: miss
+4. [User API (changed)] -> [User DB]: SELECT user
+5. [User API (changed)] -> [Redis cache (new)]: store row, 60s TTL
+6. [User API (changed)] --> [Client]: user JSON
+```
+
+</details>
+
 > *The User DB link is inferred from an import, not shown in the diff.*
+
+## Structure and sequence
+
+The two diagrams answer different questions, which is why lgtmaybe draws both:
+
+| | Answers | Best on |
+|---|---|---|
+| **Flowchart** (structure) | What does this change touch, and what talks to what? | Structural PRs — a component added, a dependency introduced, a service split |
+| **Sequence** | What happens at run time, in what order, and where did that change? | Behavioural PRs — a retry added, an ordering fixed, a signal now handled |
+
+Most pull requests are behavioural, and structure alone under-describes them: a
+PR that fixes terminal restoration on `SIGTERM` might touch two files and draw
+three boxes, while its sequence diagram — signal, flag set, loop exit, guard
+dropped, terminal restored — *is* the explanation of the fix. A PR that puts a
+cache in front of a service is the opposite: the new box is the headline, and
+the flow shows how a request now reaches it.
+
+The sequence view is **omitted entirely** when the change has no meaningful
+run-time flow — documentation, configuration, formatting — rather than inventing
+one. When only the flowchart renders, the `Structure` / `Sequence` headings drop
+away too, so a small change stays a small comment. Both diagrams share one model
+call, one PR comment, and the same six-component budget; the sequence view adds
+at most eight ordered steps.
 
 ## On GitHub: `/diagram` and `auto_diagram`
 
@@ -110,25 +171,30 @@ $ lgtmaybe diagram --provider ollama --model llama3
 It diffs your branch against the base (the same base resolution as `lgtmaybe
 review`; `--base` overrides, `--working` includes uncommitted edits,
 `--uncommitted` reviews only the working-tree edits). The output is the same
-Markdown body the `/diagram` comment carries — the Mermaid source first, then
-the ASCII rendering (which reads fine in a terminal) in a collapsed "Text
-version" block. Paste the Mermaid into a GitHub comment,
+Markdown body the `/diagram` comment carries — each diagram's Mermaid source
+first, then its text rendering (which reads fine in a terminal) in a collapsed
+"Text version" block. Paste the Mermaid into a GitHub comment,
 [mermaid.live](https://mermaid.live), or a Markdown file to render it.
 
 ## Why Mermaid (and what the ASCII is for)
 
-GitHub renders **Mermaid** natively in comments and Markdown, so a `mermaid`
-fenced flowchart renders in the comment with no image to generate or host.
-That matters for a `pull_request_target` reviewer: hosting an image would mean
-committing a file or calling an external service, neither of which fits a
-fork-safe, idempotently-updated comment.
+GitHub renders **Mermaid** natively in comments and Markdown — both flowcharts
+and sequence diagrams — so a `mermaid` fence renders in the comment with no
+image to generate or host. That matters for a `pull_request_target` reviewer:
+hosting an image would mean committing a file or calling an external service,
+neither of which fits a fork-safe, idempotently-updated comment.
 
-A terminal, though, can't render Mermaid — which is exactly why the same call
-also returns **ASCII art**. Both the CLI output and the GitHub comment show the
-Mermaid with the ASCII tucked in a collapsible "Text version" — the ASCII is
+A terminal, though, can't render Mermaid — which is exactly why each diagram
+also comes as **plain text**. Both the CLI output and the GitHub comment show
+the Mermaid with the text tucked in a collapsible "Text version" — the text is
 what you actually read in a terminal, and it doubles as the fallback body, so a
 reviewer never sees a red "unable to render" box if a diagram comes back
 malformed.
+
+The model never writes Mermaid. It returns typed graph data — components,
+relationships, ordered steps — and lgtmaybe renders the syntax itself, escaping
+every label, so a diff that tries to smuggle diagram source or markup into a
+label can't reach the fence.
 
 D2 isn't used because GitHub doesn't render it in Markdown, so it would show as
 source anyway.

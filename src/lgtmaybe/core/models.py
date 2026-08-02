@@ -452,11 +452,26 @@ class DiagramEdge(_Strict):
     label: str = ""
 
 
+class DiagramStep(_Strict):
+    """One ordered run-time interaction between two diagram node ids.
+
+    Where an edge says two components are related, a step says what happens and
+    when — the behaviour view of the same change. ``reply`` renders the dashed
+    return arrow.
+    """
+
+    source: str
+    target: str
+    label: str = ""
+    reply: bool = False
+
+
 class DiagramResult(_Strict):
     """Structured-output envelope for the change-diagram pass.
 
-    The model returns presentation-agnostic nodes and edges. lgtmaybe renders
-    both Mermaid and ASCII locally so model-authored syntax never reaches a
+    The model returns presentation-agnostic nodes, edges, and ordered steps.
+    lgtmaybe renders Mermaid (a flowchart of the structure, a sequence diagram
+    of the flow) and text locally so model-authored syntax never reaches a
     Mermaid fence. ``ascii`` remains only as a compatibility fallback for weak
     models that return the legacy C4-plus-text shape.
     """
@@ -464,6 +479,7 @@ class DiagramResult(_Strict):
     title: str = ""
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
+    steps: list[DiagramStep] = Field(default_factory=list)
     ascii: str = ""
     notes: str = ""
 
