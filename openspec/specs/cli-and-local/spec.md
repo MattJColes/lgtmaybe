@@ -62,6 +62,27 @@ stack.
 - **THEN** the C4 source is not posted as Mermaid and the ASCII rendering is
   shown instead
 
+### Requirement: Change diagrams show structure and sequence
+
+The change diagram SHALL render two complementary views from the one structured
+call: a Mermaid flowchart of the components the change touches, and a Mermaid
+sequence diagram of the ordered run-time interactions it alters. Steps
+referencing unknown components SHALL be dropped, the step count SHALL be
+bounded, participant and message text SHALL be escaped with Mermaid entity
+codes, and the sequence view SHALL be omitted — section headings included —
+when the model reports no run-time flow.
+<!-- anchor: cli.diagram-sequence -->
+
+#### Scenario: change alters a run-time flow
+- **WHEN** the provider returns ordered steps between known components
+- **THEN** a `sequenceDiagram` renders beside the flowchart under `Structure`
+  and `Sequence` headings, each view with its own text version and link
+
+#### Scenario: change has no run-time flow
+- **WHEN** the provider returns no steps
+- **THEN** the comment carries the flowchart alone, with no sequence section
+  and no headings
+
 ### Requirement: Finding-thread replies are answered in-thread
 
 A `pull_request_review_comment` reply in a finding thread lgtmaybe opened SHALL

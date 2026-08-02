@@ -34,8 +34,9 @@ line. A clean change just gets a 👍 **LGTM!**.
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
 Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
-**`/describe`** writes a structured overview, **`/diagram`** draws a
-[compact flowchart of the change](how-to/generate-a-change-diagram.md), and
+**`/describe`** writes a structured overview, **`/diagram`** draws
+[the change](how-to/generate-a-change-diagram.md) — a flowchart of what it
+touches, plus a sequence diagram of the flow it alters — and
 **`/ask <question>`** answers in the PR. Run `lgtmaybe diagram` to draw the same
 map locally before you push.
 

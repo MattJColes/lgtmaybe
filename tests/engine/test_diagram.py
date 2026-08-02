@@ -93,6 +93,27 @@ def _graph_provider(**overrides: object) -> FakeProvider:
     )
 
 
+def _sequence_provider(**overrides: object) -> FakeProvider:
+    payload = {
+        "title": "Retry flow after this change",
+        "nodes": [
+            {"id": "client", "label": "Client", "change": "unchanged"},
+            {"id": "app", "label": "App", "technology": "Python", "change": "changed"},
+        ],
+        "edges": [{"source": "client", "target": "app", "label": "calls"}],
+        "steps": [
+            {"source": "client", "target": "app", "label": "POST /orders"},
+            {"source": "app", "target": "app", "label": "retries on 503"},
+            {"source": "app", "target": "client", "label": "201 Created", "reply": True},
+        ],
+        "notes": "",
+    }
+    payload.update(overrides)
+    return FakeProvider(
+        result=ProviderResult(text=json.dumps(payload), input_tokens=5, output_tokens=5)
+    )
+
+
 def test_parenthesized_change_marker_is_rendered_inside_a_quoted_node() -> None:
     body = build_diagram(_CTX, _CFG, _graph_provider())
 
@@ -272,6 +293,79 @@ def test_unparseable_output_uses_safe_fallback() -> None:
 
     assert "couldn't produce a valid change diagram" in body
     assert "Just prose" not in body
+
+
+def test_ordered_steps_render_a_sequence_diagram_beside_the_flowchart() -> None:
+    """Structure (what the change touches) and sequence (what happens, in what
+    order) are complementary, so both render in the one diagram comment."""
+    body = build_diagram(_CTX, _CFG, _sequence_provider())
+
+    assert "### Structure" in body
+    assert "### Sequence" in body
+    assert "```mermaid\nsequenceDiagram" in body
+    assert "    participant n0 as Client" in body
+    assert "    participant n1 as App (changed)" in body
+    assert "    n0->>n1: POST /orders" in body
+    assert "    n1->>n1: retries on 503" in body
+    assert "    n1-->>n0: 201 Created" in body
+
+
+def test_sequence_text_version_numbers_the_steps() -> None:
+    body = build_diagram(_CTX, _CFG, _sequence_provider())
+
+    assert "1. [Client] -> [App (changed)]: POST /orders" in body
+    assert "3. [App (changed)] --> [Client]: 201 Created" in body
+
+
+def test_no_sequence_section_without_steps() -> None:
+    """A change with no meaningful runtime flow keeps the flowchart-only body."""
+    body = build_diagram(_CTX, _CFG, _structured_provider())
+
+    assert "sequenceDiagram" not in body
+    assert "### Sequence" not in body
+    assert "### Structure" not in body
+
+
+def test_sequence_steps_are_capped_validated_and_escaped() -> None:
+    body = build_diagram(
+        _CTX,
+        _CFG,
+        _sequence_provider(
+            steps=[
+                {"source": "client", "target": "app", "label": 'issue #7 <b>"now"</b>; go'},
+                *[
+                    {"source": "app", "target": "client", "label": f"step {index}"}
+                    for index in range(9)
+                ],
+                {"source": "client", "target": "missing", "label": "dangling"},
+            ]
+        ),
+    )
+
+    assert "n0->>n1: issue #35;7 #60;b#62;#quot;now#quot;#60;/b#62;#59; go" in body
+    assert "step 6" in body
+    assert "step 7" not in body  # capped at eight steps
+    assert "dangling" not in body
+
+
+def test_sequence_diagram_gets_its_own_full_screen_link() -> None:
+    body = build_diagram(_CTX, _CFG, _sequence_provider())
+
+    sequence = body.split("```mermaid\nsequenceDiagram", 1)[1].split("\n```", 1)[0]
+    encoded = body.rsplit("#pako:", 1)[1].split(")", 1)[0]
+    state = json.loads(zlib.decompress(base64.urlsafe_b64decode(encoded)))
+    assert state["code"] == "sequenceDiagram" + sequence
+
+
+def test_prompt_asks_for_ordered_steps() -> None:
+    provider = _sequence_provider()
+
+    build_diagram(_CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert '"steps"' in system
+    assert "at most eight steps" in system
+    assert "empty list" in system
 
 
 def test_diff_is_redacted_before_prompting() -> None:

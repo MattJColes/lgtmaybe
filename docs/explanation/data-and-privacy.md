@@ -50,8 +50,8 @@ The optional **description** (`/describe`, `auto_describe`) and **change
 diagram** (`/diagram`, `auto_diagram`) features send exactly the same inputs —
 the redacted diff and, when present, the redacted stated intent. They add no new
 data flows; they only ask the model for a different output. The diagram comment
-does include an "Open full screen" [mermaid.live](https://mermaid.live) link
-whose URL fragment embeds the diagram source — but that source is the
+does include an "Open full screen" [mermaid.live](https://mermaid.live) link per
+diagram, whose URL fragment embeds that diagram's source — but that source is the
 already-public, post-redaction comment body, the fragment is decoded
 client-side (browsers never send fragments to a server), and nothing is fetched
 unless a reader clicks the link.
