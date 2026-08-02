@@ -29,6 +29,7 @@ import pytest
 import lgtmaybe
 
 _PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+_UV_LOCK = Path(__file__).resolve().parent.parent / "uv.lock"
 
 
 def _all_module_names() -> list[str]:
@@ -57,6 +58,36 @@ def test_deprecation_gate_is_configured() -> None:
     assert "error::DeprecationWarning" in filters
     assert "error::PendingDeprecationWarning" in filters
     assert "error::EncodingWarning" in filters
+
+
+def test_uv_lock_records_the_current_project_version() -> None:
+    """`uv.lock` must record the version `pyproject.toml` declares.
+
+    The lockfile pins the workspace package's own version, so every release bump
+    invalidates it and `uv lock --check` fails on main. This asserts the same
+    thing locally and names the fix, instead of the failure only showing up in CI.
+    """
+    project_version = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    locked = next(
+        pkg
+        for pkg in tomllib.loads(_UV_LOCK.read_text(encoding="utf-8"))["package"]
+        if pkg["name"] == "lgtmaybe"
+    )
+    assert locked["version"] == project_version, (
+        f"uv.lock pins lgtmaybe {locked['version']} but pyproject.toml declares "
+        f"{project_version} — run `uv lock` and commit the result"
+    )
+
+
+def test_release_workflow_regenerates_the_lockfile() -> None:
+    """The release path must re-lock itself, or the drift above returns each release."""
+    workflow = (_UV_LOCK.parent / ".github" / "workflows" / "release-please.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "uv lock" in workflow, (
+        "release-please.yml must run `uv lock` on the Release PR branch so the "
+        "version bump and the lockfile land together"
+    )
 
 
 def test_no_default_encoding_io() -> None:
