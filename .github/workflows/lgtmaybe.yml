@@ -87,6 +87,11 @@ jobs:
           # more credits, or fewer max_tokens") — every lens fails and the review
           # posts nothing.
           model: deepseek/deepseek-v4-flash-0731
+          # This model tops out at a 16k output ceiling, and the default 100k
+          # input budget hands one call more diff than it can answer for: the
+          # response is cut off mid-JSON and the lens is lost (three of four on
+          # #309). Smaller batches keep each answer inside the ceiling.
+          max_input_tokens: 40000
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_identity: lgtmaybe
