@@ -26,6 +26,11 @@
       "title": "Output Tokens",
       "type": "integer"
     },
+    "reasoning_tokens": {
+      "default": 0,
+      "title": "Reasoning Tokens",
+      "type": "integer"
+    },
     "text": {
       "title": "Text",
       "type": "string"

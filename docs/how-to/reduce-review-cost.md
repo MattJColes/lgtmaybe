@@ -48,6 +48,19 @@ the diff, over and over, once per lens per batch. The per-call table above it
 shows exactly which lens and which batch each call belongs to, so you can see
 whether the cost is lens count, batch count, or one enormous file.
 
+On a reasoning model, read the table's `think_tok` column next to `out_tok`.
+That is how much of the output budget went on thought before the model wrote a
+single finding, and a summary line totals it:
+
+```
+reasoning: 41,300 of 47,900 output tokens (86%)
+```
+
+The line appears only when a route reports the breakdown — its absence means
+"not reported", not "no thinking". When the share is high, it explains a lens
+that ran for a minute and returned three findings, and it is the number to
+check before [raising `max_tokens`](#if-a-call-runs-past-max_tokens).
+
 In the GitHub Action, set `profile: true` and the same breakdown lands in the
 job log. Every provider call also emits a structured `provider call` log line
 with its own token counts, so you can total a run without the summary.
@@ -220,6 +233,12 @@ finding, which is how a fifteen-line diff can truncate. The failure names the
 reasoning tokens where the provider reports them — if most of the ceiling went
 on thought, no amount of shrinking the input will help, and the cap is what
 needs raising.
+
+You do not have to wait for a truncation to find that out. `--profile` reports
+the same split on calls that **succeeded** (`think_tok`, and the `reasoning:`
+total), which is the comparison a truncated call cannot give you: a call that
+hit the ceiling spent reasoning + findings ≥ `max_tokens` by definition, so it
+tells you nothing about the healthy calls sitting beside it.
 
 ## What costs more, on purpose
 

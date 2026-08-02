@@ -67,6 +67,38 @@ class TestProfiler:
         assert (call.label, call.batch, call.attempts) == ("security", 1, 2)
         assert (call.cache_read_tokens, call.cache_creation_tokens) == (90, 10)
 
+    def test_record_call_captures_reasoning_tokens(self) -> None:
+        """A lens that wrote 50 tokens in 40 seconds needs an explanation, and
+        the thinking it did before writing them is that explanation."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.5,
+            attempts=1,
+            input_tokens=100,
+            output_tokens=1200,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            reasoning_tokens=1100,
+        )
+        assert p.calls[0].reasoning_tokens == 1100
+
+    def test_reasoning_tokens_default_to_zero(self) -> None:
+        """Non-reasoning routes report nothing, and callers may omit it."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.5,
+            attempts=1,
+            input_tokens=100,
+            output_tokens=20,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+        )
+        assert p.calls[0].reasoning_tokens == 0
+
     def test_reset_clears_prior_records(self) -> None:
         p = Profiler()
         with p.stage("redact"):
@@ -117,6 +149,59 @@ class TestProfiler:
         assert "RateLimitError" in text
         assert "900 tokens read / 200 created across 2 calls" in text
         assert "tokens: 2,100 billable (2,000 in / 100 out) across 2 calls" in text
+
+    def test_render_shows_the_reasoning_column(self) -> None:
+        """The `--profile` table is where the reasoning budget becomes legible:
+        out_tok next to think_tok is the whole comparison."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=2.0,
+            attempts=1,
+            input_tokens=1000,
+            output_tokens=1250,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            reasoning_tokens=1100,
+        )
+        text = p.render()
+        assert "think_tok" in text
+        assert "1100" in text
+
+    def test_render_omits_the_reasoning_line_when_no_route_reported_any(self) -> None:
+        """Zero across the board means "this route does not report it", not "this
+        model did no thinking" — so claim nothing rather than assert a false 0."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=2.0,
+            attempts=1,
+            input_tokens=1000,
+            output_tokens=50,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+        )
+        assert "reasoning:" not in p.render()
+
+    def test_render_summarises_the_reasoning_share_of_output(self) -> None:
+        """The share is the number the decision turns on, so compute it here
+        rather than leave every reader to do the division by hand."""
+        p = Profiler()
+        for _ in range(2):
+            p.record_call(
+                label="security",
+                batch=1,
+                elapsed=2.0,
+                attempts=1,
+                input_tokens=1000,
+                output_tokens=1000,
+                cache_read_tokens=0,
+                cache_creation_tokens=0,
+                reasoning_tokens=900,
+            )
+        assert "reasoning: 1,800 of 2,000 output tokens (90%)" in p.render()
 
 
 class TestTotalTokens:
@@ -198,6 +283,20 @@ class TestTimedComplete:
         assert (call.input_tokens, call.cache_read_tokens) == (42, 30)
         assert call.error is None
 
+    def test_success_records_the_reasoning_tokens(self) -> None:
+        """Reflection and triage are model calls too — a reasoning model spends
+        the budget on them the same way, so they report it the same way."""
+        provider = FakeProvider(
+            result=ProviderResult(
+                text="{}",
+                input_tokens=42,
+                output_tokens=700,
+                reasoning_tokens=650,
+            )
+        )
+        timed_complete(provider, [{"role": "user", "content": "hi"}], model="m", label="reflect")
+        assert profiler.calls[-1].reasoning_tokens == 650
+
     def test_failure_records_then_reraises(self) -> None:
         class _Boom(FakeProvider):
             def complete(self, messages, model, **opts):  # type: ignore[override]
@@ -250,6 +349,27 @@ class TestEnginePipelineTiming:
         assert labels == ["performance", "security"]
         assert all(c.batch == 1 for c in profiler.calls)
         assert all(c.error is None for c in profiler.calls)
+
+    def test_per_lens_calls_record_their_reasoning_tokens(self) -> None:
+        """The per-lens fan-out is the measurement that matters: it is the lens
+        calls that truncate, so it is the lens calls that must report the split."""
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.security],
+            reflect=False,
+        )
+        provider = FakeProvider(
+            result=ProviderResult(
+                text=json.dumps({"findings": []}),
+                input_tokens=900,
+                output_tokens=1200,
+                reasoning_tokens=1100,
+            )
+        )
+        LLMReviewEngine(provider).review(_CTX, cfg)
+
+        assert [c.reasoning_tokens for c in profiler.calls] == [1100]
 
     def test_failed_lens_call_is_recorded_with_its_reason(self) -> None:
         class _OneBadLens(FakeProvider):

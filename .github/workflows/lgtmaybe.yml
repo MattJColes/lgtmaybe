@@ -1,4 +1,4 @@
-# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (deepseek/deepseek-v4-pro).
+# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (deepseek-v4-flash).
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
 # Add an OPENROUTER_API_KEY repo secret.
 #
@@ -9,7 +9,7 @@
 # Reviews run automatically on PRs from trusted authors (owner / member /
 # collaborator), and on demand via slash commands (/review, /improve, /ask,
 # /describe, /diagram) — a maintainer can opt an external PR in by commenting
-# /review on it. deepseek-v4-pro is cheap enough to run per-PR; on a
+# /review on it. deepseek-v4-flash is cheap enough to run per-PR; on a
 # `synchronize` push the review is incremental (only the new commits).
 name: lgtmaybe
 
@@ -81,16 +81,28 @@ jobs:
         with:
           image: lgtmaybe:dogfood
           provider: openrouter
-          # deepseek-v4-pro is cheap enough to run on every PR, which is what a
+          # deepseek-v4-flash is cheap enough to run on every PR, which is what a
           # per-PR dogfood needs: a pricier model exhausts the key's monthly
           # limit, and OpenRouter then rejects each call with a 402 ("requires
           # more credits, or fewer max_tokens") — every lens fails and the review
           # posts nothing.
-          model: deepseek/deepseek-v4-flash-latest
-          # This model tops out at a 16k output ceiling, and the default 100k
-          # input budget hands one call more diff than it can answer for: the
-          # response is cut off mid-JSON and the lens is lost (three of four on
-          # #309). Smaller batches keep each answer inside the ceiling.
+          # The bare id is what OpenRouter rejected on #319 — `{"message":
+          # "deepseek/deepseek-v4-flash-latest is not a valid model ID","code":
+          # 400}` on every lens, so the review posted a failure instead of a
+          # review. The `~` prefix is the floating-alias form; quoted because a
+          # bare `~` is YAML's null and leading-`~` scalars are easy to misread.
+          model: "~deepseek/deepseek-v4-flash-latest"
+          # The default 100k input budget hands one call more diff than it can
+          # answer for: the response is cut off mid-JSON and the lens is lost
+          # (three of four on #309). Smaller batches keep each answer inside the
+          # output ceiling.
+          #
+          # That ceiling is lgtmaybe's own `max_tokens` (.lgtmaybe.yml), NOT the
+          # model's — an earlier revision of this comment said the model "tops
+          # out at 16k", which sent the reader to a knob they cannot move. The
+          # 16k was ours, against a model that ran to 65,536 when a lens went
+          # away. Reasoning models spend that same budget on thought before
+          # writing a finding; `--profile` reports the split (`think_tok`).
           max_input_tokens: 40000
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}

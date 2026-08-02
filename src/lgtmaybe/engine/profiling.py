@@ -42,6 +42,9 @@ class CallRecord:
     cache_read_tokens: int
     cache_creation_tokens: int
     error: str | None = None  # None on success; the concise failure reason otherwise
+    # Thinking tokens inside `output_tokens` (0 = the route reported no breakdown).
+    # Keyword-defaulted so every existing caller keeps working unchanged.
+    reasoning_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,7 @@ class Profiler:
         output_tokens: int,
         cache_read_tokens: int,
         cache_creation_tokens: int,
+        reasoning_tokens: int = 0,
         error: str | None = None,
     ) -> None:
         """Record one provider call and log it as a structured line."""
@@ -91,6 +95,7 @@ class Profiler:
             output_tokens=output_tokens,
             cache_read_tokens=cache_read_tokens,
             cache_creation_tokens=cache_creation_tokens,
+            reasoning_tokens=reasoning_tokens,
             error=error,
         )
         with self._lock:
@@ -106,6 +111,9 @@ class Profiler:
                 "output_tokens": output_tokens,
                 "cache_read_tokens": cache_read_tokens,
                 "cache_creation_tokens": cache_creation_tokens,
+                # Only when reported: a 0 on every line would read as a claim
+                # that the model did no thinking, which is not what it means.
+                **({"reasoning_tokens": reasoning_tokens} if reasoning_tokens else {}),
                 **({"error": error} if error else {}),
             },
         )
@@ -152,14 +160,16 @@ class Profiler:
             lines.append(f"{stage.name:<16} {stage.elapsed:>8.2f}s")
         lines.append("")
 
+        # `think_tok` sits next to `out_tok` deliberately: side by side they are
+        # the whole story of a lens that ran for a minute and wrote 50 tokens.
         lines.append(
             f"{'call':<16} {'batch':>5} {'tries':>5} {'elapsed':>9} "
-            f"{'in_tok':>8} {'out_tok':>8} {'cache_rd':>8} {'cache_wr':>8}  error"
+            f"{'in_tok':>8} {'out_tok':>8} {'think_tok':>9} {'cache_rd':>8} {'cache_wr':>8}  error"
         )
         for call in sorted(calls, key=lambda c: c.elapsed, reverse=True):
             lines.append(
                 f"{call.label:<16} {call.batch:>5} {call.attempts:>5} {call.elapsed:>8.2f}s "
-                f"{call.input_tokens:>8} {call.output_tokens:>8} "
+                f"{call.input_tokens:>8} {call.output_tokens:>8} {call.reasoning_tokens:>9} "
                 f"{call.cache_read_tokens:>8} {call.cache_creation_tokens:>8}  "
                 f"{call.error or '-'}"
             )
@@ -168,8 +178,28 @@ class Profiler:
         read = sum(c.cache_read_tokens for c in calls)
         created = sum(c.cache_creation_tokens for c in calls)
         lines.append(f"cache: {read} tokens read / {created} created across {len(calls)} calls")
+        reasoning_line = self._render_reasoning(calls)
+        if reasoning_line:
+            lines.append(reasoning_line)
         lines.append(self.render_total())
         return "\n".join(lines)
+
+    @staticmethod
+    def _render_reasoning(calls: list[CallRecord]) -> str:
+        """How much of the output budget went on thought — "" when unreported.
+
+        Silence, not a zero: a route that reports no breakdown is not a model
+        that did no thinking, and a line reading "0 of 2,000" would say exactly
+        that. The share is computed here rather than left to the reader, because
+        it is the ratio — not either raw count — that says whether the output
+        ceiling is being spent on findings or on reasoning.
+        """
+        reasoning = sum(c.reasoning_tokens for c in calls)
+        if not reasoning:
+            return ""
+        output = sum(c.output_tokens for c in calls)
+        share = round(100 * reasoning / output) if output else 0
+        return f"reasoning: {reasoning:,} of {output:,} output tokens ({share}%)"
 
     def render_total(self) -> str:
         """One line: what this run spent, formatted for a human.
@@ -235,5 +265,6 @@ def timed_complete(
         output_tokens=result.output_tokens,
         cache_read_tokens=result.cache_read_tokens,
         cache_creation_tokens=result.cache_creation_tokens,
+        reasoning_tokens=result.reasoning_tokens,
     )
     return result

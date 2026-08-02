@@ -1269,6 +1269,7 @@ class LLMReviewEngine(ReviewEngine):
             output_tokens=result.output_tokens,
             cache_read_tokens=result.cache_read_tokens,
             cache_creation_tokens=result.cache_creation_tokens,
+            reasoning_tokens=result.reasoning_tokens,
         )
         salvaged = 0
         try:

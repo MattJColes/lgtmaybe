@@ -62,6 +62,34 @@ class TestLiteLLMProvider:
         assert result.input_tokens == 50
         assert result.output_tokens == 100
 
+    def test_complete_reports_reasoning_tokens_on_the_success_path(self) -> None:
+        """Reasoning tokens must be visible on calls that SUCCEEDED, not only on
+        the ones that blew the ceiling.
+
+        Read only from the failure path, the number can never answer the
+        question it exists to answer: a truncated call has reasoning + findings
+        >= max_tokens by definition, so that sample has no healthy call to
+        compare against. The success path is where the comparison lives.
+        """
+        response = _fake_response(prompt_tokens=900, completion_tokens=1200)
+        response.usage.completion_tokens_details = SimpleNamespace(reasoning_tokens=1100)
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert result.reasoning_tokens == 1100
+        # Reasoning is a SUBSET of the completion count, never an addition to it —
+        # adding it to `output_tokens` would double-count against the budget.
+        assert result.output_tokens == 1200
+
+    def test_a_route_without_reasoning_detail_reports_zero(self) -> None:
+        """No detail is not an error — a non-reasoning route simply reports 0."""
+        with patch("litellm.completion", return_value=_fake_response()):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert result.reasoning_tokens == 0
+
     def test_complete_passes_messages_and_model_to_litellm(self) -> None:
         response = _fake_response()
         messages = [{"role": "user", "content": "review this"}]
