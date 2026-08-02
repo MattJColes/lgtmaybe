@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import click
 
@@ -33,7 +34,9 @@ from lgtmaybe.cli import (
 )
 from lgtmaybe.config import store
 from lgtmaybe.config.loader import load_config
-from lgtmaybe.core.models import ReviewConfig
+from lgtmaybe.core.models import Provider, ReviewConfig, ReviewPreset, Severity
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewConfig:
@@ -77,18 +80,131 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
         raise click.ClickException(str(exc)) from exc
 
 
-@main.command()
-@click.option(
-    "--provider",
-    default=None,
-    help="LLM provider (openai, anthropic, bedrock, vertex, azure, ollama, "
-    "openrouter, zai, openai-compatible)",
+def _check_diff_mode(working: bool, uncommitted: bool) -> None:
+    """Reject --working with --uncommitted, once, for both local commands.
+
+    ``local_pr_context`` enforces the same invariant for library callers; the
+    CLI checks it up front so the user gets a usage error (exit 2) before any
+    provider work, rather than a runtime failure after it.
+    """
+    if working and uncommitted:
+        raise click.UsageError("--working and --uncommitted are mutually exclusive")
+
+
+def _runtime(
+    api_key: str | None, api_base: str | None, fallback_model: str | None, profile: bool = False
+) -> RuntimeOptions:
+    """The RuntimeOptions every ``model_options`` command builds from its flags."""
+    return RuntimeOptions(
+        api_key=api_key, api_base=api_base, fallback_model=fallback_model, profile=profile
+    )
+
+
+def _stack(*options: Callable[..., Any]) -> Callable[[F], F]:
+    """Bundle click options into one reusable decorator, applied bottom-up.
+
+    A shared group then reads on the command exactly as the inline decorators
+    did — and can only document itself one way across the commands that take it.
+    """
+
+    def wrap(func: F) -> F:
+        for option in reversed(options):
+            func = option(func)
+        return func
+
+    return wrap
+
+
+#: The provider/model/credential flags every model-invoking command takes.
+model_options = _stack(
+    click.option(
+        "--provider",
+        default=None,
+        # NOT `click.Choice(Provider)`: click matches an Enum by member NAME, so
+        # that would accept `openai_compatible` and reject the documented
+        # `openai-compatible`. The values keep the wire spelling, still derived.
+        type=click.Choice([p.value for p in Provider]),
+        # The nine names review used to spell out in prose are the metavar now,
+        # so --help still shows them all — from the enum, not a second copy.
+        help="LLM backend to review with (overrides the configured provider)",
+    ),
+    click.option("--model", default=None, help="Model name understood by the chosen provider"),
+    click.option(
+        "--fallback-model",
+        default=None,
+        help="Model to retry with if the primary model fails",
+    ),
+    click.option(
+        "--api-key",
+        default=None,
+        envvar="LGTMAYBE_API_KEY",
+        help="API key (not needed for bedrock/vertex/keyless-azure ambient creds, or ollama)",
+    ),
+    click.option(
+        "--api-base",
+        default=None,
+        help="API base URL (ollama: http://localhost:11434; "
+        "azure: https://<resource>.openai.azure.com; "
+        "openai-compatible: any OpenAI /v1 endpoint, e.g. https://api.deepseek.com/v1 "
+        "or http://localhost:8000/v1; "
+        "zai: optional override for the China / coding-plan GLM endpoint, "
+        "e.g. https://open.bigmodel.cn/api/paas/v4)",
+    ),
+    click.option(
+        "--config",
+        "config_path",
+        default=None,
+        help="Path to a per-repo config file (must exist when given) "
+        "[default: .lgtmaybe.yml, absent is fine]",
+    ),
 )
-@click.option("--model", default=None, help="Model name understood by the chosen provider")
+
+#: The flags the two local (no-GitHub) commands share: what to diff, and the
+#: model-call knobs a slow local model needs.
+local_diff_options = _stack(
+    click.option(
+        "--base",
+        default=None,
+        help="Base ref to diff against (default: the remote's primary branch — "
+        "origin/HEAD, else origin/main / origin/master, else a local main/master)",
+    ),
+    click.option(
+        "--working",
+        is_flag=True,
+        default=False,
+        help="Use the whole worktree — branch commits plus uncommitted edits — "
+        "against the base, instead of only the committed branch changes",
+    ),
+    click.option(
+        "--uncommitted",
+        is_flag=True,
+        default=False,
+        help="Use only the uncommitted working-tree edits (vs HEAD); "
+        "mutually exclusive with --working",
+    ),
+    click.option(
+        "--timeout",
+        default=None,
+        type=int,
+        help="Per-request timeout in seconds for each model call (raise for slow local models)",
+    ),
+    click.option(
+        "--num-ctx",
+        default=None,
+        type=int,
+        help="ollama context window (ollama only; ignored for hosted providers). "
+        "Raise it so a large multi-file diff isn't truncated; default 32768",
+    ),
+)
+
+
+@main.command()
+@model_options
+@local_diff_options
 @click.option(
     "--preset",
     default=None,
-    type=click.Choice(["fast", "full"]),
+    type=click.Choice(ReviewPreset),
     help="Review preset: fast (default) covers all nine categories in four "
     "calls, one per concern — security, correctness (stated intent folds in), "
     "code health, artefacts (tests/documentation) — the same four on every "
@@ -100,11 +216,6 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     is_flag=True,
     default=False,
     help="Shorthand for --preset full",
-)
-@click.option(
-    "--fallback-model",
-    default=None,
-    help="Model to retry with if the primary model fails",
 )
 @click.option(
     "--reflect-model",
@@ -127,31 +238,15 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "Security-relevant files always escalate past triage. Unset = no triage",
 )
 @click.option(
-    "--api-key",
-    default=None,
-    envvar="LGTMAYBE_API_KEY",
-    help="API key (not needed for bedrock/vertex/keyless-azure ambient creds, or ollama)",
-)
-@click.option(
-    "--api-base",
-    default=None,
-    help="API base URL (ollama: http://localhost:11434; "
-    "azure: https://<resource>.openai.azure.com; "
-    "openai-compatible: any OpenAI /v1 endpoint, e.g. https://api.deepseek.com/v1 "
-    "or http://localhost:8000/v1; "
-    "zai: optional override for the China / coding-plan GLM endpoint, "
-    "e.g. https://open.bigmodel.cn/api/paas/v4)",
-)
-@click.option(
     "--min-severity",
     default=None,
-    type=click.Choice(["info", "low", "medium", "high", "critical"]),
+    type=click.Choice(Severity),
     help="Minimum severity to report",
 )
 @click.option(
     "--fail-on",
     default=None,
-    type=click.Choice(["info", "low", "medium", "high", "critical"]),
+    type=click.Choice(Severity),
     help="Merge-gate threshold: on the GitHub Action, create a Check Run that "
     "fails when any finding is at or above this severity (make it a required "
     "check in branch protection). Default off",
@@ -159,7 +254,7 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
 @click.option(
     "--unanchored-min-severity",
     default=None,
-    type=click.Choice(["info", "low", "medium", "high", "critical"]),
+    type=click.Choice(Severity),
     help="Minimum severity for a finding the engine could not anchor to a changed "
     "line (default high; raise/lower to control how many low-confidence guesses surface)",
 )
@@ -190,33 +285,6 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "thinking first, so raising the cap grows the reasoning instead of the answer",
 )
 @click.option(
-    "--num-ctx",
-    default=None,
-    type=int,
-    help="ollama context window (ollama only; ignored for hosted providers). "
-    "Raise it so a large multi-file diff isn't truncated; default 32768",
-)
-@click.option(
-    "--base",
-    default=None,
-    help="Base ref to diff against (default: the remote's primary branch — "
-    "origin/HEAD, else origin/main / origin/master, else a local main/master)",
-)
-@click.option(
-    "--working",
-    is_flag=True,
-    default=False,
-    help="Review the whole worktree — branch commits plus uncommitted edits — "
-    "against the base, instead of only the committed branch changes",
-)
-@click.option(
-    "--uncommitted",
-    is_flag=True,
-    default=False,
-    help="Review only the uncommitted working-tree edits (vs HEAD); "
-    "mutually exclusive with --working",
-)
-@click.option(
     "--format",
     "output_format",
     type=click.Choice(["human", "json", "agent"]),
@@ -245,12 +313,6 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     "lenses share one pool). Default: 8 for cloud providers, 1 for ollama, and "
     "1 for openai-compatible — a llama.cpp/LM Studio single-slot server wants 1, "
     "while a vLLM server batches happily at 8; raise it there explicitly",
-)
-@click.option(
-    "--timeout",
-    default=None,
-    type=int,
-    help="Per-request timeout in seconds for each model call (raise for slow local models)",
 )
 @click.option(
     "--max-review-seconds",
@@ -348,17 +410,10 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
     help="Print a timing profile at the end of the run: total wall time, "
     "per-stage and per-call tables, and prompt-cache hit totals",
 )
-@click.option(
-    "--config",
-    "config_path",
-    default=None,
-    help="Path to a per-repo config file (must exist when given) "
-    "[default: .lgtmaybe.yml, absent is fine]",
-)
 def review(
     provider: str | None,
     model: str | None,
-    preset: str | None,
+    preset: ReviewPreset | None,
     full_preset: bool,
     fallback_model: str | None,
     reflect_model: str | None,
@@ -366,9 +421,9 @@ def review(
     triage_model: str | None,
     api_key: str | None,
     api_base: str | None,
-    min_severity: str | None,
-    fail_on: str | None,
-    unanchored_min_severity: str | None,
+    min_severity: Severity | None,
+    fail_on: Severity | None,
+    unanchored_min_severity: Severity | None,
     max_files: int | None,
     max_input_tokens: int | None,
     max_tokens: int | None,
@@ -398,16 +453,15 @@ def review(
     config_path: str | None,
 ) -> None:
     """Review local git changes and print findings — no GitHub needed."""
-    if working and uncommitted:
-        raise click.UsageError("--working and --uncommitted are mutually exclusive")
-    if full_preset and preset == "fast":
+    _check_diff_mode(working, uncommitted)
+    if full_preset and preset is ReviewPreset.fast:
         raise click.UsageError("--full contradicts --preset fast")
     cfg = _load_cfg(
         config_path,
         user_config_path=store.user_config_path(),
         provider=provider,
         model=model,
-        preset="full" if full_preset else preset,
+        preset=ReviewPreset.full if full_preset else preset,
         reflect_model=reflect_model,
         language=language,
         triage_model=triage_model,
@@ -436,61 +490,14 @@ def review(
     )
     cfg = _apply_static_analysis_flag(cfg, static_analysis)
 
-    runtime = RuntimeOptions(
-        api_key=api_key, api_base=api_base, fallback_model=fallback_model, profile=profile
-    )
+    runtime = _runtime(api_key, api_base, fallback_model, profile=profile)
     fmt = output_format or ("json" if as_json else "human")
     execute_local_review(cfg, runtime, base=base, working=working, uncommitted=uncommitted, fmt=fmt)
 
 
 @main.command()
-@click.option("--provider", default=None, help="LLM provider override")
-@click.option("--model", default=None, help="Model name understood by the chosen provider")
-@click.option("--fallback-model", default=None, help="Model to retry with if the primary fails")
-@click.option(
-    "--api-key",
-    default=None,
-    envvar="LGTMAYBE_API_KEY",
-    help="API key (not needed for bedrock/vertex/keyless-azure ambient creds, or ollama)",
-)
-@click.option("--api-base", default=None, help="API base URL (e.g. ollama)")
-@click.option(
-    "--base",
-    default=None,
-    help="Base ref to diff against (default: the remote's primary branch)",
-)
-@click.option(
-    "--working",
-    is_flag=True,
-    default=False,
-    help="Diagram the whole worktree — branch commits plus uncommitted edits — vs the base",
-)
-@click.option(
-    "--uncommitted",
-    is_flag=True,
-    default=False,
-    help="Diagram only the uncommitted working-tree edits (vs HEAD); "
-    "mutually exclusive with --working",
-)
-@click.option(
-    "--timeout",
-    default=None,
-    type=int,
-    help="Per-request timeout in seconds for the model call (raise for slow local models)",
-)
-@click.option(
-    "--num-ctx",
-    default=None,
-    type=int,
-    help="ollama context window (ollama only; raise it for a large multi-file diff)",
-)
-@click.option(
-    "--config",
-    "config_path",
-    default=None,
-    help="Path to a per-repo config file (must exist when given) "
-    "[default: .lgtmaybe.yml, absent is fine]",
-)
+@model_options
+@local_diff_options
 def diagram(
     provider: str | None,
     model: str | None,
@@ -510,8 +517,7 @@ def diagram(
     source — paste that into a GitHub comment, mermaid.live, or a Markdown file
     to render it.
     """
-    if working and uncommitted:
-        raise click.UsageError("--working and --uncommitted are mutually exclusive")
+    _check_diff_mode(working, uncommitted)
     cfg = _load_cfg(
         config_path,
         user_config_path=store.user_config_path(),
@@ -520,7 +526,7 @@ def diagram(
         timeout=timeout,
         num_ctx=num_ctx,
     )
-    runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
+    runtime = _runtime(api_key, api_base, fallback_model)
     execute_local_diagram(cfg, runtime, base=base, working=working, uncommitted=uncommitted)
 
 
@@ -531,18 +537,7 @@ def diagram(
     required=True,
     help="Path to the issue_comment event payload (GitHub sets GITHUB_EVENT_PATH).",
 )
-@click.option("--provider", default=None, help="LLM provider override")
-@click.option("--model", default=None, help="Model name override")
-@click.option("--fallback-model", default=None, help="Model to retry with if the primary fails")
-@click.option("--api-key", default=None, envvar="LGTMAYBE_API_KEY", help="API key")
-@click.option("--api-base", default=None, help="API base URL (e.g. ollama)")
-@click.option(
-    "--config",
-    "config_path",
-    default=None,
-    help="Path to a per-repo config file (must exist when given) "
-    "[default: .lgtmaybe.yml, absent is fine]",
-)
+@model_options
 def comment(
     event_path: str,
     provider: str | None,
@@ -555,7 +550,7 @@ def comment(
     """Handle an issue_comment event: route a /slash command to the engine."""
     event = json.loads(Path(event_path).read_text(encoding="utf-8"))
     cfg = _load_cfg(config_path, provider=provider, model=model)
-    runtime = RuntimeOptions(api_key=api_key, api_base=api_base, fallback_model=fallback_model)
+    runtime = _runtime(api_key, api_base, fallback_model)
     execute_comment(event, cfg, runtime)
 
 
