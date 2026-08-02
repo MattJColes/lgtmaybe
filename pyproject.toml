@@ -53,12 +53,6 @@ static-analysis = [
     # the odd one out: a Go binary with no wheel, fetched in the Dockerfile.
     "zizmor>=1.5",
 ]
-# Hosted identity broker only; not installed by CLI or Action users.
-identity-broker = [
-    "aws-lambda-powertools>=3.23",
-    "httpx>=0.28.1",
-    "pyjwt[crypto]>=2.10",
-]
 
 [project.scripts]
 lgtmaybe = "lgtmaybe.cli:main"

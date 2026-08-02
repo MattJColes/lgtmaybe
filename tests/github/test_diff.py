@@ -286,6 +286,18 @@ def test_is_reviewable_rejects_newer_lockfiles() -> None:
         assert not is_reviewable(path), path
 
 
+def test_is_reviewable_accepts_a_dotfile_named_like_an_extension() -> None:
+    """A file literally named ``.png`` is a dotfile, not an image.
+
+    ``PurePosixPath(".png").suffix`` is ``""`` (the leading dot names the file,
+    it does not start an extension), so the binary-extension skip does not fire.
+    """
+    assert is_reviewable(".png")
+    assert is_reviewable("assets/.gz")
+    # Control: a real extension on a dotfile still skips.
+    assert not is_reviewable(".hidden.png")
+
+
 def test_is_reviewable_rejects_sourcemaps() -> None:
     assert not is_reviewable("assets/app.js.map")
     assert not is_reviewable("assets/styles.css.map")

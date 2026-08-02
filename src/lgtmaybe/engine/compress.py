@@ -171,9 +171,6 @@ def batch_files(
     Returns:
         A list of batches; each batch is a list of (path, patch) pairs.
     """
-    if not files:
-        return []
-
     # RLM walk: decompose any over-budget file into per-hunk units up front, so a
     # large file becomes several small calls that each fit instead of one
     # oversized call. Files within budget pass through whole (context preserved).
@@ -347,7 +344,6 @@ class _Hunk:
     """One parsed hunk: its header positions plus its verbatim body lines."""
 
     old_start: int
-    old_len: int
     new_start: int
     new_len: int
     section: str
@@ -369,7 +365,6 @@ def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
             hunks.append(
                 _Hunk(
                     old_start=header.old_start,
-                    old_len=header.old_len,
                     new_start=header.new_start,
                     new_len=header.new_len,
                     section=header.section,
