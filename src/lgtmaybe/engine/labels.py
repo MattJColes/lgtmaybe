@@ -16,6 +16,7 @@ best-effort by the GitHub adapter — a labelling failure never fails a review.
 
 from __future__ import annotations
 
+from lgtmaybe.core.diffparse import changed_line_count
 from lgtmaybe.core.models import (
     _SCAN_CATEGORY_PREFIX,
     EFFORT_PREFIX,
@@ -69,12 +70,7 @@ def compute_labels(findings: list[ReviewFinding], ctx: PRContext) -> list[str]:
 
 def _effort_score(diff: str) -> int:
     """1–5 from the number of added/removed lines in *diff*."""
-    changed = sum(
-        1
-        for line in diff.splitlines()
-        if (line.startswith("+") and not line.startswith("+++"))
-        or (line.startswith("-") and not line.startswith("---"))
-    )
+    changed = changed_line_count(diff)
     score = 1
     for threshold in _EFFORT_THRESHOLDS:
         if changed >= threshold:

@@ -83,6 +83,20 @@ def test_large_hunks_escalate() -> None:
     assert always_escalate("docs/notes.md", big, hinted_paths=set())
 
 
+def test_diff_file_headers_do_not_count_as_changed_lines() -> None:
+    """Every ``split_by_file`` patch carries a ``---``/``+++`` pair; counting it
+    made the documented 200-line floor really 198, escalating a file sitting
+    just under the threshold."""
+    body = "\n".join(f"+line {i}" for i in range(199))
+    patch = (
+        "diff --git a/docs/notes.md b/docs/notes.md\n"
+        "--- a/docs/notes.md\n"
+        "+++ b/docs/notes.md\n"
+        f"@@ -1 +1,199 @@\n{body}\n"
+    )
+    assert not always_escalate("docs/notes.md", patch, hinted_paths=set())
+
+
 def test_plain_small_file_does_not_escalate() -> None:
     assert not always_escalate("src/util.py", "@@ -1 +1 @@\n+return x + 1\n", hinted_paths=set())
 

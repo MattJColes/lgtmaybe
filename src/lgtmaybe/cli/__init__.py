@@ -286,14 +286,6 @@ def build_review_context(
     return github, engine, provider
 
 
-def build_adapters(
-    cfg: ReviewConfig, runtime: RuntimeOptions
-) -> tuple[GitHubGateway, ReviewEngine]:
-    """Construct the real GitHub gateway and review engine from config + runtime."""
-    github, engine, _provider = build_review_context(cfg, runtime)
-    return github, engine
-
-
 def _apply_learned_feedback(github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig) -> PRContext:
     """Attach 👎-downvoted finding fingerprints to ``ctx.feedback_downvotes``.
 
@@ -527,34 +519,6 @@ def execute_local_review(
         # than only under --profile (whose table already ends with this line —
         # hence the elif). stderr keeps --json / --agent output pipeable.
         click.echo(profiler.render_total(), err=True)
-
-
-def _execute_auxiliary(
-    cfg: ReviewConfig,
-    runtime: RuntimeOptions,
-    run: Callable[[GitHubGateway, ProviderClient, ReviewConfig], None],
-    name: str,
-) -> None:
-    """Build a fresh context and run one auxiliary post. Best-effort.
-
-    The extras are auxiliary: any failure is logged and swallowed so they can
-    never block a review.
-    """
-    try:
-        github, _engine, provider = build_review_context(cfg, runtime)
-        run(github, provider, cfg)
-    except Exception:
-        _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
-
-
-def execute_describe(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
-    """Post the structured PR description (standalone path). Best-effort."""
-    _execute_auxiliary(cfg, runtime, run_describe, "describe")
-
-
-def execute_diagram(cfg: ReviewConfig, runtime: RuntimeOptions) -> None:
-    """Post the change diagram (standalone path). Best-effort."""
-    _execute_auxiliary(cfg, runtime, run_diagram, "diagram")
 
 
 def execute_local_diagram(
@@ -935,12 +899,10 @@ from lgtmaybe.cli import commands as _commands  # noqa: E402,F401
 __all__ = [
     "RuntimeOptions",
     "action_inputs",
-    "build_adapters",
     "build_provider_engine",
     "build_review_context",
     "config_cmd",
     "execute_comment",
-    "execute_describe",
     "execute_local_review",
     "execute_review",
     "execute_review_reply",

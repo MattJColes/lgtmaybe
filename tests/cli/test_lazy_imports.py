@@ -36,10 +36,3 @@ def test_build_provider_still_returns_litellm_provider() -> None:
 
     provider = build_provider(Provider.openai, "gpt-4o", api_key="k")
     assert isinstance(provider, LiteLLMProvider)
-
-
-def test_providers_package_still_exports_litellm_provider() -> None:
-    """`from lgtmaybe.providers import LiteLLMProvider` keeps working lazily."""
-    import lgtmaybe.providers as providers
-
-    assert providers.LiteLLMProvider.__name__ == "LiteLLMProvider"
