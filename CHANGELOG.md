@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.9.1...lgtmaybe-v1.10.0) (2026-08-02)
+
+
+### Features
+
+* **cli:** flatten the diagram's collapsible blocks for a terminal ([#317](https://github.com/MattJColes/lgtmaybe/issues/317)) ([961738b](https://github.com/MattJColes/lgtmaybe/commit/961738be5db55ac2b1c4acf5ccf06428fc8f3a27))
+* **config:** scope review instructions and context to a directory ([#314](https://github.com/MattJColes/lgtmaybe/issues/314)) ([d3f79f1](https://github.com/MattJColes/lgtmaybe/commit/d3f79f1cd62a6307fb6682797b42bb887e3d68fd))
+* **diagram:** add a sequence view beside the change flowchart ([#309](https://github.com/MattJColes/lgtmaybe/issues/309)) ([3fe0f87](https://github.com/MattJColes/lgtmaybe/commit/3fe0f87a3c2aa287d8837c07abb204eb6a63d1ec))
+* **engine:** let a lens defer once for bounded context ([#316](https://github.com/MattJColes/lgtmaybe/issues/316)) ([008eca7](https://github.com/MattJColes/lgtmaybe/commit/008eca70b2a3f9fc44ffe25e42d403be506d8d1a))
+* **github:** show the lens and confidence on posted findings ([#313](https://github.com/MattJColes/lgtmaybe/issues/313)) ([f72d310](https://github.com/MattJColes/lgtmaybe/commit/f72d3109badfaba71ca6c9783cfde8abcb627f00))
+
+
+### Bug Fixes
+
+* **config:** stop the dogfood cap starving a reasoning model ([#312](https://github.com/MattJColes/lgtmaybe/issues/312)) ([a9e3593](https://github.com/MattJColes/lgtmaybe/commit/a9e3593d21de90cf73338139283eca27a1a81bfb))
+* **engine:** split and retry when a call blows the output ceiling ([#315](https://github.com/MattJColes/lgtmaybe/issues/315)) ([dd4b3c9](https://github.com/MattJColes/lgtmaybe/commit/dd4b3c9a8f08ae8176214c6de4eb754dc673e72d))
+
 ## [1.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.9.0...lgtmaybe-v1.9.1) (2026-07-28)
 
 
