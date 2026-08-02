@@ -8,6 +8,7 @@ review calls are, with a lenient parser + keep-all safe default as fallback.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -356,16 +357,11 @@ def _grounding_block(
     if budget_tokens < _MIN_GROUNDING_TOKENS or not ctx.file_contents:
         return "", set()
 
-    counts: dict[str, int] = {}
-    for f in findings:
-        counts[f.path] = counts.get(f.path, 0) + 1
+    counts = Counter(f.path for f in findings)
     # Most-flagged first; stable on ties by first appearance order of the path.
-    order = sorted(counts, key=lambda p: counts[p], reverse=True)
+    order = [p for p, _ in counts.most_common()]
     # Then the deferral-fetched files (not a finding's own path), de-duplicated.
-    for path in extra_paths:
-        if path not in counts:
-            order.append(path)
-            counts[path] = 0
+    order += [p for p in dict.fromkeys(extra_paths) if p not in counts]
 
     remaining = budget_tokens
     blocks: list[str] = []

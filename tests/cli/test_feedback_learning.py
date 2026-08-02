@@ -15,7 +15,6 @@ from __future__ import annotations
 from lgtmaybe.cli import run_review
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ReviewConfig,
     ReviewFinding,
     Severity,
@@ -23,6 +22,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import ReviewEngine
 from lgtmaybe.engine.suppress import apply_suppressions
 from lgtmaybe.github.rest_gateway import finding_fingerprint
+from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 
 CTX = PRContext(
@@ -43,10 +43,6 @@ FINDING = ReviewFinding(
     body="a human downvoted this",
 )
 FINDING_FP = finding_fingerprint(FINDING.path, FINDING.title)
-
-
-def _cfg(**overrides: object) -> ReviewConfig:
-    return ReviewConfig(provider=Provider.ollama, model="llama3", **overrides)  # type: ignore[arg-type]
 
 
 class SuppressingEngine(ReviewEngine):
@@ -92,7 +88,7 @@ def test_downvoted_finding_is_suppressed_before_reflection() -> None:
     github = FeedbackFakeGitHub(CTX, downvoted={FINDING_FP})
     engine = SuppressingEngine([FINDING])
 
-    findings, _summary = run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+    findings, _summary = run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)
 
     # The downvoted fingerprint arrived on the context the engine saw...
     assert FINDING_FP in engine.reviewed_ctxs[0].feedback_downvotes
@@ -117,7 +113,7 @@ def test_downvoted_high_severity_security_finding_is_not_suppressed() -> None:
     github = FeedbackFakeGitHub(CTX, downvoted={SECURITY_FP})
     engine = SuppressingEngine([SECURITY_FINDING])
 
-    findings, _summary = run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+    findings, _summary = run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)
 
     assert findings == [SECURITY_FINDING]  # survived the downvote
 
@@ -127,7 +123,7 @@ def test_learn_feedback_false_skips_the_step() -> None:
     engine = SuppressingEngine([FINDING])
 
     findings, _summary = run_review(
-        github=github, engine=engine, cfg=_cfg(learn_feedback=False), dry_run=False
+        github=github, engine=engine, cfg=make_cfg(learn_feedback=False), dry_run=False
     )
 
     assert github.downvote_calls == 0  # gateway never queried
@@ -139,7 +135,7 @@ def test_gateway_error_is_swallowed() -> None:
     github = FeedbackFakeGitHub(CTX, error=True)
     engine = SuppressingEngine([FINDING])
 
-    findings, _summary = run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+    findings, _summary = run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)
 
     assert github.downvote_calls == 1
     assert findings == [FINDING]  # review still ran, nothing suppressed
@@ -149,6 +145,6 @@ def test_gateway_without_the_method_is_a_no_op() -> None:
     github = FakeGitHub(CTX)  # plain gateway — no list_downvoted_fingerprints
     engine = SuppressingEngine([FINDING])
 
-    findings, _summary = run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+    findings, _summary = run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)
 
     assert findings == [FINDING]

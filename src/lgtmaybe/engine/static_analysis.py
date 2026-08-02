@@ -33,11 +33,11 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -106,45 +106,97 @@ UNANCHORABLE_SCAN_CATEGORIES: frozenset[str] = frozenset(
     {f"{_SCAN_CATEGORY_PREFIX}{StaticAnalysisTool.osv_scanner.value}"}
 )
 
-_BANDIT_SEVERITY = {
-    "LOW": Severity.low,
-    "MEDIUM": Severity.medium,
-    "HIGH": Severity.high,
-}
-
-# zizmor grades its own audits; "Unknown" is its default when an audit
-# declines to commit, so it maps to the weakest rung rather than being dropped.
-_ZIZMOR_SEVERITY = {
+# Every tool that grades its own findings names the rungs from this set, and on
+# the names they share they agree — so one union table serves bandit, zizmor,
+# osv-scanner and semgrep. Each tool only ever looks up the names it emits; what
+# is genuinely per-tool is the *default* for a name it doesn't (see `_SPECS`).
+# Two odd names: zizmor's "Unknown" is an audit declining to commit, so it maps
+# to the weakest rung rather than being dropped; and OSV grades advisories on
+# GitHub's scale, where "MODERATE" is what every other tool calls medium.
+_SEVERITY_BY_NAME = {
     "UNKNOWN": Severity.info,
     "INFORMATIONAL": Severity.info,
-    "LOW": Severity.low,
-    "MEDIUM": Severity.medium,
-    "HIGH": Severity.high,
-}
-
-# OSV grades advisories on GitHub's scale, which has no "critical" between
-# HIGH and the CVSS score — treat CRITICAL when present, else HIGH.
-_OSV_SEVERITY = {
+    "INFO": Severity.info,
     "LOW": Severity.low,
     "MODERATE": Severity.medium,
     "MEDIUM": Severity.medium,
+    "WARNING": Severity.medium,
     "HIGH": Severity.high,
+    "ERROR": Severity.high,
     "CRITICAL": Severity.critical,
 }
 
-# ast-grep's rule severities. `hint` and `off` are the rule author saying "this
-# is not a defect", so they floor at info rather than being promoted.
-_ASTGREP_SEVERITY = {
-    "ERROR": Severity.high,
-    "WARNING": Severity.medium,
-    "INFO": Severity.low,
-    "HINT": Severity.info,
-}
+# ast-grep is the one tool that disagrees, on exactly one shared name: it grades
+# rules, not diagnostics, so its `info` rung is a real (if minor) defect claim
+# rather than the informational aside every other tool means by it — low, not
+# info. `hint` is the rule author saying "this is a nudge, not a defect", so it
+# floors at info rather than being promoted.
+_ASTGREP_SEVERITY = _SEVERITY_BY_NAME | {"INFO": Severity.low, "HINT": Severity.info}
 
-_SEMGREP_SEVERITY = {
-    "INFO": Severity.info,
-    "WARNING": Severity.medium,
-    "ERROR": Severity.high,
+_UNGRADED: Mapping[str, Severity] = {}
+
+
+class _Spec(NamedTuple):
+    """Where one tool's JSON keeps each `ToolFinding` field, as dotted key paths.
+
+    Six of the eight tools report the same five facts under different spellings,
+    so they are a table rather than six near-identical functions (`_zizmor_finding`
+    and `_osv_findings` have genuinely irregular shapes and stay hand-written).
+    `offset` is 1 for a tool reporting 0-based lines. A tool that grades nothing
+    itself leaves `severity` empty, so every finding lands on `default`.
+    """
+
+    path: str
+    line: str
+    rule: str
+    message: str
+    severity: str = ""
+    severities: Mapping[str, Severity] = _UNGRADED
+    default: Severity = Severity.low
+    offset: int = 0
+    rule_default: str = ""
+
+
+_T = StaticAnalysisTool
+_SPECS: dict[StaticAnalysisTool, _Spec] = {
+    # ruff grades nothing itself, and its hits are lint-grade: real enough to
+    # check, rarely a blocker — so every hit lands on that one rung.
+    _T.ruff: _Spec("filename", "location.row", "code", "message"),
+    _T.bandit: _Spec(
+        "filename", "line_number", "test_id", "issue_text", "issue_severity", _SEVERITY_BY_NAME
+    ),
+    # A type error is a provable contradiction in the code as written, so it
+    # outranks a ruff lint (low) — but mypy on a single file out of its project
+    # can't see every runtime guard either, so it is not automatically high.
+    # A diagnostic with no error code is a `note`: mypy elaborating on the error
+    # above it, hence info, and named rather than left an empty rule so the tie
+    # to its parent stays visible.
+    _T.mypy: _Spec(
+        "file",
+        "line",
+        "code",
+        "message",
+        "severity",
+        {"ERROR": Severity.medium},
+        Severity.info,
+        rule_default="note",
+    ),
+    # gitleaks reports `Match`, `Secret` and `Line` too — the credential and the
+    # source line around it. `--redact` should already have scrubbed them, but
+    # this spec must not depend on that, so it names only the fields that cannot
+    # hold the secret. This allowlist is layer two of the secret defence; keep it
+    # an allowlist. gitleaks grades nothing: a committed credential is high by
+    # definition, and nothing it reports is worth grading lower.
+    _T.gitleaks: _Spec("File", "StartLine", "RuleID", "Description", default=Severity.high),
+    # ast-grep's `range.start.line` is 0-based, like zizmor's. Note ast-grep exits
+    # non-zero when it matches an error-level rule, so the runner must read stdout
+    # rather than the exit status — it already does.
+    _T.ast_grep: _Spec(
+        "file", "range.start.line", "ruleId", "message", "severity", _ASTGREP_SEVERITY, offset=1
+    ),
+    _T.semgrep: _Spec(
+        "path", "start.line", "check_id", "extra.message", "extra.severity", _SEVERITY_BY_NAME
+    ),
 }
 
 
@@ -591,22 +643,21 @@ def _parse_output(tool: StaticAnalysisTool, stdout: str, root: Path) -> list[Too
     # others emit a single document. Parsed as one it raises and the tool
     # degrades to silence.
     if tool is StaticAnalysisTool.mypy:
-        return [_mypy_finding(json.loads(line)) for line in stdout.splitlines() if line.strip()]
+        return [
+            _table_finding(tool, json.loads(line), root)
+            for line in stdout.splitlines()
+            if line.strip()
+        ]
     data = json.loads(stdout)
-    if tool is StaticAnalysisTool.ruff:
-        return [_ruff_finding(item, root) for item in data]
-    if tool is StaticAnalysisTool.gitleaks:
-        # gitleaks emits a bare array, and `null` for "no findings".
-        return [_gitleaks_finding(item) for item in data or []]
-    if tool is StaticAnalysisTool.zizmor:
-        return [_zizmor_finding(item) for item in data or []]
-    if tool is StaticAnalysisTool.ast_grep:
-        return [_astgrep_finding(item) for item in data or []]
     if tool is StaticAnalysisTool.osv_scanner:
         return _osv_findings(data, root)
-    if tool is StaticAnalysisTool.bandit:
-        return [_bandit_finding(item) for item in data.get("results", [])]
-    return [_semgrep_finding(item) for item in data.get("results", [])]
+    if tool is StaticAnalysisTool.zizmor:
+        return [_zizmor_finding(item) for item in data or []]
+    # The rest are table-driven (`_SPECS`); only the envelope differs. bandit and
+    # semgrep nest their findings under "results"; ruff, gitleaks and ast-grep
+    # emit a bare array — and gitleaks writes `null` rather than `[]` for none.
+    items = data.get("results", []) if isinstance(data, dict) else data or []
+    return [_table_finding(tool, item, root) for item in items]
 
 
 def _posix_rel(path: str, root: Path | None = None) -> str:
@@ -618,68 +669,6 @@ def _posix_rel(path: str, root: Path | None = None) -> str:
         except ValueError:
             pass
     return p.as_posix().replace("\\", "/").removeprefix("./")
-
-
-def _ruff_finding(item: dict[str, Any], root: Path) -> ToolFinding:
-    return ToolFinding(
-        tool="ruff",
-        path=_posix_rel(str(item.get("filename", "")), root),
-        line=int(item.get("location", {}).get("row", 1)),
-        rule=str(item.get("code") or ""),
-        message=str(item.get("message", "")),
-        # ruff hits are lint-grade: real enough to check, rarely a blocker.
-        severity=Severity.low,
-    )
-
-
-def _bandit_finding(item: dict[str, Any]) -> ToolFinding:
-    return ToolFinding(
-        tool="bandit",
-        path=_posix_rel(str(item.get("filename", ""))),
-        line=int(item.get("line_number", 1)),
-        rule=str(item.get("test_id", "")),
-        message=str(item.get("issue_text", "")),
-        severity=_BANDIT_SEVERITY.get(str(item.get("issue_severity", "")).upper(), Severity.low),
-    )
-
-
-def _mypy_finding(item: dict[str, Any]) -> ToolFinding:
-    severity = str(item.get("severity", "")).lower()
-    return ToolFinding(
-        tool="mypy",
-        path=_posix_rel(str(item.get("file", ""))),
-        line=int(item.get("line") or 1),
-        # A diagnostic without an error code is a `note` — mypy's follow-up
-        # explanation of the error above it. Keep the tie to its parent visible
-        # rather than rendering an empty rule.
-        rule=str(item.get("code") or "note"),
-        message=str(item.get("message", "")),
-        # A type error is a provable contradiction in the code as written, so it
-        # outranks a ruff lint (low) — but mypy on a single file out of its
-        # project also can't see every runtime guard, so it is not automatically
-        # high. Notes only elaborate on the error they follow: info.
-        severity=Severity.medium if severity == "error" else Severity.info,
-    )
-
-
-def _gitleaks_finding(item: dict[str, Any]) -> ToolFinding:
-    """Map one gitleaks hit, reading only the fields that cannot hold the secret.
-
-    The report also carries ``Match``, ``Secret`` and ``Line`` — the credential
-    and the source line around it. ``--redact`` should already have scrubbed
-    them, but this parser must not depend on that, so it never reads them. This
-    allowlist is layer two of the secret defence; keep it an allowlist.
-    """
-    return ToolFinding(
-        tool="gitleaks",
-        path=_posix_rel(str(item.get("File", ""))),
-        line=int(item.get("StartLine") or 1),
-        rule=str(item.get("RuleID", "")),
-        message=str(item.get("Description", "")),
-        # gitleaks has no severity of its own: a committed credential is high by
-        # definition, and nothing it reports is worth grading lower.
-        severity=Severity.high,
-    )
 
 
 def _osv_findings(data: dict[str, Any], root: Path) -> list[ToolFinding]:
@@ -707,27 +696,10 @@ def _osv_findings(data: dict[str, Any], root: Path) -> list[ToolFinding]:
                         line=1,
                         rule=str(vuln.get("id", "")),
                         message=f"{name} {version}: {summary}",
-                        severity=_OSV_SEVERITY.get(severity, Severity.medium),
+                        severity=_SEVERITY_BY_NAME.get(severity, Severity.medium),
                     )
                 )
     return findings
-
-
-def _astgrep_finding(item: dict[str, Any]) -> ToolFinding:
-    """Map one ast-grep match; `range.start.line` is 0-based, like zizmor's.
-
-    Note ast-grep exits non-zero when it matches an error-level rule, so the
-    runner must read stdout rather than the exit status — it already does.
-    """
-    start = item.get("range", {}).get("start", {})
-    return ToolFinding(
-        tool="ast-grep",
-        path=_posix_rel(str(item.get("file", ""))),
-        line=int(start.get("line", 0)) + 1,
-        rule=str(item.get("ruleId", "")),
-        message=str(item.get("message", "")),
-        severity=_ASTGREP_SEVERITY.get(str(item.get("severity", "")).upper(), Severity.low),
-    )
 
 
 def _zizmor_finding(item: dict[str, Any]) -> ToolFinding:
@@ -750,17 +722,31 @@ def _zizmor_finding(item: dict[str, Any]) -> ToolFinding:
         line=int(concrete.get("start_point", {}).get("row", 0)) + 1,
         rule=str(item.get("ident", "")),
         message=str(item.get("desc", "")),
-        severity=_ZIZMOR_SEVERITY.get(severity, Severity.low),
+        severity=_SEVERITY_BY_NAME.get(severity, Severity.low),
     )
 
 
-def _semgrep_finding(item: dict[str, Any]) -> ToolFinding:
-    extra = item.get("extra", {})
+def _get(item: dict[str, Any], path: str) -> Any:
+    """Read a dotted key path out of a tool's JSON; any missing level is None.
+
+    An empty path reads nothing, which is how an ungraded tool (one with no
+    ``severity`` key of its own) lands on its spec's `default_severity`.
+    """
+    node: Any = item
+    for key in path.split("."):
+        node = node.get(key) if isinstance(node, dict) else None
+    return node
+
+
+def _table_finding(tool: StaticAnalysisTool, item: dict[str, Any], root: Path) -> ToolFinding:
+    """Build a `ToolFinding` from one tool's JSON object via its `_Spec`."""
+    spec = _SPECS[tool]
+    line = _get(item, spec.line)
     return ToolFinding(
-        tool="semgrep",
-        path=_posix_rel(str(item.get("path", ""))),
-        line=int(item.get("start", {}).get("line", 1)),
-        rule=str(item.get("check_id", "")),
-        message=str(extra.get("message", "")),
-        severity=_SEMGREP_SEVERITY.get(str(extra.get("severity", "")).upper(), Severity.low),
+        tool=tool.value,
+        path=_posix_rel(str(_get(item, spec.path) or ""), root),
+        line=int(line) + spec.offset if line else 1,
+        rule=str(_get(item, spec.rule) or spec.rule_default),
+        message=str(_get(item, spec.message) or ""),
+        severity=spec.severities.get(str(_get(item, spec.severity) or "").upper(), spec.default),
     )
