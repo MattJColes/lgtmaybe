@@ -13,12 +13,12 @@ from __future__ import annotations
 from lgtmaybe.cli import resolve_auto_incremental, run_review
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ReviewConfig,
     ReviewFinding,
     Severity,
 )
 from lgtmaybe.core.ports import ReviewEngine
+from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 
 FULL_DIFF = (
@@ -35,10 +35,6 @@ CTX = PRContext(
     repo="org/repo",
     pr_number=5,
 )
-
-
-def _cfg(**overrides: object) -> ReviewConfig:
-    return ReviewConfig(provider=Provider.ollama, model="llama3", **overrides)  # type: ignore[arg-type]
 
 
 class RecordingEngine(ReviewEngine):
@@ -91,7 +87,7 @@ def test_incremental_reviews_only_the_increment() -> None:
     engine = RecordingEngine()
 
     _findings, summary = run_review(
-        github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False
+        github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False
     )
 
     # The engine saw only the increment; the post anchored against the full diff.
@@ -107,7 +103,7 @@ def test_no_marker_falls_back_to_full_review() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha=None)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
     assert github.compare_calls == []
@@ -118,7 +114,7 @@ def test_force_push_falls_back_to_full_review() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha="head1111", compare_result=None)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
     assert github.compare_calls == [("head1111", "head2222")]
@@ -128,7 +124,7 @@ def test_same_head_falls_back_to_full_review_without_compare() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha="head2222", compare_result=INC_DIFF)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
     assert github.compare_calls == []
@@ -138,7 +134,7 @@ def test_incremental_off_never_queries_the_marker() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha="head1111", compare_result=INC_DIFF)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)  # default: auto/off
+    run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)  # default: auto/off
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
     assert github.last_reviewed_calls == 0
@@ -148,7 +144,7 @@ def test_gateway_without_incremental_methods_reviews_full() -> None:
     github = FakeGitHub(CTX)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
 
@@ -166,7 +162,7 @@ def test_left_side_findings_dropped_in_incremental_mode() -> None:
     engine = RecordingEngine(findings=[left, right])
 
     findings, _summary = run_review(
-        github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False
+        github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False
     )
 
     assert [f.side for f in findings] == ["RIGHT"]
@@ -178,7 +174,7 @@ def test_full_review_still_marks_the_watermark() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha=None)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert github.marked_reviewed == ["head2222"]
 
@@ -187,7 +183,7 @@ def test_dry_run_never_marks_or_scopes() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha="head1111", compare_result=INC_DIFF)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(incremental=True), dry_run=True)
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=True)
 
     assert github.marked_reviewed == []
     assert github.posted == []
@@ -199,20 +195,20 @@ def test_dry_run_never_marks_or_scopes() -> None:
 
 
 def test_auto_resolves_on_for_synchronize_event() -> None:
-    cfg = _cfg()  # incremental defaults to None (auto)
+    cfg = make_cfg()  # incremental defaults to None (auto)
     resolved = resolve_auto_incremental(cfg, event_action="synchronize")
     assert resolved.incremental is True
 
 
 def test_auto_resolves_off_for_opened_event() -> None:
-    resolved = resolve_auto_incremental(_cfg(), event_action="opened")
+    resolved = resolve_auto_incremental(make_cfg(), event_action="opened")
     assert resolved.incremental is False
 
 
 def test_explicit_config_wins_over_auto() -> None:
-    on = resolve_auto_incremental(_cfg(incremental=True), event_action="opened")
+    on = resolve_auto_incremental(make_cfg(incremental=True), event_action="opened")
     assert on.incremental is True
-    off = resolve_auto_incremental(_cfg(incremental=False), event_action="synchronize")
+    off = resolve_auto_incremental(make_cfg(incremental=False), event_action="synchronize")
     assert off.incremental is False
 
 
@@ -224,11 +220,11 @@ def test_explicit_config_wins_over_auto() -> None:
 def test_auto_describe_only_on_open_events_when_enabled() -> None:
     from lgtmaybe.cli import should_auto_describe
 
-    on = _cfg(auto_describe=True)
+    on = make_cfg(auto_describe=True)
     assert should_auto_describe(on, event_action="opened") is True
     assert should_auto_describe(on, event_action="reopened") is True
     assert should_auto_describe(on, event_action="synchronize") is False
-    assert should_auto_describe(_cfg(), event_action="opened") is False  # default off
+    assert should_auto_describe(make_cfg(), event_action="opened") is False  # default off
 
 
 def test_run_describe_posts_via_the_idempotent_upsert() -> None:
@@ -242,7 +238,7 @@ def test_run_describe_posts_via_the_idempotent_upsert() -> None:
     structured = _json.dumps({"title": "Add a thing", "summary": "Adds it."})
     provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
 
-    run_describe(github, provider, _cfg())
+    run_describe(github, provider, make_cfg())
 
     assert len(github.described) == 1
     assert github.described[0].startswith("## Add a thing")
@@ -252,12 +248,12 @@ def test_run_describe_posts_via_the_idempotent_upsert() -> None:
 def test_auto_diagram_only_on_open_events_when_enabled() -> None:
     from lgtmaybe.cli import should_auto_diagram
 
-    on = _cfg(auto_diagram=True)
+    on = make_cfg(auto_diagram=True)
     assert should_auto_diagram(on, event_action="opened") is True
     assert should_auto_diagram(on, event_action="reopened") is True
     assert should_auto_diagram(on, event_action="synchronize") is False
-    assert should_auto_diagram(_cfg(), event_action="opened") is True  # default on
-    assert should_auto_diagram(_cfg(auto_diagram=False), event_action="opened") is False
+    assert should_auto_diagram(make_cfg(), event_action="opened") is True  # default on
+    assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="opened") is False
 
 
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
@@ -286,7 +282,7 @@ def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
     )
     provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
 
-    run_diagram(github, provider, _cfg())
+    run_diagram(github, provider, make_cfg())
 
     assert len(github.diagrams) == 1
     assert "```mermaid" in github.diagrams[0]
@@ -342,7 +338,7 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
     )
     provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
 
-    run_diagram(github, provider, _cfg())
+    run_diagram(github, provider, make_cfg())
 
     assert len(github.comments) == 1
     assert "```mermaid" in github.comments[0]
@@ -366,7 +362,7 @@ def test_pr_labels_applied_when_enabled() -> None:
     github = LabelFakeGitHub(CTX)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(pr_labels=True), dry_run=False)
 
     assert len(github.labels) == 1
     assert any(label.startswith("review-effort/") for label in github.labels[0])
@@ -376,7 +372,7 @@ def test_pr_labels_off_by_default() -> None:
     github = LabelFakeGitHub(CTX)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)
 
     assert github.labels == []
 
@@ -385,5 +381,5 @@ def test_pr_labels_skipped_on_dry_run_and_plain_gateway() -> None:
     github = FakeGitHub(CTX)  # no apply_pr_labels — must not crash
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=False)
-    run_review(github=github, engine=engine, cfg=_cfg(pr_labels=True), dry_run=True)
+    run_review(github=github, engine=engine, cfg=make_cfg(pr_labels=True), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(pr_labels=True), dry_run=True)

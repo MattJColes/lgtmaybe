@@ -11,12 +11,12 @@ from __future__ import annotations
 from lgtmaybe.cli import run_review
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ReviewConfig,
     ReviewFinding,
     Severity,
 )
 from lgtmaybe.core.ports import GitHubGateway, ReviewEngine
+from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 
 CTX = PRContext(
@@ -27,10 +27,6 @@ CTX = PRContext(
     repo="org/repo",
     pr_number=5,
 )
-
-
-def _cfg(**overrides: object) -> ReviewConfig:
-    return ReviewConfig(provider=Provider.ollama, model="llama3", **overrides)  # type: ignore[arg-type]
 
 
 def _finding(severity: Severity) -> ReviewFinding:
@@ -51,7 +47,7 @@ def test_check_run_fails_when_a_finding_meets_the_threshold() -> None:
     github = FakeGitHub(CTX)
     engine = CannedEngine([_finding(Severity.high), _finding(Severity.low)])
 
-    run_review(github=github, engine=engine, cfg=_cfg(fail_on=Severity.high), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(fail_on=Severity.high), dry_run=False)
 
     assert len(github.check_runs) == 1
     run = github.check_runs[0]
@@ -63,7 +59,7 @@ def test_check_run_succeeds_when_all_findings_are_below_the_threshold() -> None:
     github = FakeGitHub(CTX)
     engine = CannedEngine([_finding(Severity.low), _finding(Severity.medium)])
 
-    run_review(github=github, engine=engine, cfg=_cfg(fail_on=Severity.high), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(fail_on=Severity.high), dry_run=False)
 
     assert len(github.check_runs) == 1
     assert github.check_runs[0]["conclusion"] == "success"
@@ -73,7 +69,7 @@ def test_check_run_succeeds_on_a_clean_review() -> None:
     github = FakeGitHub(CTX)
     engine = CannedEngine([])
 
-    run_review(github=github, engine=engine, cfg=_cfg(fail_on=Severity.high), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(fail_on=Severity.high), dry_run=False)
 
     assert github.check_runs[0]["conclusion"] == "success"
 
@@ -82,7 +78,8 @@ def test_no_check_run_when_fail_on_is_none() -> None:
     github = FakeGitHub(CTX)
     engine = CannedEngine([_finding(Severity.critical)])
 
-    run_review(github=github, engine=engine, cfg=_cfg(), dry_run=False)  # fail_on defaults to None
+    # fail_on defaults to None
+    run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)
 
     assert github.check_runs == []
 
@@ -91,7 +88,7 @@ def test_no_check_run_on_dry_run() -> None:
     github = FakeGitHub(CTX)
     engine = CannedEngine([_finding(Severity.critical)])
 
-    run_review(github=github, engine=engine, cfg=_cfg(fail_on=Severity.high), dry_run=True)
+    run_review(github=github, engine=engine, cfg=make_cfg(fail_on=Severity.high), dry_run=True)
 
     assert github.check_runs == []
 
@@ -118,6 +115,6 @@ def test_check_run_skipped_on_gateway_without_the_method() -> None:
     github = _PortOnlyGateway(CTX)
     engine = CannedEngine([_finding(Severity.critical)])
 
-    run_review(github=github, engine=engine, cfg=_cfg(fail_on=Severity.high), dry_run=False)
+    run_review(github=github, engine=engine, cfg=make_cfg(fail_on=Severity.high), dry_run=False)
 
     assert len(github.posted) == 1

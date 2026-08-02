@@ -48,7 +48,7 @@ jobs:
     env:
       # The `|| ...` fallbacks keep the job runnable even if a dispatch omits an
       # input; on a normal dispatch the input defaults above supply these instead.
-      OLLAMA_MODEL: ${{ github.event.inputs.model || 'qwen3.5:4b' }}
+      LGTMAYBE_E2E_OLLAMA_MODEL: ${{ github.event.inputs.model || 'qwen3.5:4b' }}
       REPEATS: ${{ github.event.inputs.repeats || '1' }}
       CATEGORIES: ${{ github.event.inputs.categories || 'security,correctness,performance' }}
       BUDGET: ${{ github.event.inputs.budget || '300' }}
@@ -72,23 +72,12 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.OLLAMA_MODELS }}
-          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}
+          key: ollama-${{ runner.os }}-${{ env.LGTMAYBE_E2E_OLLAMA_MODEL }}
 
-      - name: Start ollama and wait until ready
-        run: |
-          ollama serve &
-          for _ in $(seq 1 60); do
-            if curl -sf http://localhost:11434/api/tags >/dev/null; then
-              echo "ollama is up"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "ollama did not become ready in time" >&2
-          exit 1
-
-      - name: Pull the model
-        run: ollama pull "$OLLAMA_MODEL"
+      # The same script a developer runs locally (DEVELOPMENT.md) — serve,
+      # readiness wait, pull — so the bring-up can't drift from local either.
+      - name: Start ollama and pull the model
+        run: scripts/e2e-up.sh ollama
 
       # One strategy per matrix leg (--only), repeated REPEATS times over both RLM
       # fixtures. The benchmark itself (evals/rlm.py) owns the repeat loop and the
@@ -98,7 +87,7 @@ jobs:
         run: |
           uv run python -m evals.rlm \
             --provider ollama \
-            --model "$OLLAMA_MODEL" \
+            --model "$LGTMAYBE_E2E_OLLAMA_MODEL" \
             --api-base http://localhost:11434 \
             --only "${{ matrix.method }}" \
             --repeats "$REPEATS" \
@@ -115,7 +104,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### RLM bench — ${{ matrix.method }} (model $OLLAMA_MODEL, lenses $CATEGORIES)"
+            echo "### RLM bench — ${{ matrix.method }} (model $LGTMAYBE_E2E_OLLAMA_MODEL, lenses $CATEGORIES)"
             echo '```'
             grep -E "recall mean" result.txt || echo "(no result captured)"
             echo '```'
