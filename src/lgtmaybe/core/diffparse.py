@@ -124,6 +124,29 @@ def changed_line_index(diff: str) -> dict[tuple[str, str], list[tuple[int, str]]
     return index
 
 
+def changed_line_count(diff: str) -> int:
+    """Added/removed lines in *diff*, counting only inside hunks.
+
+    The one home for "how big is this change". Every per-file patch out of
+    :func:`split_by_file` carries a ``---``/``+++`` pair, so a naive
+    ``startswith(("+", "-"))`` inflates each file's count by two. Excluding by
+    ``+++``/``---`` prefix instead would undercount: an added line whose own
+    content starts with ``++`` renders as ``+++ ...`` and is not a header.
+    Headers only ever appear before a hunk opens, so tracking that is both
+    shorter than special-casing them and exactly right.
+    """
+    count = 0
+    in_hunk = False
+    for line in diff.splitlines():
+        if HUNK_HEADER_RE.match(line):
+            in_hunk = True
+        elif FILE_HEADER_RE.match(line):
+            in_hunk = False
+        elif in_hunk and line[:1] in ("+", "-"):
+            count += 1
+    return count
+
+
 def hunk_for_line(diff: str, path: str, line: int, side: str = "RIGHT") -> str | None:
     """Return the single hunk (with its file header) covering ``(path, line, side)``.
 
