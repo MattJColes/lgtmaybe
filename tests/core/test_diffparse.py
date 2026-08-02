@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from lgtmaybe.core.diffparse import hunk_for_line, parse_hunk_header, split_by_file
+from lgtmaybe.core.diffparse import (
+    hunk_for_line,
+    parse_hunk_header,
+    split_by_file,
+    walk_diff,
+)
 
 _TWO_FILE_DIFF = """\
 diff --git a/src/a.py b/src/a.py
@@ -103,6 +108,41 @@ class TestHunkForLine:
         hunk = hunk_for_line(_TWO_FILE_DIFF, "src/b.py", 10, "LEFT")
         assert hunk is not None
         assert "-old" in hunk
+
+
+class TestWalkDiff:
+    def test_yields_kind_and_both_line_numbers_per_in_hunk_line(self):
+        assert list(walk_diff(_TWO_FILE_DIFF)) == [
+            ("src/a.py", " ", 1, 1, "x = 1"),
+            ("src/a.py", "+", 2, 2, "y = 2"),
+            ("src/a.py", " ", 2, 3, "z = 3"),
+            ("src/b.py", "-", 10, 10, "old"),
+            ("src/b.py", "+", 11, 10, "new"),
+        ]
+
+    def test_skips_everything_outside_a_hunk(self):
+        # Headers, index lines and ---/+++ preamble are not diff content.
+        assert [text for *_, text in walk_diff(_TWO_FILE_DIFF)] == [
+            "x = 1",
+            "y = 2",
+            "z = 3",
+            "old",
+            "new",
+        ]
+
+    def test_no_newline_marker_is_not_a_line(self):
+        diff = (
+            "diff --git a/f.txt b/f.txt\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-old line\n"
+            "\\ No newline at end of file\n"
+            "+new line\n"
+            "\\ No newline at end of file\n"
+        )
+        assert list(walk_diff(diff)) == [
+            ("f.txt", "-", 1, 1, "old line"),
+            ("f.txt", "+", 2, 1, "new line"),
+        ]
 
 
 class TestChangedLineIndex:
