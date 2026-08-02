@@ -36,6 +36,12 @@ github.demote:
     has: { field: name, regex: '^_render_demoted$' }
   files: [src/lgtmaybe/github/**/*.py]
 
+github.finding-badge:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_finding_badge$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
 github.incremental:
   - rule:
       kind: function_definition

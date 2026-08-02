@@ -10,7 +10,12 @@ import respx
 
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
-from lgtmaybe.github.rest_gateway import _RESOLVE_WORKERS, finding_fingerprint
+from lgtmaybe.github.rest_gateway import (
+    _RESOLVE_WORKERS,
+    _finding_keys,
+    finding_fingerprint,
+    finding_identity,
+)
 
 REPO = "owner/repo"
 PR_NUMBER = 42
@@ -1359,3 +1364,183 @@ def test_open_finding_threads_follows_pagination() -> None:
 
     assert gw.count_open_finding_threads() == 3  # 2 on page one, 1 on page two
     assert seen_cursors == [None, "page-2"], "the endCursor was not carried into page two"
+
+
+# ---------------------------------------------------------------------------
+# Finding badge: the originating lens + the auditor's confidence
+# ---------------------------------------------------------------------------
+
+
+def _capture_created_review() -> list[dict[object, object]]:
+    """Route a first-run review POST and collect the payloads it is called with."""
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    created: list[dict[object, object]] = []
+
+    def capture_create(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        created.append(body)
+        return httpx.Response(201, json={"id": 1, "body": body.get("body", "")})
+
+    respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
+    return created
+
+
+def _badged(**overrides: object) -> ReviewFinding:
+    """The FINDINGS entry, plus the two values a badge renders."""
+    fields: dict[str, object] = {
+        "path": "src/app.py",
+        "line": 2,
+        "side": "RIGHT",
+        "severity": Severity.medium,
+        "title": "Import order",
+        "body": "sys should be before os",
+        "category": "security",
+        "confidence": 8,
+    }
+    fields.update(overrides)
+    return ReviewFinding.model_validate(fields)
+
+
+@respx.mock
+def test_inline_comment_title_carries_lens_and_confidence() -> None:
+    """The inline comment's title line names the lens that raised the finding and
+    the auditor's confidence, so a reader can weigh it without leaving GitHub."""
+    created = _capture_created_review()
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([_badged()], "Summary text", diff=SAMPLE_DIFF)
+
+    body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
+    assert body.startswith("**[MEDIUM · security · 8/10] Import order**")
+
+
+@respx.mock
+def test_inline_comment_badge_omits_confidence_when_unscored() -> None:
+    """With reflection off (or the auditor silent) there is no score, so the
+    confidence half is omitted rather than rendered empty."""
+    created = _capture_created_review()
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([_badged(confidence=None)], "Summary text", diff=SAMPLE_DIFF)
+
+    body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
+    assert body.startswith("**[MEDIUM · security] Import order**")
+    assert "/10" not in body
+
+
+@respx.mock
+def test_inline_comment_badge_renders_a_zero_score() -> None:
+    """0/10 is a real verdict, not a missing one — it must still render (the
+    falsy-vs-None trap)."""
+    created = _capture_created_review()
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([_badged(confidence=0)], "Summary text", diff=SAMPLE_DIFF)
+
+    body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
+    assert body.startswith("**[MEDIUM · security · 0/10] Import order**")
+
+
+@respx.mock
+def test_inline_comment_has_no_badge_without_a_category() -> None:
+    """An uncategorised finding renders byte-for-byte as it did before badges."""
+    created = _capture_created_review()
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+
+    fp = finding_fingerprint("src/app.py", "Import order")
+    identity = finding_identity(FINDINGS[0])
+    body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
+    assert body == (
+        "**[MEDIUM] Import order**\n\nsys should be before os\n\n"
+        f"<!-- lgtmaybe-finding:{fp} -->\n<!-- lgtmaybe-identity:{identity} -->"
+    )
+
+
+@respx.mock
+def test_demoted_finding_carries_the_badge() -> None:
+    """A finding demoted to the review body shows the same badge as an inline one,
+    so the two surfaces agree."""
+    created = _capture_created_review()
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([_badged(anchored=False)], "Summary text", diff=SAMPLE_DIFF)
+
+    rendered = str(created[0].get("body", ""))
+    assert "### Additional findings" in rendered
+    assert "**[MEDIUM · security · 8/10] Import order**" in rendered
+
+
+@respx.mock
+def test_broad_finding_carries_the_badge() -> None:
+    """A broad finding collapsed into "Broader observations" carries it too."""
+    created = _capture_created_review()
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([_badged(broad=True)], "Summary text", diff=SAMPLE_DIFF)
+
+    rendered = str(created[0].get("body", ""))
+    assert "Broader observations" in rendered
+    assert "**[MEDIUM · security · 8/10] Import order**" in rendered
+
+
+@respx.mock
+def test_badge_leaves_the_hidden_markers_byte_identical() -> None:
+    """The badge lives in the visible title line only. The hidden fingerprint and
+    identity markers — which key re-run dedupe and resolve-on-fix — are computed
+    from the finding's fields, so a score appearing (or not) never moves them."""
+    created = _capture_created_review()
+
+    scored, unscored = _badged(), _badged(confidence=None)
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review([scored], "Summary text", diff=SAMPLE_DIFF)
+    scored_body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
+
+    created.clear()
+    gw.post_review([unscored], "Summary text", diff=SAMPLE_DIFF)
+    unscored_body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
+
+    assert "· security · 8/10" in scored_body
+    assert "8/10" not in unscored_body
+    marker_tail = scored_body[scored_body.index("\n\n<!-- lgtmaybe-finding:") :]
+    assert marker_tail == unscored_body[unscored_body.index("\n\n<!-- lgtmaybe-finding:") :]
+    # And they are exactly the ids derived from the finding — no badge text leaks in.
+    assert _finding_keys(scored_body) == {
+        finding_fingerprint(scored.path, scored.title),
+        finding_identity(scored),
+    }
+
+
+@respx.mock
+def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
+    """A comment posted before badges existed (an unbadged title line) is still
+    recognised on the next run, so upgrading causes no re-post storm."""
+    _mark_existing_review()
+    respx.route(method="POST", url=GRAPHQL_URL).mock(
+        side_effect=_GraphQL([])  # no prior threads to resolve
+    )
+
+    finding = _badged()
+    # Exactly the body run 1 posted before this change: no badge in the title.
+    legacy_body = (
+        "**[MEDIUM] Import order**\n\nsys should be before os\n\n"
+        f"<!-- lgtmaybe-finding:{finding_fingerprint(finding.path, finding.title)} -->\n"
+        f"<!-- lgtmaybe-identity:{finding_identity(finding)} -->"
+    )
+    respx.route(method="GET", url__startswith=f"{PR_URL}/comments").mock(
+        return_value=httpx.Response(200, json=[{"id": 1, "body": legacy_body}])
+    )
+    posted: list[httpx.Request] = []
+
+    def capture_post(request: httpx.Request) -> httpx.Response:
+        posted.append(request)
+        return httpx.Response(201, json={"id": 2})
+
+    respx.route(method="POST", url=f"{PR_URL}/comments").mock(side_effect=capture_post)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
+    gw.post_review([finding], "New summary", diff=SAMPLE_DIFF)
+
+    assert posted == [], "a pre-badge comment must still suppress its re-post"
