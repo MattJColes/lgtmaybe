@@ -155,9 +155,11 @@ def test_release_please_is_not_pinned_to_a_consumed_version() -> None:
 
 
 # An action input reaches the container only if it is declared, mapped to an
-# INPUT_* env var, forwarded by a bare `-e INPUT_*` on the `docker run`, AND
-# read by `action_inputs()`. Miss any one link and the input is silently dead —
-# which is exactly how `max_tokens` was lost. These three tests pin the chain.
+# INPUT_* env var, AND read by `action_inputs()`. Miss either link and the input
+# is silently dead — which is exactly how `max_tokens` was lost. These two tests
+# pin the chain. (The third link, forwarding onto `docker run`, used to be a
+# hand-written `-e INPUT_*` list; it is now an `--env-file` generated from the
+# step's own environment, so there is no second copy left to drift.)
 #
 # Inputs consumed by the composite's own steps rather than the container: cloud
 # auth (the OIDC/WIF steps export the provider SDKs' own credential vars), the
@@ -196,26 +198,31 @@ def _env_block_input_names() -> set[str]:
     return {key for key in _run_lgtmaybe_step()["env"] if key.startswith("INPUT_")}
 
 
-def _forwarded_input_names() -> set[str]:
-    """``INPUT_*`` names the ``docker run`` forwards with a bare ``-e``."""
-    return set(re.findall(r"-e\s+(INPUT_[A-Z0-9_]+)", _run_lgtmaybe_step()["run"]))
-
-
 def test_every_declared_input_is_mapped_to_an_env_var() -> None:
     """A declared input with no INPUT_* mapping can never reach the container."""
     assert _declared_input_env_names() == _env_block_input_names()
 
 
-def test_every_mapped_env_var_is_forwarded_to_the_container() -> None:
-    """`docker run` passes no environment by default — a bare `-e` is required.
+def test_every_mapped_env_var_is_read_by_the_cli() -> None:
+    """A mapped var nothing reads is dead weight; an unmapped read is a bug.
 
-    The regression this test exists for: INPUT_MAX_TOKENS was set in the step's
-    `env:` block but never forwarded, so `max_tokens` set on the Action was
-    silently dropped while its unit test (which sets the var directly) passed.
+    The regression this chain exists for: INPUT_MAX_TOKENS was set in the step's
+    `env:` block but never reached the container, so `max_tokens` set on the
+    Action was silently dropped while its unit test (which sets the var
+    directly) passed.
     """
-    assert _env_block_input_names() == _forwarded_input_names()
+    assert _env_block_input_names() == {f"INPUT_{key.upper()}" for key in action_inputs()}
 
 
-def test_every_forwarded_env_var_is_read_by_the_cli() -> None:
-    """A forwarded var nothing reads is dead weight; an unforwarded read is a bug."""
-    assert _forwarded_input_names() == {f"INPUT_{key.upper()}" for key in action_inputs()}
+def test_docker_run_forwards_the_step_environment_by_env_file() -> None:
+    """The env file is generated from the step's own env, not a second name list.
+
+    A bare `VAR` line takes its value from the ambient environment, so the
+    INPUT_* names are written exactly once (the `env:` block). Anything that
+    reintroduces a hand-maintained `-e INPUT_*` list re-opens the drift.
+    """
+    run = _run_lgtmaybe_step()["run"]
+
+    assert "compgen -e" in run
+    assert '--env-file "${RUNNER_TEMP}/lgtmaybe.env"' in run
+    assert not re.search(r"-e\s+INPUT_[A-Z0-9_]+", run)
