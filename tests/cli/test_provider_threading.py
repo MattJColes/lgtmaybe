@@ -326,6 +326,58 @@ def test_max_tokens_flag_reaches_litellm(captured_completion: list[dict[str, Any
     assert captured_completion[0].get("max_tokens") == 8192
 
 
+def test_reasoning_effort_flag_reaches_litellm(captured_completion: list[dict[str, Any]]) -> None:
+    """`--reasoning-effort` bounds what the model spends THINKING, which
+    `max_tokens` cannot separate out.
+
+    Measured on this repo's own dogfood review: 5 of 9 lens calls spent 32k-35k
+    reasoning tokens — at or above the entire 32,768 `max_tokens` ceiling —
+    before writing a single finding, and the one large success wrote ~733
+    tokens of findings after 28,909 tokens of thought. Raising the cap 16k->32k
+    did not help; reasoning simply expanded to fill it. The cap is the wrong
+    lever, so the knob has to reach the provider.
+    """
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openrouter",
+            "--model",
+            "vendor/m",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+            "--reasoning-effort",
+            "low",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("reasoning_effort") == "low"
+
+
+def test_reasoning_effort_is_absent_by_default(captured_completion: list[dict[str, Any]]) -> None:
+    """Unset sends nothing: a route that does not accept the param must not
+    start receiving it because lgtmaybe upgraded."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o",
+            "--api-key",
+            "sk-x",
+            "--no-reflect",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "reasoning_effort" not in captured_completion[0]
+
+
 def test_max_tokens_is_absent_by_default(captured_completion: list[dict[str, Any]]) -> None:
     """Unset means uncapped — the request must carry no max_tokens at all, so the
     model's own ceiling applies and nothing silently truncates a long findings

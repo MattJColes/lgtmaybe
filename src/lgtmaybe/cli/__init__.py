@@ -197,6 +197,11 @@ def build_provider_engine(
     # it is not gated on the provider.
     if cfg.max_tokens is not None:
         extra["max_tokens"] = cfg.max_tokens
+    # Reasoning budget, sent only when asked for. litellm normalises the param
+    # across the routes that support one, and a route without a reasoning
+    # channel never sees it — so, like max_tokens, this is not gated on provider.
+    if cfg.reasoning_effort is not None:
+        extra["reasoning_effort"] = cfg.reasoning_effort
     # Announce the per-call budget AND where it came from, before any call runs.
     # A timeout failure reports the budget it blew ("provider request exceeded
     # 60s") but never its origin, so an explicit `timeout: 60` in a repo's
@@ -867,6 +872,7 @@ def action_inputs() -> dict[str, str | None]:
         "num_ctx": get("NUM_CTX"),
         "max_input_tokens": get("MAX_INPUT_TOKENS"),
         "max_tokens": get("MAX_TOKENS"),
+        "reasoning_effort": get("REASONING_EFFORT"),
         "max_concurrency": get("MAX_CONCURRENCY"),
         "resolve_fixed": get("RESOLVE_FIXED"),
         "recursive": get("RECURSIVE"),

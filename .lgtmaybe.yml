@@ -27,3 +27,27 @@ exclude_paths:
 # the time instead of 21 minutes. It also keeps the pre-flight reservation
 # OpenRouter charges against max_tokens well under the full ceiling.
 max_tokens: 32768
+
+# ...and 32k did not fix it either, which is what finally identified the real
+# lever. Measured on #321's review, with the reasoning-token instrumentation
+# from #319 reporting on successful calls for the first time:
+#
+#   lens          reasoning   outcome
+#   security         33,660   truncated
+#   security         35,463   truncated
+#   security         33,180   truncated
+#   artefacts        33,775   truncated
+#   artefacts        25,963   truncated
+#   correctness      32,194   truncated   (1,003s)
+#   correctness      33,232   truncated
+#   code-health      28,909   OK — of 29,642 output tokens, i.e. 97.5%
+#   artefacts         2,443   OK — of 2,939 output tokens
+#
+# Five of nine calls spent the ENTIRE 32,768 ceiling on thought before writing
+# a finding, and the one big success wrote ~733 tokens of findings after 28,909
+# tokens of thinking. Raising the cap never worked because the cap does not
+# separate thinking from answering — it buys the model more room to think.
+#
+# `low` is the separate lever. If findings start looking shallow, step up to
+# `medium` rather than raising max_tokens again.
+reasoning_effort: low

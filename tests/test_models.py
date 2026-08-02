@@ -250,6 +250,24 @@ def test_custom_lens_minimal_fields() -> None:
     assert lens.example_diff is None and lens.example_finding is None
 
 
+def test_reasoning_effort_rejects_an_unknown_level() -> None:
+    """Caught at config load, not by the provider mid-review.
+
+    A typo that reaches the route comes back as a 400 on every lens call, i.e.
+    a whole review lost to a one-character mistake — the same failure mode that
+    an invalid model id produced on this repo.
+    """
+    with pytest.raises(ValidationError):
+        ReviewConfig(provider=Provider.openrouter, model="vendor/m", reasoning_effort="lowish")
+
+
+def test_reasoning_effort_defaults_to_unset() -> None:
+    """Off unless asked for: a route that does not accept the param must not
+    start receiving it because lgtmaybe upgraded."""
+    cfg = ReviewConfig(provider=Provider.openrouter, model="vendor/m")
+    assert cfg.reasoning_effort is None
+
+
 def test_custom_lens_id_must_not_collide_with_builtin() -> None:
     with pytest.raises(ValidationError):
         CustomLens(id="security", instructions="x")

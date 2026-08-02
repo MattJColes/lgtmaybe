@@ -48,6 +48,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `preset` | `fast` / `full` | No | `fast` |  |
 | `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
+| `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
@@ -835,6 +836,27 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "provider": {
       "$ref": "#/$defs/Provider"
+    },
+    "reasoning_effort": {
+      "anyOf": [
+        {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "default"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Effort"
     },
     "recursive": {
       "default": true,

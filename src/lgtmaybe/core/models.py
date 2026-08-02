@@ -723,6 +723,23 @@ class ReviewConfig(_Strict):
     # models spend this budget on thinking tokens too, so a value that suits a
     # plain model can starve a reasoning one.
     max_tokens: int | None = Field(default=None, ge=1)
+    # How much of the output budget the model may spend THINKING before it
+    # writes an answer — the knob `max_tokens` cannot express, because it caps
+    # reasoning and findings TOGETHER and the model spends the reasoning first.
+    #
+    # Measured on this repo's own dogfood review: 5 of 9 lens calls burned
+    # 32k-35k reasoning tokens — at or above the whole 32,768 `max_tokens`
+    # ceiling — before writing a single finding, and the one large success wrote
+    # ~733 tokens of findings after 28,909 tokens of thought. Raising the cap
+    # from 16k to 32k did not fix it; reasoning simply expanded to fill the new
+    # ceiling. That is the case for a separate lever rather than a bigger cap.
+    #
+    # None (default) sends nothing, so a route that does not accept the param is
+    # unaffected. Values are litellm's normalised set — validated here so a typo
+    # fails at config load rather than as a 400 on every lens call mid-review.
+    reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh", "default"] | None
+    ) = None
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True
