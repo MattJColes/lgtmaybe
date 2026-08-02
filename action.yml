@@ -313,35 +313,21 @@ runs:
         LGTMAYBE_IMAGE: ${{ inputs.image }}
       run: |
         set -euo pipefail
+        # Forward this step's env by *name*: a bare `VAR` line in an --env-file
+        # takes its value from the ambient environment, so the INPUT_* names
+        # only have to be written once (the `env:` block above). Names not set
+        # are skipped; values are passed verbatim — no shell expansion, and
+        # newlines survive because the file holds names, never values.
+        # The cloud-auth steps export the AWS_/GOOGLE_/CLOUDSDK_/AZURE_ vars.
+        compgen -e \
+          | grep -E '^(GITHUB_TOKEN|GITHUB_EVENT_NAME|GITHUB_EVENT_PATH)$|^(INPUT|AWS|GOOGLE|CLOUDSDK|AZURE)_' \
+          > "${RUNNER_TEMP}/lgtmaybe.env"
         # host-gateway mapping: lets api_base reach a model server on the
         # runner host (ollama / openai-compatible) at host.docker.internal,
         # which Linux Docker does not resolve without it.
         docker run --rm \
           --add-host=host.docker.internal:host-gateway \
-          -e GITHUB_TOKEN \
-          -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH \
-          -e INPUT_PROVIDER -e INPUT_MODEL -e INPUT_PRESET \
-          -e INPUT_FALLBACK_MODEL -e INPUT_REFLECT_MODEL \
-          -e INPUT_LANGUAGE \
-          -e INPUT_TRIAGE_MODEL \
-          -e INPUT_API_KEY -e INPUT_API_BASE -e INPUT_CONFIG_PATH \
-          -e INPUT_TIMEOUT -e INPUT_MAX_REVIEW_SECONDS -e INPUT_MAX_REVIEW_TOKENS \
-          -e INPUT_TEMPERATURE \
-          -e INPUT_NUM_CTX -e INPUT_MAX_INPUT_TOKENS -e INPUT_MAX_TOKENS \
-          -e INPUT_REASONING_EFFORT \
-          -e INPUT_MAX_CONCURRENCY \
-          -e INPUT_RESOLVE_FIXED \
-          -e INPUT_RECURSIVE -e INPUT_STRUCTURED_OUTPUT -e INPUT_SYMBOL_RESOLUTION \
-          -e INPUT_MID_REVIEW_RETRIEVAL \
-          -e INPUT_PROMPT_CACHE -e INPUT_INCREMENTAL -e INPUT_STATIC_ANALYSIS \
-          -e INPUT_AUTO_DESCRIBE -e INPUT_AUTO_DIAGRAM -e INPUT_ANSWER_REPLIES \
-          -e INPUT_PR_LABELS -e INPUT_LEARN_FEEDBACK -e INPUT_FAIL_ON -e INPUT_PROFILE \
-          -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
-          -e AWS_REGION -e AWS_DEFAULT_REGION \
-          -e GOOGLE_APPLICATION_CREDENTIALS -e GOOGLE_GHA_CREDS_PATH \
-          -e CLOUDSDK_CORE_PROJECT -e GOOGLE_CLOUD_PROJECT \
-          -e AZURE_FEDERATED_TOKEN_FILE -e AZURE_CLIENT_ID -e AZURE_TENANT_ID \
-          -e AZURE_AUTHORITY_HOST \
+          --env-file "${RUNNER_TEMP}/lgtmaybe.env" \
           -v "${GITHUB_EVENT_PATH}:${GITHUB_EVENT_PATH}:ro" \
           -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
           -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \

@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from lgtmaybe.core.models import Provider
-from lgtmaybe.providers.constants import DEFAULT_OLLAMA_BASE
+from lgtmaybe.providers.constants import CLOUD_TIMEOUT, DEFAULT_OLLAMA_BASE
 
 if TYPE_CHECKING:
     from lgtmaybe.providers.litellm_provider import LiteLLMProvider
@@ -49,9 +49,9 @@ _PREFIXES: dict[Provider, str] = {
 # Both are sized for the failure that matters: a timed-out lens call posts
 # "results may be incomplete" with no findings, which a human reads as a clean
 # review. Waiting longer for an answer beats reporting a confident nothing, so
-# these are deliberately far above what a healthy call needs.
+# these are deliberately far above what a healthy call needs. The cloud one is
+# shared with the adapter's fallback (providers.constants.CLOUD_TIMEOUT).
 _SLOW_TIMEOUT = 1800
-_CLOUD_TIMEOUT = 600
 
 # Providers whose endpoint may be a slow model (local server or open gateway).
 _SLOW_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})
@@ -65,7 +65,7 @@ _OLLAMA_NUM_CTX = 32768
 
 def default_timeout_for(provider: Provider) -> int:
     """The auto timeout (seconds) for a provider when none is given explicitly."""
-    return _SLOW_TIMEOUT if provider in _SLOW_CAPABLE else _CLOUD_TIMEOUT
+    return _SLOW_TIMEOUT if provider in _SLOW_CAPABLE else CLOUD_TIMEOUT
 
 
 def cheaper_reflect_sibling(provider: Provider, model: str) -> str | None:

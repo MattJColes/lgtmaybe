@@ -11,6 +11,7 @@ from lgtmaybe.engine.compress import (
     expand_hunks,
     split_hunk_by_budget,
     split_patch_into_hunks,
+    take_lines,
     trailing_context_lines,
 )
 
@@ -56,6 +57,34 @@ def test_count_tokens_scales_with_length() -> None:
     short = count_tokens("x")
     long = count_tokens("x " * 1000)
     assert long > short
+
+
+# ---------------------------------------------------------------------------
+# take_lines
+# ---------------------------------------------------------------------------
+
+
+def test_take_lines_keeps_a_prefix_within_budget() -> None:
+    lines = ["alpha beta gamma"] * 10
+    kept = take_lines(lines, 20)
+    assert kept == lines[: len(kept)]
+    assert 0 < len(kept) < len(lines)
+    assert sum(count_tokens(line) + 1 for line in kept) <= 20
+
+
+def test_take_lines_keeps_everything_when_the_budget_is_ample() -> None:
+    lines = ["a", "b", "c"]
+    assert take_lines(lines, 10_000) == lines
+
+
+def test_take_lines_returns_nothing_when_even_one_line_overflows() -> None:
+    assert take_lines(["a much longer line than the budget allows"], 1) == []
+
+
+def test_take_lines_consumes_any_iterable_so_the_tail_can_be_reversed() -> None:
+    lines = ["a", "b", "c", "d"]
+    tail = take_lines(reversed(lines), 4)[::-1]
+    assert tail == lines[len(lines) - len(tail) :]
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,31 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # release-please bumps `version` in pyproject.toml, which invalidates the
+      # `[[package]] name = "lgtmaybe"` entry in uv.lock — and `uv lock --check`
+      # in ci.yml then fails on main after every release. Regenerate the lockfile
+      # on the Release PR branch so both land in the same merge. Running the real
+      # `uv lock` is the only correct fix: uv.lock holds a `version` key per
+      # dependency, so a text/TOML updater aimed at it could rewrite the wrong
+      # one — and silently no-ops if its path stops matching.
+      - uses: actions/checkout@v7
+        if: ${{ steps.rp.outputs.pr }}
+        with:
+          ref: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+      - uses: astral-sh/setup-uv@v7
+        if: ${{ steps.rp.outputs.pr }}
+        with:
+          python-version: "3.12"
+      - name: Sync uv.lock with the bumped version
+        if: ${{ steps.rp.outputs.pr }}
+        run: |
+          uv lock
+          git diff --quiet -- uv.lock && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: sync uv.lock with the version bump" -- uv.lock
+          git push
+
   # PyPI publish — inline (top-level) so OIDC trusted publishing matches the
   # `release-please.yml` publisher. Runs on a fresh release or a manual dispatch.
   pypi:

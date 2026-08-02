@@ -4,19 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
+from tests.conftest import read_workflow
 
 _ROOT = Path(__file__).parent.parent
-_WORKFLOWS = _ROOT / ".github" / "workflows"
-
-
-def _workflow(name: str) -> tuple[str, dict]:
-    text = (_WORKFLOWS / name).read_text(encoding="utf-8")
-    return text, yaml.safe_load(text)
 
 
 def test_main_ci_runs_only_minimum_python_on_linux_and_windows() -> None:
-    _text, workflow = _workflow("ci.yml")
+    _text, workflow = read_workflow("ci.yml")
     job = workflow["jobs"]["test"]
     setup_uv = next(step for step in job["steps"] if step.get("uses") == "astral-sh/setup-uv@v7")
 
@@ -27,7 +21,7 @@ def test_main_ci_runs_only_minimum_python_on_linux_and_windows() -> None:
 
 
 def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
-    text, workflow = _workflow("windows-exe.yml")
+    text, workflow = read_workflow("windows-exe.yml")
     job = workflow["jobs"]["build"]
     runs = "\n".join(str(step.get("run", "")) for step in job["steps"] if isinstance(step, dict))
 
@@ -45,7 +39,7 @@ def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
 
 
 def test_winget_workflow_updates_the_portable_package() -> None:
-    text, workflow = _workflow("winget.yml")
+    text, workflow = read_workflow("winget.yml")
     job = workflow["jobs"]["publish"]
     steps = {step["name"]: step for step in job["steps"]}
     runs = "\n".join(str(step.get("run", "")) for step in job["steps"] if isinstance(step, dict))
@@ -83,7 +77,7 @@ def test_winget_docs_cover_installation_lifecycle() -> None:
 
 
 def test_release_please_sequences_windows_exe_before_winget() -> None:
-    _text, workflow = _workflow("release-please.yml")
+    _text, workflow = read_workflow("release-please.yml")
     jobs = workflow["jobs"]
 
     assert jobs["windows-exe"]["needs"] == "release-please"

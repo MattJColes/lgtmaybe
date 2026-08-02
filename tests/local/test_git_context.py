@@ -433,3 +433,11 @@ def test_explicit_file_reader_root_is_used_verbatim(tmp_path: Path) -> None:
     read = local_file_reader(corpus)
 
     assert read("migrations/ledger.py") == "def pending():\n    return []\n"
+
+
+def test_repo_name_falls_back_to_the_directory_name_outside_a_repo(tmp_path: Path) -> None:
+    """`_repo_name` reuses `_repo_root`, whose fallback makes it answer for a
+    directory git knows nothing about instead of raising."""
+    from lgtmaybe.local import _repo_name
+
+    assert _repo_name(tmp_path) == tmp_path.name

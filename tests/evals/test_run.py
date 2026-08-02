@@ -191,31 +191,6 @@ def test_json_flag_emits_machine_readable_scores(
     assert payload["fixtures"][0]["name"] == "badcode"
 
 
-def test_save_results_writes_a_record(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """--save-results persists a RunRecord JSON keyed by the head sha."""
-    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
-    monkeypatch.setattr(run_mod, "_RESULTS_DIR", tmp_path)
-    monkeypatch.setattr(run_mod, "_head_sha", lambda: "cafef00d")
-    run_mod.main(
-        [
-            "--provider",
-            "ollama",
-            "--model",
-            "x",
-            "--min-recall",
-            "0.0",
-            "--fixture",
-            "badcode",
-            "--save-results",
-        ]
-    )
-    saved = tmp_path / "cafef00d.json"
-    assert saved.exists()
-    record = run_mod.RunRecord.model_validate_json(saved.read_text())
-    assert record.sha == "cafef00d"
-    assert record.model == "x"
-
-
 def test_runner_fails_when_review_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Unparseable(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[override]

@@ -83,6 +83,20 @@ def test_large_hunks_escalate() -> None:
     assert always_escalate("docs/notes.md", big, hinted_paths=set())
 
 
+def test_diff_file_headers_do_not_count_as_changed_lines() -> None:
+    """Every ``split_by_file`` patch carries a ``---``/``+++`` pair; counting it
+    made the documented 200-line floor really 198, escalating a file sitting
+    just under the threshold."""
+    body = "\n".join(f"+line {i}" for i in range(199))
+    patch = (
+        "diff --git a/docs/notes.md b/docs/notes.md\n"
+        "--- a/docs/notes.md\n"
+        "+++ b/docs/notes.md\n"
+        f"@@ -1 +1,199 @@\n{body}\n"
+    )
+    assert not always_escalate("docs/notes.md", patch, hinted_paths=set())
+
+
 def test_plain_small_file_does_not_escalate() -> None:
     assert not always_escalate("src/util.py", "@@ -1 +1 @@\n+return x + 1\n", hinted_paths=set())
 
@@ -172,6 +186,18 @@ def test_unparseable_triage_reviews_everything() -> None:
     provider = FakeProvider(
         result=ProviderResult(text="no json here", input_tokens=1, output_tokens=1)
     )
+
+    kept, skipped = triage_files([BORING, PLAIN], [], _cfg(triage_model="tiny"), provider)
+
+    assert [p for p, _ in kept] == [BORING[0], PLAIN[0]]
+    assert skipped == []
+
+
+def test_out_of_range_risk_reviews_everything() -> None:
+    """The verdict schema declares risk as 0-10, so a value outside it is a
+    verdict lgtmaybe cannot trust — and an untrusted verdict means review, never
+    a guessed-down score that could skip a file."""
+    provider = _verdict_provider([{"path": BORING[0], "review": False, "risk": 99}])
 
     kept, skipped = triage_files([BORING, PLAIN], [], _cfg(triage_model="tiny"), provider)
 

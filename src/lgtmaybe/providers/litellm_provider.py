@@ -43,15 +43,10 @@ from lgtmaybe.core.ports import (
     ProviderTruncated,
     ProviderWallTimeout,
 )
+from lgtmaybe.providers.constants import CLOUD_TIMEOUT
 
 _log = get_logger(__name__)
 
-# Last-resort per-request timeout (seconds), used only when a caller builds this
-# adapter outside the factory or passes no timeout at all. Kept at the factory's
-# shortest provider default (see providers.factory) rather than something tighter:
-# a fallback that silently undercuts the configured budget is how a reasoning
-# model's review turns into "1 of 8 review calls failed" with zero findings.
-_DEFAULT_TIMEOUT = 600  # seconds
 _MAX_ATTEMPTS = 4
 
 # All attempts for one completion share a total wall-clock budget of this many
@@ -156,22 +151,10 @@ _EXPIRED_CREDENTIAL_MARKERS = (
 )
 
 
-def _is_quota_rate_limit(exc: BaseException) -> bool:
-    """True for a quota/billing 429 (permanent), False for a capacity 429."""
+def _mentions(exc: BaseException, markers: tuple[str, ...]) -> bool:
+    """True when *exc*'s message mentions any of *markers* (case-insensitively)."""
     msg = str(exc).lower()
-    return any(marker in msg for marker in _QUOTA_MARKERS)
-
-
-def _is_insufficient_credit(exc: BaseException) -> bool:
-    """True when *exc* is a prepaid-balance refusal (permanent until topped up)."""
-    msg = str(exc).lower()
-    return any(marker in msg for marker in _INSUFFICIENT_CREDIT_MARKERS)
-
-
-def _is_expired_credential(exc: BaseException) -> bool:
-    """True when *exc* is an expired/invalid ambient cloud credential (permanent)."""
-    msg = str(exc).lower()
-    return any(marker in msg for marker in _EXPIRED_CREDENTIAL_MARKERS)
+    return any(marker in msg for marker in markers)
 
 
 def _is_permanent(exc: BaseException) -> bool:
@@ -197,9 +180,12 @@ def _is_permanent(exc: BaseException) -> bool:
     # attempt worth refusing.
     if isinstance(exc, ProviderTruncated):
         return True
+    # A 429 is permanent only when it's a quota/billing one; a capacity 429 retries.
     if isinstance(exc, RateLimitError):
-        return _is_quota_rate_limit(exc)
-    return _is_expired_credential(exc) or _is_insufficient_credit(exc)
+        return _mentions(exc, _QUOTA_MARKERS)
+    return _mentions(exc, _EXPIRED_CREDENTIAL_MARKERS) or _mentions(
+        exc, _INSUFFICIENT_CREDIT_MARKERS
+    )
 
 
 def _rejects_response_format(exc: Exception) -> bool:
@@ -294,7 +280,7 @@ class LiteLLMProvider(ProviderClient):
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
-        merged.setdefault("timeout", _DEFAULT_TIMEOUT)
+        merged.setdefault("timeout", CLOUD_TIMEOUT)
         # We own retries (tenacity, below). Disable litellm's own retry loop so a
         # failure isn't ground through two stacked backoff layers — the doubling
         # that helped a quota error run ~13 min before it surfaced.
@@ -348,7 +334,7 @@ class LiteLLMProvider(ProviderClient):
         # Attempts share one deadline derived from the per-request timeout (the
         # fallback model, when configured, gets its own fresh budget — it is a
         # separate recovery path, not another attempt).
-        timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
+        timeout = float(kwargs.get("timeout") or CLOUD_TIMEOUT)
 
         @retry(
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
@@ -599,7 +585,7 @@ def _completion_with_wall_timeout(
     replace its real error (a quota 429, a bad key) with a bare timeout, hiding the
     one thing that tells the user what to fix.
     """
-    timeout = float(kwargs.get("timeout") or _DEFAULT_TIMEOUT)
+    timeout = float(kwargs.get("timeout") or CLOUD_TIMEOUT)
     future: Future[Any] = Future()
 
     def complete() -> None:

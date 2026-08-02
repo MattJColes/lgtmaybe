@@ -22,13 +22,12 @@ import json
 
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ProviderResult,
-    ReviewConfig,
     ReviewFinding,
     Severity,
 )
 from lgtmaybe.engine import LLMReviewEngine
+from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
 
 _DIFF = "diff --git a/a.py b/a.py\n@@ -1,1 +1,2 @@\n context\n+new_line = 1\n"
@@ -45,12 +44,6 @@ def _ctx(**overrides) -> PRContext:
     )
     base.update(overrides)
     return PRContext(**base)  # type: ignore[arg-type]
-
-
-def _cfg(**overrides) -> ReviewConfig:
-    base: dict[str, object] = {"provider": Provider.ollama, "model": "m", "reflect": False}
-    base.update(overrides)
-    return ReviewConfig(**base)  # type: ignore[arg-type]
 
 
 class _Clean(FakeProvider):
@@ -91,7 +84,7 @@ class TestSuppressedFindingsAreDisclosed:
 
         fp = finding_fingerprint("a.py", "Something")
         findings, summary = LLMReviewEngine(_Flags()).review(
-            _ctx(feedback_downvotes=frozenset({fp})), _cfg()
+            _ctx(feedback_downvotes=frozenset({fp})), make_cfg()
         )
 
         assert findings == []
@@ -103,7 +96,7 @@ class TestSuppressedFindingsAreDisclosed:
 
         fp = finding_fingerprint("a.py", "Something")
         _findings, summary = LLMReviewEngine(_Flags()).review(
-            _ctx(), _cfg(ignore_fingerprints=[fp])
+            _ctx(), make_cfg(ignore_fingerprints=[fp])
         )
 
         assert "LGTM" not in summary
@@ -111,7 +104,7 @@ class TestSuppressedFindingsAreDisclosed:
 
     def test_a_genuinely_clean_review_still_says_lgtm(self) -> None:
         """The guard must not cost every clean PR its thumbs-up."""
-        _findings, summary = LLMReviewEngine(_Clean()).review(_ctx(), _cfg())
+        _findings, summary = LLMReviewEngine(_Clean()).review(_ctx(), make_cfg())
         assert "LGTM" in summary
 
 
@@ -119,7 +112,9 @@ class TestOpenPriorFindingsAreDisclosed:
     def test_open_earlier_conversations_block_lgtm(self) -> None:
         """Nothing new this run, but earlier findings are still unaddressed —
         an incremental run may not even have re-reviewed their files."""
-        _findings, summary = LLMReviewEngine(_Clean()).review(_ctx(open_finding_threads=3), _cfg())
+        _findings, summary = LLMReviewEngine(_Clean()).review(
+            _ctx(open_finding_threads=3), make_cfg()
+        )
 
         assert "LGTM" not in summary
         assert "3" in summary
@@ -128,12 +123,14 @@ class TestOpenPriorFindingsAreDisclosed:
         """Not only on the clean path: a run that finds two new things while five
         remain open should say so."""
         _findings, summary = LLMReviewEngine(_Flags()).review(
-            _ctx(open_finding_threads=5), _cfg(min_severity="info")
+            _ctx(open_finding_threads=5), make_cfg(min_severity="info")
         )
 
         assert "5" in summary
 
     def test_no_open_conversations_is_silent(self) -> None:
-        _findings, summary = LLMReviewEngine(_Clean()).review(_ctx(open_finding_threads=0), _cfg())
+        _findings, summary = LLMReviewEngine(_Clean()).review(
+            _ctx(open_finding_threads=0), make_cfg()
+        )
         assert "LGTM" in summary
         assert "unresolved" not in summary

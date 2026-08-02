@@ -10,23 +10,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
+from tests.conftest import read_workflow
 
 _ROOT = Path(__file__).parent.parent
-_WORKFLOWS = _ROOT / ".github" / "workflows"
 
 TAP_REPO = "MattJColes/homebrew-tap"
 TAP = "MattJColes/tap"
 FORMULA = f"{TAP}/lgtmaybe"
 
 
-def _workflow(name: str) -> tuple[str, dict]:
-    text = (_WORKFLOWS / name).read_text(encoding="utf-8")
-    return text, yaml.safe_load(text)
-
-
 def test_homebrew_workflow_targets_the_tap_repo() -> None:
-    text, workflow = _workflow("homebrew.yml")
+    text, workflow = read_workflow("homebrew.yml")
     steps = {step["name"]: step for step in workflow["jobs"]["formula"]["steps"]}
     checkout = steps["Checkout the tap"]
 
@@ -38,7 +32,7 @@ def test_homebrew_workflow_targets_the_tap_repo() -> None:
 
 
 def test_homebrew_smoke_test_installs_the_generated_formula() -> None:
-    _text, workflow = _workflow("homebrew.yml")
+    _text, workflow = read_workflow("homebrew.yml")
     steps = {step["name"]: step for step in workflow["jobs"]["formula"]["steps"]}
     run = steps["Smoke-test that the formula installs and runs"]["run"]
 
@@ -57,7 +51,7 @@ def test_homebrew_smoke_test_trusts_the_tap_like_a_user_does() -> None:
     one thing the gate cannot fail on — and that escape hatch is slated for removal
     upstream, so the gate would break with it.
     """
-    text, workflow = _workflow("homebrew.yml")
+    text, workflow = read_workflow("homebrew.yml")
     step = next(
         s
         for s in workflow["jobs"]["formula"]["steps"]

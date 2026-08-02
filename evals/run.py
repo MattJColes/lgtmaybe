@@ -14,9 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 
 from lgtmaybe.core.models import Provider, ReviewCategory, ReviewConfig, StaticAnalysisConfig
@@ -25,7 +23,6 @@ from lgtmaybe.local import local_file_reader
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
 
-from .persist import RunRecord, write_run_record
 from .scorer import (
     Fixture,
     FixtureScore,
@@ -39,23 +36,6 @@ from .scorer import (
 # A/B harness can point a baseline-ref worktree at the CURRENT tree's fixtures —
 # keeping the yardstick fixed while only the reviewer code varies between legs.
 _FIXTURES = Path(os.environ.get("EVALS_FIXTURES_DIR") or (Path(__file__).parent / "fixtures"))
-_RESULTS_DIR = Path(__file__).parent / "results"
-
-
-def _head_sha() -> str:
-    """The short git sha of the current tree (``unknown`` if git is unavailable)."""
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
-        return out.stdout.strip() or "unknown"
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return "unknown"
 
 
 def _load_fixtures() -> list[tuple[str, Fixture]]:
@@ -376,11 +356,6 @@ def main(argv: list[str] | None = None) -> int:
         help="emit the per-fixture scores + pooled metrics as a single JSON object on "
         "stdout (machine-readable; consumed by the evals.ab A/B harness)",
     )
-    ap.add_argument(
-        "--save-results",
-        action="store_true",
-        help="persist this run's pooled metrics to evals/results/<sha>.json for tracking",
-    )
     args = ap.parse_args(argv)
 
     provider = Provider(args.provider)
@@ -444,21 +419,6 @@ def main(argv: list[str] | None = None) -> int:
         f"pooled precision {pooled['pooled_precision']:.0%} "
         f"({right}/{adjudicable} adjudicable findings right)"
     )
-
-    if args.save_results:
-        record = RunRecord(
-            sha=_head_sha(),
-            model=args.model,
-            provider=args.provider,
-            date=date.today().isoformat(),
-            min_recall=args.min_recall,
-            pooled_recall=pooled["pooled_recall"],
-            pooled_precision=pooled["pooled_precision"],
-            pooled_anchored=pooled["pooled_anchored"],
-            fixtures=scores,
-        )
-        path = write_run_record(record, _RESULTS_DIR)
-        print(f"saved results → {path}")
 
     return 0 if ok else 1
 

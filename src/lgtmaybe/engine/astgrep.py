@@ -25,9 +25,9 @@ import json
 import re
 import shutil
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from lgtmaybe.core.logging import get_logger
 
@@ -53,12 +53,96 @@ _MAX_CANDIDATES = 3
 # (handled by the path fetcher) and keeps the symbol safe to drop into the rule's
 # ``regex: ^<name>$`` — an identifier carries no regex or YAML metacharacters.
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-# Source-file extensions (no dot). A `need` like ``models.py`` is a filename the
-# path fetcher handles — not a ``module.symbol`` reference — so it must not be
-# mistaken for a symbol whose name is ``py``.
-_SOURCE_EXTS = frozenset(
-    {"py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "go", "java", "rs", "rb"}
-)
+
+
+class _LangSpec(NamedTuple):
+    """One ast-grep language: the files it owns and its definition node kinds.
+
+    ``block`` kinds OPEN a body worth padding a hunk back to (functions, methods,
+    classes) — ``engine/boundaries.py`` scans those alone, since a
+    ``variable_declarator`` boundary would be noise. Symbol resolution scans
+    :attr:`kinds`, the block kinds plus the rest. One table, one blockness flag —
+    so adding a language can no longer land in half of it.
+    """
+
+    exts: tuple[str, ...]
+    block: tuple[str, ...]
+    other: tuple[str, ...] = ()
+
+    @property
+    def kinds(self) -> tuple[str, ...]:
+        return self.block + self.other
+
+
+# ast-grep language name -> its file extensions and the tree-sitter definition
+# node kinds whose ``name`` field we match. Validated against ast-grep 0.44. C/C++
+# are intentionally omitted: their function names nest inside declarators that
+# ``has: {field: name}`` can't bind, and a broken matcher is worse than none.
+# ``.jsx`` maps to ``javascript`` and ``.tsx`` to ``tsx`` by ast-grep's own
+# extension table — we just supply the matching language name so its file
+# selection lines up.
+_LANGS: dict[str, _LangSpec] = {
+    "python": _LangSpec((".py",), ("function_definition", "class_definition")),
+    "javascript": _LangSpec(
+        (".js", ".jsx", ".mjs", ".cjs"),
+        ("function_declaration", "method_definition", "class_declaration"),
+        ("variable_declarator",),
+    ),
+    "typescript": _LangSpec(
+        (".ts", ".mts", ".cts"),
+        ("function_declaration", "method_definition", "class_declaration"),
+        (
+            "variable_declarator",
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+        ),
+    ),
+    "tsx": _LangSpec(
+        (".tsx",),
+        ("function_declaration", "method_definition", "class_declaration"),
+        (
+            "variable_declarator",
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+        ),
+    ),
+    "go": _LangSpec(
+        (".go",),
+        ("function_declaration", "method_declaration"),
+        ("type_spec", "const_spec"),
+    ),
+    "java": _LangSpec(
+        (".java",),
+        ("method_declaration", "class_declaration"),
+        ("interface_declaration", "enum_declaration", "record_declaration"),
+    ),
+    "rust": _LangSpec(
+        (".rs",),
+        ("function_item", "impl_item", "trait_item"),
+        (
+            "struct_item",
+            "enum_item",
+            "const_item",
+            "static_item",
+            "type_item",
+            "mod_item",
+            "macro_definition",
+        ),
+    ),
+    "ruby": _LangSpec((".rb",), ("method", "singleton_method", "class", "module")),
+}
+
+# Extension -> (language, block kinds), the lookup boundary detection needs.
+_BY_EXT: dict[str, tuple[str, tuple[str, ...]]] = {
+    ext: (language, spec.block) for language, spec in _LANGS.items() for ext in spec.exts
+}
+
+
+def block_kinds_for_path(path: str) -> tuple[str, tuple[str, ...]] | None:
+    """``(ast-grep language, body-opening kinds)`` for *path*, or None if unsupported."""
+    return _BY_EXT.get(Path(path).suffix.lower())
 
 
 def _symbol_name(raw: str) -> str | None:
@@ -69,68 +153,10 @@ def _symbol_name(raw: str) -> str | None:
     `self.method`) by taking its final segment, the name ast-grep can match.
     """
     s = raw.strip()
-    if not s or "/" in s or "\\" in s:
+    if not s or "/" in s or "\\" in s or Path(s).suffix.lower() in _BY_EXT:
         return None
     name = s.rsplit(".", 1)[-1]
-    if name in _SOURCE_EXTS:
-        return None
     return name if _IDENT.match(name) else None
-
-
-# ast-grep language name -> the tree-sitter definition node kinds whose ``name``
-# field we match. Validated against ast-grep 0.44. C/C++ are intentionally omitted:
-# their function names nest inside declarators that ``has: {field: name}`` can't
-# bind, and a broken matcher is worse than none. ``.jsx`` maps to ``javascript``
-# and ``.tsx`` to ``tsx`` by ast-grep's own extension table — we just supply the
-# matching language name so its file selection lines up.
-_LANG_KINDS: dict[str, tuple[str, ...]] = {
-    "python": ("function_definition", "class_definition"),
-    "javascript": (
-        "function_declaration",
-        "class_declaration",
-        "method_definition",
-        "variable_declarator",
-    ),
-    "typescript": (
-        "function_declaration",
-        "class_declaration",
-        "method_definition",
-        "variable_declarator",
-        "interface_declaration",
-        "type_alias_declaration",
-        "enum_declaration",
-    ),
-    "tsx": (
-        "function_declaration",
-        "class_declaration",
-        "method_definition",
-        "variable_declarator",
-        "interface_declaration",
-        "type_alias_declaration",
-        "enum_declaration",
-    ),
-    "go": ("function_declaration", "method_declaration", "type_spec", "const_spec"),
-    "java": (
-        "method_declaration",
-        "class_declaration",
-        "interface_declaration",
-        "enum_declaration",
-        "record_declaration",
-    ),
-    "rust": (
-        "function_item",
-        "struct_item",
-        "enum_item",
-        "trait_item",
-        "impl_item",
-        "const_item",
-        "static_item",
-        "type_item",
-        "mod_item",
-        "macro_definition",
-    ),
-    "ruby": ("method", "singleton_method", "class", "module"),
-}
 
 
 def _find_binary() -> str | None:
@@ -138,14 +164,18 @@ def _find_binary() -> str | None:
     return shutil.which("ast-grep")
 
 
-def _rule_yaml(language: str, kinds: tuple[str, ...], symbol: str) -> str:
-    """An inline ast-grep rule: a definition node of *language* named *symbol*.
+def rule_yaml(language: str, kinds: Sequence[str], symbol: str | None = None) -> str:
+    """An inline ast-grep rule matching any of *kinds* in *language*.
 
-    Matches any of *kinds* whose ``name`` field equals *symbol* (searched through
-    nested declarators via ``stopBy: end``). *symbol* is identifier-validated by
-    the caller, so it is safe inside the ``^...$`` regex with no escaping.
+    With *symbol*, the match is narrowed to a definition whose ``name`` field
+    equals it (searched through nested declarators via ``stopBy: end``) — symbol
+    resolution's rule. *symbol* is identifier-validated by the caller, so it is
+    safe inside the ``^...$`` regex with no escaping. Without it, the bare
+    ``any:`` rule boundary detection uses.
     """
     kinds_flow = ", ".join(f"{{kind: {k}}}" for k in kinds)
+    if symbol is None:
+        return f"id: lgtmaybe-boundaries\nlanguage: {language}\nrule: {{any: [{kinds_flow}]}}\n"
     return (
         "id: lgtmaybe-find-def\n"
         f"language: {language}\n"
@@ -154,6 +184,20 @@ def _rule_yaml(language: str, kinds: tuple[str, ...], symbol: str) -> str:
         f"    - any: [{kinds_flow}]\n"
         f"    - has: {{field: name, regex: ^{symbol}$, stopBy: end}}\n"
     )
+
+
+def _present_languages(root: Path) -> tuple[str, ...]:
+    """The languages actually present under *root*, by file extension.
+
+    Scanning a pure-Python tree for a Ruby ``singleton_method`` is guaranteed-zero
+    work; one filesystem walk (cached with the corpus root) replaces up to eight
+    repo-wide ``ast-grep scan`` subprocesses per unresolved symbol.
+    """
+    try:
+        exts = {path.suffix.lower() for path in root.rglob("*")}
+    except OSError:  # unreadable corpus — best-effort, scan nothing
+        return ()
+    return tuple(name for name, spec in _LANGS.items() if not exts.isdisjoint(spec.exts))
 
 
 def _default_runner(binary: str, rule_yaml: str, target: Path) -> str:
@@ -228,7 +272,9 @@ def build_symbol_resolver(
     Otherwise returns a callable that, given a symbol the auditor deferred on,
     structurally searches the corpus (``get_root()``, resolved and cached on first
     use) for its definition and returns up to :data:`_MAX_CANDIDATES`
-    repo-relative paths.
+    repo-relative paths. Only the languages the corpus actually contains are
+    scanned, so an unresolved symbol costs one subprocess per present language
+    rather than one per supported language.
 
     Best-effort throughout: a non-identifier symbol, an absent corpus, an
     unsupported language, or any ast-grep failure yields [] so the deferral falls
@@ -241,23 +287,28 @@ def build_symbol_resolver(
     run = runner or _default_runner
 
     @functools.cache
-    def _root() -> Path | None:
+    def _corpus() -> tuple[Path, tuple[str, ...]] | None:
+        """The resolved corpus root and the languages present in it, or None."""
         root = get_root()
-        return root.resolve() if root is not None else None
+        if root is None:
+            return None
+        root = root.resolve()
+        return root, _present_languages(root)
 
     def resolve(symbol: str) -> list[str]:
         name = _symbol_name(symbol)
         if name is None:
             return []
-        root = _root()
-        if root is None:
+        corpus = _corpus()
+        if corpus is None:
             return []
+        root, languages = corpus
         found: list[str] = []
         seen: set[str] = set()
-        for language, kinds in _LANG_KINDS.items():
+        for language in languages:
             if len(found) >= _MAX_CANDIDATES:
                 break
-            stdout = run(binary, _rule_yaml(language, kinds, name), root)
+            stdout = run(binary, rule_yaml(language, _LANGS[language].kinds, name), root)
             for rel in _parse_paths(stdout, root):
                 if rel in seen:
                     continue

@@ -36,7 +36,9 @@ class Severity(StrEnum):
 
     @property
     def rank(self) -> int:
-        return _SEVERITY_ORDER.index(self)
+        # Enum iteration order IS declaration order, so the members above are the
+        # single source of the ordering — no second list to keep in step.
+        return list(Severity).index(self)
 
     # All four order comparisons rank by severity. Defined explicitly (not via
     # functools.total_ordering, which skips operators str already defines) so
@@ -60,15 +62,6 @@ class Severity(StrEnum):
         if isinstance(other, Severity):
             return self.rank >= other.rank
         return NotImplemented
-
-
-_SEVERITY_ORDER: list[Severity] = [
-    Severity.info,
-    Severity.low,
-    Severity.medium,
-    Severity.high,
-    Severity.critical,
-]
 
 
 class ReviewCategory(StrEnum):
@@ -501,15 +494,13 @@ class DiagramResult(_Strict):
     The model returns presentation-agnostic nodes, edges, and ordered steps.
     lgtmaybe renders Mermaid (a flowchart of the structure, a sequence diagram
     of the flow) and text locally so model-authored syntax never reaches a
-    Mermaid fence. ``ascii`` remains only as a compatibility fallback for weak
-    models that return the legacy C4-plus-text shape.
+    Mermaid fence.
     """
 
     title: str = ""
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
     steps: list[DiagramStep] = Field(default_factory=list)
-    ascii: str = ""
     notes: str = ""
 
 
