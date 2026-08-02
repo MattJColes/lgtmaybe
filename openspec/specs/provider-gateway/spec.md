@@ -63,7 +63,9 @@ this provider" message.
 adapter boundary, retry transient failures within its bounded budget, switch to
 `fallback_model` when the primary is exhausted, and place explicit cache
 breakpoints on the shared prefix for supported routes. Cache usage SHALL land
-on `ProviderResult`.
+on `ProviderResult`, as SHALL the reasoning-token count where the route reports
+one — on successful calls, not only on the truncated ones that name it as a
+cause, since a ceiling-hitting call offers no healthy call to compare against.
 <!-- anchor: provider.complete -->
 
 #### Scenario: provider SDK ignores its timeout

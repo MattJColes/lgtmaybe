@@ -539,6 +539,10 @@ class LiteLLMProvider(ProviderClient):
             output_tokens=output_tokens,
             cache_read_tokens=cache_read,
             cache_creation_tokens=cache_creation,
+            # Same helper as the truncation message above, so a call that
+            # succeeded and a call that hit the ceiling can never report the
+            # thinking they did by two different readings of the same field.
+            reasoning_tokens=_reasoning_tokens(usage),
         )
 
 

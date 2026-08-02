@@ -548,6 +548,16 @@ class ProviderResult(_Strict):
     # providers/models without prompt caching (back-compat default).
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Tokens the model spent thinking before it wrote a word of the answer, when
+    # the route reports them. A SUBSET of `output_tokens`, never an addition to
+    # it — the two are added nowhere, or the budget double-counts. Zero on routes
+    # that report no breakdown, which means "not reported", NOT "did no thinking".
+    #
+    # It is on the success path for a reason: read only off truncated calls (where
+    # it was first surfaced, to name the cause) the number cannot answer the
+    # question it exists for, because such a call has reasoning + findings >=
+    # max_tokens by definition and so offers no healthy call to compare against.
+    reasoning_tokens: int = 0
     # Completion attempts the adapter made to produce this result (1 = first try).
     # Feeds the timing instrumentation so a call that burned its retry budget is
     # distinguishable from one that was merely slow.
