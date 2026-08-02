@@ -109,6 +109,19 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    `ReviewFinding` using Pydantic; parse errors are logged and surfaced in
    the summary rather than silently discarded.
 
+   With `mid_review_retrieval` on (default **off**), a lens gets a third option
+   besides asserting or hedging a cross-file claim: **ask to read the code**.
+   Alongside its findings it may answer `needs` — the file paths or symbols it
+   must see — and the engine fetches them through the same read-only, redacting
+   boundary reflection's deferral uses (never a checkout), then re-runs *that one
+   lens* with the text appended to its own uncached block. The shared prefix is
+   untouched, so the batch's other lenses still read it from cache. Bounded to
+   **one hop**: the re-run cannot defer again, at most five files inside a quarter
+   of `max_input_tokens` are fetched, and a deferral arriving past the review
+   deadline or token budget is skipped with the usual incomplete-results notice.
+   Both calls' findings are merged, so a deferral can only add findings. The cost
+   is up to one extra model call per (batch, lens) — which is why it ships off.
+
 4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
    changed line whose content matches the finding's verbatim `anchor`, rather
    than trusting the model's line arithmetic. A finding whose anchor matches

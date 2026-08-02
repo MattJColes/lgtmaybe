@@ -225,6 +225,41 @@ def _recover_complete_findings(raw: str) -> list[ReviewFinding]:
     return recovered
 
 
+def coerce_needs(value: object) -> list[str]:
+    """Normalise a ``needs`` value into a clean list of non-empty path/symbol strings.
+
+    Tolerates a caller that omits it (None), emits a single string, or includes
+    blank/non-string entries — so a sloppy ``needs`` never raises, it just yields
+    the paths worth fetching. Shared by the two places a model may defer: a
+    reflection verdict (``reflect._parse_verdicts``) and a review lens's findings
+    envelope (:func:`parse_needs`), so both read a deferral identically.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def parse_needs(raw: str) -> list[str]:
+    """The ``needs`` deferral a review lens put on its findings envelope, else [].
+
+    A lens that cannot decide without seeing code outside the diff answers
+    ``{"findings": [...], "needs": [...]}`` — the paths (or symbols) it must
+    read. Extraction is the same lenient walk :func:`parse_findings` uses, so a
+    fenced or prose-wrapped answer still defers; the values go through
+    :func:`coerce_needs`, so a malformed one degrades to "no deferral" rather
+    than raising. ``parse_findings`` ignores the extra key, so the two are read
+    independently from the one response.
+    """
+    for value in iter_json_values(raw):
+        if isinstance(value, dict) and value.get("needs") is not None:
+            return coerce_needs(value["needs"])
+    return []
+
+
 def parse_findings(raw: str) -> list[ReviewFinding]:
     """Parse *raw* LLM text into a list of ReviewFinding objects.
 

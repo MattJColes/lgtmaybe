@@ -24,7 +24,7 @@ from lgtmaybe.core.ports import ProviderClient
 from .astgrep import SymbolResolver
 from .compress import count_tokens
 from .injection import neutralise
-from .parse import iter_json_values
+from .parse import coerce_needs, iter_json_values
 from .profiling import timed_complete
 from .redact import redact
 from .retrieve import MAX_FETCH_FILES, MAX_HOPS, FileFetcher, resolve_needs
@@ -498,7 +498,7 @@ def _parse_verdicts(raw: str) -> dict[int, _ParsedVerdict]:
                     out[int(v["index"])] = _ParsedVerdict(
                         keep=bool(v["keep"]),
                         broad=bool(v.get("broad", False)),
-                        needs=tuple(_coerce_needs(v.get("needs"))),
+                        needs=tuple(coerce_needs(v.get("needs"))),
                         confidence=_coerce_confidence(v.get("confidence")),
                     )
             return out
@@ -519,19 +519,3 @@ def _coerce_confidence(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return max(0, min(10, int(value)))
-
-
-def _coerce_needs(value: object) -> list[str]:
-    """Normalise a verdict's ``needs`` into a clean list of non-empty path strings.
-
-    Tolerates a model that omits it (None), emits a single string, or includes
-    blank/non-string entries — so a sloppy ``needs`` never raises, it just yields
-    the paths worth fetching.
-    """
-    if value is None:
-        return []
-    if isinstance(value, str):
-        value = [value]
-    if not isinstance(value, list):
-        return []
-    return [item.strip() for item in value if isinstance(item, str) and item.strip()]

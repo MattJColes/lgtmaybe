@@ -333,6 +333,24 @@ pattern, event bus, plugin framework.
      ("is this hard to follow?"): ponytail asks "should this exist at all?".
      Default-on like the other built-ins; asserted by
      `test_prompt.py::test_prompt_asks_for_ponytail_review`.
+   - **Mid-review retrieval (lens deferral, default off):** with
+     `ReviewConfig.mid_review_retrieval`, a lens may answer `needs` beside its
+     `findings` — the paths/symbols it must read — instead of hedging or omitting
+     a claim that hinges on unshown code (which the shared humility rule
+     otherwise requires). `engine._review_with_context` fetches them through the
+     SAME read-only, redacting boundary reflection's deferral uses
+     (`retrieve.resolve_needs`, `MAX_FETCH_FILES`, `max_input_tokens // 4`; never
+     a checkout) and re-runs **that one lens** with the text
+     `injection.wrap_context`-wrapped on its own **uncached lens block** — never
+     the shared prefix, which its sibling lenses read from cache. Bounded to
+     **one hop** (the re-run passes `batch=None`, the same condition that bounds
+     the timeout split), the ceilings are re-checked via `_skip_reason`, and both
+     calls' findings merge into the existing dedupe — a deferral can only add
+     findings. The prompt ask is gated by `prompt.retrieval_rules`, so off is a
+     zero-byte prompt change. Off by default because the worst case is one extra
+     call per (batch, lens) and the recall win is unmeasured — the
+     `cross-file-recall` eval fixture and `python -m evals.run
+     --mid-review-retrieval` are how that gets measured.
    - **Self-reflection:** after merge/dedupe, `engine/reflect.py` asks the
      provider to audit its own findings for false positives and drops the ones it
      marks low-confidence. The verdict is structured (`ReflectionResult` —

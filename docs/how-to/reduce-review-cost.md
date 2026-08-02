@@ -23,6 +23,7 @@ giving up the findings you actually want.
 - [The levers, in order of payoff](#the-levers-in-order-of-payoff)
 - [Put a hard ceiling on it](#put-a-hard-ceiling-on-it)
 - [If a call runs past `max_tokens`](#if-a-call-runs-past-max_tokens)
+- [What costs more, on purpose](#what-costs-more-on-purpose)
 - [What isn't worth changing](#what-isnt-worth-changing)
 
 ## First, measure
@@ -66,6 +67,8 @@ input tokens  ≈  batches × lenses × (diff + context padding + hints)
   and *each* batch pays the full lens fan-out again.
 - **reflection** — one more pass over the findings, on top.
 - **triage / describe / diagram** — extra calls when enabled.
+- **mid-review retrieval** — off by default; on, it adds up to one more call per
+  (batch, lens). See [What costs more, on purpose](#what-costs-more-on-purpose).
 
 Two things that look expensive but are not: `max_concurrency` only changes how
 many calls run at once, never how many there are, and `temperature` costs
@@ -217,6 +220,40 @@ finding, which is how a fifteen-line diff can truncate. The failure names the
 reasoning tokens where the provider reports them — if most of the ceiling went
 on thought, no amount of shrinking the input will help, and the cap is what
 needs raising.
+
+## What costs more, on purpose
+
+One setting in this guide runs the other way: **`mid_review_retrieval`** buys
+findings with tokens rather than the reverse. Be clear-eyed about the price
+before you turn it on.
+
+```yaml
+mid_review_retrieval: true   # default false
+```
+
+Normally a lens that cannot decide without reading code outside the diff is told
+to hedge the claim or drop it — so a bug whose evidence sits one file away is
+never reported. With this on, the lens may instead name the files (or symbols) it
+needs; lgtmaybe fetches them read-only and re-runs *that one lens* with them.
+
+The cost, worst case: **one extra model call per (batch, lens)**, each carrying
+the fetched file text as well. On the default four-lens preset over three
+batches, that is up to twelve extra calls — the multiplier in the formula above,
+doubled. In practice only the lenses that actually defer pay it, and the fetch is
+capped at five files inside a quarter of `max_input_tokens`, but budget for the
+worst case rather than the average.
+
+Ways to keep the bill honest if you want it:
+
+- pair it with `max_review_tokens`, so the worst case is bounded rather than
+  merely unlikely — a deferral arriving past the ceiling is skipped and reported;
+- leave `prompt_cache` on: the fetched text rides the lens's own block, so a
+  deferral never invalidates the prefix its sibling lenses read from cache;
+- turn on `triage_model` first, so fewer files reach the lenses that might defer.
+
+Measure it rather than assume: run `python -m evals.run` with and without
+`--mid-review-retrieval` against your model and compare recall to the token
+total.
 
 ## What isn't worth changing
 

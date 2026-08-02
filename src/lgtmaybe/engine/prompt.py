@@ -716,11 +716,15 @@ FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
 
 
 def build_group_prompt(
-    group: LensGroup, language: str | None = None, dependency_health: bool = True
+    group: LensGroup,
+    language: str | None = None,
+    dependency_health: bool = True,
+    retrieval: bool = False,
 ) -> str:
     """A merged lens's system prompt (legacy shape, ``prompt_cache: false``)."""
     section = _group_section(group, dependency_health)
-    return f"{_localised_header(language)}\n{group.example}\n\n{section}\n\n{_SHARED_RULES}\n"
+    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
+    return f"{_localised_header(language)}\n{group.example}\n\n{section}\n\n{rules}\n"
 
 
 def build_group_block(group: LensGroup, dependency_health: bool = True) -> str:
@@ -738,11 +742,14 @@ def _correctness_section(include_intent: bool) -> str:
     return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_SECTION}\n\n{_INTENT_SECTION}"
 
 
-def build_correctness_prompt(include_intent: bool, language: str | None = None) -> str:
+def build_correctness_prompt(
+    include_intent: bool, language: str | None = None, retrieval: bool = False
+) -> str:
     """The fast preset's correctness call, system-prompt (legacy) shape."""
     section = _correctness_section(include_intent)
     header = _localised_header(language)
-    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{_SHARED_RULES}\n"
+    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
+    return f"{header}\n{_CORRECTNESS_EXAMPLE}\n\n{section}\n\n{rules}\n"
 
 
 def build_correctness_block(include_intent: bool) -> str:
@@ -887,9 +894,47 @@ verify (hedge, lower the severity), never as confident `high`/`critical` fixes �
   text it replaced is not available to you, and its absence is not a defect.
 - Return `{"findings": []}` only when there are genuinely no issues."""
 
+# The deferral ask, appended after the shared rules ONLY when
+# `mid_review_retrieval` is on (ReviewConfig, default off). It is the direct
+# counterweight to the codebase-humility rule above: that rule tells a lens to
+# hedge or omit a claim that hinges on code it cannot see, which protects
+# precision at the cost of the finding entirely. Here the lens gets a third
+# option — ask for the code — bounded to ONE round, because a weak model will
+# otherwise defer on everything and double the review's cost. Off, this string
+# is never added and the prompt is byte-identical to a build without the
+# feature; the shared prefix is a prompt-cache entry, so that matters.
+_RETRIEVAL_RULES = """
 
-@lru_cache(maxsize=8)
-def build_shared_preamble(language: str | None = None) -> str:
+## Asking to see more code (once)
+
+If — and only if — you cannot decide a finding without reading code that is not in the diff,
+add a top-level `"needs"` key beside `findings`: an array of the repository file paths (or
+symbol names) you must read. That code will be fetched read-only and you will be asked this
+same question once more with it in front of you. You get ONE such round: a second `needs` is
+ignored, so never use it to postpone work you can already do.
+
+- Report every finding you are already sure of in the SAME answer — `needs` adds to that
+  answer, it does not replace it, and findings you withhold are simply lost.
+- Ask only when the fetched code would actually change what you report. "It would be nice to
+  see" is not a reason; hedge and lower the severity instead, as the rules above say.
+- Keep the list short (a handful of entries at most) and name real paths from the diff's
+  imports or the symbols you need defined. Anything unreadable is silently skipped.
+
+Example: {"findings": [...], "needs": ["app/models.py", "already_applied"]}"""
+
+
+def retrieval_rules(retrieval: bool) -> str:
+    """The deferral ask, or ``""`` when mid-review retrieval is off.
+
+    A single gate shared by every prompt shape (split preamble and all four
+    legacy system prompts), so the ask can never reach one shape and miss
+    another — and so "off" is provably a zero-byte change everywhere.
+    """
+    return _RETRIEVAL_RULES if retrieval else ""
+
+
+@lru_cache(maxsize=16)
+def build_shared_preamble(language: str | None = None, retrieval: bool = False) -> str:
     """The lens-independent system prompt for the split (cache-shaped) layout.
 
     Everything common to every lens — role, severity rubric, output contract,
@@ -903,8 +948,12 @@ def build_shared_preamble(language: str | None = None) -> str:
     *language* (constant within a run) adds the output-language directive to the
     header; keyed on it so the shared prefix stays byte-identical across the
     fan-out, and byte-identical to the pre-language prompt when unset.
+
+    *retrieval* (constant within a run too) adds the one-round deferral ask — see
+    :func:`retrieval_rules`. Off (the default) the result is byte-identical to a
+    build without the feature.
     """
-    return f"{_localised_header(language)}\n{_SHARED_RULES}\n"
+    return f"{_localised_header(language)}\n{_SHARED_RULES}{retrieval_rules(retrieval)}\n"
 
 
 # Lead-in for the lens block: the diff (untrusted data) is above, these
@@ -947,12 +996,13 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     return f"{_LENS_LEAD_IN}\n\n{body}\n\n{example}"
 
 
-@lru_cache(maxsize=len(ReviewCategory) * 8)
+@lru_cache(maxsize=len(ReviewCategory) * 16)
 def build_system_prompt(
     category: ReviewCategory,
     language: str | None = None,
     dependency_health: bool = True,
     secret_scanning: bool = True,
+    retrieval: bool = False,
 ) -> str:
     """Return the system message for the review LLM's *category* lens.
 
@@ -965,10 +1015,13 @@ def build_system_prompt(
     """
     example = _CATEGORY_EXAMPLES[category]
     body = _category_section(category, dependency_health, secret_scanning)
-    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
+    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{rules}\n"
 
 
-def build_lens_prompt(lens: CustomLens, language: str | None = None) -> str:
+def build_lens_prompt(
+    lens: CustomLens, language: str | None = None, retrieval: bool = False
+) -> str:
     """Return the system message for a user-defined ("BYO") lens.
 
     Same scaffold as a built-in category — shared header, one worked example, the
@@ -981,4 +1034,5 @@ def build_lens_prompt(lens: CustomLens, language: str | None = None) -> str:
         example = _GENERIC_EXAMPLE
     heading = lens.title.strip() or lens.id
     body = f"## {heading}\n\n{lens.instructions.strip()}"
-    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{_SHARED_RULES}\n"
+    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
+    return f"{_localised_header(language)}\n{example}\n\n{body}\n\n{rules}\n"

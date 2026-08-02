@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from lgtmaybe.engine.compress import count_tokens
+from lgtmaybe.engine.parse import coerce_needs, parse_needs
 from lgtmaybe.engine.retrieve import (
     MAX_FETCH_FILES,
     MAX_HOPS,
@@ -189,6 +190,44 @@ def test_resolve_needs_symbol_resolution_respects_caps() -> None:
     )
 
     assert len(out) == 2  # symbol-resolved files honour the same file cap
+
+
+class TestParseNeeds:
+    """A review lens defers by putting `needs` on the findings envelope. It shares
+    the auditor's coercion (one lenient normaliser, two callers), so a sloppy
+    value never raises — it just yields the paths worth fetching."""
+
+    def test_parses_needs_from_a_findings_envelope(self) -> None:
+        raw = '{"findings": [], "needs": ["pkg/ledger.py", "already_applied"]}'
+
+        assert parse_needs(raw) == ["pkg/ledger.py", "already_applied"]
+
+    def test_tolerates_a_bare_string(self) -> None:
+        assert parse_needs('{"findings": [], "needs": "pkg/ledger.py"}') == ["pkg/ledger.py"]
+
+    def test_absent_or_empty_needs_is_no_deferral(self) -> None:
+        assert parse_needs('{"findings": []}') == []
+        assert parse_needs('{"findings": [], "needs": []}') == []
+        assert parse_needs("[]") == []
+        assert parse_needs("not json at all") == []
+
+    def test_survives_fences_and_prose(self) -> None:
+        """Same lenient extraction the findings parser uses, so a gateway without
+        JSON mode (fenced output, chatty prose) still defers correctly."""
+        raw = 'Sure!\n```json\n{"findings": [], "needs": ["a.py"]}\n```\nHope that helps.'
+
+        assert parse_needs(raw) == ["a.py"]
+
+    def test_drops_blank_and_non_string_entries(self) -> None:
+        raw = '{"findings": [], "needs": ["  a.py  ", "", 7, null]}'
+
+        assert parse_needs(raw) == ["a.py"]
+
+    def test_coercion_is_shared_with_the_reflection_auditor(self) -> None:
+        assert coerce_needs(None) == []
+        assert coerce_needs("x.py") == ["x.py"]
+        assert coerce_needs(["  x.py  ", 3, ""]) == ["x.py"]
+        assert coerce_needs({"x.py": 1}) == []
 
 
 def test_module_bounds_are_small() -> None:

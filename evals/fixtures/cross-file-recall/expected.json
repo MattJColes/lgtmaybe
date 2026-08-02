@@ -1,0 +1,19 @@
+{
+  "name": "cross-file-recall",
+  "changed_file": "payments/refund.py",
+  "expected": [
+    {
+      "label": "unit mismatch: elapsed.days compared against refund_window(), which returns HOURS (window 24x too long)",
+      "line": 14,
+      "keywords": ["hour", "unit", "24", "days"],
+      "severity_at_least": "medium"
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: refund is not idempotent / could refund twice (mark_refunded and the gateway both de-duplicate, in unshown files)",
+      "line": 17,
+      "keywords": ["idempoten", "twice", "duplicate", "re-run", "rerun"]
+    }
+  ]
+}

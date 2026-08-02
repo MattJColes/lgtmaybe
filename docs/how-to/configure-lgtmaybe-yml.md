@@ -27,6 +27,7 @@ provides defaults for all runs.
   - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
   - [min_confidence](#min_confidence)
+  - [mid_review_retrieval](#mid_review_retrieval)
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
   - [triage_model](#triage_model)
@@ -349,6 +350,35 @@ min_confidence: 5   # drop findings the auditor scores 0-4
 
 Default: `0` (no numeric filtering — reflection prunes only via its keep/drop
 verdicts, as before the score existed).
+
+### mid_review_retrieval
+
+Let a **review lens defer once** for bounded, read-only codebase context.
+
+By default every lens is told the diff is only a slice of the codebase: if a
+finding depends on code it cannot see — a guard, a base class, the helper it
+calls — it must hedge the wording, lower the severity, or say nothing. That
+protects you from confident cross-file nonsense, and it also means a real bug
+whose evidence lives one file away is never reported.
+
+With this on, the lens gets a third option: alongside its findings it names the
+files (or symbols) it must read. lgtmaybe fetches them **read-only** — the same
+API/worktree read the reflection auditor's deferral uses, never a checkout of PR
+code — redacts them, and re-runs that one lens with them in front of it. Both
+calls' findings are kept and deduped, so a deferral can only add findings.
+
+```yaml
+mid_review_retrieval: true   # trade tokens for cross-file recall
+```
+
+Default: `false`. It is opt-in because of the price: **up to one extra model
+call per (batch, lens)**, carrying the fetched text as well. Every other bound is
+fixed — one hop (the re-run cannot defer again), at most five files inside a
+quarter of `max_input_tokens`, and a deferral arriving past `max_review_seconds`
+or `max_review_tokens` is skipped and reported in the summary. Read
+[Reduce Review Cost](reduce-review-cost.md#what-costs-more-on-purpose) before
+turning it on, and pair it with `max_review_tokens` if the worst case matters.
+CLI: `--mid-review-retrieval`; Action input: `mid_review_retrieval`.
 
 ### incremental
 

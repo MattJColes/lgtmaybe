@@ -637,6 +637,11 @@
       "default": null,
       "title": "Max Tokens"
     },
+    "mid_review_retrieval": {
+      "default": false,
+      "title": "Mid Review Retrieval",
+      "type": "boolean"
+    },
     "min_confidence": {
       "default": 0,
       "maximum": 10,
