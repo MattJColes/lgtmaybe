@@ -1293,7 +1293,7 @@ wheels = [
 
 [[package]]
 name = "lgtmaybe"
-version = "1.11.0"
+version = "1.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "ast-grep-cli" },
@@ -1311,11 +1311,6 @@ azure = [
 ]
 bedrock = [
     { name = "boto3" },
-]
-identity-broker = [
-    { name = "aws-lambda-powertools" },
-    { name = "httpx" },
-    { name = "pyjwt", extra = ["crypto"] },
 ]
 static-analysis = [
     { name = "bandit" },
@@ -1353,26 +1348,23 @@ packaging = [
 [package.metadata]
 requires-dist = [
     { name = "ast-grep-cli", specifier = ">=0.44.0" },
-    { name = "aws-lambda-powertools", marker = "extra == 'identity-broker'", specifier = ">=3.23" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.19" },
     { name = "bandit", marker = "extra == 'static-analysis'", specifier = ">=1.7" },
     { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34" },
     { name = "click", specifier = ">=8.4.1" },
     { name = "google-auth", marker = "extra == 'vertex'", specifier = ">=2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "httpx", marker = "extra == 'identity-broker'", specifier = ">=0.28.1" },
     { name = "litellm", marker = "python_full_version < '3.14'", specifier = ">=1.87.1" },
     { name = "litellm", marker = "python_full_version >= '3.14'", specifier = ">=1.87.1,<1.94" },
     { name = "mypy", marker = "extra == 'static-analysis'", specifier = ">=1.11" },
     { name = "pydantic", specifier = ">=2.7" },
-    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'identity-broker'", specifier = ">=2.10" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", marker = "extra == 'static-analysis'", specifier = ">=0.5" },
     { name = "semgrep", marker = "extra == 'static-analysis'", specifier = ">=1.60" },
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "zizmor", marker = "extra == 'static-analysis'", specifier = ">=1.5" },
 ]
-provides-extras = ["azure", "bedrock", "vertex", "static-analysis", "identity-broker"]
+provides-extras = ["azure", "bedrock", "vertex", "static-analysis"]
 
 [package.metadata.requires-dev]
 dev = [

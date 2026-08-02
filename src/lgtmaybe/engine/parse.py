@@ -70,10 +70,6 @@ def _strip_think_blocks(text: str) -> str:
     return _THINK_RE.sub("", text)
 
 
-def _repair_trailing_commas(text: str) -> str:
-    return _TRAILING_COMMA_RE.sub(r"\1", text)
-
-
 def _balanced_span(text: str, start: int) -> str | None:
     """Return the balanced ``{...}`` / ``[...]`` span beginning at *start*.
 
@@ -123,7 +119,7 @@ def iter_json_values(raw: str) -> Iterator[Any]:
     seen: set[str] = set()
 
     def _try(candidate: str) -> Iterator[Any]:
-        repaired = _repair_trailing_commas(candidate)
+        repaired = _TRAILING_COMMA_RE.sub(r"\1", candidate)
         if repaired in seen:
             return
         seen.add(repaired)
