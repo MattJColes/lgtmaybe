@@ -1,4 +1,4 @@
-# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (deepseek/deepseek-v4-pro).
+# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (deepseek-v4-flash).
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
 # Add an OPENROUTER_API_KEY repo secret.
 #
@@ -9,7 +9,7 @@
 # Reviews run automatically on PRs from trusted authors (owner / member /
 # collaborator), and on demand via slash commands (/review, /improve, /ask,
 # /describe, /diagram) — a maintainer can opt an external PR in by commenting
-# /review on it. deepseek-v4-pro is cheap enough to run per-PR; on a
+# /review on it. deepseek-v4-flash is cheap enough to run per-PR; on a
 # `synchronize` push the review is incremental (only the new commits).
 name: lgtmaybe
 
