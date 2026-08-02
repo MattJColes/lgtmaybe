@@ -22,6 +22,7 @@ giving up the findings you actually want.
 - [Where the tokens go](#where-the-tokens-go)
 - [The levers, in order of payoff](#the-levers-in-order-of-payoff)
 - [Put a hard ceiling on it](#put-a-hard-ceiling-on-it)
+- [If a call runs past `max_tokens`](#if-a-call-runs-past-max_tokens)
 - [What isn't worth changing](#what-isnt-worth-changing)
 
 ## First, measure
@@ -186,6 +187,36 @@ It is **off by default on purpose**: spend scales with diff size, lens count and
 batch count, so any figure that protects a small repo would silently truncate a
 large one's review. Read a real run's total with `--profile` first, then set the
 ceiling comfortably above it — it is a runaway guard, not a tuning knob.
+
+## If a call runs past `max_tokens`
+
+`max_tokens` caps what one call may *write*. A lens that hits it comes back cut
+off mid-JSON, and lowering it to save money is the usual way to arrive here.
+
+You do not have to do anything. lgtmaybe treats an over-ceiling call the same
+way it treats one that outruns its wall clock: the batch was more than one call
+could cover, so it is **halved and the pieces reviewed separately**, each with a
+fresh ceiling. Whatever the model finished writing before the cut is kept as
+well, so nothing already paid for is thrown away. The summary says a batch was
+shrunk, and — because part of a lens is not a whole lens — the run still reports
+that results may be incomplete.
+
+The cost of that recovery is up to twice the calls for the affected batch. It is
+bounded to one split level: if a piece still runs past the ceiling, it is
+reported rather than split again.
+
+When you see it happening often, the fix is usually **`max_tokens`, not the
+diff**:
+
+```yaml
+max_tokens: 32768
+```
+
+A reasoning model spends the same budget on thinking before it writes a single
+finding, which is how a fifteen-line diff can truncate. The failure names the
+reasoning tokens where the provider reports them — if most of the ceiling went
+on thought, no amount of shrinking the input will help, and the cap is what
+needs raising.
 
 ## What isn't worth changing
 

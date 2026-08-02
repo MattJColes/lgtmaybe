@@ -36,7 +36,22 @@ class ProviderTruncated(Exception):
     and the two send a maintainer to different fixes. Reported as its own
     failure so the notice on the PR names the ceiling and the knob that moves
     it, rather than "unparseable model output".
+
+    Like a wall timeout, this says something about the *payload*: one call was
+    asked to cover more than it could finish saying. The engine therefore reacts
+    the same way — split the batch and review the pieces — rather than failing
+    the whole lens.
+
+    ``text`` carries the cut-off body. It is not usable as an answer, but the
+    findings the model completed before the cut are real work, and the engine
+    salvages them from it exactly as the parser does for a truncation it detects
+    itself. It rides on the error rather than being returned, so a caller cannot
+    take the salvage without also seeing that the lens was cut short.
     """
+
+    def __init__(self, message: str, *, text: str = "") -> None:
+        super().__init__(message)
+        self.text = text
 
 
 class ProviderClient(ABC):

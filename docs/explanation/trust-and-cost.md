@@ -43,6 +43,17 @@ Two built-in caps also keep any single run modest regardless of who starts it:
 `max_files` (default 50) and `max_input_tokens` (default 100k). See
 [What gets reviewed](what-gets-reviewed.md) for how the diff is bounded.
 
+When a run does bump into a cap, it **degrades rather than fails**. A review call
+that outruns its wall clock, or writes until it hits the `max_tokens` ceiling, is
+not simply lost: the batch was more than one call could cover, so lgtmaybe halves
+it and reviews the pieces, keeping anything the model had already written. That
+costs up to twice the calls for the affected batch, and it is bounded to one
+split — a piece that still runs past the ceiling is reported rather than split
+again. Whatever the outcome, a partial review says so: the summary carries a
+"results may be incomplete" notice, and a lens that was cut short is never
+presented as a clean bill of health. The one thing lgtmaybe will not do is answer
+👍 LGTM for code no model finished reading.
+
 To measure what a run actually spends and bring it down — triage, static
 analysis, prompt caching, and a hard `max_review_tokens` ceiling — see
 [Reduce review cost](../how-to/reduce-review-cost.md).

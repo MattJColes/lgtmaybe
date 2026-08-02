@@ -190,6 +190,11 @@ def _is_permanent(exc: BaseException) -> bool:
     # to the identical ceiling, and each attempt costs a full ceiling-length
     # generation — 65,536 output tokens and 21 minutes, in the run that prompted
     # this. Same bargain as above: one attempt, then say so, fallback still tried.
+    # This stays permanent even though the ENGINE now retries a truncated call by
+    # splitting the batch: the two are not in tension, they are the division of
+    # labour. Only the engine holds the batch, so only the engine can change the
+    # payload; the adapter can only re-send the same oversized one, which is the
+    # attempt worth refusing.
     if isinstance(exc, ProviderTruncated):
         return True
     if isinstance(exc, RateLimitError):
@@ -495,12 +500,25 @@ class LiteLLMProvider(ProviderClient):
         # A generation that stopped because it ran out of output tokens is cut off
         # mid-token: it can never parse, and passing it on gets it reported as
         # "unparseable model output", which points at the prompt rather than at
-        # the ceiling actually hit. Raised here so the failure names itself.
+        # the ceiling actually hit. Raised here so the failure names itself. The
+        # body travels with it: unusable as an answer, but the findings finished
+        # before the cut are real, and the engine salvages them from it.
+        #
+        # The ceiling is named as `max_tokens`, NOT as "the model's limit": in the
+        # run that prompted this it was lgtmaybe's own configured 16,384 against a
+        # model good for 65,536, so blaming the model sends the reader to a knob
+        # they cannot move. The reasoning count is named when the route reports it,
+        # because it is the whole explanation for a fifteen-line diff truncating —
+        # a reasoning model spends this same budget on thought before it writes a
+        # single finding, so the cap, not the diff, is what needs raising.
         if _finish_reason(response) == "length":
+            reasoning = _reasoning_tokens(usage)
+            detail = f" ({reasoning} reasoning)" if reasoning else ""
             raise ProviderTruncated(
-                f"response truncated at the model's output limit after {output_tokens} tokens — "
-                "lower `max_input_tokens` so each call has less to say about, or raise "
-                "`max_tokens` if the model supports a higher ceiling"
+                f"response hit the {output_tokens}-token `max_tokens` ceiling{detail} before "
+                "finishing — raise `max_tokens`, or lower `max_input_tokens` so each call "
+                "covers less",
+                text=text,
             )
         cache_read, cache_creation = _cache_usage(usage)
         if cache_read or cache_creation:
@@ -649,6 +667,19 @@ def _supports_cache_control(model: str) -> bool:
         return bool(supports_prompt_caching(model=model))
     except Exception:
         return False
+
+
+def _reasoning_tokens(usage: Any) -> int:
+    """Output tokens the model spent thinking, or 0 when the route doesn't say.
+
+    litellm normalises this onto ``completion_tokens_details.reasoning_tokens``
+    for the routes that report it. Read defensively — a route that omits the
+    wrapper, or fills it with a non-number, must not turn a truncation report
+    into a crash — and 0 simply means "no breakdown to show".
+    """
+    details = getattr(usage, "completion_tokens_details", None)
+    value = getattr(details, "reasoning_tokens", None)
+    return value if isinstance(value, int) and value > 0 else 0
 
 
 def _cache_usage(usage: Any) -> tuple[int, int]:
