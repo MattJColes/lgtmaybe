@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.10.0...lgtmaybe-v1.11.0) (2026-08-02)
+
+
+### Features
+
+* **engine:** report reasoning tokens on every provider call ([#319](https://github.com/MattJColes/lgtmaybe/issues/319)) ([24c4645](https://github.com/MattJColes/lgtmaybe/commit/24c4645d8c2a288d5b2c7cc2964327b7d97a93ab))
+
 ## [1.10.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.9.1...lgtmaybe-v1.10.0) (2026-08-02)
 
 
