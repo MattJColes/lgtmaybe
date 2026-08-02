@@ -347,6 +347,33 @@ can commit straight from the PR:
 The summary carries a hidden marker (`<!-- lgtmaybe -->`), so re-running on the
 same PR **updates** the existing review instead of creating duplicates.
 
+#### Reading the title line
+
+A comment's title line carries the finding's provenance in its brackets:
+
+```
+**[HIGH · security · 8/10] User input is concatenated into the SQL string**
+```
+
+- **`HIGH`** — the severity.
+- **`security`** — the lens that raised it. One of the nine review categories
+  (or your own id if you added a [custom lens](../how-to/add-a-custom-lens.md)),
+  and the same value you match on in `finding_rules` — so a badge you keep seeing
+  and don't want tells you exactly what rule to write.
+- **`8/10`** — the self-reflection auditor's confidence that the finding is real,
+  reached by actively trying to disprove it. Set the `min_confidence` floor to
+  drop everything below a score you choose.
+
+Each half drops away when it isn't there: with `reflect: false` there is no score
+and the badge is just the lens.
+
+One asymmetry worth knowing: GitHub's review API can't edit an inline comment
+once it's posted, so an inline comment's score is **frozen at first post** — a
+later run that judges the same finding differently won't change it. Findings in
+the summary body (the "Additional findings" and "Broader observations" sections)
+are rewritten on every run, so those badges do track. That's how severity and
+title have always behaved too; the badge just makes it visible.
+
 ### Resolving conversations once they're fixed
 
 Each inline comment also carries a hidden per-finding fingerprint. When you push

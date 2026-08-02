@@ -169,12 +169,15 @@ def test_dogfood_workflow_uses_the_public_app_identity() -> None:
     assert "app_private_key" not in inputs
 
 
+# The cap that was observed to STARVE the reviewer rather than bound it: at
+# 16,384 a reasoning model spent the budget on thinking and truncated 3 of 4
+# lenses on one PR, and 1 of 4 on a fifteen-line diff — where input size cannot
+# be the cause. The floor is set from that failure, not from the findings
+# payload of a plain model, because `max_tokens` pays for thinking too.
+_STARVED_CAP = 16_384
 # The largest output any healthy lens has been observed to generate on the
 # dogfood review (artefacts, 2,261 tokens; security and code-health were under
-# 1,800). The floor below is several times this, because `max_tokens` also pays
-# for a reasoning model's thinking tokens — a cap sized to a plain model's
-# findings payload would starve one that thinks first, and every lens would
-# truncate instead of the runaway this guards against.
+# 1,800) — kept as the reason the floor is a multiple of it, not a sibling of it.
 _OBSERVED_HEALTHY_OUTPUT = 2_261
 # The ceiling deepseek-v4-pro ran to when a lens went away: 65,536 tokens and
 # 21 minutes for a single call, against ~5.5k for the other three combined.
@@ -182,22 +185,28 @@ _RUNAWAY_OUTPUT = 65_536
 
 
 def test_dogfood_config_caps_what_one_call_may_generate() -> None:
-    """A runaway generation is bounded, not just reported.
+    """A runaway generation is bounded, without starving an ordinary one.
 
-    Truncation is now legible (it names itself and its salvaged findings survive),
+    Truncation is legible (it names itself and its salvaged findings survive),
     but nothing stopped a lens burning a full output ceiling to get there. The cap
     is what makes that cost seconds instead of minutes — and on a prepaid route
     like OpenRouter it also shrinks the pre-flight reservation, which is charged
     against `max_tokens` before a single token is generated.
+
+    The floor is the other half of the bargain, and it is set from an observed
+    failure: at 16,384 this reasoning model truncated lenses on a fifteen-line
+    diff, spending the budget on thinking before it wrote findings. A cap that
+    low reports a problem it created.
     """
     config = yaml.safe_load((_REPO_ROOT / ".lgtmaybe.yml").read_text(encoding="utf-8"))
     cap = config.get("max_tokens")
 
     assert cap is not None, ".lgtmaybe.yml must cap max_tokens — see the reasoning above"
-    assert cap >= _OBSERVED_HEALTHY_OUTPUT * 3, (
-        f"max_tokens={cap} leaves too little headroom over the largest healthy lens "
-        f"({_OBSERVED_HEALTHY_OUTPUT} tokens) — a reasoning model spends this budget on "
-        "thinking too, and a starved cap truncates every lens rather than only a runaway"
+    assert cap > _STARVED_CAP, (
+        f"max_tokens={cap} is at or below the cap observed to starve a reasoning model "
+        f"({_STARVED_CAP} tokens truncated lenses on a fifteen-line diff) — this budget "
+        f"pays for thinking as well as the ~{_OBSERVED_HEALTHY_OUTPUT}-token findings "
+        "payload, so a starved cap truncates every lens rather than only a runaway"
     )
     assert cap < _RUNAWAY_OUTPUT, (
         f"max_tokens={cap} does not bound the runaway it exists to bound "
