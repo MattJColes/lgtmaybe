@@ -326,6 +326,42 @@ def test_a_truncation_that_spent_its_ceiling_on_findings_is_still_split() -> Non
     assert len(provider.diffs) == 3  # the batch, then one call per half
 
 
+def test_a_piece_that_truncates_on_reasoning_names_the_lever_too() -> None:
+    """The diagnosis has to reach the piece, not only the whole batch.
+
+    A piece has nothing smaller to try, so it reports and stops either way — but
+    *what* it reports is the only thing the reader gets. Falling through to the
+    generic "raise `max_tokens`" there would send them to the one knob that
+    provably does not move this, after the split has already been paid for.
+
+    The batch's own truncation is answer-shaped (little thinking), so the split
+    is right to happen; the pieces are where the thinking wall shows up.
+    """
+
+    class _BatchRunsLongThenPiecesRunDeep(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.diffs: list[str] = []
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            diff = "\n".join(str(m.get("content", "")) for m in messages)
+            self.diffs.append(diff)
+            whole_batch = "one.py" in diff and "two.py" in diff
+            raise ProviderTruncated(
+                _CEILING,
+                text="",
+                reasoning_tokens=2048 if whole_batch else _REASONING_SPENT,
+                output_tokens=_REASONING_CEILING,
+            )
+
+    provider = _BatchRunsLongThenPiecesRunDeep()
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(provider).review(_ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg())
+
+    assert len(provider.diffs) == 3  # the batch, then its two halves — and stop
+    assert "reasoning_effort" in str(exc_info.value)
+
+
 def test_a_truncation_with_no_reasoning_breakdown_is_still_split() -> None:
     """Silence from the route is not evidence of thinking.
 

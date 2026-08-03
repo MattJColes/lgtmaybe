@@ -98,6 +98,13 @@ def _finding_json(path: str, anchor: str) -> str:
     )
 
 
+def _piece_json(diff: str) -> str:
+    """The answer a split piece gives, anchored in whichever file it carries."""
+    path = "one.py" if "one.py" in diff else "two.py"
+    anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
+    return _finding_json(path, anchor)
+
+
 class _TimeoutUntilSmaller(FakeProvider):
     """Times out while both files are in one call; answers a single-file call.
 
@@ -227,8 +234,11 @@ def test_a_piece_that_times_out_again_is_not_split_further() -> None:
 class _TimeoutThenSlowPieces(FakeProvider):
     """Times out on the whole batch; each piece then takes real wall time.
 
-    The delay is the measurement: it holds a piece in flight long enough for a
-    sibling to be observed running beside it (or queued behind it).
+    For asserting pieces do NOT overlap. The delay only has to be long enough
+    that a concurrent pair would be caught in the act — and getting that wrong
+    can only cost a missed detection, never a spurious failure, which is the
+    safe direction for a clock in a test. Proving overlap is the direction that
+    would flake, so it uses a rendezvous instead (see below).
     """
 
     def __init__(self, delay: float = 0.05) -> None:
@@ -247,27 +257,65 @@ class _TimeoutThenSlowPieces(FakeProvider):
             self.max_in_flight = max(self.max_in_flight, self._in_flight)
         try:
             time.sleep(self._delay)
-            path = "one.py" if "one.py" in diff else "two.py"
-            anchor = (
-                "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
-            )
-            return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
+            return ProviderResult(text=_piece_json(diff), input_tokens=5, output_tokens=5)
         finally:
             with self._lock:
                 self._in_flight -= 1
+
+
+# How long a piece waits at the rendezvous for its sibling to arrive. Generous
+# enough that a loaded runner scheduling the second thread late cannot fail the
+# test, and bounded so a REGRESSION to serial pieces fails in seconds with a
+# real message instead of hanging the job until CI kills it.
+_RENDEZVOUS_TIMEOUT = 5.0
+
+
+class _TimeoutThenPairedPieces(FakeProvider):
+    """Times out on the whole batch; its pieces then have to meet each other.
+
+    The rendezvous *is* the assertion: each piece blocks at the barrier until
+    the other arrives, so overlap is proven by both getting through rather than
+    inferred from a stopwatch — no sleep long enough to be safe on a loaded
+    runner, and no sleep short enough to flake.
+
+    A serial split can never get both pieces there. The barrier's own timeout
+    turns that into a recorded failure the test can name, rather than the
+    deadlock an unbounded ``wait()`` would leave for the CI job to time out on.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._barrier = threading.Barrier(2, timeout=_RENDEZVOUS_TIMEOUT)
+        self.serialised = False
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        diff = "\n".join(str(m.get("content", "")) for m in messages)
+        if "one.py" in diff and "two.py" in diff:
+            raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
+        try:
+            self._barrier.wait()
+        except threading.BrokenBarrierError:
+            # Recorded, not raised: the review runs to completion either way, so
+            # the test reports "the pieces ran serially" instead of a piece
+            # failing for a reason that reads like a provider error.
+            self.serialised = True
+        return ProviderResult(text=_piece_json(diff), input_tokens=5, output_tokens=5)
 
 
 def test_the_pieces_of_a_split_batch_are_reviewed_concurrently() -> None:
     """A split cost N sequential model calls, inside a worker already holding a
     pool slot — on a run where most lenses split, the biggest wall-clock
     multiplier in the system. The pieces are independent, so they overlap."""
-    provider = _TimeoutThenSlowPieces()
+    provider = _TimeoutThenPairedPieces()
     findings, _summary = LLMReviewEngine(provider).review(
         _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
     )
 
+    assert not provider.serialised, (
+        "the split's pieces ran serially: neither piece was inside the provider "
+        f"while the other was, within {_RENDEZVOUS_TIMEOUT}s"
+    )
     assert sorted(f.path for f in findings) == ["one.py", "two.py"]
-    assert provider.max_in_flight == 2
 
 
 def test_a_single_stream_provider_still_reviews_its_pieces_one_at_a_time() -> None:
@@ -290,6 +338,35 @@ def test_a_single_stream_provider_still_reviews_its_pieces_one_at_a_time() -> No
     )
 
     assert provider.max_in_flight == 1
+
+
+def test_an_explicit_concurrency_lifts_the_split_off_the_single_stream_default() -> None:
+    """The user's number wins over the provider default, in the split as in the
+    fan-out.
+
+    ollama's 1 is a default for the usual deployment — one instance, one slot —
+    not a property of the backend: an ollama started with several parallel slots
+    (and a batching vLLM behind `openai-compatible`) serves concurrent calls
+    happily, which is exactly why `max_concurrency` is exposed. Honouring it in
+    only one of the two pools would make one setting mean two different things.
+    """
+    provider = _TimeoutThenPairedPieces()
+    LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]),
+        ReviewConfig(
+            provider=Provider.ollama,
+            model="qwen3-coder",
+            categories=[ReviewCategory.security],
+            reflect=False,
+            prompt_cache=False,
+            max_concurrency=2,
+        ),
+    )
+
+    assert not provider.serialised, (
+        "an explicit max_concurrency=2 did not reach the split: its pieces still "
+        f"ran one at a time (rendezvous timed out after {_RENDEZVOUS_TIMEOUT}s)"
+    )
 
 
 def test_a_split_starting_past_the_deadline_costs_nothing() -> None:
