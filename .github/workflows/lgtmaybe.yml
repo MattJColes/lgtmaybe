@@ -78,8 +78,9 @@ jobs:
     # model call can't sit on the runner for GitHub's 6-hour default. Fail-fast on
     # permanent provider errors (quota/auth) means this only ever trips on a real
     # hang, not on an out-of-credit key. Kept above the review's own
-    # `max_review_seconds` ceiling (60 min) so the soft deadline — which posts
-    # partial findings — always fires first; a killed job posts nothing at all.
+    # `max_review_seconds` ceiling (60 min) so the soft deadline fires first and
+    # posts partial findings calmly; if the runner does cut the job short, the
+    # CLI's SIGINT/SIGTERM wind-down posts what it has as the backstop.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7 # base repo only — for action.yml + .lgtmaybe.yml config
