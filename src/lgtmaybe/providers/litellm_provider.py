@@ -505,6 +505,13 @@ class LiteLLMProvider(ProviderClient):
                 "finishing — raise `max_tokens`, or lower `max_input_tokens` so each call "
                 "covers less",
                 text=text,
+                # The same two numbers as the message, carried as data: the engine
+                # decides whether shrinking the payload can help from the ratio
+                # between them, and re-reading them out of the prose above would be
+                # parsing our own sentence. None, not 0, when the route reported no
+                # breakdown — "it never said" must not read as "it thought nothing".
+                reasoning_tokens=reasoning or None,
+                output_tokens=output_tokens,
             )
         cache_read, cache_creation = _cache_usage(usage)
         if cache_read or cache_creation:

@@ -8,6 +8,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -139,19 +140,81 @@ INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 # apart from the provider failures the generic incomplete notice covers.
 _BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
 
+# When reasoning accounts for at least this share of the `max_tokens` ceiling a
+# truncation hit, the ceiling was spent on THINKING, not on findings — and the
+# split (see _review_split) cannot help, because a smaller payload does not
+# shrink a thinking budget.
+#
+# 0.9 because the two populations are nowhere near it from either side. Measured
+# on one self-review of this repo: five calls truncated at a 32,768 ceiling
+# having spent 25,963–35,463 tokens reasoning — 0.79 to over 1.0 of the cap,
+# clustering at 0.98+ — while the calls that answered normally wrote thousands of
+# tokens of findings after their thinking. The failure mode the split exists for
+# is the opposite shape: little thought, then an answer that runs long, where the
+# ratio is near zero. At 0.9 at most a tenth of the ceiling was left for the
+# answer, so halving the diff cannot buy a complete one — the only lever left is
+# `reasoning_effort`, which bounds the thinking directly.
+#
+# Deliberately not configurable: it is a diagnosis, not a preference, and a knob
+# here would be one more thing to tune in the failure it exists to explain.
+_REASONING_DOMINANT_SHARE = 0.9
+
+# The reason string a call skipped by an interruption reports. Worded to name
+# the cause, because the remedy differs from the deadline's: nobody should go
+# hunting for a `max_review_seconds` they never hit.
+_INTERRUPT_SKIP_REASON = "review interrupted (termination signal) — call skipped"
+
+# A wind-down asked for from OUTSIDE the pipeline — in practice the CLI's
+# SIGTERM/SIGINT handler, when the CI job blows its `timeout-minutes` or a push
+# cancels the run. Deliberately the same state the elapsed deadline sets: queued
+# model calls are skipped, in-flight ones finish, and the review posts partial
+# results with a notice instead of dying with nothing on the PR. Process-global
+# and never cleared by `review()` — a signal means stop, not stop-for-one-review
+# — so the CLI's other steps wind down too. `Event` because the fan-out reads it
+# from every worker thread.
+_interrupted = threading.Event()
+
+
+def request_interrupt() -> None:
+    """Stop starting new model calls; post what the review already has."""
+    _interrupted.set()
+
+
+def interrupt_requested() -> bool:
+    """Whether a wind-down has been asked for."""
+    return _interrupted.is_set()
+
+
+def clear_interrupt() -> None:
+    """Forget a requested wind-down (tests, and a long-lived host process)."""
+    _interrupted.clear()
+
 
 def _plural(n: int, one: str = "", many: str = "s") -> str:
     """The word (or suffix) for a count of *n*: *one* when it is exactly 1, else *many*."""
     return one if n == 1 else many
 
 
-def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
-    """The fan-out pool size: the explicit cap, else the provider-aware default."""
+def _concurrency_cap(cfg: ReviewConfig) -> int:
+    """How many model calls this run may have in flight: the explicit cap, else
+    the provider-aware default.
+
+    A property of the *backend*, independent of how much work there is — which
+    is why it is separate from the pool size below. The oversized-batch split
+    runs its pieces in a pool of its own, and needs this figure rather than the
+    fan-out's: a one-lens review sizes its pool to one task, but that says
+    nothing about what the provider will serve at once.
+    """
     if cfg.max_concurrency is not None:
-        return max(1, min(cfg.max_concurrency, task_count))
+        return max(1, cfg.max_concurrency)
     if cfg.provider in _SINGLE_STREAM_PROVIDERS:
         return 1
-    return min(_CLOUD_MAX_WORKERS, task_count) or 1
+    return _CLOUD_MAX_WORKERS
+
+
+def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
+    """The fan-out pool size: the cap above, narrowed to the work there is."""
+    return max(1, min(_concurrency_cap(cfg), task_count))
 
 
 @dataclass(frozen=True)
@@ -303,6 +366,10 @@ class _Run:
     budget_at: int | None
     # Mid-review retrieval budget in tokens, or None when a lens may not defer.
     retrieval_budget: int | None
+    # How many calls this backend will serve at once (_concurrency_cap). Carried
+    # for the oversized-batch split, which runs its pieces in a pool of its own
+    # and must not out-run what the fan-out itself is allowed.
+    concurrency: int
 
 
 def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
@@ -333,11 +400,14 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
 def _skip_reason(deadline_at: float | None, budget_at: int | None, lens: _Lens) -> str | None:
     """Why this model call must not be made, or None to go ahead.
 
-    Both ceilings are checked at EXECUTION time (tasks queue in the pool long
+    Every ceiling is checked at EXECUTION time (tasks queue in the pool long
     before a worker picks them up, and a deferral is decided later still), so the
     figures include everything that landed in the meantime. One function, so the
     first call and a deferral's re-run can never drift apart on when to stop.
     """
+    if interrupt_requested():
+        _log.warning("review interrupted — skipping call", extra={"lens": lens.id})
+        return _INTERRUPT_SKIP_REASON
     if deadline_at is not None and time.perf_counter() >= deadline_at:
         _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
         return "review deadline (max_review_seconds) reached — call skipped"
@@ -497,6 +567,21 @@ class LLMReviewEngine(ReviewEngine):
                 and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
             ]
 
+            # 2b. Per-file size cap: a patch longer than max_file_diff_lines is a
+            #     data blob or a generated file the name-based filter could not
+            #     recognise. Drop it here — before batching, so the recursive walk
+            #     never decomposes it into hundreds of per-hunk calls — and record
+            #     the names, because a silent drop reads as "everything was
+            #     covered". Like a lockfile skip, it never counts against max_files.
+            oversized: list[str] = []
+            kept: list[tuple[str, str]] = []
+            for path, patch in file_patches:
+                if passes_size_cap(patch, cfg.max_file_diff_lines):
+                    kept.append((path, patch))
+                else:
+                    oversized.append(path)
+            file_patches = kept
+
             # 3. File cap: review only the first N reviewable files, note the rest.
             total_files = len(file_patches)
             capped_files = total_files > cfg.max_files
@@ -623,6 +708,7 @@ class LLMReviewEngine(ReviewEngine):
             deadline_at=deadline_at,
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
+            concurrency=_concurrency_cap(cfg),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_ReviewTask]]] = []
@@ -775,17 +861,27 @@ class LLMReviewEngine(ReviewEngine):
         scanned = [f for f in all_findings if _is_scan_finding(f)]
         all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
-            if deadline_at is not None and time.perf_counter() >= deadline_at:
+            if interrupt_requested():
+                # The process is being torn down: audit nothing, post what we
+                # have. Same trade as the deadline below, on someone else's clock.
+                reflection_skipped = "Review interrupted (termination signal)"
+                _log.warning(
+                    "review interrupted — skipping reflection",
+                    extra={"findings": len(all_findings)},
+                )
+            elif deadline_at is not None and time.perf_counter() >= deadline_at:
                 # Better unaudited findings with an honest notice than more
                 # minutes past the ceiling — and never a silent quality drop.
-                reflection_skipped = f"Review deadline ({cfg.max_review_seconds}s)"
+                reflection_skipped = f"Review deadline ({cfg.max_review_seconds}s) reached"
                 _log.warning(
                     "review deadline reached — skipping reflection",
                     extra={"findings": len(all_findings)},
                 )
             elif budget_at is not None and profiler.total_tokens() >= budget_at:
                 # Same trade, spend instead of time.
-                reflection_skipped = f"Token budget (max_review_tokens = {cfg.max_review_tokens})"
+                reflection_skipped = (
+                    f"Token budget (max_review_tokens = {cfg.max_review_tokens}) reached"
+                )
                 _log.warning(
                     "review token budget reached — skipping reflection",
                     extra={"findings": len(all_findings)},
@@ -831,6 +927,16 @@ class LLMReviewEngine(ReviewEngine):
             notices.append(
                 f"⚠️ Reviewed the top {cfg.max_files} of {total_files} changed files "
                 f"(file cap {cfg.max_files}). Raise max_files to review them all."
+            )
+        if oversized:
+            # Transparency, same rule as the file cap: a skip must be visible.
+            plural_big = _plural(len(oversized))
+            listed_big = ", ".join(f"`{p}`" for p in oversized[:10])
+            more_big = ", …" if len(oversized) > 10 else ""
+            notices.append(
+                f"📄 Skipped {len(oversized)} oversized file{plural_big} "
+                f"(over {cfg.max_file_diff_lines} diff lines): {listed_big}{more_big}. "
+                "Raise `max_file_diff_lines` (0 disables) to review them."
             )
         if skipped_by_triage:
             # Transparency: a triage skip must be visible, never silent.
@@ -880,7 +986,7 @@ class LLMReviewEngine(ReviewEngine):
             )
         if reflection_skipped:
             notices.append(
-                f"⚠️ {reflection_skipped} reached — the self-reflection audit was "
+                f"⚠️ {reflection_skipped} — the self-reflection audit was "
                 "skipped, so findings may include false positives."
             )
         # Findings the model DID raise and the run then hid: an ignore
@@ -1153,6 +1259,15 @@ class LLMReviewEngine(ReviewEngine):
         unredacted or unwrapped reaches the model. Returns the original *reason*
         unchanged when the batch cannot be split — a single-hunk file has no
         smaller unit to fall back to.
+
+        The pieces run concurrently (see below) and each still goes through
+        ``_review_lens``, so each re-checks the whole-review deadline and token
+        budget at execution: a split that begins past a ceiling costs nothing,
+        and running the pieces together only shortens the overshoot a split in
+        flight can add — it was already bounded at one call's latency.
+
+        Not attempted at all when the truncation was reasoning-bound; see
+        :func:`_reasoning_exhausted_reason`, which decides that before we get here.
         """
         pieces = _split_batch(batch)
         if len(pieces) < 2:
@@ -1161,10 +1276,9 @@ class LLMReviewEngine(ReviewEngine):
             "review call was too big for one response — retrying on smaller pieces",
             extra={"lens": lens.id, "batch": batch_num, "pieces": len(pieces)},
         )
-        findings: list[ReviewFinding] = []
-        errors: list[str] = []
-        for piece in pieces:
-            piece_findings, piece_error = self._review_lens(
+
+        def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
+            return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
                 intent_block,
@@ -1173,6 +1287,36 @@ class LLMReviewEngine(ReviewEngine):
                 batch_num,
                 lens,
             )
+
+        # The pieces are independent calls, so they run CONCURRENTLY — serially
+        # a split cost one full model latency per piece, and it does so from
+        # inside a fan-out worker that is already holding a slot, which on a run
+        # where most lenses split is the largest wall-clock multiplier there is.
+        #
+        # In a POOL OF ITS OWN, deliberately, never back into the global fan-out
+        # pool: this code runs on one of that pool's workers, and a worker that
+        # submits to its own pool and then blocks on the result deadlocks the
+        # moment the pool is saturated — every worker waiting on work that only a
+        # free worker could start. A private executor makes that impossible by
+        # construction rather than by argument. It costs at most `width` threads
+        # for the duration of one split, and a split is the exceptional path.
+        #
+        # Width is the backend's own concurrency (never the piece count): a
+        # single-stream server — ollama, a one-slot llama.cpp — serves calls
+        # serially, so two at once would only queue and eat the timeout. At
+        # width 1 the executor runs them in submission order, exactly as the
+        # serial loop did. A splitting worker is blocked, not calling, so the
+        # calls in flight peak at the fan-out's width times this one — the
+        # adapter's backoff absorbs that burst, and it only happens on the run
+        # where every lens is already failing.
+        findings: list[ReviewFinding] = []
+        errors: list[str] = []
+        width = min(len(pieces), run.concurrency)
+        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-split") as pool:
+            # map() yields in submission order, so the pieces' findings and the
+            # reported error stay deterministic however the calls interleave.
+            outcomes = list(pool.map(review_piece, pieces))
+        for piece_findings, piece_error in outcomes:
             findings.extend(piece_findings)
             if piece_error is not None:
                 errors.append(piece_error)
@@ -1233,6 +1377,18 @@ class LLMReviewEngine(ReviewEngine):
                 # schema-valid work — kept, exactly as the parse path keeps it, so
                 # the exception path is not the one place a partial answer is binned.
                 completed = _salvage_truncated(exc, lens)
+                exhausted = _reasoning_exhausted_reason(exc)
+                if exhausted is not None:
+                    # The ceiling went on thinking, not on findings: shrinking the
+                    # payload cannot shrink that, so the split is skipped and the
+                    # reason names the lever that does move it. Checked before the
+                    # "already a piece" case below so a piece reports it too — it is
+                    # the better diagnosis wherever the truncation happens.
+                    _log.warning(
+                        "truncation was reasoning-bound — not splitting",
+                        extra={"lens": lens.id, "batch": batch_num},
+                    )
+                    return completed, exhausted
                 if on_oversized is None:
                     # Already a piece: nothing smaller to try. Report the reason
                     # rather than recurse — an unbounded cascade would spend the
@@ -1284,6 +1440,41 @@ class LLMReviewEngine(ReviewEngine):
                 return on_needs(needs, findings)
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
+    """Why splitting this failure cannot help, or None when it still can.
+
+    A truncation normally means the payload asked for more answer than one
+    response could hold, and the remedy is to cover less. Not when the ceiling
+    went on *thought*: a reasoning model draws its thinking from the same
+    `max_tokens` budget, and halving the diff does not halve the thinking. The
+    observed proof is a fifteen-line diff truncating at the same ceiling as a
+    thousand-line one. Splitting there re-spends the whole ceiling on every piece
+    and fails identically — pure added latency on a review that is already slow.
+
+    Decided from the numbers the adapter measured (see ProviderTruncated), never
+    from its message: this reads the diagnosis as data, exactly as the structured
+    findings contract requires. Both counts are needed — the reasoning spend is
+    meaningless without the ceiling it is a share of — so a route that reports
+    neither keeps the split it has always had.
+
+    The returned reason replaces the adapter's, whose advice ("raise
+    `max_tokens`") is the one thing that provably does not work here: the cap
+    does not separate thinking from answering, so raising it buys more thinking.
+    """
+    if not isinstance(exc, ProviderTruncated):
+        return None
+    reasoning, ceiling = exc.reasoning_tokens, exc.output_tokens
+    if not reasoning or not ceiling:
+        return None
+    if reasoning < ceiling * _REASONING_DOMINANT_SHARE:
+        return None
+    return (
+        f"{type(exc).__name__}: spent {reasoning} of the {ceiling}-token `max_tokens` "
+        "ceiling on reasoning, so the batch was not split — a smaller payload cannot "
+        "shrink a thinking budget; lower `reasoning_effort` instead"
+    )
 
 
 def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:
@@ -1368,6 +1559,20 @@ def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) ->
     return not any(_matches_glob(path, pattern) for pattern in exclude)
 
 
+def passes_size_cap(patch: str, max_lines: int) -> bool:
+    """Whether one file's *patch* is small enough to be worth reviewing.
+
+    The companion to the name-based skip filter, which can only recognise a
+    generated file that ADMITS it in its name. A hand-named data blob — a
+    154,000-line index, an 18,000-line snapshot corpus — has no such tell, so
+    size is the deterministic signal left. Counting the patch's own lines (not
+    the file's) keeps the judgement about what this PR actually changed.
+
+    ``max_lines`` of 0 disables the cap.
+    """
+    return not max_lines or patch.count("\n") <= max_lines
+
+
 def _matches_glob(path: str, pattern: str) -> bool:
     if fnmatchcase(path, pattern):
         return True
@@ -1379,14 +1584,15 @@ def files_not_visible(changed_files: Sequence[str], batch_paths: set[str]) -> li
 
     Derived, not captured. One subtraction covers every way a file goes missing
     before a lens sees it — the hardcoded generated/binary/vendored skip, the
-    include/exclude globs, the ``max_files`` cap, a triage skip, an incremental
-    scope, and simply being in another batch — because it asks what is left of
-    the PR after this batch rather than which filter removed what.
+    include/exclude globs, the ``max_file_diff_lines`` size cap, the
+    ``max_files`` cap, a triage skip, an incremental scope, and simply being in
+    another batch — because it asks what is left of the PR after this batch
+    rather than which filter removed what.
 
-    Capturing at each filter instead would mean five call sites kept in sync,
-    three of which have no pattern list to report (the skip filter is hardcoded
-    rules, the cap is a count, triage is a per-file model verdict) — and it
-    would still miss batching, which has the widest reach of the six: the intent
+    Capturing at each filter instead would mean six call sites kept in sync,
+    four of which have no pattern list to report (the skip filter is hardcoded
+    rules, the caps are counts, triage is a per-file model verdict) — and it
+    would still miss batching, which has the widest reach of the seven: the intent
     lens runs once PER BATCH, so on a multi-batch PR every call is judging the
     whole PR's promise against a fraction of the change.
 

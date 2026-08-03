@@ -261,6 +261,14 @@ local_diff_options = _stack(
 )
 @click.option("--max-files", default=None, type=int, help="Maximum number of files to review")
 @click.option(
+    "--max-file-diff-lines",
+    default=None,
+    type=click.IntRange(min=0),
+    help="Skip any single file whose diff is longer than this many lines "
+    "(default 2000; 0 disables). Catches generated data blobs no name-based "
+    "filter can recognise; every skip is named in the summary",
+)
+@click.option(
     "--max-input-tokens",
     default=None,
     type=int,
@@ -426,6 +434,7 @@ def review(
     fail_on: Severity | None,
     unanchored_min_severity: Severity | None,
     max_files: int | None,
+    max_file_diff_lines: int | None,
     max_input_tokens: int | None,
     max_tokens: int | None,
     reasoning_effort: str | None,
@@ -470,6 +479,7 @@ def review(
         fail_on=fail_on,
         unanchored_min_severity=unanchored_min_severity,
         max_files=max_files,
+        max_file_diff_lines=max_file_diff_lines,
         max_input_tokens=max_input_tokens,
         max_tokens=max_tokens,
         reasoning_effort=reasoning_effort,

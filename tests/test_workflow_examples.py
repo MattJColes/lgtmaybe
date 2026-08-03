@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from lgtmaybe.cli.slash import SlashCommand
+
 _REPO_ROOT = Path(__file__).parent.parent
 _DOGFOOD_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "lgtmaybe.yml"
 _PROJECT_VERSION = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
@@ -45,6 +47,31 @@ def _concurrency_blocks(workflow: dict) -> list[tuple[str, dict]]:
         if isinstance(job.get("concurrency"), dict):
             blocks.append((f"jobs.{name}", job["concurrency"]))
     return blocks
+
+
+def _top_level_arms(condition: str) -> list[str]:
+    """The `||`-separated arms of a job condition, split at paren depth zero.
+
+    Substring and index checks over the whole condition cannot tell which arm a
+    clause landed in — a guard hoisted into its own `||` branch reads exactly
+    like one ANDed inside the arm it belongs to, and sits at the same offset.
+    Splitting first is what lets an assertion name the arm it means.
+    """
+    arms: list[str] = []
+    depth = start = index = 0
+    while index < len(condition):
+        if condition[index] == "(":
+            depth += 1
+        elif condition[index] == ")":
+            depth -= 1
+        elif depth == 0 and condition.startswith("||", index):
+            arms.append(condition[start:index])
+            index += 2
+            start = index
+            continue
+        index += 1
+    arms.append(condition[start:])
+    return [arm.strip() for arm in arms]
 
 
 def test_supplied_workflows_rely_on_the_auto_diagram_default() -> None:
@@ -152,6 +179,68 @@ def test_self_triggered_workflows_discriminate_concurrency_by_event() -> None:
                 f"but its {scope} concurrency group is not discriminated by event: "
                 f"{block.get('group')!r} — lgtmaybe's own comments will cancel its reviews"
             )
+
+
+def test_comment_arm_starts_no_job_without_a_slash_command() -> None:
+    """A comment carrying no slash command must not start the issue_comment job.
+
+    `issue_comment` fires on every comment on every PR. Without this guard the
+    runner is claimed, the container pulled and Python booted, only for
+    `execute_comment` to find no command and exit — correct, free of provider
+    spend, and still a whole job. On a contended self-hosted pool that queueing
+    delays the reviews that do have work to do.
+
+    The guard is keyed on the command names the parser accepts, and is
+    deliberately looser than `parse_command` (which additionally requires the
+    command at the *start* of the body): a guard tighter than the parser would
+    silently disable a command that used to work.
+    """
+    for path in _workflows():
+        condition = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["review"]["if"]
+        flat = " ".join(condition.split())
+        arms = _top_level_arms(flat)
+
+        for command in SlashCommand:
+            assert f"github.event.comment.body, '/{command.value}'" in flat, (
+                f"{path.name} does not admit /{command.value}; its `if:` guard is tighter "
+                "than parse_command and would silently disable the command"
+            )
+        # `github.event.issue.pull_request` is what confines this arm to comments
+        # on a pull request. Without it a `/review` on a plain issue starts a job,
+        # and the arm also begins matching pull_request_review_comment events.
+        comment_arms = [arm for arm in arms if "github.event.issue.pull_request" in arm]
+        assert len(comment_arms) == 1, (
+            f"{path.name} has no single issue_comment arm keyed on "
+            "github.event.issue.pull_request — a comment on a plain issue would start a job"
+        )
+        # The command group must be ANDed onto the trusted-author check *inside*
+        # that arm, with nothing but `&&` between them. As its own `||` branch —
+        # or negated — it lets ANY commenter, a stranger included, start a job,
+        # defeating the author-association gate whose whole purpose is to stop a
+        # drive-by /review spending the provider budget. Matched on the
+        # whitespace-normalised arm and blind to the order of the commands inside
+        # the group, so a reflow or a reorder does not fail this.
+        assert re.search(
+            r"comment\.author_association\)\s*&&\s*\(\s*contains\(github\.event\.comment\.body",
+            comment_arms[0],
+        ), (
+            f"{path.name} does not AND the slash-command group onto the trusted-author "
+            "check inside the issue_comment arm — as a separate `||` branch (or "
+            "negated) it lets any commenter start a job"
+        )
+        # The pull_request_review_comment arm is the answer_replies path, whose
+        # replies are plain prose. Gating it on a command would disable the
+        # feature outright, so it must inspect no comment body at all.
+        [reply_arm] = [arm for arm in arms if "'pull_request_review_comment'" in arm]
+        assert "github.event.comment.body" not in reply_arm, (
+            f"{path.name} gates the reply arm on a slash command; replies carry none"
+        )
+        # One reference per command and nowhere else. With all five living in the
+        # issue_comment arm checked above, this is what pins that no other arm —
+        # pull_request_target included — gates on the comment body.
+        assert flat.count("github.event.comment.body") == len(SlashCommand), (
+            f"{path.name} references the comment body outside the issue_comment arm"
+        )
 
 
 def test_dogfood_workflow_uses_the_public_app_identity() -> None:

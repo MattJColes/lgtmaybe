@@ -448,11 +448,22 @@ and default to **trusted contributors** — `OWNER`, `MEMBER`, and `COLLABORATOR
 A maintainer can also review an outside contributor's PR any time by commenting
 `/review` on it (their own association passes the gate).
 
+The same `if:` also requires a comment to actually carry a slash command before
+any job starts. `issue_comment` fires on every comment on every pull request, so
+without that clause an ordinary "lgtm, merging" would claim a runner, pull the
+container and boot Python only to find no command and exit — no tokens spent, but
+a job queued ahead of the reviews that do have work to do. The check is
+substring-based and case-insensitive, so `/REVIEW` and `/review full` both pass.
+It is not applied to the `pull_request_review_comment` arm: replies in a finding
+thread are ordinary prose and carry no command.
+
 To change the policy, edit the `if:` on the `review` job:
 
-- **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review. A friendly choice for an open project — just remember that on a
-  hosted provider it means anyone can start a paid run, so pick it deliberately.
+- **Everyone** — drop the author-association checks so any PR or `/ask` /
+  `/review` comment runs a review (keep the slash-command clause, or every
+  comment starts a job). A friendly choice for an open project — just remember
+  that on a hosted provider it means anyone can start a paid run, so pick it
+  deliberately.
 - **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
   PR has merged before.
 - **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
@@ -481,12 +492,18 @@ permissions:
 
 jobs:
   review:
-    # Only trusted authors (owner / member / collaborator) can trigger a review.
+    # Only trusted authors (owner / member / collaborator) can trigger a review,
+    # and a comment only starts a job when it carries a slash command.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram'))) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
@@ -576,7 +593,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `preset` | `fast` | `fast` uses four calls — security, correctness, code health, artefacts — on every provider; `full` runs one call per lens |
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
-| `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
+| `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice (a cancelled or timed-out job does the same, via SIGINT/SIGTERM). `0` disables |
 | `max_concurrency` | auto (8 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix, with an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax); safe no-op elsewhere |
@@ -1246,7 +1263,12 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1400,7 +1422,12 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1544,7 +1571,12 @@ jobs:
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -3678,9 +3710,10 @@ well, so nothing already paid for is thrown away. The summary says a batch was
 shrunk, and — because part of a lens is not a whole lens — the run still reports
 that results may be incomplete.
 
-The cost of that recovery is up to twice the calls for the affected batch. It is
-bounded to one split level: if a piece still runs past the ceiling, it is
-reported rather than split again.
+The cost of that recovery is up to twice the calls for the affected batch,
+though the pieces are reviewed **concurrently**, so on the clock it costs about
+one extra call. It is bounded to one split level: if a piece still runs past the
+ceiling, it is reported rather than split again.
 
 When you see it happening often, the fix is usually **`max_tokens`, not the
 diff**:
@@ -3691,9 +3724,11 @@ max_tokens: 32768
 
 A reasoning model spends the same budget on thinking before it writes a single
 finding, which is how a fifteen-line diff can truncate. The failure names the
-reasoning tokens where the provider reports them — if most of the ceiling went
-on thought, no amount of shrinking the input will help, and the cap is what
-needs raising.
+reasoning tokens where the provider reports them — and when they account for
+essentially the whole ceiling, lgtmaybe **does not split the batch at all**:
+smaller pieces would each re-spend the same ceiling on thought and truncate the
+same way, so it says so and names `reasoning_effort` instead of costing you the
+extra calls.
 
 You do not have to wait for a truncation to find that out. `--profile` reports
 the same split on calls that **succeeded** (`think_tok`, and the `reasoning:`
@@ -3994,6 +4029,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `language` | string / null | No | `null` | Language |
 | `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
+| `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
@@ -4713,6 +4749,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Max Concurrency"
     },
+    "max_file_diff_lines": {
+      "default": 2000,
+      "minimum": 0,
+      "title": "Max File Diff Lines",
+      "type": "integer"
+    },
     "max_files": {
       "default": 50,
       "title": "Max Files",
@@ -5241,6 +5283,10 @@ Before the diff reaches the model it is cleaned:
 - **Non-reviewable files are skipped** — lockfiles, minified/bundled assets,
   vendored directories, generated LLM-index corpora (`llms.txt` / `llms-full.txt`),
   and binaries. Reviewing them is noise and wastes tokens.
+- **Oversized files are skipped** — a single file whose diff runs past
+  `max_file_diff_lines` (default 2000, `0` disables) is dropped and named in the
+  summary. Name matching can only catch generated files that admit it in their
+  name; a hand-named 154,000-line data blob is caught on size alone.
 - **Secrets are redacted** — anything that looks like a key or token is stripped
   from the diff before it leaves your environment for the provider.
 
@@ -5461,9 +5507,10 @@ Where the stated intent comes from:
 ### The lens is told what it was not shown
 
 An intent lens judging "did the author keep their promise?" against a *filtered*
-diff will call a kept promise broken. Files go missing for six different
+diff will call a kept promise broken. Files go missing for seven different
 reasons — the generated/binary/vendored skip, your `include_paths` /
-`exclude_paths` globs, the `max_files` cap, a triage skip, an incremental
+`exclude_paths` globs, the `max_file_diff_lines` size cap, the `max_files` cap,
+a triage skip, an incremental
 scope, and simply being in another batch (the lens runs once **per batch**, so
 on a large PR each call sees only part of the change).
 
@@ -5512,6 +5559,7 @@ configurable in `.lgtmaybe.yml` (see
 |---|---|---|
 | `preset` | `fast` | `fast` uses four calls — security, correctness, code health, artefacts — on every provider; `full` runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
+| `max_file_diff_lines` | 2000 | Skips any single file whose diff is longer, naming it in the summary. `0` disables. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
 | `max_review_seconds` | 3600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
@@ -5917,13 +5965,23 @@ network recovers but a dead-end failure surfaces fast:
   posting workflows additionally set a job-level `timeout-minutes` so a wedged
   run can't hold a runner for GitHub's six-hour default — set above
   `max_review_seconds`, so the soft deadline (which still posts partial
-  findings) always fires before the runner is killed.
+  findings) fires before the runner is killed. If the runner does cut the job
+  short — a blown `timeout-minutes`, or `cancel-in-progress` on a new push — the
+  CLI's signal handler is the backstop (below).
 
 - **A whole-review deadline.** `max_review_seconds` (default 3600, `0` disables)
   is a soft ceiling on the run: once it passes, queued model calls are skipped
   — in-flight ones finish and their findings post — and the summary carries an
   explicit incomplete-results notice. It can never produce a silent LGTM: a
   run where every call failed or was skipped still fails loud.
+
+- **A termination signal does the same thing.** The CLI installs a
+  SIGINT/SIGTERM handler that sets the deadline's state, so a job the runner
+  cancels or times out stops dispatching model calls and posts what it already
+  has, with a notice naming the interruption, instead of dying with nothing on
+  the PR. The handler is installed by the CLI entrypoint only (importing
+  lgtmaybe as a library never touches your signal handlers), and it restores the
+  previous handler as it fires — a second signal still kills the process.
 
 - **Incompleteness is visible on the PR, not just in the log.** The notice above
   is not specific to the deadline: *any* failed lens call (a per-call timeout, a
@@ -6304,21 +6362,38 @@ if: >-
   (github.event_name == 'pull_request_target' &&
    contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
   (github.event.issue.pull_request &&
-   contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+   contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+   (contains(github.event.comment.body, '/review') ||
+    contains(github.event.comment.body, '/improve') ||
+    contains(github.event.comment.body, '/ask') ||
+    contains(github.event.comment.body, '/describe') ||
+    contains(github.event.comment.body, '/diagram')))
 ```
 
 A maintainer can still review an outside contributor's PR any time by commenting
 `/review` on it — their own association passes the gate. To change the policy,
 edit the list:
 
-- **Open it up to everyone** — drop the `if:` so any PR or `/review` comment runs
-  a review.
+- **Open it up to everyone** — drop the author-association checks so any PR or
+  `/review` comment runs a review.
 - **Welcome returning contributors** — add `CONTRIBUTOR` to auto-review anyone
   whose PR has merged before.
 - **Tighten to admins** — keep just `OWNER` (and `MEMBER` for your org).
 
 Because the gate lives in the workflow YAML, not in the action's code, the policy
 is entirely yours.
+
+The second half of the comment arm is a different kind of thrift. `issue_comment`
+fires on every comment on every pull request, and lgtmaybe's answer to one that
+holds no slash command is to exit — correct, and free of tokens, but only after a
+runner has been claimed, a container pulled and Python booted. Deciding that in
+the `if:` costs nothing at all, and on a busy runner pool it is the difference
+between a review starting now and a review queueing behind comment threads. The
+clause is deliberately looser than the parser it stands in for — substring, not
+prefix, and case-insensitive — because a guard tighter than the parser would
+silently disable a command that used to work. Replies inside a finding thread
+arrive on the separate `pull_request_review_comment` event and are never gated
+this way; they are ordinary prose, and gating them would switch the feature off.
 
 ## If you want extra guardrails
 

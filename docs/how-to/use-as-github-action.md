@@ -86,11 +86,22 @@ and default to **trusted contributors** — `OWNER`, `MEMBER`, and `COLLABORATOR
 A maintainer can also review an outside contributor's PR any time by commenting
 `/review` on it (their own association passes the gate).
 
+The same `if:` also requires a comment to actually carry a slash command before
+any job starts. `issue_comment` fires on every comment on every pull request, so
+without that clause an ordinary "lgtm, merging" would claim a runner, pull the
+container and boot Python only to find no command and exit — no tokens spent, but
+a job queued ahead of the reviews that do have work to do. The check is
+substring-based and case-insensitive, so `/REVIEW` and `/review full` both pass.
+It is not applied to the `pull_request_review_comment` arm: replies in a finding
+thread are ordinary prose and carry no command.
+
 To change the policy, edit the `if:` on the `review` job:
 
-- **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review. A friendly choice for an open project — just remember that on a
-  hosted provider it means anyone can start a paid run, so pick it deliberately.
+- **Everyone** — drop the author-association checks so any PR or `/ask` /
+  `/review` comment runs a review (keep the slash-command clause, or every
+  comment starts a job). A friendly choice for an open project — just remember
+  that on a hosted provider it means anyone can start a paid run, so pick it
+  deliberately.
 - **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
   PR has merged before.
 - **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
@@ -119,12 +130,18 @@ permissions:
 
 jobs:
   review:
-    # Only trusted authors (owner / member / collaborator) can trigger a review.
+    # Only trusted authors (owner / member / collaborator) can trigger a review,
+    # and a comment only starts a job when it carries a slash command.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram'))) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
@@ -214,7 +231,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `preset` | `fast` | `fast` uses four calls — security, correctness, code health, artefacts — on every provider; `full` runs one call per lens |
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
-| `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice. `0` disables |
+| `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice (a cancelled or timed-out job does the same, via SIGINT/SIGTERM). `0` disables |
 | `max_concurrency` | auto (8 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `prompt_cache` | `true` | Shape calls as a shared cacheable prefix, with an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax); safe no-op elsewhere |

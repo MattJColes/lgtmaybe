@@ -47,7 +47,7 @@ inputs:
     required: false
     default: ""
   max_review_seconds:
-    description: "Soft wall-clock ceiling for the whole review, in seconds (default 3600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with the incomplete-results notice every failed or skipped call raises. Set 0 to disable."
+    description: "Soft wall-clock ceiling for the whole review, in seconds (default 3600). Once it passes, no further model calls are dispatched — in-flight calls finish and the review posts partial results with the incomplete-results notice every failed or skipped call raises. A job cancelled or timed out by the runner does the same: the CLI winds the review down on SIGINT/SIGTERM and posts what it already has. Set 0 to disable."
     required: false
     default: ""
   max_review_tokens:

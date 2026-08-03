@@ -41,11 +41,26 @@ jobs:
     # review, so fork PRs and drive-by /ask or /review comments from strangers
     # cannot spend your provider budget. A maintainer can still opt-in to an
     # external PR by commenting /review on it. (Comments not on a PR are skipped.)
+    # The issue_comment arm also requires a slash command in the body. That event
+    # fires on EVERY comment on every PR, so without it an ordinary "lgtm,
+    # merging" starts a job that claims a runner, pulls the container and boots
+    # Python only to find no command and exit — no provider spend, but a runner
+    # held ahead of the reviews that do have work to do. `contains` is
+    # case-insensitive and substring-based, so the guard stays looser than the
+    # parser (which additionally wants the command at the START of the body):
+    # /REVIEW and `/review full` both pass. The pull_request_review_comment arm
+    # is NOT gated this way — that is lgtmaybe answering a reply inside a finding
+    # thread, and a reply is plain prose with no command in it.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram'))) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest

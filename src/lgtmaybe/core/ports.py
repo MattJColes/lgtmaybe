@@ -37,21 +37,38 @@ class ProviderTruncated(Exception):
     failure so the notice on the PR names the ceiling and the knob that moves
     it, rather than "unparseable model output".
 
-    Like a wall timeout, this says something about the *payload*: one call was
-    asked to cover more than it could finish saying. The engine therefore reacts
-    the same way — split the batch and review the pieces — rather than failing
-    the whole lens.
+    Usually this says something about the *payload*: one call was asked to cover
+    more than it could finish saying. The engine then reacts as it does to a wall
+    timeout — split the batch and review the pieces — rather than failing the
+    whole lens. But not always, which is what the counts below are for.
 
     ``text`` carries the cut-off body. It is not usable as an answer, but the
     findings the model completed before the cut are real work, and the engine
     salvages them from it exactly as the parser does for a truncation it detects
     itself. It rides on the error rather than being returned, so a caller cannot
     take the salvage without also seeing that the lens was cut short.
+
+    ``reasoning_tokens`` (None when the route reports no breakdown — which is not
+    the same as zero) and ``output_tokens`` (the ceiling actually reached) carry
+    the *diagnosis* as data rather than as prose. A reasoning model spends this
+    same budget on thought, so a truncation where the thinking accounts for
+    essentially the whole ceiling is not a payload problem at all: covering less
+    does not shrink a thinking budget, and only `reasoning_effort` moves it. The
+    caller must be able to tell the two apart without re-reading our own message.
     """
 
-    def __init__(self, message: str, *, text: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        text: str = "",
+        reasoning_tokens: int | None = None,
+        output_tokens: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.text = text
+        self.reasoning_tokens = reasoning_tokens
+        self.output_tokens = output_tokens
 
 
 class ProviderClient(ABC):
