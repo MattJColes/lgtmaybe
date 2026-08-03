@@ -31,5 +31,7 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    ignore:
+      - dependency-name: "MattJColes/lgtmaybe"
     commit-message:
       prefix: "ci"
