@@ -139,19 +139,51 @@ INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 # apart from the provider failures the generic incomplete notice covers.
 _BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
 
+# When reasoning accounts for at least this share of the `max_tokens` ceiling a
+# truncation hit, the ceiling was spent on THINKING, not on findings — and the
+# split (see _review_split) cannot help, because a smaller payload does not
+# shrink a thinking budget.
+#
+# 0.9 because the two populations are nowhere near it from either side. Measured
+# on one self-review of this repo: five calls truncated at a 32,768 ceiling
+# having spent 25,963–35,463 tokens reasoning — 0.79 to over 1.0 of the cap,
+# clustering at 0.98+ — while the calls that answered normally wrote thousands of
+# tokens of findings after their thinking. The failure mode the split exists for
+# is the opposite shape: little thought, then an answer that runs long, where the
+# ratio is near zero. At 0.9 at most a tenth of the ceiling was left for the
+# answer, so halving the diff cannot buy a complete one — the only lever left is
+# `reasoning_effort`, which bounds the thinking directly.
+#
+# Deliberately not configurable: it is a diagnosis, not a preference, and a knob
+# here would be one more thing to tune in the failure it exists to explain.
+_REASONING_DOMINANT_SHARE = 0.9
+
 
 def _plural(n: int, one: str = "", many: str = "s") -> str:
     """The word (or suffix) for a count of *n*: *one* when it is exactly 1, else *many*."""
     return one if n == 1 else many
 
 
-def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
-    """The fan-out pool size: the explicit cap, else the provider-aware default."""
+def _concurrency_cap(cfg: ReviewConfig) -> int:
+    """How many model calls this run may have in flight: the explicit cap, else
+    the provider-aware default.
+
+    A property of the *backend*, independent of how much work there is — which
+    is why it is separate from the pool size below. The oversized-batch split
+    runs its pieces in a pool of its own, and needs this figure rather than the
+    fan-out's: a one-lens review sizes its pool to one task, but that says
+    nothing about what the provider will serve at once.
+    """
     if cfg.max_concurrency is not None:
-        return max(1, min(cfg.max_concurrency, task_count))
+        return max(1, cfg.max_concurrency)
     if cfg.provider in _SINGLE_STREAM_PROVIDERS:
         return 1
-    return min(_CLOUD_MAX_WORKERS, task_count) or 1
+    return _CLOUD_MAX_WORKERS
+
+
+def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
+    """The fan-out pool size: the cap above, narrowed to the work there is."""
+    return max(1, min(_concurrency_cap(cfg), task_count))
 
 
 @dataclass(frozen=True)
@@ -303,6 +335,10 @@ class _Run:
     budget_at: int | None
     # Mid-review retrieval budget in tokens, or None when a lens may not defer.
     retrieval_budget: int | None
+    # How many calls this backend will serve at once (_concurrency_cap). Carried
+    # for the oversized-batch split, which runs its pieces in a pool of its own
+    # and must not out-run what the fan-out itself is allowed.
+    concurrency: int
 
 
 def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
@@ -623,6 +659,7 @@ class LLMReviewEngine(ReviewEngine):
             deadline_at=deadline_at,
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
+            concurrency=_concurrency_cap(cfg),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_ReviewTask]]] = []
@@ -1153,6 +1190,15 @@ class LLMReviewEngine(ReviewEngine):
         unredacted or unwrapped reaches the model. Returns the original *reason*
         unchanged when the batch cannot be split — a single-hunk file has no
         smaller unit to fall back to.
+
+        The pieces run concurrently (see below) and each still goes through
+        ``_review_lens``, so each re-checks the whole-review deadline and token
+        budget at execution: a split that begins past a ceiling costs nothing,
+        and running the pieces together only shortens the overshoot a split in
+        flight can add — it was already bounded at one call's latency.
+
+        Not attempted at all when the truncation was reasoning-bound; see
+        :func:`_reasoning_exhausted_reason`, which decides that before we get here.
         """
         pieces = _split_batch(batch)
         if len(pieces) < 2:
@@ -1161,10 +1207,9 @@ class LLMReviewEngine(ReviewEngine):
             "review call was too big for one response — retrying on smaller pieces",
             extra={"lens": lens.id, "batch": batch_num, "pieces": len(pieces)},
         )
-        findings: list[ReviewFinding] = []
-        errors: list[str] = []
-        for piece in pieces:
-            piece_findings, piece_error = self._review_lens(
+
+        def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
+            return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
                 intent_block,
@@ -1173,6 +1218,36 @@ class LLMReviewEngine(ReviewEngine):
                 batch_num,
                 lens,
             )
+
+        # The pieces are independent calls, so they run CONCURRENTLY — serially
+        # a split cost one full model latency per piece, and it does so from
+        # inside a fan-out worker that is already holding a slot, which on a run
+        # where most lenses split is the largest wall-clock multiplier there is.
+        #
+        # In a POOL OF ITS OWN, deliberately, never back into the global fan-out
+        # pool: this code runs on one of that pool's workers, and a worker that
+        # submits to its own pool and then blocks on the result deadlocks the
+        # moment the pool is saturated — every worker waiting on work that only a
+        # free worker could start. A private executor makes that impossible by
+        # construction rather than by argument. It costs at most `width` threads
+        # for the duration of one split, and a split is the exceptional path.
+        #
+        # Width is the backend's own concurrency (never the piece count): a
+        # single-stream server — ollama, a one-slot llama.cpp — serves calls
+        # serially, so two at once would only queue and eat the timeout. At
+        # width 1 the executor runs them in submission order, exactly as the
+        # serial loop did. A splitting worker is blocked, not calling, so the
+        # calls in flight peak at the fan-out's width times this one — the
+        # adapter's backoff absorbs that burst, and it only happens on the run
+        # where every lens is already failing.
+        findings: list[ReviewFinding] = []
+        errors: list[str] = []
+        width = min(len(pieces), run.concurrency)
+        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-split") as pool:
+            # map() yields in submission order, so the pieces' findings and the
+            # reported error stay deterministic however the calls interleave.
+            outcomes = list(pool.map(review_piece, pieces))
+        for piece_findings, piece_error in outcomes:
             findings.extend(piece_findings)
             if piece_error is not None:
                 errors.append(piece_error)
@@ -1233,6 +1308,18 @@ class LLMReviewEngine(ReviewEngine):
                 # schema-valid work — kept, exactly as the parse path keeps it, so
                 # the exception path is not the one place a partial answer is binned.
                 completed = _salvage_truncated(exc, lens)
+                exhausted = _reasoning_exhausted_reason(exc)
+                if exhausted is not None:
+                    # The ceiling went on thinking, not on findings: shrinking the
+                    # payload cannot shrink that, so the split is skipped and the
+                    # reason names the lever that does move it. Checked before the
+                    # "already a piece" case below so a piece reports it too — it is
+                    # the better diagnosis wherever the truncation happens.
+                    _log.warning(
+                        "truncation was reasoning-bound — not splitting",
+                        extra={"lens": lens.id, "batch": batch_num},
+                    )
+                    return completed, exhausted
                 if on_oversized is None:
                     # Already a piece: nothing smaller to try. Report the reason
                     # rather than recurse — an unbounded cascade would spend the
@@ -1284,6 +1371,41 @@ class LLMReviewEngine(ReviewEngine):
                 return on_needs(needs, findings)
         _log.info("lens reviewed", extra={"lens": lens.id, "findings": len(findings)})
         return findings, None
+
+
+def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
+    """Why splitting this failure cannot help, or None when it still can.
+
+    A truncation normally means the payload asked for more answer than one
+    response could hold, and the remedy is to cover less. Not when the ceiling
+    went on *thought*: a reasoning model draws its thinking from the same
+    `max_tokens` budget, and halving the diff does not halve the thinking. The
+    observed proof is a fifteen-line diff truncating at the same ceiling as a
+    thousand-line one. Splitting there re-spends the whole ceiling on every piece
+    and fails identically — pure added latency on a review that is already slow.
+
+    Decided from the numbers the adapter measured (see ProviderTruncated), never
+    from its message: this reads the diagnosis as data, exactly as the structured
+    findings contract requires. Both counts are needed — the reasoning spend is
+    meaningless without the ceiling it is a share of — so a route that reports
+    neither keeps the split it has always had.
+
+    The returned reason replaces the adapter's, whose advice ("raise
+    `max_tokens`") is the one thing that provably does not work here: the cap
+    does not separate thinking from answering, so raising it buys more thinking.
+    """
+    if not isinstance(exc, ProviderTruncated):
+        return None
+    reasoning, ceiling = exc.reasoning_tokens, exc.output_tokens
+    if not reasoning or not ceiling:
+        return None
+    if reasoning < ceiling * _REASONING_DOMINANT_SHARE:
+        return None
+    return (
+        f"{type(exc).__name__}: spent {reasoning} of the {ceiling}-token `max_tokens` "
+        "ceiling on reasoning, so the batch was not split — a smaller payload cannot "
+        "shrink a thinking budget; lower `reasoning_effort` instead"
+    )
 
 
 def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:

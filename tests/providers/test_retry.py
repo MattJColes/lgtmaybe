@@ -467,6 +467,50 @@ class TestOutputCeilingTruncation:
         assert "reasoning" not in str(exc_info.value)
         assert "65536" in str(exc_info.value)
 
+    def test_the_counts_travel_as_numbers_not_only_as_prose(self) -> None:
+        """The diagnosis is data, not a sentence.
+
+        The engine reacts differently to "the answer was too long" and "the
+        thinking ate the ceiling" — the first is fixed by covering less, the
+        second is not fixable by size at all. It can only tell them apart from
+        the two numbers, and re-reading them out of the message would be
+        parsing our own prose.
+        """
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=""),
+                    finish_reason="length",
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=900,
+                completion_tokens=16384,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=16200),
+            ),
+        )
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert exc_info.value.reasoning_tokens == 16200
+        assert exc_info.value.output_tokens == 16384
+
+    def test_a_route_without_reasoning_detail_carries_no_reasoning_count(self) -> None:
+        """None, not 0: "the route never said" is not "it thought nothing".
+
+        A caller reading 0 as a measurement would conclude the ceiling went
+        entirely on findings — the opposite diagnosis — from an absence of data.
+        """
+        with patch("litellm.completion", return_value=self._truncated()):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert exc_info.value.reasoning_tokens is None
+        assert exc_info.value.output_tokens == 65536
+
     def test_truncation_still_falls_back_to_the_secondary_model(self) -> None:
         """Permanent stops the *retry*, not the fallback — a different model is a
         genuinely different request and may well fit its answer in budget."""

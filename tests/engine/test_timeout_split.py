@@ -10,6 +10,8 @@ with its own fresh budget: the one retry that can actually work.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -220,6 +222,102 @@ def test_a_piece_that_times_out_again_is_not_split_further() -> None:
         LLMReviewEngine(provider).review(_ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg())
 
     assert len(provider.diffs) == 3  # the batch, then its two halves — and stop
+
+
+class _TimeoutThenSlowPieces(FakeProvider):
+    """Times out on the whole batch; each piece then takes real wall time.
+
+    The delay is the measurement: it holds a piece in flight long enough for a
+    sibling to be observed running beside it (or queued behind it).
+    """
+
+    def __init__(self, delay: float = 0.05) -> None:
+        super().__init__()
+        self._delay = delay
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self.max_in_flight = 0
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        diff = "\n".join(str(m.get("content", "")) for m in messages)
+        if "one.py" in diff and "two.py" in diff:
+            raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
+        with self._lock:
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            time.sleep(self._delay)
+            path = "one.py" if "one.py" in diff else "two.py"
+            anchor = (
+                "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
+            )
+            return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
+        finally:
+            with self._lock:
+                self._in_flight -= 1
+
+
+def test_the_pieces_of_a_split_batch_are_reviewed_concurrently() -> None:
+    """A split cost N sequential model calls, inside a worker already holding a
+    pool slot — on a run where most lenses split, the biggest wall-clock
+    multiplier in the system. The pieces are independent, so they overlap."""
+    provider = _TimeoutThenSlowPieces()
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]
+    assert provider.max_in_flight == 2
+
+
+def test_a_single_stream_provider_still_reviews_its_pieces_one_at_a_time() -> None:
+    """The split is bounded by the review's own concurrency, not by piece count.
+
+    A single ollama instance serves a model serially: two concurrent calls only
+    queue up and eat the timeout. Whatever the fan-out is allowed, the split is
+    allowed — never more.
+    """
+    provider = _TimeoutThenSlowPieces()
+    LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]),
+        ReviewConfig(
+            provider=Provider.ollama,
+            model="qwen3-coder",
+            categories=[ReviewCategory.security],
+            reflect=False,
+            prompt_cache=False,
+        ),
+    )
+
+    assert provider.max_in_flight == 1
+
+
+def test_a_split_starting_past_the_deadline_costs_nothing() -> None:
+    """Concurrent pieces must still answer to the whole-review deadline.
+
+    Serially, a piece was held back by the previous piece's own check. Running
+    together they check at the same instant — so the check has to be the
+    deadline itself, or a review already over budget would fan out past it.
+    """
+
+    class _SlowTimeout(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.diffs: list[str] = []
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            self.diffs.append("\n".join(str(m.get("content", "")) for m in messages))
+            time.sleep(1.2)
+            raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
+
+    provider = _SlowTimeout()
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(provider).review(
+            _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg(max_review_seconds=1)
+        )
+
+    assert len(provider.diffs) == 1  # the batch — both pieces skipped, not run
+    assert "deadline" in str(exc_info.value)
 
 
 def test_an_ordinary_failure_is_not_split() -> None:

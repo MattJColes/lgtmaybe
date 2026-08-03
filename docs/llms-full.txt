@@ -3678,9 +3678,10 @@ well, so nothing already paid for is thrown away. The summary says a batch was
 shrunk, and — because part of a lens is not a whole lens — the run still reports
 that results may be incomplete.
 
-The cost of that recovery is up to twice the calls for the affected batch. It is
-bounded to one split level: if a piece still runs past the ceiling, it is
-reported rather than split again.
+The cost of that recovery is up to twice the calls for the affected batch,
+though the pieces are reviewed **concurrently**, so on the clock it costs about
+one extra call. It is bounded to one split level: if a piece still runs past the
+ceiling, it is reported rather than split again.
 
 When you see it happening often, the fix is usually **`max_tokens`, not the
 diff**:
@@ -3691,9 +3692,11 @@ max_tokens: 32768
 
 A reasoning model spends the same budget on thinking before it writes a single
 finding, which is how a fifteen-line diff can truncate. The failure names the
-reasoning tokens where the provider reports them — if most of the ceiling went
-on thought, no amount of shrinking the input will help, and the cap is what
-needs raising.
+reasoning tokens where the provider reports them — and when they account for
+essentially the whole ceiling, lgtmaybe **does not split the batch at all**:
+smaller pieces would each re-spend the same ceiling on thought and truncate the
+same way, so it says so and names `reasoning_effort` instead of costing you the
+extra calls.
 
 You do not have to wait for a truncation to find that out. `--profile` reports
 the same split on calls that **succeeded** (`think_tok`, and the `reasoning:`
