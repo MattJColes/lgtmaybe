@@ -14,6 +14,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -65,7 +66,38 @@ class TestGracefulInterrupt:
         thread = threading.Thread(target=run)
         thread.start()
         thread.join(timeout=10)
+        # A hang leaves `errors` empty too — assert the thread actually finished,
+        # or a wedged wind-down would read as success.
+        assert not thread.is_alive(), "graceful_interrupt hung off the main thread"
         assert not errors, f"raised off the main thread: {errors}"
+
+    @pytest.mark.skipif(
+        not (hasattr(signal, "SIGINT") and hasattr(signal, "SIGTERM")),
+        reason="needs both signals to install one and fail the other",
+    )
+    def test_a_partial_install_restores_what_it_managed_to_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SIGINT installs, then SIGTERM refuses: the SIGINT handler installed a
+        moment earlier must not be left behind for the rest of the process."""
+        real_signal = signal.signal
+        attempts: list[int] = []
+
+        def fake_signal(sig: Any, handler: Any) -> Any:
+            attempts.append(sig)
+            if len(attempts) == 2:  # the SIGTERM install
+                raise ValueError("signal only works in main thread")
+            return real_signal(sig, handler)
+
+        monkeypatch.setattr(signal, "signal", fake_signal)
+        before = signal.getsignal(signal.SIGINT)
+        with graceful_interrupt():
+            # A partial install is no install: the previous handler is already
+            # back, so the process keeps its normal termination behaviour.
+            assert signal.getsignal(signal.SIGINT) is before
+        assert attempts == [signal.SIGINT, signal.SIGTERM, signal.SIGINT], (
+            f"expected install SIGINT, fail on SIGTERM, then restore SIGINT — got {attempts}"
+        )
 
     def test_main_wraps_the_command_in_the_wind_down(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         """Installed by the CLI entrypoint, and held open for the subcommand."""
