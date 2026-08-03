@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.12.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.12.0...lgtmaybe-v1.12.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** sync uv.lock with the 1.12.0 version bump ([#340](https://github.com/MattJColes/lgtmaybe/issues/340)) ([b310637](https://github.com/MattJColes/lgtmaybe/commit/b31063763547d0b14da4b8c961b6426fde2c67a0))
+* **engine:** exclude diff file headers from the triage line count ([#341](https://github.com/MattJColes/lgtmaybe/issues/341)) ([43965bb](https://github.com/MattJColes/lgtmaybe/commit/43965bb96f6c3a1829ae062eeed1889f07e81134)), closes [#326](https://github.com/MattJColes/lgtmaybe/issues/326)
+
+
+### Dependencies
+
+* bump the python-dependencies group across 1 directory with 7 updates ([#353](https://github.com/MattJColes/lgtmaybe/issues/353)) ([5c7f220](https://github.com/MattJColes/lgtmaybe/commit/5c7f220b3f39f2e1a0b7baf95b6629501b311dd9))
+
 ## [1.12.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.11.1...lgtmaybe-v1.12.0) (2026-08-02)
 
 
