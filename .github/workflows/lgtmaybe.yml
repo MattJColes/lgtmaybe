@@ -112,7 +112,7 @@ jobs:
           # 400}` on every lens, so the review posted a failure instead of a
           # review. The `~` prefix is the floating-alias form; quoted because a
           # bare `~` is YAML's null and leading-`~` scalars are easy to misread.
-          model: "~deepseek/deepseek-v4-flash-latest"
+          model: "openai/gpt-5.6-luna"
           # The default 100k input budget hands one call more diff than it can
           # answer for: the response is cut off mid-JSON and the lens is lost
           # (three of four on #309). Smaller batches keep each answer inside the
