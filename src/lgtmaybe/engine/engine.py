@@ -8,6 +8,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -157,6 +158,36 @@ _BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped
 # Deliberately not configurable: it is a diagnosis, not a preference, and a knob
 # here would be one more thing to tune in the failure it exists to explain.
 _REASONING_DOMINANT_SHARE = 0.9
+
+# The reason string a call skipped by an interruption reports. Worded to name
+# the cause, because the remedy differs from the deadline's: nobody should go
+# hunting for a `max_review_seconds` they never hit.
+_INTERRUPT_SKIP_REASON = "review interrupted (termination signal) — call skipped"
+
+# A wind-down asked for from OUTSIDE the pipeline — in practice the CLI's
+# SIGTERM/SIGINT handler, when the CI job blows its `timeout-minutes` or a push
+# cancels the run. Deliberately the same state the elapsed deadline sets: queued
+# model calls are skipped, in-flight ones finish, and the review posts partial
+# results with a notice instead of dying with nothing on the PR. Process-global
+# and never cleared by `review()` — a signal means stop, not stop-for-one-review
+# — so the CLI's other steps wind down too. `Event` because the fan-out reads it
+# from every worker thread.
+_interrupted = threading.Event()
+
+
+def request_interrupt() -> None:
+    """Stop starting new model calls; post what the review already has."""
+    _interrupted.set()
+
+
+def interrupt_requested() -> bool:
+    """Whether a wind-down has been asked for."""
+    return _interrupted.is_set()
+
+
+def clear_interrupt() -> None:
+    """Forget a requested wind-down (tests, and a long-lived host process)."""
+    _interrupted.clear()
 
 
 def _plural(n: int, one: str = "", many: str = "s") -> str:
@@ -369,11 +400,14 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
 def _skip_reason(deadline_at: float | None, budget_at: int | None, lens: _Lens) -> str | None:
     """Why this model call must not be made, or None to go ahead.
 
-    Both ceilings are checked at EXECUTION time (tasks queue in the pool long
+    Every ceiling is checked at EXECUTION time (tasks queue in the pool long
     before a worker picks them up, and a deferral is decided later still), so the
     figures include everything that landed in the meantime. One function, so the
     first call and a deferral's re-run can never drift apart on when to stop.
     """
+    if interrupt_requested():
+        _log.warning("review interrupted — skipping call", extra={"lens": lens.id})
+        return _INTERRUPT_SKIP_REASON
     if deadline_at is not None and time.perf_counter() >= deadline_at:
         _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
         return "review deadline (max_review_seconds) reached — call skipped"
@@ -812,17 +846,27 @@ class LLMReviewEngine(ReviewEngine):
         scanned = [f for f in all_findings if _is_scan_finding(f)]
         all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
-            if deadline_at is not None and time.perf_counter() >= deadline_at:
+            if interrupt_requested():
+                # The process is being torn down: audit nothing, post what we
+                # have. Same trade as the deadline below, on someone else's clock.
+                reflection_skipped = "Review interrupted (termination signal)"
+                _log.warning(
+                    "review interrupted — skipping reflection",
+                    extra={"findings": len(all_findings)},
+                )
+            elif deadline_at is not None and time.perf_counter() >= deadline_at:
                 # Better unaudited findings with an honest notice than more
                 # minutes past the ceiling — and never a silent quality drop.
-                reflection_skipped = f"Review deadline ({cfg.max_review_seconds}s)"
+                reflection_skipped = f"Review deadline ({cfg.max_review_seconds}s) reached"
                 _log.warning(
                     "review deadline reached — skipping reflection",
                     extra={"findings": len(all_findings)},
                 )
             elif budget_at is not None and profiler.total_tokens() >= budget_at:
                 # Same trade, spend instead of time.
-                reflection_skipped = f"Token budget (max_review_tokens = {cfg.max_review_tokens})"
+                reflection_skipped = (
+                    f"Token budget (max_review_tokens = {cfg.max_review_tokens}) reached"
+                )
                 _log.warning(
                     "review token budget reached — skipping reflection",
                     extra={"findings": len(all_findings)},
@@ -917,7 +961,7 @@ class LLMReviewEngine(ReviewEngine):
             )
         if reflection_skipped:
             notices.append(
-                f"⚠️ {reflection_skipped} reached — the self-reflection audit was "
+                f"⚠️ {reflection_skipped} — the self-reflection audit was "
                 "skipped, so findings may include false positives."
             )
         # Findings the model DID raise and the run then hid: an ignore

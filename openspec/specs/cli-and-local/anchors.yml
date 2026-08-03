@@ -12,6 +12,12 @@ cli.run-review:
     has: { field: name, regex: '^run_review$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.graceful-interrupt:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^graceful_interrupt$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.slash:
   - rule:
       kind: function_definition
