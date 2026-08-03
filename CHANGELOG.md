@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.13.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.12.2...lgtmaybe-v1.13.0) (2026-08-03)
+
+
+### Features
+
+* **cli:** post partial results when the process is signalled ([#367](https://github.com/MattJColes/lgtmaybe/issues/367)) ([1819896](https://github.com/MattJColes/lgtmaybe/commit/18198965ea30e54928f04b7f798852ddeaa91222))
+* **engine:** skip oversized files and more generated artefacts ([#366](https://github.com/MattJColes/lgtmaybe/issues/366)) ([bb03da6](https://github.com/MattJColes/lgtmaybe/commit/bb03da602d6764f96ee5b6221abacb2c73f868f0))
+
+
+### Bug Fixes
+
+* **providers:** deliver the reasoning budget on OpenRouter, and never drop a param in silence ([#369](https://github.com/MattJColes/lgtmaybe/issues/369)) ([afcc0b8](https://github.com/MattJColes/lgtmaybe/commit/afcc0b89df3bedabf0ba26e7db8afb09d428f88a)), closes [#348](https://github.com/MattJColes/lgtmaybe/issues/348)
+
+
+### Performance Improvements
+
+* **ci:** start no job for a comment with no slash command ([#365](https://github.com/MattJColes/lgtmaybe/issues/365)) ([e72903d](https://github.com/MattJColes/lgtmaybe/commit/e72903dcbdfc12010b45a3a1bf246f013c744359))
+* **engine:** stop splitting a truncation the thinking budget caused ([#368](https://github.com/MattJColes/lgtmaybe/issues/368)) ([85c5258](https://github.com/MattJColes/lgtmaybe/commit/85c52583c9094ae4ee7396e1f35fb34819b3a888))
+
 ## [1.12.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.12.1...lgtmaybe-v1.12.2) (2026-08-03)
 
 
