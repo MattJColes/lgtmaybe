@@ -130,7 +130,9 @@ A completion that stopped because it ran out of output tokens SHALL be raised
 as its own failure naming `max_tokens` as the ceiling reached — usually a value
 the user set, not the model's own — plus the reasoning-token count where the
 route reports it, and SHALL carry the cut-off body so the engine can salvage the
-findings finished before the cut. It SHALL NOT be retried — at temperature 0 the
+findings finished before the cut, and both counts as data so a caller can tell a
+long answer from exhausted thinking without reading the message. It SHALL NOT be
+retried — at temperature 0 the
 identical request reaches the identical ceiling, and each attempt costs a full
 ceiling-length generation — while a configured fallback model is still tried.
 Detection reads the finish reason only where the route reports it plainly:
@@ -145,8 +147,13 @@ names a ceiling hit its own way is caught downstream by the parser instead.
 
 #### Scenario: a reasoning model spends the budget on thought
 - **WHEN** the route reports reasoning tokens on a truncated completion
-- **THEN** the failure names them, because that — not diff size — is why a small
-  diff hit the ceiling
+- **THEN** the failure names them and carries them beside the ceiling as numbers,
+  because that — not diff size — is why a small diff hit the ceiling
+
+#### Scenario: the route reports no reasoning breakdown
+- **WHEN** a truncated completion carries no reasoning count
+- **THEN** the failure carries none either, never zero — "it never said" must not
+  read as "it thought nothing"
 
 #### Scenario: the route misreports why it stopped
 - **WHEN** a provider reports a ceiling hit under a name litellm maps to `stop`

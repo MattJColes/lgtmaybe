@@ -14,6 +14,8 @@ Two wrinkles the timeout does not have:
   `max_tokens` budget on thought, so a fifteen-line diff can truncate too. A
   piece that truncates again is a reachable state, not a theoretical one, and it
   must terminate naming the lever that can actually move — never recurse.
+- When the numbers say the ceiling went on thought, the split is skipped
+  outright: it cannot help, and attempting it re-spends the ceiling per piece.
 """
 
 from __future__ import annotations
@@ -69,6 +71,13 @@ _CEILING = (
     "response hit the 16384-token `max_tokens` ceiling (16200 reasoning) before "
     "finishing — raise `max_tokens`, or lower `max_input_tokens` so each call covers less"
 )
+
+
+# The same failure, but the numbers say the ceiling went on *thought*. Measured
+# on a real self-review: five of nine calls spent 25,963–35,463 tokens reasoning
+# against a 32,768 ceiling, i.e. the whole budget, before writing one finding.
+_REASONING_CEILING = 32768
+_REASONING_SPENT = 32194
 
 
 def _ctx(diff: str, files: list[str]) -> PRContext:
@@ -229,6 +238,143 @@ def test_an_unsplittable_batch_reports_the_ceiling_with_its_salvage() -> None:
     # And it names the lever that can still move. Shrinking is spent, so pointing
     # only at `max_input_tokens` would be advice the reader has already taken.
     assert "`max_tokens`" in summary
+
+
+class _TruncatesOnReasoning(FakeProvider):
+    """Every call spends the whole ceiling thinking, whatever the payload is.
+
+    The shape issue #348 measured: a reasoning model's thinking budget is the
+    same `max_tokens` ceiling, and it does not shrink when the diff does.
+    """
+
+    def __init__(self, partial: str = "") -> None:
+        super().__init__()
+        self.diffs: list[str] = []
+        self._partial = partial
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        self.diffs.append("\n".join(str(m.get("content", "")) for m in messages))
+        raise ProviderTruncated(
+            _CEILING,
+            text=self._partial,
+            reasoning_tokens=_REASONING_SPENT,
+            output_tokens=_REASONING_CEILING,
+        )
+
+
+def test_a_reasoning_dominated_truncation_is_not_split() -> None:
+    """Splitting cannot shrink a thinking budget, so it is not attempted.
+
+    Halving the diff halves the payload, not the reasoning the model does before
+    it answers — issue #348 recorded a fifteen-line diff truncating at the same
+    ceiling. Splitting anyway burns the full ceiling again on every piece and
+    fails identically, which is pure added latency on an already-slow review.
+    """
+    provider = _TruncatesOnReasoning()
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(provider).review(_ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg())
+
+    assert len(provider.diffs) == 1  # the batch — and no pieces
+    # And it names the lever that can actually move. `max_tokens` cannot: the cap
+    # does not separate thinking from answering, so raising it buys more thought.
+    assert "reasoning_effort" in str(exc_info.value)
+
+
+def test_a_reasoning_dominated_truncation_keeps_its_salvage() -> None:
+    """Not splitting must not become "not salvaging".
+
+    The findings the model completed before the cut are real, already-paid-for
+    work on every path — the one that splits and the one that gives up on size.
+    """
+    partial = _cut_off_json("one.py", "early_change = os.sep", "sep is never validated")
+    findings, summary = LLMReviewEngine(_TruncatesOnReasoning(partial)).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert [f.title for f in findings] == ["sep is never validated"]
+    assert "results may be incomplete" in summary
+    assert "reasoning_effort" in summary
+
+
+def test_a_truncation_that_spent_its_ceiling_on_findings_is_still_split() -> None:
+    """The output-length truncation the split was built for is untouched.
+
+    A model that thought briefly and then wrote to the ceiling really did have
+    more to say than one response could hold — for that one, less to cover is
+    exactly the fix.
+    """
+
+    class _TruncatesWithLittleThought(_TruncatesUntilSmaller):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            diff = "\n".join(str(m.get("content", "")) for m in messages)
+            if "one.py" in diff and "two.py" in diff:
+                self.diffs.append(diff)
+                raise ProviderTruncated(
+                    _CEILING,
+                    text="",
+                    reasoning_tokens=2048,
+                    output_tokens=_REASONING_CEILING,
+                )
+            return super().complete(messages, model, **opts)
+
+    provider = _TruncatesWithLittleThought()
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]
+    assert len(provider.diffs) == 3  # the batch, then one call per half
+
+
+def test_a_piece_that_truncates_on_reasoning_names_the_lever_too() -> None:
+    """The diagnosis has to reach the piece, not only the whole batch.
+
+    A piece has nothing smaller to try, so it reports and stops either way — but
+    *what* it reports is the only thing the reader gets. Falling through to the
+    generic "raise `max_tokens`" there would send them to the one knob that
+    provably does not move this, after the split has already been paid for.
+
+    The batch's own truncation is answer-shaped (little thinking), so the split
+    is right to happen; the pieces are where the thinking wall shows up.
+    """
+
+    class _BatchRunsLongThenPiecesRunDeep(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.diffs: list[str] = []
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            diff = "\n".join(str(m.get("content", "")) for m in messages)
+            self.diffs.append(diff)
+            whole_batch = "one.py" in diff and "two.py" in diff
+            raise ProviderTruncated(
+                _CEILING,
+                text="",
+                reasoning_tokens=2048 if whole_batch else _REASONING_SPENT,
+                output_tokens=_REASONING_CEILING,
+            )
+
+    provider = _BatchRunsLongThenPiecesRunDeep()
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(provider).review(_ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg())
+
+    assert len(provider.diffs) == 3  # the batch, then its two halves — and stop
+    assert "reasoning_effort" in str(exc_info.value)
+
+
+def test_a_truncation_with_no_reasoning_breakdown_is_still_split() -> None:
+    """Silence from the route is not evidence of thinking.
+
+    Most routes report no reasoning count at all. Reading that as "reasoning
+    dominated" would switch off the split for every provider that stays quiet.
+    """
+    provider = _TruncatesUntilSmaller()
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]
+    assert len(provider.diffs) == 3
 
 
 def test_a_piece_that_fails_is_still_reported() -> None:

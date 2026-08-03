@@ -148,10 +148,10 @@ within budget are reviewed whole.
 
 A lens call that exhausts a per-request budget SHALL be retried on smaller
 pieces of the same batch rather than re-sent unchanged, bounded to one split
-level, with the shrink disclosed in the summary. Both budgets trigger it: the
-wall clock, and the `max_tokens` ceiling an answer runs into. Findings the model
-completed before a truncation SHALL be kept, and the lens SHALL still count as
-failed.
+level, the pieces reviewed concurrently, with the shrink disclosed in the
+summary. Both budgets trigger it: the wall clock, and the `max_tokens` ceiling
+an answer runs into. Findings the model completed before a truncation SHALL be
+kept, and the lens SHALL still count as failed.
 <!-- anchor: engine.timeout-split -->
 
 #### Scenario: a multi-file batch times out
@@ -177,6 +177,36 @@ failed.
 - **WHEN** part of a split batch is reviewed and part fails
 - **THEN** the findings are kept AND the failure is reported, so the summary never
   claims a shrunk batch was reviewed when some of it was not
+
+#### Scenario: the pieces are reviewed
+- **WHEN** a batch is split
+- **THEN** its pieces run together in an executor of their own, bounded by the
+  backend's concurrency — never resubmitted into the pool this call occupies
+
+### Requirement: A split is only attempted when covering less can help
+
+A truncation that spent essentially the whole ceiling reasoning SHALL NOT be
+split, and SHALL name `reasoning_effort` as the lever instead: a smaller payload
+does not shrink a thinking budget, so the split would re-spend the whole
+`max_tokens` ceiling on every piece and fail identically. The
+decision reads the counts the failure carries, never its message. Findings
+completed before the cut are kept on this path too, and a failure that says
+nothing about size is not split at all.
+<!-- anchor: engine.reasoning-ceiling -->
+
+#### Scenario: the ceiling went on thinking
+- **WHEN** a lens call truncates having spent nearly the whole ceiling reasoning
+- **THEN** no pieces are reviewed, the salvage is kept, and the notice names
+  `reasoning_effort` rather than `max_tokens`
+
+#### Scenario: the ceiling went on the answer
+- **WHEN** a truncated call spent only a small share of the ceiling reasoning
+- **THEN** the batch is split as usual — that call really did have more to say
+  than one response could hold
+
+#### Scenario: the route reports no reasoning count
+- **WHEN** a truncation carries no reasoning breakdown at all
+- **THEN** the batch is split as usual, because silence is not evidence of thinking
 
 #### Scenario: the failure says nothing about size
 - **WHEN** a lens call fails for any other reason (quota, bad key, unparseable)
