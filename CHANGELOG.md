@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.12.1...lgtmaybe-v1.12.2) (2026-08-03)
+
+
+### Dependencies
+
+* bump litellm in the python-dependencies group ([#363](https://github.com/MattJColes/lgtmaybe/issues/363)) ([d225fcc](https://github.com/MattJColes/lgtmaybe/commit/d225fcc22570eff3c41ecb966eea629cc46937dc))
+
 ## [1.12.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.12.0...lgtmaybe-v1.12.1) (2026-08-03)
 
 
