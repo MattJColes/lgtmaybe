@@ -48,6 +48,19 @@ max_tokens: 32768
 # tokens of thinking. Raising the cap never worked because the cap does not
 # separate thinking from answering — it buys the model more room to think.
 #
-# `low` is the separate lever. If findings start looking shallow, step up to
-# `medium` rather than raising max_tokens again.
+# The table above is real. The conclusion first drawn from it — "`low` is the
+# separate lever, step up to `medium` if findings look shallow" — was not: the
+# lever was never connected. litellm forwards `reasoning_effort` on openrouter
+# only for models its capability map already flags reasoning-capable, and the
+# model this repo points at is not in that map, so `drop_params` discarded the
+# value in silence. The proof it was still being discarded after this line was
+# added: #367's review, with `low` set right here, spent 34,012 reasoning tokens
+# on one lens against the 32,768 ceiling above and truncated.
+#
+# It is connected now — the budget goes out in OpenRouter's own top-level
+# `reasoning` object for models litellm won't forward it for, and a param that
+# would be dropped is warned about at startup instead of vanishing. So the
+# numbers below have yet to be re-measured against a budget that was actually
+# enforced. Read them as the evidence that the cap is the wrong lever, not as
+# evidence about what `low` does. Re-measure before moving this value.
 reasoning_effort: low

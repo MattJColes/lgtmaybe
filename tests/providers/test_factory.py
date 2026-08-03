@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.factory import build_provider, litellm_model_string
 
@@ -243,3 +247,132 @@ class TestDefaultTimeout:
             provider.complete([{"role": "user", "content": "hi"}], model="qwen3:27b")
 
         assert mock_completion.call_args.kwargs["model"] == "ollama/qwen3:27b"
+
+
+class TestParamSupport:
+    """A configured param the model will not honour is named, not swallowed.
+
+    litellm runs with ``drop_params`` on (so one unsupported param can't fail a
+    whole review), which means a param its capability map doesn't recognise for
+    a model is discarded with no warning at all. Every case below is judged
+    against litellm's REAL map, except the one that says it stubs it.
+    """
+
+    def test_an_unsupported_param_is_named_at_build_time(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """gpt-4o has no reasoning channel, so litellm drops ``reasoning_effort``.
+        The run has to say so — a silently dropped knob is indistinguishable from
+        a knob that did not work."""
+        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.factory"):
+            build_provider(Provider.openai, "gpt-4o", api_key="k", reasoning_effort="low")
+
+        assert any("reasoning_effort" in str(record.__dict__) for record in caplog.records)
+
+    def test_a_supported_param_is_not_warned_about(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.factory"):
+            build_provider(Provider.openai, "gpt-4o", api_key="k", max_tokens=8192)
+
+        assert caplog.records == []
+
+    def test_a_provider_native_option_is_not_warned_about(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``num_ctx`` is ollama's own option, not an OpenAI-vocabulary param, so
+        litellm's map never lists it and it is not litellm's to drop. Warning
+        about it would only train the reader to ignore the warning."""
+        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.factory"):
+            build_provider(Provider.ollama, "llama2", num_ctx=32768)
+
+        assert caplog.records == []
+
+    def test_the_check_is_not_a_hardcoded_param_list(self) -> None:
+        """Keyed off litellm's capability map, so a param nobody wrote a special
+        case for is covered too — which is the whole point of the mechanism."""
+        from lgtmaybe.providers.factory import dropped_params
+
+        assert dropped_params(Provider.anthropic, "claude-3-haiku-20240307", ["logprobs"]) == [
+            "logprobs"
+        ]
+
+    def test_a_non_openai_option_is_never_reported_as_dropped(self) -> None:
+        """Only OpenAI-vocabulary params are judged; anything else rides through
+        to the provider as a passthrough."""
+        from lgtmaybe.providers.factory import dropped_params
+
+        assert dropped_params(Provider.ollama, "llama2", ["num_ctx", "think"]) == []
+
+
+class TestOpenRouterReasoning:
+    """OpenRouter's native ``reasoning`` field, for models litellm's map misses."""
+
+    def test_unmapped_model_gets_the_native_reasoning_field(self) -> None:
+        """litellm only forwards ``reasoning_effort`` on openrouter for a model
+        its capability map flags reasoning-capable — which the newest models are
+        not. Those are exactly the models a reasoning budget gets set for, so the
+        budget goes out in OpenRouter's own top-level ``reasoning`` object."""
+        built = build_provider(Provider.openrouter, "vendor/unmapped-model", reasoning_effort="low")
+
+        assert built.default_opts["extra_body"] == {"reasoning": {"effort": "low"}}
+        assert "reasoning_effort" not in built.default_opts
+
+    def test_a_natively_forwarded_model_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OpenRouter rejects a request carrying BOTH fields with ``400 Only one
+        of "reasoning" and "reasoning_effort" may be provided`` — so when litellm
+        will forward the flat param itself, nothing may be injected beside it.
+        The capability map is stubbed here so the guarantee does not depend on a
+        particular model staying in litellm's map across a dependency bump."""
+        import litellm
+
+        real = litellm.get_supported_openai_params
+        monkeypatch.setattr(
+            litellm,
+            "get_supported_openai_params",
+            lambda **kw: [*(real(**kw) or []), "reasoning_effort"],
+        )
+        built = build_provider(
+            Provider.openrouter, "vendor/reasoning-model", reasoning_effort="low"
+        )
+
+        assert built.default_opts.get("reasoning_effort") == "low"
+        assert "extra_body" not in built.default_opts
+
+    def test_a_value_with_no_native_equivalent_is_reported_not_translated(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``default`` is in litellm's normalised set but not in OpenRouter's
+        ``reasoning.effort`` enum (none/minimal/low/medium/high/xhigh). Sending a
+        nearby value instead would quietly buy a budget nobody asked for."""
+        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.factory"):
+            built = build_provider(
+                Provider.openrouter, "vendor/unmapped-model", reasoning_effort="default"
+            )
+
+        assert "extra_body" not in built.default_opts
+        assert any("reasoning_effort" in str(record.__dict__) for record in caplog.records)
+
+    def test_the_native_field_survives_litellms_own_transformation(self) -> None:
+        """One layer past our own kwargs: litellm's openrouter transformation
+        assigns its own `extra_body` (for `transforms`/`models`/`route`), so a
+        bump that made that assignment clobber rather than merge would put us
+        back where we started — a budget that looks sent and never leaves."""
+        import litellm
+
+        built = build_provider(Provider.openrouter, "vendor/unmapped-model", reasoning_effort="low")
+        outbound = litellm.get_optional_params(
+            model="vendor/unmapped-model",
+            custom_llm_provider="openrouter",
+            drop_params=True,
+            extra_body=built.default_opts["extra_body"],
+        )
+
+        assert outbound["extra_body"]["reasoning"] == {"effort": "low"}
+
+    def test_no_other_route_is_reshaped(self) -> None:
+        """Scoped to openrouter: every other route keeps the request shape it has
+        always sent."""
+        built = build_provider(Provider.openai, "gpt-4o", api_key="k", reasoning_effort="low")
+
+        assert "extra_body" not in built.default_opts

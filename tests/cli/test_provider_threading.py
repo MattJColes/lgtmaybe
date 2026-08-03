@@ -342,6 +342,32 @@ def test_reasoning_effort_flag_reaches_litellm(captured_completion: list[dict[st
         [
             "review",
             "--provider",
+            "ollama",
+            "--model",
+            "llama3",
+            "--no-reflect",
+            "--reasoning-effort",
+            "low",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_completion[0].get("reasoning_effort") == "low"
+
+
+def test_reasoning_effort_reaches_openrouter_as_its_native_field(
+    captured_completion: list[dict[str, Any]],
+) -> None:
+    """On openrouter, litellm forwards `reasoning_effort` only for models its
+    capability map flags reasoning-capable — the newest models are not in it, so
+    the budget was silently discarded on exactly the models it was set for. It
+    goes out as OpenRouter's own top-level `reasoning` object instead, and never
+    alongside the flat param (OpenRouter 400s on both together)."""
+    result = CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
             "openrouter",
             "--model",
             "vendor/m",
@@ -354,7 +380,8 @@ def test_reasoning_effort_flag_reaches_litellm(captured_completion: list[dict[st
     )
 
     assert result.exit_code == 0, result.output
-    assert captured_completion[0].get("reasoning_effort") == "low"
+    assert captured_completion[0].get("extra_body") == {"reasoning": {"effort": "low"}}
+    assert "reasoning_effort" not in captured_completion[0]
 
 
 def test_reasoning_effort_is_absent_by_default(captured_completion: list[dict[str, Any]]) -> None:
