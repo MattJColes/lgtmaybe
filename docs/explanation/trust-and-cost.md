@@ -70,21 +70,38 @@ if: >-
   (github.event_name == 'pull_request_target' &&
    contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
   (github.event.issue.pull_request &&
-   contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+   contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+   (contains(github.event.comment.body, '/review') ||
+    contains(github.event.comment.body, '/improve') ||
+    contains(github.event.comment.body, '/ask') ||
+    contains(github.event.comment.body, '/describe') ||
+    contains(github.event.comment.body, '/diagram')))
 ```
 
 A maintainer can still review an outside contributor's PR any time by commenting
 `/review` on it — their own association passes the gate. To change the policy,
 edit the list:
 
-- **Open it up to everyone** — drop the `if:` so any PR or `/review` comment runs
-  a review.
+- **Open it up to everyone** — drop the author-association checks so any PR or
+  `/review` comment runs a review.
 - **Welcome returning contributors** — add `CONTRIBUTOR` to auto-review anyone
   whose PR has merged before.
 - **Tighten to admins** — keep just `OWNER` (and `MEMBER` for your org).
 
 Because the gate lives in the workflow YAML, not in the action's code, the policy
 is entirely yours.
+
+The second half of the comment arm is a different kind of thrift. `issue_comment`
+fires on every comment on every pull request, and lgtmaybe's answer to one that
+holds no slash command is to exit — correct, and free of tokens, but only after a
+runner has been claimed, a container pulled and Python booted. Deciding that in
+the `if:` costs nothing at all, and on a busy runner pool it is the difference
+between a review starting now and a review queueing behind comment threads. The
+clause is deliberately looser than the parser it stands in for — substring, not
+prefix, and case-insensitive — because a guard tighter than the parser would
+silently disable a command that used to work. Replies inside a finding thread
+arrive on the separate `pull_request_review_comment` event and are never gated
+this way; they are ordinary prose, and gating them would switch the feature off.
 
 ## If you want extra guardrails
 
