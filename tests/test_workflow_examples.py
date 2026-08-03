@@ -157,7 +157,7 @@ def test_self_triggered_workflows_discriminate_concurrency_by_event() -> None:
 
 
 def test_comment_arm_starts_no_job_without_a_slash_command() -> None:
-    """A comment carrying no slash command must not start a job at all.
+    """A comment carrying no slash command must not start the issue_comment job.
 
     `issue_comment` fires on every comment on every PR. Without this guard the
     runner is claimed, the container pulled and Python booted, only for
@@ -172,23 +172,33 @@ def test_comment_arm_starts_no_job_without_a_slash_command() -> None:
     """
     for path in _workflows():
         condition = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["review"]["if"]
+        flat = " ".join(condition.split())
 
         for command in SlashCommand:
-            assert f"github.event.comment.body, '/{command.value}'" in condition, (
+            assert f"github.event.comment.body, '/{command.value}'" in flat, (
                 f"{path.name} does not admit /{command.value}; its `if:` guard is tighter "
                 "than parse_command and would silently disable the command"
             )
-        # One guard per command and no more: the pull_request_review_comment arm
-        # is the answer_replies path, whose replies are plain prose. Gating it on
-        # a slash command would disable that feature outright.
-        assert condition.count("github.event.comment.body") == len(SlashCommand), (
-            f"{path.name} inspects the comment body outside the issue_comment arm"
+        # The command group must be ANDed onto the trusted-author check, with
+        # nothing but `&&` between them. Hoisted into its own `||` branch it
+        # would let ANY commenter — a stranger included — start a job, defeating
+        # the author-association gate whose whole job is to stop a drive-by
+        # /review spending the provider budget. Matched on the whitespace-
+        # normalised string and blind to the order of the commands inside the
+        # group, so a reflow or a reorder does not fail this.
+        assert re.search(
+            r"comment\.author_association\)\s*&&\s*\(\s*contains\(github\.event\.comment\.body",
+            flat,
+        ), (
+            f"{path.name} does not AND the slash-command group onto the trusted-author "
+            "check — as a separate `||` branch (or negated) it lets any commenter "
+            "start a job"
         )
-        guard_at = condition.index("github.event.comment.body")
-        assert condition.index("github.event.issue.pull_request") < guard_at, (
-            f"{path.name} does not place the slash-command guard in the issue_comment arm"
-        )
-        assert guard_at < condition.index("'pull_request_review_comment'"), (
+        # The pull_request_review_comment arm is the answer_replies path, whose
+        # replies are plain prose. Gating it on a command would disable the
+        # feature outright, so it must inspect no comment body at all.
+        reply_arm = flat[flat.index("'pull_request_review_comment'") :]
+        assert "github.event.comment.body" not in reply_arm, (
             f"{path.name} gates the reply arm on a slash command; replies carry none"
         )
 
