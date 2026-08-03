@@ -86,11 +86,22 @@ and default to **trusted contributors** — `OWNER`, `MEMBER`, and `COLLABORATOR
 A maintainer can also review an outside contributor's PR any time by commenting
 `/review` on it (their own association passes the gate).
 
+The same `if:` also requires a comment to actually carry a slash command before
+any job starts. `issue_comment` fires on every comment on every pull request, so
+without that clause an ordinary "lgtm, merging" would claim a runner, pull the
+container and boot Python only to find no command and exit — no tokens spent, but
+a job queued ahead of the reviews that do have work to do. The check is
+substring-based and case-insensitive, so `/REVIEW` and `/review full` both pass.
+It is not applied to the `pull_request_review_comment` arm: replies in a finding
+thread are ordinary prose and carry no command.
+
 To change the policy, edit the `if:` on the `review` job:
 
-- **Everyone** — drop the `if:` so any PR or `/ask` / `/review` comment runs a
-  review. A friendly choice for an open project — just remember that on a
-  hosted provider it means anyone can start a paid run, so pick it deliberately.
+- **Everyone** — drop the author-association checks so any PR or `/ask` /
+  `/review` comment runs a review (keep the slash-command clause, or every
+  comment starts a job). A friendly choice for an open project — just remember
+  that on a hosted provider it means anyone can start a paid run, so pick it
+  deliberately.
 - **Returning contributors too** — add `CONTRIBUTOR` to auto-review anyone whose
   PR has merged before.
 - **Admins only** — keep just `OWNER` (plus `MEMBER` for your org).
@@ -119,12 +130,18 @@ permissions:
 
 jobs:
   review:
-    # Only trusted authors (owner / member / collaborator) can trigger a review.
+    # Only trusted authors (owner / member / collaborator) can trigger a review,
+    # and a comment only starts a job when it carries a slash command.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram'))) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest

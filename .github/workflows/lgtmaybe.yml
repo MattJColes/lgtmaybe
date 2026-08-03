@@ -34,11 +34,31 @@ jobs:
     # review — automatically on their PRs, or via a slash command. This keeps a
     # drive-by /ask or /review from a stranger from spending the provider
     # budget, and skips comments that aren't on a pull request.
+    #
+    # The issue_comment arm also requires the body to carry one of our slash
+    # commands. issue_comment fires on EVERY comment on every PR, and without
+    # this a plain "lgtm, merging" claims a runner, pulls the container and boots
+    # Python only for the CLI to find no command and exit. Free of provider
+    # spend, but a whole job — and on a contended runner pool that queueing is
+    # what delays the reviews that do have work to do. The check is deliberately
+    # looser than `parse_command`, which additionally requires the command at the
+    # START of the body: `contains` is case-insensitive (so /REVIEW passes) and
+    # substring-based (so `/review full` passes). A guard tighter than the parser
+    # would silently disable a command that used to work.
+    #
+    # The pull_request_review_comment arm is NOT gated this way: that is the
+    # answer_replies path, where a PR author's reply inside a finding thread is
+    # plain prose with no command in it.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram'))) ||
       (github.event_name == 'pull_request_review_comment' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     # Two independent guards against cancelling our own review. The job scope

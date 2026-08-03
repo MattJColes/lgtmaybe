@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from lgtmaybe.cli.slash import SlashCommand
+
 _REPO_ROOT = Path(__file__).parent.parent
 _DOGFOOD_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "lgtmaybe.yml"
 _PROJECT_VERSION = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
@@ -152,6 +154,43 @@ def test_self_triggered_workflows_discriminate_concurrency_by_event() -> None:
                 f"but its {scope} concurrency group is not discriminated by event: "
                 f"{block.get('group')!r} — lgtmaybe's own comments will cancel its reviews"
             )
+
+
+def test_comment_arm_starts_no_job_without_a_slash_command() -> None:
+    """A comment carrying no slash command must not start a job at all.
+
+    `issue_comment` fires on every comment on every PR. Without this guard the
+    runner is claimed, the container pulled and Python booted, only for
+    `execute_comment` to find no command and exit — correct, free of provider
+    spend, and still a whole job. On a contended self-hosted pool that queueing
+    delays the reviews that do have work to do.
+
+    The guard is keyed on the command names the parser accepts, and is
+    deliberately looser than `parse_command` (which additionally requires the
+    command at the *start* of the body): a guard tighter than the parser would
+    silently disable a command that used to work.
+    """
+    for path in _workflows():
+        condition = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["review"]["if"]
+
+        for command in SlashCommand:
+            assert f"github.event.comment.body, '/{command.value}'" in condition, (
+                f"{path.name} does not admit /{command.value}; its `if:` guard is tighter "
+                "than parse_command and would silently disable the command"
+            )
+        # One guard per command and no more: the pull_request_review_comment arm
+        # is the answer_replies path, whose replies are plain prose. Gating it on
+        # a slash command would disable that feature outright.
+        assert condition.count("github.event.comment.body") == len(SlashCommand), (
+            f"{path.name} inspects the comment body outside the issue_comment arm"
+        )
+        guard_at = condition.index("github.event.comment.body")
+        assert condition.index("github.event.issue.pull_request") < guard_at, (
+            f"{path.name} does not place the slash-command guard in the issue_comment arm"
+        )
+        assert guard_at < condition.index("'pull_request_review_comment'"), (
+            f"{path.name} gates the reply arm on a slash command; replies carry none"
+        )
 
 
 def test_dogfood_workflow_uses_the_public_app_identity() -> None:
