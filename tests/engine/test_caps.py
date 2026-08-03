@@ -114,6 +114,83 @@ def test_file_cap_reviews_top_n_with_notice() -> None:
     assert "added line in f3.py" not in sent
 
 
+def _big_diff(path: str, added_lines: int) -> str:
+    """A single-file diff adding *added_lines* lines to *path*."""
+    body = "".join(f"+line {i} in {path}\n" for i in range(added_lines))
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        f"index 0000001..0000002 100644\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        f"@@ -1,1 +1,{added_lines + 1} @@\n"
+        f" first\n" + body
+    )
+
+
+def _ctx_from(diff: str, paths: list[str]) -> PRContext:
+    return PRContext(
+        diff=diff,
+        changed_files=paths,
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+
+
+def test_oversized_file_is_skipped_with_a_notice() -> None:
+    """A hand-named data blob no pattern can catch is skipped on size alone.
+
+    The motivating case is a generated 154k-line `clause_index.json`: nothing in
+    `is_reviewable` can know that name is machine-written, so the line cap is the
+    only deterministic defence — and, like the file cap, the skip must be named in
+    the summary rather than read as "everything was covered".
+    """
+    provider = _Provider([_A_FINDING])
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", max_file_diff_lines=10)
+
+    paths = ["data/clause_index.json", "src/app.py"]
+    diff = _big_diff("data/clause_index.json", 50) + _diff_for(["src/app.py"])
+    _findings, summary = engine.review(_ctx_from(diff, paths), cfg)
+
+    sent = " ".join(msg.get("content", "") for call in provider.calls for msg in call["messages"])
+    assert "line 0 in data/clause_index.json" not in sent
+    assert "added line in src/app.py" in sent
+    assert "clause_index.json" in summary
+    assert "max_file_diff_lines" in summary
+
+
+def test_oversized_skip_does_not_consume_the_file_cap() -> None:
+    """A size-skipped file is out of the review entirely, exactly like a lockfile
+    — so it must not count towards `max_files` and trigger a spurious cap notice."""
+    provider = _Provider([])
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(
+        provider=Provider.ollama, model="llama3", max_files=2, max_file_diff_lines=10
+    )
+
+    diff = _big_diff("blob.json", 50) + _diff_for(["a.py", "b.py"])
+    _findings, summary = engine.review(_ctx_from(diff, ["blob.json", "a.py", "b.py"]), cfg)
+
+    assert "file cap" not in summary
+    sent = " ".join(msg.get("content", "") for call in provider.calls for msg in call["messages"])
+    assert "added line in a.py" in sent
+    assert "added line in b.py" in sent
+
+
+def test_zero_disables_the_file_size_cap() -> None:
+    provider = _Provider([])
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", max_file_diff_lines=0)
+
+    _findings, summary = engine.review(_ctx_from(_big_diff("blob.json", 50), ["blob.json"]), cfg)
+
+    sent = " ".join(msg.get("content", "") for call in provider.calls for msg in call["messages"])
+    assert "line 0 in blob.json" in sent
+    assert "max_file_diff_lines" not in summary
+
+
 def test_generated_and_lockfiles_are_skipped() -> None:
     provider = _Provider([_A_FINDING])
     engine = LLMReviewEngine(provider)

@@ -81,6 +81,9 @@ _LOCKFILES = frozenset(
         "mix.lock",
         "Package.resolved",
         "gradle.lockfile",
+        "pubspec.lock",
+        "Podfile.lock",
+        "packages.lock.json",
     }
 )
 
@@ -128,9 +131,22 @@ _SKIP_DIR_PREFIXES = (
 _SKIP_GLOB_PATTERNS = (
     "*.min.js",
     "*.min.css",
+    # Snapshot corpora: jest writes `.snap`, syrupy (Python) writes `.ambr`.
     "*.snap",
+    "*.ambr",
     "*.pb.go",
     "*.pb.py",
+    # protoc output for Python (`_pb2`) and C++ (`.pb.cc` / `.pb.h`). The `.proto`
+    # source they are generated from stays reviewable.
+    "*_pb2.py",
+    "*_pb2.pyi",
+    "*.pb.cc",
+    "*.pb.h",
+    # Dart/Flutter build_runner output: json_serializable/built_value (`.g.dart`),
+    # freezed, and mockito's generated test doubles.
+    "*.g.dart",
+    "*.freezed.dart",
+    "*.mocks.dart",
     "*.generated.*",
     "*.d.ts",
     # Sourcemaps are compiler output, never hand-written.

@@ -185,6 +185,33 @@ class TestReviewCommandLocal:
         assert seen.get("uncommitted") is True
         assert seen.get("working") is False
 
+    def test_max_file_diff_lines_flag_reaches_the_config(self, monkeypatch):
+        """`--max-file-diff-lines` overrides the per-file size cap, like --max-files."""
+        seen: dict[str, object] = {}
+
+        class _CapturingEngine(FakeEngine):
+            def review(self, ctx, cfg):
+                seen["max_file_diff_lines"] = cfg.max_file_diff_lines
+                return super().review(ctx, cfg)
+
+        _patch_local(monkeypatch, engine=_CapturingEngine(FakeProvider()))
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "review",
+                "--provider",
+                "ollama",
+                "--model",
+                "llama3",
+                "--max-file-diff-lines",
+                "500",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert seen == {"max_file_diff_lines": 500}
+
 
 class TestDiagramCommand:
     def _patch_diagram_provider(self, monkeypatch):

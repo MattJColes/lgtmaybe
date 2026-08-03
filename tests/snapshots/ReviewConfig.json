@@ -602,6 +602,12 @@
       "default": null,
       "title": "Max Concurrency"
     },
+    "max_file_diff_lines": {
+      "default": 2000,
+      "minimum": 0,
+      "title": "Max File Diff Lines",
+      "type": "integer"
+    },
     "max_files": {
       "default": 50,
       "title": "Max Files",

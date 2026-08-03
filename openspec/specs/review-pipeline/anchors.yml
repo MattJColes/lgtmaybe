@@ -38,6 +38,12 @@ engine.path-filters:
     has: { field: name, regex: '^passes_path_filters$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+engine.size-cap:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^passes_size_cap$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.recursive-walk:
   - rule:
       kind: function_definition
