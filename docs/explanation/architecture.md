@@ -232,13 +232,23 @@ network recovers but a dead-end failure surfaces fast:
   posting workflows additionally set a job-level `timeout-minutes` so a wedged
   run can't hold a runner for GitHub's six-hour default — set above
   `max_review_seconds`, so the soft deadline (which still posts partial
-  findings) always fires before the runner is killed.
+  findings) fires before the runner is killed. If the runner does cut the job
+  short — a blown `timeout-minutes`, or `cancel-in-progress` on a new push — the
+  CLI's signal handler is the backstop (below).
 
 - **A whole-review deadline.** `max_review_seconds` (default 3600, `0` disables)
   is a soft ceiling on the run: once it passes, queued model calls are skipped
   — in-flight ones finish and their findings post — and the summary carries an
   explicit incomplete-results notice. It can never produce a silent LGTM: a
   run where every call failed or was skipped still fails loud.
+
+- **A termination signal does the same thing.** The CLI installs a
+  SIGINT/SIGTERM handler that sets the deadline's state, so a job the runner
+  cancels or times out stops dispatching model calls and posts what it already
+  has, with a notice naming the interruption, instead of dying with nothing on
+  the PR. The handler is installed by the CLI entrypoint only (importing
+  lgtmaybe as a library never touches your signal handlers), and it restores the
+  previous handler as it fires — a second signal still kills the process.
 
 - **Incompleteness is visible on the PR, not just in the log.** The notice above
   is not specific to the deadline: *any* failed lens call (a per-call timeout, a

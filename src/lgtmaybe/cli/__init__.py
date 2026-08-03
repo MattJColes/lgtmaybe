@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import sys
 from collections import Counter
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ from lgtmaybe.engine import (
     LLMReviewEngine,
     SymbolResolver,
     build_symbol_resolver,
+    request_interrupt,
 )
 from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.github import RestGitHubGateway
@@ -890,10 +892,64 @@ def _utf8_stdio() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
 
 
+@contextmanager
+def graceful_interrupt() -> Iterator[None]:
+    """Turn the FIRST SIGINT/SIGTERM into the engine's partial-results wind-down.
+
+    A CI job that blows its `timeout-minutes`, or a run cancelled by
+    `cancel-in-progress`, is signalled before it is killed. Ignoring that signal
+    is why an over-running review posts *nothing* — no findings, no failure
+    comment. The handler sets the same state the `max_review_seconds` deadline
+    sets, so queued model calls are skipped and the review posts what it already
+    has (see `engine.request_interrupt`).
+
+    Installed here, in the CLI entrypoint, and never at import time: importing
+    lgtmaybe as a library must not hijack a host application's handlers. The
+    previous handler is restored on the way out *and* on the first signal — so a
+    second signal takes its normal course and the process is still killable if
+    the wind-down itself hangs. Off the main thread (where `signal.signal`
+    raises) and on a platform missing a signal, this is a no-op.
+    """
+    previous: dict[int, Any] = {}
+
+    def _restore() -> None:
+        for sig in list(previous):
+            handler = previous.pop(sig, None)
+            if handler is not None:
+                with suppress(ValueError, OSError):
+                    signal.signal(sig, handler)
+
+    def _on_signal(signum: int, _frame: Any) -> None:
+        _restore()
+        _log.warning(
+            "interrupted — winding down and posting partial results",
+            extra={"signal": signum},
+        )
+        request_interrupt()
+
+    try:
+        for name in ("SIGINT", "SIGTERM"):
+            sig = getattr(signal, name, None)
+            if sig is not None:
+                previous[sig] = signal.signal(sig, _on_signal)
+    except (ValueError, OSError):
+        # Not the main thread, or the platform won't take this handler: degrade
+        # to the process's normal termination behaviour rather than fail.
+        _restore()
+    try:
+        yield
+    finally:
+        _restore()
+
+
 @click.group(epilog=_EPILOG)
-def main() -> None:
+@click.pass_context
+def main(ctx: click.Context) -> None:
     """lgtmaybe — provider-agnostic PR reviewer."""
     _utf8_stdio()
+    # Held open for the subcommand: click closes the context (and this resource)
+    # once the command it dispatches to has returned.
+    ctx.with_resource(graceful_interrupt())
 
 
 @main.group(name="config")
@@ -915,6 +971,7 @@ __all__ = [
     "execute_local_review",
     "execute_review",
     "execute_review_reply",
+    "graceful_interrupt",
     "main",
     "parse_pr_url",
     "pr_url_from_event",
