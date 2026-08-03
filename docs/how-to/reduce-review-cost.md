@@ -262,6 +262,28 @@ model more room to think.
 
 Unset sends nothing, so a route without a reasoning channel is unaffected.
 
+#### On OpenRouter, check the log line
+
+litellm forwards `reasoning_effort` to OpenRouter only for models its capability
+map already flags reasoning-capable, and the newest models — the ones a
+reasoning budget is usually set for — are not in it. lgtmaybe sends the budget
+in OpenRouter's own top-level `reasoning` object for those, so the setting is
+enforced either way.
+
+More generally, any configured param the resolved model will not accept is named
+once at startup rather than discarded in silence:
+
+```
+configured params are not supported by this model and will be ignored
+```
+
+If you see that line naming a setting you meant to apply, the setting is not in
+force — pick a different model, or drop the setting. `reasoning_effort: default`
+on OpenRouter is one real case: it is in litellm's vocabulary but not in
+OpenRouter's `reasoning.effort` enum (`none`, `minimal`, `low`, `medium`,
+`high`, `xhigh`), so it is reported rather than quietly turned into a nearby
+level.
+
 ## What costs more, on purpose
 
 One setting in this guide runs the other way: **`mid_review_retrieval`** buys

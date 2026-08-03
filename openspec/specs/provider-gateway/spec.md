@@ -124,6 +124,38 @@ stdout banner SHALL be suppressed, since stdout carries machine-readable output.
 - **WHEN** litellm maps a provider error while `--format json` is in force
 - **THEN** nothing is printed to stdout, so the findings array stays parseable
 
+### Requirement: A configured param is never discarded in silence
+
+The factory SHALL name at startup every param the user configured that litellm's
+capability map says the resolved model will not accept. `drop_params` is on so
+one unsupported param cannot fail a whole review; the cost is that a knob which
+was never connected is otherwise indistinguishable from one that did not help.
+The check is keyed off litellm's own maps rather than a per-param special case,
+and judges only OpenAI-vocabulary params — a provider-native option (ollama's
+`num_ctx`) is not litellm's to drop. As a deliberate, narrowly scoped exception
+to normalising every provider through litellm, a reasoning budget litellm will
+not forward to OpenRouter SHALL instead be sent as OpenRouter's own top-level
+`reasoning` object — and never beside the flat param, which OpenRouter rejects.
+<!-- anchor: provider.param-support -->
+
+#### Scenario: the model has no channel for a configured param
+- **WHEN** a reasoning budget is configured for a model litellm's map says has
+  no reasoning channel
+- **THEN** the run names the ignored param up front, rather than the budget
+  vanishing and leaving a truncated review to be blamed on the diff
+
+#### Scenario: OpenRouter fronts a model litellm's map does not know
+- **WHEN** a reasoning budget is configured on openrouter and litellm would drop
+  it — its transformation forwards the flat param only for models already flagged
+  reasoning-capable, which the newest models are not
+- **THEN** the budget goes out in OpenRouter's native `reasoning` object, and the
+  flat param is not sent alongside it
+
+#### Scenario: the configured value has no equivalent on the route
+- **WHEN** a configured value is outside the route's own vocabulary
+- **THEN** it is reported as ignored rather than translated into a nearby value,
+  which would buy a budget nobody asked for
+
 ### Requirement: A blown output ceiling is named, not retried
 
 A completion that stopped because it ran out of output tokens SHALL be raised

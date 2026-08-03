@@ -14,13 +14,17 @@ litellm model-string conventions:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
+from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.constants import CLOUD_TIMEOUT, DEFAULT_OLLAMA_BASE
 
 if TYPE_CHECKING:
     from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+_log = get_logger(__name__)
 
 _PREFIXES: dict[Provider, str] = {
     Provider.openai: "openai",
@@ -100,6 +104,85 @@ def litellm_model_string(provider: Provider, model: str) -> str:
     return f"{_PREFIXES[provider]}/{model}"
 
 
+# The values OpenRouter's own `reasoning.effort` field accepts. `default` — which
+# litellm's normalised set includes — has no equivalent here, so it is reported
+# as dropped rather than translated into a nearby level nobody asked for.
+_OPENROUTER_REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
+
+
+def dropped_params(provider: Provider, model: str, params: Iterable[str]) -> list[str]:
+    """The names in *params* that litellm will silently discard for this model.
+
+    The adapter runs with ``drop_params`` on so one unsupported param can't fail
+    a whole review — the cost is that a param litellm's capability map doesn't
+    list for a model vanishes with no warning at all, and a knob that was never
+    connected is indistinguishable from a knob that didn't help.
+
+    Keyed off litellm's own two maps rather than a per-param special case, so a
+    param added to the config later is covered without touching this function.
+    Only OpenAI-vocabulary params are judged: a provider-native option (ollama's
+    ``num_ctx``/``think``) never appears in the capability map and is not
+    litellm's to drop, so flagging it would only teach the reader to ignore the
+    warning. A lookup failure reports nothing — this is instrumentation, and it
+    must never be the reason a review doesn't run.
+    """
+    import litellm
+
+    # litellm re-exports this but doesn't list it in __all__, so mypy rejects
+    # litellm.OPENAI_CHAT_COMPLETION_PARAMS — import it from where it's defined.
+    from litellm.constants import OPENAI_CHAT_COMPLETION_PARAMS
+
+    try:
+        supported = set(
+            litellm.get_supported_openai_params(
+                model=model, custom_llm_provider=_PREFIXES[provider]
+            )
+            or []
+        )
+    except Exception:  # pragma: no cover - defensive; litellm raises on odd ids
+        return []
+    return sorted(
+        name for name in params if name in OPENAI_CHAT_COMPLETION_PARAMS and name not in supported
+    )
+
+
+def _honour_param_support(provider: Provider, model: str, opts: dict[str, Any]) -> None:
+    """Say (once, up front) which configured params this model will discard, and
+    re-route the one that has a native home on OpenRouter.
+
+    The OpenRouter branch is a DELIBERATE, narrowly scoped exception to the
+    "litellm normalises every provider to one `completion()` call" decision in
+    CLAUDE.md — not licence for general per-provider plumbing. The reason it has
+    to exist here: litellm's openrouter transformation only forwards
+    ``reasoning_effort`` when its capability map already flags the model
+    reasoning-capable, and the newest models are not in that map — which is
+    exactly the set a reasoning budget gets configured for. OpenRouter itself
+    accepts the budget as a top-level ``reasoning`` object regardless of model,
+    so that is what gets sent, via ``extra_body``.
+
+    Never both: OpenRouter answers a request carrying ``reasoning`` *and*
+    ``reasoning_effort`` with ``400 Only one of "reasoning" and
+    "reasoning_effort" may be provided``. So the object is only added on the
+    branch where litellm has already been observed to drop the flat param, and
+    the flat param is removed when it is.
+    """
+    dropped = dropped_params(provider, model, opts)
+    if provider is Provider.openrouter and "reasoning_effort" in dropped:
+        effort = opts.pop("reasoning_effort")
+        if effort in _OPENROUTER_REASONING_EFFORTS:
+            opts["extra_body"] = {**opts.get("extra_body", {}), "reasoning": {"effort": effort}}
+            dropped.remove("reasoning_effort")
+    if dropped:
+        _log.warning(
+            "configured params are not supported by this model and will be ignored",
+            extra={
+                "provider": provider.value,
+                "model": litellm_model_string(provider, model),
+                "ignored_params": dropped,
+            },
+        )
+
+
 def build_provider(
     provider: Provider,
     model: str,
@@ -125,6 +208,12 @@ def build_provider(
     resolved_model = litellm_model_string(provider, model)
     resolved_fallback = litellm_model_string(provider, fallback_model) if fallback_model else None
     opts: dict[str, Any] = dict(extra_opts)
+
+    # Before anything the factory itself adds (timeout, credentials, ollama's own
+    # options), so what is judged is exactly what the USER configured — and it is
+    # judged here because this is where the litellm model string the capability
+    # map keys on comes into existence.
+    _honour_param_support(provider, model, opts)
 
     opts["timeout"] = timeout if timeout is not None else default_timeout_for(provider)
 
