@@ -172,8 +172,9 @@ and the same reply the resolve-on-fix path uses.
 
 ### Requirement: Generated and binary files are skipped
 
-Lockfiles, minified bundles, vendored trees, binary files, and generated LLM-index corpora (`llms.txt` / `llms-full.txt`) SHALL be excluded from review
-before any path filter or cap applies.
+Lockfiles, minified bundles, vendored trees, binary files, code-generator output (protobuf, Dart `build_runner`), snapshot corpora, and generated LLM-index corpora (`llms.txt` / `llms-full.txt`) SHALL be excluded from review
+before any path filter or cap applies. Lockfiles SHALL stay scannable, so a new
+lockfile joins the lockfile set rather than the generated-path patterns.
 <!-- anchor: github.reviewable -->
 
 #### Scenario: lockfile in the diff

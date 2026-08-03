@@ -497,6 +497,21 @@ class LLMReviewEngine(ReviewEngine):
                 and passes_path_filters(path, include=cfg.include_paths, exclude=cfg.exclude_paths)
             ]
 
+            # 2b. Per-file size cap: a patch longer than max_file_diff_lines is a
+            #     data blob or a generated file the name-based filter could not
+            #     recognise. Drop it here — before batching, so the recursive walk
+            #     never decomposes it into hundreds of per-hunk calls — and record
+            #     the names, because a silent drop reads as "everything was
+            #     covered". Like a lockfile skip, it never counts against max_files.
+            oversized: list[str] = []
+            kept: list[tuple[str, str]] = []
+            for path, patch in file_patches:
+                if passes_size_cap(patch, cfg.max_file_diff_lines):
+                    kept.append((path, patch))
+                else:
+                    oversized.append(path)
+            file_patches = kept
+
             # 3. File cap: review only the first N reviewable files, note the rest.
             total_files = len(file_patches)
             capped_files = total_files > cfg.max_files
@@ -831,6 +846,16 @@ class LLMReviewEngine(ReviewEngine):
             notices.append(
                 f"⚠️ Reviewed the top {cfg.max_files} of {total_files} changed files "
                 f"(file cap {cfg.max_files}). Raise max_files to review them all."
+            )
+        if oversized:
+            # Transparency, same rule as the file cap: a skip must be visible.
+            plural_big = _plural(len(oversized))
+            listed_big = ", ".join(f"`{p}`" for p in oversized[:10])
+            more_big = ", …" if len(oversized) > 10 else ""
+            notices.append(
+                f"📄 Skipped {len(oversized)} oversized file{plural_big} "
+                f"(over {cfg.max_file_diff_lines} diff lines): {listed_big}{more_big}. "
+                "Raise `max_file_diff_lines` (0 disables) to review them."
             )
         if skipped_by_triage:
             # Transparency: a triage skip must be visible, never silent.
@@ -1368,6 +1393,20 @@ def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) ->
     return not any(_matches_glob(path, pattern) for pattern in exclude)
 
 
+def passes_size_cap(patch: str, max_lines: int) -> bool:
+    """Whether one file's *patch* is small enough to be worth reviewing.
+
+    The companion to the name-based skip filter, which can only recognise a
+    generated file that ADMITS it in its name. A hand-named data blob — a
+    154,000-line index, an 18,000-line snapshot corpus — has no such tell, so
+    size is the deterministic signal left. Counting the patch's own lines (not
+    the file's) keeps the judgement about what this PR actually changed.
+
+    ``max_lines`` of 0 disables the cap.
+    """
+    return not max_lines or patch.count("\n") <= max_lines
+
+
 def _matches_glob(path: str, pattern: str) -> bool:
     if fnmatchcase(path, pattern):
         return True
@@ -1379,14 +1418,15 @@ def files_not_visible(changed_files: Sequence[str], batch_paths: set[str]) -> li
 
     Derived, not captured. One subtraction covers every way a file goes missing
     before a lens sees it — the hardcoded generated/binary/vendored skip, the
-    include/exclude globs, the ``max_files`` cap, a triage skip, an incremental
-    scope, and simply being in another batch — because it asks what is left of
-    the PR after this batch rather than which filter removed what.
+    include/exclude globs, the ``max_file_diff_lines`` size cap, the
+    ``max_files`` cap, a triage skip, an incremental scope, and simply being in
+    another batch — because it asks what is left of the PR after this batch
+    rather than which filter removed what.
 
-    Capturing at each filter instead would mean five call sites kept in sync,
-    three of which have no pattern list to report (the skip filter is hardcoded
-    rules, the cap is a count, triage is a per-file model verdict) — and it
-    would still miss batching, which has the widest reach of the six: the intent
+    Capturing at each filter instead would mean six call sites kept in sync,
+    four of which have no pattern list to report (the skip filter is hardcoded
+    rules, the caps are counts, triage is a per-file model verdict) — and it
+    would still miss batching, which has the widest reach of the seven: the intent
     lens runs once PER BATCH, so on a multi-batch PR every call is judging the
     whole PR's promise against a fraction of the change.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from lgtmaybe.github import build_commentable_lines, is_reviewable
+from lgtmaybe.github.diff import is_scannable_manifest
 
 # ---------------------------------------------------------------------------
 # Commentable-line index
@@ -301,3 +302,45 @@ def test_is_reviewable_accepts_a_dotfile_named_like_an_extension() -> None:
 def test_is_reviewable_rejects_sourcemaps() -> None:
     assert not is_reviewable("assets/app.js.map")
     assert not is_reviewable("assets/styles.css.map")
+
+
+def test_is_reviewable_rejects_mobile_ecosystem_lockfiles() -> None:
+    """Lockfiles from the mobile / .NET ecosystems, all generated resolvers.
+
+    They join `_LOCKFILES` rather than the glob list so they are also fetched
+    for vulnerability scanning — `osv-scanner` reads all three.
+    """
+    for path in (
+        "pubspec.lock",
+        "Podfile.lock",
+        "packages.lock.json",
+        "ios/Podfile.lock",
+        "app/pubspec.lock",
+    ):
+        assert not is_reviewable(path), path
+        assert is_scannable_manifest(path), path
+
+
+def test_is_reviewable_rejects_dart_codegen() -> None:
+    """build_runner output: json_serializable (`.g.dart`), freezed, mockito."""
+    assert not is_reviewable("lib/models/user.g.dart")
+    assert not is_reviewable("lib/models/user.freezed.dart")
+    assert not is_reviewable("test/repo_test.mocks.dart")
+    # Control: the hand-written source these are generated FROM stays reviewable.
+    assert is_reviewable("lib/models/user.dart")
+
+
+def test_is_reviewable_rejects_syrupy_snapshots() -> None:
+    """`.ambr` is syrupy's snapshot format — the Python analogue of jest's
+    `.snap`, which was already covered."""
+    assert not is_reviewable("tests/__snapshots__/test_api.ambr")
+
+
+def test_is_reviewable_rejects_protobuf_outputs() -> None:
+    """protoc output for Python and C++, alongside the Go rule already present."""
+    assert not is_reviewable("proto/service_pb2.py")
+    assert not is_reviewable("proto/service_pb2.pyi")
+    assert not is_reviewable("proto/service.pb.cc")
+    assert not is_reviewable("proto/service.pb.h")
+    # Control: the .proto source is hand-written.
+    assert is_reviewable("proto/service.proto")

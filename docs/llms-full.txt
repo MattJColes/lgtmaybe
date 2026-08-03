@@ -3972,6 +3972,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `language` | string / null | No | `null` | Language |
 | `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
+| `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
@@ -4691,6 +4692,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": null,
       "title": "Max Concurrency"
     },
+    "max_file_diff_lines": {
+      "default": 2000,
+      "minimum": 0,
+      "title": "Max File Diff Lines",
+      "type": "integer"
+    },
     "max_files": {
       "default": 50,
       "title": "Max Files",
@@ -5219,6 +5226,10 @@ Before the diff reaches the model it is cleaned:
 - **Non-reviewable files are skipped** — lockfiles, minified/bundled assets,
   vendored directories, generated LLM-index corpora (`llms.txt` / `llms-full.txt`),
   and binaries. Reviewing them is noise and wastes tokens.
+- **Oversized files are skipped** — a single file whose diff runs past
+  `max_file_diff_lines` (default 2000, `0` disables) is dropped and named in the
+  summary. Name matching can only catch generated files that admit it in their
+  name; a hand-named 154,000-line data blob is caught on size alone.
 - **Secrets are redacted** — anything that looks like a key or token is stripped
   from the diff before it leaves your environment for the provider.
 
@@ -5439,9 +5450,10 @@ Where the stated intent comes from:
 ### The lens is told what it was not shown
 
 An intent lens judging "did the author keep their promise?" against a *filtered*
-diff will call a kept promise broken. Files go missing for six different
+diff will call a kept promise broken. Files go missing for seven different
 reasons — the generated/binary/vendored skip, your `include_paths` /
-`exclude_paths` globs, the `max_files` cap, a triage skip, an incremental
+`exclude_paths` globs, the `max_file_diff_lines` size cap, the `max_files` cap,
+a triage skip, an incremental
 scope, and simply being in another batch (the lens runs once **per batch**, so
 on a large PR each call sees only part of the change).
 
@@ -5490,6 +5502,7 @@ configurable in `.lgtmaybe.yml` (see
 |---|---|---|
 | `preset` | `fast` | `fast` uses four calls — security, correctness, code health, artefacts — on every provider; `full` runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
+| `max_file_diff_lines` | 2000 | Skips any single file whose diff is longer, naming it in the summary. `0` disables. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
 | `max_concurrency` | 8 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
 | `max_review_seconds` | 3600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |

@@ -34,6 +34,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `language` | string / null | No | `null` | Language |
 | `learn_feedback` | boolean | No | `True` | Learn Feedback |
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
+| `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
 | `max_files` | integer | No | `50` | Max Files |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
@@ -752,6 +753,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Max Concurrency"
+    },
+    "max_file_diff_lines": {
+      "default": 2000,
+      "minimum": 0,
+      "title": "Max File Diff Lines",
+      "type": "integer"
     },
     "max_files": {
       "default": 50,

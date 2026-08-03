@@ -650,6 +650,22 @@ class ReviewConfig(_Strict):
     include_paths: list[str] = Field(default_factory=list)
     exclude_paths: list[str] = Field(default_factory=list)
     max_files: int = 50
+    # Per-file diff-size cap: a single file whose patch is longer than this many
+    # lines is dropped before any model call, and named in the summary notice.
+    #
+    # The name-based skip filter (`is_reviewable`) can only catch generated files
+    # that ADMIT it in their name. It cannot catch a hand-named data blob — a
+    # 154,000-line `clause_index.json`, an 18,000-line snapshot corpus — and those
+    # are exactly the files that dominate a review's token bill while yielding
+    # nothing worth commenting on. Size is the deterministic signal left, and
+    # spending it here costs nothing: the file never reaches the provider, and the
+    # recursive walk never splits it into hundreds of per-hunk calls.
+    #
+    # 2000 sits well above a real hand-written file change (a 2000-line single-file
+    # patch is already past what any human reviews in one sitting) and far below
+    # the generated artefacts above, so the default catches blobs without ever
+    # silently dropping honest work. 0 disables the cap.
+    max_file_diff_lines: int = Field(default=2000, ge=0)
     max_input_tokens: int = 100_000
     # RLM-style recursive walk: when a single file's diff exceeds
     # max_input_tokens, split it into per-hunk review calls instead of sending it

@@ -107,6 +107,25 @@ on every host.
   only by letter case
 - **THEN** the path does not match on Windows or POSIX hosts
 
+### Requirement: Oversized single files are skipped and named
+
+A file whose own patch exceeds `max_file_diff_lines` SHALL be dropped in the
+same stage as the skip and path filters — before batching, so no model call and
+no recursive walk ever sees it — and every dropped path SHALL be named in the
+summary notice, because a silent drop reads as "everything was covered". The
+skip SHALL NOT count towards `max_files`, exactly like a lockfile skip. `0`
+disables the cap. This is the deterministic backstop for generated content the
+name-based filter cannot recognise.
+<!-- anchor: engine.size-cap -->
+
+#### Scenario: a hand-named generated data blob
+- **WHEN** the PR changes a 154,000-line `clause_index.json` and one source file
+- **THEN** only the source file is reviewed and the summary names the skipped blob
+
+#### Scenario: the cap is disabled
+- **WHEN** `max_file_diff_lines` is `0`
+- **THEN** no file is skipped for size and no size notice is posted
+
 ### Requirement: Over-budget files walk hunk-by-hunk
 
 When one file's diff exceeds `max_input_tokens`, the engine SHALL decompose it
