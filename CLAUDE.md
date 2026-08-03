@@ -285,9 +285,15 @@ pattern, event bus, plugin framework.
      `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
      cloud, 1 ollama/openai-compatible), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
-     A soft whole-review deadline (`max_review_seconds`, default 1800s, 0 = off)
+     A soft whole-review deadline (`max_review_seconds`, default 3600s, 0 = off)
      skips still-queued calls once passed — partial results with a notice,
-     never a silent LGTM. Every stage and call is timed
+     never a silent LGTM. A **termination signal** (SIGINT/SIGTERM from a
+     cancelled or timed-out CI job) sets that same state via
+     `engine.request_interrupt`, so an interrupted run posts what it has
+     instead of nothing; the handler is installed by the CLI entrypoint only
+     (`cli.graceful_interrupt` — never at library import), restores the
+     previous handler as it fires (a second signal still kills), and is a
+     no-op off the main thread. Every stage and call is timed
      (`engine/profiling.py`); `--profile` / Action input `profile` prints the
      breakdown.
    - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
