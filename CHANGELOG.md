@@ -9,6 +9,11 @@
 * **engine:** skip oversized files and more generated artefacts ([#366](https://github.com/MattJColes/lgtmaybe/issues/366)) ([bb03da6](https://github.com/MattJColes/lgtmaybe/commit/bb03da602d6764f96ee5b6221abacb2c73f868f0))
 
 
+### Bug Fixes
+
+* **providers:** deliver the reasoning budget on OpenRouter, and never drop a param in silence ([#369](https://github.com/MattJColes/lgtmaybe/issues/369)) ([afcc0b8](https://github.com/MattJColes/lgtmaybe/commit/afcc0b89df3bedabf0ba26e7db8afb09d428f88a)), closes [#348](https://github.com/MattJColes/lgtmaybe/issues/348)
+
+
 ### Performance Improvements
 
 * **ci:** start no job for a comment with no slash command ([#365](https://github.com/MattJColes/lgtmaybe/issues/365)) ([e72903d](https://github.com/MattJColes/lgtmaybe/commit/e72903dcbdfc12010b45a3a1bf246f013c744359))
