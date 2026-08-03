@@ -29,6 +29,28 @@ vs full decision, optional auto-describe, engine call, posting — so `review`,
 - **WHEN** the Action runs on `synchronize` with `incremental` unset
 - **THEN** the same orchestrator picks incremental review automatically
 
+### Requirement: A termination signal posts partial results
+
+The CLI SHALL turn the first SIGINT/SIGTERM into a graceful wind-down that
+posts what the review already produced. The handler sets the same state the
+`max_review_seconds` deadline sets, so queued model calls are skipped, in-flight
+ones finish, and the summary carries the partial-results notice — naming the
+interruption rather than a ceiling nobody hit. It is installed by the CLI
+entrypoint only (importing lgtmaybe as a library never touches a host's
+handlers), is a no-op off the main thread or where the platform lacks the
+signal, and restores the previous handler as it fires.
+<!-- anchor: cli.graceful-interrupt -->
+
+#### Scenario: the CI job is cancelled or exceeds timeout-minutes
+- **WHEN** the runner signals the process mid-review
+- **THEN** no further model calls are dispatched and the findings already
+  produced post with a notice, instead of the run dying with nothing on the PR
+
+#### Scenario: a second signal arrives
+- **WHEN** the wind-down is under way and another signal is delivered
+- **THEN** the previous handler is already back in place, so the process is
+  still killable
+
 ### Requirement: Slash commands route to the same engine
 
 `issue_comment` events SHALL parse into commands — `/review` (with `full`
