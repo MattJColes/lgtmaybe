@@ -1411,7 +1411,7 @@ def test_inline_comment_title_carries_lens_and_confidence() -> None:
     gw.post_review([_badged()], "Summary text", diff=SAMPLE_DIFF)
 
     body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
-    assert body.startswith("**[MEDIUM · security · 8/10] Import order**")
+    assert body.startswith("**[MEDIUM · security · 80%] Import order**")
 
 
 @respx.mock
@@ -1425,12 +1425,12 @@ def test_inline_comment_badge_omits_confidence_when_unscored() -> None:
 
     body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
     assert body.startswith("**[MEDIUM · security] Import order**")
-    assert "/10" not in body
+    assert "%" not in body
 
 
 @respx.mock
 def test_inline_comment_badge_renders_a_zero_score() -> None:
-    """0/10 is a real verdict, not a missing one — it must still render (the
+    """0% is a real verdict, not a missing one — it must still render (the
     falsy-vs-None trap)."""
     created = _capture_created_review()
 
@@ -1438,7 +1438,7 @@ def test_inline_comment_badge_renders_a_zero_score() -> None:
     gw.post_review([_badged(confidence=0)], "Summary text", diff=SAMPLE_DIFF)
 
     body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
-    assert body.startswith("**[MEDIUM · security · 0/10] Import order**")
+    assert body.startswith("**[MEDIUM · security · 0%] Import order**")
 
 
 @respx.mock
@@ -1469,7 +1469,7 @@ def test_demoted_finding_carries_the_badge() -> None:
 
     rendered = str(created[0].get("body", ""))
     assert "### Additional findings" in rendered
-    assert "**[MEDIUM · security · 8/10] Import order**" in rendered
+    assert "**[MEDIUM · security · 80%] Import order**" in rendered
 
 
 @respx.mock
@@ -1482,7 +1482,7 @@ def test_broad_finding_carries_the_badge() -> None:
 
     rendered = str(created[0].get("body", ""))
     assert "Broader observations" in rendered
-    assert "**[MEDIUM · security · 8/10] Import order**" in rendered
+    assert "**[MEDIUM · security · 80%] Import order**" in rendered
 
 
 @respx.mock
@@ -1501,8 +1501,8 @@ def test_badge_leaves_the_hidden_markers_byte_identical() -> None:
     gw.post_review([unscored], "Summary text", diff=SAMPLE_DIFF)
     unscored_body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
 
-    assert "· security · 8/10" in scored_body
-    assert "8/10" not in unscored_body
+    assert "· security · 80%" in scored_body
+    assert "80%" not in unscored_body
     marker_tail = scored_body[scored_body.index("\n\n<!-- lgtmaybe-finding:") :]
     assert marker_tail == unscored_body[unscored_body.index("\n\n<!-- lgtmaybe-finding:") :]
     # And they are exactly the ids derived from the finding — no badge text leaks in.

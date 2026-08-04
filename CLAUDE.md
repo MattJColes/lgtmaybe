@@ -76,8 +76,9 @@ autocrlf before checkout.
 - **License:** MIT (already in `LICENSE`).
 - **Posting:** REST review API — batched inline comments + one summary. Every
   posted finding's title line carries its provenance inside the severity
-  brackets — `**[HIGH · security · 8/10] Title**`, the originating lens and the
-  reflection auditor's confidence (`rest_gateway._finding_badge`, each half
+  brackets — `**[HIGH · security · 80%] Title**`, the originating lens and the
+  reflection auditor's confidence as a percentage of its 0-10 score
+  (`rest_gateway._finding_badge`, each half
   omitted when absent; inline, demoted, and broad render it identically). It is
   visible prose only — never part of the hidden ids below.
   Idempotent updates via a hidden marker comment (which also carries the
