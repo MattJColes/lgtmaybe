@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.13.0...lgtmaybe-v1.13.1) (2026-08-04)
+
+
+### Bug Fixes
+
+* **github:** render finding confidence as a percentage ([#373](https://github.com/MattJColes/lgtmaybe/issues/373)) ([6b56e0f](https://github.com/MattJColes/lgtmaybe/commit/6b56e0fb513eb779c3b39c5157741db2a33a0b65))
+
 ## [1.13.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.12.2...lgtmaybe-v1.13.0) (2026-08-03)
 
 
