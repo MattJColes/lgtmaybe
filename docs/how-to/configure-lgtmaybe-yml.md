@@ -337,9 +337,9 @@ During reflection the auditor also scores each kept finding's confidence from
 0 (certainly a false positive) to 10 (certain it is real), reached by actively
 trying to disprove the finding against the diff and the file text. Findings
 scored **below** `min_confidence` are dropped before posting; the surviving
-score is shown in the CLI output, the JSON export, and on the posted GitHub
-comment itself — `**[HIGH · security · 8/10] Title**`, alongside the lens that
-raised it. A finding the auditor keeps but doesn't score always survives the
+score is shown in the CLI output, the JSON export, and — as a percentage — on the
+posted GitHub comment itself: `**[HIGH · security · 80%] Title**`, alongside the
+lens that raised it. A finding the auditor keeps but doesn't score always survives the
 threshold — a missing score never drops a real finding, and the comment simply
 omits that half of the badge (as it does for every finding when `reflect:
 false`). CLI: `--min-confidence`.

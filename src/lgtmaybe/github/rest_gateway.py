@@ -196,9 +196,13 @@ def _finding_badge(f: ReviewFinding) -> str:
     auditor gave it (``confidence``) — but a GitHub reader could never see them.
     They answer the two questions a reviewer asks of a bot comment: which pass
     raised this, and how sure was it. Rendered inside the existing severity
-    brackets (``**[HIGH · security · 8/10] Title**``) so the title line gains no
+    brackets (``**[HIGH · security · 80%] Title**``) so the title line gains no
     new visual furniture, and appended by the caller so it can never displace the
     hidden fingerprint/identity markers that key re-run dedupe.
+
+    The 0-10 score is shown as a **percentage** — "how likely is this a real
+    issue" reads plainly as ``80%``, where ``8/10`` invites a reader to mistake
+    it for a rating out of ten. The scale is unchanged; only the rendering is.
 
     Each half is omitted when absent, so nothing renders empty: no category (a
     legacy finding) means no badge at all — byte-identical to the pre-badge
@@ -209,7 +213,7 @@ def _finding_badge(f: ReviewFinding) -> str:
     if not f.category:
         return ""
     badge = f" · {_defang_fences(f.category)}"
-    return badge if f.confidence is None else f"{badge} · {f.confidence}/10"
+    return badge if f.confidence is None else f"{badge} · {f.confidence * 10}%"
 
 
 def _marker(family: str, key: str | None) -> str:

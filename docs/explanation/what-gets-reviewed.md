@@ -378,7 +378,7 @@ same PR **updates** the existing review instead of creating duplicates.
 A comment's title line carries the finding's provenance in its brackets:
 
 ```
-**[HIGH · security · 8/10] User input is concatenated into the SQL string**
+**[HIGH · security · 80%] User input is concatenated into the SQL string**
 ```
 
 - **`HIGH`** — the severity.
@@ -386,9 +386,10 @@ A comment's title line carries the finding's provenance in its brackets:
   (or your own id if you added a [custom lens](../how-to/add-a-custom-lens.md)),
   and the same value you match on in `finding_rules` — so a badge you keep seeing
   and don't want tells you exactly what rule to write.
-- **`8/10`** — the self-reflection auditor's confidence that the finding is real,
-  reached by actively trying to disprove it. Set the `min_confidence` floor to
-  drop everything below a score you choose.
+- **`80%`** — the self-reflection auditor's confidence that the finding is real,
+  reached by actively trying to disprove it. It is the auditor's 0-10 score shown
+  as a percentage, so `min_confidence: 5` is the same floor as `50%`. Set that
+  floor to drop everything below a score you choose.
 
 Each half drops away when it isn't there: with `reflect: false` there is no score
 and the badge is just the lens.
