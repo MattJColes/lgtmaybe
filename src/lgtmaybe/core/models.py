@@ -72,6 +72,9 @@ class ReviewCategory(StrEnum):
     ``ponytail`` is the "lazy senior dev" lens — the best code is the code you
     never wrote — flagging code that needn't exist at all (YAGNI, reach for the
     standard library, do it in fewer lines).
+    ``spec`` checks the diff against a specification the repository commits
+    (OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is
+    something to check against — here, a detected spec that matches the PR.
     """
 
     security = "security"
@@ -83,6 +86,7 @@ class ReviewCategory(StrEnum):
     complexity = "complexity"
     intent = "intent"
     ponytail = "ponytail"
+    spec = "spec"
 
 
 class ReviewPreset(StrEnum):
@@ -603,6 +607,13 @@ class PRContext(_Strict):
     title: str = ""
     description: str = ""
     commit_messages: list[str] = Field(default_factory=list)
+    # The PR's head branch name (``git rev-parse --abbrev-ref HEAD`` locally).
+    # Read by the spec lens only, to match a PR against the committed spec it is
+    # delivering: Spec Kit names the branch after the spec directory, and an
+    # OpenSpec change-id usually matches it too. Attacker-controlled on a fork,
+    # so it is only ever compared against directory names already on disk — it
+    # never reaches a prompt. Empty when unavailable.
+    head_branch: str = ""
     # Dependency manifests and lockfiles fetched for DETERMINISTIC SCANNING ONLY.
     # Separate from `file_contents` on purpose: that dict feeds hunk expansion,
     # suppression pragmas and reflection grounding, all of which end in a prompt,
@@ -783,6 +794,19 @@ class ReviewConfig(_Strict):
     # Empty (default) = one uniform review across the whole repo. YAML-only,
     # like finding_rules and extra_lenses.
     directory_rules: list[DirectoryRule] = Field(default_factory=list)
+    # Spec lens: when the repository drives its work from a committed
+    # specification (OpenSpec, GitHub Spec Kit, Kiro), check the diff against the
+    # spec it is delivering — requirements it falls short of, task-list entries
+    # it ticks off without doing, and behaviour the spec never covers. On by
+    # default, but gated on DETECTION: no spec system in the workspace, or no
+    # spec matching this PR, and the lens is dropped before the fan-out, so a
+    # repository without specs pays no call and no prompt bytes. When it does
+    # run it is a lens of its own (a fifth call under the fast preset).
+    spec_review: bool = True
+    # Extra directory globs to search for specs, for a house layout the three
+    # known systems do not describe (e.g. `docs/rfcs/*`). Each match is treated
+    # as a spec directory. YAML-only, like directory_rules.
+    spec_paths: list[str] = Field(default_factory=list)
     # Custom template for the review summary line. Placeholders: {count}
     # (findings posted), {provider}, {model}, {version} (the running lgtmaybe
     # release). None (default) keeps the built-in line, which names all of them;

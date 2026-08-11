@@ -30,6 +30,7 @@ _SIGNATURE = {
     ReviewCategory.complexity: "cyclomatic",
     ReviewCategory.intent: "stated intent",
     ReviewCategory.ponytail: "yagni",
+    ReviewCategory.spec: "committed-specification",
 }
 
 
@@ -430,6 +431,40 @@ def test_prompt_asks_for_intent_review() -> None:
     assert "stated intent" in prompt
     assert "out-of-scope" in prompt or "out of scope" in prompt
     assert "commit" in prompt  # commit messages carry the intent on the CLI
+
+
+def test_prompt_asks_for_spec_review() -> None:
+    """The spec lens judges the diff against the repository's committed spec —
+    OpenSpec / Spec Kit / Kiro all commit requirements, a design and a task list."""
+    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    assert "specification" in prompt
+    assert "requirement" in prompt
+    # Both halves: does the diff deliver the spec, and does the spec cover the diff.
+    assert "deliver" in prompt
+    assert "task" in prompt
+
+
+def test_spec_prompt_asks_for_gaps_in_the_spec_itself() -> None:
+    """The other direction, and the reason the lens is worth its call: the diff
+    ships behaviour no requirement covers, so the SPEC is what is incomplete."""
+    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    assert "no requirement" in prompt or "not covered" in prompt
+    assert "clarification" in prompt  # a [NEEDS CLARIFICATION] marker left behind
+
+
+def test_spec_prompt_says_a_file_not_shown_is_not_undelivered() -> None:
+    """The same trap the intent lens fell into on #315, and sharper here: a
+    requirement is delivered by code, so a requirement implemented in a file this
+    call was never given must not be reported as missing."""
+    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    assert "not shown" in prompt
+    assert "undelivered" in prompt or "not delivered" in prompt
+
+
+def test_spec_prompt_forbids_flagging_a_ticked_task_it_cannot_check() -> None:
+    """Ticked checkboxes are claims to verify, not claims to assume false."""
+    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    assert "ticked" in prompt or "checked" in prompt
 
 
 def test_intent_prompt_says_a_file_not_shown_is_not_a_broken_promise() -> None:

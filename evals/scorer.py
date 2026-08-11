@@ -57,6 +57,12 @@ class Fixture(BaseModel):
     # context expansion, and function-boundary padding all key on — so those
     # features can be A/B-measured against fixtures instead of running dark.
     head_root: Path | None = Field(default=None, exclude=True)
+    # The fixture's own directory, loader-populated. Used as the engine's
+    # workspace root when there is no ``repo/`` corpus, so spec detection and
+    # directory-rule context always resolve against the FIXTURE — never against
+    # whatever repository the harness happens to be run from, which would make
+    # a run's results depend on the operator's working directory.
+    fixture_root: Path | None = Field(default=None, exclude=True)
 
 
 class FixtureScore(BaseModel):

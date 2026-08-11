@@ -227,6 +227,17 @@ def _marker(family: str, key: str | None) -> str:
     return f"<!-- {family}:{key} -->" if key else f"<!-- {family} -->"
 
 
+def _head_ref(meta: dict[str, Any]) -> str:
+    """The PR's head branch name, or ``""`` when the payload doesn't carry one.
+
+    Read by the spec lens to match a PR against the spec directory it is
+    delivering. Defensive about shape because a fork PR whose head repository was
+    deleted returns a partial ``head`` object.
+    """
+    ref = (meta.get("head") or {}).get("ref")
+    return ref if isinstance(ref, str) else ""
+
+
 def _first_comment(node: dict[str, Any]) -> dict[str, Any]:
     """A review thread's opening comment, or ``{}`` when it has none."""
     comments = node.get("comments", {}).get("nodes", [])
@@ -441,6 +452,7 @@ class RestGitHubGateway(GitHubGateway):
             title=meta.get("title") or "",
             description=meta.get("body") or "",
             commit_messages=self._fetch_commit_subjects(),
+            head_branch=_head_ref(meta),
             open_finding_threads=open_finding_threads,
         )
 

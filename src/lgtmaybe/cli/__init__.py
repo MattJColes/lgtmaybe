@@ -840,6 +840,7 @@ _ACTION_INPUTS = (
     "mid_review_retrieval",
     "prompt_cache",
     "incremental",
+    "spec_review",
     "static_analysis",
     "auto_describe",
     "auto_diagram",

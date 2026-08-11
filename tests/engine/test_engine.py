@@ -725,8 +725,9 @@ def test_fans_out_one_call_per_category_and_merges_findings() -> None:
     findings, _ = engine.review(_CTX, cfg)
 
     assert {f.title for f in findings} == {title for title, _ in _CATEGORY_BY_MARKER.values()}
-    # intent is skipped: _CTX has no stated intent to review against.
-    assert len(_review_calls(provider)) == len(cfg.categories) - 1
+    # intent and spec are skipped: _CTX states no intent, and no committed
+    # specification is detected in the workspace to review against.
+    assert len(_review_calls(provider)) == len(cfg.categories) - 2
 
 
 def test_duplicate_findings_across_categories_are_deduped() -> None:

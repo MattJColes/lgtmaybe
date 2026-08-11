@@ -17,11 +17,13 @@ from evals import run as run_mod
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.astgrep import build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
 from lgtmaybe.engine.reflect import reflect_findings
 from lgtmaybe.github import is_reviewable
 from lgtmaybe.local import local_file_reader
+from tests.fakes import FakeProvider
 
 # The four live false-positive fixtures Track C adds: each plants a genuine catch
 # plus forbidden traps drawn from real over-eager reviewer claims.
@@ -300,6 +302,82 @@ def test_a_fixture_plants_test_and_documentation_gaps() -> None:
     keywords = " ".join(k.lower() for e in manifest.expected for k in e.keywords)
     assert "untested" in keywords or "coverage" in keywords, "no test-gap finding"
     assert "docstring" in keywords or "stale" in keywords, "no documentation finding"
+
+
+def test_spec_delivery_fixture_can_score_the_spec_lens() -> None:
+    """The spec lens only runs when a committed spec is detected AND matched, so
+    this fixture must ship one in its corpus — otherwise the lens is skipped and
+    the fixture silently measures nothing.
+
+    It plants both halves the lens reports: a task the diff ticks off without
+    delivering, and behaviour (`force`) that no requirement covers."""
+    _diff, manifest = _fixture("spec-delivery")
+
+    assert manifest.corpus_root is not None
+    spec_dir = manifest.corpus_root / ".kiro" / "specs" / "link-expiry"
+    assert (spec_dir / "requirements.md").is_file()
+    assert (spec_dir / "tasks.md").is_file()
+
+    keywords = " ".join(k.lower() for e in manifest.expected for k in e.keywords)
+    assert "expiry" in keywords or "expired" in keywords, "no undelivered-task finding"
+    assert "requirement" in keywords or "specification" in keywords, "no spec-gap finding"
+    assert manifest.forbidden, "no cross-file traps to measure precision against"
+
+
+def test_spec_delivery_diff_ticks_tasks_its_code_does_not_deliver() -> None:
+    """The claim extractor reads the DIFF, so the checkbox flip has to be in it —
+    a fixture whose tasks.md arrives already ticked would plant no claim at all."""
+    from lgtmaybe.engine.specs import ticked_tasks
+
+    diff, _manifest = _fixture("spec-delivery")
+    claims = ticked_tasks(diff)
+
+    assert any(c.startswith("1.3") for c in claims), "task 1.3 is not claimed as done"
+    assert any(c.startswith("1.4") for c in claims), "task 1.4 is not claimed as done"
+    # ...and neither is actually delivered: redeem_link checks redeemed_at only.
+    assert "expires_at" not in diff.split("def redeem_link")[1]
+    assert "audit" not in diff.split("def redeem_link")[1].lower()
+
+
+def test_spec_delivery_fixture_actually_drives_the_spec_lens_end_to_end() -> None:
+    """The structural checks above cannot see a broken chain: rename the fixture's
+    spec directory, change a detection rule, or mis-wire the harness's workspace
+    root, and they all still pass while the fixture silently scores a lens that
+    never ran. This runs the real engine over the real fixture — only the provider
+    is fake — and asserts the spec block reaches exactly one call, carrying both
+    the requirements and the tasks the diff ticks off."""
+    diff, manifest = _fixture("spec-delivery")
+    provider = FakeProvider(findings=[])
+
+    LLMReviewEngine(provider, workspace_root=manifest.corpus_root or manifest.fixture_root).review(
+        run_mod._eval_ctx(diff, manifest),
+        ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False),
+    )
+
+    carrying = [
+        call
+        for call in provider.calls
+        if "===SPEC_START===" in "\n".join(str(m.get("content", "")) for m in call["messages"])
+    ]
+    assert len(carrying) == 1, "the spec block must reach exactly one call"
+
+    prompt = "\n".join(str(m.get("content", "")) for m in carrying[0]["messages"])
+    assert "link-expiry" in prompt
+    assert "SHALL set an expiry" in prompt, "requirements.md did not reach the lens"
+    assert "1.3 Reject redemption" in prompt, "the ticked-task claims did not reach the lens"
+
+
+def test_spec_delivery_corpus_refutes_its_forbidden_traps() -> None:
+    """Each forbidden trap must be refutable from the corpus — otherwise it is not
+    a false positive, it is a finding the fixture is wrong to forbid."""
+    _diff, manifest = _fixture("spec-delivery")
+    assert manifest.corpus_root is not None
+
+    models = (manifest.corpus_root / "src" / "links" / "models.py").read_text(encoding="utf-8")
+    repo = (manifest.corpus_root / "src" / "links" / "repo.py").read_text(encoding="utf-8")
+
+    assert "expires_at" in models, "the column trap needs the field to already exist"
+    assert "redeemed_at IS NULL" in repo, "the idempotency trap needs a conditional update"
 
 
 # ---------------------------------------------------------------------------
