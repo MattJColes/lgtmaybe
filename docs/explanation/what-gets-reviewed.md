@@ -276,6 +276,90 @@ neutralised delimiters, and the model is told never to follow instructions
 inside it. Only the intent lens's model call ever carries it. When a PR states
 no intent at all, the lens is skipped instead of burning a model call.
 
+## Spec — does the PR deliver the specification it commits to?
+
+If your repository drives its work from a committed specification, that spec is
+a far better statement of intent than a PR description: it is structured, it
+predates the code, and its task list records what the author claims to have
+finished. The spec lens checks the diff against it — in **both** directions.
+
+lgtmaybe recognises three layouts out of the box, plus your own:
+
+| Workflow | Detected by | Read |
+|---|---|---|
+| [OpenSpec](https://github.com/Fission-AI/OpenSpec) | `openspec/changes/<id>/`, `openspec/specs/<capability>/` | proposal, delta specs, design, tasks (archived changes are ignored) |
+| [GitHub Spec Kit](https://github.com/github/spec-kit) | `.specify/`, or `specs/<slug>/` with a `spec.md` **and** a `plan.md` | spec, plan, tasks |
+| [Kiro](https://kiro.dev/docs/specs/) | `.kiro/specs/<feature>/` | requirements, design, tasks |
+| Your own layout | `spec_paths` globs in `.lgtmaybe.yml` | whichever of those filenames are present |
+
+### What it reports
+
+**The diff falling short of the spec**
+
+- **Contradicts an explicit requirement** — the code does the opposite of a
+  stated SHALL/MUST or acceptance criterion (`high`).
+- **A ticked task that is not delivered** (`medium`) — see below.
+- **A requirement in scope with nothing implementing it** (`medium`).
+- **An acceptance criterion with no test** (`low`).
+
+**The spec falling short of the diff** — the half people miss, and the most
+reliable of the two, because the evidence is entirely in the diff:
+
+- **Behaviour no requirement covers** — a new endpoint, state, error path, limit
+  or side effect the spec never mentions (`low`/`info`).
+- **A requirement the change made stale** (`low`).
+- **An unresolved `[NEEDS CLARIFICATION]`** still sitting in a requirement this
+  PR implements (`info`).
+
+### Ticked checkboxes are claims
+
+All three workflows track progress with markdown checkboxes, and a PR that
+implements tasks *flips* them:
+
+```diff
+-- [ ] T014 [US1] Enforce the 30-day link expiry in src/links/service.py
++- [x] T014 [US1] Enforce the 30-day link expiry in src/links/service.py
+```
+
+That flip is already in the diff. lgtmaybe extracts it with no model call and no
+extra file read, and hands the lens the resulting list as *claims the author made
+in this pull request* — turning a vague question ("did this deliver the spec?")
+into a precise one ("is T014 actually here?"). A ticked task is something to
+**check**, never to assume false: the lens flags it only when the diff positively
+shows the work is absent.
+
+### Which spec, and when it stays quiet
+
+A monorepo can hold forty spec directories, so lgtmaybe ranks them against the
+PR — it edits the spec, its branch is named after one (Spec Kit names branches
+after the spec directory), or its title, description or commits name one — and
+sends at most two. **When nothing matches, the lens does not run at all**: no
+model call, no prompt bytes. The same is true when no spec system is present,
+which is the common case, so a repository without specs pays nothing for this.
+
+Because it needs its own large block, the spec lens is a call of its own — a
+fifth one under the default `fast` preset, and only in repositories where a spec
+actually matched. Turn it off with `--no-spec`, `spec_review: false` in
+`.lgtmaybe.yml`, or `spec_review: false` on the Action.
+
+### The lens is told what it was not shown
+
+A requirement is delivered by *code*, so this lens is even more exposed than the
+intent lens to the filtered-diff trap: told nothing, it reports every requirement
+implemented in another batch as undelivered. It gets the same correction — the
+list of the PR's files this call cannot see, and the rule that a requirement
+delivered in one of them is **not shown, not undelivered**.
+
+Spec text is treated exactly like the diff: redacted, wrapped as untrusted data
+in its own neutralised block, and never obeyed. That is deliberate rather than
+paranoid — a spec is usually committed in the same PR that implements it, so on
+a fork PR the author controls the requirements their own change is judged
+against. Files the PR changes are read from its head text for that same reason
+(the base branch does not have them yet); everything else comes from the
+checked-out workspace, which on `pull_request_target` is the trusted base
+branch. The worst a planted spec can do is suppress a spec finding — no other
+lens ever sees the block.
+
 ## Ponytail — the laziest senior dev in the room
 
 The best code is the code you never wrote. Inspired by the

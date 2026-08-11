@@ -333,6 +333,32 @@ pattern, event bus, plugin framework.
      redacts the intent text, wraps it via `injection.wrap_intent` (its own
      neutralised `INTENT_START`/`INTENT_END` block), and sends it **only on the
      intent call**; with no stated intent the lens is skipped (logged, no notice).
+   - **Spec lens (default on, detection-gated):** "does the PR deliver the
+     specification it commits to?" — `engine/specs.py` detects a committed spec
+     (**OpenSpec** `openspec/changes|specs/*`, archives excluded; **Spec Kit**
+     `.specify/` or `specs/*/` with spec.md **and** plan.md; **Kiro**
+     `.kiro/specs/*`; plus `ReviewConfig.spec_paths` globs) with a pure
+     filesystem probe, then **ranks** the candidates against the PR (it edits the
+     spec / the branch names it / the stated intent names it; a lone spec dir
+     wins by default) and sends at most `MAX_SELECTED` = 2. Reports both
+     directions: the diff falling short of the spec, **and** behaviour the spec
+     never covers (the "what did the spec miss" half). `specs.ticked_tasks`
+     mines the diff for `- [ ]` → `- [x]` flips in a `tasks.md` — the author's
+     own delivery claims, extracted with no model call — and renders them as
+     claims to verify. Files the PR changes are read from `PRContext.file_contents`
+     (head text: a spec is usually committed in the PR that implements it), the
+     rest from the workspace (`LLMReviewEngine(workspace_root=...)`, default
+     `Path.cwd()` = the trusted base branch on `pull_request_target`), through
+     `retrieve.resolve_needs` for redaction + a `max_input_tokens // 8` budget.
+     Redacted once, wrapped per batch via `injection.wrap_spec` (its own
+     neutralised `SPEC_START`/`SPEC_END` family) carrying the batch's
+     `files_not_visible` list — a requirement delivered elsewhere is *not shown,
+     not undelivered*. Sent **only on the spec call**, which is its own lens in
+     both presets (a **fifth** `fast` call, paid only when a spec matched);
+     nothing detected or nothing matched skips it entirely (logged, zero prompt
+     bytes). `reflect.py`'s gap-finding carve-out names spec mismatches, or the
+     auditor prunes them as cross-file absence claims. CLI `--spec/--no-spec`,
+     Action input `spec_review`; eval fixture `spec-delivery`.
    - **Ponytail lens:** the "lazy senior dev" lens (`ReviewCategory.ponytail`),
      inspired by the Ponytail skill — *the best code is the code you never wrote*.
      Flags code that needn't exist at all (YAGNI / speculative generality,

@@ -1,0 +1,44 @@
+diff --git a/.kiro/specs/link-expiry/tasks.md b/.kiro/specs/link-expiry/tasks.md
+index 1a2b3c4..5d6e7f8 100644
+--- a/.kiro/specs/link-expiry/tasks.md
++++ b/.kiro/specs/link-expiry/tasks.md
+@@ -15,11 +15,11 @@
+-- [ ] 1.1 Add an `expires_at` column to the links table
++- [x] 1.1 Add an `expires_at` column to the links table
+   - _Requirements: 1.1_
+-- [ ] 1.2 Set the 30-day expiry when creating a link in src/links/service.py
++- [x] 1.2 Set the 30-day expiry when creating a link in src/links/service.py
+   - _Requirements: 1.1_
+
+ ## Phase 2 — redemption
+
+-- [ ] 1.3 Reject redemption of an expired link in src/links/service.py
++- [x] 1.3 Reject redemption of an expired link in src/links/service.py
+   - _Requirements: 1.2_
+-- [ ] 1.4 Record an audit entry when a redemption is rejected as expired
++- [x] 1.4 Record an audit entry when a redemption is rejected as expired
+   - _Requirements: 2.1_
+diff --git a/src/links/service.py b/src/links/service.py
+index 9f8e7d6..3c2b1a0 100644
+--- a/src/links/service.py
++++ b/src/links/service.py
+@@ -40,6 +40,24 @@
+ EXPIRY_DAYS = 30
+
+
+-def create_link(amount, customer_id):
+-    return links.insert(Link(amount=amount, customer_id=customer_id))
++def create_link(amount, customer_id):
++    expires_at = datetime.now(timezone.utc) + timedelta(days=EXPIRY_DAYS)
++    return links.insert(
++        Link(amount=amount, customer_id=customer_id, expires_at=expires_at)
++    )
++
++
++def redeem_link(link_id, force=False):
++    link = links.get(link_id)
++    if force:
++        return links.mark_redeemed(link)
++    if link.redeemed_at is not None:
++        raise AlreadyRedeemed(link_id)
++    return links.mark_redeemed(link)

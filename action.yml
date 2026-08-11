@@ -106,6 +106,10 @@ inputs:
     description: "Commit-scoped incremental review: on a synchronize push, review only the diff of the commits added since the last completed review instead of the whole PR. Auto by default (on for synchronize, full review everywhere else); set to true/false to force. Falls back to a full review after a force-push/rebase or when no previous review exists. `/review full` forces a full re-review on demand."
     required: false
     default: ""
+  spec_review:
+    description: "Check the diff against a specification the repository commits (OpenSpec `openspec/`, GitHub Spec Kit `specs/NNN-slug/`, Kiro `.kiro/specs/`): requirements the change falls short of, task-list entries it ticks off without doing, and behaviour no requirement covers. On by default, but gated on detection — no spec in the repo, or none matching this PR, and the lens never runs, so a repository without specs pays no extra call. Set false to disable."
+    required: false
+    default: ""
   static_analysis:
     description: "Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, and semgrep) over the changed files in a sandboxed, network-less subprocess. Linters ground the model as untrusted hints to confirm or discard; gitleaks (secrets), zizmor (workflow security), ast-grep (your rules) and osv-scanner (dependency advisories) post findings directly with no model call. Off by default; the image bundles these tools and an offline vulnerability database."
     required: false
@@ -301,6 +305,7 @@ runs:
         INPUT_SYMBOL_RESOLUTION: ${{ inputs.symbol_resolution }}
         INPUT_PROMPT_CACHE: ${{ inputs.prompt_cache }}
         INPUT_INCREMENTAL: ${{ inputs.incremental }}
+        INPUT_SPEC_REVIEW: ${{ inputs.spec_review }}
         INPUT_STATIC_ANALYSIS: ${{ inputs.static_analysis }}
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}

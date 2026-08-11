@@ -123,6 +123,7 @@ def local_pr_context(
         repo=_repo_name(cwd),
         pr_number=0,
         commit_messages=commit_messages,
+        head_branch=_current_branch(cwd),
     )
 
 
@@ -241,6 +242,20 @@ def _ensure_repo(cwd: Path | None) -> None:
         raise ValueError("not a git repository (run lgtmaybe from inside one)") from exc
     if inside != "true":
         raise ValueError("not a git repository (run lgtmaybe from inside one)")
+
+
+def _current_branch(cwd: Path | None) -> str:
+    """The checked-out branch name, or "" on a detached HEAD or any git failure.
+
+    Feeds the spec lens's branch signal: spec-driven workflows name the branch
+    after the spec directory, so locally this is often the only thing tying a
+    review to the spec it delivers.
+    """
+    try:
+        branch = _git(cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    except ValueError:
+        return ""
+    return "" if branch == "HEAD" else branch
 
 
 def _commit_subjects(cwd: Path | None, base_ref: str) -> list[str]:

@@ -45,6 +45,11 @@
       "title": "File Contents",
       "type": "object"
     },
+    "head_branch": {
+      "default": "",
+      "title": "Head Branch",
+      "type": "string"
+    },
     "head_sha": {
       "title": "Head Sha",
       "type": "string"

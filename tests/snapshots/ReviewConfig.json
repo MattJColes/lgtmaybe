@@ -194,7 +194,7 @@
       "type": "string"
     },
     "ReviewCategory": {
-      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).",
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
       "enum": [
         "security",
         "correctness",
@@ -204,7 +204,8 @@
         "performance",
         "complexity",
         "intent",
-        "ponytail"
+        "ponytail",
+        "spec"
       ],
       "title": "ReviewCategory",
       "type": "string"
@@ -489,7 +490,8 @@
         "performance",
         "complexity",
         "intent",
-        "ponytail"
+        "ponytail",
+        "spec"
       ],
       "items": {
         "$ref": "#/$defs/ReviewCategory"
@@ -738,6 +740,18 @@
     "resolve_fixed": {
       "default": true,
       "title": "Resolve Fixed",
+      "type": "boolean"
+    },
+    "spec_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Spec Paths",
+      "type": "array"
+    },
+    "spec_review": {
+      "default": true,
+      "title": "Spec Review",
       "type": "boolean"
     },
     "static_analysis": {

@@ -40,6 +40,7 @@ from lgtmaybe.core.ports import (
 from lgtmaybe.core.version import package_version
 from lgtmaybe.github import is_reviewable
 
+from . import specs
 from .astgrep import SymbolResolver
 from .boundaries import definition_spans
 from .compress import (
@@ -51,7 +52,7 @@ from .compress import (
     trailing_context_lines,
 )
 from .directory import build_directory_block, load_context_files, rules_for
-from .injection import wrap_context, wrap_diff, wrap_hints, wrap_intent
+from .injection import wrap_context, wrap_diff, wrap_hints, wrap_intent, wrap_spec
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
 from .prompt import (
@@ -228,13 +229,15 @@ class _Lens:
     (cache-shaped) layout's final user message (used when it is on — the
     default), where the system message is the shared preamble instead.
     ``carries_intent`` is true only for the built-in intent lens, the one call
-    that receives the stated-intent block.
+    that receives the stated-intent block; ``carries_spec`` likewise for the spec
+    lens and the committed-specification block.
     """
 
     id: str
     system_prompt: str
     user_block: str
     carries_intent: bool = False
+    carries_spec: bool = False
     # For a merged (fast-preset) lens: the category values the model may stamp
     # on its findings. The engine keeps a model-supplied category in this set
     # and falls back to the lens id otherwise; None (a focused lens) means the
@@ -242,18 +245,27 @@ class _Lens:
     allowed_categories: frozenset[str] | None = None
 
 
-def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = False) -> list[_Lens]:
+def _build_lenses(
+    cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False, retrieval: bool = False
+) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
-    The fast preset runs all nine built-ins as FOUR distinct lenses — security,
-    correctness, code health, artefacts — one per concern, the same set on every
-    provider. The lens set is a property of the preset, not of how many workers
-    happen to be available: a single-worker provider runs the same four calls,
-    serially. This grouping applies only when ``categories`` is the untouched
-    default: a user who explicitly listed lenses asked for exactly those, so the
-    preset never regroups them. The full preset runs every category; an explicit
-    list runs exactly its selected categories. Both skip intent when nothing
-    states an intent.
+    The fast preset runs the nine everyday built-ins as FOUR distinct lenses —
+    security, correctness, code health, artefacts — one per concern, the same set
+    on every provider. The lens set is a property of the preset, not of how many
+    workers happen to be available: a single-worker provider runs the same four
+    calls, serially. This grouping applies only when ``categories`` is the
+    untouched default: a user who explicitly listed lenses asked for exactly
+    those, so the preset never regroups them. The full preset runs every
+    category; an explicit list runs exactly its selected categories. Both skip
+    intent when nothing states an intent, and skip spec when no committed
+    specification matches the PR.
+
+    Spec is the one built-in that does not fold into a fast-preset group. It
+    carries a large block of its own (requirements, design, task list) and under
+    ``fast`` the correctness lens already carries the stated intent; stacking
+    both on one call degrades it. So a matched spec adds a FIFTH call — paid only
+    in repositories that commit a spec the PR is delivering.
 
     ``retrieval`` adds the one-round deferral ask to the legacy (``prompt_cache:
     false``) system prompts — the split shape carries it on the shared preamble
@@ -307,6 +319,8 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = Fals
             )
             for group in FAST_GROUPS
         ]
+        if has_spec:
+            lenses.append(_spec_lens(cfg, retrieval))
     else:
         lenses = [
             _Lens(
@@ -322,12 +336,16 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = Fals
                     category, dependency_health=deps, secret_scanning=secrets
                 ),
                 carries_intent=category is ReviewCategory.intent,
+                carries_spec=category is ReviewCategory.spec,
             )
             for category in cfg.categories
         ]
         if not has_intent and any(lens.carries_intent for lens in lenses):
             lenses = [lens for lens in lenses if not lens.carries_intent]
             _log.info("intent lens skipped — no stated intent (title/description/commits)")
+        if not has_spec and any(lens.carries_spec for lens in lenses):
+            lenses = [lens for lens in lenses if not lens.carries_spec]
+            _log.info("spec lens skipped — no committed specification matches this PR")
     lenses += [
         _Lens(
             id=lens.id,
@@ -337,6 +355,16 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, retrieval: bool = Fals
         for lens in cfg.extra_lenses
     ]
     return lenses
+
+
+def _spec_lens(cfg: ReviewConfig, retrieval: bool) -> _Lens:
+    """The spec lens, built the same way in either preset."""
+    return _Lens(
+        id=ReviewCategory.spec.value,
+        system_prompt=build_system_prompt(ReviewCategory.spec, cfg.language, retrieval=retrieval),
+        user_block=build_lens_block(ReviewCategory.spec),
+        carries_spec=True,
+    )
 
 
 # One prepared _review_lens call, ready to submit to the fan-out pool.
@@ -425,6 +453,7 @@ def _lens_messages(
     dir_block: str | None,
     lens: _Lens,
     *,
+    spec_block: str | None = None,
     context: str | None = None,
 ) -> list[Message]:
     """The messages for one lens call, in whichever prompt shape is configured.
@@ -439,8 +468,10 @@ def _lens_messages(
     # Only the intent lens pays the intent-block tokens (and its injection
     # surface); the other lenses never see PR-authored prose. In the split shape
     # it rides the lens block — NOT the shared prefix — so their cached prefix
-    # stays identical.
+    # stays identical. The spec block is gated the same way, for the same two
+    # reasons: it is large, and it is untrusted.
     intent = intent_block if lens.carries_intent else None
+    spec = spec_block if lens.carries_spec else None
     retrieval = run.retrieval_budget is not None
     if run.split_prompt:
         # The directory block joins the ONE prefix string rather than adding
@@ -449,6 +480,8 @@ def _lens_messages(
         # it is warmed once by the primer and read by lenses 2..N.
         prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
         suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
+        if spec is not None:
+            suffix = f"{spec}\n\n{suffix}"
         if intent is not None:
             suffix = f"{intent}\n\n{suffix}"
         return [
@@ -458,6 +491,8 @@ def _lens_messages(
         ]
 
     user_content = wrapped
+    if spec is not None:
+        user_content = f"{spec}\n\n{user_content}"
     if intent is not None:
         user_content = f"{intent}\n\n{user_content}"
     if hint_block is not None:
@@ -492,8 +527,16 @@ class LLMReviewEngine(ReviewEngine):
         provider: ProviderClient,
         fetch_file: FileFetcher | None = None,
         resolve_symbol: SymbolResolver | None = None,
+        workspace_root: Path | None = None,
     ) -> None:
         self._provider = provider
+        # The checked-out repository the engine may READ from: directory-rule
+        # context files and the committed spec. On `pull_request_target` this is
+        # the trusted BASE branch — never the PR head — which is the whole reason
+        # those two read from a workspace instead of the gateway. Defaults to the
+        # process's cwd, which is what both the Action and the local CLI want;
+        # injectable so the eval harness can point it at a fixture corpus.
+        self._workspace_root = workspace_root or Path.cwd()
         # Optional read-only file reader for the reflection pass's bounded retrieval
         # escalation: when the auditor defers a finding for lack of a referenced
         # file, this fetches it (read-only — never a checkout) so it can re-judge.
@@ -540,6 +583,15 @@ class LLMReviewEngine(ReviewEngine):
             #     block also has to name the files that batch cannot see.
             intent_text = _intent_text(ctx)
             clean_intent = redact(intent_text) if intent_text else None
+
+        # 1c. The committed specification this PR is delivering, when the repo
+        #     drives its work from one. Detection is a filesystem probe and
+        #     selection is deterministic, so a repo with no spec — or one whose
+        #     specs have nothing to do with this PR — costs a handful of stats
+        #     and skips the lens entirely. Wrapped per batch like the intent,
+        #     and for the same reason: the hidden-file list is batch-specific.
+        with profiler.stage("spec_context"):
+            clean_spec = _resolve_spec(cfg, ctx, self._workspace_root)
         # Mid-review retrieval budget, or None when a lens may not defer at all:
         # the feature is off, or nothing injected a read-only reader to fetch
         # with. One scalar rather than a config-plus-fetcher pair threaded down
@@ -552,7 +604,10 @@ class LLMReviewEngine(ReviewEngine):
             else None
         )
         lenses = _build_lenses(
-            cfg, has_intent=clean_intent is not None, retrieval=retrieval_budget is not None
+            cfg,
+            has_intent=clean_intent is not None,
+            has_spec=clean_spec is not None,
+            retrieval=retrieval_budget is not None,
         )
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
@@ -670,7 +725,9 @@ class LLMReviewEngine(ReviewEngine):
         #     head, which is why no gateway fetcher is involved). Which of them
         #     a given batch actually sees is decided per batch below.
         with profiler.stage("directory_context"):
-            dir_contents = load_context_files(cfg, Path.cwd()) if cfg.directory_rules else {}
+            dir_contents = (
+                load_context_files(cfg, self._workspace_root) if cfg.directory_rules else {}
+            )
 
         # Announce the queued work before any model call returns, so a long run
         # on a slow provider shows up immediately in the Action log instead of
@@ -736,6 +793,15 @@ class LLMReviewEngine(ReviewEngine):
                 if clean_intent is not None
                 else None
             )
+            # Same for the spec block, and the correction matters more here: a
+            # requirement is delivered by CODE, so a spec call that does not know
+            # which files it was denied reports every requirement implemented in
+            # another batch as undelivered.
+            spec_block = (
+                wrap_spec(clean_spec, files_not_visible(ctx.changed_files, batch_paths))
+                if clean_spec is not None
+                else None
+            )
             # Warm the prompt cache for this batch: a fully concurrent first
             # wave defeats it (every call misses, and on explicit-breakpoint
             # routes each also pays the cache write), so one lens is dispatched
@@ -761,6 +827,7 @@ class LLMReviewEngine(ReviewEngine):
                     batch_num,
                     lens,
                     batch,
+                    spec_block=spec_block,
                 )
                 for lens in lenses
             ]
@@ -1084,6 +1151,8 @@ class LLMReviewEngine(ReviewEngine):
         batch_num: int,
         lens: _Lens,
         batch: list[tuple[str, str]] | None = None,
+        *,
+        spec_block: str | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
 
@@ -1128,6 +1197,7 @@ class LLMReviewEngine(ReviewEngine):
                 dir_block=dir_block,
                 batch_num=batch_num,
                 lens=lens,
+                spec_block=spec_block,
             )
         )
         on_needs = (
@@ -1143,9 +1213,12 @@ class LLMReviewEngine(ReviewEngine):
                 dir_block=dir_block,
                 batch_num=batch_num,
                 lens=lens,
+                spec_block=spec_block,
             )
         )
-        messages = _lens_messages(run, wrapped, intent_block, hint_block, dir_block, lens)
+        messages = _lens_messages(
+            run, wrapped, intent_block, hint_block, dir_block, lens, spec_block=spec_block
+        )
         return self._complete_lens(
             messages, run.model, run.response_format, batch_num, lens, on_oversized, on_needs
         )
@@ -1163,6 +1236,7 @@ class LLMReviewEngine(ReviewEngine):
         dir_block: str | None,
         batch_num: int,
         lens: _Lens,
+        spec_block: str | None = None,
     ) -> _LensOutcome:
         """Re-run one lens with the bounded, read-only code it asked to read.
 
@@ -1222,6 +1296,7 @@ class LLMReviewEngine(ReviewEngine):
             hint_block,
             dir_block,
             lens,
+            spec_block=spec_block,
             context=wrap_context(fetched),
         )
         retry, error = self._complete_lens(
@@ -1240,6 +1315,7 @@ class LLMReviewEngine(ReviewEngine):
         dir_block: str | None,
         batch_num: int,
         lens: _Lens,
+        spec_block: str | None = None,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
 
@@ -1286,6 +1362,7 @@ class LLMReviewEngine(ReviewEngine):
                 dir_block,
                 batch_num,
                 lens,
+                spec_block=spec_block,
             )
 
         # The pieces are independent calls, so they run CONCURRENTLY — serially
@@ -1602,6 +1679,60 @@ def files_not_visible(changed_files: Sequence[str], batch_paths: set[str]) -> li
     *earlier* commits' changes, which this cannot express.
     """
     return sorted(set(changed_files) - batch_paths)
+
+
+# Slice of the input budget the committed spec may take. The same eighth the
+# directory-scoped context files get, and for the same reason: this is reference
+# material handed to ONE lens per batch, not the diff under review.
+_SPEC_BUDGET_DIVISOR = 8
+
+
+def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> str | None:
+    """The committed spec block for this PR, or None to skip the spec lens.
+
+    Four deterministic steps — detect, select, read, render — and any of them
+    coming up empty means no spec lens runs at all. Silence is the right answer
+    far more often than not: most repositories commit no spec, and a repository
+    that does may still be seeing a PR that delivers none of them.
+
+    Spec text is read from the workspace (the trusted base branch on
+    ``pull_request_target``) except for files this PR changes, which come from
+    its own head text — a spec is usually committed alongside the code that
+    delivers it. For the same reason the PR's changed paths join the tree
+    ``detect`` walks: on the first PR of a feature the spec directory does not
+    exist on the base branch at all, and detecting only what the workspace holds
+    would skip the lens exactly then. Everything is redacted, including the
+    ticked-task claims, which are mined from the raw diff rather than from an
+    already-redacted file.
+    """
+    if not cfg.spec_review:
+        return None
+    bundles = specs.detect(root, cfg.spec_paths, ctx.changed_files)
+    if not bundles:
+        return None
+    selected = specs.select(
+        bundles,
+        changed_files=ctx.changed_files,
+        branch=ctx.head_branch,
+        intent_text=_intent_text(ctx),
+    )
+    if not selected:
+        return None
+    contents = specs.load_spec_files(
+        selected,
+        root=root,
+        head_texts=ctx.file_contents,
+        budget_tokens=cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR,
+    )
+    text = specs.build_spec_text(selected, contents, claims=specs.ticked_tasks(ctx.diff))
+    if text is None:
+        _log.info("spec lens skipped — no spec text fit the budget")
+        return None
+    _log.info(
+        "spec lens enabled",
+        extra={"specs": [b.root for b in selected], "files": sorted(contents)},
+    )
+    return redact(text)
 
 
 def _intent_text(ctx: PRContext) -> str:

@@ -59,3 +59,13 @@ prompt.dependency-health:
     kind: function_definition
     has: { field: name, regex: '^_category_section$' }
   files: [src/lgtmaybe/engine/prompt.py]
+
+prompt.spec-lens:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_resolve_spec$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^build_spec_text$' }
+    files: [src/lgtmaybe/engine/**/*.py]

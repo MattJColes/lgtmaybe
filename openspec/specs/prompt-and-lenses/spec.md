@@ -177,3 +177,34 @@ so prompts stay reproducible.
 #### Scenario: no scanner covers the class
 - **WHEN** no such scanner will run
 - **THEN** the prompt is unchanged and the model reports them as before
+
+### Requirement: The spec lens judges the diff against a committed specification
+
+A review SHALL check the diff against a specification the repository commits
+(OpenSpec, GitHub Spec Kit, Kiro, or a `spec_paths` layout) when one is detected
+AND matches the PR, reporting both the diff falling short of the spec and the
+spec failing to cover the diff. Detection is a filesystem probe and selection is
+deterministic — the PR editing a spec, a branch or stated intent naming one —
+so no match SHALL skip the lens with no prompt bytes and no model call. Spec
+text SHALL be treated as untrusted data in its own neutralised block, carried
+only on the spec call, and read from the workspace except for files the PR
+changes, which come from its head text.
+<!-- anchor: prompt.spec-lens -->
+
+#### Scenario: no spec system in the repository
+- **WHEN** the workspace holds no known spec layout
+- **THEN** the lens never runs and the prompt is byte-identical to a build
+  without the feature
+
+#### Scenario: a spec directory unrelated to the PR
+- **WHEN** several specs exist and none is edited, named by the branch, or named
+  by the stated intent
+- **THEN** no spec is selected and the lens is skipped
+
+#### Scenario: the PR commits the spec it implements
+- **WHEN** a selected spec file is among the PR's changed files
+- **THEN** its head text is used, not the base branch's copy
+
+#### Scenario: a task the PR ticked off
+- **WHEN** the diff flips a `tasks.md` checkbox from unticked to ticked
+- **THEN** that entry is carried into the spec block as a claim to verify

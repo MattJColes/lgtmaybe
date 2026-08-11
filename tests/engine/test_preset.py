@@ -58,9 +58,11 @@ class TestFastLensGrouping:
         assert [lens.id for lens in lenses] == self._FOUR
 
     def test_fast_covers_every_built_in_category(self) -> None:
-        """Four distinct lenses, but still all nine categories — nothing that
-        used to be reviewed silently stops being reviewed."""
-        lenses = _build_lenses(make_cfg(), has_intent=True)
+        """Four distinct lenses cover the nine everyday categories — nothing that
+        used to be reviewed silently stops being reviewed. Spec is the tenth and
+        the exception: it has its own call, and only when a spec matches the PR,
+        so it is passed here as present for the coverage claim to mean anything."""
+        lenses = _build_lenses(make_cfg(), has_intent=True, has_spec=True)
         covered: set[str] = set()
         for lens in lenses:
             covered.add(lens.id)
@@ -88,7 +90,7 @@ class TestFastLensGrouping:
         assert "stated intent" not in plain["correctness"].user_block
 
     def test_full_preset_builds_one_lens_per_category(self) -> None:
-        lenses = _build_lenses(make_cfg(preset="full"), has_intent=True)
+        lenses = _build_lenses(make_cfg(preset="full"), has_intent=True, has_spec=True)
         assert [lens.id for lens in lenses] == [c.value for c in ReviewCategory]
         assert {"tests", "documentation"} <= {lens.id for lens in lenses}
 

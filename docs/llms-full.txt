@@ -4015,7 +4015,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
-| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
+| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'spec']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `directory_rules` | list[DirectoryRule] | No | `[]` | Directory Rules |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -4049,6 +4049,8 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
+| `spec_paths` | list[string] | No | `[]` | Spec Paths |
+| `spec_review` | boolean | No | `True` | Spec Review |
 | `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
@@ -4131,6 +4133,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `diff` | string | Yes | — | Diff |
 | `feedback_downvotes` | list[string] | No | `[]` | Feedback Downvotes |
 | `file_contents` | object | No | — | File Contents |
+| `head_branch` | string | No | `` | Head Branch |
 | `head_sha` | string | Yes | — | Head Sha |
 | `open_finding_threads` | integer | No | `0` | Open Finding Threads |
 | `pr_number` | integer | Yes | — | Pr Number |
@@ -4341,7 +4344,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "string"
     },
     "ReviewCategory": {
-      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).",
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
       "enum": [
         "security",
         "correctness",
@@ -4351,7 +4354,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "performance",
         "complexity",
         "intent",
-        "ponytail"
+        "ponytail",
+        "spec"
       ],
       "title": "ReviewCategory",
       "type": "string"
@@ -4636,7 +4640,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "performance",
         "complexity",
         "intent",
-        "ponytail"
+        "ponytail",
+        "spec"
       ],
       "items": {
         "$ref": "#/$defs/ReviewCategory"
@@ -4885,6 +4890,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "resolve_fixed": {
       "default": true,
       "title": "Resolve Fixed",
+      "type": "boolean"
+    },
+    "spec_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Spec Paths",
+      "type": "array"
+    },
+    "spec_review": {
+      "default": true,
+      "title": "Spec Review",
       "type": "boolean"
     },
     "static_analysis": {
@@ -5209,6 +5226,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "File Contents",
       "type": "object"
     },
+    "head_branch": {
+      "default": "",
+      "title": "Head Branch",
+      "type": "string"
+    },
     "head_sha": {
       "title": "Head Sha",
       "type": "string"
@@ -5530,6 +5552,90 @@ like the diff: secrets are redacted, it is wrapped as untrusted data with
 neutralised delimiters, and the model is told never to follow instructions
 inside it. Only the intent lens's model call ever carries it. When a PR states
 no intent at all, the lens is skipped instead of burning a model call.
+
+## Spec — does the PR deliver the specification it commits to?
+
+If your repository drives its work from a committed specification, that spec is
+a far better statement of intent than a PR description: it is structured, it
+predates the code, and its task list records what the author claims to have
+finished. The spec lens checks the diff against it — in **both** directions.
+
+lgtmaybe recognises three layouts out of the box, plus your own:
+
+| Workflow | Detected by | Read |
+|---|---|---|
+| [OpenSpec](https://github.com/Fission-AI/OpenSpec) | `openspec/changes/<id>/`, `openspec/specs/<capability>/` | proposal, delta specs, design, tasks (archived changes are ignored) |
+| [GitHub Spec Kit](https://github.com/github/spec-kit) | `.specify/`, or `specs/<slug>/` with a `spec.md` **and** a `plan.md` | spec, plan, tasks |
+| [Kiro](https://kiro.dev/docs/specs/) | `.kiro/specs/<feature>/` | requirements, design, tasks |
+| Your own layout | `spec_paths` globs in `.lgtmaybe.yml` | whichever of those filenames are present |
+
+### What it reports
+
+**The diff falling short of the spec**
+
+- **Contradicts an explicit requirement** — the code does the opposite of a
+  stated SHALL/MUST or acceptance criterion (`high`).
+- **A ticked task that is not delivered** (`medium`) — see below.
+- **A requirement in scope with nothing implementing it** (`medium`).
+- **An acceptance criterion with no test** (`low`).
+
+**The spec falling short of the diff** — the half people miss, and the most
+reliable of the two, because the evidence is entirely in the diff:
+
+- **Behaviour no requirement covers** — a new endpoint, state, error path, limit
+  or side effect the spec never mentions (`low`/`info`).
+- **A requirement the change made stale** (`low`).
+- **An unresolved `[NEEDS CLARIFICATION]`** still sitting in a requirement this
+  PR implements (`info`).
+
+### Ticked checkboxes are claims
+
+All three workflows track progress with markdown checkboxes, and a PR that
+implements tasks *flips* them:
+
+```diff
+-- [ ] T014 [US1] Enforce the 30-day link expiry in src/links/service.py
++- [x] T014 [US1] Enforce the 30-day link expiry in src/links/service.py
+```
+
+That flip is already in the diff. lgtmaybe extracts it with no model call and no
+extra file read, and hands the lens the resulting list as *claims the author made
+in this pull request* — turning a vague question ("did this deliver the spec?")
+into a precise one ("is T014 actually here?"). A ticked task is something to
+**check**, never to assume false: the lens flags it only when the diff positively
+shows the work is absent.
+
+### Which spec, and when it stays quiet
+
+A monorepo can hold forty spec directories, so lgtmaybe ranks them against the
+PR — it edits the spec, its branch is named after one (Spec Kit names branches
+after the spec directory), or its title, description or commits name one — and
+sends at most two. **When nothing matches, the lens does not run at all**: no
+model call, no prompt bytes. The same is true when no spec system is present,
+which is the common case, so a repository without specs pays nothing for this.
+
+Because it needs its own large block, the spec lens is a call of its own — a
+fifth one under the default `fast` preset, and only in repositories where a spec
+actually matched. Turn it off with `--no-spec`, `spec_review: false` in
+`.lgtmaybe.yml`, or `spec_review: false` on the Action.
+
+### The lens is told what it was not shown
+
+A requirement is delivered by *code*, so this lens is even more exposed than the
+intent lens to the filtered-diff trap: told nothing, it reports every requirement
+implemented in another batch as undelivered. It gets the same correction — the
+list of the PR's files this call cannot see, and the rule that a requirement
+delivered in one of them is **not shown, not undelivered**.
+
+Spec text is treated exactly like the diff: redacted, wrapped as untrusted data
+in its own neutralised block, and never obeyed. That is deliberate rather than
+paranoid — a spec is usually committed in the same PR that implements it, so on
+a fork PR the author controls the requirements their own change is judged
+against. Files the PR changes are read from its head text for that same reason
+(the base branch does not have them yet); everything else comes from the
+checked-out workspace, which on `pull_request_target` is the trusted base
+branch. The worst a planted spec can do is suppress a spec finding — no other
+lens ever sees the block.
 
 ## Ponytail — the laziest senior dev in the room
 
