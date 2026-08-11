@@ -20,7 +20,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
-| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail']` | Categories |
+| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'spec']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `directory_rules` | list[DirectoryRule] | No | `[]` | Directory Rules |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -54,6 +54,8 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
+| `spec_paths` | list[string] | No | `[]` | Spec Paths |
+| `spec_review` | boolean | No | `True` | Spec Review |
 | `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
@@ -136,6 +138,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `diff` | string | Yes | — | Diff |
 | `feedback_downvotes` | list[string] | No | `[]` | Feedback Downvotes |
 | `file_contents` | object | No | — | File Contents |
+| `head_branch` | string | No | `` | Head Branch |
 | `head_sha` | string | Yes | — | Head Sha |
 | `open_finding_threads` | integer | No | `0` | Open Finding Threads |
 | `pr_number` | integer | Yes | — | Pr Number |
@@ -346,7 +349,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "string"
     },
     "ReviewCategory": {
-      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).",
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
       "enum": [
         "security",
         "correctness",
@@ -356,7 +359,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "performance",
         "complexity",
         "intent",
-        "ponytail"
+        "ponytail",
+        "spec"
       ],
       "title": "ReviewCategory",
       "type": "string"
@@ -641,7 +645,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "performance",
         "complexity",
         "intent",
-        "ponytail"
+        "ponytail",
+        "spec"
       ],
       "items": {
         "$ref": "#/$defs/ReviewCategory"
@@ -890,6 +895,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "resolve_fixed": {
       "default": true,
       "title": "Resolve Fixed",
+      "type": "boolean"
+    },
+    "spec_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Spec Paths",
+      "type": "array"
+    },
+    "spec_review": {
+      "default": true,
+      "title": "Spec Review",
       "type": "boolean"
     },
     "static_analysis": {
@@ -1213,6 +1230,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "File Contents",
       "type": "object"
+    },
+    "head_branch": {
+      "default": "",
+      "title": "Head Branch",
+      "type": "string"
     },
     "head_sha": {
       "title": "Head Sha",

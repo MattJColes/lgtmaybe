@@ -43,6 +43,7 @@ def _load_fixtures() -> list[tuple[str, Fixture]]:
     for d in sorted(p for p in _FIXTURES.iterdir() if p.is_dir()):
         diff = (d / "diff.txt").read_text(encoding="utf-8")
         manifest = Fixture.model_validate_json((d / "expected.json").read_text(encoding="utf-8"))
+        manifest.fixture_root = d
         # A `repo/` subdir is the fixture's on-disk corpus of unshown files — the
         # ones a cross-file deferral needs to verify. When present, the harness
         # roots a read-only reader + symbol resolver here (see `_review`).
@@ -191,6 +192,11 @@ def _review(
         ),
         fetch_file=fetch_file,
         resolve_symbol=resolve_symbol,
+        # Root the workspace at the fixture's corpus, not the process cwd, so a
+        # fixture that commits a spec (or directory-rule context files) is read
+        # from ITS tree — and so a run started inside a repo that happens to have
+        # its own `openspec/` never leaks that into a fixture's review.
+        workspace_root=manifest.corpus_root or manifest.fixture_root,
     )
     try:
         findings, _summary = engine.review(ctx, cfg)

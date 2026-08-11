@@ -403,6 +403,16 @@ local_diff_options = _stack(
     "discount. Safe no-op elsewhere (--no-prompt-cache disables)",
 )
 @click.option(
+    "--spec/--no-spec",
+    "spec_review",
+    default=None,
+    help="Check the diff against a specification the repository commits "
+    "(OpenSpec, GitHub Spec Kit, Kiro): requirements it falls short of, task-list "
+    "entries it ticks off without doing, and behaviour no requirement covers. "
+    "On by default, but only runs when a spec is detected AND matches this PR — "
+    "a repo without specs pays nothing (--no-spec disables)",
+)
+@click.option(
     "--static-analysis/--no-static-analysis",
     default=None,
     help="Run installed deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, "
@@ -454,6 +464,7 @@ def review(
     learn_feedback: bool | None,
     min_confidence: int | None,
     recursive: bool | None,
+    spec_review: bool | None,
     structured_output: bool | None,
     mid_review_retrieval: bool | None,
     symbol_resolution: bool | None,
@@ -494,6 +505,7 @@ def review(
         learn_feedback=learn_feedback,
         min_confidence=min_confidence,
         recursive=recursive,
+        spec_review=spec_review,
         structured_output=structured_output,
         mid_review_retrieval=mid_review_retrieval,
         symbol_resolution=symbol_resolution,

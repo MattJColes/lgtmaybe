@@ -90,7 +90,9 @@ diff itself shows the absence. A finding that already hedges this ("if there is 
 elsewhere…") may be kept at low severity.
 
 Gap findings are valid types, not false positives: a missing test, a missing or stale \
-docstring, a performance or complexity concern, or a mismatch with the PR's stated intent. \
+docstring, a performance or complexity concern, a mismatch with the PR's stated intent, or a \
+mismatch with a specification the repository commits (a requirement the change falls short of, \
+a task-list entry it ticks off without doing, or behaviour it adds that no requirement covers). \
 For those, judge whether the gap or mismatch is real — not whether the changed line \
 itself is buggy.
 

@@ -302,6 +302,54 @@ def test_a_fixture_plants_test_and_documentation_gaps() -> None:
     assert "docstring" in keywords or "stale" in keywords, "no documentation finding"
 
 
+def test_spec_delivery_fixture_can_score_the_spec_lens() -> None:
+    """The spec lens only runs when a committed spec is detected AND matched, so
+    this fixture must ship one in its corpus — otherwise the lens is skipped and
+    the fixture silently measures nothing.
+
+    It plants both halves the lens reports: a task the diff ticks off without
+    delivering, and behaviour (`force`) that no requirement covers."""
+    _diff, manifest = _fixture("spec-delivery")
+
+    assert manifest.corpus_root is not None
+    spec_dir = manifest.corpus_root / ".kiro" / "specs" / "link-expiry"
+    assert (spec_dir / "requirements.md").is_file()
+    assert (spec_dir / "tasks.md").is_file()
+
+    keywords = " ".join(k.lower() for e in manifest.expected for k in e.keywords)
+    assert "expiry" in keywords or "expired" in keywords, "no undelivered-task finding"
+    assert "requirement" in keywords or "specification" in keywords, "no spec-gap finding"
+    assert manifest.forbidden, "no cross-file traps to measure precision against"
+
+
+def test_spec_delivery_diff_ticks_tasks_its_code_does_not_deliver() -> None:
+    """The claim extractor reads the DIFF, so the checkbox flip has to be in it —
+    a fixture whose tasks.md arrives already ticked would plant no claim at all."""
+    from lgtmaybe.engine.specs import ticked_tasks
+
+    diff, _manifest = _fixture("spec-delivery")
+    claims = ticked_tasks(diff)
+
+    assert any(c.startswith("1.3") for c in claims), "task 1.3 is not claimed as done"
+    assert any(c.startswith("1.4") for c in claims), "task 1.4 is not claimed as done"
+    # ...and neither is actually delivered: redeem_link checks redeemed_at only.
+    assert "expires_at" not in diff.split("def redeem_link")[1]
+    assert "audit" not in diff.split("def redeem_link")[1].lower()
+
+
+def test_spec_delivery_corpus_refutes_its_forbidden_traps() -> None:
+    """Each forbidden trap must be refutable from the corpus — otherwise it is not
+    a false positive, it is a finding the fixture is wrong to forbid."""
+    _diff, manifest = _fixture("spec-delivery")
+    assert manifest.corpus_root is not None
+
+    models = (manifest.corpus_root / "src" / "links" / "models.py").read_text(encoding="utf-8")
+    repo = (manifest.corpus_root / "src" / "links" / "repo.py").read_text(encoding="utf-8")
+
+    assert "expires_at" in models, "the column trap needs the field to already exist"
+    assert "redeemed_at IS NULL" in repo, "the idempotency trap needs a conditional update"
+
+
 # ---------------------------------------------------------------------------
 # static-hints fixture (F1 A/B) + head/ loading
 # ---------------------------------------------------------------------------
