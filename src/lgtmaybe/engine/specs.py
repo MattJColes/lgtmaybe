@@ -36,6 +36,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from lgtmaybe.core.diffparse import walk_diff
@@ -110,115 +111,160 @@ class SpecBundle:
     files: tuple[str, ...]
 
 
-def _spec_files_in(root: Path, rel_root: str) -> tuple[str, ...]:
-    """The known spec files directly inside *rel_root*, in reading order."""
-    return tuple(
-        f"{rel_root}/{name}" for name in _SPEC_FILE_ORDER if (root / rel_root / name).is_file()
-    )
+class _Tree:
+    """The repository as detection sees it: the workspace UNION the PR's own paths.
 
+    Spec-driven work commits the spec in the pull request that implements it, so
+    on the first PR of a feature the spec directory does not exist on the base
+    branch — which is the only thing the workspace holds on
+    ``pull_request_target``. Detection that walked the filesystem alone would
+    therefore skip the lens in precisely the case the spec is newest and the
+    review most needs it.
 
-def _dirs_in(parent: Path) -> list[Path]:
-    """Immediate subdirectories of *parent*, sorted, or [] when it isn't one."""
-    if not parent.is_dir():
-        return []
-    return sorted((child for child in parent.iterdir() if child.is_dir()), key=lambda p: p.name)
+    Adding the PR's paths here rather than in a second detection pass keeps ONE
+    set of layout rules: the ``specs/`` guard, the archive exclusion and the
+    reading order cannot drift between a spec that already existed and one this
+    PR introduces. Existence only — no content is read, and the paths are never
+    resolved against the filesystem, so a hostile path cannot escape the root.
+    """
+
+    def __init__(self, root: Path, changed_files: Sequence[str] = ()) -> None:
+        self._root = root
+        self._added = {p for p in changed_files if p}
+        self._added_dirs = {
+            str(parent)
+            for p in self._added
+            for parent in PurePosixPath(p).parents
+            if str(parent) != "."
+        }
+
+    def is_file(self, rel: str) -> bool:
+        return rel in self._added or (self._root / rel).is_file()
+
+    def is_dir(self, rel: str) -> bool:
+        return rel in self._added_dirs or (self._root / rel).is_dir()
+
+    def dirs_in(self, rel: str) -> list[str]:
+        """Immediate subdirectory names of *rel*, sorted, from disk and the PR."""
+        names = {
+            PurePosixPath(d).name for d in self._added_dirs if str(PurePosixPath(d).parent) == rel
+        }
+        parent = self._root / rel
+        if parent.is_dir():
+            names |= {child.name for child in parent.iterdir() if child.is_dir()}
+        return sorted(names)
+
+    def spec_files_in(self, rel_root: str) -> tuple[str, ...]:
+        """The known spec files directly inside *rel_root*, in reading order."""
+        return tuple(
+            f"{rel_root}/{name}" for name in _SPEC_FILE_ORDER if self.is_file(f"{rel_root}/{name}")
+        )
+
+    def glob_dirs(self, pattern: str) -> list[str]:
+        """Directories matching a ``spec_paths`` glob, from disk and the PR."""
+        found = {
+            d for d in self._added_dirs if fnmatchcase(d, pattern) or fnmatchcase(f"{d}/", pattern)
+        }
+        for match in self._root.glob(pattern):
+            if not match.is_dir():
+                continue
+            try:
+                found.add(match.relative_to(self._root).as_posix())
+            except ValueError:  # a pattern that climbed out of the workspace
+                continue
+        return sorted(found)
 
 
 def _bundle(
-    root: Path, system: SpecSystem, rel_root: str, extra: Sequence[str] = ()
+    tree: _Tree, system: SpecSystem, rel_root: str, extra: Sequence[str] = ()
 ) -> SpecBundle | None:
     """Build a bundle for *rel_root*, or None when it holds no spec files."""
-    files = _spec_files_in(root, rel_root) + tuple(extra)
+    files = tree.spec_files_in(rel_root) + tuple(extra)
     if not files:
         return None
     return SpecBundle(system=system, slug=PurePosixPath(rel_root).name, root=rel_root, files=files)
 
 
-def _detect_openspec(root: Path) -> list[SpecBundle]:
+def _detect_openspec(tree: _Tree) -> list[SpecBundle]:
     """Active change proposals and living capability specs under ``openspec/``.
 
     Archived changes are deliberately excluded: they describe work that already
     shipped, so holding a PR to one would be judging it against history.
     """
-    if not (root / "openspec").is_dir():
+    if not tree.is_dir("openspec"):
         return []
 
     bundles: list[SpecBundle] = []
-    for change in _dirs_in(root / "openspec" / "changes"):
-        if change.name == "archive":
+    for name in tree.dirs_in("openspec/changes"):
+        if name == "archive":
             continue
-        rel = f"openspec/changes/{change.name}"
+        rel = f"openspec/changes/{name}"
         # Delta specs sit one level down, one directory per capability.
         deltas = tuple(
-            f"{rel}/specs/{cap.name}/spec.md"
-            for cap in _dirs_in(change / "specs")
-            if (cap / "spec.md").is_file()
+            f"{rel}/specs/{cap}/spec.md"
+            for cap in tree.dirs_in(f"{rel}/specs")
+            if tree.is_file(f"{rel}/specs/{cap}/spec.md")
         )
-        bundle = _bundle(root, SpecSystem.openspec, rel, deltas)
+        bundle = _bundle(tree, SpecSystem.openspec, rel, deltas)
         if bundle is not None:
             bundles.append(bundle)
 
-    for capability in _dirs_in(root / "openspec" / "specs"):
-        bundle = _bundle(root, SpecSystem.openspec, f"openspec/specs/{capability.name}")
+    for capability in tree.dirs_in("openspec/specs"):
+        bundle = _bundle(tree, SpecSystem.openspec, f"openspec/specs/{capability}")
         if bundle is not None:
             bundles.append(bundle)
 
     return bundles
 
 
-def _detect_speckit(root: Path) -> list[SpecBundle]:
+def _detect_speckit(tree: _Tree) -> list[SpecBundle]:
     """Feature directories under ``specs/``, when this really is a Spec Kit tree.
 
     A bare ``specs/`` folder of prose is not Spec Kit, and treating it as one
     would fire the lens on every documentation repository. Either the
     ``.specify/`` scaffolding is present, or the directory carries both a spec
-    and the plan Spec Kit generates from it.
+    and the plan Spec Kit generates from it. The guard applies to a spec the PR
+    adds exactly as it does to one already on the branch.
     """
-    scaffolded = (root / ".specify").is_dir()
+    scaffolded = tree.is_dir(".specify")
     bundles: list[SpecBundle] = []
-    for feature in _dirs_in(root / "specs"):
-        has_plan = (feature / "plan.md").is_file() and (feature / "spec.md").is_file()
+    for feature in tree.dirs_in("specs"):
+        rel = f"specs/{feature}"
+        has_plan = tree.is_file(f"{rel}/plan.md") and tree.is_file(f"{rel}/spec.md")
         if not scaffolded and not has_plan:
             continue
-        bundle = _bundle(root, SpecSystem.speckit, f"specs/{feature.name}")
+        bundle = _bundle(tree, SpecSystem.speckit, rel)
         if bundle is not None:
             bundles.append(bundle)
     return bundles
 
 
-def _detect_kiro(root: Path) -> list[SpecBundle]:
+def _detect_kiro(tree: _Tree) -> list[SpecBundle]:
     """Feature directories under ``.kiro/specs/``."""
     bundles: list[SpecBundle] = []
-    for feature in _dirs_in(root / ".kiro" / "specs"):
-        bundle = _bundle(root, SpecSystem.kiro, f".kiro/specs/{feature.name}")
+    for feature in tree.dirs_in(".kiro/specs"):
+        bundle = _bundle(tree, SpecSystem.kiro, f".kiro/specs/{feature}")
         if bundle is not None:
             bundles.append(bundle)
     return bundles
 
 
-def _detect_extra(root: Path, patterns: Sequence[str]) -> list[SpecBundle]:
+def _detect_extra(tree: _Tree, patterns: Sequence[str]) -> list[SpecBundle]:
     """Spec directories named by ``ReviewConfig.spec_paths`` globs.
 
     The escape hatch for a house layout the three known systems do not describe.
-    Each pattern globs directories relative to the workspace root; a match that
-    holds no recognised spec file is skipped like any other.
+    A match that holds no recognised spec file is skipped like any other.
     """
     bundles: list[SpecBundle] = []
     seen: set[str] = set()
     for pattern in patterns:
-        for match in sorted(root.glob(pattern)):
-            if not match.is_dir():
-                continue
-            try:
-                rel = match.relative_to(root).as_posix()
-            except ValueError:  # a pattern that climbed out of the workspace
-                continue
+        for rel in tree.glob_dirs(pattern):
             if rel in seen:
                 continue
             seen.add(rel)
             # No system owns a custom layout; label it by the closest match so
             # the prompt can still name what it is reading.
-            bundle = _bundle(root, _system_for(rel), rel)
+            bundle = _bundle(tree, _system_for(rel), rel)
             if bundle is not None:
                 bundles.append(bundle)
     return bundles
@@ -232,18 +278,21 @@ def _system_for(rel: str) -> SpecSystem:
     return SpecSystem.speckit
 
 
-def detect(root: Path, extra_paths: Sequence[str] = ()) -> list[SpecBundle]:
+def detect(
+    root: Path, extra_paths: Sequence[str] = (), changed_files: Sequence[str] = ()
+) -> list[SpecBundle]:
     """Every spec directory in the workspace, across all known layouts.
 
     A pure filesystem probe — no file body is read and no model is called — so
     running it on every review costs a handful of ``stat`` calls. An empty
     result is the common case and means the spec lens never runs.
     """
+    tree = _Tree(root, changed_files)
     bundles = (
-        _detect_openspec(root)
-        + _detect_speckit(root)
-        + _detect_kiro(root)
-        + _detect_extra(root, extra_paths)
+        _detect_openspec(tree)
+        + _detect_speckit(tree)
+        + _detect_kiro(tree)
+        + _detect_extra(tree, extra_paths)
     )
     if bundles:
         _log.info(

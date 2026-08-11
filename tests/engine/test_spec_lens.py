@@ -162,8 +162,8 @@ class TestSpecBlockDelivery:
         implements it, so it does not exist on the base branch the workspace holds.
         Reading only the workspace would judge the code against nothing."""
         monkeypatch.chdir(tmp_path)
-        # The directory exists at head only; detection still needs to see it, so
-        # the workspace carries the tree while the CONTENT comes from the PR.
+        # The workspace copy is the BASE branch's stale version; the PR changes
+        # the file, so the head text must win.
         _write_kiro_spec(tmp_path, body="stale base copy\n")
         provider = FakeProvider(findings=[])
 
@@ -284,3 +284,55 @@ def _shared_prefixes(provider: FakeProvider) -> set[str]:
         if len(messages) == 3:
             prefixes.add(str(messages[1]["content"]))
     return prefixes
+
+
+class TestSpecAddedByThePR:
+    """The first PR of a feature commits the spec and the code together, so the
+    spec directory does not exist on the base branch the workspace holds. This is
+    the case the lens exists for, and the one a workspace-only probe misses."""
+
+    def test_a_spec_absent_from_the_workspace_still_runs_the_lens(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)  # an empty workspace: no .kiro at all
+        provider = FakeProvider(findings=[])
+
+        LLMReviewEngine(provider).review(
+            _ctx(
+                changed_files=[
+                    "src/links/service.py",
+                    ".kiro/specs/brand-new/requirements.md",
+                    ".kiro/specs/brand-new/tasks.md",
+                ],
+                file_contents={
+                    ".kiro/specs/brand-new/requirements.md": (
+                        "1. WHEN a link is created THEN it SHALL expire\n"
+                    ),
+                    ".kiro/specs/brand-new/tasks.md": "- [ ] 1.1 Add expiry\n",
+                },
+            ),
+            _cfg(),
+        )
+
+        prompts = _prompts(provider)
+        assert "WHEN a link is created THEN it SHALL expire" in prompts
+        assert len(provider.calls) == 5
+
+    def test_an_unrelated_changed_markdown_file_invents_no_spec(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`design.md` and `tasks.md` are ordinary filenames — only the known
+        layouts count, or every docs PR grows a spec lens."""
+        monkeypatch.chdir(tmp_path)
+        provider = FakeProvider(findings=[])
+
+        LLMReviewEngine(provider).review(
+            _ctx(
+                changed_files=["src/links/service.py", "docs/design.md", "notes/tasks.md"],
+                file_contents={"docs/design.md": "# Design\n", "notes/tasks.md": "- [x] ship it\n"},
+            ),
+            _cfg(),
+        )
+
+        assert "SPEC_START" not in _prompts(provider)
+        assert len(provider.calls) == 4

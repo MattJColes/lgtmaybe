@@ -438,3 +438,101 @@ class TestBuildSpecText:
         # A ticked checkbox with no readable spec gives the lens nothing to
         # judge against; better silence than a call that can only guess.
         assert build_spec_text([self._bundle()], {}, claims=["1.1 Do a thing"]) is None
+
+
+class TestDetectFromChangedFiles:
+    """Spec-driven work commits the spec in the PR that implements it, so on the
+    very first PR of a feature the spec directory does not exist on the base
+    branch at all. Detection that only walks the workspace skips the lens exactly
+    when the spec is newest — so the PR's own added paths are part of the tree
+    detection sees."""
+
+    def test_a_kiro_spec_added_by_the_pr_is_detected(self, tmp_path: Path) -> None:
+        bundles = detect(
+            tmp_path,
+            changed_files=[
+                ".kiro/specs/new-feature/requirements.md",
+                ".kiro/specs/new-feature/tasks.md",
+                "src/app.py",
+            ],
+        )
+
+        assert [(b.system, b.slug) for b in bundles] == [(SpecSystem.kiro, "new-feature")]
+        assert bundles[0].files == (
+            ".kiro/specs/new-feature/requirements.md",
+            ".kiro/specs/new-feature/tasks.md",
+        )
+
+    def test_an_openspec_change_added_by_the_pr_is_detected(self, tmp_path: Path) -> None:
+        bundles = detect(
+            tmp_path,
+            changed_files=[
+                "openspec/changes/add-billing/proposal.md",
+                "openspec/changes/add-billing/tasks.md",
+                "openspec/changes/add-billing/specs/billing/spec.md",
+            ],
+        )
+
+        assert [b.slug for b in bundles] == ["add-billing"]
+        assert "openspec/changes/add-billing/specs/billing/spec.md" in bundles[0].files
+
+    def test_a_speckit_spec_added_by_the_pr_needs_spec_and_plan(self, tmp_path: Path) -> None:
+        """The `specs/` guard has to survive into the added-file path too, or every
+        PR touching a `specs/*/spec.md` in a docs repo grows a spec lens."""
+        assert detect(tmp_path, changed_files=["specs/003-thing/spec.md"]) == []
+
+        bundles = detect(
+            tmp_path, changed_files=["specs/003-thing/spec.md", "specs/003-thing/plan.md"]
+        )
+        assert [b.slug for b in bundles] == ["003-thing"]
+
+    def test_a_speckit_spec_added_beside_an_existing_specify_dir(self, tmp_path: Path) -> None:
+        _write(tmp_path, ".specify/memory/constitution.md")
+
+        bundles = detect(tmp_path, changed_files=["specs/004-thing/spec.md"])
+
+        assert [b.slug for b in bundles] == ["004-thing"]
+
+    def test_a_changed_doc_that_merely_shares_a_filename_is_not_a_spec(
+        self, tmp_path: Path
+    ) -> None:
+        """`design.md` and `tasks.md` are ordinary filenames. Only the known
+        layouts count, or a PR touching docs/design.md invents a spec."""
+        assert (
+            detect(
+                tmp_path,
+                changed_files=["docs/design.md", "notes/tasks.md", "README.md"],
+            )
+            == []
+        )
+
+    def test_an_added_archive_change_is_still_ignored(self, tmp_path: Path) -> None:
+        assert (
+            detect(
+                tmp_path,
+                changed_files=["openspec/changes/archive/2026-01-01-old/proposal.md"],
+            )
+            == []
+        )
+
+    def test_workspace_and_added_specs_merge_without_duplicates(self, tmp_path: Path) -> None:
+        """The PR adds tasks.md to a spec whose requirements.md is already on the
+        base branch: one bundle carrying both, not two half-bundles."""
+        _write(tmp_path, ".kiro/specs/half/requirements.md")
+
+        bundles = detect(tmp_path, changed_files=[".kiro/specs/half/tasks.md"])
+
+        assert len(bundles) == 1
+        assert bundles[0].files == (
+            ".kiro/specs/half/requirements.md",
+            ".kiro/specs/half/tasks.md",
+        )
+
+    def test_extra_paths_match_an_added_directory_too(self, tmp_path: Path) -> None:
+        bundles = detect(
+            tmp_path,
+            extra_paths=["design/rfcs/*"],
+            changed_files=["design/rfcs/rfc-9/requirements.md"],
+        )
+
+        assert [b.slug for b in bundles] == ["rfc-9"]

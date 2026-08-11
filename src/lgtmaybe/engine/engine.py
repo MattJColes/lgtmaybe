@@ -1698,12 +1698,16 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> str | None:
     Spec text is read from the workspace (the trusted base branch on
     ``pull_request_target``) except for files this PR changes, which come from
     its own head text — a spec is usually committed alongside the code that
-    delivers it. Everything is redacted, including the ticked-task claims, which
-    are mined from the raw diff rather than from an already-redacted file.
+    delivers it. For the same reason the PR's changed paths join the tree
+    ``detect`` walks: on the first PR of a feature the spec directory does not
+    exist on the base branch at all, and detecting only what the workspace holds
+    would skip the lens exactly then. Everything is redacted, including the
+    ticked-task claims, which are mined from the raw diff rather than from an
+    already-redacted file.
     """
     if not cfg.spec_review:
         return None
-    bundles = specs.detect(root, cfg.spec_paths)
+    bundles = specs.detect(root, cfg.spec_paths, ctx.changed_files)
     if not bundles:
         return None
     selected = specs.select(

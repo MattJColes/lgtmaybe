@@ -17,11 +17,13 @@ from evals import run as run_mod
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig, ReviewFinding
 from lgtmaybe.core.ports import ProviderClient
+from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.astgrep import build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
 from lgtmaybe.engine.reflect import reflect_findings
 from lgtmaybe.github import is_reviewable
 from lgtmaybe.local import local_file_reader
+from tests.fakes import FakeProvider
 
 # The four live false-positive fixtures Track C adds: each plants a genuine catch
 # plus forbidden traps drawn from real over-eager reviewer claims.
@@ -335,6 +337,34 @@ def test_spec_delivery_diff_ticks_tasks_its_code_does_not_deliver() -> None:
     # ...and neither is actually delivered: redeem_link checks redeemed_at only.
     assert "expires_at" not in diff.split("def redeem_link")[1]
     assert "audit" not in diff.split("def redeem_link")[1].lower()
+
+
+def test_spec_delivery_fixture_actually_drives_the_spec_lens_end_to_end() -> None:
+    """The structural checks above cannot see a broken chain: rename the fixture's
+    spec directory, change a detection rule, or mis-wire the harness's workspace
+    root, and they all still pass while the fixture silently scores a lens that
+    never ran. This runs the real engine over the real fixture — only the provider
+    is fake — and asserts the spec block reaches exactly one call, carrying both
+    the requirements and the tasks the diff ticks off."""
+    diff, manifest = _fixture("spec-delivery")
+    provider = FakeProvider(findings=[])
+
+    LLMReviewEngine(provider, workspace_root=manifest.corpus_root or manifest.fixture_root).review(
+        run_mod._eval_ctx(diff, manifest),
+        ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False),
+    )
+
+    carrying = [
+        call
+        for call in provider.calls
+        if "===SPEC_START===" in "\n".join(str(m.get("content", "")) for m in call["messages"])
+    ]
+    assert len(carrying) == 1, "the spec block must reach exactly one call"
+
+    prompt = "\n".join(str(m.get("content", "")) for m in carrying[0]["messages"])
+    assert "link-expiry" in prompt
+    assert "SHALL set an expiry" in prompt, "requirements.md did not reach the lens"
+    assert "1.3 Reject redemption" in prompt, "the ticked-task claims did not reach the lens"
 
 
 def test_spec_delivery_corpus_refutes_its_forbidden_traps() -> None:
