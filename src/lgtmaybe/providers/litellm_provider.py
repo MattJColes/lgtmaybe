@@ -591,12 +591,14 @@ class LiteLLMProvider:
         if not self._cache_capable[model]:
             return _merge_user_messages(messages)
 
+        from lgtmaybe.engine.compress import count_tokens
+
         out = list(messages)
         cumulative = 0
         sys_index = next((i for i, m in enumerate(out) if m.get("role") == "system"), None)
         if sys_index is not None and isinstance(out[sys_index].get("content"), str):
             sys_text = out[sys_index]["content"]
-            cumulative = _count_tokens(sys_text)
+            cumulative = count_tokens(sys_text)
             if cumulative >= _MIN_CACHEABLE_TOKENS:
                 sys_marked: Any = [_cache_block(sys_text)]
                 out[sys_index] = {**out[sys_index], "content": sys_marked}
@@ -605,7 +607,7 @@ class LiteLLMProvider:
         if len(run) >= 2:
             # Split shape: every user message but the last is shared prefix.
             prefix_texts = [str(m.get("content", "")) for m in run[:-1]]
-            cumulative += sum(_count_tokens(t) for t in prefix_texts)
+            cumulative += sum(count_tokens(t) for t in prefix_texts)
             blocks: list[dict[str, Any]] = [{"type": "text", "text": t} for t in prefix_texts]
             if cumulative >= _MIN_CACHEABLE_TOKENS:
                 blocks[-1] = _cache_block(prefix_texts[-1])
@@ -847,14 +849,3 @@ def _cache_usage(usage: Any) -> tuple[int, int]:
         "cache_creation_tokens", "cache_write_tokens"
     )
     return int(cache_read or 0), int(cache_creation or 0)
-
-
-def _count_tokens(text: str) -> int:
-    """Token count for the minimum-cacheable-block check.
-
-    Reuses the engine's cached tiktoken encoder (len/4 fallback) — imported
-    lazily so building a provider never drags the engine in at import time.
-    """
-    from lgtmaybe.engine.compress import count_tokens
-
-    return count_tokens(text)
