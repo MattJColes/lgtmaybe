@@ -176,9 +176,11 @@ def test_reflect_prompt_conditions_the_test_and_doc_carve_out_on_seeing_the_file
     reflect_findings([_HIGH], _CTX, _CFG, provider)
 
     system = provider.calls[0]["messages"][0]["content"].lower()
-    assert "only when" in system
+    # The condition itself, not words near it: "only when" and "test file" both
+    # survive a rewrite that quietly drops the requirement to SEE the file, which
+    # is the only thing this test exists to stop.
+    assert "keep it only when the test file or doc file is actually in front of you" in system
     assert "untouched" in system or "elsewhere" in system
-    assert "test file" in system
 
 
 def test_reflect_prompt_drops_unseen_code_assumptions() -> None:

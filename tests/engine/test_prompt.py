@@ -617,8 +617,10 @@ def test_prompt_guards_claims_about_an_unshown_symbols_value() -> None:
     name the second one too, in every focused prompt."""
     for category in ReviewCategory:
         prompt = _built_in_prompt(category).lower()
-        assert "contains" in prompt
-        assert "constant" in prompt
+        # Pinned as the whole clause, not as three words that happen to co-occur:
+        # `contains`, `constant` and `hedge` are each satisfied by unrelated prompt
+        # text, so a keyword triple would go on passing after the rule was deleted.
+        assert "you may not assume the value of a constant" in prompt
         # the same remedy as every other absence claim: hedge, don't assert
         assert "hedge" in prompt
 
