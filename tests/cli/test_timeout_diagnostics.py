@@ -17,6 +17,7 @@ import pytest
 
 from lgtmaybe.cli import build_provider_engine
 from lgtmaybe.core.models import Provider, ReviewConfig
+from lgtmaybe.engine.engine import concurrency_cap
 from lgtmaybe.providers.factory import default_timeout_for
 
 
@@ -126,3 +127,75 @@ def test_the_two_sources_are_distinguishable_at_the_same_value(cli_logs) -> None
     record = _timeout_record(cli_logs)
     assert getattr(record, "timeout_s", None) == cloud_default
     assert getattr(record, "timeout_source", None) == "configured"
+
+
+def test_a_local_default_is_widened_for_the_fan_out_it_will_queue_behind(cli_logs) -> None:
+    """The CLI is the only place that knows both numbers — the provider and the
+    fan-out width — so it is where the scaling has to be applied. Getting this
+    wiring wrong is invisible: the unscaled budget still works on a fast box and
+    only fails on the slow one the scaling exists for.
+    """
+    cfg = ReviewConfig(provider=Provider.ollama, model="m")
+    provider = build_provider_engine(cfg, _runtime())[1]
+
+    unscaled = default_timeout_for(Provider.ollama)
+    expected = min(unscaled * concurrency_cap(cfg), cfg.max_review_seconds)
+    assert expected > unscaled, "the fixture must actually exercise a widening"
+    assert provider.default_opts["timeout"] == expected
+
+    record = _timeout_record(cli_logs)
+    assert getattr(record, "timeout_s", None) == expected
+    assert getattr(record, "concurrency", None) == concurrency_cap(cfg)
+
+
+def test_a_serial_local_run_gets_the_unscaled_budget(cli_logs) -> None:
+    """Width 1 has no queue, so the mitigation must cost it nothing."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="m", max_concurrency=1)
+    provider = build_provider_engine(cfg, _runtime())[1]
+
+    assert provider.default_opts["timeout"] == default_timeout_for(Provider.ollama)
+
+
+def test_a_hosted_default_is_not_widened_by_the_fan_out(cli_logs) -> None:
+    cfg = ReviewConfig(provider=Provider.openai, model="m")
+    provider = build_provider_engine(cfg, _runtime())[1]
+
+    assert provider.default_opts["timeout"] == default_timeout_for(Provider.openai)
+
+
+def test_the_widened_budget_never_outlives_the_whole_review_deadline(cli_logs) -> None:
+    """Scaling by width is a mitigation, not a licence to run forever.
+
+    Six workers on the generous local default is 3 hours of per-call budget, and
+    the fan-out all starts at once — so the whole-review deadline, which only
+    skips calls that have not *started*, cannot cut it short. Clamping the scaled
+    value to that deadline restores the property the deadline exists for: no
+    single call outlives the run it belongs to.
+    """
+    cfg = ReviewConfig(provider=Provider.ollama, model="m")
+    provider = build_provider_engine(cfg, _runtime())[1]
+
+    resolved = provider.default_opts["timeout"]
+    assert resolved <= cfg.max_review_seconds
+    assert resolved > default_timeout_for(Provider.ollama), "still widened, just bounded"
+
+
+def test_a_disabled_deadline_leaves_the_scaling_unbounded(cli_logs) -> None:
+    """`max_review_seconds: 0` means "no deadline" — it must not read as a
+    zero-second ceiling that collapses every budget to nothing."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="m", max_review_seconds=0)
+    provider = build_provider_engine(cfg, _runtime())[1]
+
+    assert provider.default_opts["timeout"] == default_timeout_for(
+        Provider.ollama, concurrency=concurrency_cap(cfg)
+    )
+
+
+def test_a_short_deadline_never_cuts_below_the_providers_own_default(cli_logs) -> None:
+    """The clamp may only take back what the scaling added. A tight deadline
+    must not drag a local call below the budget it would have had unscaled —
+    that would be a regression dressed up as a safety bound."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="m", max_review_seconds=60)
+    provider = build_provider_engine(cfg, _runtime())[1]
+
+    assert provider.default_opts["timeout"] == default_timeout_for(Provider.ollama)
