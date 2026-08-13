@@ -6,6 +6,7 @@
 ### Bug Fixes
 
 * align GitHub Action with v2 ([#430](https://github.com/MattJColes/lgtmaybe/issues/430)) ([386b9d4](https://github.com/MattJColes/lgtmaybe/commit/386b9d4c250c5adeccf05b9876aed3ebb0f7f0f5))
+* **prompt:** close the seam between humility and the gap carve-out ([#428](https://github.com/MattJColes/lgtmaybe/issues/428)) ([0d09eb4](https://github.com/MattJColes/lgtmaybe/commit/0d09eb4a06c45cf78c7414501e9a3b5a3380b707))
 
 ## [2.0.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.14.1...lgtmaybe-v2.0.0) (2026-08-13)
 
