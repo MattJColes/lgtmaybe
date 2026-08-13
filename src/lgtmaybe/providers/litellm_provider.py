@@ -7,6 +7,7 @@ optional fallback model.
 from __future__ import annotations
 
 import hashlib
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -34,12 +35,17 @@ from tenacity import (
     retry,
     retry_if_exception,
     stop_after_attempt,
-    stop_after_delay,
+    stop_before_delay,
     wait_exponential_jitter,
 )
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ProviderResult, attempts_of, stamp_attempts
+from lgtmaybe.core.models import (
+    ProviderResult,
+    attempts_of,
+    stamp_attempts,
+    stamp_unrecoverable,
+)
 from lgtmaybe.core.ports import (
     Message,
     ProviderClient,
@@ -160,9 +166,30 @@ def _mentions(exc: BaseException, markers: tuple[str, ...]) -> bool:
     return any(marker in msg for marker in markers)
 
 
+def _is_unrecoverable(exc: BaseException) -> bool:
+    """True when NO later attempt at this call can succeed — not in this run.
+
+    Bad credentials, exhausted quota, spent prepaid credit, a request the model
+    refuses: the condition cannot change while the review runs. Narrower than
+    :func:`_is_permanent`, which additionally refuses to retry a call *in place*
+    when only an identical immediate re-send is on offer. The engine reads this
+    one (via the stamp in :func:`stamp_unrecoverable`) to decide whether its
+    rescue wave is worth a billed call — and a stalled upstream, which is
+    permanent for an immediate retry, may well answer a genuinely later request.
+    """
+    if isinstance(exc, _PERMANENT_ERROR_TYPES):
+        return True
+    # A 429 is permanent only when it's a quota/billing one; a capacity 429 retries.
+    if isinstance(exc, RateLimitError):
+        return _mentions(exc, _QUOTA_MARKERS)
+    return _mentions(exc, _EXPIRED_CREDENTIAL_MARKERS) or _mentions(
+        exc, _INSUFFICIENT_CREDIT_MARKERS
+    )
+
+
 def _is_permanent(exc: BaseException) -> bool:
     """True when retrying *exc* cannot plausibly succeed, so we should not."""
-    if isinstance(exc, _PERMANENT_ERROR_TYPES):
+    if _is_unrecoverable(exc):
         return True
     # A blown wall clock is not a blip: the retry re-sends the identical request
     # against the identical budget, so attempts 2..N can only fail the same way
@@ -181,14 +208,7 @@ def _is_permanent(exc: BaseException) -> bool:
     # labour. Only the engine holds the batch, so only the engine can change the
     # payload; the adapter can only re-send the same oversized one, which is the
     # attempt worth refusing.
-    if isinstance(exc, ProviderTruncated):
-        return True
-    # A 429 is permanent only when it's a quota/billing one; a capacity 429 retries.
-    if isinstance(exc, RateLimitError):
-        return _mentions(exc, _QUOTA_MARKERS)
-    return _mentions(exc, _EXPIRED_CREDENTIAL_MARKERS) or _mentions(
-        exc, _INSUFFICIENT_CREDIT_MARKERS
-    )
+    return isinstance(exc, ProviderTruncated)
 
 
 # How long to back off between attempts, by what failed.
@@ -265,9 +285,15 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
     if raw is None:
         return None
     try:
-        return max(0.0, float(raw))
+        seconds = float(raw)
     except (TypeError, ValueError):
-        pass
+        seconds = None
+    if seconds is not None:
+        # `float()` parses "nan" and "inf" perfectly happily, and either would
+        # travel through the clamp below into tenacity's sleep — raising from
+        # inside the retry loop, the one place left that can still rescue this
+        # call. A header we can't use is a header we don't have.
+        return max(0.0, seconds) if math.isfinite(seconds) else None
     try:
         when = parsedate_to_datetime(str(raw))
     except (TypeError, ValueError):
@@ -441,8 +467,14 @@ class LiteLLMProvider(ProviderClient):
 
         @retry(
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
+            # stop_BEFORE_delay, not after: `after` reads the clock only once a
+            # wait has already been taken, so a call with most of its budget
+            # spent could still sleep out a full `Retry-After` on top of it —
+            # two minutes past a budget that had all but run out. `before` weighs
+            # the UPCOMING sleep, so a wait that would blow the budget ends the
+            # call instead of being taken.
             stop=stop_after_attempt(_MAX_ATTEMPTS)
-            | stop_after_delay(timeout * _CALL_BUDGET_MULTIPLIER),
+            | stop_before_delay(timeout * _CALL_BUDGET_MULTIPLIER),
             wait=_retry_wait,
             reraise=True,
         )
@@ -469,8 +501,12 @@ class LiteLLMProvider(ProviderClient):
         except BaseException as exc:
             # A failure has no ProviderResult to ride home on, so the count goes
             # on the exception — else the instrumentation records a budget-burning
-            # failure as `attempts=0`, which reads as "never retried".
+            # failure as `attempts=0`, which reads as "never retried". The same
+            # channel carries whether any later attempt could have helped, which
+            # is what stops the engine's rescue wave re-billing a dead key.
             stamp_attempts(exc, attempts)
+            if _is_unrecoverable(exc):
+                stamp_unrecoverable(exc)
             raise
         return result.model_copy(update={"attempts": attempts})
 

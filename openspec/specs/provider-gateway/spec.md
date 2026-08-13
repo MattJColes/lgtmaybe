@@ -102,8 +102,9 @@ cause, since a ceiling-hitting call offers no healthy call to compare against.
 Retry backoff SHALL be chosen by the failure. A capacity rate limit SHALL back
 off far enough to reach a fresh metering window, and SHALL prefer the server's
 own `Retry-After` when one is sent, clamped so a long hint cannot consume the
-run. Every other transient failure SHALL keep the sub-second ladder, and both
-SHALL stay inside the call's existing retry budget.
+run. Every other transient failure SHALL keep the sub-second ladder. The retry
+budget SHALL be weighed against the wait about to be taken, so no backoff is
+slept past it.
 <!-- anchor: provider.backoff -->
 
 #### Scenario: the gateway meters the key per minute
@@ -116,6 +117,12 @@ SHALL stay inside the call's existing retry budget.
   HTTP-date form
 - **THEN** that wait is honoured up to a ceiling, since nothing computed locally
   can beat the server's own answer
+
+#### Scenario: the hint would outlast the call's budget
+- **WHEN** the wait a retry is about to take would carry the call past its
+  retry budget
+- **THEN** the call ends there rather than sleeping through the budget it was
+  given
 
 #### Scenario: a brief connection failure
 - **WHEN** a call fails on something other than a rate limit — a reset, a 5xx, a

@@ -14,7 +14,7 @@ import httpx
 import litellm
 import pytest
 
-from lgtmaybe.core.models import attempts_of
+from lgtmaybe.core.models import attempts_of, is_unrecoverable
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
@@ -1155,8 +1155,12 @@ class TestRateLimitBackoff:
         when = datetime.now(UTC) + timedelta(seconds=40)
         exc = self._rate_limited(response=self._429({"retry-after": format_datetime(when)}))
         wait = provider_module._retry_wait(self._state(exc))
-        # Second-granularity header plus the clock moving under the test.
-        assert 35 <= wait <= 41
+        # Upper bound is tight (the header is 40s at second granularity); the
+        # lower one is loose on purpose, because a contended CI worker can stall
+        # for seconds between the header being written and the wait computed.
+        # What is under test is that the DATE was parsed at all — the ladder
+        # would answer 5s, and anything above it could only come from the header.
+        assert provider_module._RATE_LIMIT_BACKOFF_INITIAL < wait <= 41
 
     def test_a_retry_after_in_the_past_waits_no_time(self) -> None:
         """A stale HTTP-date must not produce a negative wait."""
@@ -1198,3 +1202,129 @@ class TestRateLimitBackoff:
         """tenacity computes a wait before the first outcome exists."""
         state = SimpleNamespace(attempt_number=1, outcome=None)
         assert provider_module._retry_wait(state) >= 0
+
+
+class TestPermanenceIsVisibleToTheEngine:
+    """The adapter knows which failures no later attempt can fix; the engine
+    needs that to decide whether its rescue wave is worth a billed call.
+
+    Stamped onto the exception, in the same place and for the same reason as the
+    attempt count: a failure has no result object to carry anything home on.
+    """
+
+    def test_a_quota_rate_limit_is_stamped_unrecoverable(self) -> None:
+        def quota(*args: Any, **kwargs: Any) -> Any:
+            raise litellm.RateLimitError(
+                message="OpenAIException - You exceeded your current quota",
+                model="m",
+                llm_provider="openai",
+            )
+
+        with patch("litellm.completion", side_effect=quota):
+            with pytest.raises(litellm.RateLimitError) as caught:
+                LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openai/m")
+
+        assert is_unrecoverable(caught.value)
+
+    def test_a_bad_key_is_stamped_unrecoverable(self) -> None:
+        def bad_key(*args: Any, **kwargs: Any) -> Any:
+            raise litellm.AuthenticationError(
+                message="invalid api key", model="m", llm_provider="openai"
+            )
+
+        with patch("litellm.completion", side_effect=bad_key):
+            with pytest.raises(litellm.AuthenticationError) as caught:
+                LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openai/m")
+
+        assert is_unrecoverable(caught.value)
+
+    def test_a_capacity_rate_limit_is_not_stamped(self) -> None:
+        """Transient: the engine's rescue wave should still get its go."""
+
+        def busy(*args: Any, **kwargs: Any) -> Any:
+            raise litellm.RateLimitError(
+                message="RateLimitError: OpenrouterException - rate limit exceeded",
+                model="m",
+                llm_provider="openrouter",
+            )
+
+        with (
+            patch("litellm.completion", side_effect=busy),
+            patch.object(provider_module, "_rate_limit_wait", lambda _: 0.0),
+        ):
+            with pytest.raises(litellm.RateLimitError) as caught:
+                LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openrouter/m")
+
+        assert not is_unrecoverable(caught.value)
+
+    def test_a_wall_timeout_is_not_stamped(self) -> None:
+        """Not retried *here* — an identical request against an identical budget
+        can only fail the same way — but a stalled upstream is not a dead end
+        forever, so the engine's later rescue is still allowed to try."""
+        release = threading.Event()
+
+        def hangs(*args: Any, **kwargs: Any) -> Any:
+            release.wait(timeout=5)
+            return _fake_response()
+
+        try:
+            with patch("litellm.completion", side_effect=hangs):
+                with pytest.raises(TimeoutError) as caught:
+                    LiteLLMProvider(timeout=0.05).complete(
+                        [{"role": "user", "content": "hi"}], "openrouter/m"
+                    )
+        finally:
+            release.set()
+
+        assert not is_unrecoverable(caught.value)
+
+
+class TestRetryBudgetIsNotOvershot:
+    def test_a_long_retry_after_is_not_slept_past_the_call_budget(self) -> None:
+        """`stop_after_delay` checks the clock only AFTER a wait, so a 120s
+        `Retry-After` on a short-timeout call could sleep two minutes past a
+        budget that had all but run out. The stop is evaluated against the
+        UPCOMING sleep instead, so a wait that would blow the budget ends the
+        call rather than being taken."""
+        started = time.perf_counter()
+
+        def rate_limited(*args: Any, **kwargs: Any) -> Any:
+            raise litellm.RateLimitError(
+                message="rate limited",
+                model="m",
+                llm_provider="openrouter",
+                response=httpx.Response(
+                    429,
+                    headers={"retry-after": "120"},
+                    request=httpx.Request("POST", "https://openrouter.ai"),
+                ),
+            )
+
+        with patch("litellm.completion", side_effect=rate_limited):
+            # Budget is 2.5 × 0.05s; the 120s hint cannot fit inside it.
+            with pytest.raises(litellm.RateLimitError):
+                LiteLLMProvider(timeout=0.05).complete(
+                    [{"role": "user", "content": "hi"}], "openrouter/m"
+                )
+
+        assert time.perf_counter() - started < 5
+
+
+class TestMalformedRetryAfter:
+    def test_a_non_finite_retry_after_falls_through_to_the_ladder(self) -> None:
+        """`float()` happily parses "nan" and "inf". Either would reach the
+        sleep and raise from inside the retry loop — the one place left that can
+        still rescue the call — so both are treated as no header at all."""
+        for raw in ("nan", "inf", "-inf"):
+            exc = litellm.RateLimitError(
+                message="rate limited",
+                model="m",
+                llm_provider="openrouter",
+                headers={"retry-after": raw},
+            )
+            state = SimpleNamespace(
+                attempt_number=1, outcome=SimpleNamespace(exception=lambda exc=exc: exc)
+            )
+            wait = provider_module._retry_wait(state)
+            assert wait == wait  # not NaN
+            assert wait <= provider_module._RATE_LIMIT_BACKOFF_MAX

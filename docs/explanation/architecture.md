@@ -226,18 +226,22 @@ network recovers but a dead-end failure surfaces fast:
   few seconds lands all four in the same window, where they can only fail
   identically. Rate limits therefore back off on a 5s–60s ladder instead, and
   prefer the server's own **`Retry-After`** when it sends one (in either RFC
-  form, clamped so a gateway asking for an hour can't eat the run's wall clock).
-  Both ladders stay inside the same 2.5× retry budget below.
+  form, clamped at 120s so a gateway asking for an hour can't eat the run's wall
+  clock). Both ladders stay inside the same 2.5× retry budget below — which is
+  weighed against the *upcoming* wait, so a backoff that would blow the budget
+  ends the call instead of being slept.
 
 - **A call that failed on the provider gets one more go.** Once the fan-out has
   drained, the calls that failed *provider-side* are re-run once, in a narrow
   pool of their own. This is the difference between a review and a partial one:
   a single flaky call used to void the whole round's verdict, and the findings
   that lens would have made were lost until somebody re-ran by hand. Nothing
-  else is rescued — unparseable output re-runs to the same unparseable answer at
-  temperature 0, a truncation runs to the same output ceiling, a batch the split
-  (below) already retried has had the one retry that can help, and a ceiling you
-  set is not a fault to retry past. Every rescue re-checks the deadline, the
+  else is left alone, because a second attempt would repeat the same failure at
+  full price: unparseable output returns the same unparseable answer at
+  temperature 0, a truncation runs to the same output ceiling, a batch already
+  retried by the split (below) has had the one retry that can help, a dead key
+  or spent quota cannot resolve itself mid-review, and a ceiling you set is not
+  a fault to retry past. Every rescue re-checks the deadline, the
   token budget and the interrupt first, and a healthy run costs **zero** extra
   calls.
 
@@ -275,9 +279,9 @@ network recovers but a dead-end failure surfaces fast:
 
 - **Incompleteness is visible on the PR, not just in the log.** The notice above
   is not specific to the deadline: *any* failed lens call (a per-call timeout, a
-  provider error, unparseable output) raises it — naming the lenses it lost, since
-  a missing security lens and a missing documentation lens are the same count and
-  very different news — and the engine stamps a hidden
+  provider error, unparseable output) raises it — naming the lenses it lost and
+  why, since a missing security lens and a missing documentation lens are the
+  same count and very different news — and the engine stamps a hidden
   `<!-- lgtmaybe-incomplete -->` marker alongside it. Because a re-run can only
   update the *first* run's review body in place — a silent edit, while this run's
   new findings arrive as individual review comments GitHub wraps in bodyless
@@ -287,8 +291,9 @@ network recovers but a dead-end failure surfaces fast:
 
 - **One global fan-out pool.** Every (batch, lens) call runs through a single
   `ThreadPoolExecutor` sized by `max_concurrency` — default **6 workers** for
-  hosted providers (every extra worker cuts a full-latency wave off the wall
-  clock, but the fan-out is *one* API key, and past some width the burst
+  hosted providers (an extra worker can cut a full-latency wave off the wall
+  clock — see the formula below — but the fan-out is *one* API key, and past
+  some width the burst
   rate-limits itself against a per-minute-metered gateway; raise it if your rate
   tier is generous), **1** for ollama (a single local instance serves a model
   one request at a time, so concurrent calls would only queue up and time out)

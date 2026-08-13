@@ -29,6 +29,7 @@ from lgtmaybe.core.models import (
     ReviewResult,
     StaticAnalysisTool,
     ToolMode,
+    is_unrecoverable,
 )
 from lgtmaybe.core.ports import (
     Message,
@@ -87,8 +88,10 @@ _log = get_logger(__name__)
 
 # Auto concurrency (cfg.max_concurrency=None), resolved per provider:
 #
-# - Cloud providers get 6. Every extra worker cuts a full-latency wave off the
-#   wall clock, so the pull is upward — but the fan-out is one API key, and the
+# - Cloud providers get 6. An extra worker can cut a full-latency wave off the
+#   wall clock (only when it changes how many waves there are — wall time is
+#   ceil(batches × lenses / workers)), so the pull is upward — but the fan-out
+#   is one API key, and the
 #   gateways that meter a key meter it per minute, so past some width the burst
 #   rate-limits ITSELF. It did: eight concurrent calls against one OpenRouter key
 #   produced three consecutive reviews reporting "1 of 4 review calls failed" on
@@ -1575,12 +1578,19 @@ class LLMReviewEngine(ReviewEngine):
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
             # Retryable by default: this is the provider faltering, not us, so the
-            # rescue wave gets one more go once the fan-out has drained. A
-            # truncation is the exception — a blown output CEILING is deterministic
-            # (the same request runs to the same ceiling), so a rescue would only
-            # buy a second identical failure at full generation cost.
+            # rescue wave gets one more go once the fan-out has drained. Two
+            # exceptions, both because the second call is guaranteed to buy the
+            # same answer at full price:
+            #
+            # - a truncation is a blown output CEILING, and the identical request
+            #   runs to the identical ceiling;
+            # - a failure the adapter stamped UNRECOVERABLE — a dead key, a spent
+            #   quota, a refused request — cannot resolve itself mid-review. The
+            #   adapter already made that judgement to decide its own retries;
+            #   re-deriving it here from the message text would be a second copy
+            #   of the rule, drifting from the first.
             reason: str = _error_reason(exc)
-            if not isinstance(exc, ProviderTruncated):
+            if not isinstance(exc, ProviderTruncated) and not is_unrecoverable(exc):
                 reason = _RetryableReason(reason)
             profiler.record_error(lens.id, batch_num, time.perf_counter() - started, exc, reason)
             _log.warning(

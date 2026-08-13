@@ -83,8 +83,9 @@ interrupt first, and a run with no failures SHALL cost no extra calls.
   posts as complete instead of partial
 
 #### Scenario: the failure would repeat identically
-- **WHEN** a call returns unparseable output, hits the `max_tokens` ceiling, or
-  fails after the oversized-batch split already retried it smaller
+- **WHEN** a call returns unparseable output, hits the `max_tokens` ceiling,
+  fails after the oversized-batch split already retried it smaller, or fails on
+  a condition that cannot change mid-run — a spent quota, a dead credential
 - **THEN** it is not re-run: the same request fails the same way, at cost
 
 #### Scenario: the re-run fails too

@@ -18,6 +18,7 @@ from lgtmaybe.core.models import (
     ProviderResult,
     ReviewCategory,
     ReviewConfig,
+    stamp_unrecoverable,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated, ProviderWallTimeout
 from lgtmaybe.engine import LLMReviewEngine
@@ -170,6 +171,21 @@ class TestRescueWave:
         _, summary = LLMReviewEngine(provider).review(_CTX, _cfg())
 
         # A single hunk: nothing smaller to try, and no rescue either.
+        assert provider.security_calls == 1
+        assert INCOMPLETE_MARKER in summary
+
+    def test_an_unrecoverable_provider_failure_is_not_rescued(self) -> None:
+        """A dead key or a spent quota cannot come back mid-review, so a rescue
+        would only pay a second billed call to be told the same thing. The
+        adapter already knows this and stamps the exception; the engine reads it
+        rather than deciding again for itself.
+        """
+        exc = RuntimeError("insufficient_quota — you exceeded your current quota")
+        stamp_unrecoverable(exc)
+        provider = _FlakyLens(failures=99, exc=exc)
+
+        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg())
+
         assert provider.security_calls == 1
         assert INCOMPLETE_MARKER in summary
 

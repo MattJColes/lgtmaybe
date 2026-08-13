@@ -587,6 +587,34 @@ def attempts_of(exc: BaseException) -> int:
     return value if isinstance(value, int) and value > 0 else 0
 
 
+# Whether the adapter judged a failure UNRECOVERABLE: bad credentials, exhausted
+# quota, spent prepaid credit, a request the model refuses. No later attempt in
+# this run can succeed, so nothing downstream should spend a billed call finding
+# that out again. Carried on the exception for the same reason as the attempt
+# count above — a failure has no result object to ride home on — and deliberately
+# NARROWER than the adapter's own "don't retry this immediately" rule: a blown
+# wall clock is not retried in place (the identical request has the identical
+# budget) yet a stalled upstream may well answer a genuinely later request, so it
+# is not stamped.
+_UNRECOVERABLE_ATTR = "lgtmaybe_unrecoverable"
+
+
+def stamp_unrecoverable(exc: BaseException) -> None:
+    """Mark *exc* as a failure no later attempt in this run can fix.
+
+    Best effort, exactly like :func:`stamp_attempts`: an exception type that
+    refuses attributes is not worth failing a review over — it just reports the
+    failure as possibly-transient, which costs at most one extra call.
+    """
+    with suppress(Exception):
+        setattr(exc, _UNRECOVERABLE_ATTR, True)
+
+
+def is_unrecoverable(exc: BaseException) -> bool:
+    """True when the adapter said no later attempt at *exc*'s call can succeed."""
+    return getattr(exc, _UNRECOVERABLE_ATTR, False) is True
+
+
 class PRContext(_Strict):
     """Everything the engine needs about a PR — fetched via API, never checkout."""
 

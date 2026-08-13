@@ -98,10 +98,15 @@ time before reporting the same failure.
 
 A *capacity* 429 is different: it is temporary, and lgtmaybe handles it for you.
 Rate-limited calls back off on a 5s–60s ladder — long enough to reach a fresh
-per-minute window — and honour OpenRouter's own `Retry-After` when it sends one.
-Anything still failing when the fan-out drains is re-run once. You will usually
-see nothing at all; a review that could not recover says so in its summary, and
-names the lens it lost.
+per-minute window — and honour OpenRouter's own `Retry-After` when it sends one
+(clamped at 120s). A lens still failing on the provider when the fan-out drains
+is re-run once more. That rescue is only for provider-side failures: unparseable
+output, a blown `max_tokens` ceiling, a batch the oversized-diff split already
+retried, an unrecoverable failure like a spent quota, and any ceiling you set
+(`max_review_seconds`, `max_review_tokens`, a cancelled job) are all left alone,
+because a second attempt would buy the same answer at full price. You will
+usually see none of this; a review that could not recover says so in its
+summary, and names the lens it lost.
 
 If you *are* seeing rate limits, the review's own burst is worth a look before
 the model is. Every `(batch, lens)` call shares one concurrency pool and one API
@@ -111,9 +116,14 @@ key, so a wide fan-out can meter itself:
 max_concurrency: 3
 ```
 
-OpenRouter's per-key request limits scale with your credit balance, and free
-model variants carry their own hard daily and per-minute caps, so a paid model
-on a topped-up key rate-limits far less than the same review on a free one.
+Beyond that it is an account question rather than a lgtmaybe one. OpenRouter's
+limits on **free** model variants (the `:free` suffix) are account-wide rather
+than per-model, and the daily allowance depends on how much credit the account
+has bought — so the same review is far more likely to be throttled on a free
+variant than a paid one. **Paid** models carry no OpenRouter platform request
+cap, though the upstream provider behind a given model can still rate-limit you.
+Neither is the same thing as a per-key credit *spending* cap, which limits what a
+key may spend, not how often it may call.
 
 ## Persist non-secret defaults
 
