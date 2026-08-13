@@ -80,7 +80,7 @@ latency:
 - `preset` (default `fast`) — four calls, one per concern (security, correctness, code health, artefacts), the same on every provider; `full` runs one call per lens.
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
-- `max_concurrency` (default 6 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.
+- `max_concurrency` (default 6, every provider) — concurrent model calls across the whole fan-out. What decides local throughput is the server's own setting (`OLLAMA_NUM_PARALLEL`, llama.cpp `-np`, vLLM batching); set `1` to run serially.
 - `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
 - `categories` (default all nine) — which review lenses to run; an explicit list overrides the preset grouping and runs exactly those lenses, one call each.
 - `min_severity` (default `low`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.

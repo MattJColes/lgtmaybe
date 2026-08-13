@@ -252,10 +252,11 @@ provider so users give bare model ids.
 
 #### Scenario: the widened budget exceeds the review's own deadline
 - **WHEN** that scaled default exceeds `max_review_seconds`
-- **THEN** it is clamped to the deadline — bounding the budget, not the wall clock,
-  since the deadline gates when a call may start rather than cutting one short —
-  never below the provider's own default, and never clamped at all when the
-  deadline is disabled
+- **THEN** the resolved budget is the lesser of the scaled default and the
+  deadline, floored at the provider's own default — so a deadline shorter than
+  that default does not shrink it — and nothing is clamped when the deadline is
+  disabled. It bounds the budget, not the wall clock: the deadline gates when a
+  call may start rather than cutting a running one short
 
 #### Scenario: the documented default and the resolved one disagree
 - **WHEN** a provider's resolved default stops matching the seconds the Action
