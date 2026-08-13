@@ -24,9 +24,15 @@ from lgtmaybe.github import is_reviewable
 from lgtmaybe.local import local_file_reader
 from tests.fakes import FakeProvider
 
-# The four live false-positive fixtures Track C adds: each plants a genuine catch
-# plus forbidden traps drawn from real over-eager reviewer claims.
-_FP_FIXTURES = ["lazy-imports", "split-hunks", "cloud-semantics", "test-harness"]
+# The live false-positive fixtures: each plants a genuine catch plus forbidden
+# traps drawn from real over-eager reviewer claims.
+_FP_FIXTURES = [
+    "lazy-imports",
+    "split-hunks",
+    "cloud-semantics",
+    "test-harness",
+    "unshown-code-fp",
+]
 
 _VIBE_FILES = {
     "src/api/handlers.py",
@@ -100,6 +106,43 @@ def test_cross_file_fp_fixture_has_expected_and_forbidden() -> None:
     assert diff.strip()
     assert manifest.expected, "needs a real in-diff finding so recall stays meaningful"
     assert manifest.forbidden, "needs forbidden (cross-file false-positive) traps"
+
+
+def test_unshown_code_fp_traps_the_same_file_and_test_elsewhere_shapes() -> None:
+    """``cross-file-fp``'s three traps are all CROSS-file. The five false positives
+    that motivated this fixture were not: four asserted what a constant defined
+    200 lines up in the SAME file contained, and one claimed a change was untested
+    when the test lived in a file the diff never touched.
+
+    Neither shape is expressible in cross-file-fp — its changed file is new, so
+    nothing of it is unshown — so they get a fixture whose diff is a small edit to
+    a long existing module. This asserts the shapes hold, because both traps are
+    only traps while the evidence stays OUT of the diff: pull the constant into a
+    hunk, or add a test to the diff, and the fixture quietly starts forbidding
+    findings that would then be correct.
+    """
+    diff, manifest = _fixture("unshown-code-fp")
+    assert manifest.corpus_root is not None, "both traps need their evidence on disk"
+
+    module = manifest.corpus_root / "scheduler" / "dispatch.py"
+    lines = module.read_text(encoding="utf-8").splitlines()
+
+    # Trap A — the constant's VALUE is what the trap asserts, and it must sit far
+    # enough from the edited function that no hunk (or context pad) can reach it.
+    definition = next(
+        i for i, line in enumerate(lines, 1) if line.startswith("SINGLE_STREAM_PROVIDERS")
+    )
+    reader = next(i for i, line in enumerate(lines, 1) if line.startswith("def worker_count"))
+    assert reader - definition > 100, "the constant is close enough to be shown — not a trap"
+    assert "frozenset()" in lines[definition - 1], "an empty set is what makes the claim false"
+    assert "SINGLE_STREAM_PROVIDERS: frozenset[str] = frozenset()" not in diff, (
+        "the diff must not show the constant's value"
+    )
+
+    # Trap B — the test exists, and lives outside the diff.
+    tests = manifest.corpus_root / "tests" / "test_dispatch.py"
+    assert "def test_worker_count" in tests.read_text(encoding="utf-8")
+    assert "test_dispatch" not in diff, "a test in the diff makes the untested claim correct"
 
 
 def test_cross_file_recall_fixture_hides_its_bug_in_an_unshown_file() -> None:

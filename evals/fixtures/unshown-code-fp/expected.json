@@ -1,0 +1,41 @@
+{
+  "name": "unshown-code-fp",
+  "changed_file": "scheduler/dispatch.py",
+  "expected": [
+    {
+      "label": "average_latency divides by len(samples) with no empty-list guard",
+      "line": 221,
+      "keywords": ["zerodivision", "division by zero", "divide by zero", "empty list", "empty"]
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: asserts what SINGLE_STREAM_PROVIDERS contains (it is empty, 180 lines up in the SAME file)",
+      "line": 214,
+      "keywords": [
+        "single_stream",
+        "single worker",
+        "one worker",
+        "returns 1",
+        "return 1",
+        "pinned to 1",
+        "serialis",
+        "serializ"
+      ]
+    },
+    {
+      "label": "FP: claims the new behaviour is untested (tests/test_dispatch.py covers it, untouched by the diff)",
+      "line": 208,
+      "keywords": [
+        "untested",
+        "no test",
+        "not tested",
+        "missing test",
+        "test coverage",
+        "lacks a test",
+        "without a test",
+        "no unit test"
+      ]
+    }
+  ]
+}
