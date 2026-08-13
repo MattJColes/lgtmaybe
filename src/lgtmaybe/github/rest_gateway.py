@@ -26,6 +26,7 @@ from lgtmaybe.core.models import (
     EFFORT_PREFIX,
     SECURITY_LABEL,
     SPLITTING_LABEL,
+    ActiveFinding,
     PRContext,
     ReviewFinding,
 )
@@ -93,6 +94,7 @@ _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 # this review covered, so the next run can review only the commits pushed
 # since (commit-scoped incremental review). The capture group is the SHA.
 _REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
+_DIAGRAMMED_MARKER = re.compile(r"<!-- lgtmaybe-diagrammed:([0-9a-f]{7,40}) -->")
 
 
 def finding_fingerprint(path: str, title: str) -> str:
@@ -357,6 +359,8 @@ class RestGitHubGateway:
         # paths — a finding absent merely because its file wasn't re-reviewed
         # this run must never be spuriously resolved. None = full review.
         self._incremental_paths: set[str] | None = None
+        self._validated_fixed_thread_ids: set[str] | None = None
+        self._active_findings: list[ActiveFinding] | None = None
         # Whether to fetch dependency manifests for the vulnerability scanner
         # (set via set_scan_manifests). Off by default so the overwhelming
         # majority of runs — static analysis is opt-in — pay no extra API calls.
@@ -606,16 +610,21 @@ class RestGitHubGateway:
         """
         self._upsert_marked_comment(body, self._describe_marker)
 
-    def post_diagram_comment(self, body: str) -> None:
+    def post_diagram_comment(self, body: str, *, completed_sha: str | None = None) -> None:
         """Post or update the change-diagram comment, idempotently.
 
         Its marker family is disjoint from the describe and review markers, so
         the three comments never clobber each other. Adapter-only, beyond the
         frozen port.
         """
-        self._upsert_marked_comment(body, self._diagram_marker)
+        body = _DIAGRAMMED_MARKER.sub("", body).rstrip()
+        if completed_sha is not None:
+            body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
+        self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
 
-    def _upsert_marked_comment(self, body: str, marker: str) -> None:
+    def _upsert_marked_comment(
+        self, body: str, marker: str, *, preserve: re.Pattern[str] | None = None
+    ) -> None:
         """Post *body* as an issue comment stamped with *marker*, or edit the
         existing comment carrying that marker in place."""
         stamped = f"{body}\n\n{marker}"
@@ -623,6 +632,10 @@ class RestGitHubGateway:
         for resp in self._paginate(f"{url}?per_page=100"):
             for comment in resp.json():
                 if marker in (comment.get("body") or ""):
+                    if preserve is not None and preserve.search(stamped) is None:
+                        previous = preserve.search(comment.get("body") or "")
+                        if previous is not None:
+                            stamped += f"\n{previous.group(0)}"
                     patched = self._client.patch(
                         f"{self._api}/issues/comments/{comment['id']}",
                         headers=self._json_headers,
@@ -726,6 +739,31 @@ class RestGitHubGateway:
         match = _REVIEWED_MARKER.search(body)
         return match.group(1) if match else None
 
+    def last_completed_sha(self, *, diagram_required: bool) -> str | None:
+        """Return the latest head whose required review outputs were posted.
+
+        A diagram marker is written only after its review post succeeds, so it
+        is the durable completion record when diagrams are required. It may be
+        older than the summary's reviewed marker after an interrupted newer
+        attempt; returning it preserves the last genuinely completed head.
+        """
+        if not diagram_required:
+            return self.last_reviewed_sha()
+        try:
+            if self._find_existing_review_entry() is None:
+                return None
+            url = f"{self._issue_api}/comments?per_page=100"
+            for resp in self._paginate(url):
+                for comment in resp.json():
+                    body = comment.get("body") or ""
+                    if self._diagram_marker not in body:
+                        continue
+                    match = _DIAGRAMMED_MARKER.search(body)
+                    return match.group(1) if match else None
+        except httpx.HTTPError:
+            return None
+        return None
+
     def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
         """Unified diff of the commits between *base_sha* and *head_sha*, or None.
 
@@ -775,14 +813,44 @@ class RestGitHubGateway:
         """
         self._incremental_paths = paths
 
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Declare that this run is a completed review of *head_sha*.
+    def list_active_findings(self) -> list[ActiveFinding]:
+        """Read our unresolved finding roots for explicit follow-up validation."""
+        active: list[ActiveFinding] = []
+        for node in self._walk_review_threads(
+            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+        ):
+            if node.get("isResolved"):
+                continue
+            first = _first_comment(node)
+            body = first.get("body", "") or ""
+            fingerprint = _FINDING_MARKER.search(body)
+            identity = _IDENTITY_MARKER.search(body)
+            if fingerprint is None and identity is None:
+                continue
+            active.append(
+                ActiveFinding(
+                    thread_id=node["id"],
+                    comment_id=first.get("databaseId"),
+                    path=node.get("path") or "",
+                    body=body,
+                    fingerprint=fingerprint.group(1) if fingerprint else None,
+                    identity=identity.group(1) if identity else None,
+                    outdated=bool(node.get("isOutdated")),
+                )
+            )
+        self._active_findings = active
+        return active
 
-        Called by the orchestrator on the success path, just before
-        ``post_review``. Enables the reviewed-SHA stamp (the incremental
-        watermark) and re-run inline-comment posting. The CLI's failure path
-        calls ``mark_reviewed(None)`` to clear the watermark, so a failure
-        notice posted after a partial run never stamps
+    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
+        """Restrict hybrid resolve-on-fix to explicitly validated thread ids."""
+        self._validated_fixed_thread_ids = set(thread_ids)
+
+    def mark_reviewed(self, head_sha: str | None) -> None:
+        """Prepare the reviewed marker for the next successful review post.
+
+        This setter changes only in-memory request state; GitHub receives the
+        marker atomically inside ``post_review``. The CLI's failure path calls
+        ``mark_reviewed(None)`` so a later failure notice never stamps
         ``<!-- lgtmaybe-reviewed:... -->`` — a failed run must not move the
         watermark.
         """
@@ -1069,8 +1137,17 @@ class RestGitHubGateway:
                 return
             try:
                 self._mark_comment_resolved(comment_id, first_body)
-            except Exception as exc:  # noqa: BLE001 — the thread is already resolved
+            except Exception as exc:  # noqa: BLE001 — restore retryable state below
                 _log.warning("resolved-marker rewrite on %s failed: %s", thread_id, exc)
+                try:
+                    self._unresolve_thread(thread_id)
+                except Exception as reopen_exc:  # noqa: BLE001 — best-effort repair
+                    _log.warning(
+                        "reopening thread %s after marker failure failed: %s",
+                        thread_id,
+                        reopen_exc,
+                    )
+                return
             try:
                 self.reply_in_thread(thread_id, "✅ Looks resolved.")
             except Exception as exc:  # noqa: BLE001 — nothing depends on the reply
@@ -1116,27 +1193,36 @@ class RestGitHubGateway:
         Each entry is ``(thread_id, opening comment's REST id or None, opening
         comment's body)`` — the comment id/body feed the resolved-marker rewrite.
         """
+        if self._validated_fixed_thread_ids is not None and self._active_findings is not None:
+            return [
+                (finding.thread_id, finding.comment_id, finding.body)
+                for finding in self._active_findings
+                if finding.thread_id in self._validated_fixed_thread_ids
+            ]
+
         fixed: list[tuple[str, int | None, str]] = []
         for node in self._walk_review_threads(
             "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
         ):
             if node.get("isResolved"):
                 continue
-            if not node.get("isOutdated"):
-                continue
-            if (
-                self._incremental_paths is not None
-                and node.get("path") not in self._incremental_paths
-            ):
-                # Incremental run: this file wasn't re-reviewed, so its
-                # finding's absence is no evidence it was fixed.
-                continue
+            if self._validated_fixed_thread_ids is not None:
+                if node.get("id") not in self._validated_fixed_thread_ids:
+                    continue
+            else:
+                if not node.get("isOutdated"):
+                    continue
+                if (
+                    self._incremental_paths is not None
+                    and node.get("path") not in self._incremental_paths
+                ):
+                    continue
             first = _first_comment(node)
             first_body = first.get("body", "")
             keys = _finding_keys(first_body)
             if not keys:
                 continue  # not one of ours
-            if keys & current:
+            if self._validated_fixed_thread_ids is None and keys & current:
                 continue  # still flagged this run (however worded) — leave it open
             fixed.append((node["id"], first.get("databaseId"), first_body))
         return fixed
@@ -1158,6 +1244,15 @@ class RestGitHubGateway:
         """
         self._graphql(resolve, {"threadId": thread_id})
 
+    def _unresolve_thread(self, thread_id: str) -> None:
+        """Reopen a thread whose resolved-marker rewrite failed so it can retry."""
+        unresolve = """
+        mutation($threadId:ID!){
+          unresolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
+        }
+        """
+        self._graphql(unresolve, {"threadId": thread_id})
+
     def _mark_comment_resolved(self, comment_id: int | None, body: str) -> None:
         """Rewrite a resolved comment's fingerprint marker into the "resolved" family.
 
@@ -1165,25 +1260,22 @@ class RestGitHubGateway:
         without this rewrite a finding fixed once would be skipped forever if it
         reappeared. **Both** families are retired together — leaving the identity
         marker active would keep suppressing the finding after its fingerprint
-        was retired. Best-effort on its own (beyond the pass-wide guard): a PATCH
-        failure is logged and swallowed so the remaining threads still resolve.
+        was retired. A failure raises so the caller can reopen the thread and
+        preserve retryable state.
         """
         if comment_id is None:
-            return
+            raise RuntimeError("the resolved finding has no comment id to rewrite")
         rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
             _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
         )
         url = f"{self._api}/pulls/comments/{comment_id}"
-        try:
-            resp = self._client.patch(
-                url,
-                headers=self._json_headers,
-                json={"body": rewritten},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            _log.warning("rewriting resolved-finding marker failed: %s", exc)
+        resp = self._client.patch(
+            url,
+            headers=self._json_headers,
+            json={"body": rewritten},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
 
     # ------------------------------------------------------------------
     # Feedback learning (adapter-only, beyond the frozen port): read the 👎

@@ -51,12 +51,20 @@ github.incremental:
       kind: function_definition
       has: { field: name, regex: '^mark_reviewed$' }
     files: [src/lgtmaybe/github/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^last_completed_sha$' }
+    files: [src/lgtmaybe/github/**/*.py]
 
 github.resolve-fixed:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_resolve_fixed_threads$' }
-  files: [src/lgtmaybe/github/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_resolve_fixed_threads$' }
+    files: [src/lgtmaybe/github/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^validate_findings$' }
+    files: [src/lgtmaybe/engine/**/*.py]
 
 github.feedback:
   rule:

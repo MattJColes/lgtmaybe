@@ -46,6 +46,12 @@ provider.truncation:
     has: { field: name, regex: '^_finish_reason$' }
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.ceiling-detection:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_spent_the_ceiling$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.output-ceiling:
   rule:
     kind: function_definition

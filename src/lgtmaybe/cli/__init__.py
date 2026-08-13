@@ -135,13 +135,27 @@ def run_diagram(
     provider: ProviderClient,
     cfg: ReviewConfig,
     ctx: PRContext | None = None,
+    *,
+    completed_sha: str | None = None,
 ) -> None:
     """Build the change diagram and post it idempotently."""
     from lgtmaybe.engine.diagram import build_diagram
 
-    _run_upsert(
-        github, provider, cfg, build=build_diagram, post_method="post_diagram_comment", ctx=ctx
-    )
+    body = build_diagram(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    post = getattr(github, "post_diagram_comment", None)
+    if post is not None:
+        if completed_sha is None:
+            post(body)
+        else:
+            post(body, completed_sha=completed_sha)
+        return
+    if completed_sha is not None:
+        raise RuntimeError("the GitHub gateway cannot persist a diagram completion marker")
+    post_comment = getattr(github, "post_issue_comment", None)
+    if post_comment is not None:
+        post_comment(body)
+        return
+    raise RuntimeError("the GitHub gateway cannot post a diagram")
 
 
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
@@ -393,17 +407,22 @@ def run_review(
     cfg: ReviewConfig,
     dry_run: bool,
     ctx: PRContext | None = None,
+    provider: ProviderClient | None = None,
+    diagram_required: bool = False,
 ) -> tuple[list[ReviewFinding], str]:
-    """Core review pipeline — pure function over injected ports.
+    """Run a full or hybrid review and optionally persist its completion state.
 
     Fetches PR context (unless a prefetched ``ctx`` is passed in), runs the
     engine, and optionally posts the review. Returns (findings, summary) in
-    all cases so callers can inspect output.
+    all cases so callers can inspect output. ``provider`` performs explicit
+    validation of earlier findings and builds a required automatic diagram.
+    ``diagram_required`` makes that current-head diagram part of completion.
 
     With ``cfg.incremental`` on and a gateway that supports it, only the diff
-    of the commits pushed since the last completed review is reviewed; every
-    degraded case (first review, force-push, compare failure, a gateway
-    without the adapter methods) falls back to the full review.
+    since the last completed head is reviewed while earlier findings are
+    validated. A completed same-head run is a no-op; every degraded case
+    (first review, force-push, compare failure, incomplete state, or a gateway
+    without the adapter methods) falls back to a full review.
     """
     if ctx is None:
         # Dependency manifests are fetched only when a scanner will read them —
@@ -413,7 +432,11 @@ def run_review(
         if callable(want_manifests):
             want_manifests(cfg.static_analysis.enabled)
         ctx = github.get_pr_context()
-    review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
+    review_ctx, incremental_since, already_complete = _incremental_context(
+        github, ctx, cfg, diagram_required=diagram_required
+    )
+    if already_complete:
+        return [], f"Head {ctx.head_sha[:7]} is already complete; nothing changed."
     review_ctx = _apply_learned_feedback(github, review_ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
@@ -428,19 +451,22 @@ def run_review(
                 extra={"count": len(dropped)},
             )
         findings = [f for f in findings if f.side == "RIGHT"]
+        validation_summary = _validate_prior_findings(github, provider, cfg, review_ctx, findings)
         summary += (
             f"\n\n_Incremental review of the changes since {incremental_since[:7]} — "
             "earlier findings stay open until fixed._"
         )
+        if validation_summary:
+            summary += f"\n\n{validation_summary}"
 
     if not dry_run:
-        # Record the watermark: this run completed a review of the current
-        # head, so the NEXT run may review only what lands after it. Never set
-        # on the failure path (a failure notice posts via post_review without
-        # this) — an unreviewed commit must not be skipped.
+        # Prepare the watermark for the review body. This is only in-memory
+        # adapter state until post_review succeeds, so an interruption here
+        # cannot remotely complete the head.
+        complete = INCOMPLETE_MARKER not in summary
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
-            mark_reviewed(ctx.head_sha)
+            mark_reviewed(ctx.head_sha if complete else None)
         if incremental_since is not None:
             set_scope = getattr(github, "set_incremental_scope", None)
             if set_scope is not None:
@@ -486,6 +512,10 @@ def run_review(
         # incremental diff's context lines aren't necessarily in the PR diff.
         with profiler.stage("post"):
             github.post_review(findings, summary, diff=ctx.diff)
+        if diagram_required and complete:
+            if provider is None:
+                raise ValueError("a provider is required for automatic diagram completion")
+            run_diagram(github, provider, cfg, ctx=ctx, completed_sha=ctx.head_sha)
 
     return findings, summary
 
@@ -514,38 +544,134 @@ def _fail_on_check(findings: list[ReviewFinding], fail_on: Severity) -> tuple[st
 
 
 def _incremental_context(
-    github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig
-) -> tuple[PRContext, str | None]:
-    """The context to review: ``(incremental ctx, last-reviewed sha)`` or ``(ctx, None)``.
+    github: GitHubGateway,
+    ctx: PRContext,
+    cfg: ReviewConfig,
+    *,
+    diagram_required: bool = False,
+) -> tuple[PRContext, str | None, bool]:
+    """Return ``(context, completed_sha, already_complete)`` for this run.
 
     Incremental only when ``cfg.incremental`` is truthy (None = auto resolves
     upstream, and unresolved auto means full), the gateway has the adapter
-    methods (``last_reviewed_sha`` / ``compare_diff`` — fakes and the frozen
-    port don't), a watermark exists, head moved since, and the compare yields
-    a usable increment. Everything else returns the full context untouched.
+    methods (``last_completed_sha`` / ``compare_diff`` — fakes and the frozen
+    port don't), a completion watermark exists, the head moved since, and the
+    compare yields a usable increment. A matching head sets the final flag;
+    every degraded case returns the full context with no completed SHA.
     """
     if not cfg.incremental:
-        return ctx, None
+        return ctx, None, False
+    last_completed_sha = getattr(github, "last_completed_sha", None)
     last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
     compare_diff = getattr(github, "compare_diff", None)
-    if last_reviewed_sha is None or compare_diff is None:
-        return ctx, None
-    last_sha = last_reviewed_sha()
-    if not last_sha or last_sha == ctx.head_sha:
-        return ctx, None
+    if compare_diff is None or (last_completed_sha is None and last_reviewed_sha is None):
+        return ctx, None, False
+    if last_completed_sha is not None:
+        last_sha = last_completed_sha(diagram_required=diagram_required)
+    elif last_reviewed_sha is not None:
+        last_sha = last_reviewed_sha()
+    else:  # guarded above; keeps the optional callable narrowed for type-checkers
+        return ctx, None, False
+    if not last_sha:
+        return ctx, None, False
+    if last_sha == ctx.head_sha:
+        return ctx, None, True
     increment = compare_diff(last_sha, ctx.head_sha)
     if not increment or not increment.strip():
-        return ctx, None
+        return ctx, None, False
     _log.info(
         "incremental review",
         extra={"since": last_sha, "head": ctx.head_sha},
     )
-    return ctx.model_copy(update={"diff": increment}), last_sha
+    return ctx.model_copy(update={"diff": increment}), last_sha, False
 
 
 def _diff_paths(diff: str) -> set[str]:
     """The file paths named by a unified diff's ``diff --git`` headers."""
     return set(FILE_HEADER_RE.findall(diff))
+
+
+def _validate_prior_findings(
+    github: GitHubGateway,
+    provider: ProviderClient | None,
+    cfg: ReviewConfig,
+    ctx: PRContext,
+    current_findings: list[ReviewFinding],
+) -> str:
+    """Validate active prior findings and install the explicit resolve allowlist."""
+    list_active = getattr(github, "list_active_findings", None)
+    set_fixed = getattr(github, "set_validated_fixed_threads", None)
+    if list_active is None or set_fixed is None:
+        return ""
+    try:
+        active = list_active()
+    except Exception as exc:  # noqa: BLE001 - failure leaves every thread open
+        _log.warning("reading active findings for validation failed: %s", exc)
+        set_fixed(set())
+        return "_Follow-up validation was unavailable; earlier findings remain open._"
+    if not active:
+        set_fixed(set())
+        return ""
+
+    from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
+    from lgtmaybe.engine.validate import validate_findings
+    from lgtmaybe.github.rest_gateway import finding_fingerprint, finding_identity
+
+    current_keys = {
+        key
+        for finding in current_findings
+        for key in (finding_fingerprint(finding.path, finding.title), finding_identity(finding))
+    }
+    reproduced = [
+        finding
+        for finding in active
+        if ({finding.fingerprint, finding.identity} - {None}) & current_keys
+    ]
+    reproduced_thread_ids = {finding.thread_id for finding in reproduced}
+    unmatched = [finding for finding in active if finding.thread_id not in reproduced_thread_ids]
+    verdicts = [
+        FindingValidation(
+            thread_id=finding.thread_id,
+            status=FindingValidationStatus.still_open,
+            reason="the incremental review reproduced this finding",
+        )
+        for finding in reproduced
+    ]
+    if provider is None:
+        verdicts.extend(
+            FindingValidation(
+                thread_id=finding.thread_id,
+                status=FindingValidationStatus.uncertain,
+                reason="no provider was available for follow-up validation",
+            )
+            for finding in unmatched
+        )
+    else:
+        verdicts.extend(validate_findings(provider, cfg, unmatched, ctx))
+
+    outdated_thread_ids = {finding.thread_id for finding in active if finding.outdated}
+    verdicts = [
+        FindingValidation(
+            thread_id=verdict.thread_id,
+            status=FindingValidationStatus.uncertain,
+            reason="the model reported a fix but GitHub does not mark the finding outdated",
+        )
+        if verdict.status is FindingValidationStatus.fixed
+        and verdict.thread_id not in outdated_thread_ids
+        else verdict
+        for verdict in verdicts
+    ]
+
+    fixed = {
+        verdict.thread_id for verdict in verdicts if verdict.status is FindingValidationStatus.fixed
+    }
+    set_fixed(fixed)
+    counts = Counter(verdict.status for verdict in verdicts)
+    return (
+        f"_Follow-up validation: {counts[FindingValidationStatus.fixed]} fixed, "
+        f"{counts[FindingValidationStatus.still_open]} still open, "
+        f"{counts[FindingValidationStatus.uncertain]} uncertain._"
+    )
 
 
 def execute_local_review(
@@ -629,10 +755,11 @@ def _post_extras(
     describe: bool,
     diagram: bool,
 ) -> None:
-    """Post the auto extras (description, diagram) over a prefetched context.
+    """Post best-effort extras over a prefetched context.
 
-    Each is independently best-effort: a failure is logged and swallowed so an
-    extra can never turn a completed review into a failed run.
+    Automatic descriptions remain best-effort. Required automatic diagrams are
+    posted by ``run_review`` and never enter this helper; the ``diagram`` option
+    remains only for callers that explicitly request a best-effort diagram.
     """
     for enabled, run, name in (
         (describe, run_describe, "describe"),
@@ -652,12 +779,12 @@ def execute_review(
     describe: bool = False,
     diagram: bool = False,
 ) -> None:
-    """Build adapters, run the review, surface failures back to the PR.
+    """Build adapters, run the review, and surface failures back to the PR.
 
-    Shared by the ``review`` command and the ``action`` entrypoint. With
-    ``describe``/``diagram`` on (the action's auto extras), the adapters are
-    built once and the expensive O(files) PR-context fetch happens once —
-    extras and review all reuse them.
+    Shared by the ``review`` command and Action entrypoint. Automatic
+    descriptions are best-effort after review; an automatic diagram is a
+    required completion step inside ``run_review``. Both reuse one adapter set
+    and the prefetched O(files) PR context.
     """
     profiler.reset()
     # Adapter construction can fail before we have any way to post (bad URL,
@@ -669,10 +796,9 @@ def execute_review(
 
     ctx: PRContext | None = None
     if describe or diagram:
-        # The extras are best-effort and must never block the review. A failed
-        # prefetch just means run_review fetches (and surfaces) it itself. The
-        # fetch happens here, before the review, so the review reuses it — only
-        # the posting is deferred (see _post_extras).
+        # A failed prefetch means run_review fetches and surfaces the failure
+        # itself. Fetching here lets the review, required diagram, and optional
+        # description share one current-head context.
         try:
             ctx = github.get_pr_context()
         except Exception:
@@ -681,7 +807,15 @@ def execute_review(
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
     try:
-        run_review(github=github, engine=engine, cfg=cfg, dry_run=False, ctx=ctx)
+        run_review(
+            github=github,
+            engine=engine,
+            cfg=cfg,
+            dry_run=False,
+            ctx=ctx,
+            provider=provider,
+            diagram_required=diagram,
+        )
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
@@ -694,7 +828,7 @@ def execute_review(
         # harmless. In a `finally` so a failed review still gets its extras,
         # exactly as when they ran first.
         if ctx is not None:
-            _post_extras(github, provider, cfg, ctx, describe=describe, diagram=diagram)
+            _post_extras(github, provider, cfg, ctx, describe=describe, diagram=False)
 
     if runtime.profile:
         click.echo(profiler.render())
@@ -743,7 +877,7 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     # so without it a failure report says nothing about what was running.
     notice = f"⚠️ lgtmaybe review failed: {exc}\n\n_lgtmaybe {package_version()}_"
     try:
-        # run_review may have stamped the reviewed watermark before the post
+        # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next
         # incremental run re-reviews the commits whose findings never posted.
         mark_reviewed = getattr(github, "mark_reviewed", None)

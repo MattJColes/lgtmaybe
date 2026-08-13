@@ -366,7 +366,7 @@ class TestReviewFull:
         )
 
         assert engine.reviewed_ctxs[0].diff == ctx.diff  # full, not INC_DIFF
-        assert github.last_reviewed_calls == 0
+        assert github.last_completed_calls == []
 
     def test_bare_review_honours_incremental_config(self):
         from lgtmaybe.core.models import PRContext
