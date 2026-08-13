@@ -40,6 +40,16 @@ cli.review-reply:
     has: { field: name, regex: '^execute_review_reply$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.response-style:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_answer_question$' }
+    files: [src/lgtmaybe/cli/slash.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_answer_reply$' }
+    files: [src/lgtmaybe/cli/slash.py]
+
 cli.local-context:
   rule:
     kind: function_definition

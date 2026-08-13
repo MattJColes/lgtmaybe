@@ -12,6 +12,12 @@ prompt.system:
     has: { field: name, regex: '^build_lens_block$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+prompt.response-style:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_shared_preamble$' }
+  files: [src/lgtmaybe/engine/prompt.py]
+
 prompt.custom-lens:
   rule:
     kind: function_definition

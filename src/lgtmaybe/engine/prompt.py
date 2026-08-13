@@ -41,9 +41,14 @@ null), suggestion (string or null), anchor (string — the verbatim flagged line
 
 Report each distinct issue as its own finding.
 
-### How to fill `body`, `failure_scenario`, and `suggestion`
+### How to fill `title`, `body`, `failure_scenario`, and `suggestion`
 
-`body` holds your explanation — what is wrong and why it matters, in prose.
+`title` is the first user-facing line. When a concrete correction is known, lead with the \
+corrective action in imperative form, not just a defect label. When there is no concrete \
+correction, state the problem plainly instead of inventing an action.
+
+`body` explains what is wrong through its cause and observable impact. Start directly, with \
+no preamble. Do not repeat the title, add tangents or a recap, or end with closing pleasantries.
 
 `failure_scenario` is the concrete way a defect causes harm: name the trigger, the changed \
 behaviour, and the observable impact in one concise causal chain. It is REQUIRED for every \
@@ -155,7 +160,7 @@ _SECURITY_EXAMPLE = _example_block(
         "line": 11,
         "side": "RIGHT",
         "severity": "high",
-        "title": "Unsafe deserialization via pickle.loads",
+        "title": "Parse untrusted files with a safe format",
         "body": "pickle.loads executes arbitrary code when the input is attacker-controlled. "
         "Use a safe format such as json.loads instead.",
         "failure_scenario": "When an attacker controls the file contents, pickle.loads "
@@ -176,7 +181,7 @@ _CORRECTNESS_EXAMPLE = _example_block(
         "line": 5,
         "side": "RIGHT",
         "severity": "high",
-        "title": "Off-by-one: items[len(items)] is out of range",
+        "title": "Index the final item with -1",
         "body": "Indexing with len(items) raises IndexError; the last index is len(items) - 1.",
         "failure_scenario": "When last_item receives any list, indexing at len(items) raises "
         "IndexError instead of returning an item.",
@@ -196,7 +201,7 @@ _DEPRECATION_EXAMPLE = _example_block(
         "line": 2,
         "side": "RIGHT",
         "severity": "medium",
-        "title": "datetime.utcnow() is deprecated",
+        "title": "Use timezone-aware datetime.now()",
         "body": "datetime.utcnow() is deprecated since Python 3.12 and returns a naive datetime.",
         "failure_scenario": "When this value is compared with a timezone-aware datetime, "
         "Python raises TypeError instead of completing the comparison.",
@@ -217,7 +222,7 @@ _TESTS_EXAMPLE = _example_block(
         "line": 9,
         "side": "RIGHT",
         "severity": "low",
-        "title": "New VIP branch has no accompanying test",
+        "title": "Add coverage for the VIP discount branch",
         "body": "The new VIP discount path is untested; a regression here would ship silently.",
         "failure_scenario": None,
         "suggestion": 'def test_vip_discount():\n    assert discount(100.0, "VIP") == 50.0',
@@ -237,7 +242,7 @@ _DOCUMENTATION_EXAMPLE = _example_block(
         "line": 4,
         "side": "RIGHT",
         "severity": "info",
-        "title": "Public function fetch_user lacks a docstring",
+        "title": "Document the fetch_user contract",
         "body": "fetch_user is a public API surface; a short docstring states the contract.",
         "failure_scenario": None,
         "suggestion": 'def fetch_user(user_id):\n    """Fetch one user record by id."""',
@@ -256,7 +261,7 @@ _PERFORMANCE_EXAMPLE = _example_block(
         "line": 7,
         "side": "RIGHT",
         "severity": "medium",
-        "title": "N+1 query: one database call per user id",
+        "title": "Batch the user lookups",
         "body": "Each iteration issues its own query; the cost scales linearly with input size.",
         "failure_scenario": "When user_ids is large, the function issues one database "
         "round-trip per id, increasing latency and exhausting the connection pool.",
@@ -278,7 +283,7 @@ _COMPLEXITY_EXAMPLE = _example_block(
         "line": 6,
         "side": "RIGHT",
         "severity": "medium",
-        "title": "Deeply nested conditionals — invert to guard clauses",
+        "title": "Flatten the nested checks with a guard clause",
         "body": "Three nesting levels for one happy path; guard clauses read flat.",
         "failure_scenario": None,
         "suggestion": "    if not (req and req.user and req.user.active):\n        return None",
@@ -300,7 +305,7 @@ _PONYTAIL_EXAMPLE = _example_block(
         "line": 3,
         "side": "RIGHT",
         "severity": "low",
-        "title": "Hand-rolled loop reimplements str.upper()",
+        "title": "Replace the loop with str.upper()",
         "body": (
             "This five-line loop is exactly what the standard library already does. "
             "The best code is the code you never wrote — delete it for the one-liner."
