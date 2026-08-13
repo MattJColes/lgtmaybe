@@ -124,9 +124,9 @@ class TestActionRouting:
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="true")
         assert called == [True]
 
-    def test_auto_diagram_skipped_on_synchronize(self, tmp_path, monkeypatch):
+    def test_auto_diagram_posts_on_synchronize(self, tmp_path, monkeypatch):
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronize", auto="true")
-        assert called == []
+        assert called == [True]
 
     def test_auto_diagram_on_by_default(self, tmp_path, monkeypatch):
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="")

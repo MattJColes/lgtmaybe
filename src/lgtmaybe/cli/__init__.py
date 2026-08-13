@@ -75,8 +75,7 @@ _PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<
 
 
 def _should_auto_post(enabled: bool, event_action: str) -> bool:
-    """One gate for both auto extras: opted in, and the PR was just opened or
-    reopened — a synchronize push updates the review, not the extras."""
+    """Gate an automatic extra to newly opened or reopened pull requests."""
     return enabled and event_action in ("opened", "reopened")
 
 
@@ -86,8 +85,8 @@ def should_auto_describe(cfg: ReviewConfig, *, event_action: str) -> bool:
 
 
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the change diagram first."""
-    return _should_auto_post(cfg.auto_diagram, event_action)
+    """Whether the action run should post or refresh the change diagram."""
+    return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
 
 
 def _run_upsert(

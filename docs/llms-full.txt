@@ -382,9 +382,10 @@ default shape.
 
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
-`auto_diagram` is on by default, so newly opened or reopened pull requests
-receive a compact Mermaid flowchart — and, when the change alters a run-time
-flow, a sequence diagram beside it — automatically. Set it to `false` if you do
+`auto_diagram` is on by default, so opened, reopened, and updated pull requests
+receive a concise change summary and compact Mermaid flowchart — and, when the
+change alters a run-time flow, a sequence diagram beside it — automatically.
+Set it to `false` if you do
 not want the extra model call.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
@@ -599,7 +600,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks, zizmor, ast-grep and osv-scanner post directly with no model call. The image bundles these tools and an offline vulnerability database |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `true` | Post a compact change-diagram comment (Mermaid flowchart, plus a sequence diagram when the change alters a flow) when a PR is opened/reopened, before the review; set `false` to opt out |
+| `auto_diagram` | `true` | After each opened, reopened, or updated PR review, post or refresh a concise change summary with a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out |
 | `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
@@ -3177,7 +3178,8 @@ review and the description: enable any of them independently.
 
 ## What you get
 
-One model call returns up to two diagrams, each in two renderings:
+One model call returns a concise summary of what changed and up to two diagrams,
+each in two renderings:
 
 - a **Mermaid flowchart** of the structure — what the change touches and how
   those pieces connect;
@@ -3206,6 +3208,9 @@ front of a user service — the Mermaid renders in place, with the ASCII tucked
 in a collapsible "Text version" underneath:
 
 > **Cache user lookups in Redis**
+
+> User reads now check Redis before PostgreSQL, and successful database reads
+> populate the cache for later requests.
 
 > ### Structure
 
@@ -3296,8 +3301,8 @@ diagram. Like `/describe`, it's an idempotent upsert — re-running edits the sa
 comment instead of stacking new ones.
 
 `auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
-needed — so a diagram posts automatically when a PR is opened or reopened. It
-never fires on a `synchronize` push. To opt out, set it in your workflow:
+needed — so a diagram posts automatically when a PR is opened or reopened and
+refreshes after later pushes. To opt out, set it in your workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v1

@@ -20,7 +20,8 @@ review and the description: enable any of them independently.
 
 ## What you get
 
-One model call returns up to two diagrams, each in two renderings:
+One model call returns a concise summary of what changed and up to two diagrams,
+each in two renderings:
 
 - a **Mermaid flowchart** of the structure — what the change touches and how
   those pieces connect;
@@ -49,6 +50,9 @@ front of a user service — the Mermaid renders in place, with the ASCII tucked
 in a collapsible "Text version" underneath:
 
 > **Cache user lookups in Redis**
+
+> User reads now check Redis before PostgreSQL, and successful database reads
+> populate the cache for later requests.
 
 > ### Structure
 
@@ -139,8 +143,8 @@ diagram. Like `/describe`, it's an idempotent upsert — re-running edits the sa
 comment instead of stacking new ones.
 
 `auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
-needed — so a diagram posts automatically when a PR is opened or reopened. It
-never fires on a `synchronize` push. To opt out, set it in your workflow:
+needed — so a diagram posts automatically when a PR is opened or reopened and
+refreshes after later pushes. To opt out, set it in your workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v1

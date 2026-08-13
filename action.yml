@@ -115,7 +115,7 @@ inputs:
     required: false
     default: ""
   auto_diagram:
-    description: "On a freshly opened (or reopened) PR, post a change diagram comment — a Mermaid flowchart of the components the PR touches plus a Mermaid sequence diagram of the run-time flow it alters (both rendered natively by GitHub), with a text fallback — before the review runs, updated in place by later /diagram runs. On by default; set to false to opt out."
+    description: "On an opened, reopened, or updated PR, post or refresh a change diagram comment after the review — a concise summary plus a Mermaid flowchart of the components the PR touches and a Mermaid sequence diagram of the run-time flow it alters (both rendered natively by GitHub), with a text fallback. On by default; set to false to opt out."
     required: false
     default: ""
   answer_replies:

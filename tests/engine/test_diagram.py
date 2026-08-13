@@ -169,6 +169,15 @@ def test_structured_diagram_renders_every_section() -> None:
     assert "inferred from an import" in body
 
 
+def test_change_summary_renders_above_the_diagrams() -> None:
+    summary = "Retries now use bounded backoff and report the final result to the caller."
+
+    body = build_diagram(_CTX, _CFG, _structured_provider(summary=summary))
+
+    assert summary in body
+    assert body.index(summary) < body.index("```mermaid")
+
+
 def test_response_format_is_the_diagram_schema() -> None:
     provider = _structured_provider()
 
@@ -405,6 +414,19 @@ def test_prompt_carries_the_codebase_humility_rule() -> None:
     system = provider.calls[0]["messages"][0]["content"].lower()
     assert "untrusted" in system
     assert "slice" in system
+    assert '"summary"' in system
+
+
+def test_summary_prompt_demands_concise_message_shape() -> None:
+    provider = _structured_provider()
+
+    build_diagram(_CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "highest-impact" in system
+    assert "one change per sentence" in system
+    assert "no preamble" in system
+    assert "tangents" in system
 
 
 def test_no_language_directive_by_default() -> None:
