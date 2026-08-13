@@ -80,6 +80,16 @@ engine.reasoning-ceiling:
     has: { field: name, regex: '^_reasoning_exhausted_reason$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+engine.reasoning-step-down:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_retry_lower_effort$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^lower_reasoning_effort$' }
+    files: [src/lgtmaybe/providers/**/*.py]
+
 engine.mid-review-retrieval:
   rule:
     kind: function_definition

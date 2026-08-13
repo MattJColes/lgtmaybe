@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
@@ -51,7 +52,14 @@ from .compress import (
     trailing_context_lines,
 )
 from .directory import build_directory_block, load_context_files, rules_for
-from .injection import wrap_context, wrap_diff, wrap_hints, wrap_intent, wrap_spec
+from .injection import (
+    wrap_context,
+    wrap_diff,
+    wrap_hints,
+    wrap_intent,
+    wrap_not_shown,
+    wrap_spec,
+)
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
 from .prompt import (
@@ -227,6 +235,7 @@ class _NoticeState:
     failed_calls: int
     failed_lenses: list[str]
     split_batches: int
+    stepped_down: list[str]
     reflection_skipped: str | None
     suppressed: int
     off_diff: int
@@ -282,6 +291,16 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "(timed out, or ran past the `max_tokens` ceiling) and "
             f"{was} reviewed in smaller pieces instead. Consider a lower "
             "`max_input_tokens`, a higher `max_tokens`, or a faster model."
+        )
+    if state.stepped_down:
+        count = len(state.stepped_down)
+        listed = ", ".join(f"`{lens}`" for lens in state.stepped_down)
+        notices.append(
+            f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
+            f"ceiling on reasoning and was re-run once at a lower `reasoning_effort` "
+            f"({listed}). Those findings come from the lower setting — lower "
+            "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
+            "first attempt rather than the second."
         )
     if state.reflection_skipped:
         notices.append(
@@ -548,6 +567,11 @@ class _Run:
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
+    # The PR's full changed-file list. Carried for the same reason as
+    # `concurrency`: a split piece shows FEWER files than the batch it came from,
+    # so it has to derive its own not-shown manifest rather than inherit the
+    # batch's — which would leave a piece silently unaware of its siblings' files.
+    changed_files: tuple[str, ...] = ()
 
 
 def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
@@ -604,6 +628,7 @@ def _lens_messages(
     lens: _Lens,
     *,
     spec_block: str | None = None,
+    hidden_block: str | None = None,
     context: str | None = None,
 ) -> list[Message]:
     """The split-prefix messages for one lens call.
@@ -627,7 +652,9 @@ def _lens_messages(
     # fourth message: the adapter puts its cache breakpoint on the last prefix
     # block, and it varies per batch exactly like the hints do, so it is warmed
     # once by the primer and read by lenses 2..N.
-    prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
+    prefix = "\n\n".join(
+        part for part in (dir_block, hint_block, hidden_block, wrapped) if part is not None
+    )
     suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
     if spec is not None:
         suffix = f"{spec}\n\n{suffix}"
@@ -698,6 +725,11 @@ class LLMReviewEngine:
         # Per-review state (reset here, not in __init__, so a reused engine starts
         # clean); a set's add is atomic, which is all the fan-out threads need.
         self._split_batches: set[int] = set()
+        # Lenses that only answered after their reasoning effort was stepped down
+        # (see _retry_lower_effort). Keyed by lens so the notice counts lenses,
+        # not calls — the same lens stepping down in two batches is one fact
+        # about the review, not two.
+        self._stepped_down: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
         with profiler.stage("redact"):
@@ -896,6 +928,7 @@ class LLMReviewEngine:
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
+            changed_files=tuple(ctx.changed_files),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
@@ -906,8 +939,16 @@ class LLMReviewEngine:
             # messages can quote hostile file content — same posture as the
             # diff) and wrapped as their own neutralised untrusted block.
             batch_paths = {path for path, _ in batch}
+            not_visible = files_not_visible(ctx.changed_files, batch_paths)
             batch_hints = [h for h in sa_hints if h.path in batch_paths]
             hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
+            # What this call was NOT shown, for EVERY lens — not just the two that
+            # judge a whole-PR promise. Absence stated as fact beats absence
+            # inferred from "code you rely on may live in files you CANNOT see",
+            # which asks the model to reason about what it cannot observe. None
+            # when the batch shows the whole PR, so the common case adds nothing
+            # to the cached prefix.
+            hidden_block = wrap_not_shown(not_visible)
             # Directory rules matching THIS batch's files, with the context
             # files they name. Batch-scoped like the hints above, so a batch
             # never pays for another directory's instructions.
@@ -955,6 +996,7 @@ class LLMReviewEngine:
                         lens,
                         batch,
                         spec_block=spec_block,
+                        hidden_block=hidden_block,
                     ),
                 )
                 for lens in lenses
@@ -1135,6 +1177,7 @@ class LLMReviewEngine:
                 failed_calls=failed_calls,
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
+                stepped_down=sorted(self._stepped_down),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
                 off_diff=off_diff,
@@ -1259,6 +1302,7 @@ class LLMReviewEngine:
         batch: list[tuple[str, str]] | None = None,
         *,
         spec_block: str | None = None,
+        hidden_block: str | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
 
@@ -1300,6 +1344,7 @@ class LLMReviewEngine:
                 batch_num=batch_num,
                 lens=lens,
                 spec_block=spec_block,
+                hidden_block=hidden_block,
             )
         )
         on_needs = (
@@ -1316,13 +1361,28 @@ class LLMReviewEngine:
                 batch_num=batch_num,
                 lens=lens,
                 spec_block=spec_block,
+                hidden_block=hidden_block,
             )
         )
         messages = _lens_messages(
-            run, wrapped, intent_block, hint_block, dir_block, lens, spec_block=spec_block
+            run,
+            wrapped,
+            intent_block,
+            hint_block,
+            dir_block,
+            lens,
+            spec_block=spec_block,
+            hidden_block=hidden_block,
         )
         return self._complete_lens(
-            messages, run.model, run.response_format, batch_num, lens, on_oversized, on_needs
+            messages,
+            run.model,
+            run.response_format,
+            batch_num,
+            lens,
+            on_oversized,
+            on_needs,
+            run=run,
         )
 
     def _review_with_context(
@@ -1339,6 +1399,7 @@ class LLMReviewEngine:
         batch_num: int,
         lens: _Lens,
         spec_block: str | None = None,
+        hidden_block: str | None = None,
     ) -> _LensOutcome:
         """Re-run one lens with the bounded, read-only code it asked to read.
 
@@ -1399,10 +1460,11 @@ class LLMReviewEngine:
             dir_block,
             lens,
             spec_block=spec_block,
+            hidden_block=hidden_block,
             context=wrap_context(fetched),
         )
         retry, error = self._complete_lens(
-            messages, run.model, run.response_format, batch_num, lens, None, None
+            messages, run.model, run.response_format, batch_num, lens, None, None, run=run
         )
         return findings + retry, error
 
@@ -1418,6 +1480,7 @@ class LLMReviewEngine:
         batch_num: int,
         lens: _Lens,
         spec_block: str | None = None,
+        hidden_block: str | None = None,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
 
@@ -1459,6 +1522,12 @@ class LLMReviewEngine:
         )
 
         def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
+            # Recomputed, never inherited: this piece carries a subset of the
+            # batch's files, so the batch's manifest would omit exactly the
+            # sibling-piece files this call is now missing.
+            piece_hidden = wrap_not_shown(
+                files_not_visible(run.changed_files, {path for path, _ in piece})
+            )
             return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
@@ -1468,6 +1537,7 @@ class LLMReviewEngine:
                 batch_num,
                 lens,
                 spec_block=spec_block,
+                hidden_block=piece_hidden,
             )
 
         # The pieces are independent calls, so they run CONCURRENTLY — serially
@@ -1542,6 +1612,78 @@ class LLMReviewEngine:
             return findings, _RetryableReason(last)
         return findings, str(last)
 
+    def _retry_lower_effort(
+        self,
+        messages: list[Message],
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        lens: _Lens,
+        reason: str,
+        run: _Run | None = None,
+    ) -> _LensOutcome:
+        """Re-run one lens once with its reasoning effort stepped down a level.
+
+        The missing sibling of :meth:`_review_split`. Both start from the same
+        failure — the answer hit the output ceiling — and the diagnosis decides
+        which remedy applies: a payload-bound truncation shrinks the payload, a
+        reasoning-bound one cannot (halving the diff does not halve the thinking),
+        so it changes the only variable that does move a thinking budget.
+
+        Without this, the reasoning branch diagnosed correctly and then stopped,
+        losing the lens for that round — a real dogfood review reviewed its tests
+        and documentation with nothing at all, and the message it left named a
+        knob for the reader to turn by hand next time.
+
+        Bounded exactly like the split:
+
+        - **One attempt.** The retry runs with ``effort`` set, and that is the
+          same flag :meth:`_complete_lens` checks before offering a step-down —
+          so a retry that truncates the same way reports plain.
+        - **Down, never up**, one level, and only where
+          :func:`_reasoning_exhausted_reason` already fired.
+        - **No split, no deferral** on the retry (both callbacks are None): the
+          payload was never the problem.
+        - **Nothing when the effort is unset.** The adapter answers None for the
+          library default, so a user who never configured it pays nothing and
+          sends byte-identical requests.
+        - **Every whole-review ceiling still applies.** ``_skip_reason`` is
+          re-checked before the call, exactly as ``_review_split``'s pieces do by
+          re-entering ``_review_lens`` — this path reaches ``_complete_lens``
+          directly, so it has to make that check itself. A retry that would begin
+          past the deadline, the token budget or a termination signal reports the
+          truncation it already had instead of spending past a stop.
+
+        Returns the retry's ``(findings, error)``. The cut call's salvage is
+        merged by the caller, exactly as the split's is.
+        """
+        # Adapter-only, like `post_issue_comment` on the GitHub side: the effort
+        # lives in provider-shaped opts (a flat `reasoning_effort`, or
+        # OpenRouter's nested `reasoning` object), and the engine has no business
+        # knowing which. A provider without it simply never steps down.
+        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+            # Past a ceiling: the run is already stopping, and the notice it will
+            # carry is the truncation's, not a skip's — this call never happened.
+            return [], reason
+        lower = getattr(self._provider, "lower_reasoning_effort", None)
+        step_down = lower() if callable(lower) else None
+        if not step_down:
+            return [], reason
+        _log.warning(
+            "retrying the lens once at a lower reasoning effort",
+            extra={"lens": lens.id, "batch": batch_num, "effort": step_down},
+        )
+        findings, error = self._complete_lens(
+            messages, model, response_format, batch_num, lens, None, None, effort=step_down, run=run
+        )
+        if error is None:
+            # Recorded on the way OUT, not the way in: the notice claims findings
+            # came from the lower setting, and a retry that truncated again
+            # produced no such findings. That run reports the failure it already
+            # had — claiming a recovery on top of it would be two wrong notices.
+            self._stepped_down.add(lens.id)
+        return findings, error
+
     def _complete_lens(
         self,
         messages: list[Message],
@@ -1551,6 +1693,9 @@ class LLMReviewEngine:
         lens: _Lens,
         on_oversized: Callable[[str], _LensOutcome] | None = None,
         on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
+        *,
+        effort: dict[str, Any] | None = None,
+        run: _Run | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
@@ -1567,8 +1712,15 @@ class LLMReviewEngine:
         returns the outcome to use instead. None (a re-run, or the feature off)
         means a ``needs`` in the response is simply ignored — nothing is parsed
         for it, so a review without the feature costs exactly what it did before.
+
+        ``effort`` carries the per-call reasoning override of a step-down retry
+        (see :meth:`_retry_lower_effort`). Not None also MARKS this call as that
+        retry, which is what bounds it to one: the step-down is only ever offered
+        to a call that has not already taken it.
         """
-        opts = {"response_format": response_format} if response_format is not None else {}
+        opts: dict[str, Any] = {"response_format": response_format} if response_format else {}
+        if effort is not None:
+            opts.update(effort)
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.
         _log.info("reviewing lens", extra={"lens": lens.id})
@@ -1616,7 +1768,16 @@ class LLMReviewEngine:
                         "truncation was reasoning-bound — not splitting",
                         extra={"lens": lens.id, "batch": batch_num},
                     )
-                    return completed, exhausted
+                    if effort is not None:
+                        # This IS the step-down retry, and it went the same way.
+                        # One attempt, not a cascade: the lower level did not fit
+                        # either, and grinding down the ladder spends the whole
+                        # review proving it.
+                        return completed, exhausted
+                    retried, retry_reason = self._retry_lower_effort(
+                        messages, model, response_format, batch_num, lens, exhausted, run
+                    )
+                    return completed + retried, retry_reason
                 if on_oversized is None:
                     # Already a piece: nothing smaller to try. Report the reason
                     # rather than recurse — an unbounded cascade would spend the

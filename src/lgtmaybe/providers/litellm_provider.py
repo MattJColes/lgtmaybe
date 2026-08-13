@@ -440,6 +440,44 @@ class LiteLLMProvider:
         # patch the litellm lookup stay isolated.
         self._cache_capable: dict[str, bool] = {}
 
+    def lower_reasoning_effort(self) -> dict[str, Any] | None:
+        """Per-call opts that step this provider's reasoning effort down one level.
+
+        ``None`` when there is nothing to step: no effort configured (the library
+        default — a user who never set it must send byte-identical requests), a
+        value already at the floor, or ``default``, which names no position on the
+        ladder and so cannot be moved down from.
+
+        Adapter-only, beyond the frozen ``ProviderClient`` port, and deliberately
+        so: the effort lives in one of two provider-shaped places — a flat
+        ``reasoning_effort``, or the nested ``reasoning`` object the factory
+        re-routes it into for OpenRouter (see ``_honour_param_support``, where
+        sending both is a 400). The engine asks for "one level less" and gets back
+        opts in whichever shape this provider was built with; it never learns
+        which, and a provider that cannot answer simply never steps down.
+
+        Read off ``default_opts`` because that is where the configured value was
+        resolved, and returned as an override rather than mutated in place: this
+        is one retry's request, not a new setting for the rest of the run.
+        """
+        flat = self.default_opts.get("reasoning_effort")
+        if isinstance(flat, str):
+            lower = _one_level_lower(flat)
+            return {"reasoning_effort": lower} if lower else None
+        extra = self.default_opts.get("extra_body")
+        if not isinstance(extra, dict):
+            return None
+        nested = extra.get("reasoning")
+        if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
+            lower = _one_level_lower(nested["effort"])
+            if not lower:
+                return None
+            # The whole extra_body is replaced, not deep-merged: `complete` merges
+            # per-call opts over the defaults a key at a time, so a partial
+            # extra_body here would drop every other key it carries.
+            return {"extra_body": {**extra, "reasoning": {**nested, "effort": lower}}}
+        return None
+
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
         merged.setdefault("timeout", CLOUD_TIMEOUT)
@@ -738,6 +776,21 @@ class LiteLLMProvider:
             # share at all.
             output_ceiling=ceiling,
         )
+
+
+# The reasoning ladder, lowest first. litellm's normalised set minus `default`,
+# which is a "let the route decide" sentinel rather than a rung — there is no
+# telling what it is one level below.
+_EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+
+
+def _one_level_lower(effort: str) -> str | None:
+    """The rung below *effort*, or None at (or off) the bottom of the ladder."""
+    try:
+        index = _EFFORT_LADDER.index(effort)
+    except ValueError:
+        return None
+    return _EFFORT_LADDER[index - 1] if index else None
 
 
 def _configured_ceiling(kwargs: dict[str, Any]) -> int | None:

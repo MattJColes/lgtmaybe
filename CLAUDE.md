@@ -334,6 +334,20 @@ pattern, event bus, plugin framework.
      redacts the intent text, wraps it via `injection.wrap_intent` (its own
      neutralised `INTENT_START`/`INTENT_END` block), and sends it **only on the
      intent call**; with no stated intent the lens is skipped (logged, no notice).
+   - **Not-shown manifest (every lens):** `engine.files_not_visible` derives — by
+     subtraction, so one call covers all seven ways a file goes missing — the PR's
+     changed files this batch's diff does not show. It rides the intent and spec
+     blocks with their own lens-specific lead-ins, **and** `injection.wrap_not_shown`
+     puts it on the **per-batch cacheable prefix that every lens reads** (its own
+     neutralised `HIDDEN_START`/`HIDDEN_END` family — paths are attacker-chosen on a
+     fork PR). Every other lens used to *infer* absence from the shared humility
+     rule's "code you rely on may live in files you CANNOT see", which asks the
+     model to reason about what it cannot observe; naming the files makes it a
+     stated fact instead. Nothing hidden ⇒ `None`, so the common case adds zero
+     prompt bytes and leaves the cached prefix byte-identical. The naming cap
+     (`_MAX_LISTED_NOT_VISIBLE`) is applied in **one** place for all three blocks.
+     File granularity only — it cannot say "this file is shown but that hunk is
+     not", which is the same-file shape the prompt's value rule covers instead.
    - **Spec lens (default on, detection-gated):** "does the PR deliver the
      specification it commits to?" — `engine/specs.py` detects a committed spec
      (**OpenSpec** `openspec/changes|specs/*`, archives excluded; **Spec Kit**
