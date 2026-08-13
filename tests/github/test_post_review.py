@@ -1177,9 +1177,7 @@ def test_failed_resolve_posts_no_reply() -> None:
     assert graphql.resolved == []
     assert len(patched) == 2
     assert "lgtmaybe-resolved-fingerprint" in json.loads(patched[0].content)["body"]
-    assert json.loads(patched[1].content)["body"].endswith(
-        f"<!-- lgtmaybe-finding:{gone_fp} -->"
-    )
+    assert json.loads(patched[1].content)["body"].endswith(f"<!-- lgtmaybe-finding:{gone_fp} -->")
 
 
 @respx.mock
