@@ -148,6 +148,16 @@ def _single_line(value: str) -> str:
     return " ".join(value.split())
 
 
+_MARKDOWN_ESCAPES = str.maketrans(
+    {char: f"\\{char}" for char in "\\`*_{}[]<>()#+-!|>&"}
+)
+
+
+def _markdown_text(value: str) -> str:
+    """Render model-authored prose as inert, single-line Markdown text."""
+    return _single_line(value).translate(_MARKDOWN_ESCAPES)
+
+
 class _Node(NamedTuple):
     """One validated component, pre-rendered for every view that shows it."""
 
@@ -286,9 +296,9 @@ def _view(mermaid: str, text: str) -> list[str]:
 
 def _render(diagram: DiagramResult) -> str:
     """Render a validated graph; the invalid-diagram notice when there is none."""
-    title = _single_line(diagram.title) or "Architecture of this change"
+    title = _markdown_text(diagram.title) or "Architecture of this change"
     lines = [f"## {title}", ""]
-    summary = _single_line(diagram.summary)
+    summary = _markdown_text(diagram.summary)
     if summary:
         lines += [summary, ""]
     nodes, node_ids = _prepare_nodes(diagram)
@@ -305,8 +315,9 @@ def _render(diagram: DiagramResult) -> str:
     else:
         return _invalid_diagram("")
 
-    if diagram.notes.strip():
-        lines += ["", diagram.notes.strip()]
+    notes = _markdown_text(diagram.notes)
+    if notes:
+        lines += ["", notes]
     return "\n".join(lines)
 
 

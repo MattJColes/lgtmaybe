@@ -178,6 +178,19 @@ def test_change_summary_renders_above_the_diagrams() -> None:
     assert body.index(summary) < body.index("```mermaid")
 
 
+def test_change_summary_escapes_model_authored_markdown() -> None:
+    body = build_diagram(
+        _CTX,
+        _CFG,
+        _structured_provider(summary='[load image](https://example.com/pixel) <img src="x">'),
+    )
+
+    assert r"\[load image\]\(https://example.com/pixel\)" in body
+    assert r'\<img src="x"\>' in body
+    assert '[load image](https://example.com/pixel)' not in body
+    assert '<img src="x">' not in body
+
+
 def test_response_format_is_the_diagram_schema() -> None:
     provider = _structured_provider()
 
