@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.14.1...lgtmaybe-v2.0.0) (2026-08-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove answer_replies from configuration and Action inputs.
+* remove legacy prompt cache path ([#399](https://github.com/MattJColes/lgtmaybe/issues/399))
+
+### Features
+
+* clarify user-facing review responses ([#405](https://github.com/MattJColes/lgtmaybe/issues/405)) ([59a8b64](https://github.com/MattJColes/lgtmaybe/commit/59a8b64e62e41c43bdb57070b15957e0f997e2d4))
+* **cli:** report the running version with --version ([#411](https://github.com/MattJColes/lgtmaybe/issues/411)) ([ac15398](https://github.com/MattJColes/lgtmaybe/commit/ac153987ccb3a315d1706a029f3e511feec40e7a))
+* default to medium reasoning, and stop capping local models ([#402](https://github.com/MattJColes/lgtmaybe/issues/402)) ([3028133](https://github.com/MattJColes/lgtmaybe/commit/3028133f245340b2d73916439e5873382f42f4ac))
+* **ollama:** cap local output so a review can't decode forever ([#413](https://github.com/MattJColes/lgtmaybe/issues/413)) ([c0c7428](https://github.com/MattJColes/lgtmaybe/commit/c0c7428ebf246f2f23a2251363d4afb1163ea8d2))
+* validate findings on follow-up reviews ([#412](https://github.com/MattJColes/lgtmaybe/issues/412)) ([419460a](https://github.com/MattJColes/lgtmaybe/commit/419460a12fed5794f819934414ec37a660ca5889))
+
+
+### Bug Fixes
+
+* **cli:** scale the local per-call timeout by the fan-out width ([#404](https://github.com/MattJColes/lgtmaybe/issues/404)) ([3385dcd](https://github.com/MattJColes/lgtmaybe/commit/3385dcdd6acff3a1764c19f4ac922bedba5e45bf))
+* deterministic ceiling tests, and delete the dead single-stream branch ([#407](https://github.com/MattJColes/lgtmaybe/issues/407)) ([334396e](https://github.com/MattJColes/lgtmaybe/commit/334396ece4af8380e075d5a1009eaf52cf59568a))
+* **engine:** rescue a split piece that failed on the provider ([#400](https://github.com/MattJColes/lgtmaybe/issues/400)) ([160fcb0](https://github.com/MattJColes/lgtmaybe/commit/160fcb0a2b7f8e0cb490bfde15317a40880f5b82))
+* give a reasoning-bound truncation both levers, and the dogfood cap the headroom ([#418](https://github.com/MattJColes/lgtmaybe/issues/418)) ([ef74cfe](https://github.com/MattJColes/lgtmaybe/commit/ef74cfe4747e56125de17ce6ae1fb690b1e06bee))
+* make follow-up thread resolution fail safe ([#419](https://github.com/MattJColes/lgtmaybe/issues/419)) ([ccd0e62](https://github.com/MattJColes/lgtmaybe/commit/ccd0e62cca72d854c094e3cf869ed644f6d63c3d))
+* **providers:** read a spent ceiling as a truncation ([#417](https://github.com/MattJColes/lgtmaybe/issues/417)) ([64513ce](https://github.com/MattJColes/lgtmaybe/commit/64513cea4de117f963ec8830b5183d5cf27cc051))
+* remove automatic review thread replies ([#408](https://github.com/MattJColes/lgtmaybe/issues/408)) ([d435124](https://github.com/MattJColes/lgtmaybe/commit/d4351244dc1768301da99e232f31c70889b61fa5))
+* restore automatic PR diagrams ([#406](https://github.com/MattJColes/lgtmaybe/issues/406)) ([183b8ec](https://github.com/MattJColes/lgtmaybe/commit/183b8ec6080b3f09ea2835ce19f480340e596806))
+* **slash:** stop /ask asking the model for a findings object ([#415](https://github.com/MattJColes/lgtmaybe/issues/415)) ([800df1a](https://github.com/MattJColes/lgtmaybe/commit/800df1a533b47ba012ab9b8b37a8566f5074642b))
+
+
+### Code Refactoring
+
+* remove legacy prompt cache path ([#399](https://github.com/MattJColes/lgtmaybe/issues/399)) ([86f276e](https://github.com/MattJColes/lgtmaybe/commit/86f276ed2e16171f9b2007e875cf0a034c17635a))
+
 ## [1.14.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.14.0...lgtmaybe-v1.14.1) (2026-08-13)
 
 
