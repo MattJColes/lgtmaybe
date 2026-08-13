@@ -11,43 +11,49 @@ exclude_paths:
 # Bound what one call may generate — and, more to the point, bound what a
 # RUNAWAY call may generate.
 #
-# History, because this value has moved three times and every move was upward.
-# The cap was raised to 16k, then to 32k, chasing lens calls that truncated; the
-# measurements behind those moves showed 25,963-35,463 reasoning tokens per
-# truncation and concluded that the cap was the wrong lever because raising it
-# only buys the model more room to think. That conclusion was drawn while
-# `reasoning_effort` was being silently dropped on OpenRouter, and this comment
-# asked the next person to re-measure before moving the value again.
+# History, because this value keeps moving and each move answered a different
+# failure. It was raised to 16k, then to 32k, chasing lens calls that truncated;
+# those measurements showed 25,963-35,463 reasoning tokens per truncation and
+# concluded the cap was the wrong lever, since raising it only bought the model
+# more room to think. That conclusion was drawn while `reasoning_effort` was
+# being silently dropped on OpenRouter, i.e. with thinking effectively unbounded.
 #
-# Re-measured, twice, on the same diff, with the budget actually enforced:
+# Re-measured at 32k, twice, on the same diff, with the budget enforced:
 #
 #   run          truncated lens   reasoning   output    that call   whole review
 #   low                code-health       516  ~32,250        380s           410s
 #   medium             security          961  ~32,700        288s           361s
 #
-# Three things follow. Thinking is bounded now (~500-1000, not ~30,000), so the
-# old diagnosis is spent. `reasoning_effort` is not the lever either — `medium`
-# truncated too, on a different lens. And the truncation is a CONTENT runaway,
-# not a thinking one: 961 tokens of thought against ~32,700 of output, salvaging
-# zero findings, where the same material split in half produced 1,122 tokens.
-# Roughly one lens call in five does this. It is model-level generation
-# instability, and no cap prevents it.
+# Those were a CONTENT runaway, not a thinking one: ~1k tokens of thought against
+# ~32k of output, salvaging zero findings, where the same material split in half
+# produced 1,122. Roughly one lens call in five. No cap prevents that, so the
+# cap's job was re-framed as blast radius — at 32k one runaway ate 93% and 80%
+# of those two runs' wall clock, at 8k it costs ~95s instead of ~380s. Hence
+# 8,192, against a largest-healthy-output of 937 at `low` and 3,986 at `medium`.
 #
-# So the cap's job is not prevention, it is blast radius — and at 32k the blast
-# radius was the entire review: 93% and 80% of those two runs' wall clock went on
-# one call that said nothing. At 8k a runaway costs ~95s instead of ~380s.
+# Then the model changed (openai/gpt-5.6-luna — see
+# .github/workflows/lgtmaybe.yml) and the failure inverted. A dogfood review lost
+# its whole `artefacts` lens — tests and documentation, reviewed by nothing that
+# run — to a truncation that spent 8,192 of the 8,192 ceiling on REASONING: zero
+# content tokens, zero findings salvaged, and no split, because splitting cannot
+# shrink a thinking budget. That is the ~2x headroom the note below already
+# flagged as thin, arriving.
 #
-# 8,192 against a largest-healthy-output of 937 tokens at `low` (~9x headroom)
-# and 3,986 at `medium` (~2x). A truncation is not fatal in any case: the engine
-# splits the batch and reviews the pieces, which is how both runs still produced
-# findings from the lens that ran away.
+# So: 16,384. It doubles the headroom over a model whose thinking alone reached
+# 8k, while keeping a runaway's blast radius at half of what 32k cost. Note it is
+# the opposite of what the runs above wanted — that is what makes this number
+# hard, because the two failures are indistinguishable from the outside (both are
+# "truncated at the ceiling") and want opposite moves. `reasoning_effort` is not
+# the alternative here: the note below measured `low` missing a real bug in both
+# runs and producing the only false positive across four.
 #
-# The coupling is what makes this number hard, so: the cap pays for THINKING as
-# well as output on this model. 8,192 is comfortable at `low` and `medium`. It
-# would need raising again at `high`/`xhigh`, where thinking alone can approach
-# it — and at that point re-measure rather than guessing, the same way this
-# number was arrived at.
-max_tokens: 8192
+# Honest about what this is: a directional response to ONE observed truncation,
+# not a re-measurement — every number above came from paired runs and this did
+# not. What to measure next, on the dogfood diff at `medium`: largest healthy
+# output, the reasoning share of it, and whether `artefacts` still truncates. If
+# thinking has simply grown past 16k too, the lever really is `reasoning_effort`
+# and this should come back down rather than climb to 32k a second time.
+max_tokens: 16384
 
 # Bound what the model spends THINKING, as opposed to answering.
 #
@@ -75,8 +81,9 @@ max_tokens: 8192
 # output's higher unit price is applied. Not the 3x the token counts suggest.
 #
 # Two things to watch. `max_tokens` above pays for thinking as well, and the
-# largest healthy output at `medium` was 3,986 tokens against that 8,192 cap —
-# roughly 2x headroom, where `low` had 9x. And `medium` truncated once in two
-# runs where `low` truncated twice, which is directionally interesting but n=2:
-# do not read it as a fix for the runaway.
+# largest healthy output at `medium` was 3,986 tokens — roughly 2x headroom
+# against the 8,192 cap those runs used, and ~4x against the 16,384 it now sits
+# at, which is the headroom that raise was buying back. And `medium` truncated
+# once in two runs where `low` truncated twice, which is directionally
+# interesting but n=2: do not read it as a fix for the runaway.
 reasoning_effort: medium

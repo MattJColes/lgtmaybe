@@ -297,6 +297,28 @@ def test_a_reasoning_dominated_truncation_keeps_its_salvage() -> None:
     assert "reasoning_effort" in summary
 
 
+def test_a_reasoning_dominated_truncation_offers_the_cap_as_well() -> None:
+    """Naming only `reasoning_effort` states the pessimistic case as fact.
+
+    Two different failures produce identical numbers. Thinking that *expands to
+    fill* whatever ceiling it is given is immune to a bigger cap — the case
+    issue #348 measured, and the one where lowering the effort is the only move.
+    Thinking with a bounded natural size that merely exceeds this ceiling is the
+    opposite: raising the cap fixes it outright, and lowering the effort buys
+    the fix in review quality instead. One truncation cannot tell the two apart
+    — only re-running at a higher cap can — so the reader is handed both levers
+    rather than the pessimistic one asserted as proven.
+    """
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(_TruncatesOnReasoning()).review(
+            _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+        )
+
+    reason = str(exc_info.value)
+    assert "reasoning_effort" in reason
+    assert "raise `max_tokens`" in reason
+
+
 def test_a_truncation_that_spent_its_ceiling_on_findings_is_still_split() -> None:
     """The output-length truncation the split was built for is untouched.
 
