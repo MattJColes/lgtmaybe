@@ -783,7 +783,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "max_tokens": {
       "anyOf": [
         {
-          "minimum": 1,
+          "minimum": 0,
           "type": "integer"
         },
         {

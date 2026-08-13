@@ -277,11 +277,13 @@ local_diff_options = _stack(
 @click.option(
     "--max-tokens",
     default=None,
-    type=click.IntRange(min=1),
-    help="Cap the tokens each model call may generate (any provider; unset = the "
-    "model's own ceiling). Set it on a prepaid route like OpenRouter, which "
-    "reserves prompt + max_tokens against your balance before generating and "
-    "assumes the model's full ceiling when the request omits it",
+    type=click.IntRange(min=0),
+    help="Cap the tokens each model call may generate (any provider; 0 = no cap). "
+    "Unset means ollama gets a finite default ceiling — a local model can otherwise "
+    "decode until the timeout — and every hosted route keeps the model's own. Set it "
+    "on a prepaid route like OpenRouter, which reserves prompt + max_tokens against "
+    "your balance before generating and assumes the model's full ceiling when the "
+    "request omits it",
 )
 @click.option(
     "--reasoning-effort",
