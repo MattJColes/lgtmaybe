@@ -218,9 +218,12 @@ artefacts           43.67s   |   so these overlapped
 security            43.30s   |
 ```
 
-**When to go the other way.** On a very slow model — a large one on CPU, minutes
-per call — six queued calls can each sit waiting long enough to run out the
-per-request timeout below. Pin it down:
+**Queue time is already paid for.** A queued call's timeout clock starts when the
+request is *sent*, not when your server gets to it, so on a single-slot box the
+last call in a six-wide fan-out would otherwise have to be served within the same
+budget as the first. lgtmaybe scales the local default by the fan-out width to
+cover that (see below), so you should not need to intervene. If you would rather
+not have the calls queue at all:
 
 ```yaml
 # .lgtmaybe.yml
@@ -233,8 +236,21 @@ Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama 
 long default per-request timeout (1800 seconds)** automatically — you don't need
 to set anything for a normal run. (Direct cloud providers default to 600 s.)
 
+**That default scales with the fan-out.** Because the calls queue, the budget has
+to cover the wait as well as the work: at the default width of six the resolved
+per-call timeout is `1800 × 6`, **bounded by `max_review_seconds`** (3600 s by
+default) so no single call can outlive the review it belongs to. At
+`max_concurrency: 1` there is no queue and the budget is the plain 1800 s. Every
+run logs which number it resolved, and why:
+
+```
+per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+```
+
+An explicit `timeout` is never scaled — `timeout: 600` means 600 at any width.
+
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 1800.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 3600.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
@@ -250,20 +266,16 @@ timeout: 1800
 ```
 
 The review fans out **four calls** under the default `fast` preset (nine under
-`--preset full`). lgtmaybe runs those **serially for
-ollama**: a single ollama instance serves one request at a time, so firing them
-concurrently would only make each wait and time out. The trade-off is
-wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — four serial calls instead of nine is the
-single biggest local speed-up.
+`--preset full`). On a default ollama those queue rather than overlap, so a slow
+model takes roughly `lens calls × per-call time` — which is exactly why `fast` is
+the default: four calls instead of nine is the single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
-`OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — the same four calls then overlap instead of queueing, which is close to
-a 4× wall-clock win. By default lgtmaybe issues ollama calls one at a time. Add
-`--profile` to any run to see the per-call breakdown.
+`OLLAMA_NUM_PARALLEL` on the **ollama server** as described above — the same four
+calls then overlap instead of queueing, which is close to a 4× wall-clock win.
+Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 

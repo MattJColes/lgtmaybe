@@ -6,6 +6,7 @@ from .engine import (
     LLMReviewEngine,
     ReviewIncompleteError,
     clear_interrupt,
+    concurrency_cap,
     interrupt_requested,
     request_interrupt,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "LLMReviewEngine",
     "ReviewIncompleteError",
     "clear_interrupt",
+    "concurrency_cap",
     "interrupt_requested",
     "request_interrupt",
     "FileFetcher",
