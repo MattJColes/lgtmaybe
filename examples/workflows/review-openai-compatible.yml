@@ -17,11 +17,11 @@ permissions:
   contents: read
   pull-requests: write
 
-# The event name is part of the key on purpose. lgtmaybe posts comments during a
-# review, and those comments fire the issue_comment event this workflow subscribes to.
-# Without the event in the key those runs share this group and cancel-in-progress
-# kills the review that posted the comment. A new push still cancels an in-flight
-# review — two pushes are both pull_request_target, so they still collide.
+# The automatic diagram posts an issue_comment event after a review. Because
+# workflow-level concurrency applies before the job guard, the event name keeps
+# that run from cancelling the review job that posted it. A new push still
+# cancels an in-flight review — two pushes are both
+# pull_request_target, so they still collide.
 concurrency:
   group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
   cancel-in-progress: true
