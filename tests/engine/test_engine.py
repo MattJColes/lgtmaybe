@@ -2417,7 +2417,7 @@ def test_nothing_hidden_costs_zero_extra_prompt_bytes() -> None:
     """The shared prefix is a prompt-cache entry, and most PRs hide nothing. A
     review where the batch shows every changed file must send exactly what it sent
     before — no empty block, no lead-in, no marker."""
-    from lgtmaybe.engine.injection import _HIDDEN_START
+    from lgtmaybe.engine.injection import _HIDDEN_END, _HIDDEN_START, HIDDEN_PREAMBLE
 
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
@@ -2425,7 +2425,13 @@ def test_nothing_hidden_costs_zero_extra_prompt_bytes() -> None:
     LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
 
     for prefix in _review_prefixes(provider):
+        # Every part of the block, not just its opener: the preamble is the half
+        # that could survive a refactor that stopped emitting the markers, and
+        # "zero extra bytes" is the claim being made.
         assert _HIDDEN_START not in prefix
+        assert _HIDDEN_END not in prefix
+        assert HIDDEN_PREAMBLE not in prefix
+        assert "NOT SHOWN" not in prefix
 
 
 def test_the_manifest_rides_the_shared_prefix_not_the_system_preamble() -> None:
@@ -2445,3 +2451,46 @@ def test_the_manifest_rides_the_shared_prefix_not_the_system_preamble() -> None:
         assert _HIDDEN_START not in system
         if _REFLECT_MARKER not in system:
             assert system == build_shared_preamble(None, False)
+
+
+def test_a_split_piece_derives_its_own_manifest_not_the_batch_s() -> None:
+    """A split piece shows FEWER files than the batch it came from.
+
+    Inheriting the batch's manifest would leave each piece silently unaware of
+    its siblings' files — the one omission the whole mechanism exists to prevent,
+    reintroduced on the recovery path. So it is recomputed per piece.
+    """
+    from lgtmaybe.core.ports import ProviderTruncated
+
+    class _TruncatesOnTheWholeBatch(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefixes: list[str] = []
+
+        def complete(self, messages, model, **opts):  # type: ignore[no-untyped-def]
+            prefix = messages[1]["content"]
+            self.prefixes.append(prefix)
+            # By CONTENT, not by path: with the manifest every piece names both
+            # files, one as its diff and one as the file it was not shown.
+            if "+x = 1" in prefix and "+y = 2" in prefix:
+                raise ProviderTruncated("ceiling", text="")
+            return ProviderResult(text='{"findings": []}', input_tokens=5, output_tokens=5)
+
+    provider = _TruncatesOnTheWholeBatch()
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        categories=[ReviewCategory.security],
+        reflect=False,
+    )
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    pieces = [p for p in provider.prefixes if not ("+x = 1" in p and "+y = 2" in p)]
+    assert len(pieces) == 2, "expected the batch to split into two pieces"
+    for piece in pieces:
+        shown, hidden = (
+            ("+x = 1", "scripts/tool.py") if "+x = 1" in piece else ("+y = 2", "src/app.py")
+        )
+        assert shown in piece
+        assert hidden in piece, "the piece was not told about its sibling's file"

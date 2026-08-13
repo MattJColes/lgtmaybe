@@ -555,6 +555,11 @@ class _Run:
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
+    # The PR's full changed-file list. Carried for the same reason as
+    # `concurrency`: a split piece shows FEWER files than the batch it came from,
+    # so it has to derive its own not-shown manifest rather than inherit the
+    # batch's — which would leave a piece silently unaware of its siblings' files.
+    changed_files: tuple[str, ...] = ()
 
 
 def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
@@ -906,6 +911,7 @@ class LLMReviewEngine:
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
+            changed_files=tuple(ctx.changed_files),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
@@ -1491,6 +1497,12 @@ class LLMReviewEngine:
         )
 
         def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
+            # Recomputed, never inherited: this piece carries a subset of the
+            # batch's files, so the batch's manifest would omit exactly the
+            # sibling-piece files this call is now missing.
+            piece_hidden = wrap_not_shown(
+                files_not_visible(run.changed_files, {path for path, _ in piece})
+            )
             return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
@@ -1500,7 +1512,7 @@ class LLMReviewEngine:
                 batch_num,
                 lens,
                 spec_block=spec_block,
-                hidden_block=hidden_block,
+                hidden_block=piece_hidden,
             )
 
         # The pieces are independent calls, so they run CONCURRENTLY — serially
