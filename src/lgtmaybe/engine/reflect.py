@@ -89,12 +89,19 @@ handling could plausibly exist elsewhere — is a likely false positive; drop it
 diff itself shows the absence. A finding that already hedges this ("if there is no X \
 elsewhere…") may be kept at low severity.
 
-Gap findings are valid types, not false positives: a missing test, a missing or stale \
-docstring, a performance or complexity concern, a mismatch with the PR's stated intent, or a \
-mismatch with a specification the repository commits (a requirement the change falls short of, \
-a task-list entry it ticks off without doing, or behaviour it adds that no requirement covers). \
-For those, judge whether the gap or mismatch is real — not whether the changed line \
-itself is buggy.
+Gap findings are valid types, not false positives: a missing or stale docstring, a \
+performance or complexity concern, a mismatch with the PR's stated intent, or a mismatch with \
+a specification the repository commits (a requirement the change falls short of, a task-list \
+entry it ticks off without doing, or behaviour it adds that no requirement covers). For those, \
+judge whether the gap or mismatch is real — not whether the changed line itself is buggy.
+
+A missing test (or missing documentation) is the one gap type that collides with the rule \
+above, because the test or doc it says is absent routinely lives in a file the diff never \
+touched. Keep it only when the test file or doc file is \
+actually in front of you — shown in the diff, or present in the file text below. Otherwise it \
+is an absence claim about code you cannot see, like any other: the coverage may sit elsewhere \
+in an untouched file, so drop it unless the diff itself shows the absence (it deletes the \
+test, or it changes the very test file that fails to cover the new path).
 
 Also apply these three drop-rules:
 (a) Drop a finding that asserts library/cloud/framework SEMANTICS the diff does not itself \

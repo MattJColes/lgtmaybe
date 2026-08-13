@@ -413,10 +413,20 @@ pattern, event bus, plugin framework.
      output. Skippable via `--no-reflect` for weaker models that over-prune. The auditor
      also drops **cross-file false positives** — findings whose validity hinges on
      an assumption about code outside the diff (a guard/field/handler that may live
-     in an unshown file) — while **carving out gap findings** (a missing test/doc on
-     the diff itself stays valid). This mirrors the shared review rule (below) that
-     tells every lens the diff is only a **slice of the codebase**, so it should
-     hedge a cross-file absence-claim and lower its severity rather than assert it.
+     in an unshown file) — while **carving out gap findings** (performance,
+     complexity, intent, spec). The test/doc half of that carve-out is
+     **conditional**: a "no test for this" finding keeps its protection only when
+     the test or doc file is shown in the diff or in the grounded file text.
+     Unconditional, it instructed the auditor *not* to prune the exact claim the
+     cross-file rule forbids — a test living in an untouched file is not a missing
+     test — which is the seam a real false positive landed in. This mirrors the
+     shared review rule (below) that tells every lens the diff is only a **slice of
+     the codebase**, so it should hedge a cross-file absence-claim and lower its
+     severity rather than assert it — a rule that covers both a symbol's
+     **existence** and its **value**: you may not assume what an unshown constant,
+     default, config entry or collection *contains*, only that it exists (a
+     constant named for a policy may hold an empty set, hundreds of lines away in
+     the same file).
    - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
      reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
      one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
