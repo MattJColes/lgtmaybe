@@ -19,7 +19,6 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
-from lgtmaybe.core.ports import ReviewEngine
 from lgtmaybe.engine.suppress import apply_suppressions
 from lgtmaybe.github.rest_gateway import finding_fingerprint
 from tests.conftest import make_cfg
@@ -45,7 +44,7 @@ FINDING = ReviewFinding(
 FINDING_FP = finding_fingerprint(FINDING.path, FINDING.title)
 
 
-class SuppressingEngine(ReviewEngine):
+class SuppressingEngine:
     """Returns canned findings after applying suppression like the real engine.
 
     Records the context it was handed so a test can assert the downvoted

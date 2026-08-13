@@ -29,7 +29,6 @@ from lgtmaybe.core.models import (
     PRContext,
     ReviewFinding,
 )
-from lgtmaybe.core.ports import GitHubGateway
 
 from .checkout import clone_base_tree
 from .diff import (
@@ -298,7 +297,7 @@ def _render_broad(broad: list[ReviewFinding]) -> str:
     return "\n".join(lines)
 
 
-class RestGitHubGateway(GitHubGateway):
+class RestGitHubGateway:
     """GitHub REST adapter.
 
     Args:
