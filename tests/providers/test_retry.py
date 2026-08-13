@@ -1368,13 +1368,17 @@ class TestRetryBudgetIsNotOvershot:
                 ),
             )
 
-        with patch("litellm.completion", side_effect=rate_limited):
+        with (
+            patch("litellm.completion", side_effect=rate_limited),
+            patch("tenacity.nap.time.sleep") as sleep,
+        ):
             # Budget is 2.5 × 0.05s; the 120s hint cannot fit inside it.
             with pytest.raises(litellm.RateLimitError) as caught:
                 LiteLLMProvider(timeout=0.05).complete(
                     [{"role": "user", "content": "hi"}], "openrouter/m"
                 )
 
+        sleep.assert_not_called()
         assert attempts_of(caught.value) == 1
         assert time.perf_counter() - started < 60
 
