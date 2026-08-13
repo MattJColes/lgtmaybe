@@ -224,10 +224,22 @@ def _is_permanent(exc: BaseException) -> bool:
 # other three lenses sailed through. So a rate limit gets its own, much slower
 # ladder: long enough for the next attempt to land in a fresh window.
 #
-# Both stay well inside the call's existing `stop_after_delay` budget
+# The number that matters is the CUMULATIVE wait, not how long any one of them
+# looks. The first version of this started at 5s and so waited 5s, 10s, 20s —
+# each of them obviously "slow", and all four attempts still landing inside 36
+# seconds, i.e. inside the very minute that had just refused them. It was the
+# same bug it replaced, one order of magnitude out instead of two, and it read
+# as correct because every individual wait did.
+#
+# Starting at 20s puts the attempts at roughly 20s, 60s and 120s: past the first
+# window, and past the second. `_RATE_LIMIT_BACKOFF_MAX` caps the growth so a
+# fourth-attempt wait cannot run away.
+#
+# Both ladders stay well inside the call's existing `stop_before_delay` budget
 # (2.5 × timeout — 1,500s on direct cloud, 4,500s on the slow-capable routes
-# openrouter/ollama/openai-compatible), so nothing new needs bounding.
-_RATE_LIMIT_BACKOFF_INITIAL = 5.0
+# openrouter/ollama/openai-compatible), and that stop weighs the wait ABOUT to be
+# taken, so a backoff that would blow the budget ends the call instead.
+_RATE_LIMIT_BACKOFF_INITIAL = 20.0
 _RATE_LIMIT_BACKOFF_MAX = 60.0
 
 # The most we will honour from a server-supplied `Retry-After`. A gateway that
@@ -243,22 +255,51 @@ _rate_limit_wait = wait_exponential_jitter(
 )
 
 
-def _response_headers(exc: BaseException) -> Mapping[str, str] | None:
-    """The response headers *exc* carries, from wherever litellm put them.
+def _header_sources(exc: BaseException) -> tuple[Mapping[str, str], ...]:
+    """Every place litellm may have put *exc*'s response headers.
 
-    Three places, because litellm's own ``_get_response_headers`` looks in the
+    Three of them, because litellm's own ``_get_response_headers`` looks in the
     same three: the exception's ``headers`` attribute, the ``response`` it wraps,
     and the ``litellm_response_headers`` its exception mapper stamps on the way
-    out. Which one is populated depends on the route, so reading only one loses
-    the header on the others.
+    out. Which one is populated depends on the route.
     """
-    for source in (
-        getattr(exc, "headers", None),
-        getattr(getattr(exc, "response", None), "headers", None),
-        getattr(exc, "litellm_response_headers", None),
-    ):
-        if source:
-            return source  # type: ignore[no-any-return]
+    return tuple(
+        source
+        for source in (
+            getattr(exc, "headers", None),
+            getattr(getattr(exc, "response", None), "headers", None),
+            getattr(exc, "litellm_response_headers", None),
+        )
+        if source
+    )
+
+
+def _header(exc: BaseException, name: str) -> str | None:
+    """*name*'s value from any source that carries it, whatever its casing.
+
+    Two mistakes are worth naming, because both read as correct and both lose the
+    header in exactly the case it exists for:
+
+    - **Stopping at the first non-empty source.** That is what litellm's helper
+      does, but its job is "give me the headers" and ours is "find this one" — an
+      exception holding an unrelated ``headers`` dict alongside a response with
+      the real hint would answer from the wrong mapping and find nothing.
+    - **Matching a fixed spelling.** ``httpx.Headers`` is case-insensitive, so
+      two hard-coded spellings look sufficient; litellm's ``headers=`` kwarg is a
+      plain ``Dict[str, str]``, where the lookup is exact and ``RETRY-AFTER``
+      misses.
+
+    So: search every source, compare case-insensitively, first match wins.
+    """
+    wanted = name.lower()
+    for source in _header_sources(exc):
+        try:
+            items = source.items()
+        except AttributeError:  # pragma: no cover — a mapping-shaped non-mapping
+            continue
+        for key, value in items:
+            if str(key).lower() == wanted:
+                return value
     return None
 
 
@@ -277,10 +318,7 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
     milliseconds there) between providers, so parsing them would be guesswork
     dressed as precision.
     """
-    headers = _response_headers(exc)
-    if not headers:
-        return None
-    raw = headers.get("retry-after") or headers.get("Retry-After")
+    raw = _header(exc, "Retry-After")
     if raw is None:
         return None
     try:
@@ -652,6 +690,9 @@ class LiteLLMProvider:
                 # breakdown — "it never said" must not read as "it thought nothing".
                 reasoning_tokens=reasoning or None,
                 output_tokens=output_tokens,
+                # Not diagnosis but accounting: the prompt was sent and billed,
+                # so the spend ceiling must see it (see profiling.record_error).
+                input_tokens=input_tokens,
             )
         cache_read, cache_creation = _cache_usage(usage)
         if cache_read or cache_creation:

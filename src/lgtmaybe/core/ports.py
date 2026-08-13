@@ -48,8 +48,12 @@ class ProviderTruncated(Exception):
     take the salvage without also seeing that the lens was cut short.
 
     ``reasoning_tokens`` (None when the route reports no breakdown — which is not
-    the same as zero) and ``output_tokens`` (the ceiling actually reached) carry
-    the *diagnosis* as data rather than as prose. A reasoning model spends this
+    the same as zero), ``output_tokens`` (the ceiling actually reached) and
+    ``input_tokens`` carry the *diagnosis* as data rather than as prose.
+    ``input_tokens`` is here for a second reason: a truncation is routinely the
+    most expensive call in a run, and the spend ceiling has to be able to charge
+    for it. Reporting a failure as free is how a runaway hides from the very
+    budget that exists to stop it. A reasoning model spends this
     same budget on thought, so a truncation where the thinking accounts for
     essentially the whole ceiling is not a payload problem at all: covering less
     does not shrink a thinking budget, and only `reasoning_effort` moves it. The
@@ -63,11 +67,13 @@ class ProviderTruncated(Exception):
         text: str = "",
         reasoning_tokens: int | None = None,
         output_tokens: int | None = None,
+        input_tokens: int | None = None,
     ) -> None:
         super().__init__(message)
         self.text = text
         self.reasoning_tokens = reasoning_tokens
         self.output_tokens = output_tokens
+        self.input_tokens = input_tokens
 
 
 class ProviderClient(Protocol):

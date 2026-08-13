@@ -127,7 +127,18 @@ class Profiler:
     def record_error(
         self, label: str, batch: int, elapsed: float, exc: BaseException, reason: str | None = None
     ) -> None:
-        """Record a failed call: no usage to report, so every counter is zero."""
+        """Record a failed call, charging it for whatever it actually spent.
+
+        Most failures genuinely cost nothing — a connection error or a rate limit
+        never reached the model — and report zeros. A **truncation** is the
+        exception that matters: it reached the model and generated all the way to
+        the ceiling, so it is routinely the most expensive call in the whole run.
+        Reporting it as free made it invisible to :meth:`total_tokens`, and so to
+        `max_review_tokens` — the runaway calls the spend ceiling exists to stop
+        were precisely the ones it could not see. It also printed the single
+        costliest row of ``--profile`` as ``0 / 0``, which is exactly the row a
+        reader is looking at.
+        """
         self.record_call(
             label=label,
             batch=batch,
@@ -136,8 +147,12 @@ class Profiler:
             # retry budget must not read as one that was never retried. 0 only when
             # the failure never reached the retry loop.
             attempts=attempts_of(exc),
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=getattr(exc, "input_tokens", None) or 0,
+            output_tokens=getattr(exc, "output_tokens", None) or 0,
+            reasoning_tokens=getattr(exc, "reasoning_tokens", None) or 0,
+            # A truncation is billed as ordinary input; the route reports no cache
+            # breakdown alongside the ceiling error, so claiming one would be
+            # invention rather than accounting.
             cache_read_tokens=0,
             cache_creation_tokens=0,
             error=reason or type(exc).__name__,
