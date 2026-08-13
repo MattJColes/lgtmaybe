@@ -1568,3 +1568,62 @@ class TestTruncationAdviceMatchesTheMeasurement:
 
     def test_it_names_the_model_as_the_lever_that_actually_moves_this(self) -> None:
         assert "model" in self._message()
+
+
+class TestSteppingReasoningEffortDown:
+    """The lever the engine pulls when a truncation went on THOUGHT.
+
+    Splitting the payload cannot shrink a thinking budget, so the engine retries
+    the lens once at a lower effort instead — and the effort lives in one of two
+    provider-shaped places, which is why the adapter answers this rather than the
+    engine deriving it.
+    """
+
+    def test_a_flat_effort_steps_down_one_level(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="medium")
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "low"}
+
+    def test_the_bottom_of_the_ladder_has_nowhere_to_go(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="none")
+
+        assert provider.lower_reasoning_effort() is None
+
+    def test_an_unset_effort_steps_nowhere(self) -> None:
+        """The library default. A user who never configured this must send
+        byte-identical requests, so there is nothing to retry with."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        assert provider.lower_reasoning_effort() is None
+
+    def test_default_is_a_sentinel_not_a_rung(self) -> None:
+        """`default` says "let the route decide" — there is no telling what sits
+        one level below it, so it is left alone rather than guessed at."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="default")
+
+        assert provider.lower_reasoning_effort() is None
+
+    def test_openrouters_nested_reasoning_object_steps_down_in_place(self) -> None:
+        """The factory re-routes `reasoning_effort` into a top-level `reasoning`
+        object for OpenRouter (sending both is a 400), so the step-down has to
+        find it there — and must not lose the rest of extra_body doing it."""
+        provider = LiteLLMProvider(
+            model="openrouter/openai/gpt-5.6-luna",
+            extra_body={"reasoning": {"effort": "high"}, "provider": {"sort": "latency"}},
+        )
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {
+                "reasoning": {"effort": "medium"},
+                "provider": {"sort": "latency"},
+            }
+        }
+
+    def test_the_step_down_is_an_override_not_a_mutation(self) -> None:
+        """One retry's request, not a new setting for the rest of the run: the
+        next lens must still go out at the effort the user configured."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="high")
+
+        provider.lower_reasoning_effort()
+
+        assert provider.default_opts["reasoning_effort"] == "high"

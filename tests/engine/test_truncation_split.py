@@ -423,3 +423,141 @@ def test_a_piece_that_fails_is_still_reported() -> None:
     assert [f.path for f in findings] == ["one.py"]  # the half that answered
     assert "results may be incomplete" in summary
     assert "insufficient_quota" in summary  # naming the piece's real failure
+
+
+# ---------------------------------------------------------------------------
+# The reasoning-bound sibling of the split: one step down, then stop.
+# ---------------------------------------------------------------------------
+
+
+class _TruncatesUntilEffortDrops(FakeProvider):
+    """Spends the whole ceiling thinking until asked to think less.
+
+    The provider's own shape: it holds the configured effort and hands back the
+    per-call opts that step it down, exactly as the litellm adapter does — the
+    engine never knows whether that is a flat `reasoning_effort` or OpenRouter's
+    nested `reasoning` object.
+    """
+
+    _NEVER = object()  # distinct from every effort value, including None
+
+    def __init__(self, effort: str | None = "medium", answers_at: Any = "low") -> None:
+        super().__init__()
+        self.efforts: list[str | None] = []
+        self._effort = effort
+        self._answers_at = answers_at
+
+    def lower_reasoning_effort(self) -> dict[str, Any] | None:
+        if self._effort in (None, "none"):
+            return None
+        ladder = ["none", "minimal", "low", "medium", "high", "xhigh"]
+        return {"reasoning_effort": ladder[ladder.index(self._effort) - 1]}
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        effort = opts.get("reasoning_effort", self._effort)
+        self.efforts.append(effort)
+        if effort == self._answers_at:
+            return ProviderResult(
+                text=_finding_json("one.py", "first_change = os.getcwd()"),
+                input_tokens=10,
+                output_tokens=10,
+            )
+        raise ProviderTruncated(
+            _CEILING,
+            text="",
+            reasoning_tokens=_REASONING_SPENT,
+            output_tokens=_REASONING_CEILING,
+        )
+
+
+def test_a_reasoning_bound_truncation_retries_once_at_a_lower_effort() -> None:
+    """The missing sibling of the split.
+
+    A payload-bound truncation shrinks the payload and re-reviews. A
+    reasoning-bound one was diagnosed correctly and then abandoned, losing the
+    lens for that round. It changes the one variable that can help instead.
+    """
+    provider = _TruncatesUntilEffortDrops()
+
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
+    )
+
+    assert provider.efforts == ["medium", "low"]  # one step down, never up
+    assert [f.title for f in findings] == ["unchecked value in one.py"]
+    # Not silent: a lens that answered only after being told to think less is a
+    # fact about this review, and the summary says so.
+    assert "reasoning_effort" in summary
+
+
+def test_a_second_reasoning_bound_truncation_reports_and_stops() -> None:
+    """One attempt, not a cascade — the same posture as the split's one level."""
+    provider = _TruncatesUntilEffortDrops(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == ["medium", "low"]  # and no third
+    assert "reasoning_effort" in str(exc_info.value)
+
+
+def test_no_retry_when_reasoning_effort_is_unset() -> None:
+    """Byte-identical behaviour for the users who never configured it: there is
+    no lower level to step to, so nothing is retried and nothing is spent."""
+    provider = _TruncatesUntilEffortDrops(effort=None, answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == [None]  # one call, no step-down
+
+
+def test_the_step_down_keeps_what_the_cut_call_completed() -> None:
+    """Salvage still applies: the findings finished before the cut are real work,
+    and they merge with the retry's rather than being replaced by them."""
+
+    class _SalvagesThenAnswers(_TruncatesUntilEffortDrops):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            if opts.get("reasoning_effort", self._effort) == "low":
+                return ProviderResult(
+                    text=_finding_json("two.py", "second_change = sys.maxsize", "found at low"),
+                    input_tokens=10,
+                    output_tokens=10,
+                )
+            self.efforts.append("medium")
+            raise ProviderTruncated(
+                _CEILING,
+                text=_cut_off_json("one.py", "first_change = os.getcwd()", "found before the cut"),
+                reasoning_tokens=_REASONING_SPENT,
+                output_tokens=_REASONING_CEILING,
+            )
+
+    provider = _SalvagesThenAnswers()
+
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert {f.title for f in findings} == {"found before the cut", "found at low"}
+
+
+def test_a_payload_bound_truncation_splits_and_does_not_step_down() -> None:
+    """The two remedies stay disjoint. A payload-bound truncation says nothing
+    about the thinking budget, so lowering the effort there would pay for a fix
+    in review quality that the split provides for free."""
+
+    class _SplitsAndCountsStepDowns(_TruncatesUntilSmaller):
+        asked = 0
+
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            type(self).asked += 1
+            return {"reasoning_effort": "low"}
+
+    provider = _SplitsAndCountsStepDowns()
+
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]  # the split still ran
+    assert _SplitsAndCountsStepDowns.asked == 0

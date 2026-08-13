@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
@@ -227,6 +228,7 @@ class _NoticeState:
     failed_calls: int
     failed_lenses: list[str]
     split_batches: int
+    stepped_down: list[str]
     reflection_skipped: str | None
     suppressed: int
     off_diff: int
@@ -282,6 +284,16 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "(timed out, or ran past the `max_tokens` ceiling) and "
             f"{was} reviewed in smaller pieces instead. Consider a lower "
             "`max_input_tokens`, a higher `max_tokens`, or a faster model."
+        )
+    if state.stepped_down:
+        count = len(state.stepped_down)
+        listed = ", ".join(f"`{lens}`" for lens in state.stepped_down)
+        notices.append(
+            f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
+            f"ceiling on reasoning and was re-run once at a lower `reasoning_effort` "
+            f"({listed}). Those findings come from the lower setting — lower "
+            "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
+            "first attempt rather than the second."
         )
     if state.reflection_skipped:
         notices.append(
@@ -698,6 +710,11 @@ class LLMReviewEngine:
         # Per-review state (reset here, not in __init__, so a reused engine starts
         # clean); a set's add is atomic, which is all the fan-out threads need.
         self._split_batches: set[int] = set()
+        # Lenses that only answered after their reasoning effort was stepped down
+        # (see _retry_lower_effort). Keyed by lens so the notice counts lenses,
+        # not calls — the same lens stepping down in two batches is one fact
+        # about the review, not two.
+        self._stepped_down: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
         with profiler.stage("redact"):
@@ -1135,6 +1152,7 @@ class LLMReviewEngine:
                 failed_calls=failed_calls,
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
+                stepped_down=sorted(self._stepped_down),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
                 off_diff=off_diff,
@@ -1542,6 +1560,61 @@ class LLMReviewEngine:
             return findings, _RetryableReason(last)
         return findings, str(last)
 
+    def _retry_lower_effort(
+        self,
+        messages: list[Message],
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        lens: _Lens,
+        reason: str,
+    ) -> _LensOutcome:
+        """Re-run one lens once with its reasoning effort stepped down a level.
+
+        The missing sibling of :meth:`_review_split`. Both start from the same
+        failure — the answer hit the output ceiling — and the diagnosis decides
+        which remedy applies: a payload-bound truncation shrinks the payload, a
+        reasoning-bound one cannot (halving the diff does not halve the thinking),
+        so it changes the only variable that does move a thinking budget.
+
+        Without this, the reasoning branch diagnosed correctly and then stopped,
+        losing the lens for that round — a real dogfood review reviewed its tests
+        and documentation with nothing at all, and the message it left named a
+        knob for the reader to turn by hand next time.
+
+        Bounded exactly like the split:
+
+        - **One attempt.** The retry runs with ``effort`` set, and that is the
+          same flag :meth:`_complete_lens` checks before offering a step-down —
+          so a retry that truncates the same way reports plain.
+        - **Down, never up**, one level, and only where
+          :func:`_reasoning_exhausted_reason` already fired.
+        - **No split, no deferral** on the retry (both callbacks are None): the
+          payload was never the problem.
+        - **Nothing when the effort is unset.** The adapter answers None for the
+          library default, so a user who never configured it pays nothing and
+          sends byte-identical requests.
+
+        Returns the retry's ``(findings, error)``. The cut call's salvage is
+        merged by the caller, exactly as the split's is.
+        """
+        # Adapter-only, like `post_issue_comment` on the GitHub side: the effort
+        # lives in provider-shaped opts (a flat `reasoning_effort`, or
+        # OpenRouter's nested `reasoning` object), and the engine has no business
+        # knowing which. A provider without it simply never steps down.
+        lower = getattr(self._provider, "lower_reasoning_effort", None)
+        step_down = lower() if callable(lower) else None
+        if not step_down:
+            return [], reason
+        _log.warning(
+            "retrying the lens once at a lower reasoning effort",
+            extra={"lens": lens.id, "batch": batch_num, "effort": step_down},
+        )
+        self._stepped_down.add(lens.id)
+        return self._complete_lens(
+            messages, model, response_format, batch_num, lens, None, None, effort=step_down
+        )
+
     def _complete_lens(
         self,
         messages: list[Message],
@@ -1551,6 +1624,8 @@ class LLMReviewEngine:
         lens: _Lens,
         on_oversized: Callable[[str], _LensOutcome] | None = None,
         on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
+        *,
+        effort: dict[str, Any] | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
@@ -1567,8 +1642,15 @@ class LLMReviewEngine:
         returns the outcome to use instead. None (a re-run, or the feature off)
         means a ``needs`` in the response is simply ignored — nothing is parsed
         for it, so a review without the feature costs exactly what it did before.
+
+        ``effort`` carries the per-call reasoning override of a step-down retry
+        (see :meth:`_retry_lower_effort`). Not None also MARKS this call as that
+        retry, which is what bounds it to one: the step-down is only ever offered
+        to a call that has not already taken it.
         """
-        opts = {"response_format": response_format} if response_format is not None else {}
+        opts: dict[str, Any] = {"response_format": response_format} if response_format else {}
+        if effort is not None:
+            opts.update(effort)
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.
         _log.info("reviewing lens", extra={"lens": lens.id})
@@ -1616,7 +1698,16 @@ class LLMReviewEngine:
                         "truncation was reasoning-bound — not splitting",
                         extra={"lens": lens.id, "batch": batch_num},
                     )
-                    return completed, exhausted
+                    if effort is not None:
+                        # This IS the step-down retry, and it went the same way.
+                        # One attempt, not a cascade: the lower level did not fit
+                        # either, and grinding down the ladder spends the whole
+                        # review proving it.
+                        return completed, exhausted
+                    retried, retry_reason = self._retry_lower_effort(
+                        messages, model, response_format, batch_num, lens, exhausted
+                    )
+                    return completed + retried, retry_reason
                 if on_oversized is None:
                     # Already a piece: nothing smaller to try. Report the reason
                     # rather than recurse — an unbounded cascade would spend the

@@ -231,6 +231,31 @@ says nothing about size is not split at all.
 - **THEN** no pieces are reviewed, the salvage is kept, and the notice names both
   levers, since the counts alone cannot say which one is the fix
 
+### Requirement: A reasoning-bound truncation is retried once at a lower effort
+
+A lens whose truncation was reasoning-bound SHALL be re-run once with its
+`reasoning_effort` stepped down one level, merging its findings with the cut
+call's salvage — the sibling of the split, changing the one variable that can
+move a thinking budget. Exactly one attempt: a retry that truncates the same way
+reports plain. The step is always downward, never offered on a payload-bound
+truncation, and a no-op when no effort is configured, so a review that never set
+one is byte-identical. A lens that only answered after stepping down SHALL be
+named in the summary.
+<!-- anchor: engine.reasoning-step-down -->
+
+#### Scenario: the lower effort fits
+- **WHEN** a reasoning-bound truncation is re-run one level down and answers
+- **THEN** its findings join the review and the summary names the lens that
+  needed the lower setting
+
+#### Scenario: the lower effort truncates too
+- **WHEN** the step-down retry is itself reasoning-bound
+- **THEN** it reports and stops — one attempt, never a walk down the ladder
+
+#### Scenario: no effort was configured
+- **WHEN** the provider reports no reasoning effort to step down from
+- **THEN** nothing is retried and nothing is spent
+
 #### Scenario: the ceiling went on the answer
 - **WHEN** a truncated call spent only a small share of the ceiling reasoning
 - **THEN** the batch is split as usual — that call really did have more to say
