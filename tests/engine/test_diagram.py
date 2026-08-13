@@ -185,10 +185,24 @@ def test_change_summary_escapes_model_authored_markdown() -> None:
         _structured_provider(summary='[load image](https://example.com/pixel) <img src="x">'),
     )
 
-    assert r"\[load image\]\(https://example.com/pixel\)" in body
+    assert r"\[load image\]\(https\://example.com/pixel\)" in body
     assert r'\<img src="x"\>' in body
     assert "[load image](https://example.com/pixel)" not in body
     assert '<img src="x">' not in body
+
+
+def test_title_and_notes_escape_model_authored_markdown() -> None:
+    body = build_diagram(
+        _CTX,
+        _CFG,
+        _structured_provider(
+            title="[title](https://example.com)",
+            notes='<img src="x"> https://example.com/pixel',
+        ),
+    )
+
+    assert body.startswith(r"## \[title\]\(https\://example.com\)")
+    assert r'\<img src="x"\> https\://example.com/pixel' in body
 
 
 def test_response_format_is_the_diagram_schema() -> None:
