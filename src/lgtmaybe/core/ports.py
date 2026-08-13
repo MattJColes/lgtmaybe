@@ -8,8 +8,7 @@ parallel tracks can build against stable signatures.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol
 
 from .models import PRContext, ProviderResult, ReviewConfig, ReviewFinding
 
@@ -77,22 +76,21 @@ class ProviderTruncated(Exception):
         self.input_tokens = input_tokens
 
 
-class ProviderClient(ABC):
+class ProviderClient(Protocol):
     """Port: an LLM backend that returns a normalised completion."""
 
-    @abstractmethod
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         """Run one completion and return text + token usage."""
+        ...
 
 
-class GitHubGateway(ABC):
+class GitHubGateway(Protocol):
     """Port: read a PR's context and post a review back."""
 
-    @abstractmethod
     def get_pr_context(self) -> PRContext:
         """Fetch the PR diff and metadata via API (never check out PR code)."""
+        ...
 
-    @abstractmethod
     def post_review(
         self, findings: list[ReviewFinding], summary: str, diff: str | None = None
     ) -> None:
@@ -102,15 +100,16 @@ class GitHubGateway(ABC):
         positions; when omitted the adapter re-fetches it. Callers that already
         hold the context should pass it to avoid a redundant round-trip.
         """
+        ...
 
-    @abstractmethod
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone comment to the PR conversation (in-thread reply)."""
+        ...
 
 
-class ReviewEngine(ABC):
+class ReviewEngine(Protocol):
     """Port: turn a PR context + config into findings and a summary."""
 
-    @abstractmethod
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Produce (findings, summary) for the given PR and config."""
+        ...

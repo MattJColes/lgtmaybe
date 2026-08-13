@@ -239,7 +239,7 @@ class TestEndpointProviderCredentials:
         assert cfg.api_base == _CUSTOM_BASE
 
     def test_keyless_base_resolves_with_a_placeholder(self, provider: Provider) -> None:
-        from lgtmaybe.providers.constants import OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+        from lgtmaybe.providers.factory import OPENAI_COMPATIBLE_PLACEHOLDER_KEY
 
         cfg = resolve_credentials(provider, api_base=_CUSTOM_BASE)
         assert cfg.api_key == OPENAI_COMPATIBLE_PLACEHOLDER_KEY

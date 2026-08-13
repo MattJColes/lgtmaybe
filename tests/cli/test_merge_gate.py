@@ -15,7 +15,6 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
-from lgtmaybe.core.ports import GitHubGateway, ReviewEngine
 from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 
@@ -35,7 +34,7 @@ def _finding(severity: Severity) -> ReviewFinding:
     )
 
 
-class CannedEngine(ReviewEngine):
+class CannedEngine:
     def __init__(self, findings: list[ReviewFinding]) -> None:
         self._findings = findings
 
@@ -93,7 +92,7 @@ def test_no_check_run_on_dry_run() -> None:
     assert github.check_runs == []
 
 
-class _PortOnlyGateway(GitHubGateway):
+class _PortOnlyGateway:
     """A gateway implementing only the frozen port — no create_check_run."""
 
     def __init__(self, ctx: PRContext) -> None:

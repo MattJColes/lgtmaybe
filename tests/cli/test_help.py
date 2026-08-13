@@ -1,4 +1,4 @@
-"""The `help` command: overview with examples, per-command help, nested paths."""
+"""Click's native overview, command help, and nested-command help."""
 
 from __future__ import annotations
 
@@ -10,10 +10,11 @@ from lgtmaybe.core.models import Provider, ReviewPreset, Severity
 
 
 def test_help_lists_commands_and_examples() -> None:
-    result = CliRunner().invoke(main, ["help"])
+    result = CliRunner().invoke(main, ["--help"])
     assert result.exit_code == 0
-    for command in ("review", "diagram", "comment", "action", "config", "help"):
+    for command in ("review", "diagram", "comment", "action", "config"):
         assert command in result.output
+    assert "  help " not in result.output
     assert "Examples:" in result.output
     assert "lgtmaybe review" in result.output
     assert "https://lgtmaybe.coles.codes/" in result.output
@@ -23,48 +24,29 @@ def test_help_examples_cover_every_local_command() -> None:
     """The worked examples are the suggested CLI workflow, so a local command
     missing from them reads as one that doesn't exist — which is exactly how
     `lgtmaybe diagram` got reported as unshipped."""
-    result = CliRunner().invoke(main, ["help"])
+    result = CliRunner().invoke(main, ["--help"])
     examples = result.output.split("Examples:", 1)[1]
     for command in ("review", "diagram", "config"):
         assert f"lgtmaybe {command}" in examples
 
 
-def test_help_command_matches_dash_dash_help() -> None:
-    runner = CliRunner()
-    via_help = runner.invoke(main, ["help", "review"])
-    via_flag = runner.invoke(main, ["review", "--help"])
-    assert via_help.exit_code == 0
-    assert via_flag.exit_code == 0
-    assert via_help.output == via_flag.output
+def test_help_alias_is_not_a_command() -> None:
+    result = CliRunner().invoke(main, ["help"])
+    assert result.exit_code == 2
+    assert "No such command 'help'" in result.output
 
 
 def test_help_nested_subcommand() -> None:
-    runner = CliRunner()
-    via_help = runner.invoke(main, ["help", "config", "set"])
-    via_flag = runner.invoke(main, ["config", "set", "--help"])
-    assert via_help.exit_code == 0
-    assert via_help.output == via_flag.output
-    assert "KEY VALUE" in via_help.output
+    result = CliRunner().invoke(main, ["config", "set", "--help"])
+    assert result.exit_code == 0
+    assert "KEY VALUE" in result.output
 
 
 def test_help_group_lists_subcommands() -> None:
-    result = CliRunner().invoke(main, ["help", "config"])
+    result = CliRunner().invoke(main, ["config", "--help"])
     assert result.exit_code == 0
     for sub in ("path", "show", "get", "set", "init"):
         assert sub in result.output
-
-
-def test_help_unknown_command_errors() -> None:
-    result = CliRunner().invoke(main, ["help", "bogus"])
-    assert result.exit_code != 0
-    assert "No such command 'bogus'" in result.output
-    assert "lgtmaybe help" in result.output
-
-
-def test_help_path_through_non_group_errors() -> None:
-    result = CliRunner().invoke(main, ["help", "review", "extra"])
-    assert result.exit_code != 0
-    assert "No such command 'extra'" in result.output
 
 
 def test_bare_invocation_shows_enriched_help() -> None:
@@ -72,7 +54,7 @@ def test_bare_invocation_shows_enriched_help() -> None:
     # (exit 2) while still printing the full help — assert the content only.
     result = CliRunner().invoke(main, [])
     assert "Examples:" in result.output
-    for command in ("review", "comment", "action", "config", "help"):
+    for command in ("review", "comment", "action", "config"):
         assert command in result.output
 
 
