@@ -280,7 +280,16 @@ def test_base_checkout_root_returns_none_when_ref_unavailable(monkeypatch) -> No
 def test_open_thread_count_overlaps_the_file_fetches() -> None:
     """The count is disclosure metadata, so it must not sit in FRONT of the
     content fetches — it shares nothing with them and rides the same pool. Run
-    serially it would add a round trip to every review's startup."""
+    serially it would add a round trip to every review's startup.
+
+    Each handler waits for the OTHER to be in flight rather than sleeping a fixed
+    span. A sleep only asserts overlap if the scheduler happens to start the
+    second request inside it, which a loaded CI runner does not guarantee — this
+    test failed exactly that way, on a diff that touched nothing near the
+    gateway. The handshake proves the same property with no clock in it: on
+    concurrent code both events are set immediately and neither side waits, and
+    on serial code the first handler waits out `_OVERLAP_TIMEOUT` and the
+    assertion below fails on the events, which is the real regression signal."""
     import threading
 
     respx.route(
@@ -298,12 +307,18 @@ def test_open_thread_count_overlaps_the_file_fetches() -> None:
 
     lock = threading.Lock()
     events: list[str] = []
+    # Long enough that a busy runner is never mistaken for serial execution,
+    # short enough that a genuine regression fails rather than hangs.
+    _OVERLAP_TIMEOUT = 10.0
+    in_flight = {"threads": threading.Event(), "content": threading.Event()}
 
     def slow(label: str):
         def handler(request: httpx.Request) -> httpx.Response:
             with lock:
                 events.append(f"start-{label}")
-            threading.Event().wait(0.05)
+            in_flight[label].set()
+            other = "content" if label == "threads" else "threads"
+            in_flight[other].wait(_OVERLAP_TIMEOUT)
             with lock:
                 events.append(f"end-{label}")
             if label == "threads":
