@@ -50,6 +50,7 @@ def test_notice_builder_preserves_notice_order() -> None:
             failed_calls=0,
             failed_lenses=[],
             split_batches=0,
+            stepped_down=[],
             reflection_skipped=None,
             suppressed=1,
             off_diff=1,

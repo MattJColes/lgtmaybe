@@ -21,6 +21,7 @@ Two wrinkles the timeout does not have:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pytest
@@ -33,7 +34,7 @@ from lgtmaybe.core.models import (
     ReviewConfig,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated
-from lgtmaybe.engine import LLMReviewEngine
+from lgtmaybe.engine import LLMReviewEngine, clear_interrupt, request_interrupt
 from lgtmaybe.engine.engine import ReviewIncompleteError
 from tests.fakes import FakeProvider
 
@@ -438,3 +439,244 @@ def test_a_piece_that_fails_is_still_reported() -> None:
     assert [f.path for f in findings] == ["one.py"]  # the half that answered
     assert "results may be incomplete" in summary
     assert "insufficient_quota" in summary  # naming the piece's real failure
+
+
+# ---------------------------------------------------------------------------
+# The reasoning-bound sibling of the split: one step down, then stop.
+# ---------------------------------------------------------------------------
+
+
+class _TruncatesUntilEffortDrops(FakeProvider):
+    """Spends the whole ceiling thinking until asked to think less.
+
+    The provider's own shape: it holds the configured effort and hands back the
+    per-call opts that step it down, exactly as the litellm adapter does — the
+    engine never knows whether that is a flat `reasoning_effort` or OpenRouter's
+    nested `reasoning` object.
+    """
+
+    _NEVER = object()  # distinct from every effort value, including None
+
+    def __init__(self, effort: str | None = "medium", answers_at: Any = "low") -> None:
+        super().__init__()
+        self.efforts: list[str | None] = []
+        self._effort = effort
+        self._answers_at = answers_at
+
+    def lower_reasoning_effort(self) -> dict[str, Any] | None:
+        if self._effort in (None, "none"):
+            return None
+        ladder = ["none", "minimal", "low", "medium", "high", "xhigh"]
+        return {"reasoning_effort": ladder[ladder.index(self._effort) - 1]}
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        effort = opts.get("reasoning_effort", self._effort)
+        self.efforts.append(effort)
+        if effort == self._answers_at:
+            return ProviderResult(
+                text=_finding_json("one.py", "first_change = os.getcwd()"),
+                input_tokens=10,
+                output_tokens=10,
+            )
+        raise ProviderTruncated(
+            _CEILING,
+            text="",
+            reasoning_tokens=_REASONING_SPENT,
+            output_tokens=_REASONING_CEILING,
+        )
+
+
+def test_a_reasoning_bound_truncation_retries_once_at_a_lower_effort() -> None:
+    """The missing sibling of the split.
+
+    A payload-bound truncation shrinks the payload and re-reviews. A
+    reasoning-bound one was diagnosed correctly and then abandoned, losing the
+    lens for that round. It changes the one variable that can help instead.
+    """
+    provider = _TruncatesUntilEffortDrops()
+
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
+    )
+
+    assert provider.efforts == ["medium", "low"]  # one step down, never up
+    assert [f.title for f in findings] == ["unchecked value in one.py"]
+    # Not silent: a lens that answered only after being told to think less is a
+    # fact about this review, and the summary says so.
+    assert "reasoning_effort" in summary
+
+
+def test_a_second_reasoning_bound_truncation_reports_and_stops() -> None:
+    """One attempt, not a cascade — the same posture as the split's one level."""
+    provider = _TruncatesUntilEffortDrops(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == ["medium", "low"]  # and no third
+    assert "reasoning_effort" in str(exc_info.value)
+
+
+def test_a_failed_step_down_is_not_reported_as_a_recovery() -> None:
+    """The notice says findings came from the lower setting. A retry that
+    truncated again produced none, so claiming it would be a second wrong notice
+    stacked on the failure the run already reports."""
+
+    class _TruncatesEverywhereButAnswersOneFile(_TruncatesUntilEffortDrops):
+        """two.py answers at any effort; one.py truncates at every effort.
+
+        Both lenses have to be in one run, or the review raises before a summary
+        is ever built.
+        """
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            diff = "\n".join(str(m.get("content", "")) for m in messages)
+            if "second_change" in diff and "first_change" not in diff:
+                return ProviderResult(
+                    text=_finding_json("two.py", "second_change = sys.maxsize"),
+                    input_tokens=5,
+                    output_tokens=5,
+                )
+            self.efforts.append(opts.get("reasoning_effort", self._effort))
+            raise ProviderTruncated(
+                _CEILING,
+                text="",
+                reasoning_tokens=_REASONING_SPENT,
+                output_tokens=_REASONING_CEILING,
+            )
+
+    provider = _TruncatesEverywhereButAnswersOneFile()
+    ctx = _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"])
+
+    _findings, summary = LLMReviewEngine(provider).review(
+        ctx,
+        _cfg(max_input_tokens=60),  # one batch per file, so one lens survives
+    )
+
+    assert provider.efforts == ["medium", "low"]  # it did step down, and failed
+    assert "re-run once at a lower" not in summary
+    assert "results may be incomplete" in summary
+
+
+def test_no_retry_when_reasoning_effort_is_unset() -> None:
+    """Byte-identical behaviour for the users who never configured it: there is
+    no lower level to step to, so nothing is retried and nothing is spent."""
+    provider = _TruncatesUntilEffortDrops(effort=None, answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == [None]  # one call, no step-down
+
+
+def test_the_step_down_keeps_what_the_cut_call_completed() -> None:
+    """Salvage still applies: the findings finished before the cut are real work,
+    and they merge with the retry's rather than being replaced by them."""
+
+    class _SalvagesThenAnswers(_TruncatesUntilEffortDrops):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            if opts.get("reasoning_effort", self._effort) == "low":
+                return ProviderResult(
+                    text=_finding_json("two.py", "second_change = sys.maxsize", "found at low"),
+                    input_tokens=10,
+                    output_tokens=10,
+                )
+            self.efforts.append("medium")
+            raise ProviderTruncated(
+                _CEILING,
+                text=_cut_off_json("one.py", "first_change = os.getcwd()", "found before the cut"),
+                reasoning_tokens=_REASONING_SPENT,
+                output_tokens=_REASONING_CEILING,
+            )
+
+    provider = _SalvagesThenAnswers()
+
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert {f.title for f in findings} == {"found before the cut", "found at low"}
+
+
+def test_a_payload_bound_truncation_splits_and_does_not_step_down() -> None:
+    """The two remedies stay disjoint. A payload-bound truncation says nothing
+    about the thinking budget, so lowering the effort there would pay for a fix
+    in review quality that the split provides for free."""
+
+    class _SplitsAndCountsStepDowns(_TruncatesUntilSmaller):
+        asked = 0
+
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            type(self).asked += 1
+            return {"reasoning_effort": "low"}
+
+    provider = _SplitsAndCountsStepDowns()
+
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]  # the split still ran
+    assert _SplitsAndCountsStepDowns.asked == 0
+
+
+def test_the_step_down_does_not_spend_past_a_whole_review_ceiling() -> None:
+    """This path reaches `_complete_lens` directly, so it does not get the
+    re-check the split's pieces inherit by re-entering `_review_lens`.
+
+    A retry that begins past the deadline, the token budget, or a termination
+    signal would spend after the review was told to stop — which is the guarantee
+    the partial-results notice rests on."""
+    provider = _TruncatesUntilEffortDrops(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(
+            _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]),
+            # A budget of one token: the first call blows it, so the retry must
+            # not run — the truncation is reported, nothing more is spent.
+            _cfg(max_review_tokens=1),
+        )
+
+    assert provider.efforts == ["medium"]  # no step-down attempted
+
+
+def test_the_step_down_does_not_outlive_the_review_deadline() -> None:
+    """The budget is one of three stops `_skip_reason` enforces. This is the
+    second: a deadline already passed when the truncation lands must not buy a
+    second billed call."""
+
+    class _SlowTruncation(_TruncatesUntilEffortDrops):
+        """Overruns the 1s ceiling before it truncates, exactly as a real
+        reasoning runaway does — it is the slowest call in the run by far."""
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            time.sleep(1.2)
+            return super().complete(messages, model, **opts)
+
+    provider = _SlowTruncation(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(
+            _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg(max_review_seconds=1)
+        )
+
+    assert provider.efforts == ["medium"]
+
+
+def test_the_step_down_respects_a_termination_signal() -> None:
+    """And the third: a cancelled or timed-out CI job. An interrupted run posts
+    what it has — it does not spend one more call on the way out."""
+
+    class _TruncatesThenAsksToStop(_TruncatesUntilEffortDrops):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            request_interrupt()
+            return super().complete(messages, model, **opts)
+
+    provider = _TruncatesThenAsksToStop(answers_at=_TruncatesUntilEffortDrops._NEVER)
+    try:
+        with pytest.raises(ReviewIncompleteError):
+            LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+    finally:
+        clear_interrupt()
+
+    assert provider.efforts == ["medium"]
