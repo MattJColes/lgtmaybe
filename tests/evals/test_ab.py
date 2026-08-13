@@ -102,10 +102,7 @@ def test_verdict_no_change_reads_as_flat() -> None:
     assert "no change" in out or "flat" in out
 
 
-class TestPresetAxis:
-    """The --preset flag: a list sweeps the preset on the current tree; a single
-    value pins it (passthrough to both legs of a ref comparison)."""
-
+class TestSweepAxis:
     def _run(self, monkeypatch, argv: list[str]) -> list[tuple[str, list[str]]]:
         """Run ab.main with legs faked out; returns (label, extra_args) per leg."""
         import evals.ab as ab_mod
@@ -125,14 +122,21 @@ class TestPresetAxis:
         assert ab_mod.main(argv) == 0
         return calls
 
-    def test_preset_list_sweeps_on_the_current_tree(self, monkeypatch) -> None:
+    def test_scalar_sweep_runs_each_value_on_the_current_tree(self, monkeypatch) -> None:
         calls = self._run(
             monkeypatch,
-            ["--provider", "ollama", "--model", "x", "--preset", "full,fast"],
+            ["--provider", "ollama", "--model", "x", "--sweep", "context-lines=20,0"],
         )
-        assert [label for label, _ in calls] == ["preset=full", "preset=fast"]
-        assert ["--preset", "full"] == calls[0][1][-2:]
-        assert ["--preset", "fast"] == calls[1][1][-2:]
+        assert [label for label, _ in calls] == ["context-lines=20", "context-lines=0"]
+        assert ["--context-lines", "20"] == calls[0][1][-2:]
+
+    def test_boolean_sweep_uses_argparse_boolean_flags(self, monkeypatch) -> None:
+        calls = self._run(
+            monkeypatch,
+            ["--provider", "ollama", "--model", "x", "--sweep", "recursive=false,true"],
+        )
+        assert calls[0][1][-1] == "--no-recursive"
+        assert calls[1][1][-1] == "--recursive"
 
     def test_single_preset_pins_both_legs_of_a_ref_comparison(self, monkeypatch) -> None:
         calls = self._run(
@@ -151,21 +155,3 @@ class TestPresetAxis:
         assert len(calls) == 2  # baseline + current
         for _label, extra in calls:
             assert "--preset" in extra and extra[extra.index("--preset") + 1] == "full"
-
-    def test_two_axes_at_once_is_an_error(self, monkeypatch) -> None:
-        import pytest as _pytest
-
-        with _pytest.raises(SystemExit):
-            self._run(
-                monkeypatch,
-                [
-                    "--provider",
-                    "ollama",
-                    "--model",
-                    "x",
-                    "--preset",
-                    "full,fast",
-                    "--context-lines",
-                    "20,0",
-                ],
-            )
