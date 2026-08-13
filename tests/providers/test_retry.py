@@ -1401,3 +1401,54 @@ class TestMalformedRetryAfter:
             wait = provider_module._retry_wait(state)
             assert wait == wait  # not NaN
             assert wait <= provider_module._RATE_LIMIT_BACKOFF_MAX
+
+
+class TestTruncationAdviceMatchesTheMeasurement:
+    """The ceiling message must not send the reader to the knob that measurably
+    makes this worse.
+
+    `.lgtmaybe.yml` records the experiment: the dominant truncation is a CONTENT
+    runaway, not a thinking one — 961 tokens of thought against ~32,700 of output,
+    salvaging zero findings, on roughly one lens call in five. It is generation
+    instability, and no ceiling prevents it. At 32k the blast radius was 80–93% of
+    a review's wall clock; at 8k the same runaway costs ~95s.
+
+    So "raise `max_tokens`" buys a *larger wasted call*. The codebase already knows
+    this in one place — `_reasoning_exhausted_reason` overrides the adapter
+    precisely because "the advice ... is the one thing that provably does not work
+    here" — but that override only fires when thinking dominated. The common case
+    shipped the bad advice, and it is what made a reader propose raising the
+    ceiling on a repo whose own config says not to.
+    """
+
+    @staticmethod
+    def _message() -> str:
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"findings": [{"path": "a.py"'),
+                    finish_reason="length",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=13215, completion_tokens=8192),
+        )
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+        return str(exc_info.value)
+
+    def test_it_does_not_advise_raising_the_ceiling(self) -> None:
+        assert "raise `max_tokens`" not in self._message()
+
+    def test_it_still_names_the_ceiling_that_was_hit(self) -> None:
+        """Diagnosis is not what was wrong — the reader still needs the number."""
+        message = self._message()
+        assert "8192" in message
+        assert "max_tokens" in message
+
+    def test_it_names_the_automatic_recovery_so_the_reader_does_not_chase_it(self) -> None:
+        assert "smaller pieces" in self._message()
+
+    def test_it_names_the_model_as_the_lever_that_actually_moves_this(self) -> None:
+        assert "model" in self._message()

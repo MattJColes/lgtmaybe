@@ -170,7 +170,7 @@ explicit `timeout` is honoured exactly as written, at any width. Each run logs t
 number it resolved and the width it assumed:
 
 ```
-per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+per-call budget resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
 ```
 
 For a single-slot server, you can still say so and let lgtmaybe queue nothing:

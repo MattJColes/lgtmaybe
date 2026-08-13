@@ -1714,6 +1714,7 @@ the findings; to post reviews on real pull requests, use the
 - [Get findings as JSON](#get-findings-as-json)
 - [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
 - [Concurrency on a local server](#concurrency-on-a-local-server)
+- [The output ceiling (why a review can't run forever)](#the-output-ceiling-why-a-review-cant-run-forever)
 - [Slow models and timeouts](#slow-models-and-timeouts)
 - [Troubleshooting](#troubleshooting)
 
@@ -1916,6 +1917,63 @@ not have the calls queue at all:
 max_concurrency: 1
 ```
 
+## The output ceiling (why a review can't run forever)
+
+A local model under structured output sometimes fails to stop: the response just
+keeps decoding. With no ceiling the only thing that ends it is the per-call
+timeout — half an hour of sustained GPU for a single lens on a one-file diff, and
+hours for a whole review.
+
+So an ollama review runs with a **default output ceiling of 8192 tokens per
+call** — a quarter of the default 32768 `num_ctx`. Measured findings payloads are
+hundreds of tokens, so the rest is headroom for a thinking model — reasoning is
+drawn from this same budget. Hosted providers get no default ceiling; they don't
+have this problem, and capping them would truncate long findings for nothing.
+
+The ceiling is a fixed number, not a fraction of your window: raising `num_ctx`
+for a big diff buys room for the **prompt**, not for a longer answer. Use
+`max_tokens` when you want a longer answer.
+
+Every run says which ceiling it resolved and where it came from:
+
+```
+per-call budget resolved  timeout_s=3600  max_tokens=8192  max_tokens_source="provider default"
+```
+
+If a lens does hit it you get a **truncation notice**, not a silent clean review:
+
+```
+response truncated at the 8192-token `max_tokens` ceiling — the batch is
+re-reviewed in smaller pieces automatically, so a lens that keeps doing it is
+usually generation instability in the model, which a higher ceiling makes more
+expensive rather than prevents
+```
+
+**One truncation is not a reason to raise the cap.** The batch is re-reviewed in
+smaller pieces on its own, so a lens that trips it occasionally has still been
+reviewed. A model that runs away repeatedly is generating past the ceiling rather
+than being cut short by it — a bigger ceiling just buys a longer wasted call, and
+a different model is the lever that moves it.
+
+Where a raise *is* right is a genuinely long answer being cut off — a large diff
+with many real findings, salvaging most of them each time. Then raise it, or turn
+the cap off entirely with `0`, which puts the run back on the timeout as its only
+stop:
+
+```bash
+lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 16384
+lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 0  # uncapped
+```
+
+```yaml
+# or in .lgtmaybe.yml (also how the GitHub Action picks it up):
+max_tokens: 16384
+```
+
+Going the other way is the fastest lever there is on a slow model: a low ceiling
+(`--max-tokens 512`) turns a stuck review into one that finishes in minutes and
+tells you what it truncated.
+
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
@@ -1933,7 +1991,7 @@ runs its budget out.) At
 run logs which number it resolved, and why:
 
 ```
-per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+per-call budget resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
 ```
 
 An explicit `timeout` is never scaled — `timeout: 600` means 600 at any width.
@@ -2203,7 +2261,7 @@ explicit `timeout` is honoured exactly as written, at any width. Each run logs t
 number it resolved and the width it assumed:
 
 ```
-per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+per-call budget resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
 ```
 
 For a single-slot server, you can still say so and let lgtmaybe queue nothing:
@@ -4911,7 +4969,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "max_tokens": {
       "anyOf": [
         {
-          "minimum": 1,
+          "minimum": 0,
           "type": "integer"
         },
         {

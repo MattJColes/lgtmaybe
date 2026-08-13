@@ -12,13 +12,14 @@ provider — a PR comment is no more trusted than the diff itself.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 
 from lgtmaybe.core.models import AnswerResult, ReviewConfig
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
-from lgtmaybe.engine.injection import wrap_diff
-from lgtmaybe.engine.parse import iter_json_values, parse_structured
+from lgtmaybe.engine.injection import wrap_diff_for_question
+from lgtmaybe.engine.parse import parse_structured
 from lgtmaybe.engine.redact import redact
 
 
@@ -53,6 +54,27 @@ _ASK_SYSTEM = (
     'key: {"answer": "<your concise answer>"}.'
 )
 _ASK_FALLBACK = "I couldn't produce a valid answer. Please try again."
+
+
+def _is_json_envelope(text: str) -> bool:
+    """Is the WHOLE response a JSON object/array rather than an answer?
+
+    An answer is posted into a human thread, so a model that replies with a
+    machine envelope must be refused rather than relayed.
+
+    Whole-response, deliberately. Scanning for *any* JSON value inside the text
+    refuses prose that merely contains braces ("use `dict()` rather than {} here")
+    and a fenced JSON example in an otherwise good answer — eating the answers the
+    guard exists to protect. An envelope is the entire response, or it is prose
+    that happens to quote one. Arrays count: `[]` is as much an envelope as `{}`.
+    """
+    stripped = text.strip()
+    if not stripped.startswith(("{", "[")):
+        return False
+    try:
+        return isinstance(json.loads(stripped), dict | list)
+    except ValueError:
+        return False
 
 
 def parse_command(body: str) -> ParsedCommand | None:
@@ -118,7 +140,7 @@ def _answer_question(
 ) -> str:
     """Redact+wrap the diff and ask the provider the user's question over it."""
     ctx = github.get_pr_context()
-    user = wrap_diff(redact(ctx.diff)) + f"\n\nQuestion: {question}"
+    user = wrap_diff_for_question(redact(ctx.diff)) + f"\n\nQuestion: {question}"
     result = provider.complete(
         [{"role": "system", "content": _ASK_SYSTEM}, {"role": "user", "content": user}],
         model=cfg.model,
@@ -131,6 +153,6 @@ def _answer_question(
     )
     if parsed is not None:
         return parsed.answer.strip()
-    if any(isinstance(value, (dict, list)) for value in iter_json_values(result.text)):
+    if _is_json_envelope(result.text):
         return _ASK_FALLBACK
     return result.text.strip() or _ASK_FALLBACK
