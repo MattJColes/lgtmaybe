@@ -312,7 +312,7 @@ filters, and cost caps. See
 
 ## Pin to a specific version
 
-`@v1` is a floating tag that tracks the latest `v1.x.x` release. To pin exactly,
+`@v2` is a floating tag that tracks the latest `v2.x.x` release. To pin exactly,
 use a full version tag:
 
 ```yaml
