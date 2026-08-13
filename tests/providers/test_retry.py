@@ -1149,6 +1149,32 @@ class TestRateLimitBackoff:
         exc.litellm_response_headers = {"Retry-After": "12"}
         assert provider_module._retry_wait(self._state(exc)) == 12.0
 
+    def test_an_upper_case_header_in_a_plain_dict_is_honoured(self) -> None:
+        """Casing is the route's choice, not ours.
+
+        `httpx.Headers` is case-insensitive, so reading `response.headers` with
+        two fixed spellings looks fine. But litellm's `headers=` kwarg is typed
+        `Dict[str, str]` and a plain dict lookup is exact, so a route spelling it
+        `RETRY-AFTER` was silently ignored and we fell back to the ladder — in
+        the one case the header exists to prevent.
+        """
+        exc = self._rate_limited(headers={"RETRY-AFTER": "30"})
+        assert provider_module._retry_wait(self._state(exc)) == 30.0
+
+    def test_a_source_without_the_header_does_not_hide_one_that_has_it(self) -> None:
+        """Search for the header, not for a non-empty mapping.
+
+        Returning the first *truthy* source mirrors litellm's own helper, but its
+        job is "give me the headers" and ours is "find Retry-After" — so an
+        exception carrying unrelated headers alongside a response that holds the
+        real hint lost the hint entirely.
+        """
+        exc = self._rate_limited(
+            response=self._429({"retry-after": "45"}),
+        )
+        exc.headers = {"x-request-id": "abc123"}  # truthy, but not what we want
+        assert provider_module._retry_wait(self._state(exc)) == 45.0
+
     def test_retry_after_accepts_an_http_date(self) -> None:
         """RFC 9110 allows either delta-seconds or an HTTP-date, and the
         Cloudflare edge these gateways sit behind sends both forms.
@@ -1201,6 +1227,26 @@ class TestRateLimitBackoff:
         assert first >= provider_module._RATE_LIMIT_BACKOFF_INITIAL
         assert later > first
         assert later <= provider_module._RATE_LIMIT_BACKOFF_MAX
+
+    def test_the_ladder_outlasts_a_per_minute_metering_window(self) -> None:
+        """The point of the slow ladder, asserted the only way that catches it.
+
+        A gateway that meters per minute refuses everything in the window it just
+        refused in, so what matters is not how long any single wait is but where
+        the LAST attempt lands. The first version of this ladder waited 5s, 10s
+        and 20s — every wait comfortably "long", and all four attempts inside 36
+        seconds, i.e. inside the very window that had already said no. Asserting
+        per-wait passes happily on that; only the cumulative figure catches it.
+        """
+        exc = self._rate_limited()
+        waits = [
+            provider_module._retry_wait(self._state(exc, attempt=n))
+            for n in range(1, provider_module._MAX_ATTEMPTS)
+        ]
+        assert sum(waits) > 60, (
+            f"attempts all land within {sum(waits):.1f}s — inside one minute-long "
+            f"window (waits: {[round(w, 1) for w in waits]})"
+        )
 
     def test_other_transient_errors_keep_the_fast_ladder(self) -> None:
         """The slow ladder is for rate limits only. A connection blip (an ollama
@@ -1295,7 +1341,19 @@ class TestRetryBudgetIsNotOvershot:
         `Retry-After` on a short-timeout call could sleep two minutes past a
         budget that had all but run out. The stop is evaluated against the
         UPCOMING sleep instead, so a wait that would blow the budget ends the
-        call rather than being taken."""
+        call rather than being taken.
+
+        Asserted on the attempt count rather than elapsed time: with a 0.05s
+        timeout every candidate wait exceeds the budget, so a working
+        `stop_before_delay` ends the call after exactly one attempt. That is the
+        same fact as "it did not sleep", observed deterministically instead of by
+        racing a loaded runner.
+
+        The elapsed bound is kept alongside it, but generously. On its own at 5s
+        it was flaky under load; at 60s it cannot be, since the call really takes
+        well under a second — and it makes a regression fail in seconds rather
+        than sitting through the 120s sleep before the attempt count disagrees.
+        """
         started = time.perf_counter()
 
         def rate_limited(*args: Any, **kwargs: Any) -> Any:
@@ -1312,12 +1370,13 @@ class TestRetryBudgetIsNotOvershot:
 
         with patch("litellm.completion", side_effect=rate_limited):
             # Budget is 2.5 × 0.05s; the 120s hint cannot fit inside it.
-            with pytest.raises(litellm.RateLimitError):
+            with pytest.raises(litellm.RateLimitError) as caught:
                 LiteLLMProvider(timeout=0.05).complete(
                     [{"role": "user", "content": "hi"}], "openrouter/m"
                 )
 
-        assert time.perf_counter() - started < 5
+        assert attempts_of(caught.value) == 1
+        assert time.perf_counter() - started < 60
 
 
 class TestMalformedRetryAfter:

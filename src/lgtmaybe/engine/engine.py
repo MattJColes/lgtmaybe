@@ -97,7 +97,7 @@ _log = get_logger(__name__)
 #   produced three consecutive reviews reporting "1 of 4 review calls failed" on
 #   a 429. The adapter's backoff (now long enough to outlast a rate window) and
 #   the rescue wave both make that survivable rather than fatal; six is the same
-#   fix from the other end — a quarter less burst for a sixth less parallelism.
+#   fix from the other end — a quarter less burst for a quarter less parallelism.
 #   Teams on a high rate tier can raise it with `max_concurrency`.
 # - A single ollama instance serves a model serially, so concurrent calls only
 #   queue up and time out: 1.

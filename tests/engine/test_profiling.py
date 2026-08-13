@@ -14,6 +14,7 @@ from lgtmaybe.core.models import (
     ReviewConfig,
     stamp_attempts,
 )
+from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.profiling import Profiler, profiler, timed_complete
 from tests.fakes import FakeProvider
@@ -296,6 +297,43 @@ class TestTimedComplete:
         )
         timed_complete(provider, [{"role": "user", "content": "hi"}], model="m", label="reflect")
         assert profiler.calls[-1].reasoning_tokens == 650
+
+    def test_a_truncation_reports_the_tokens_it_burned(self) -> None:
+        """A truncated call is usually the most expensive one in the run, and it
+        was reported as free.
+
+        `record_error` zeroed every counter on the reasoning that a failure has
+        no usage — true of a connection error, which never reached the model, and
+        false of a truncation, which reached it and generated all the way to the
+        ceiling. A real run spent 32,768 output tokens on one and recorded 0.
+        """
+        exc = ProviderTruncated(
+            "response hit the 32768-token `max_tokens` ceiling before finishing",
+            text="",
+            input_tokens=24039,
+            output_tokens=32768,
+            reasoning_tokens=516,
+        )
+        profiler.record_error("code-health", 1, 380.1, exc, "ProviderTruncated: …")
+        call = profiler.calls[-1]
+        assert (call.input_tokens, call.output_tokens) == (24039, 32768)
+        assert call.reasoning_tokens == 516
+
+    def test_a_truncation_is_charged_to_the_token_budget(self) -> None:
+        """`total_tokens` backs `max_review_tokens`, so a runaway that reports
+        zero is a runaway the spend ceiling cannot see — which inverts the whole
+        point of having one."""
+        exc = ProviderTruncated("ceiling", text="", input_tokens=1000, output_tokens=32768)
+        profiler.record_error("code-health", 1, 380.1, exc)
+        assert profiler.total_tokens() == 33768
+
+    def test_a_failure_with_no_usage_still_reports_zero(self) -> None:
+        """A connection error never reached the model, so it genuinely cost
+        nothing — the change above must not invent usage for it."""
+        profiler.record_error("security", 1, 0.5, RuntimeError("connection reset"))
+        call = profiler.calls[-1]
+        assert (call.input_tokens, call.output_tokens) == (0, 0)
+        assert profiler.total_tokens() == 0
 
     def test_failure_records_then_reraises(self) -> None:
         class _Boom(FakeProvider):
