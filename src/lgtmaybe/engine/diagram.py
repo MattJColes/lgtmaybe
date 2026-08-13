@@ -148,9 +148,7 @@ def _single_line(value: str) -> str:
     return " ".join(value.split())
 
 
-_MARKDOWN_ESCAPES = str.maketrans(
-    {char: f"\\{char}" for char in "\\`*_{}[]<>()#+-!|>&"}
-)
+_MARKDOWN_ESCAPES = str.maketrans({char: f"\\{char}" for char in "\\`*_{}[]<>()#+-!|>&"})
 
 
 def _markdown_text(value: str) -> str:

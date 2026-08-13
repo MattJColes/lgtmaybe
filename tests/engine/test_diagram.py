@@ -187,7 +187,7 @@ def test_change_summary_escapes_model_authored_markdown() -> None:
 
     assert r"\[load image\]\(https://example.com/pixel\)" in body
     assert r'\<img src="x"\>' in body
-    assert '[load image](https://example.com/pixel)' not in body
+    assert "[load image](https://example.com/pixel)" not in body
     assert '<img src="x">' not in body
 
 
