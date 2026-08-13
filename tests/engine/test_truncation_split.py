@@ -21,6 +21,7 @@ Two wrinkles the timeout does not have:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pytest
@@ -33,7 +34,7 @@ from lgtmaybe.core.models import (
     ReviewConfig,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated
-from lgtmaybe.engine import LLMReviewEngine
+from lgtmaybe.engine import LLMReviewEngine, clear_interrupt, request_interrupt
 from lgtmaybe.engine.engine import ReviewIncompleteError
 from tests.fakes import FakeProvider
 
@@ -622,3 +623,45 @@ def test_the_step_down_does_not_spend_past_a_whole_review_ceiling() -> None:
         )
 
     assert provider.efforts == ["medium"]  # no step-down attempted
+
+
+def test_the_step_down_does_not_outlive_the_review_deadline() -> None:
+    """The budget is one of three stops `_skip_reason` enforces. This is the
+    second: a deadline already passed when the truncation lands must not buy a
+    second billed call."""
+
+    class _SlowTruncation(_TruncatesUntilEffortDrops):
+        """Overruns the 1s ceiling before it truncates, exactly as a real
+        reasoning runaway does — it is the slowest call in the run by far."""
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            time.sleep(1.2)
+            return super().complete(messages, model, **opts)
+
+    provider = _SlowTruncation(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(
+            _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg(max_review_seconds=1)
+        )
+
+    assert provider.efforts == ["medium"]
+
+
+def test_the_step_down_respects_a_termination_signal() -> None:
+    """And the third: a cancelled or timed-out CI job. An interrupted run posts
+    what it has — it does not spend one more call on the way out."""
+
+    class _TruncatesThenAsksToStop(_TruncatesUntilEffortDrops):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            request_interrupt()
+            return super().complete(messages, model, **opts)
+
+    provider = _TruncatesThenAsksToStop(answers_at=_TruncatesUntilEffortDrops._NEVER)
+    try:
+        with pytest.raises(ReviewIncompleteError):
+            LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+    finally:
+        clear_interrupt()
+
+    assert provider.efforts == ["medium"]
