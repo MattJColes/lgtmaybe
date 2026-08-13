@@ -31,7 +31,7 @@ Copy [`examples/workflows/review-zai.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v1
+- uses: MattJColes/lgtmaybe@v2
   with:
     provider: zai
     model: glm-4.6

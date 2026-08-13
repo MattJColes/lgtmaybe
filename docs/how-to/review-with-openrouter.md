@@ -29,7 +29,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 `.github/workflows/lgtmaybe.yml`. The core step is:
 
 ```yaml
-- uses: MattJColes/lgtmaybe@v1
+- uses: MattJColes/lgtmaybe@v2
   with:
     provider: openrouter
     model: anthropic/claude-sonnet-4-6

@@ -241,7 +241,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: MattJColes/lgtmaybe@v1
+      - uses: MattJColes/lgtmaybe@v2
         with:
           provider: openai
           model: gpt-5.5
@@ -281,7 +281,7 @@ author identity. See
   ([details](docs/how-to/install-the-cli.md) — the `brew trust` step is required for third-party taps)
 - **CLI (WinGet, Windows x64)** — `winget install --id MattJColes.lgtmaybe --exact`
   ([details](docs/how-to/install-the-cli.md#install-on-windows-winget))
-- **GitHub Action** — `uses: MattJColes/lgtmaybe@v1`
+- **GitHub Action** — `uses: MattJColes/lgtmaybe@v2`
 
 ## Contributing
 
