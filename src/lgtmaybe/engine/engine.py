@@ -112,12 +112,10 @@ _log = get_logger(__name__)
 #   six queued calls could each wait out the per-request timeout — and the local
 #   per-call default is scaled by this width precisely so that they do not.
 #
-# There is deliberately no per-provider exception list. One briefly survived as
-# an empty frozenset feeding a branch that could never fire, and it cost four
-# separate false review findings: the name asserted that ollama resolved to 1
-# while the value said otherwise, and the value sat 200 lines from its only
-# reader — outside any diff hunk that touched it. Whatever replaces this should
-# be a value a reader can see, not a name they have to trust.
+# There is deliberately no per-provider exception list. If one is ever needed
+# again, keep it a value a reader can see next to the branch that reads it: the
+# last one was a named-but-empty set two hundred lines away, which read as a
+# policy it no longer had.
 _CLOUD_MAX_WORKERS = 6
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
