@@ -675,27 +675,3 @@ def config_init() -> None:
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Wrote {store.user_config_path()}")
-
-
-@main.command(name="help")
-@click.argument("command_path", nargs=-1, metavar="[COMMAND]...")
-@click.pass_context
-def help_command(ctx: click.Context, command_path: tuple[str, ...]) -> None:
-    """Show help for lgtmaybe or a specific command.
-
-    `lgtmaybe help review` shows the full option reference for `review`;
-    nested paths work too: `lgtmaybe help config set`.
-    """
-    # Walk the command tree from the main group, rebuilding the context chain
-    # so the usage line matches `lgtmaybe <command...> --help` exactly.
-    target_ctx = ctx.parent if ctx.parent is not None else ctx
-    cmd = target_ctx.command
-    for name in command_path:
-        sub = cmd.get_command(target_ctx, name) if isinstance(cmd, click.Group) else None
-        if sub is None:
-            raise click.UsageError(
-                f"No such command {name!r}. Run `lgtmaybe help` to list commands."
-            )
-        target_ctx = click.Context(sub, info_name=name, parent=target_ctx)
-        cmd = sub
-    click.echo(cmd.get_help(target_ctx))

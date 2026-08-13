@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from lgtmaybe.core.models import CustomLens, ReviewCategory, ReviewFinding, Severity
+from lgtmaybe.engine import prompt as prompt_module
 from lgtmaybe.engine.prompt import build_lens_prompt, build_shared_preamble, build_system_prompt
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 
@@ -668,6 +671,15 @@ def test_custom_lens_prompt_carries_language_directive() -> None:
 # ---------------------------------------------------------------------------
 # dependency health: the model stops guessing once a scanner covers it
 # ---------------------------------------------------------------------------
+
+
+def test_scanner_carveouts_are_composed_without_prose_subtraction() -> None:
+    builders = (
+        prompt_module._security_section,
+        prompt_module._deprecation_section,
+        prompt_module._code_health_section,
+    )
+    assert all(".replace(" not in inspect.getsource(builder) for builder in builders)
 
 
 def test_dependency_health_bullets_are_present_by_default() -> None:

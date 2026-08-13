@@ -406,7 +406,15 @@ _CORRECTNESS_SECTION = f"""\
 {_CORRECTNESS_FLOW_CHECKS}
 {_CORRECTNESS_STATE_CHECKS}"""
 
-_SECURITY_SECTION = """\
+_SECRET_BULLET = """\
+- **Hardcoded secrets** — API keys, passwords, tokens, or private keys committed
+  in the diff as literals.
+"""
+
+
+def _security_section(include_secrets: bool) -> str:
+    secret_bullet = _SECRET_BULLET if include_secrets else ""
+    return f"""\
 ## Security review (be thorough — these are high-value findings)
 
 Actively look for security vulnerabilities introduced by the change. When you
@@ -418,8 +426,7 @@ classes, aligned with the OWASP Top 10, to watch for:
 - **Cross-site scripting (XSS)** — unescaped user input rendered into HTML/JS.
 - **CSRF & open redirect** — state-changing endpoints without CSRF protection;
   redirect targets taken from user input without validation.
-- **Hardcoded secrets** — API keys, passwords, tokens, or private keys committed
-  in the diff as literals.
+{secret_bullet}\
 - **Broken authn / authz** — missing permission checks, IDOR, auth bypass,
   privilege escalation, trusting client-supplied identity, or JWT/session
   pitfalls: unverified signatures, `alg` confusion, missing expiry checks.
@@ -447,12 +454,30 @@ classes, aligned with the OWASP Top 10, to watch for:
   unvalidated input sizes, or regexes vulnerable to catastrophic backtracking
   (ReDoS) that enable denial of service."""
 
-_DEPRECATION_SECTION = """\
+
+_SECURITY_SECTION = _security_section(include_secrets=True)
+_SECURITY_SECTION_NO_SECRETS = _security_section(include_secrets=False)
+
+_ADVISORY_BULLETS = """\
+- **End-of-life or abandoned dependencies** — adding or pinning a package that
+  is unmaintained, yanked, or end-of-life.
+- **Versions with known advisories** — pinning a dependency to a version with a
+  publicly known vulnerability when a fixed release exists.
+"""
+
+
+def _deprecation_section(include_advisories: bool) -> str:
+    grading = (
+        "`low` to\n`medium`, or higher when a security advisory is involved"
+        if include_advisories
+        else "`low` to `medium`"
+    )
+    advisory_bullets = _ADVISORY_BULLETS if include_advisories else ""
+    return f"""\
 ## Deprecation & dependency health
 
 Flag outdated or end-of-life code and dependencies — these are factual, not
-stylistic, so report them when the diff clearly shows them (grade `low` to
-`medium`, or higher when a security advisory is involved):
+stylistic, so report them when the diff clearly shows them (grade {grading}):
 
 - **Deprecated APIs** — use of functions, methods, or arguments the language or
   framework has marked deprecated (e.g. ones that emit a deprecation warning, or
@@ -460,16 +485,17 @@ stylistic, so report them when the diff clearly shows them (grade `low` to
   in the suggestion when you know it.
 - **End-of-life runtimes / language versions** — targeting or requiring a
   language/runtime version that is past its support window.
-- **End-of-life or abandoned dependencies** — adding or pinning a package that
-  is unmaintained, yanked, or end-of-life.
-- **Versions with known advisories** — pinning a dependency to a version with a
-  publicly known vulnerability when a fixed release exists.
+{advisory_bullets}\
 - **Suspicious or incompatibly-licensed additions** — a new dependency whose
   name looks like a typosquat of a popular package, or whose license conflicts
   with the project's.
 
 Only raise these when the diff itself shows the change; do not speculate about
 code you cannot see."""
+
+
+_DEPRECATION_SECTION = _deprecation_section(include_advisories=True)
+_DEPRECATION_SECTION_NO_ADVISORIES = _deprecation_section(include_advisories=False)
 
 _TESTS_SECTION = """\
 ## Test coverage
@@ -664,7 +690,17 @@ keep this lens to "should this exist at all?" — leave readability nits to othe
 # keep working.
 # ---------------------------------------------------------------------------
 
-_CODE_HEALTH_SECTION = """\
+_ADVISORY_LINE = "- abandoned, yanked, or known-vulnerable dependency versions;\n"
+
+
+def _code_health_section(include_advisories: bool) -> str:
+    grading = (
+        "(`low` to `medium`,\nhigher when a security advisory is involved)"
+        if include_advisories
+        else "(`low` to `medium`)"
+    )
+    advisory_line = _ADVISORY_LINE if include_advisories else ""
+    return f"""\
 ## Code health (performance · complexity · needless code · deprecation)
 
 One pass over four related concerns. For EVERY finding, set the `category` field to \
@@ -712,14 +748,17 @@ Prefer deleting or collapsing code; put the smaller replacement in `suggestion`.
 
 ### Deprecation & dependency health — category "deprecation"
 
-Factual, not stylistic — report only what the diff clearly shows (`low` to `medium`,
-higher when a security advisory is involved):
+Factual, not stylistic — report only what the diff clearly shows {grading}:
 - deprecated APIs (name the modern replacement in `suggestion` when you know it);
 - end-of-life runtimes or language versions;
-- abandoned, yanked, or known-vulnerable dependency versions;
+{advisory_line}\
 - typosquat-looking or incompatibly-licensed additions.
 
 Do NOT nag about self-evident, already-simple, or already-minimal code."""
+
+
+_CODE_HEALTH_SECTION = _code_health_section(include_advisories=True)
+_CODE_HEALTH_SECTION_NO_ADVISORIES = _code_health_section(include_advisories=False)
 
 _ARTEFACTS_SECTION = """\
 ## Supporting artefacts (tests · documentation)
@@ -857,44 +896,6 @@ def build_correctness_prompt(
 def build_correctness_block(include_intent: bool) -> str:
     """The fast preset's correctness call, user-block (split) shape."""
     return _block(_correctness_section(include_intent), _CORRECTNESS_EXAMPLE)
-
-
-# The two bullets a vulnerability database answers and a language model cannot:
-# whether a version has a published advisory, and whether a package is
-# abandoned, both depend on what was disclosed since the model was trained. When
-# a scanner covers them, asking for them too only invites a confident wrong
-# answer next to an accurate one. Everything else in the section stays — a CVE
-# database knows nothing about deprecated APIs, EOL runtimes, typosquats or
-# licence conflicts.
-_ADVISORY_BULLETS = """\
-- **End-of-life or abandoned dependencies** — adding or pinning a package that
-  is unmaintained, yanked, or end-of-life.
-- **Versions with known advisories** — pinning a dependency to a version with a
-  publicly known vulnerability when a fixed release exists.
-"""
-
-_ADVISORY_LINE = "- abandoned, yanked, or known-vulnerable dependency versions;\n"
-
-# The grading clause goes with them: with advisory findings out of scope for
-# this lens, "higher when a security advisory is involved" points at a case
-# that can no longer arise here.
-_DEPRECATION_SECTION_NO_ADVISORIES = _DEPRECATION_SECTION.replace(_ADVISORY_BULLETS, "").replace(
-    "`medium`, or higher when a security advisory is involved):", "`medium`):"
-)
-_CODE_HEALTH_SECTION_NO_ADVISORIES = _CODE_HEALTH_SECTION.replace(_ADVISORY_LINE, "").replace(
-    "(`low` to `medium`,\nhigher when a security advisory is involved):", "(`low` to `medium`):"
-)
-
-# The committed-secret bullet. Dropped when a secret scanner runs: redaction has
-# already rewritten every secret it matched to `[REDACTED]` before the diff is
-# sent, so the lens is being asked for something it largely cannot see, while
-# gitleaks reads the unredacted file text and answers it exactly.
-_SECRET_BULLET = """\
-- **Hardcoded secrets** — API keys, passwords, tokens, or private keys committed
-  in the diff as literals.
-"""
-
-_SECURITY_SECTION_NO_SECRETS = _SECURITY_SECTION.replace(_SECRET_BULLET, "")
 
 
 def _category_section(

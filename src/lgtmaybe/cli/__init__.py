@@ -889,7 +889,7 @@ Examples:
   lgtmaybe review --format json            Machine-readable findings
   lgtmaybe diagram                         Diagram the components you touched
   lgtmaybe config init                     One-time provider/model setup
-  lgtmaybe help COMMAND                    Detailed help for any command
+  lgtmaybe review --help                   Detailed help for a command
 \b
 Docs: https://lgtmaybe.coles.codes/
 """
