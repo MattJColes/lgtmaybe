@@ -1098,31 +1098,40 @@ class RestGitHubGateway:
         refused = threading.Event()
 
         def resolve_one(thread: tuple[str, int | None, str]) -> None:
-            """Resolve one thread, then record it — in that order, deliberately.
+            """Retire one finding marker, resolve its thread, then reply.
 
             Three steps with three different consequences, so they are sequenced
-            by how much a failure costs:
+            so the unsafe failure state — a resolved thread with active markers —
+            is impossible:
 
-            1. **Resolve** — the gate. Until it succeeds nothing else should
-               happen: a reply on a thread that stays open re-qualifies as fixed
-               on every later run and collects another reply each time.
-            2. **Rewrite the marker** — correctness-critical, and this is the
-               only chance. A resolved thread is skipped by `_fixed_threads`
-               forever, so an active fingerprint left behind would let re-run
-               dedupe suppress the finding permanently if it came back.
+            1. **Rewrite the marker** — correctness-critical. If this fails the
+               thread stays open and retryable.
+            2. **Resolve** — if this fails, restore the active body. A failed
+               restore may cause a duplicate later, but can never suppress a
+               reintroduced finding.
             3. **Reply** — cosmetic audit trail. Last, because a failure here
-               must not skip step 2.
+               must not affect either durable state transition.
             """
             if refused.is_set():
                 return
             thread_id, comment_id, first_body = thread
             try:
+                self._mark_comment_resolved(comment_id, first_body)
+            except Exception as exc:  # noqa: BLE001 — one thread never blocks the rest
+                _log.warning("resolved-marker rewrite on %s failed: %s", thread_id, exc)
+                return
+            try:
                 self._resolve_thread(thread_id)
             except Exception as exc:  # noqa: BLE001 — one thread never blocks the rest
+                try:
+                    self._restore_comment_active(comment_id, first_body)
+                except Exception as restore_exc:  # noqa: BLE001 — safe duplicate failure mode
+                    _log.warning(
+                        "restoring active markers on thread %s failed: %s",
+                        thread_id,
+                        restore_exc,
+                    )
                 if "FORBIDDEN" in str(exc) or "not accessible by integration" in str(exc):
-                    # Not transient: the identity simply cannot resolve threads,
-                    # so this recurs every run until someone changes the setup.
-                    # Say what to do about it rather than repeating a bare error.
                     if not refused.is_set():
                         refused.set()
                         _log.warning(
@@ -1134,19 +1143,6 @@ class RestGitHubGateway:
                         )
                 else:
                     _log.warning("auto-resolve of thread %s failed: %s", thread_id, exc)
-                return
-            try:
-                self._mark_comment_resolved(comment_id, first_body)
-            except Exception as exc:  # noqa: BLE001 — restore retryable state below
-                _log.warning("resolved-marker rewrite on %s failed: %s", thread_id, exc)
-                try:
-                    self._unresolve_thread(thread_id)
-                except Exception as reopen_exc:  # noqa: BLE001 — best-effort repair
-                    _log.warning(
-                        "reopening thread %s after marker failure failed: %s",
-                        thread_id,
-                        reopen_exc,
-                    )
                 return
             try:
                 self.reply_in_thread(thread_id, "✅ Looks resolved.")
@@ -1244,15 +1240,6 @@ class RestGitHubGateway:
         """
         self._graphql(resolve, {"threadId": thread_id})
 
-    def _unresolve_thread(self, thread_id: str) -> None:
-        """Reopen a thread whose resolved-marker rewrite failed so it can retry."""
-        unresolve = """
-        mutation($threadId:ID!){
-          unresolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
-        }
-        """
-        self._graphql(unresolve, {"threadId": thread_id})
-
     def _mark_comment_resolved(self, comment_id: int | None, body: str) -> None:
         """Rewrite a resolved comment's fingerprint marker into the "resolved" family.
 
@@ -1268,11 +1255,21 @@ class RestGitHubGateway:
         rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
             _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
         )
+        self._update_review_comment(comment_id, rewritten)
+
+    def _restore_comment_active(self, comment_id: int | None, body: str) -> None:
+        """Restore the original active marker body after resolution fails."""
+        if comment_id is None:
+            return
+        self._update_review_comment(comment_id, body)
+
+    def _update_review_comment(self, comment_id: int, body: str) -> None:
+        """Replace one review comment body, raising on any GitHub failure."""
         url = f"{self._api}/pulls/comments/{comment_id}"
         resp = self._client.patch(
             url,
             headers=self._json_headers,
-            json={"body": rewritten},
+            json={"body": body},
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()

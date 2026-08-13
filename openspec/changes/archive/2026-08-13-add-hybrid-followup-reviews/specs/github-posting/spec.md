@@ -23,7 +23,7 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 
 ### Requirement: Resolving threads is best-effort GraphQL
 
-A follow-up run SHALL classify each earlier active finding as `fixed`, `still_open`, or `uncertain` from structured model output. A finding SHALL be resolved via GraphQL only when the model returns `fixed` and GitHub independently marks its anchored thread outdated; every other verdict SHALL remain open without repetitive replies. After a successful resolve, the opening comment's fingerprint and identity markers SHALL be rewritten into disjoint resolved families before the one cosmetic fixed reply is attempted. Each thread remains independently best-effort and identity-wide permission refusal SHALL stop further resolution attempts in that wave without failing the review.
+A follow-up run SHALL classify each earlier active finding as `fixed`, `still_open`, or `uncertain` from structured model output. A finding SHALL be resolved via GraphQL only when the model returns `fixed` and GitHub independently marks its anchored thread outdated; every other verdict SHALL remain open without repetitive replies. Before resolve, the opening comment's fingerprint and identity markers SHALL be rewritten into disjoint resolved families; a failed resolve SHALL restore the active body, and only a successful resolve may receive the one cosmetic fixed reply. Each thread remains independently best-effort and identity-wide permission refusal SHALL stop further resolution attempts in that wave without failing the review.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: a prior finding is explicitly fixed
@@ -35,8 +35,8 @@ A follow-up run SHALL classify each earlier active finding as `fixed`, `still_op
 - **THEN** the thread remains open and receives no repetitive reply
 
 #### Scenario: GraphQL call errors
-- **WHEN** `resolveReviewThread` fails
-- **THEN** the review still completes and posts normally
+- **WHEN** the marker rewrite or `resolveReviewThread` fails
+- **THEN** the thread stays open with active markers retained or restored, receives no reply, and the review still completes
 
 #### Scenario: one thread of several fails
 - **WHEN** several findings are fixed and one errors mid-resolve
@@ -50,6 +50,3 @@ A follow-up run SHALL classify each earlier active finding as `fixed`, `still_op
 - **WHEN** the thread resolves but its reply errors
 - **THEN** the active markers are still rewritten so the resolved finding may reappear later if the problem returns
 
-#### Scenario: the marker rewrite fails after resolve
-- **WHEN** the thread resolves but its active-marker rewrite fails
-- **THEN** the thread is reopened and receives no fixed reply, preserving retryable state
