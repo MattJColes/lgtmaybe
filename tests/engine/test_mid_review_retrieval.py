@@ -211,7 +211,7 @@ class TestTheFetchedContextIsBounded:
         provider = _ScriptedProvider(_needs_json("pkg/ledger.py"), _findings_json(_finding()))
         fetch = _reader({"pkg/ledger.py": _LEDGER})
 
-        LLMReviewEngine(provider, fetch_file=fetch).review(_CTX, _cfg(prompt_cache=True))
+        LLMReviewEngine(provider, fetch_file=fetch).review(_CTX, _cfg())
 
         first, retry = provider.calls[0]["messages"], provider.calls[1]["messages"]
         assert len(retry) == 3

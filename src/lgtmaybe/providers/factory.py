@@ -195,7 +195,6 @@ def build_provider(
     azure_ad_token: str | None = None,
     fallback_model: str | None = None,
     timeout: int | None = None,
-    prompt_cache: bool = False,
     **extra_opts: Any,
 ) -> LiteLLMProvider:
     """Build a configured LiteLLMProvider for the given provider and model.
@@ -260,6 +259,5 @@ def build_provider(
     return LiteLLMProvider(
         model=resolved_model,
         fallback_model=resolved_fallback,
-        prompt_cache=prompt_cache,
         **opts,
     )

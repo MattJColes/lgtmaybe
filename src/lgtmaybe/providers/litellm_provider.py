@@ -422,16 +422,12 @@ class LiteLLMProvider:
         *,
         model: str = "",
         fallback_model: str | None = None,
-        prompt_cache: bool = False,
         **default_opts: Any,
     ) -> None:
+        if "prompt_cache" in default_opts:
+            raise TypeError("prompt_cache was removed; prompt caching is always enabled")
         self.model = model
         self.fallback_model = fallback_model
-        # Mark the static system prompt cacheable (cache_control) on routes that
-        # support an explicit cache breakpoint; a safe no-op everywhere else.
-        # A named constructor arg — NOT part of default_opts — so it can never
-        # leak into the litellm.completion call as an unknown parameter.
-        self.prompt_cache = prompt_cache
         self.default_opts: dict[str, Any] = default_opts
         # Set once a structured-output call comes back empty (see _call): the
         # backend's JSON-schema decoder is broken for this model, so every
@@ -457,8 +453,7 @@ class LiteLLMProvider:
         # a cache hit — too late for a fan-out that dispatches its lenses at
         # once. OpenAI uses the same field as a hint for prefix-sharing
         # requests, so one param serves both; drop_params strips it elsewhere.
-        if self.prompt_cache:
-            merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
+        merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
         effective_model = self.model or model
@@ -599,11 +594,10 @@ class LiteLLMProvider:
     def _with_cache_control(self, messages: list[Message], model: str) -> list[Message]:
         """Return *messages* shaped for the model's caching route, when it pays.
 
-        The engine sends the review prompt in a **split shape** when
-        ``prompt_cache`` is on: a lens-independent system preamble, then the
-        shared prefix (the wrapped diff, plus hints) as one user message, then
-        the lens-specific instruction as a final user message. This adapter is
-        where that shape meets each provider:
+        The engine sends the review prompt as a lens-independent system
+        preamble, then the shared prefix (the wrapped diff, plus hints), then
+        the lens-specific instruction. This adapter is where that shape meets
+        each provider:
 
         - On a route with an explicit cache breakpoint (:data:`_CACHE_CONTROL_PREFIXES`,
           confirmed by litellm's capability map): consecutive user messages are
@@ -617,13 +611,10 @@ class LiteLLMProvider:
           per-model threshold (some Opus/Haiku-class models need 4,096), so
           1,024 is used for all — a too-small block degrades to "not cached",
           never to an error.
-        - Everywhere else (no breakpoint route, capability lookup failure, or
-          ``prompt_cache`` off): consecutive user messages are merged into one
-          plain string and no marker is attached — byte-identical to the single
-          user message these providers have always received.
+        - Everywhere else (no breakpoint route or capability lookup failure):
+          consecutive user messages are merged into one plain string and no
+          marker is attached.
         """
-        if not self.prompt_cache:
-            return _merge_user_messages(messages)
         if model not in self._cache_capable:
             self._cache_capable[model] = _supports_cache_control(model)
         if not self._cache_capable[model]:

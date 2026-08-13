@@ -37,7 +37,7 @@ _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 def _user_text(call: dict) -> str:
     """All user-message content joined.
 
-    With prompt_cache on (the default) the audit prompt is split — diff in one
+    The audit prompt is split — diff in one
     user message, grounding + findings in another — so assertions about "the
     user content" search both.
     """

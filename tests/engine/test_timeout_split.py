@@ -75,7 +75,6 @@ def _cfg(**overrides: Any) -> ReviewConfig:
         model="deepseek/deepseek-v4-pro",
         categories=[ReviewCategory.security],
         reflect=False,
-        prompt_cache=False,
         **overrides,
     )
 
@@ -335,7 +334,6 @@ def test_one_worker_reviews_the_split_pieces_one_at_a_time() -> None:
             max_concurrency=1,
             categories=[ReviewCategory.security],
             reflect=False,
-            prompt_cache=False,
         ),
     )
 
@@ -359,7 +357,6 @@ def test_an_explicit_concurrency_lifts_the_split_off_the_single_stream_default()
             model="qwen3-coder",
             categories=[ReviewCategory.security],
             reflect=False,
-            prompt_cache=False,
             max_concurrency=2,
         ),
     )

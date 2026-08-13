@@ -1,10 +1,8 @@
-"""Tests for the split (cache-shaped) prompt layout and the cache warm-up primer.
+"""Tests for the split prompt layout and cache warm-up primer.
 
-With ``prompt_cache`` on (the default) every review call shares one expensive
-prefix — shared system preamble + wrapped diff — and carries its lens-specific
-instruction as the final user block, so caching providers serve the prefix from
-cache across the whole fan-out. ``prompt_cache: false`` restores the legacy
-shape (lens text in the system prompt) byte-for-byte.
+Every review call shares one expensive prefix — shared system preamble plus
+wrapped diff — and carries its lens-specific instruction as the final user
+block, so caching providers reuse the prefix across the fan-out.
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.compress import count_tokens
-from lgtmaybe.engine.prompt import build_shared_preamble, build_system_prompt
+from lgtmaybe.engine.prompt import build_shared_preamble
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -76,17 +74,6 @@ class TestSplitShape:
         joined = "\n".join(blocks)
         assert "Security review" in joined
         assert "Performance" in joined
-
-    def test_prompt_cache_off_restores_the_legacy_shape(self) -> None:
-        provider = FakeProvider()
-        LLMReviewEngine(provider).review(_CTX, _cfg(prompt_cache=False))
-        systems = {c["messages"][0]["content"] for c in provider.calls}
-        assert systems == {
-            build_system_prompt(ReviewCategory.security),
-            build_system_prompt(ReviewCategory.performance),
-        }
-        for call in provider.calls:
-            assert [m["role"] for m in call["messages"]] == ["system", "user"]
 
     def test_intent_block_rides_the_lens_suffix_not_the_shared_prefix(self) -> None:
         ctx = _CTX.model_copy(update={"title": "Fix the frobnicator"})
@@ -255,21 +242,6 @@ class TestCacheWarmup:
         LLMReviewEngine(provider).review(_big_ctx(), cfg)
         assert provider.events[0] == "start-0"
         assert provider.events[1] == "end-0"
-
-    def test_no_warmup_when_prompt_cache_is_off(self) -> None:
-        """`prompt_cache: false` restores the legacy shape byte-for-byte, and
-        that includes dispatching the batch fully concurrently."""
-        provider = _EventOrderProvider()
-        cfg = _cfg(
-            provider=Provider.anthropic,
-            prompt_cache=False,
-            categories=[ReviewCategory.security, ReviewCategory.performance, ReviewCategory.tests],
-        )
-        LLMReviewEngine(provider).review(_big_ctx(), cfg)
-        starts_before_first_end = [
-            e for e in provider.events[: provider.events.index("end-0")] if e.startswith("start")
-        ]
-        assert len(starts_before_first_end) >= 2
 
     def test_failed_primer_still_releases_its_batch(self) -> None:
         calls = {"n": 0}

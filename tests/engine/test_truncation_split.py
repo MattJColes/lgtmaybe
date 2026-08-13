@@ -97,7 +97,6 @@ def _cfg(**overrides: Any) -> ReviewConfig:
         model="deepseek/deepseek-v4-pro",
         categories=[ReviewCategory.security],
         reflect=False,
-        prompt_cache=False,
         **overrides,
     )
 

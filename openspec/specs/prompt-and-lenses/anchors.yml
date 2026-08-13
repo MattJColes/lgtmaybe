@@ -9,27 +9,23 @@ prompt.shared-preamble:
 prompt.system:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^build_system_prompt$' }
+    has: { field: name, regex: '^build_lens_block$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
 prompt.custom-lens:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^build_lens_prompt$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^build_custom_lens_block$' }
-    files: [src/lgtmaybe/engine/**/*.py]
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_custom_lens_block$' }
+  files: [src/lgtmaybe/engine/**/*.py]
 
 prompt.groups:
   - rule:
       kind: function_definition
-      has: { field: name, regex: '^build_group_prompt$' }
+      has: { field: name, regex: '^build_group_block$' }
     files: [src/lgtmaybe/engine/**/*.py]
   - rule:
       kind: function_definition
-      has: { field: name, regex: '^build_correctness_prompt$' }
+      has: { field: name, regex: '^build_correctness_block$' }
     files: [src/lgtmaybe/engine/**/*.py]
   - rule:
       kind: function_definition
