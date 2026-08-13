@@ -182,6 +182,56 @@ class TestRescueWave:
         assert provider.security_calls == 3
         assert INCOMPLETE_MARKER in summary
 
+    def test_a_piece_that_fails_on_the_provider_is_still_rescued(self) -> None:
+        """The split answers a SIZE problem. A 429 in a piece is not one.
+
+        Stripping the retryable marker from every split failure conflated the
+        two: "the smaller payload also timed out" (nothing left to try) and "a
+        piece hit a capacity 429" (the provider faltered, and one more go is
+        exactly what the rescue wave is for). The second was silently excluded.
+
+        Here the whole batch times out, the split runs, both pieces fail
+        transiently — and the lens must still get its one rescue.
+        """
+        calls = {"n": 0}
+        lock = threading.Lock()
+
+        class _StallsThenFlaky(FakeProvider):
+            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+                prompt = "\n".join(str(m.get("content", "")) for m in messages)
+                with lock:
+                    self.calls.append({"messages": messages, "model": model, "opts": opts})
+                    if _SECURITY_MARKER not in prompt:
+                        return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+                    calls["n"] += 1
+                    n = calls["n"]
+                if n == 1:
+                    raise ProviderWallTimeout("call exceeded 600s (waited 601.2s)")
+                if n in (2, 3):  # the two split pieces
+                    raise RuntimeError("upstream hiccup")
+                return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+
+        provider = _StallsThenFlaky()
+        two_files = PRContext(
+            diff=(
+                "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+                "@@ -1,1 +1,2 @@\n context\n+one\n"
+                "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n"
+                "@@ -1,1 +1,2 @@\n context\n+two\n"
+            ),
+            changed_files=["a.py", "b.py"],
+            base_sha="abc",
+            head_sha="def",
+            repo="org/repo",
+            pr_number=1,
+        )
+
+        _, summary = LLMReviewEngine(provider).review(two_files, _cfg())
+
+        # whole batch, two pieces, then the rescue — which succeeds.
+        assert calls["n"] == 4
+        assert "review calls failed" not in summary
+
     def test_a_truncated_response_is_not_rescued(self) -> None:
         """A blown output ceiling is deterministic, not an outage: the same
         request runs to the same ceiling. Rescuing it would buy a second

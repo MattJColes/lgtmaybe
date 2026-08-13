@@ -399,6 +399,24 @@ class _RetryableReason(str):
     __slots__ = ()
 
 
+class _PayloadReason(_RetryableReason):
+    """A provider failure that is ALSO evidence the payload was too big.
+
+    A blown wall clock or output ceiling is retryable in the sense the *adapter*
+    cares about — a genuinely later request may well succeed — but not in the
+    sense the *split* cares about. Once the pieces have been tried, re-sending
+    the original whole payload is the one thing already known not to work.
+
+    The distinction exists because :meth:`LLMReviewEngine._review_split` has to
+    tell two failures apart that both arrive as "the piece call failed":
+    ``the smaller payload also ran out of room`` (nothing left to try) and ``a
+    piece hit a capacity 429`` (the provider faltered, and the rescue wave is
+    exactly what should have it). Collapsing them excluded the second.
+    """
+
+    __slots__ = ()
+
+
 def _rescuable(reason: str | None) -> bool:
     """True when *reason* is a provider-side failure worth one more attempt."""
     return isinstance(reason, _RetryableReason)
@@ -1535,12 +1553,25 @@ class LLMReviewEngine:
         # ever saw. The last error is reported (the split's own failure, not the
         # original timeout) so the notice names what actually went wrong.
         #
-        # Reported PLAIN, never retryable: the split is already this call's retry,
-        # and it retried with the one change that can help — a smaller payload. A
-        # rescue on top would re-send the original oversized request, which is
-        # exactly the "identical request against an identical budget" the adapter
-        # refuses to repeat, at up to twice the calls.
-        return findings, str(errors[-1]) if errors else None
+        # Whether the rescue wave may have this one turns on WHY the piece failed,
+        # and the two answers are opposite:
+        #
+        # - A piece that ran out of room again (:class:`_PayloadReason`) is
+        #   reported plain. The split is already this call's retry, and it retried
+        #   with the one change that can help — a smaller payload. Re-sending the
+        #   original oversized request is the "identical request against an
+        #   identical budget" the adapter refuses to repeat, at twice the calls.
+        # - A piece that failed on the PROVIDER — a capacity 429, a 5xx, a stalled
+        #   connection — says nothing about size. Its marker travels on, because
+        #   one more go after the wave has drained is exactly what it needs.
+        #
+        # Collapsing the two is the bug this replaces: every split failure was
+        # reported plain, so a transient blip inside a piece silently forfeited
+        # the rescue the same blip would have got anywhere else.
+        if not errors:
+            return findings, None
+        last = errors[-1]
+        return findings, str(last) if isinstance(last, _PayloadReason) else last
 
     def _complete_lens(
         self,
@@ -1590,7 +1621,10 @@ class LLMReviewEngine:
             #   of the rule, drifting from the first.
             reason: str = _error_reason(exc)
             if not isinstance(exc, ProviderTruncated) and not is_unrecoverable(exc):
-                reason = _RetryableReason(reason)
+                # A wall timeout is retryable, but it is also the signal the split
+                # acts on, so it is marked as such — see _PayloadReason.
+                mark = _PayloadReason if isinstance(exc, ProviderWallTimeout) else _RetryableReason
+                reason = mark(reason)
             profiler.record_error(lens.id, batch_num, time.perf_counter() - started, exc, reason)
             _log.warning(
                 "review call failed",
