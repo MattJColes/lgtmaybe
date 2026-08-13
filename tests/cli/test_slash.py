@@ -8,13 +8,37 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from lgtmaybe.cli import main
-from lgtmaybe.cli.slash import SlashCommand, dispatch, parse_command
+from lgtmaybe.cli.slash import _ASK_SYSTEM, _REPLY_SYSTEM, SlashCommand, dispatch, parse_command
 from lgtmaybe.core.models import Provider, ProviderResult, ReviewConfig
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 
 
 def _cfg() -> ReviewConfig:
     return ReviewConfig(provider=Provider.ollama, model="llama3")
+
+
+def test_conversational_prompts_lead_with_the_answer_without_padding() -> None:
+    for prompt in (_ASK_SYSTEM, _REPLY_SYSTEM):
+        lowered = prompt.lower()
+        assert "begin with the direct answer" in lowered
+        assert "no preamble" in lowered
+        assert "tangents" in lowered
+        assert "closing pleasantries" in lowered
+
+
+def test_conversational_prompts_number_only_genuinely_multi_step_work() -> None:
+    for prompt in (_ASK_SYSTEM, _REPLY_SYSTEM):
+        lowered = prompt.lower()
+        assert "genuinely multi-step" in lowered
+        assert "fewest numbered steps" in lowered
+
+
+def test_conversational_prompts_add_a_next_action_only_when_work_remains() -> None:
+    for prompt in (_ASK_SYSTEM, _REPLY_SYSTEM):
+        lowered = prompt.lower()
+        assert "exactly one concrete next action" in lowered
+        assert "purely informational" in lowered
+        assert "stop after the answer" in lowered
 
 
 class TestParseCommand:
