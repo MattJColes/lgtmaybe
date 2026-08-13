@@ -643,6 +643,13 @@ Split by whether it can be deterministic, because that decides where it lives:
   example — one genuine in-diff catch (a logged secret) plus three forbidden
   cross-file traps (model_dump-vs-V2, idempotency re-run, tenant_id null) — and it
   measures the codebase-humility behavior the review prompt + reflection enforce.
-  Real-spend hosted-provider e2e remains label-gated in `action-e2e.yml`.
+  **`unshown-code-fp`** is its sibling for the two shapes cross-file-fp cannot
+  express (its changed file is new, so nothing of it is unshown): a short edit at
+  the bottom of a long existing module traps a claim about **what an unshown
+  constant in the SAME file contains** (an empty frozenset ~180 lines up, the
+  `_SINGLE_STREAM_PROVIDERS` shape) and a claim that the change is **untested**
+  when the test lives in a file the diff never touched — the shape reflection's
+  gap-finding carve-out currently protects. Real-spend hosted-provider e2e
+  remains label-gated in `action-e2e.yml`.
 
 [litellm]: https://github.com/BerriAI/litellm
