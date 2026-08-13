@@ -533,3 +533,7 @@ class TestBuildReviewContext:
 
         assert provider.default_opts.get("azure_ad_token") == "ad-token-from-oidc"
         assert "api_key" not in provider.default_opts
+
+
+def test_runtime_options_is_owned_by_the_cli_package() -> None:
+    assert RuntimeOptions.__module__ == "lgtmaybe.cli"

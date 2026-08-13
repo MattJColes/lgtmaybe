@@ -282,7 +282,7 @@ class TestOpenAICompatible:
     def test_keyless_local_server_uses_placeholder(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """llama.cpp / LM Studio / vLLM need no key — but the OpenAI client demands
         a non-empty one, so a harmless placeholder is sent and the base preserved."""
-        from lgtmaybe.providers.constants import OPENAI_COMPATIBLE_PLACEHOLDER_KEY
+        from lgtmaybe.providers.factory import OPENAI_COMPATIBLE_PLACEHOLDER_KEY
 
         monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
         config = resolve_credentials(

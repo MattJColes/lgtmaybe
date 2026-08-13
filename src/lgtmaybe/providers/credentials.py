@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lgtmaybe.core.models import Provider
-from lgtmaybe.providers.constants import (
+from lgtmaybe.providers.factory import (
     DEFAULT_OLLAMA_BASE,
     OPENAI_COMPATIBLE_PLACEHOLDER_KEY,
 )
