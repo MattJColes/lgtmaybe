@@ -90,9 +90,9 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not $configPath) {
             throw "lgtmaybe.exe config path failed"
           }
-          $reviewHelp = & $exe help review
+          $reviewHelp = & $exe review --help
           if ($LASTEXITCODE -ne 0 -or -not ($reviewHelp | Select-String -Quiet "Usage")) {
-            throw "lgtmaybe.exe help review failed"
+            throw "lgtmaybe.exe review --help failed"
           }
 
           $size = (Get-Item $exe).Length
