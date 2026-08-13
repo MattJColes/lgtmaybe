@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from lgtmaybe.core.models import ProviderResult, ReviewFinding, Severity
-from lgtmaybe.core.ports import Message, ProviderClient
+from lgtmaybe.core.ports import Message
 
 _DEFAULT_FINDINGS = [
     ReviewFinding(
@@ -20,7 +20,7 @@ _DEFAULT_FINDINGS = [
 ]
 
 
-class FakeProvider(ProviderClient):
+class FakeProvider:
     """A ProviderClient that returns canned findings as JSON text."""
 
     def __init__(

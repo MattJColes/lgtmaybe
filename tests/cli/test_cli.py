@@ -9,11 +9,10 @@ from click.testing import CliRunner
 
 from lgtmaybe.cli import RuntimeOptions, build_review_context, main, run_review
 from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
-from lgtmaybe.core.ports import ReviewEngine
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 
 
-class _BoomEngine(ReviewEngine):
+class _BoomEngine:
     """A ReviewEngine that always fails — used to exercise error surfacing."""
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
