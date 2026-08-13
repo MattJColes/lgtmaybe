@@ -229,11 +229,23 @@ def build_provider(
     is_ollama = provider is Provider.ollama
     if is_ollama:
         opts["api_base"] = api_base or DEFAULT_OLLAMA_BASE
-        # Disable "thinking" for ollama models. Thinking models (qwen3.x) otherwise
-        # route their whole answer to the reasoning channel and return EMPTY content
-        # under structured output — so JSON-mode yields nothing to parse. With
-        # think=False they emit the findings JSON directly.
-        opts["think"] = False
+        # `think` is deliberately NOT sent. Ollama already decides it per model —
+        # its chat route defaults thinking ON for a thinking-capable model when the
+        # field is unset, and 400s outright if you ask a non-thinking model for it.
+        # So sending nothing gets the right answer for both, where sending either
+        # literal gets one of them wrong.
+        #
+        # This used to be pinned to False, because a thinking model routed its whole
+        # answer into the reasoning channel and returned EMPTY content under
+        # structured output, leaving JSON mode nothing to parse. Two things have
+        # since made that the wrong trade. Ollama now separates the trace into
+        # `message.thinking` and leaves the answer in `message.content`; and when a
+        # backend does still come back empty under a schema, the adapter drops
+        # `response_format` and re-sends (see LiteLLMProvider._call), remembering it
+        # for the rest of the run. The cost of being wrong is one re-send; the cost
+        # of pinning it False was every local reasoning model reviewing with its
+        # reasoning switched off, which four measured runs say is the single
+        # biggest lever on finding quality there is.
         # Ollama's default context window (~4k) is smaller than a real review
         # prompt (system prompt + wrapped diff + context lines), which truncates
         # the output to a stub. Give it enough room to read the prompt AND emit the

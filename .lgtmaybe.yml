@@ -57,9 +57,26 @@ max_tokens: 8192
 # silence. It now goes out in OpenRouter's own top-level `reasoning` object, and
 # a param that would be dropped is warned about at startup instead of vanishing.
 #
-# Measured at `low`: ~343-914 reasoning tokens per lens, i.e. the bound holds.
-# `medium` costs 3.3x the output tokens (91% of them thinking) and found 5
-# findings against `low`'s 2 on the same diff — a real quality difference, and a
-# real bill. Left at `low` deliberately; moving it is a quality decision that
-# wants its own change and its own evidence, not a side effect of this one.
-reasoning_effort: low
+# `medium`, on four measured runs — two per setting, same 18-file diff, same cap,
+# so the setting was the only variable:
+#
+#   setting   findings   true positives   false positives   truncated lens
+#   low        2, 2          2, 1               0, 1         code-health x2
+#   medium     5, 4          5, 4               0, 0         security, none
+#
+# What decided it was not the count. The rate-limit ladder bug that shipped in
+# 1.14.0 and needed a follow-up PR was found by `medium` in BOTH runs and missed
+# by `low` in both. `low` also produced the only false positive across all four —
+# a confident 9/10 claim about tenacity's internals that was exactly inverted.
+#
+# The cost is smaller than it looks. `medium` roughly triples OUTPUT tokens
+# (~90% of them thinking), but this workload is input-dominated: total billable
+# went 180,704 -> 187,191 on the same diff, about 4% more, or nearer 20% once
+# output's higher unit price is applied. Not the 3x the token counts suggest.
+#
+# Two things to watch. `max_tokens` above pays for thinking as well, and the
+# largest healthy output at `medium` was 3,986 tokens against that 8,192 cap —
+# roughly 2x headroom, where `low` had 9x. And `medium` truncated once in two
+# runs where `low` truncated twice, which is directionally interesting but n=2:
+# do not read it as a fix for the runaway.
+reasoning_effort: medium

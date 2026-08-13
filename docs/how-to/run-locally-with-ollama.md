@@ -27,6 +27,7 @@ the findings; to post reviews on real pull requests, use the
 - [Inside the GitHub Action's container](#inside-the-github-actions-container)
 - [Get findings as JSON](#get-findings-as-json)
 - [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
+- [Concurrency on a local server](#concurrency-on-a-local-server)
 - [Slow models and timeouts](#slow-models-and-timeouts)
 - [Troubleshooting](#troubleshooting)
 
@@ -180,6 +181,52 @@ agent (such as Claude Code) can read and apply, so you can review and fix a
 branch locally before opening a PR. See
 [Fix findings with an AI agent](fix-findings-with-an-ai-agent.md).
 
+## Concurrency on a local server
+
+lgtmaybe fans its review calls out across a pool sized by `max_concurrency`,
+**6 by default on every provider, local included**. That is a ceiling on what
+lgtmaybe will have in flight — it is not a promise your server will run them at
+once, and the distinction matters:
+
+- **A default ollama runs one at a time.** `OLLAMA_NUM_PARALLEL` is `1` unless you
+  set it, so five of six calls simply queue (up to `OLLAMA_MAX_QUEUE`, 512). They
+  are not lost and nothing fails; the wall clock is your server's throughput
+  either way. Raising `max_concurrency` alone therefore changes nothing.
+- **The knob that matters is on the server.** Start ollama with
+  `OLLAMA_NUM_PARALLEL=4` and four calls genuinely run together.
+- **It costs memory, in proportion.** Ollama allocates the context window *per
+  parallel slot*: four slots at `num_ctx` 32768 needs 128k of context allocated,
+  not 32k. This is the usual reason a machine that reviewed happily at one slot
+  falls over at four.
+
+So the two settings want to match. If you have raised the server, tell lgtmaybe:
+
+```bash
+lgtmaybe review --max-concurrency 4
+```
+
+**How to tell which you got.** `--profile` already answers it, no extra flag
+needed: compare the per-call `elapsed` column against the `review` stage total.
+If the calls' elapsed times sum to roughly the stage time, they ran one after
+another; if they sum to well over it, they genuinely overlapped.
+
+```
+review             95.32s        <- stage total
+correctness         52.02s   |
+spec                45.64s   |   sum is ~3x the stage,
+artefacts           43.67s   |   so these overlapped
+security            43.30s   |
+```
+
+**When to go the other way.** On a very slow model — a large one on CPU, minutes
+per call — six queued calls can each sit waiting long enough to run out the
+per-request timeout below. Pin it down:
+
+```yaml
+# .lgtmaybe.yml
+max_concurrency: 1
+```
+
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
@@ -233,9 +280,15 @@ pretending the PR is clean.
 
 For a **large diff** this can mean the prompt plus the findings don't fit in
 ollama's context window and the output gets truncated. lgtmaybe runs ollama with
-a generous context (`num_ctx` of 32768) and **structured JSON output** (it also
-disables "thinking" so reasoning models like qwen3.x emit the findings directly),
-which covers most reviews.
+a generous context (`num_ctx` of 32768) and **structured JSON output**, which
+covers most reviews.
+
+lgtmaybe does not pass ollama's `think` flag either way. Ollama already defaults
+thinking **on** for a model that supports it and rejects the flag outright for one
+that does not, so sending nothing is the only choice that is right for both.
+lgtmaybe used to force it off — that made reasoning models review with their
+reasoning switched off, which measurement says is the single biggest lever on
+finding quality there is.
 
 For a big multi-file change ("vibe-coded" commits across many files), raise the
 context window with `--num-ctx` so the whole diff and the findings fit — this is

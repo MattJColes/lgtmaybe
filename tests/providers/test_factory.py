@@ -161,10 +161,16 @@ class TestBuildProvider:
         provider = build_provider(Provider.ollama, "llama2", timeout=45)
         assert provider.default_opts.get("timeout") == 45
 
-    def test_ollama_disables_thinking(self) -> None:
-        # Thinking models return empty content under structured output otherwise.
+    def test_ollama_leaves_thinking_to_ollama(self) -> None:
+        """Send nothing, because either literal is wrong for some model.
+
+        Ollama's chat route defaults thinking ON for a thinking-capable model
+        when the field is unset, and 400s if a non-thinking model is asked for
+        it. Pinning False switched reasoning off for every local reasoning
+        model; pinning True would break every non-reasoning one.
+        """
         provider = build_provider(Provider.ollama, "qwen3.6:35b", api_base="http://localhost:11434")
-        assert provider.default_opts.get("think") is False
+        assert "think" not in provider.default_opts
 
     def test_cloud_does_not_set_think(self) -> None:
         provider = build_provider(Provider.openai, "gpt-4o", api_key="sk-test")
