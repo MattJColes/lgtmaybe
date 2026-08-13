@@ -216,18 +216,20 @@ kept, and the lens SHALL still count as failed.
 ### Requirement: A split is only attempted when covering less can help
 
 A truncation that spent essentially the whole ceiling reasoning SHALL NOT be
-split, and SHALL name `reasoning_effort` as the lever instead: a smaller payload
-does not shrink a thinking budget, so the split would re-spend the whole
-`max_tokens` ceiling on every piece and fail identically. The
-decision reads the counts the failure carries, never its message. Findings
-completed before the cut are kept on this path too, and a failure that says
-nothing about size is not split at all.
+split, and SHALL name both a lower `reasoning_effort` and a higher `max_tokens`
+as the levers: a smaller payload does not shrink a thinking budget, so the split
+would re-spend the whole `max_tokens` ceiling on every piece and fail
+identically — but these counts cannot say whether the thinking expands to fill
+any ceiling given it or merely outgrew this one, and those two have opposite
+fixes. The decision reads the counts the failure carries, never its message.
+Findings completed before the cut are kept on this path too, and a failure that
+says nothing about size is not split at all.
 <!-- anchor: engine.reasoning-ceiling -->
 
 #### Scenario: the ceiling went on thinking
 - **WHEN** a lens call truncates having spent nearly the whole ceiling reasoning
-- **THEN** no pieces are reviewed, the salvage is kept, and the notice names
-  `reasoning_effort` rather than `max_tokens`
+- **THEN** no pieces are reviewed, the salvage is kept, and the notice names both
+  levers, since the counts alone cannot say which one is the fix
 
 #### Scenario: the ceiling went on the answer
 - **WHEN** a truncated call spent only a small share of the ceiling reasoning
