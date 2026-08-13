@@ -176,7 +176,8 @@ class TestEngineBehaviourMatrix:
 
     # Auto max_concurrency per provider: 1 for single-stream backends (ollama
     # serves serially; openai-compatible may front a single-slot llama.cpp/LM
-    # Studio server), 8 for hosted cloud.
+    # Studio server), 6 for hosted cloud — wide enough to overlap the fan-out,
+    # narrow enough that one API key does not rate-limit itself.
     SINGLE_STREAM = (Provider.ollama, Provider.openai_compatible)
 
     @pytest.mark.parametrize("provider", list(Provider))
@@ -185,7 +186,7 @@ class TestEngineBehaviourMatrix:
         from lgtmaybe.engine.engine import _resolve_workers
 
         cfg = ReviewConfig(provider=provider, model="m")
-        expected = 1 if provider in self.SINGLE_STREAM else 8
+        expected = 1 if provider in self.SINGLE_STREAM else 6
         assert _resolve_workers(cfg, task_count=99) == expected
 
     @pytest.mark.parametrize("provider", list(Provider))

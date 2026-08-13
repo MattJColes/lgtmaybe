@@ -97,6 +97,39 @@ cause, since a ceiling-hitting call offers no healthy call to compare against.
 - **WHEN** retries on the primary model are exhausted and a fallback is set
 - **THEN** the call completes on the fallback model instead of failing the review
 
+### Requirement: Backoff matches what failed
+
+Retry backoff SHALL be chosen by the failure. A capacity rate limit SHALL back
+off far enough to reach a fresh metering window, and SHALL prefer the server's
+own `Retry-After` when one is sent, clamped so a long hint cannot consume the
+run. Every other transient failure SHALL keep the sub-second ladder. The retry
+budget SHALL be weighed against the wait about to be taken, so no backoff is
+slept past it.
+<!-- anchor: provider.backoff -->
+
+#### Scenario: the gateway meters the key per minute
+- **WHEN** a call is refused with a capacity 429 and no retry hint
+- **THEN** the attempts are spread across minutes rather than seconds, so they do
+  not all land in the window that just refused them
+
+#### Scenario: the gateway says when to come back
+- **WHEN** a 429 carries a `Retry-After` header, in either delta-seconds or
+  HTTP-date form
+- **THEN** that wait is honoured up to a ceiling, since nothing computed locally
+  can beat the server's own answer
+
+#### Scenario: the hint would outlast the call's budget
+- **WHEN** the wait a retry is about to take would carry the call past its
+  retry budget
+- **THEN** the call ends there rather than sleeping through the budget it was
+  given
+
+#### Scenario: a brief connection failure
+- **WHEN** a call fails on something other than a rate limit — a reset, a 5xx, a
+  local server still warming up
+- **THEN** it retries in fractions of a second, because the condition is gone by
+  the time the next request lands
+
 ### Requirement: A rejected request param degrades, it does not fail the review
 
 The adapter SHALL drop a request param the model refuses and re-send once

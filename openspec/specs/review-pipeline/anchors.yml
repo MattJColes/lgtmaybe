@@ -16,6 +16,12 @@ engine.fan-out:
     has: { field: name, regex: '^_fan_out$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+engine.rescue:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_rescue$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.dedupe:
   rule:
     kind: function_definition
