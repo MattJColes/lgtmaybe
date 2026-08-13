@@ -8,8 +8,15 @@ Place a `.lgtmaybe.yml` file at the root of your repository to control how
 lgtmaybe reviews pull requests. CLI flags override file values; the file
 provides defaults for all runs.
 
+## Upgrading from 1.14
+
+Remove `prompt_cache` from existing `.lgtmaybe.yml` files and remove
+`--prompt-cache` or `--no-prompt-cache` from scripts. Prompt caching is now
+automatic where the provider supports it.
+
 ## Contents
 
+- [Upgrading from 1.14](#upgrading-from-114)
 - [Full example](#full-example)
 - [Field reference](#field-reference)
   - [provider](#provider)
