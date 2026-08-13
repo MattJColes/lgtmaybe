@@ -427,9 +427,7 @@ def run_review(
                 extra={"count": len(dropped)},
             )
         findings = [f for f in findings if f.side == "RIGHT"]
-        validation_summary = _validate_prior_findings(
-            github, provider, cfg, review_ctx, findings
-        )
+        validation_summary = _validate_prior_findings(github, provider, cfg, review_ctx, findings)
         summary += (
             f"\n\n_Incremental review of the changes since {incremental_since[:7]} — "
             "earlier findings stay open until fixed._"
@@ -627,9 +625,7 @@ def _validate_prior_findings(
         verdicts.extend(validate_findings(provider, cfg, unmatched, ctx))
 
     fixed = {
-        verdict.thread_id
-        for verdict in verdicts
-        if verdict.status is FindingValidationStatus.fixed
+        verdict.thread_id for verdict in verdicts if verdict.status is FindingValidationStatus.fixed
     }
     set_fixed(fixed)
     counts = Counter(verdict.status for verdict in verdicts)

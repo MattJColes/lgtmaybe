@@ -164,8 +164,7 @@ def test_diagrammed_head_is_the_completed_head_when_required() -> None:
     diagram = [
         {
             "id": 9,
-            "body": "Diagram\n\n<!-- lgtmaybe-diagram -->\n"
-            "<!-- lgtmaybe-diagrammed:cafe1234 -->",
+            "body": "Diagram\n\n<!-- lgtmaybe-diagram -->\n<!-- lgtmaybe-diagrammed:cafe1234 -->",
         }
     ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=review))
@@ -178,9 +177,7 @@ def test_diagrammed_head_is_the_completed_head_when_required() -> None:
 
 @respx.mock
 def test_review_marker_is_completion_when_diagram_is_disabled() -> None:
-    review = [
-        {"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}
-    ]
+    review = [{"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=review))
 
     assert _gateway().last_completed_sha(diagram_required=False) == "cafe1234"

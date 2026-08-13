@@ -8,11 +8,7 @@ def _gateway() -> RestGitHubGateway:
 
 
 def _node(thread_id: str, *, resolved: bool = False, ours: bool = True) -> dict:
-    markers = (
-        "<!-- lgtmaybe-finding:abc123 -->\n<!-- lgtmaybe-identity:def456 -->"
-        if ours
-        else ""
-    )
+    markers = "<!-- lgtmaybe-finding:abc123 -->\n<!-- lgtmaybe-identity:def456 -->" if ours else ""
     return {
         "id": thread_id,
         "isResolved": resolved,

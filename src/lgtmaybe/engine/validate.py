@@ -47,9 +47,7 @@ def _context(findings: list[ActiveFinding], ctx: PRContext) -> str:
     )
     paths = {finding.path for finding in findings}
     current = "\n\n".join(
-        f"--- {path} ---\n{text}"
-        for path, text in ctx.file_contents.items()
-        if path in paths
+        f"--- {path} ---\n{text}" for path, text in ctx.file_contents.items() if path in paths
     )
     return redact(
         f"PRIOR FINDINGS\n{prior}\n\nCOMPARE DIFF\n{ctx.diff}\n\nCURRENT FILES\n{current}"

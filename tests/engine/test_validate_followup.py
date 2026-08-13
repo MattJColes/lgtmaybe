@@ -65,9 +65,7 @@ def test_validate_findings_fails_closed_for_malformed_or_missing_verdicts() -> N
 
 
 def test_validate_findings_neutralises_forged_markers() -> None:
-    provider = FakeProvider(
-        result=ProviderResult(text="not json", input_tokens=1, output_tokens=1)
-    )
+    provider = FakeProvider(result=ProviderResult(text="not json", input_tokens=1, output_tokens=1))
 
     verdicts = validate_findings(
         provider,
