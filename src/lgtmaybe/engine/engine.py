@@ -1570,8 +1570,17 @@ class LLMReviewEngine:
         # the rescue the same blip would have got anywhere else.
         if not errors:
             return findings, None
+        # The message and the retryability come from different places, and reading
+        # both off the last error conflates them: a piece that failed on the
+        # provider followed by one that ran out of room reports a payload reason
+        # last, and the provider failure — the case this exists to rescue — would
+        # lose its turn behind it. So the MESSAGE is the last error (the split's
+        # own failure, which is what the notice should name), while retryability
+        # is a property of ANY piece having faltered provider-side.
         last = errors[-1]
-        return findings, str(last) if isinstance(last, _PayloadReason) else last
+        if any(_rescuable(e) and not isinstance(e, _PayloadReason) for e in errors):
+            return findings, _RetryableReason(last)
+        return findings, str(last)
 
     def _complete_lens(
         self,
