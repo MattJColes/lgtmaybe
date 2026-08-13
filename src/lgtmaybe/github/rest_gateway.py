@@ -850,31 +850,15 @@ class RestGitHubGateway:
         return posted
 
     # ------------------------------------------------------------------
-    # Conversational finding threads (adapter-only, beyond the frozen port)
+    # Resolve-on-fix thread replies (adapter-only, beyond the frozen port)
     # ------------------------------------------------------------------
-
-    def find_review_thread(self, comment_id: int) -> tuple[str, str] | None:
-        """Resolve a REST review-comment id to ``(thread_node_id, root_body)``.
-
-        Replying to a review thread needs its GraphQL global node id, not a REST
-        comment id, so this walks the PR's review threads (paginated) and returns
-        the thread whose comments include *comment_id* (matched by ``databaseId``)
-        together with its root comment's body — the body a caller inspects to tell
-        whether the thread is one lgtmaybe opened. Returns None when no thread
-        carries that comment. Read-only; adapter-only, beyond the frozen port.
-        """
-        for node in self._walk_review_threads("id comments(first:100){ nodes{ databaseId body } }"):
-            comments = node.get("comments", {}).get("nodes", [])
-            if any(c.get("databaseId") == comment_id for c in comments):
-                return node["id"], _first_comment(node).get("body", "")
-        return None
 
     def reply_in_thread(self, thread_id: str, body: str) -> None:
         """Post *body* as a reply on review thread *thread_id* (a GraphQL node id).
 
-        Reuses the ``addPullRequestReviewThreadReply`` mutation — the same reply
-        primitive resolve-on-fix uses. Adapter-only, beyond the frozen port; used
-        to answer a PR author's reply in a finding thread.
+        Resolve-on-fix uses ``addPullRequestReviewThreadReply`` to explain why a
+        verified outdated finding is being closed. Adapter-only, beyond the
+        frozen port.
         """
         mutation = """
         mutation($threadId:ID!,$body:String!){

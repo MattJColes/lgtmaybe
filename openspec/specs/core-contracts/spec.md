@@ -62,13 +62,14 @@ are rejected — prose is never parsed.
 - **THEN** the field defaults to `null` so compatibility is preserved until the
   engine applies category-specific eligibility
 
-### Requirement: One config surface with ordered severities
+### Requirement: Review configuration is typed with ordered severities
 
 `ReviewConfig` SHALL be the single knob surface for a review (provider, model,
 filters, caps, toggles like `learn_feedback`); `Severity` SHALL order `info <
 low < medium < high < critical` so floors like `min_severity` and `fail_on`
 compare with `>=`. `fail_on` is an optional `Severity` (default `None` = off)
-driving the merge-gate Check Run.
+driving the merge-gate Check Run. Removed fields such as `answer_replies` SHALL
+be rejected by strict configuration validation rather than accepted as no-ops.
 <!-- anchor: core.config -->
 
 #### Scenario: severity floor filters findings
@@ -79,9 +80,10 @@ driving the merge-gate Check Run.
 - **WHEN** a `ReviewConfig` is built without `fail_on`
 - **THEN** `fail_on` is `None` and no check run is created
 
-#### Scenario: a posting toggle defaults on
-- **WHEN** `answer_replies` is unset
-- **THEN** it defaults to `true`, enabling finding-thread replies
+#### Scenario: a removed option is configured
+- **WHEN** configuration contains `answer_replies`
+- **THEN** validation rejects it with the same unknown-field behavior as any
+  unsupported option
 
 #### Scenario: an unknown reasoning effort is rejected at load
 - **WHEN** `reasoning_effort` is set to a value outside the normalised set

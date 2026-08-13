@@ -25,10 +25,7 @@ class FakeGitHub:
         self.described: list[str] = []
         self.diagrams: list[str] = []
         self.check_runs: list[dict[str, str]] = []
-        # Conversational finding threads — beyond the frozen port. ``thread`` is
-        # what find_review_thread returns for any comment id (None = no matching
-        # thread); ``replies`` records every reply_in_thread call.
-        self.thread: tuple[str, str] | None = None
+        # Resolve-on-fix review-thread replies — beyond the frozen port.
         self.replies: list[tuple[str, str]] = []
 
     def get_pr_context(self) -> PRContext:
@@ -63,10 +60,6 @@ class FakeGitHub:
             }
         )
 
-    def find_review_thread(self, comment_id: int) -> tuple[str, str] | None:
-        """Resolve a comment id to (thread node id, root body) — beyond the port."""
-        return self.thread
-
     def reply_in_thread(self, thread_id: str, body: str) -> None:
-        """Record a reply posted to a review thread — beyond the port."""
+        """Record a resolve-on-fix reply posted to a review thread."""
         self.replies.append((thread_id, body))

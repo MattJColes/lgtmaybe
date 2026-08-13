@@ -157,18 +157,17 @@ reaction and a resolved thread are not.
 - **WHEN** the opening comment carries our finding marker and a write-access user's 👎
 - **THEN** its fingerprint is returned, to be suppressed next run
 
-### Requirement: Replying in a finding thread is GraphQL
+### Requirement: Resolved findings receive a GraphQL reply
 
-`reply_in_thread` SHALL post a reply on a review thread via the GraphQL
-`addPullRequestReviewThreadReply` mutation — its node id resolved from an inbound
-review-comment id by `find_review_thread`, matching the thread whose comments
-carry that id — the primitive that answers a PR author in a finding conversation
-and the same reply the resolve-on-fix path uses.
+`reply_in_thread` SHALL post a reply on a known review thread via the GraphQL
+`addPullRequestReviewThreadReply` mutation. It SHALL be used only after
+resolve-on-fix has verified that a finding disappeared and resolved the thread;
+human comments SHALL NOT invoke it.
 <!-- anchor: github.reply-in-thread -->
 
-#### Scenario: author replies in a finding thread
-- **WHEN** `reply_in_thread` is called with a thread node id and a body
-- **THEN** the reply is posted to that thread via GraphQL
+#### Scenario: a verified fix resolves a finding
+- **WHEN** resolve-on-fix resolves a thread whose finding disappeared
+- **THEN** `reply_in_thread` posts `✅ Looks resolved.` to that thread via GraphQL
 
 ### Requirement: Generated and binary files are skipped
 
