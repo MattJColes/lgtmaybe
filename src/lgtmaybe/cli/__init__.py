@@ -883,7 +883,36 @@ def graceful_interrupt() -> Iterator[None]:
         _restore()
 
 
+def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """Print `lgtmaybe <version>` and exit — the eager `--version` callback.
+
+    Written by hand rather than with ``click.version_option`` because both of
+    that helper's modes get an edge case wrong here. Passing a resolved version
+    would read the distribution metadata at import time, on every invocation
+    that never asks for it; passing ``package_name`` makes click do the read
+    itself and raise ``RuntimeError`` when there is no dist-info, so the flag
+    would CRASH in a source checkout. ``package_version`` already answers
+    "unknown" there, and a diagnostic that fails is worse than one that hedges.
+
+    The line is deliberately plain: a benchmark runner records the executable it
+    ran by parsing this, so it names the program (never click's ``main``) in one
+    stable shape.
+    """
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(f"lgtmaybe {package_version()}")
+    ctx.exit()
+
+
 @click.group(epilog=_EPILOG)
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_print_version,
+    help="Show the lgtmaybe version and exit.",
+)
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """lgtmaybe — provider-agnostic PR reviewer."""

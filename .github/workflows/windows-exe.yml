@@ -80,6 +80,12 @@ jobs:
         id: smoke
         if: steps.idem.outputs.skip != 'true'
         shell: pwsh
+        env:
+          # Read through the environment, never interpolated into the script:
+          # the version originates in a workflow_dispatch input, and a `"` or a
+          # backtick in a GitHub expression pasted into PowerShell source would
+          # break out of the string and run on the runner.
+          EXPECTED_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           $exe = Resolve-Path ".\dist\lgtmaybe.exe"
           $help = & $exe --help
@@ -93,6 +99,13 @@ jobs:
           $reviewHelp = & $exe review --help
           if ($LASTEXITCODE -ne 0 -or -not ($reviewHelp | Select-String -Quiet "Usage")) {
             throw "lgtmaybe.exe review --help failed"
+          }
+          # The version has to survive freezing: it comes from the distribution
+          # metadata the spec copies in, and "lgtmaybe unknown" means that copy
+          # was lost — which would ship an executable nobody can identify.
+          $version = & $exe --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne "lgtmaybe $env:EXPECTED_VERSION") {
+            throw "lgtmaybe.exe --version reported '$version'"
           }
 
           $size = (Get-Item $exe).Length
