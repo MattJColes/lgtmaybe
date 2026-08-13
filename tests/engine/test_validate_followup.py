@@ -85,6 +85,20 @@ def test_validate_findings_fails_closed_for_duplicate_verdicts() -> None:
     assert verdicts[0].status is FindingValidationStatus.uncertain
 
 
+def test_validate_findings_rejects_a_blank_reason() -> None:
+    provider = FakeProvider(
+        result=ProviderResult(
+            text='{"verdicts":[{"thread_id":"T1","status":"fixed","reason":"   "}]}',
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+
+    verdicts = validate_findings(provider, make_cfg(), [_finding()], CTX)
+
+    assert verdicts[0].status is FindingValidationStatus.uncertain
+
+
 def test_duplicate_semantic_identities_are_validated_by_unique_thread_id() -> None:
     provider = FakeProvider(
         result=ProviderResult(

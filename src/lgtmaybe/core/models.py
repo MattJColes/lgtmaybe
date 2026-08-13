@@ -298,6 +298,14 @@ class FindingValidation(_Strict):
     status: FindingValidationStatus
     reason: str
 
+    @field_validator("reason")
+    @classmethod
+    def _reason_is_nonblank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("validation reason must not be blank")
+        return cleaned
+
 
 class FindingValidationResult(_Strict):
     """Structured-output envelope for follow-up finding validation."""

@@ -617,6 +617,7 @@ class RestGitHubGateway:
         the three comments never clobber each other. Adapter-only, beyond the
         frozen port.
         """
+        body = _DIAGRAMMED_MARKER.sub("", body).rstrip()
         if completed_sha is not None:
             body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
         self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
@@ -1136,8 +1137,17 @@ class RestGitHubGateway:
                 return
             try:
                 self._mark_comment_resolved(comment_id, first_body)
-            except Exception as exc:  # noqa: BLE001 — the thread is already resolved
+            except Exception as exc:  # noqa: BLE001 — restore retryable state below
                 _log.warning("resolved-marker rewrite on %s failed: %s", thread_id, exc)
+                try:
+                    self._unresolve_thread(thread_id)
+                except Exception as reopen_exc:  # noqa: BLE001 — best-effort repair
+                    _log.warning(
+                        "reopening thread %s after marker failure failed: %s",
+                        thread_id,
+                        reopen_exc,
+                    )
+                return
             try:
                 self.reply_in_thread(thread_id, "✅ Looks resolved.")
             except Exception as exc:  # noqa: BLE001 — nothing depends on the reply
@@ -1234,6 +1244,15 @@ class RestGitHubGateway:
         """
         self._graphql(resolve, {"threadId": thread_id})
 
+    def _unresolve_thread(self, thread_id: str) -> None:
+        """Reopen a thread whose resolved-marker rewrite failed so it can retry."""
+        unresolve = """
+        mutation($threadId:ID!){
+          unresolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }
+        }
+        """
+        self._graphql(unresolve, {"threadId": thread_id})
+
     def _mark_comment_resolved(self, comment_id: int | None, body: str) -> None:
         """Rewrite a resolved comment's fingerprint marker into the "resolved" family.
 
@@ -1241,25 +1260,22 @@ class RestGitHubGateway:
         without this rewrite a finding fixed once would be skipped forever if it
         reappeared. **Both** families are retired together — leaving the identity
         marker active would keep suppressing the finding after its fingerprint
-        was retired. Best-effort on its own (beyond the pass-wide guard): a PATCH
-        failure is logged and swallowed so the remaining threads still resolve.
+        was retired. A failure raises so the caller can reopen the thread and
+        preserve retryable state.
         """
         if comment_id is None:
-            return
+            raise RuntimeError("the resolved finding has no comment id to rewrite")
         rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
             _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
         )
         url = f"{self._api}/pulls/comments/{comment_id}"
-        try:
-            resp = self._client.patch(
-                url,
-                headers=self._json_headers,
-                json={"body": rewritten},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            _log.warning("rewriting resolved-finding marker failed: %s", exc)
+        resp = self._client.patch(
+            url,
+            headers=self._json_headers,
+            json={"body": rewritten},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
 
     # ------------------------------------------------------------------
     # Feedback learning (adapter-only, beyond the frozen port): read the 👎
