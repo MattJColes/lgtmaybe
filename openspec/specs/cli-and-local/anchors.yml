@@ -34,21 +34,17 @@ cli.diagram-sequence:
     has: { field: name, regex: '^_sequence_views$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
-cli.review-reply:
+cli.review-comment-noop:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^execute_review_reply$' }
+    has: { field: name, regex: '^action$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
 cli.response-style:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^_answer_question$' }
-    files: [src/lgtmaybe/cli/slash.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^_answer_reply$' }
-    files: [src/lgtmaybe/cli/slash.py]
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_answer_question$' }
+  files: [src/lgtmaybe/cli/slash.py]
 
 cli.local-context:
   rule:

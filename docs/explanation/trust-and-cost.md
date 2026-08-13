@@ -100,8 +100,7 @@ between a review starting now and a review queueing behind comment threads. The
 clause is deliberately looser than the parser it stands in for — substring, not
 prefix, and case-insensitive — because a guard tighter than the parser would
 silently disable a command that used to work. Replies inside a finding thread
-arrive on the separate `pull_request_review_comment` event and are never gated
-this way; they are ordinary prose, and gating them would switch the feature off.
+do not invoke the model; a pushed fix is checked by the next incremental review.
 
 ## If you want extra guardrails
 

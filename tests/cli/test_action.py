@@ -271,95 +271,21 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert len(github.posted) == 1
 
-    def _run_reply(
-        self,
-        tmp_path,
-        monkeypatch,
-        *,
-        comment: dict,
-        action: str = "created",
-        thread: tuple[str, str] | None,
-        answer_replies: str | None = None,
-    ) -> FakeGitHub:
-        """Run the action for a pull_request_review_comment event; return the gateway."""
-        import lgtmaybe.cli as cli_module
+    def test_review_comment_event_is_a_noop_before_configuration(self, tmp_path, monkeypatch):
+        import lgtmaybe.cli.commands as commands_module
 
-        github = FakeGitHub()
-        github.thread = thread
-        provider = FakeProvider()
-        monkeypatch.setattr(
-            cli_module,
-            "build_review_context",
-            lambda cfg, runtime: (github, FakeEngine(provider), provider),
-        )
-
-        event = _write_event(
-            tmp_path,
-            {
-                "action": action,
-                "repository": {"full_name": "org/repo"},
-                "pull_request": {"number": 7},
-                "comment": comment,
-            },
-        )
+        event = _write_event(tmp_path, {"action": "created"})
         monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
-        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
-        monkeypatch.setenv("INPUT_MODEL", "llama3")
-        if answer_replies is not None:
-            monkeypatch.setenv("INPUT_ANSWER_REPLIES", answer_replies)
+        monkeypatch.setattr(
+            commands_module,
+            "action_inputs",
+            lambda: pytest.fail("stale review-comment events must not read Action inputs"),
+        )
 
         result = CliRunner().invoke(main, ["action"])
+
         assert result.exit_code == 0, result.output
-        return github
-
-    _OURS = ("THREAD_1", "**[HIGH] NPE**\n\nbody\n\n<!-- lgtmaybe-finding:abc123def456 -->")
-    _HUMAN_REPLY = {
-        "in_reply_to_id": 555,
-        "path": "a.py",
-        "line": 1,
-        "body": "is this really a bug?",
-        "user": {"type": "User", "login": "alice"},
-    }
-
-    def test_review_comment_reply_in_our_thread_is_answered(self, tmp_path, monkeypatch):
-        github = self._run_reply(
-            tmp_path, monkeypatch, comment=self._HUMAN_REPLY, thread=self._OURS
-        )
-        assert len(github.replies) == 1
-        assert github.replies[0][0] == "THREAD_1"
-
-    def test_review_comment_ignored_when_not_a_reply(self, tmp_path, monkeypatch):
-        top_level = {**self._HUMAN_REPLY}
-        del top_level["in_reply_to_id"]
-        github = self._run_reply(tmp_path, monkeypatch, comment=top_level, thread=self._OURS)
-        assert github.replies == []
-
-    def test_review_comment_ignored_when_parent_not_ours(self, tmp_path, monkeypatch):
-        not_ours = ("THREAD_1", "a plain human review comment, no marker")
-        github = self._run_reply(tmp_path, monkeypatch, comment=self._HUMAN_REPLY, thread=not_ours)
-        assert github.replies == []
-
-    def test_review_comment_ignored_when_author_is_a_bot(self, tmp_path, monkeypatch):
-        bot_reply = {**self._HUMAN_REPLY, "user": {"type": "Bot", "login": "lgtmaybe[bot]"}}
-        github = self._run_reply(tmp_path, monkeypatch, comment=bot_reply, thread=self._OURS)
-        assert github.replies == []
-
-    def test_review_comment_ignored_when_action_is_not_created(self, tmp_path, monkeypatch):
-        github = self._run_reply(
-            tmp_path, monkeypatch, comment=self._HUMAN_REPLY, thread=self._OURS, action="edited"
-        )
-        assert github.replies == []
-
-    def test_review_comment_ignored_when_answer_replies_disabled(self, tmp_path, monkeypatch):
-        github = self._run_reply(
-            tmp_path,
-            monkeypatch,
-            comment=self._HUMAN_REPLY,
-            thread=self._OURS,
-            answer_replies="false",
-        )
-        assert github.replies == []
 
     def test_inputs_read_from_env_reach_config(self, tmp_path, monkeypatch):
         """INPUT_PROVIDER / INPUT_MODEL select the provider+model for the run."""
