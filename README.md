@@ -141,7 +141,7 @@ flow it alters — `review` then `diagram` is the pair to run before opening a
 pull request. See
 [Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
 
-`lgtmaybe help` lists every command with usage examples; `lgtmaybe help review`
+`lgtmaybe --help` lists every command with usage examples; `lgtmaybe review --help`
 shows the full option reference. To post reviews on real pull requests, wire up
 the
 [GitHub Action](#use-as-a-github-action). See
