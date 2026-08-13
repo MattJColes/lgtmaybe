@@ -358,6 +358,19 @@ typically cross-file false positives where the relevant guard lives in a file th
 reviewer can't see. The `cross-file-fp` fixture is the worked example: one genuine
 in-diff catch alongside three forbidden cross-file claims.
 
+`unshown-code-fp` is its sibling, for the two shapes cross-file-fp cannot express
+(its changed file is new, so nothing of it is unshown). Its diff is a short edit
+to the bottom of a long existing module, and both traps turn on what the reviewer
+was *not* shown:
+
+- **the value of a symbol in the same file** — `SINGLE_STREAM_PROVIDERS` is an
+  empty frozenset defined ~180 lines above the function that reads it, so a
+  finding asserting what it *contains* ("this pins ollama to one worker") is
+  false, and no amount of context padding reaches it;
+- **a test that exists elsewhere** — `worker_count` arrives with no test beside
+  it in the diff, while `tests/test_dispatch.py` covers it in a file the PR never
+  touched, so "this change is untested" is true of the diff and wrong as a defect.
+
 ### Measuring what the fast preset trades away
 
 The default `fast` preset covers the nine lenses in four grouped calls;
