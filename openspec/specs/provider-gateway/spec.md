@@ -260,3 +260,28 @@ provider so users give bare model ids.
   input and the Action how-to advertise
 - **THEN** the test suite fails, because a silently reclassified provider leaves
   every timeout floor green while breaking the promise a user read
+
+### Requirement: A local model gets a finite output ceiling
+
+`max_tokens` unset SHALL resolve to a finite ceiling for ollama and to none for
+every other provider, because a local model under structured output can decode
+without terminating and the only thing that would otherwise stop it is the
+deliberately generous per-call timeout. A configured value SHALL win, `0` SHALL
+mean explicitly uncapped, and the resolved ceiling and its source SHALL be
+announced before the first call so a truncation is not read as a number the user
+chose.
+<!-- anchor: provider.output-ceiling -->
+
+#### Scenario: no ceiling configured on a local model
+- **WHEN** `max_tokens` is unset and the provider is ollama
+- **THEN** a finite ceiling applies, so a non-terminating decode is cut off in
+  seconds and reported as a truncation rather than as a timeout half an hour later
+
+#### Scenario: no ceiling configured on a hosted model
+- **WHEN** `max_tokens` is unset and the provider is any hosted route
+- **THEN** no ceiling is sent, and the model's own applies — a long findings
+  payload is never truncated for a problem that route does not have
+
+#### Scenario: the user turns the ceiling off
+- **WHEN** `max_tokens` is `0`
+- **THEN** no ceiling is sent at all, and the run is announced as uncapped

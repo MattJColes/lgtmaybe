@@ -754,8 +754,11 @@ class ReviewConfig(_Strict):
     # reproducible reviews (and steadier instruction-following on small models).
     temperature: float = 0.0
     # Ceiling on the tokens each model call may GENERATE (the findings JSON) — the
-    # output counterpart to max_input_tokens. None (default) sends no cap, so the
-    # model's own ceiling applies and a long findings payload is never truncated.
+    # output counterpart to max_input_tokens. None (default) resolves per provider
+    # (`factory.resolve_max_tokens`): ollama gets a finite ceiling, because a local
+    # model under structured output can decode until the 30-minute timeout stops
+    # it, and every hosted route keeps the model's own ceiling so a long findings
+    # payload is never truncated. `0` turns any ceiling off explicitly.
     #
     # Set it on a PREPAID route (OpenRouter and friends), which reserves
     # prompt + max_tokens against the balance BEFORE generating and falls back to
@@ -766,10 +769,10 @@ class ReviewConfig(_Strict):
     # what the review actually costs.
     #
     # Sized too low it truncates the JSON mid-object and the call parses as a
-    # failed lens, which is why it is opt-in rather than defaulted: reasoning
-    # models spend this budget on thinking tokens too, so a value that suits a
-    # plain model can starve a reasoning one.
-    max_tokens: int | None = Field(default=None, ge=1)
+    # failed lens, which is why it is not defaulted on the hosted routes:
+    # reasoning models spend this budget on thinking tokens too, so a value that
+    # suits a plain model can starve a reasoning one.
+    max_tokens: int | None = Field(default=None, ge=0)
     # How much of the output budget the model may spend THINKING before it
     # writes an answer — the knob `max_tokens` cannot express, because it caps
     # reasoning and findings TOGETHER and the model spends the reasoning first.

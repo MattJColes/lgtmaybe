@@ -7,7 +7,7 @@ import logging
 import pytest
 
 from lgtmaybe.core.models import Provider
-from lgtmaybe.providers.factory import build_provider, litellm_model_string
+from lgtmaybe.providers.factory import build_provider, litellm_model_string, resolve_max_tokens
 
 
 class TestLiteLLMModelString:
@@ -444,3 +444,66 @@ class TestQueuedTimeoutScaling:
 
         provider = build_provider(Provider.ollama, "qwen3.6:35b", concurrency=6)
         assert provider.default_opts["timeout"] == _SLOW_TIMEOUT * 6
+
+
+class TestOutputCeiling:
+    """A local model gets a finite output ceiling by default.
+
+    Without one, a structured-output response that terminates badly decodes
+    until the *timeout* stops it — 18 minutes of sustained GPU on a one-file
+    diff, and hours for a full nine-lens review. The timeout is sized generously
+    on purpose (a slow local model has to be given time to answer), which makes
+    it the wrong instrument for a runaway decode: it can only notice half an
+    hour late.
+    """
+
+    def test_ollama_gets_a_finite_ceiling(self) -> None:
+        ceiling = resolve_max_tokens(Provider.ollama)
+        assert ceiling is not None and ceiling > 0
+
+    def test_the_ceiling_leaves_room_for_a_real_findings_payload(self) -> None:
+        """Sized against the context window it shares rather than plucked from
+        the air: an ollama review runs at `num_ctx` 32768, and a ceiling that
+        crowded the prompt would truncate ordinary reviews to buy the fix."""
+        from lgtmaybe.providers.factory import _OLLAMA_NUM_CTX
+
+        ceiling = resolve_max_tokens(Provider.ollama)
+        assert ceiling is not None
+        assert 2048 <= ceiling <= _OLLAMA_NUM_CTX // 2
+
+    def test_hosted_providers_stay_uncapped(self) -> None:
+        """Every other route keeps the model's own ceiling. A cap here would
+        truncate a long findings payload on a provider that never had the
+        runaway-decode problem — a regression bought for nothing."""
+        for provider in Provider:
+            if provider is not Provider.ollama:
+                assert resolve_max_tokens(provider) is None, provider
+
+    def test_a_configured_ceiling_wins_everywhere(self) -> None:
+        assert resolve_max_tokens(Provider.ollama, 512) == 512
+        assert resolve_max_tokens(Provider.openai, 512) == 512
+
+    def test_zero_means_explicitly_uncapped(self) -> None:
+        """The escape hatch, spelled the way the rest of the config spells one
+        (`max_review_seconds: 0`, `context_lines: 0`): a long review that would
+        rather run for half an hour than be truncated can say so, and a default
+        nobody can turn off would be the wrong kind of default."""
+        assert resolve_max_tokens(Provider.ollama, 0) is None
+
+    def test_build_provider_applies_the_default_ceiling(self) -> None:
+        provider = build_provider(Provider.ollama, "qwen3.5:4b")
+        assert provider.default_opts.get("max_tokens") == resolve_max_tokens(Provider.ollama)
+
+    def test_build_provider_sends_no_ceiling_for_cloud(self) -> None:
+        provider = build_provider(Provider.openai, "gpt-4o", api_key="sk-test")
+        assert "max_tokens" not in provider.default_opts
+
+    def test_build_provider_honours_an_explicit_ceiling(self) -> None:
+        provider = build_provider(Provider.ollama, "qwen3.5:4b", max_tokens=512)
+        assert provider.default_opts.get("max_tokens") == 512
+
+    def test_build_provider_sends_nothing_when_uncapped(self) -> None:
+        """`max_tokens=0` must not reach litellm — it would ask the model for an
+        empty answer rather than an unbounded one."""
+        provider = build_provider(Provider.ollama, "qwen3.5:4b", max_tokens=0)
+        assert "max_tokens" not in provider.default_opts

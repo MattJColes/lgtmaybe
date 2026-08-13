@@ -90,6 +90,43 @@ _MAY_QUEUE = frozenset({Provider.ollama, Provider.openai_compatible})
 # review could overrun it and get truncated.
 _OLLAMA_NUM_CTX = 32768
 
+# Default ceiling on the tokens ONE ollama call may generate, and the only
+# provider that gets one.
+#
+# A local model under structured output can fail to terminate: the response
+# keeps decoding, and with no ceiling the only thing that ever stops it is the
+# per-call timeout — 1800s, deliberately generous because a slow local model has
+# to be given time to answer. That makes the timeout the wrong instrument for a
+# runaway decode: a single lens spent 18 minutes of sustained GPU on a one-file
+# diff, and a nine-lens review takes hours. A finite ceiling stops it in
+# seconds, and the stop is *reported* — a truncation posts the incomplete
+# notice, where a timeout posts the same notice half an hour later.
+#
+# 8192 is a quarter of `_OLLAMA_NUM_CTX`: measured findings payloads are
+# hundreds of tokens, so the rest is headroom for a thinking model (ollama now
+# leaves thinking on for a model that supports it, and reasoning is drawn from
+# this same budget). Sized against the window it shares rather than picked flat,
+# so raising `num_ctx` for a big diff is not silently undone here.
+#
+# Only ollama. openrouter and openai-compatible can also front a slow endpoint,
+# but they can equally be a hosted API with its own sane ceiling, and capping
+# those would truncate long findings payloads for setups that never had this
+# problem.
+_OLLAMA_MAX_TOKENS = _OLLAMA_NUM_CTX // 4
+
+
+def resolve_max_tokens(provider: Provider, configured: int | None = None) -> int | None:
+    """The output ceiling to send for one call, or None to send none at all.
+
+    ``configured`` is the user's ``max_tokens``: a positive value always wins,
+    ``0`` means "explicitly uncapped" (spelled the way the rest of the config
+    spells an off switch — ``max_review_seconds: 0``, ``context_lines: 0``), and
+    ``None`` means "unset", which is where the provider default applies.
+    """
+    if configured is not None:
+        return configured or None
+    return _OLLAMA_MAX_TOKENS if provider is Provider.ollama else None
+
 
 def default_timeout_for(provider: Provider, *, concurrency: int = 1) -> int:
     """The auto timeout (seconds) for a provider when none is given explicitly.
@@ -254,6 +291,14 @@ def build_provider(
     opts["timeout"] = (
         timeout if timeout is not None else default_timeout_for(provider, concurrency=concurrency)
     )
+
+    # Resolved here, not at the caller, so every path that builds a provider gets
+    # the ceiling — and so the one value that must never be sent (0, the
+    # uncapped escape hatch, which litellm would forward as "generate nothing")
+    # is removed in the same place it is interpreted.
+    ceiling = resolve_max_tokens(provider, opts.pop("max_tokens", None))
+    if ceiling is not None:
+        opts["max_tokens"] = ceiling
 
     if api_key is not None:
         opts["api_key"] = api_key
