@@ -1651,8 +1651,10 @@ class LLMReviewEngine:
             # is usually a value the user set, not the model's own limit.
             reason = (
                 f"response truncated at the {result.output_tokens}-token `max_tokens` "
-                f"ceiling — raise `max_tokens`, or lower `max_input_tokens` so each "
-                f"call covers less{recovered_note}"
+                "ceiling — the batch is re-reviewed in smaller pieces automatically, so a "
+                "lens that keeps doing it is usually generation instability in the model, "
+                f"which a higher ceiling makes more expensive rather than prevents"
+                f"{recovered_note}"
             )
             _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
             # The findings fall through to be stamped like any others, but the

@@ -69,7 +69,9 @@ _ONE_FILE_ONE_HUNK = """diff --git a/one.py b/one.py
 # what explains a small diff truncating at all.
 _CEILING = (
     "response hit the 16384-token `max_tokens` ceiling (16200 reasoning) before "
-    "finishing — raise `max_tokens`, or lower `max_input_tokens` so each call covers less"
+    "finishing — the batch is re-reviewed in smaller pieces automatically, so a lens "
+    "that keeps doing it is usually generation instability in the model, which a "
+    "higher ceiling makes more expensive rather than prevents"
 )
 
 

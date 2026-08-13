@@ -145,6 +145,17 @@ SHALL stop after answering instead of inventing a task for the reader.
 - **WHEN** an answer requires more than one bounded action
 - **THEN** those actions are presented as the fewest numbered steps that still work
 
+#### Scenario: the diff is context for a question, not a review request
+- **WHEN** the diff is wrapped for `/ask`
+- **THEN** it carries the same neutralised untrusted-data guard as a review diff
+  but neither the review task restatement nor the review lead-in, which would ask
+  for the findings JSON object from a call whose answer is prose
+
+#### Scenario: the model answers with a machine envelope
+- **WHEN** the response is entirely a JSON object or array
+- **THEN** it is refused rather than posted, while prose that merely quotes braces
+  or a fenced JSON example is relayed
+
 ### Requirement: Local review needs no GitHub
 
 `lgtmaybe review` in a repo SHALL build the context from git alone: branch
