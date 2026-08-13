@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 
@@ -21,11 +22,41 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.engine.compress import count_tokens
-from lgtmaybe.engine.engine import passes_path_filters
+from lgtmaybe.engine.engine import LLMReviewEngine as EngineClass
+from lgtmaybe.engine.engine import _build_notices, _NoticeState, passes_path_filters
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.fakes import FakeProvider
 
 _REFLECT_MARKER = "auditing another reviewer"
+
+
+def test_review_delegates_summary_notices_to_the_builder() -> None:
+    source = inspect.getsource(EngineClass.review)
+    assert "_build_notices(" in source
+    assert "Token budget reached" not in source
+
+
+def test_notice_builder_preserves_notice_order() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="m", max_files=1)
+    notices = _build_notices(
+        _NoticeState(
+            cfg=cfg,
+            capped_files=True,
+            total_files=2,
+            oversized=[],
+            skipped_by_triage=[],
+            errors=[],
+            total_calls=4,
+            failed_calls=0,
+            failed_lenses=[],
+            split_batches=0,
+            reflection_skipped=None,
+            suppressed=1,
+            off_diff=1,
+            open_finding_threads=1,
+        )
+    )
+    assert [notice[0] for notice in notices] == ["⚠", "🙈", "🔍", "💬"]
 
 
 def _is_reflection(call: dict) -> bool:

@@ -273,10 +273,9 @@ def _sampling_extra(
 
 
 def _add_review_args(ap: argparse.ArgumentParser) -> None:
-    """The review-driver CLI flags shared by evals.run and evals.rlm.
+    """The review-driver CLI flags used by evals.run.
 
-    Each runner adds its own extra flags around these (budget/repeats/only on
-    rlm; min-recall/json/... on run).
+    Runners add their own output and gating flags around these shared options.
     """
     ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
     ap.add_argument("--model", required=True)

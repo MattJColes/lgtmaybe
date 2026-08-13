@@ -369,7 +369,7 @@ in one command — first value is the baseline:
 ```bash
 # Needs a live model — full-vs-fast recall/precision on the fixture set:
 uv run python -m evals.ab --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --preset full,fast --timeout 900
+  --api-base http://localhost:11434 --sweep preset=full,fast --timeout 900
 ```
 
 Each leg reviews every fixture through the real engine; only the preset varies
@@ -386,28 +386,25 @@ the flag exists).
 
 `ReviewConfig.recursive` (default on) decides what happens when a single file's
 diff exceeds `max_input_tokens`: walk it hunk-by-hunk (each hunk its own focused
-call) or send the whole file in one call. `evals/rlm.py` is an on-demand A/B
+call) or send the whole file in one call. `evals.ab --sweep` is an on-demand A/B
 benchmark that runs both through the **real** engine — they differ only by that
-one flag — and reports recall + token usage for each, so "does walking the diff
+one flag — and reports pooled recall, precision, and anchoring for each, so "does walking the diff
 actually raise recall?" gets a real number instead of a hunch:
 
 ```bash
 # Defaults to both RLM fixtures (rlm-bigfile, rlm-pipeline) — each a single
-# multi-hunk file ~600 tokens; --budget below that (but above a single hunk)
-# forces the over-budget split. --repeats samples the spread. Needs a live model.
-uv run python -m evals.rlm --provider ollama --model qwen3.5:4b \
-  --api-base http://localhost:11434 --repeats 8
+# multi-hunk file ~600 tokens; a token budget below that (but above a single
+# hunk) forces the over-budget split. Needs a live model.
+uv run python -m evals.ab --provider ollama --model qwen3.5:4b \
+  --api-base http://localhost:11434 --sweep recursive=false,true \
+  --fixture rlm-bigfile --fixture rlm-pipeline --max-input-tokens 300
 ```
 
-It runs both strategies through the real engine `--repeats` times (recall pooled
-across the fixtures per run) and prints each strategy's recall **mean / min / max
-/ spread** plus mean token cost and a one-line verdict (e.g. *"recursive recall
-+25% (mean) at 1.4x tokens"*). The spread is the point — at temperature > 0 a
-single run is noisy, so a wide `--repeats` tells you whether the gap is real or
-sampling luck. `--only whole|recursive` runs one strategy (the CI matrix uses it
-to parallelise the two legs); `--categories` / `--budget` / `--num-ctx` /
-`--temperature` tune it. This is the **same command** the `rlm-bench` workflow
-runs, so a local run and CI can't drift.
+It runs both strategies once through the real engine with temperature pinned to
+zero. The first sweep value is the baseline; each later value gets a pooled
+recall/precision delta against it. `--categories`, `--max-input-tokens`, and the
+usual provider options tune the run. This is the **same command** the
+`rlm-bench` workflow runs, so a local run and CI cannot drift.
 
 Two distinct effects are in play, and the benchmark separates them by fixture
 size:
@@ -426,16 +423,15 @@ size:
 
 Use it to confirm the walk helps on your model before trusting the default. Its
 plumbing (usage accounting, the comparison record) is unit-tested in
-`tests/evals/test_rlm.py`; only the A/B runner needs a live model.
+`tests/evals/test_ab.py`; only the A/B runner needs a live model.
 
-The `.github/workflows/rlm-bench.yml` workflow runs this A/B as two separate
-matrix tasks (`whole` vs `recursive`) against a live ollama model and publishes
-each leg's recall to the run summary — on demand (`workflow_dispatch`) or when the
-RLM code/fixture changes.
+The `.github/workflows/rlm-bench.yml` workflow runs the generic sweep as one
+on-demand task against a live ollama model and publishes the comparison to the
+run summary.
 
-**Recorded result** (qwen3.5:4b, fixtures `rlm-bigfile` + `rlm-pipeline` pooled,
-`--budget 300`, `--categories security,correctness,performance`, `--repeats 8`,
-temperature 0.6):
+**Historical recorded result** from the former repeated RLM harness (qwen3.5:4b,
+fixtures `rlm-bigfile` + `rlm-pipeline` pooled, token budget 300, categories
+security/correctness/performance, eight samples at temperature 0.6):
 
 | strategy | mean recall | range | spread | tokens |
 |---|---|---|---|---|

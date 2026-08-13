@@ -8,14 +8,14 @@ Runs the same fixtures twice — once with the reviewer *code* checked out at
 working tree — and reports the pooled recall / precision deltas so a prompt or
 pipeline change can be measured rather than eyeballed. Temperature is pinned to 0
 in both legs and the **fixtures are always read from the current tree**, so the
-only thing that varies is the reviewer code (or, with ``--context-lines``, one
-config axis): the fixtures are the fixed yardstick.
+only thing that varies is the reviewer code (or, with ``--sweep``, one config
+axis): the fixtures are the fixed yardstick.
 
-A config axis (``--context-lines 20,40,0``) sweeps one ``ReviewConfig`` setting
-across the *current* tree instead of comparing two refs, so a window-width
-question is answerable on one checkout.
+A config axis (``--sweep context-lines=20,40,0``) sweeps one ``evals.run``
+option across the *current* tree instead of comparing two refs, so a
+configuration question is answerable on one checkout.
 
-Like ``evals.rlm`` this needs a live model, so only the pure aggregation (pooling,
+This needs a live model, so only the pure aggregation (pooling,
 deltas, verdict) is in the pytest gate (``tests/evals/test_ab.py``). It exits
 non-zero only on a *pipeline* break (a leg that wouldn't run / parse), never on
 the deltas — it reports numbers, it doesn't gate them.
@@ -216,11 +216,31 @@ def _provider_passthrough(args: argparse.Namespace) -> list[str]:
         out += ["--api-key", args.api_key]
     if args.timeout is not None:
         out += ["--timeout", str(args.timeout)]
+    if args.max_input_tokens is not None:
+        out += ["--max-input-tokens", str(args.max_input_tokens)]
     if args.categories:
         out += ["--categories", args.categories]
     for name in args.fixtures or []:
         out += ["--fixture", name]
     return out
+
+
+def _parse_sweep(value: str) -> tuple[str, list[str]]:
+    field, separator, raw_values = value.partition("=")
+    field = field.strip().replace("_", "-")
+    values = [item.strip() for item in raw_values.split(",") if item.strip()]
+    if not separator or not field or len(values) < 2:
+        raise ValueError("--sweep must be NAME=VALUE,VALUE with at least two values")
+    if not field.replace("-", "").isalnum():
+        raise ValueError("--sweep field must contain only letters, numbers, '-' or '_'")
+    return field, values
+
+
+def _sweep_args(field: str, value: str) -> list[str]:
+    lowered = value.lower()
+    if lowered in {"true", "false"}:
+        return [f"--{field}" if lowered == "true" else f"--no-{field}"]
+    return [f"--{field}", value]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -232,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--api-base", default=None)
     ap.add_argument("--api-key", default=None)
     ap.add_argument("--timeout", type=int, default=None)
+    ap.add_argument("--max-input-tokens", type=int, default=None)
     ap.add_argument("--categories", default=None, help="comma-separated review lenses")
     ap.add_argument(
         "--fixture",
@@ -247,18 +268,15 @@ def main(argv: list[str] | None = None) -> int:
         "(e.g. main, a tag, a sha). Compared against the current working tree.",
     )
     ap.add_argument(
-        "--context-lines",
+        "--sweep",
         default=None,
-        help="instead of comparing two refs, sweep ReviewConfig.context_lines over "
-        "this comma-separated list on the CURRENT tree (e.g. 20,40,0) — a config A/B "
-        "axis for the hunk-context window width",
+        metavar="NAME=VALUE,VALUE",
+        help="sweep one evals.run option on the current tree; first value is baseline",
     )
     ap.add_argument(
         "--preset",
         default=None,
-        help="review preset. A comma-separated list (e.g. 'full,fast') sweeps the "
-        "preset on the CURRENT tree — the one-command full-vs-fast recall A/B, first "
-        "value as baseline. A single value applies to both legs of a --baseline-ref "
+        help="review preset applied to both legs of a --baseline-ref "
         "comparison (the baseline ref must already know the flag, i.e. >= 0.10.0; "
         "for older refs omit it and compare via --categories instead).",
     )
@@ -266,49 +284,32 @@ def main(argv: list[str] | None = None) -> int:
 
     fixtures_dir = Path(__file__).parent / "fixtures"
     passthrough = _provider_passthrough(args)
-    preset_values = [v.strip() for v in (args.preset or "").split(",") if v.strip()]
-    if len(preset_values) > 1 and args.context_lines is not None:
-        ap.error("sweep one config axis at a time: --preset list OR --context-lines")
-    if len(preset_values) == 1:
-        # A pinned preset is provider passthrough, not an axis: both legs get it.
-        passthrough += ["--preset", preset_values[0]]
+    if args.preset:
+        passthrough += ["--preset", args.preset]
 
     # Config axis: sweep one ReviewConfig setting on the current tree. Each value is
     # its own leg; we report each against the first as baseline.
-    if len(preset_values) > 1:
+    if args.sweep:
+        try:
+            field, values = _parse_sweep(args.sweep)
+        except ValueError as exc:
+            ap.error(str(exc))
         legs = [
             _current_leg(
                 fixtures_dir,
                 provider=args.provider,
                 model=args.model,
-                extra_args=passthrough + ["--preset", v],
-                label=f"preset={v}",
+                extra_args=passthrough + _sweep_args(field, value),
+                label=f"{field}={value}",
             )
-            for v in preset_values
+            for value in values
         ]
         for leg in legs[1:]:
             _print_report(ABReport(baseline=legs[0], current=leg))
         return 0
 
-    if args.context_lines is not None:
-        values = [v.strip() for v in args.context_lines.split(",") if v.strip()]
-        legs = [
-            _current_leg(
-                fixtures_dir,
-                provider=args.provider,
-                model=args.model,
-                extra_args=passthrough + ["--context-lines", v],
-                label=f"context-lines={v}",
-            )
-            for v in values
-        ]
-        baseline = legs[0]
-        for leg in legs[1:]:
-            _print_report(ABReport(baseline=baseline, current=leg))
-        return 0
-
     if not args.baseline_ref:
-        ap.error("either --baseline-ref, --context-lines, or a --preset list is required")
+        ap.error("either --baseline-ref or --sweep is required")
 
     baseline = _baseline_leg(
         args.baseline_ref,

@@ -429,91 +429,30 @@ local_diff_options = _stack(
     help="Print a timing profile at the end of the run: total wall time, "
     "per-stage and per-call tables, and prompt-cache hit totals",
 )
-def review(
-    provider: str | None,
-    model: str | None,
-    preset: ReviewPreset | None,
-    full_preset: bool,
-    fallback_model: str | None,
-    reflect_model: str | None,
-    language: str | None,
-    triage_model: str | None,
-    api_key: str | None,
-    api_base: str | None,
-    min_severity: Severity | None,
-    fail_on: Severity | None,
-    unanchored_min_severity: Severity | None,
-    max_files: int | None,
-    max_file_diff_lines: int | None,
-    max_input_tokens: int | None,
-    max_tokens: int | None,
-    reasoning_effort: str | None,
-    num_ctx: int | None,
-    max_concurrency: int | None,
-    base: str | None,
-    working: bool,
-    uncommitted: bool,
-    output_format: str | None,
-    as_json: bool,
-    context_lines: int | None,
-    timeout: int | None,
-    max_review_seconds: int | None,
-    max_review_tokens: int | None,
-    temperature: float | None,
-    reflect: bool | None,
-    learn_feedback: bool | None,
-    min_confidence: int | None,
-    recursive: bool | None,
-    spec_review: bool | None,
-    structured_output: bool | None,
-    mid_review_retrieval: bool | None,
-    symbol_resolution: bool | None,
-    prompt_cache: bool | None,
-    static_analysis: bool | None,
-    profile: bool,
-    config_path: str | None,
-) -> None:
+def review(**inputs: Any) -> None:
     """Review local git changes and print findings — no GitHub needed."""
+    working = inputs.pop("working")
+    uncommitted = inputs.pop("uncommitted")
     _check_diff_mode(working, uncommitted)
+    full_preset = inputs.pop("full_preset")
+    preset = inputs.get("preset")
     if full_preset and preset is ReviewPreset.fast:
         raise click.UsageError("--full contradicts --preset fast")
-    cfg = _load_cfg(
-        config_path,
-        user_config_path=store.user_config_path(),
-        provider=provider,
-        model=model,
-        preset=ReviewPreset.full if full_preset else preset,
-        reflect_model=reflect_model,
-        language=language,
-        triage_model=triage_model,
-        min_severity=min_severity,
-        fail_on=fail_on,
-        unanchored_min_severity=unanchored_min_severity,
-        max_files=max_files,
-        max_file_diff_lines=max_file_diff_lines,
-        max_input_tokens=max_input_tokens,
-        max_tokens=max_tokens,
-        reasoning_effort=reasoning_effort,
-        num_ctx=num_ctx,
-        max_concurrency=max_concurrency,
-        context_lines=context_lines,
-        timeout=timeout,
-        max_review_seconds=max_review_seconds,
-        max_review_tokens=max_review_tokens,
-        temperature=temperature,
-        reflect=reflect,
-        learn_feedback=learn_feedback,
-        min_confidence=min_confidence,
-        recursive=recursive,
-        spec_review=spec_review,
-        structured_output=structured_output,
-        mid_review_retrieval=mid_review_retrieval,
-        symbol_resolution=symbol_resolution,
-        prompt_cache=prompt_cache,
+    inputs["preset"] = ReviewPreset.full if full_preset else preset
+    config_path = inputs.pop("config_path")
+    runtime = _runtime(
+        inputs.pop("api_key"),
+        inputs.pop("api_base"),
+        inputs.pop("fallback_model"),
+        profile=inputs.pop("profile"),
     )
+    static_analysis = inputs.pop("static_analysis")
+    base = inputs.pop("base")
+    output_format = inputs.pop("output_format")
+    as_json = inputs.pop("as_json")
+    cfg = _load_cfg(config_path, user_config_path=store.user_config_path(), **inputs)
     cfg = _apply_static_analysis_flag(cfg, static_analysis)
 
-    runtime = _runtime(api_key, api_base, fallback_model, profile=profile)
     fmt = output_format or ("json" if as_json else "human")
     execute_local_review(cfg, runtime, base=base, working=working, uncommitted=uncommitted, fmt=fmt)
 

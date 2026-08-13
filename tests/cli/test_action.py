@@ -699,22 +699,19 @@ class TestActionRouting:
         monkeypatch.setenv("INPUT_CONFIG_PATH", "")
         assert action_inputs()["config_path"] is None
 
-    def test_inputs_are_an_allowlist_not_every_config_field(self, monkeypatch):
+    def test_action_inputs_are_derived_from_review_config(self):
         """`action_inputs()` reads a written-out name list, not ReviewConfig's fields.
 
         Deriving the names from ``ReviewConfig.model_fields`` would silently
         accept INPUT_* vars `action.yml` never declares — so a config field with
         no matching action input must stay unreadable from the environment.
         """
-        from lgtmaybe.cli import action_inputs
+        from lgtmaybe.cli import _ACTION_CONFIG_EXCLUSIONS, _RUNTIME_INPUTS, action_inputs
         from lgtmaybe.core.models import ReviewConfig
 
-        undeclared = sorted(set(ReviewConfig.model_fields) - set(action_inputs()))
-        assert undeclared, "expected at least one config field with no action input"
-
-        for name in undeclared:
-            monkeypatch.setenv(f"INPUT_{name.upper()}", "smuggled")
-        assert not set(action_inputs()) & set(undeclared)
+        assert set(action_inputs()) == (
+            set(ReviewConfig.model_fields) - _ACTION_CONFIG_EXCLUSIONS | _RUNTIME_INPUTS
+        )
 
     def test_structured_output_input_is_read(self, monkeypatch):
         """INPUT_STRUCTURED_OUTPUT is the action's escape hatch for a gateway that

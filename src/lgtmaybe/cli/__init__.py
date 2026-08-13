@@ -821,53 +821,39 @@ def pr_url_from_event(event: dict[str, Any]) -> str:
     return f"https://github.com/{repo}/pull/{number}"
 
 
-#: The action inputs the container reads, as an explicit allowlist. Written out
-#: rather than derived from ``ReviewConfig.model_fields`` on purpose: deriving
-#: would silently accept inputs ``action.yml`` never declares. Each name maps to
-#: the ``INPUT_<NAME.upper()>`` env var GitHub sets for it.
-_ACTION_INPUTS = (
-    "provider",
-    "model",
-    "preset",
-    "fallback_model",
-    "reflect_model",
-    "language",
-    "triage_model",
-    "api_key",
-    "api_base",
-    "timeout",
-    "max_review_seconds",
-    "max_review_tokens",
-    "temperature",
-    "num_ctx",
-    "max_input_tokens",
-    "max_tokens",
-    "reasoning_effort",
-    "max_concurrency",
-    "resolve_fixed",
-    "recursive",
-    "structured_output",
-    "symbol_resolution",
-    "mid_review_retrieval",
-    "prompt_cache",
-    "incremental",
-    "spec_review",
-    "static_analysis",
-    "auto_describe",
-    "auto_diagram",
-    "answer_replies",
-    "pr_labels",
-    "learn_feedback",
-    "fail_on",
-    "profile",
-    "config_path",
-)
-
 #: Inputs ``action()`` handles itself rather than passing to ``ReviewConfig``:
 #: credentials and per-run options that live on ``RuntimeOptions``, the nested
 #: static-analysis toggle, and the config file path.
 _RUNTIME_INPUTS = frozenset(
     {"api_key", "api_base", "fallback_model", "profile", "static_analysis", "config_path"}
+)
+
+#: Config fields intentionally available only through the config file or local
+#: CLI. Everything else is an Action input; action.yml parity tests make a newly
+#: derived name fail loudly until its declaration and environment mapping exist.
+_ACTION_CONFIG_EXCLUSIONS = frozenset(
+    {
+        "categories",
+        "context_lines",
+        "directory_rules",
+        "exclude_paths",
+        "extra_lenses",
+        "finding_rules",
+        "function_context",
+        "ignore_fingerprints",
+        "include_paths",
+        "max_file_diff_lines",
+        "max_files",
+        "min_confidence",
+        "min_severity",
+        "reflect",
+        "spec_paths",
+        "summary_template",
+        "unanchored_min_severity",
+    }
+)
+_ACTION_INPUTS = tuple(
+    sorted(set(ReviewConfig.model_fields) - _ACTION_CONFIG_EXCLUSIONS | _RUNTIME_INPUTS)
 )
 
 
