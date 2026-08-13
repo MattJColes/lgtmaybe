@@ -1031,9 +1031,13 @@ class TestIntentSeesWhatItWasNotShown:
             for path in unseen:
                 assert path in text, f"batch did not name {path} as not visible"
 
-    def test_only_the_intent_lens_pays_for_the_list(self) -> None:
-        """It rides the intent block, so no other lens and no cached prefix
-        carries it."""
+    def test_only_the_intent_lens_pays_for_the_intent_prose(self) -> None:
+        """The intent PROSE is still intent-only — it is large, it is untrusted,
+        and no other lens has any use for it.
+
+        The hidden-file list is not: every lens now gets that as its own block on
+        the shared prefix, because every lens can reason wrongly about a file it
+        was not shown. So what is asserted here is the block, not the paths."""
         ctx = _CTX_WITH_INTENT.model_copy(update={"changed_files": ["a.py", "docs/llms-full.txt"]})
         provider = _provider_for([], reflection_keeps_all=True)
         cfg = ReviewConfig(
@@ -1046,7 +1050,10 @@ class TestIntentSeesWhatItWasNotShown:
 
         others = [c for c in _review_calls(provider) if "INTENT_START" not in _user_text(c)]
         assert others, "expected a non-intent lens to have run"
-        assert all("docs/llms-full.txt" not in _user_text(c) for c in others)
+        for call in others:
+            text = _user_text(call)
+            assert _CTX_WITH_INTENT.title not in text
+            assert "docs/llms-full.txt" in text, "every lens is told what it was not shown"
 
 
 def test_intent_block_is_redacted_before_egress() -> None:
@@ -1869,7 +1876,9 @@ def test_include_paths_reviews_only_matching_files() -> None:
 
     sent = _first_user_diff(provider)
     assert "src/app.py" in sent
-    assert "scripts/tool.py" not in sent
+    # Its CONTENT, not its name: the filtered path is now named on every call by
+    # the not-shown manifest, which is the point — filtered out, not invisible.
+    assert "+y = 2" not in sent
 
 
 def test_exclude_paths_drops_matching_files() -> None:
@@ -1881,7 +1890,9 @@ def test_exclude_paths_drops_matching_files() -> None:
 
     sent = _first_user_diff(provider)
     assert "src/app.py" in sent
-    assert "scripts/tool.py" not in sent
+    # Its CONTENT, not its name: the filtered path is now named on every call by
+    # the not-shown manifest, which is the point — filtered out, not invisible.
+    assert "+y = 2" not in sent
 
 
 def test_exclude_paths_wins_over_include_paths() -> None:
@@ -1898,7 +1909,9 @@ def test_exclude_paths_wins_over_include_paths() -> None:
 
     sent = _first_user_diff(provider)
     assert "src/app.py" in sent
-    assert "scripts/tool.py" not in sent
+    # Its CONTENT, not its name: the filtered path is now named on every call by
+    # the not-shown manifest, which is the point — filtered out, not invisible.
+    assert "+y = 2" not in sent
 
 
 def test_empty_path_filters_review_everything() -> None:
@@ -2368,3 +2381,67 @@ def test_every_lens_is_told_the_redaction_marker_is_not_a_finding() -> None:
 
     for lens in _build_lenses(cfg, has_intent=False):
         assert REDACTED_PLACEHOLDER in build_shared_preamble() + lens.user_block
+
+
+# ---------------------------------------------------------------------------
+# The not-shown manifest reaches every lens (not just intent and spec)
+# ---------------------------------------------------------------------------
+
+
+def _review_prefixes(provider: FakeProvider) -> list[str]:
+    """The shared per-batch prefix of every REVIEW call (reflection excluded)."""
+    return [
+        call["messages"][1]["content"]
+        for call in provider.calls
+        if _REFLECT_MARKER not in call["messages"][0]["content"]
+    ]
+
+
+def test_every_lens_is_told_which_changed_files_it_was_not_shown() -> None:
+    """`files_not_visible` reached two lenses — intent and spec. Everyone else was
+    left to INFER absence from "code you rely on may live in files you CANNOT
+    see", which asks the model to reason about what it cannot observe. Stating it
+    as fact is strictly more information, on machinery that already exists."""
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", exclude_paths=["scripts/**"])
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    prefixes = _review_prefixes(provider)
+    assert prefixes, "no review calls were made"
+    for prefix in prefixes:
+        assert "scripts/tool.py" in prefix, "a lens was not told what it is missing"
+
+
+def test_nothing_hidden_costs_zero_extra_prompt_bytes() -> None:
+    """The shared prefix is a prompt-cache entry, and most PRs hide nothing. A
+    review where the batch shows every changed file must send exactly what it sent
+    before — no empty block, no lead-in, no marker."""
+    from lgtmaybe.engine.injection import _HIDDEN_START
+
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    for prefix in _review_prefixes(provider):
+        assert _HIDDEN_START not in prefix
+
+
+def test_the_manifest_rides_the_shared_prefix_not_the_system_preamble() -> None:
+    """It varies per batch, exactly like the hints and directory blocks — so it
+    joins the per-batch prefix the primer warms once, and the cross-batch system
+    preamble stays byte-identical."""
+    from lgtmaybe.engine.injection import _HIDDEN_START
+    from lgtmaybe.engine.prompt import build_shared_preamble
+
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", exclude_paths=["scripts/**"])
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    for call in provider.calls:
+        system = call["messages"][0]["content"]
+        assert _HIDDEN_START not in system
+        if _REFLECT_MARKER not in system:
+            assert system == build_shared_preamble(None, False)
