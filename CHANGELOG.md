@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.0.0...lgtmaybe-v2.0.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* align GitHub Action with v2 ([#430](https://github.com/MattJColes/lgtmaybe/issues/430)) ([386b9d4](https://github.com/MattJColes/lgtmaybe/commit/386b9d4c250c5adeccf05b9876aed3ebb0f7f0f5))
+
 ## [2.0.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v1.14.1...lgtmaybe-v2.0.0) (2026-08-13)
 
 
