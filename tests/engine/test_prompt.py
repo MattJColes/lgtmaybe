@@ -609,6 +609,20 @@ def test_prompt_guards_whole_file_symbol_claims() -> None:
         assert "hedge" in prompt
 
 
+def test_prompt_guards_claims_about_an_unshown_symbols_value() -> None:
+    """The symbol rule above covers EXISTENCE — "is it defined, imported, awaited".
+    Four of the five false positives on #407 never claimed the constant did not
+    exist; they asserted what it CONTAINED (an empty frozenset, 200 lines away in
+    the same file). Existence and value are different claims, so the rule has to
+    name the second one too, in every focused prompt."""
+    for category in ReviewCategory:
+        prompt = _built_in_prompt(category).lower()
+        assert "contains" in prompt
+        assert "constant" in prompt
+        # the same remedy as every other absence claim: hedge, don't assert
+        assert "hedge" in prompt
+
+
 def test_prompt_guards_unused_import_inside_functions() -> None:
     for category in ReviewCategory:
         prompt = _built_in_prompt(category).lower()

@@ -950,6 +950,14 @@ is never assigned, UNLESS the diff itself shows that absence (e.g. the `+` line 
 import, or the changed line is the definition site). When you cannot see the rest of the \
 file, hedge the wording, lower the severity, and raise it only as a question worth \
 checking — or omit it.
+- The rule above is about whether a symbol EXISTS. The same restraint applies to what it \
+CONTAINS: you may not assume the value of a constant, default, config entry, collection, or \
+enum the diff does not show — only that it exists. A name is not evidence of its contents (a \
+constant named for a policy may hold an empty set, and it may be defined hundreds of lines \
+away in the same file, outside every hunk). If a finding turns on what an unshown value \
+holds — "this returns 1 for X", "that flag is on by default", "this list includes Y" — do \
+NOT assert it: hedge the wording, lower the severity, or omit it, exactly as for a guard you \
+cannot see.
 - An import is NOT unused just because the importing line is the only place it appears in \
 the diff. It may be referenced inside a function body, as a decorator, as a type \
 annotation, or as a parameter default — including a dependency-injection default such as a \

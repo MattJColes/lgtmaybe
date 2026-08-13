@@ -150,7 +150,9 @@ def test_verdict_with_think_block_and_fence_parses() -> None:
 def test_reflect_prompt_names_gap_findings_as_valid_types() -> None:
     """The keep-criterion must not read as "only bugs in the changed line count":
     a literal-minded judge would otherwise systematically prune missing-test,
-    missing-doc, performance, and intent-mismatch findings."""
+    missing-doc, performance, and intent-mismatch findings. (The test/doc half is
+    conditional on the file being visible — see the test below — but it must still
+    be named as a valid TYPE, or the judge prunes it on shape alone.)"""
     provider = _fake_with_verdict({0: True})
 
     reflect_findings([_HIGH], _CTX, _CFG, provider)
@@ -158,6 +160,25 @@ def test_reflect_prompt_names_gap_findings_as_valid_types() -> None:
     system = provider.calls[0]["messages"][0]["content"].lower()
     assert "missing test" in system or "missing-test" in system
     assert "intent" in system
+
+
+def test_reflect_prompt_conditions_the_test_and_doc_carve_out_on_seeing_the_file() -> None:
+    """The carve-out and the cross-file drop-rule left a seam, and a real finding
+    landed in it: "the diff adds no test covering the new default" — true of the
+    diff, false as a defect, because the test lived in an untouched file. The
+    carve-out was instructing the auditor NOT to prune precisely the claim the
+    cross-file rule forbids.
+
+    So the protection is conditional now: a missing-test/doc finding keeps it only
+    when the test or doc file is actually in front of the auditor."""
+    provider = _fake_with_verdict({0: True})
+
+    reflect_findings([_HIGH], _CTX, _CFG, provider)
+
+    system = provider.calls[0]["messages"][0]["content"].lower()
+    assert "only when" in system
+    assert "untouched" in system or "elsewhere" in system
+    assert "test file" in system
 
 
 def test_reflect_prompt_drops_unseen_code_assumptions() -> None:
