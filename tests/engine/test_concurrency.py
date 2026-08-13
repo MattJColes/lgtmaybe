@@ -151,5 +151,8 @@ class TestFlattenedFanOut:
             reflect=False,
         )
         findings, summary = LLMReviewEngine(_OneBadLens()).review(_multi_file_ctx(1), cfg)
-        assert len(calls) == 2
+        # Two lens calls, plus the rescue wave's one more go at the security lens
+        # — which fails again here, since this provider always refuses it. One
+        # extra call and then the round reports itself; it never grinds.
+        assert len(calls) == 3
         assert "1 of 2 review calls failed" in summary

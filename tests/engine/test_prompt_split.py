@@ -289,8 +289,11 @@ class TestCacheWarmup:
             categories=[ReviewCategory.security, ReviewCategory.performance, ReviewCategory.tests],
         )
         findings, summary = LLMReviewEngine(_FailingPrimer()).review(_big_ctx(), cfg)
-        assert calls["n"] == 3  # the two followers still ran
-        assert "1 of 3 review calls failed" in summary
+        # Three lens calls — the two followers still ran, the primer's failure
+        # never stranded them — plus the rescue wave's one more go at the primer,
+        # which this time succeeds. So the round completes.
+        assert calls["n"] == 4
+        assert "review calls failed" not in summary
 
 
 class TestReflectionSplitShape:

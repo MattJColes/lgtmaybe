@@ -414,4 +414,8 @@ def test_an_ordinary_failure_is_not_split() -> None:
     with pytest.raises(ReviewIncompleteError):
         LLMReviewEngine(provider).review(_ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg())
 
-    assert len(provider.diffs) == 1
+    # The original call plus the rescue wave's one more go — and both saw the
+    # WHOLE diff. A split would have sent a halved one, which is the thing under
+    # test here; the rescue only ever re-sends the same request.
+    assert len(provider.diffs) == 2
+    assert provider.diffs[0] == provider.diffs[1]
