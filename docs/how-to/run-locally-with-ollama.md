@@ -239,7 +239,9 @@ to set anything for a normal run. (Direct cloud providers default to 600 s.)
 **That default scales with the fan-out.** Because the calls queue, the budget has
 to cover the wait as well as the work: at the default width of six the resolved
 per-call timeout is `1800 × 6`, **bounded by `max_review_seconds`** (3600 s by
-default) so no single call can outlive the review it belongs to. At
+default) so no call is ever given more time than the whole review is allowed. (That
+bounds the budget rather than the wall clock: the deadline decides when a call may
+*start*, so one that begins just inside it still runs its budget out.) At
 `max_concurrency: 1` there is no queue and the budget is the plain 1800 s. Every
 run logs which number it resolved, and why:
 

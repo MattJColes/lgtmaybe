@@ -161,7 +161,9 @@ lgtmaybe review --provider openai-compatible --model <model> \
 **Queueing does not cost you a timeout.** A queued request's clock starts when it
 is sent, not when the slot frees, so lgtmaybe scales the `openai-compatible`
 per-call default (1800 s) by the fan-out width — `1800 × 6` at the default,
-bounded by `max_review_seconds` (3600 s) so no call outlives the review. An
+bounded by `max_review_seconds` (3600 s) so no call is given more time than the
+whole review is allowed — a bound on the budget, not on the wall clock, since the
+deadline gates when a call may start rather than cutting a running one short. An
 explicit `timeout` is honoured exactly as written, at any width. Each run logs the
 number it resolved and the width it assumed:
 
