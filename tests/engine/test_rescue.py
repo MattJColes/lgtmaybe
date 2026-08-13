@@ -10,8 +10,10 @@ once, after the main wave has drained, and costs nothing at all on a healthy run
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Iterator
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -30,6 +32,7 @@ from lgtmaybe.engine import (
     clear_interrupt,
     request_interrupt,
 )
+from lgtmaybe.engine import engine as engine_module
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -232,17 +235,22 @@ class TestRescueWave:
         assert len(provider.calls) == 2  # no third call
         assert "unparseable model output" in summary
 
-    def test_a_ceiling_skipped_call_is_not_rescued(self) -> None:
-        """A ceiling the user set is not a fault to retry past.
+    def test_a_ceiling_still_holds_through_the_rescue_wave(self) -> None:
+        """A ceiling the user set must survive the rescue, not just precede it.
 
-        Driven with the wind-down flag rather than the `max_review_seconds`
-        clock: both land on the same `_skip_reason` gate the rescue must
-        respect, and the flag gets there deterministically and instantly
-        instead of sleeping a call out past a deadline.
+        Worth being precise about what this pins, because it is NOT the
+        `_rescuable` gate: a rescue re-enters `_review_lens`, which re-checks
+        `_skip_reason` before it calls anything, so an interrupted call costs no
+        model call even if the gate let it through. Belt and braces — and this
+        is the braces. It fails if the rescue is ever changed to reach the
+        provider without going back through that check.
+
+        Driven with the wind-down flag, which reaches `_skip_reason`
+        deterministically and instantly; the deadline's route is pinned
+        separately below.
 
         Serial provider, so the first call raises the flag and the second is
-        skipped. The rescue must leave the skipped one alone — spending past a
-        ceiling to rescue the call it stopped would defeat the ceiling.
+        skipped.
         """
         provider = _InterruptOnFirstCall()
 
@@ -250,6 +258,40 @@ class TestRescueWave:
 
         assert len(provider.calls) == 1
         assert "interrupted" in summary
+
+    def test_the_deadline_still_holds_through_the_rescue_wave(self) -> None:
+        """The same property for `max_review_seconds` specifically.
+
+        The two ceilings reach `_skip_reason` by different routes — a flag
+        versus a clock comparison — and the case above only exercises one of
+        them.
+
+        The clock is stepped, not slept: `perf_counter` reports one instant
+        until the first completion runs, and a far-future one after. That
+        crosses the deadline exactly once, deterministically, with no sleep and
+        no dependence on how loaded the runner is.
+        """
+        crossed = threading.Event()
+        base = time.perf_counter()
+
+        class _CrossesTheDeadline(FakeProvider):
+            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+                self.calls.append({"messages": messages, "model": model, "opts": opts})
+                crossed.set()
+                return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+
+        def stepped() -> float:
+            return base + (10_000.0 if crossed.is_set() else 0.0)
+
+        provider = _CrossesTheDeadline()
+        # ollama resolves to one worker, so the calls are strictly serial: the
+        # first runs, crosses the deadline, and the second is skipped by it.
+        cfg = _cfg(provider=Provider.ollama, max_review_seconds=1)
+        with patch.object(engine_module.time, "perf_counter", stepped):
+            _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
+
+        assert len(provider.calls) == 1
+        assert "deadline" in summary
 
     def test_the_notice_names_the_failing_lens(self) -> None:
         """A failed security lens and a failed documentation lens read identically

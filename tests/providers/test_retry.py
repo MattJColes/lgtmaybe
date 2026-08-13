@@ -1151,21 +1151,26 @@ class TestRateLimitBackoff:
 
     def test_retry_after_accepts_an_http_date(self) -> None:
         """RFC 9110 allows either delta-seconds or an HTTP-date, and the
-        Cloudflare edge these gateways sit behind sends both forms."""
-        when = datetime.now(UTC) + timedelta(seconds=40)
-        exc = self._rate_limited(response=self._429({"retry-after": format_datetime(when)}))
-        wait = provider_module._retry_wait(self._state(exc))
-        # Deliberately no wall-clock-derived bound in either direction: a
-        # contended CI worker can stall for seconds between the header being
-        # written and the wait computed, and pinning either end to 40 would make
-        # a correct implementation fail. What is under test is that the DATE was
-        # parsed at all — the ladder would answer 5s, so anything above it came
-        # from the header, and the clamp is what keeps it in range.
-        assert (
-            provider_module._RATE_LIMIT_BACKOFF_INITIAL
-            < wait
-            <= provider_module._RETRY_AFTER_CEILING
-        )
+        Cloudflare edge these gateways sit behind sends both forms.
+
+        The clock is frozen rather than read twice. Building the header from
+        `now` and then asserting on what the code computes from its own `now`
+        makes the answer depend on how long the test took: a worker stalled past
+        the header's date drives the wait to zero — correct behaviour, failing
+        test. Pinning both reads to one instant is what lets this assert the
+        exact number the header asked for.
+        """
+        frozen = datetime(2026, 8, 13, 12, 0, 0, tzinfo=UTC)
+
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+                return frozen
+
+        header = format_datetime(frozen + timedelta(seconds=40))
+        exc = self._rate_limited(response=self._429({"retry-after": header}))
+        with patch.object(provider_module, "datetime", _FrozenDatetime):
+            assert provider_module._retry_wait(self._state(exc)) == 40.0
 
     def test_a_retry_after_in_the_past_waits_no_time(self) -> None:
         """A stale HTTP-date must not produce a negative wait."""
