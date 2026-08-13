@@ -650,6 +650,24 @@ class TestReasoningShareIsLegibleFromAnyRun:
         assert "reasoning: 900 of 1,000 output tokens (90%" in rendered  # not 9%
         assert "1 of 2 calls reporting it" in rendered
 
+    def test_a_run_that_measured_zero_still_says_so(self) -> None:
+        """A route that reported the breakdown and put 0 in it measured something.
+        Suppressing the line puts that back in the same bucket as silence."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=10,
+            output_tokens=500,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            reasoning_tokens=0,
+        )
+
+        assert "reasoning: 0 of 500 output tokens (0%)" in p.render()
+
     def test_no_share_is_claimed_when_no_ceiling_was_configured(self) -> None:
         """`max_tokens` unset means there is no denominator — a share against a
         number nobody chose would be invention, not accounting."""

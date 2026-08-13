@@ -20,7 +20,7 @@ from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
 
 
-def _reasoning_response(reasoning: int, content: str = "ok") -> Any:
+def _reasoning_response(reasoning: Any, content: str = "ok") -> Any:
     """A response whose route DOES report the thinking/answer breakdown."""
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
@@ -1621,6 +1621,20 @@ class TestTheCeilingRidesTheResult:
             result = provider.complete([{"role": "user", "content": "hi"}], model="openai/gpt-4o")
 
         assert result.reasoning_tokens == 0
+
+    def test_a_malformed_breakdown_is_read_as_unknown(self) -> None:
+        """A flag, a negative count, or a string is not a measurement. `True` is
+        the one that would slip through a plain `isinstance(int)` — it would read
+        as one reasoning token, which is a number the table would then print."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        for value in (True, -1, "900", None, 3.5):
+            with patch("litellm.completion", return_value=_reasoning_response(value)):
+                result = provider.complete(
+                    [{"role": "user", "content": "hi"}], model="openai/gpt-5.5"
+                )
+
+            assert result.reasoning_tokens is None, value
 
     def test_no_ceiling_configured_reports_none(self) -> None:
         provider = LiteLLMProvider(model="openai/gpt-5.5")

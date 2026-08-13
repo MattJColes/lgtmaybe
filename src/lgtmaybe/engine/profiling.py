@@ -273,9 +273,13 @@ class Profiler:
         counted is said out loud rather than left for the reader to assume.
         """
         measured = [c for c in calls if c.reasoning_tokens is not None]
-        reasoning = sum(c.reasoning_tokens or 0 for c in measured)
-        if not reasoning:
+        if not measured:
+            # Nothing REPORTED — the only case with nothing to say. A run whose
+            # routes all reported 0 has measured something (a model that did no
+            # thinking), and suppressing it here would put it back in the same
+            # bucket as silence, which is the distinction this line exists for.
             return ""
+        reasoning = sum(c.reasoning_tokens or 0 for c in measured)
         output = sum(c.output_tokens for c in measured)
         share = round(100 * reasoning / output) if output else 0
         line = f"reasoning: {reasoning:,} of {output:,} output tokens ({share}%)"
