@@ -1,10 +1,14 @@
-"""The effective per-call timeout is announced, with where it came from.
+"""The effective per-call budget is announced, with where it came from.
 
 A timed-out review reports the budget it blew ("provider request exceeded 60s")
 but never where that budget came from — so an explicit `timeout: 60` in a repo's
 `.lgtmaybe.yml` and a 60s built-in default produce identical evidence. That
 ambiguity cost a real investigation, so the resolved value and its source are
 logged before the first call.
+
+The output ceiling (`max_tokens`) is announced from the same record and for the
+same reason: it now has a provider-aware default, so "response truncated at the
+8192-token `max_tokens` ceiling" names a number nobody set.
 """
 
 from __future__ import annotations
@@ -57,9 +61,9 @@ def _runtime(**overrides):
     return RuntimeOptions(api_key="sk-test", **overrides)
 
 
-def _timeout_record(records: list[logging.LogRecord]) -> logging.LogRecord:
-    matching = [r for r in records if "timeout" in r.getMessage()]
-    assert matching, "expected the resolved per-call timeout to be logged"
+def _budget_record(records: list[logging.LogRecord]) -> logging.LogRecord:
+    matching = [r for r in records if "budget" in r.getMessage()]
+    assert matching, "expected the resolved per-call budget to be logged"
     return matching[0]
 
 
@@ -67,7 +71,7 @@ def test_explicit_timeout_is_logged_and_named_as_configured(cli_logs) -> None:
     cfg = ReviewConfig(provider=Provider.openrouter, model="m", timeout=60)
     build_provider_engine(cfg, _runtime())
 
-    record = _timeout_record(cli_logs)
+    record = _budget_record(cli_logs)
     assert getattr(record, "timeout_s", None) == 60
     assert getattr(record, "timeout_source", None) == "configured"
 
@@ -76,7 +80,7 @@ def test_auto_timeout_is_logged_and_named_as_a_default(cli_logs) -> None:
     cfg = ReviewConfig(provider=Provider.openrouter, model="m")
     build_provider_engine(cfg, _runtime())
 
-    record = _timeout_record(cli_logs)
+    record = _budget_record(cli_logs)
     assert getattr(record, "timeout_s", None) == default_timeout_for(Provider.openrouter)
     assert getattr(record, "timeout_source", None) == "provider default"
 
@@ -96,7 +100,7 @@ def test_the_running_build_is_named_alongside_the_budget(cli_logs, monkeypatch) 
     cfg = ReviewConfig(provider=Provider.openrouter, model="m")
     build_provider_engine(cfg, _runtime())
 
-    assert getattr(_timeout_record(cli_logs), "lgtmaybe_version", None) == "1.2.3"
+    assert getattr(_budget_record(cli_logs), "lgtmaybe_version", None) == "1.2.3"
 
 
 @pytest.mark.parametrize(
@@ -124,7 +128,7 @@ def test_the_two_sources_are_distinguishable_at_the_same_value(cli_logs) -> None
     cfg = ReviewConfig(provider=Provider.openai, model="m", timeout=cloud_default)
     build_provider_engine(cfg, _runtime())
 
-    record = _timeout_record(cli_logs)
+    record = _budget_record(cli_logs)
     assert getattr(record, "timeout_s", None) == cloud_default
     assert getattr(record, "timeout_source", None) == "configured"
 
@@ -143,7 +147,7 @@ def test_a_local_default_is_widened_for_the_fan_out_it_will_queue_behind(cli_log
     assert expected > unscaled, "the fixture must actually exercise a widening"
     assert provider.default_opts["timeout"] == expected
 
-    record = _timeout_record(cli_logs)
+    record = _budget_record(cli_logs)
     assert getattr(record, "timeout_s", None) == expected
     assert getattr(record, "concurrency", None) == concurrency_cap(cfg)
 
@@ -199,3 +203,45 @@ def test_a_short_deadline_never_cuts_below_the_providers_own_default(cli_logs) -
     provider = build_provider_engine(cfg, _runtime())[1]
 
     assert provider.default_opts["timeout"] == default_timeout_for(Provider.ollama)
+
+
+def test_the_default_output_ceiling_is_announced(cli_logs) -> None:
+    """A truncated lens is reported as incomplete, but the reader still has to
+    know a ceiling was in play at all — otherwise "response truncated at the
+    8192-token max_tokens ceiling" names a number nobody set."""
+    from lgtmaybe.providers.factory import resolve_max_tokens
+
+    cfg = ReviewConfig(provider=Provider.ollama, model="qwen3.5:4b")
+    build_provider_engine(cfg, _runtime())
+
+    record = _budget_record(cli_logs)
+    assert getattr(record, "max_tokens", None) == resolve_max_tokens(Provider.ollama)
+    assert getattr(record, "max_tokens_source", None) == "provider default"
+
+
+def test_a_configured_ceiling_is_named_as_configured(cli_logs) -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="qwen3.5:4b", max_tokens=512)
+    build_provider_engine(cfg, _runtime())
+
+    record = _budget_record(cli_logs)
+    assert getattr(record, "max_tokens", None) == 512
+    assert getattr(record, "max_tokens_source", None) == "configured"
+
+
+def test_an_uncapped_run_says_so(cli_logs) -> None:
+    """`max_tokens: 0` turns the default off. That has to be visible too: it is
+    the setting that puts a run back on the 30-minute timeout for its stop."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="qwen3.5:4b", max_tokens=0)
+    build_provider_engine(cfg, _runtime())
+
+    record = _budget_record(cli_logs)
+    assert getattr(record, "max_tokens", None) is None
+    assert getattr(record, "max_tokens_source", None) == "uncapped"
+
+
+def test_a_cloud_run_is_uncapped_without_being_asked(cli_logs) -> None:
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4o")
+    build_provider_engine(cfg, _runtime())
+
+    record = _budget_record(cli_logs)
+    assert getattr(record, "max_tokens", None) is None
