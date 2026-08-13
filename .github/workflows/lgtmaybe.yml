@@ -17,8 +17,6 @@ on:
   pull_request_target:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
 
 # pull_request_target and issue_comment run against the BASE repo (secrets
 # available); the action only ever reads the diff via the API and never checks
@@ -45,10 +43,6 @@ jobs:
     # START of the body: `contains` is case-insensitive (so /REVIEW passes) and
     # substring-based (so `/review full` passes). A guard tighter than the parser
     # would silently disable a command that used to work.
-    #
-    # The pull_request_review_comment arm is NOT gated this way: that is the
-    # answer_replies path, where a PR author's reply inside a finding thread is
-    # plain prose with no command in it.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
@@ -58,17 +52,13 @@ jobs:
         contains(github.event.comment.body, '/improve') ||
         contains(github.event.comment.body, '/ask') ||
         contains(github.event.comment.body, '/describe') ||
-        contains(github.event.comment.body, '/diagram'))) ||
-      (github.event_name == 'pull_request_review_comment' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+        contains(github.event.comment.body, '/diagram')))
     # Two independent guards against cancelling our own review. The job scope
     # keeps an ineligible run (a bot comment that fails the guard above) out of
-    # the group entirely. The event name in the key handles the rest: lgtmaybe
-    # posts comments during a review (the diagram, the inline findings) and those
-    # comments fire the issue_comment / pull_request_review_comment events this
-    # workflow subscribes to, so without it an eligible comment run shares this
-    # group and cancel-in-progress kills the review that posted the comment. A
-    # new push still cancels an in-flight review — two pushes are both
+    # the group entirely. The event name in the key handles eligible slash-command
+    # runs: without it, a maintainer's /ask during a review shares this group and
+    # cancel-in-progress kills the review. A new push still cancels an in-flight review —
+    # two pushes are both
     # pull_request_target, so they still collide.
     concurrency:
       group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}

@@ -10,7 +10,6 @@ from click.testing import CliRunner
 from lgtmaybe.cli import main
 from lgtmaybe.cli.slash import (
     _ASK_SYSTEM,
-    _REPLY_SYSTEM,
     _RESPONSE_STYLE,
     SlashCommand,
     dispatch,
@@ -24,33 +23,29 @@ def _cfg() -> ReviewConfig:
     return ReviewConfig(provider=Provider.ollama, model="llama3")
 
 
-def test_conversational_prompts_lead_with_the_answer_without_padding() -> None:
-    for prompt in (_ASK_SYSTEM, _REPLY_SYSTEM):
-        lowered = prompt.lower()
-        assert "begin with the direct answer" in lowered
-        assert "no preamble" in lowered
-        assert "tangents" in lowered
-        assert "closing pleasantries" in lowered
+def test_ask_prompt_leads_with_the_answer_without_padding() -> None:
+    lowered = _ASK_SYSTEM.lower()
+    assert "begin with the direct answer" in lowered
+    assert "no preamble" in lowered
+    assert "tangents" in lowered
+    assert "closing pleasantries" in lowered
 
 
-def test_conversational_prompts_number_only_genuinely_multi_step_work() -> None:
-    for prompt in (_ASK_SYSTEM, _REPLY_SYSTEM):
-        lowered = prompt.lower()
-        assert "genuinely multi-step" in lowered
-        assert "fewest numbered steps" in lowered
+def test_ask_prompt_numbers_only_genuinely_multi_step_work() -> None:
+    lowered = _ASK_SYSTEM.lower()
+    assert "genuinely multi-step" in lowered
+    assert "fewest numbered steps" in lowered
 
 
-def test_conversational_prompts_add_a_next_action_only_when_work_remains() -> None:
-    for prompt in (_ASK_SYSTEM, _REPLY_SYSTEM):
-        lowered = prompt.lower()
-        assert "exactly one concrete next action" in lowered
-        assert "purely informational" in lowered
-        assert "stop after the answer" in lowered
+def test_ask_prompt_adds_a_next_action_only_when_work_remains() -> None:
+    lowered = _ASK_SYSTEM.lower()
+    assert "exactly one concrete next action" in lowered
+    assert "purely informational" in lowered
+    assert "stop after the answer" in lowered
 
 
-def test_conversational_prompts_share_one_response_style_contract() -> None:
+def test_ask_prompt_uses_the_response_style_contract() -> None:
     assert _RESPONSE_STYLE in _ASK_SYSTEM
-    assert _RESPONSE_STYLE in _REPLY_SYSTEM
 
 
 class TestParseCommand:

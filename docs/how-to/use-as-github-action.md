@@ -60,18 +60,15 @@ added since the last completed review are re-reviewed, and earlier findings
 stay open until fixed. Comment `/review full` for a full re-review on demand,
 or pin the behaviour with the `incremental` input / config key.
 
-On a `pull_request_review_comment` event lgtmaybe **answers replies in finding
-threads**: when a PR author replies inside a review conversation it opened on a
-finding, it responds in that same thread, using the finding and its surrounding
-diff hunk as context (the reply text is treated as untrusted input, exactly like
-the diff). This needs the `pull_request_review_comment` trigger in your workflow
-(the example workflows include it), and it never answers itself — only a freshly
-created reply from a human author, on a thread lgtmaybe started, is answered. It
-is on by default; set `answer_replies: false` to leave finding threads
-unanswered. With `github_identity: lgtmaybe`, replies post as
-`github-actions[bot]` rather than `lgtmaybe[bot]` — GitHub runs this event from
-the PR's branch, so branded identity cannot be minted for it (see
-[Post as lgtmaybe\[bot\]](post-as-a-github-app.md)).
+Replies inside finding threads do not trigger lgtmaybe. A comment is not
+evidence that the finding is fixed: push the fix and the next incremental review
+will verify the changed code, reply `✅ Looks resolved.`, and resolve the outdated
+thread when the finding has disappeared. Use `/ask` when you deliberately want
+the model to answer a question.
+
+> **Upgrading:** remove `answer_replies` from `.lgtmaybe.yml` and Action inputs,
+> and remove the `pull_request_review_comment` trigger from custom workflows.
+> Configuration is strict, so leaving the removed option in place is an error.
 
 > **Note on cost.** With ollama the model runs on your own hardware, so reviews
 > are free. On a hosted provider each run uses tokens you pay for, so it's worth
@@ -94,8 +91,6 @@ without that clause an ordinary "lgtm, merging" would claim a runner, pull the
 container and boot Python only to find no command and exit — no tokens spent, but
 a job queued ahead of the reviews that do have work to do. The check is
 substring-based and case-insensitive, so `/REVIEW` and `/review full` both pass.
-It is not applied to the `pull_request_review_comment` arm: replies in a finding
-thread are ordinary prose and carry no command.
 
 To change the policy, edit the `if:` on the `review` job:
 
@@ -123,8 +118,6 @@ on:
   pull_request_target:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
 
 permissions:
   contents: read
@@ -143,9 +136,7 @@ jobs:
         contains(github.event.comment.body, '/improve') ||
         contains(github.event.comment.body, '/ask') ||
         contains(github.event.comment.body, '/describe') ||
-        contains(github.event.comment.body, '/diagram'))) ||
-      (github.event_name == 'pull_request_review_comment' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+        contains(github.event.comment.body, '/diagram')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7 # base repo only — for .lgtmaybe.yml config
@@ -240,7 +231,6 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks, zizmor, ast-grep and osv-scanner post directly with no model call. The image bundles these tools and an offline vulnerability database |
 | `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
 | `auto_diagram` | `true` | After each opened, reopened, or synchronized (push) PR review, post or refresh a concise change summary with a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out |
-| `answer_replies` | `true` | Answer a PR author's reply in a finding thread (a `pull_request_review_comment` event), using the finding and its diff hunk as context; the reply is untrusted input. Set `false` to leave threads unanswered |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |

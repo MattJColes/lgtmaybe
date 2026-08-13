@@ -26,7 +26,6 @@ from lgtmaybe.cli import (
     execute_local_diagram,
     execute_local_review,
     execute_review,
-    execute_review_reply,
     main,
     pr_url_from_event,
     resolve_auto_incremental,
@@ -512,9 +511,13 @@ def comment(
 def action() -> None:
     """GitHub Action entrypoint: route by event, read inputs from env.
 
-    ``issue_comment`` routes a slash command; any other event (``pull_request``
-    / ``pull_request_target``) runs a full review of the triggering PR.
+    ``issue_comment`` routes a slash command, stale review-comment events are a
+    no-op, and pull-request events run a review of the triggering PR.
     """
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    if event_name == "pull_request_review_comment":
+        return
+
     inputs = action_inputs()
     cfg = _load_cfg(
         inputs["config_path"],
@@ -529,16 +532,8 @@ def action() -> None:
     )
 
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-
     if event_name == "issue_comment":
         execute_comment(event, cfg, runtime)
-        return
-
-    if event_name == "pull_request_review_comment":
-        # A reply inside a review conversation — answered in-thread when it lands
-        # on a finding lgtmaybe opened (loop-safe; see execute_review_reply).
-        execute_review_reply(event, cfg, runtime)
         return
 
     # incremental=None (auto): review only the new commits on a synchronize

@@ -182,8 +182,8 @@ def test_exchange_skips_an_event_that_cannot_mint_branded_identity(tmp_path: Pat
 
     That guard is correct — it is what stops a contributor editing the workflow
     on their own branch and minting an App token — so the client must not ask.
-    Asking anyway failed the whole review job every time somebody replied to a
-    finding, which is how `answer_replies` came to be dead on GitHub.
+    Stale custom workflows may still deliver this event after reply handling was
+    removed, so identity setup must remain a no-op for it.
     """
     module = _module()
     output = tmp_path / "github-output"

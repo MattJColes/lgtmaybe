@@ -10,20 +10,17 @@ on:
   pull_request_target:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
 
 permissions:
   contents: read
   pull-requests: write
   id-token: write # required for the OIDC token exchange (keyless auth)
 
-# The event name is part of the key on purpose. lgtmaybe posts comments during a
-# review (the change diagram, the inline findings), and those comments fire the
-# issue_comment / pull_request_review_comment events this workflow subscribes to.
-# Without the event in the key those runs share this group and cancel-in-progress
-# kills the review that posted the comment. A new push still cancels an in-flight
-# review — two pushes are both pull_request_target, so they still collide.
+# The automatic diagram posts an issue_comment event after a review. Because
+# workflow-level concurrency applies before the job guard, the event name keeps
+# that run from cancelling the review job that posted it. A new push still
+# cancels an in-flight review — two pushes are both
+# pull_request_target, so they still collide.
 concurrency:
   group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -41,9 +38,7 @@ jobs:
     # held ahead of the reviews that do have work to do. `contains` is
     # case-insensitive and substring-based, so the guard stays looser than the
     # parser (which additionally wants the command at the START of the body):
-    # /REVIEW and `/review full` both pass. The pull_request_review_comment arm
-    # is NOT gated this way — that is lgtmaybe answering a reply inside a finding
-    # thread, and a reply is plain prose with no command in it.
+    # /REVIEW and `/review full` both pass.
     if: >-
       (github.event_name == 'pull_request_target' &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
@@ -53,9 +48,7 @@ jobs:
         contains(github.event.comment.body, '/improve') ||
         contains(github.event.comment.body, '/ask') ||
         contains(github.event.comment.body, '/describe') ||
-        contains(github.event.comment.body, '/diagram'))) ||
-      (github.event_name == 'pull_request_review_comment' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
+        contains(github.event.comment.body, '/diagram')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

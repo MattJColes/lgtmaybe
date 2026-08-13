@@ -118,10 +118,6 @@ inputs:
     description: "On an opened, reopened, or synchronized (push) PR, post or refresh a change diagram comment after the review — a concise summary plus a Mermaid flowchart of the components the PR touches and a Mermaid sequence diagram of the run-time flow it alters (both rendered natively by GitHub), with a text fallback. On by default; set to false to opt out."
     required: false
     default: ""
-  answer_replies:
-    description: "Answer a PR author who replies inside a review conversation lgtmaybe opened on a finding: the reply is answered in that same thread, using the finding and its surrounding diff hunk as context (the reply text is treated as untrusted input). Needs the pull_request_review_comment trigger. On by default; set to false to leave finding threads unanswered."
-    required: false
-    default: ""
   pr_labels:
     description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, and consider-splitting when the diff spans many unrelated directories. Best-effort; off by default."
     required: false
@@ -304,7 +300,6 @@ runs:
         INPUT_STATIC_ANALYSIS: ${{ inputs.static_analysis }}
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}
-        INPUT_ANSWER_REPLIES: ${{ inputs.answer_replies }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
         INPUT_LEARN_FEEDBACK: ${{ inputs.learn_feedback }}
         INPUT_FAIL_ON: ${{ inputs.fail_on }}
