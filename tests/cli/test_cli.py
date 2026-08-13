@@ -367,6 +367,33 @@ class TestGitHubReviewErrorSurfacing:
         assert github.diagrams == []
         assert "fail" in github.posted[0][1].lower()
 
+    def test_required_diagram_failure_clears_the_pending_watermark(self, monkeypatch):
+        import click
+
+        import lgtmaybe.cli as cli_module
+        from tests.cli.test_incremental_review import CTX, IncrementalFakeGitHub, RecordingEngine
+
+        github = IncrementalFakeGitHub(CTX)
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, RecordingEngine(), FakeProvider()),
+        )
+        monkeypatch.setattr(
+            cli_module,
+            "run_diagram",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("diagram failed")),
+        )
+
+        with pytest.raises(click.ClickException):
+            cli_module.execute_review(
+                _default_cfg(), RuntimeOptions(pr_url="x"), diagram=True
+            )
+
+        assert github.marked_reviewed == ["head2222", None]
+        assert len(github.posted) == 2
+        assert "fail" in github.posted[-1][1].lower()
+
     def test_post_review_failure_clears_the_reviewed_watermark(self, monkeypatch):
         """A failed post must not leave the reviewed watermark stamped — the
         failure notice would carry it and the next incremental run would skip

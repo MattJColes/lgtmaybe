@@ -54,6 +54,19 @@ def _context(findings: list[ActiveFinding], ctx: PRContext) -> str:
     )
 
 
+def _input_size(findings: list[ActiveFinding], ctx: PRContext) -> int:
+    """Estimate context characters without joining attacker-controlled inputs."""
+    size = len(ctx.diff)
+    paths: set[str] = set()
+    for finding in findings:
+        size += len(finding.thread_id) + len(finding.path) + len(finding.body) + 32
+        paths.add(finding.path)
+    for path, content in ctx.file_contents.items():
+        if path in paths:
+            size += len(path) + len(content) + 16
+    return size
+
+
 def validate_findings(
     provider: ProviderClient,
     cfg: ReviewConfig,
@@ -63,6 +76,8 @@ def validate_findings(
     """Return one safe verdict per active finding; ambiguity is uncertain."""
     if not findings:
         return []
+    if _input_size(findings, ctx) > cfg.max_input_tokens * 4:
+        return _uncertain(findings, "validation context exceeds the input budget")
     context = _context(findings, ctx)
     if len(context) > cfg.max_input_tokens * 4:
         return _uncertain(findings, "validation context exceeds the input budget")

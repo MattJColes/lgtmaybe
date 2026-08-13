@@ -360,6 +360,7 @@ class RestGitHubGateway:
         # this run must never be spuriously resolved. None = full review.
         self._incremental_paths: set[str] | None = None
         self._validated_fixed_thread_ids: set[str] | None = None
+        self._active_findings: list[ActiveFinding] | None = None
         # Whether to fetch dependency manifests for the vulnerability scanner
         # (set via set_scan_manifests). Off by default so the overwhelming
         # majority of runs — static analysis is opt-in — pay no extra API calls.
@@ -738,7 +739,13 @@ class RestGitHubGateway:
         return match.group(1) if match else None
 
     def last_completed_sha(self, *, diagram_required: bool) -> str | None:
-        """Return the latest head whose required review outputs were posted."""
+        """Return the latest head whose required review outputs were posted.
+
+        A diagram marker is written only after its review post succeeds, so it
+        is the durable completion record when diagrams are required. It may be
+        older than the summary's reviewed marker after an interrupted newer
+        attempt; returning it preserves the last genuinely completed head.
+        """
         if not diagram_required:
             return self.last_reviewed_sha()
         try:
@@ -830,6 +837,7 @@ class RestGitHubGateway:
                     outdated=bool(node.get("isOutdated")),
                 )
             )
+        self._active_findings = active
         return active
 
     def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
@@ -837,13 +845,11 @@ class RestGitHubGateway:
         self._validated_fixed_thread_ids = set(thread_ids)
 
     def mark_reviewed(self, head_sha: str | None) -> None:
-        """Declare that this run is a completed review of *head_sha*.
+        """Prepare the reviewed marker for the next successful review post.
 
-        Called by the orchestrator on the success path, just before
-        ``post_review``. Enables the reviewed-SHA stamp (the incremental
-        watermark) and re-run inline-comment posting. The CLI's failure path
-        calls ``mark_reviewed(None)`` to clear the watermark, so a failure
-        notice posted after a partial run never stamps
+        This setter changes only in-memory request state; GitHub receives the
+        marker atomically inside ``post_review``. The CLI's failure path calls
+        ``mark_reviewed(None)`` so a later failure notice never stamps
         ``<!-- lgtmaybe-reviewed:... -->`` — a failed run must not move the
         watermark.
         """
@@ -1177,6 +1183,13 @@ class RestGitHubGateway:
         Each entry is ``(thread_id, opening comment's REST id or None, opening
         comment's body)`` — the comment id/body feed the resolved-marker rewrite.
         """
+        if self._validated_fixed_thread_ids is not None and self._active_findings is not None:
+            return [
+                (finding.thread_id, finding.comment_id, finding.body)
+                for finding in self._active_findings
+                if finding.thread_id in self._validated_fixed_thread_ids
+            ]
+
         fixed: list[tuple[str, int | None, str]] = []
         for node in self._walk_review_threads(
             "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"

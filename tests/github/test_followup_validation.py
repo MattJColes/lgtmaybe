@@ -60,3 +60,24 @@ def test_only_explicitly_fixed_thread_ids_are_resolved(monkeypatch) -> None:
 
     assert resolved == ["FIXED"]
     assert replied == ["FIXED"]
+
+
+def test_validated_resolution_reuses_the_active_finding_read(monkeypatch) -> None:
+    gateway = _gateway()
+    walks = 0
+
+    def walk(fields: str):
+        nonlocal walks
+        walks += 1
+        return iter([_node("FIXED"), _node("UNCERTAIN")])
+
+    monkeypatch.setattr(gateway, "_walk_review_threads", walk)
+    monkeypatch.setattr(gateway, "_resolve_thread", lambda thread_id: None)
+    monkeypatch.setattr(gateway, "_mark_comment_resolved", lambda comment_id, body: None)
+    monkeypatch.setattr(gateway, "reply_in_thread", lambda thread_id, body: None)
+
+    gateway.list_active_findings()
+    gateway.set_validated_fixed_threads({"FIXED"})
+    gateway._resolve_fixed_threads([])
+
+    assert walks == 1

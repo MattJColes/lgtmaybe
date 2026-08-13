@@ -10,6 +10,8 @@ behaviour.
 
 from __future__ import annotations
 
+import pytest
+
 from lgtmaybe.cli import resolve_auto_incremental, run_review
 from lgtmaybe.core.models import (
     ActiveFinding,
@@ -198,7 +200,9 @@ def test_incremental_validates_prior_findings_and_allows_only_fixed_resolution()
 
         def list_active_findings(self) -> list[ActiveFinding]:
             return [
-                ActiveFinding(thread_id="FIXED", path="src/app.py", body="old bug"),
+                ActiveFinding(
+                    thread_id="FIXED", path="src/app.py", body="old bug", outdated=True
+                ),
                 ActiveFinding(thread_id="OPEN", path="src/other.py", body="still broken"),
             ]
 
@@ -231,6 +235,65 @@ def test_incremental_validates_prior_findings_and_allows_only_fixed_resolution()
     assert github.fixed_thread_ids == [{"FIXED"}]
     assert "1 fixed" in summary
     assert "1 still open" in summary
+
+
+def test_model_fixed_verdict_needs_an_outdated_thread() -> None:
+    class HybridGitHub(IncrementalFakeGitHub):
+        def __init__(self) -> None:
+            super().__init__(CTX, last_sha="head1111", compare_result=INC_DIFF)
+            self.fixed_thread_ids: set[str] | None = None
+
+        def list_active_findings(self) -> list[ActiveFinding]:
+            return [ActiveFinding(thread_id="T1", path="src/app.py", body="old bug")]
+
+        def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
+            self.fixed_thread_ids = thread_ids
+
+    provider = FakeProvider(
+        result=ProviderResult(
+            text='{"verdicts":[{"thread_id":"T1","status":"fixed","reason":"removed"}]}',
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+    github = HybridGitHub()
+
+    _findings, summary = run_review(
+        github=github,
+        engine=RecordingEngine(),
+        cfg=make_cfg(incremental=True),
+        dry_run=False,
+        provider=provider,
+    )
+
+    assert github.fixed_thread_ids == set()
+    assert "1 uncertain" in summary
+
+
+def test_followup_validation_unavailable_resolves_nothing() -> None:
+    class HybridGitHub(IncrementalFakeGitHub):
+        def __init__(self) -> None:
+            super().__init__(CTX, last_sha="head1111", compare_result=INC_DIFF)
+            self.fixed_thread_ids: set[str] | None = None
+
+        def list_active_findings(self) -> list[ActiveFinding]:
+            raise RuntimeError("GitHub lookup failed")
+
+        def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
+            self.fixed_thread_ids = thread_ids
+
+    github = HybridGitHub()
+
+    _findings, summary = run_review(
+        github=github,
+        engine=RecordingEngine(),
+        cfg=make_cfg(incremental=True),
+        dry_run=False,
+        provider=FakeProvider(),
+    )
+
+    assert github.fixed_thread_ids == set()
+    assert "remain open" in summary
 
 
 def test_full_review_does_not_run_followup_validation() -> None:
@@ -430,6 +493,47 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
 
     assert len(github.comments) == 1
     assert "```mermaid" in github.comments[0]
+
+
+def test_required_diagram_fails_without_a_completion_aware_gateway() -> None:
+    import json as _json
+
+    from lgtmaybe.cli import run_diagram
+    from lgtmaybe.core.models import PRContext, ProviderResult
+
+    class PlainGateway:
+        def get_pr_context(self) -> PRContext:
+            return PRContext(
+                diff="diff --git a/a b/a\n@@ -1 +1 @@\n-x\n+y\n",
+                changed_files=["a"],
+                base_sha="b",
+                head_sha="h",
+                repo="o/r",
+                pr_number=1,
+            )
+
+        def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover
+            pass
+
+        def post_issue_comment(self, body: str) -> None:  # pragma: no cover
+            raise AssertionError("a required diagram must not use the generic fallback")
+
+    structured = _json.dumps(
+        {
+            "title": "Change map",
+            "nodes": [],
+            "edges": [],
+            "notes": "",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="completion marker"):
+        run_diagram(
+            PlainGateway(),
+            FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)),
+            make_cfg(),
+            completed_sha="h",
+        )
 
 
 # ---------------------------------------------------------------------------

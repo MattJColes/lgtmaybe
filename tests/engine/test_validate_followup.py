@@ -64,6 +64,65 @@ def test_validate_findings_fails_closed_for_malformed_or_missing_verdicts() -> N
     ]
 
 
+def test_validate_findings_fails_closed_for_duplicate_verdicts() -> None:
+    provider = FakeProvider(
+        result=ProviderResult(
+            text=json.dumps(
+                {
+                    "verdicts": [
+                        {"thread_id": "T1", "status": "fixed", "reason": "removed"},
+                        {"thread_id": "T1", "status": "still_open", "reason": "remains"},
+                    ]
+                }
+            ),
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+
+    verdicts = validate_findings(provider, make_cfg(), [_finding()], CTX)
+
+    assert verdicts[0].status is FindingValidationStatus.uncertain
+
+
+def test_duplicate_semantic_identities_are_validated_by_unique_thread_id() -> None:
+    provider = FakeProvider(
+        result=ProviderResult(
+            text=json.dumps(
+                {
+                    "verdicts": [
+                        {"thread_id": "T1", "status": "fixed", "reason": "first removed"},
+                        {"thread_id": "T2", "status": "fixed", "reason": "second removed"},
+                    ]
+                }
+            ),
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+
+    verdicts = validate_findings(provider, make_cfg(), [_finding("T1"), _finding("T2")], CTX)
+
+    assert [verdict.thread_id for verdict in verdicts] == ["T1", "T2"]
+    assert all(verdict.status is FindingValidationStatus.fixed for verdict in verdicts)
+
+
+def test_validate_findings_rejects_oversized_input_before_building_the_prompt(
+    monkeypatch,
+) -> None:
+    provider = FakeProvider()
+    ctx = CTX.model_copy(update={"diff": "x" * 100})
+    monkeypatch.setattr(
+        "lgtmaybe.engine.validate._context",
+        lambda findings, ctx: (_ for _ in ()).throw(AssertionError("context was built")),
+    )
+
+    verdicts = validate_findings(provider, make_cfg(max_input_tokens=10), [_finding()], ctx)
+
+    assert verdicts[0].status is FindingValidationStatus.uncertain
+    assert provider.calls == []
+
+
 def test_validate_findings_neutralises_forged_markers() -> None:
     provider = FakeProvider(result=ProviderResult(text="not json", input_tokens=1, output_tokens=1))
 

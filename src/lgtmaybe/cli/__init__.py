@@ -148,6 +148,8 @@ def run_diagram(
         else:
             post(body, completed_sha=completed_sha)
         return
+    if completed_sha is not None:
+        raise RuntimeError("the GitHub gateway cannot persist a diagram completion marker")
     post_comment = getattr(github, "post_issue_comment", None)
     if post_comment is not None:
         post_comment(body)
@@ -389,16 +391,19 @@ def run_review(
     provider: ProviderClient | None = None,
     diagram_required: bool = False,
 ) -> tuple[list[ReviewFinding], str]:
-    """Core review pipeline — pure function over injected ports.
+    """Run a full or hybrid review and optionally persist its completion state.
 
     Fetches PR context (unless a prefetched ``ctx`` is passed in), runs the
     engine, and optionally posts the review. Returns (findings, summary) in
-    all cases so callers can inspect output.
+    all cases so callers can inspect output. ``provider`` performs explicit
+    validation of earlier findings and builds a required automatic diagram.
+    ``diagram_required`` makes that current-head diagram part of completion.
 
     With ``cfg.incremental`` on and a gateway that supports it, only the diff
-    of the commits pushed since the last completed review is reviewed; every
-    degraded case (first review, force-push, compare failure, a gateway
-    without the adapter methods) falls back to the full review.
+    since the last completed head is reviewed while earlier findings are
+    validated. A completed same-head run is a no-op; every degraded case
+    (first review, force-push, compare failure, incomplete state, or a gateway
+    without the adapter methods) falls back to a full review.
     """
     if ctx is None:
         # Dependency manifests are fetched only when a scanner will read them —
@@ -436,10 +441,9 @@ def run_review(
             summary += f"\n\n{validation_summary}"
 
     if not dry_run:
-        # Record the watermark: this run completed a review of the current
-        # head, so the NEXT run may review only what lands after it. Never set
-        # on the failure path (a failure notice posts via post_review without
-        # this) — an unreviewed commit must not be skipped.
+        # Prepare the watermark for the review body. This is only in-memory
+        # adapter state until post_review succeeds, so an interruption here
+        # cannot remotely complete the head.
         complete = INCOMPLETE_MARKER not in summary
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
@@ -527,13 +531,14 @@ def _incremental_context(
     *,
     diagram_required: bool = False,
 ) -> tuple[PRContext, str | None, bool]:
-    """The context to review: ``(incremental ctx, last-reviewed sha)`` or ``(ctx, None)``.
+    """Return ``(context, completed_sha, already_complete)`` for this run.
 
     Incremental only when ``cfg.incremental`` is truthy (None = auto resolves
     upstream, and unresolved auto means full), the gateway has the adapter
-    methods (``last_reviewed_sha`` / ``compare_diff`` — fakes and the frozen
-    port don't), a watermark exists, head moved since, and the compare yields
-    a usable increment. Everything else returns the full context untouched.
+    methods (``last_completed_sha`` / ``compare_diff`` — fakes and the frozen
+    port don't), a completion watermark exists, the head moved since, and the
+    compare yields a usable increment. A matching head sets the final flag;
+    every degraded case returns the full context with no completed SHA.
     """
     if not cfg.incremental:
         return ctx, None, False
@@ -603,7 +608,8 @@ def _validate_prior_findings(
         for finding in active
         if ({finding.fingerprint, finding.identity} - {None}) & current_keys
     ]
-    unmatched = [finding for finding in active if finding not in reproduced]
+    reproduced_thread_ids = {finding.thread_id for finding in reproduced}
+    unmatched = [finding for finding in active if finding.thread_id not in reproduced_thread_ids]
     verdicts = [
         FindingValidation(
             thread_id=finding.thread_id,
@@ -623,6 +629,19 @@ def _validate_prior_findings(
         )
     else:
         verdicts.extend(validate_findings(provider, cfg, unmatched, ctx))
+
+    outdated_thread_ids = {finding.thread_id for finding in active if finding.outdated}
+    verdicts = [
+        FindingValidation(
+            thread_id=verdict.thread_id,
+            status=FindingValidationStatus.uncertain,
+            reason="the model reported a fix but GitHub does not mark the finding outdated",
+        )
+        if verdict.status is FindingValidationStatus.fixed
+        and verdict.thread_id not in outdated_thread_ids
+        else verdict
+        for verdict in verdicts
+    ]
 
     fixed = {
         verdict.thread_id for verdict in verdicts if verdict.status is FindingValidationStatus.fixed
@@ -839,7 +858,7 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
     # so without it a failure report says nothing about what was running.
     notice = f"⚠️ lgtmaybe review failed: {exc}\n\n_lgtmaybe {package_version()}_"
     try:
-        # run_review may have stamped the reviewed watermark before the post
+        # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next
         # incremental run re-reviews the commits whose findings never posted.
         mark_reviewed = getattr(github, "mark_reviewed", None)
