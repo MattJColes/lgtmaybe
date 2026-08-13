@@ -230,7 +230,8 @@ pattern, event bus, plugin framework.
      each call's context stays small — better recall on big files, especially for
      smaller models. Files within budget are reviewed whole (context preserved).
      `ReviewConfig.recursive` (default **on**; CLI `--recursive/--no-recursive`,
-     Action input `recursive`); the on-demand A/B benchmark `python -m evals.rlm`
+     Action input `recursive`); the on-demand A/B benchmark `python -m evals.ab
+     --sweep recursive=false,true`
      measures recall + token cost of the walk vs sending whole against a live model.
    - **Incremental review (commit-scoped):** on a re-run, `run_review` reads a
      hidden watermark (`<!-- lgtmaybe-reviewed:<head_sha> -->`, stamped into the

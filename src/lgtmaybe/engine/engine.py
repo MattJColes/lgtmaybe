@@ -203,6 +203,108 @@ def _plural(n: int, one: str = "", many: str = "s") -> str:
     return one if n == 1 else many
 
 
+@dataclass(frozen=True)
+class _NoticeState:
+    cfg: ReviewConfig
+    capped_files: bool
+    total_files: int
+    oversized: list[str]
+    skipped_by_triage: list[str]
+    errors: list[str]
+    total_calls: int
+    failed_calls: int
+    failed_lenses: list[str]
+    split_batches: int
+    reflection_skipped: str | None
+    suppressed: int
+    off_diff: int
+    open_finding_threads: int
+
+
+def _build_notices(state: _NoticeState) -> list[str]:
+    notices: list[str] = []
+    cfg = state.cfg
+    if state.capped_files:
+        notices.append(
+            f"⚠️ Reviewed the top {cfg.max_files} of {state.total_files} changed files "
+            f"(file cap {cfg.max_files}). Raise max_files to review them all."
+        )
+    if state.oversized:
+        listed = ", ".join(f"`{path}`" for path in state.oversized[:10])
+        more = ", …" if len(state.oversized) > 10 else ""
+        notices.append(
+            f"📄 Skipped {len(state.oversized)} oversized file{_plural(len(state.oversized))} "
+            f"(over {cfg.max_file_diff_lines} diff lines): {listed}{more}. "
+            "Raise `max_file_diff_lines` (0 disables) to review them."
+        )
+    if state.skipped_by_triage:
+        listed = ", ".join(f"`{path}`" for path in state.skipped_by_triage[:10])
+        more = ", …" if len(state.skipped_by_triage) > 10 else ""
+        notices.append(
+            f"🔎 Triage skipped {len(state.skipped_by_triage)} low-risk "
+            f"file{_plural(len(state.skipped_by_triage))}: {listed}{more} "
+            "(`/review full` reviews everything)."
+        )
+    budget_skips = state.errors.count(_BUDGET_SKIP_REASON)
+    if budget_skips:
+        notices.append(
+            f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens) — "
+            f"{budget_skips} of {state.total_calls} review call"
+            f"{_plural(budget_skips, ' was', 's were')} skipped, so this review is partial. "
+            "Raise `max_review_tokens`, or spend less per run (a `triage_model`, fewer "
+            "`categories`, lower `context_lines`)."
+        )
+    if state.failed_calls:
+        detail = state.errors[-1] if state.errors else "timeout or unparseable output"
+        lost = ", ".join(sorted(set(state.failed_lenses)))
+        which = f"{lost} — " if lost else ""
+        notices.append(
+            f"⚠️ {state.failed_calls} of {state.total_calls} review calls failed "
+            f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
+        )
+    if state.split_batches:
+        plural = _plural(state.split_batches, many="es")
+        was = _plural(state.split_batches, "was", "were")
+        notices.append(
+            f"⏱️ {state.split_batches} batch{plural} {was} too big for one call "
+            "(timed out, or ran past the `max_tokens` ceiling) and "
+            f"{was} reviewed in smaller pieces instead. Consider a lower "
+            "`max_input_tokens`, a higher `max_tokens`, or a faster model."
+        )
+    if state.reflection_skipped:
+        notices.append(
+            f"⚠️ {state.reflection_skipped} — the self-reflection audit was skipped, "
+            "so findings may include false positives."
+        )
+
+    count_notices: tuple[tuple[int, Callable[[int], str]], ...] = (
+        (
+            state.suppressed,
+            lambda count: (
+                f"🙈 {count} finding{_plural(count)} suppressed (ignored fingerprint, "
+                "inline `lgtmaybe: ignore`, or a 👎 from a previous run) — not counted below."
+            ),
+        ),
+        (
+            state.off_diff,
+            lambda count: (
+                f"🔍 {count} scan finding{_plural(count)} skipped — on unchanged "
+                "lines outside this PR's diff. Run the tool over the repository to see them."
+            ),
+        ),
+        (
+            state.open_finding_threads,
+            lambda count: (
+                f"💬 {count} earlier lgtmaybe "
+                f"{_plural(count, 'conversation is', 'conversations are')} still unresolved on "
+                "this PR — this run's count covers what it reviewed now, not those."
+            ),
+        ),
+    )
+    notices.extend(render(count) for count, render in count_notices if count)
+    return notices
+
+
 def _concurrency_cap(cfg: ReviewConfig) -> int:
     """How many model calls this run may have in flight: the explicit cap, else
     the provider-aware default.
@@ -1054,112 +1156,24 @@ class LLMReviewEngine:
 
         summary_line = _summary_line(len(filtered), cfg)
 
-        notices = []
-        if capped_files:
-            notices.append(
-                f"⚠️ Reviewed the top {cfg.max_files} of {total_files} changed files "
-                f"(file cap {cfg.max_files}). Raise max_files to review them all."
+        notices = _build_notices(
+            _NoticeState(
+                cfg=cfg,
+                capped_files=capped_files,
+                total_files=total_files,
+                oversized=oversized,
+                skipped_by_triage=skipped_by_triage,
+                errors=errors,
+                total_calls=total_calls,
+                failed_calls=failed_calls,
+                failed_lenses=failed_lenses,
+                split_batches=len(self._split_batches),
+                reflection_skipped=reflection_skipped,
+                suppressed=suppressed,
+                off_diff=off_diff,
+                open_finding_threads=ctx.open_finding_threads,
             )
-        if oversized:
-            # Transparency, same rule as the file cap: a skip must be visible.
-            plural_big = _plural(len(oversized))
-            listed_big = ", ".join(f"`{p}`" for p in oversized[:10])
-            more_big = ", …" if len(oversized) > 10 else ""
-            notices.append(
-                f"📄 Skipped {len(oversized)} oversized file{plural_big} "
-                f"(over {cfg.max_file_diff_lines} diff lines): {listed_big}{more_big}. "
-                "Raise `max_file_diff_lines` (0 disables) to review them."
-            )
-        if skipped_by_triage:
-            # Transparency: a triage skip must be visible, never silent.
-            plural_files = _plural(len(skipped_by_triage))
-            listed = ", ".join(f"`{p}`" for p in skipped_by_triage[:10])
-            more = ", …" if len(skipped_by_triage) > 10 else ""
-            notices.append(
-                f"🔎 Triage skipped {len(skipped_by_triage)} low-risk file{plural_files}: "
-                f"{listed}{more} (`/review full` reviews everything)."
-            )
-        # A budget stop is not a fault — it is the spend ceiling the user asked
-        # for — so it gets its own notice naming the knob, ahead of the generic
-        # incomplete notice below (which still fires, because the review IS
-        # partial and that must never be softened into a clean bill of health).
-        budget_skips = sum(1 for e in errors if e == _BUDGET_SKIP_REASON)
-        if budget_skips:
-            plural = _plural(budget_skips, " was", "s were")
-            notices.append(
-                f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens) — "
-                f"{budget_skips} of {total_calls} review call{plural} skipped, so this "
-                "review is partial. Raise `max_review_tokens`, or spend less per run "
-                "(a `triage_model`, fewer `categories`, lower `context_lines`)."
-            )
-        # Some — but not all — lenses failed: the result may be incomplete, so say
-        # so and don't claim a clean bill of health. The hidden marker rides along
-        # so the posting step can tell an incomplete run from a complete one
-        # without matching prose the user may have restyled (summary_template).
-        if failed_calls:
-            detail = errors[-1] if errors else "timeout or unparseable output"
-            # Name the lenses, not just a count: a lost security lens and a lost
-            # documentation lens are the same number and very different news, and
-            # the reader has no other way to tell which one this was. Deduped and
-            # sorted so a lens that failed on several batches is named once.
-            lost = ", ".join(sorted(set(failed_lenses)))
-            which = f"{lost} — " if lost else ""
-            notices.append(
-                f"⚠️ {failed_calls} of {total_calls} review calls failed "
-                f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
-            )
-        # A batch that had to be shrunk is a standing signal that the diff is at
-        # the edge of what this model finishes in one call — say it, or the next
-        # run's failure looks like the first. Worded for both triggers (a blown
-        # wall clock and a blown output ceiling), because the remedy is the same.
-        if self._split_batches:
-            count = len(self._split_batches)
-            plural = _plural(count, many="es")
-            was = _plural(count, "was", "were")
-            notices.append(
-                f"⏱️ {count} batch{plural} {was} too big for one "
-                "call (timed out, or ran past the `max_tokens` ceiling) and "
-                f"{was} reviewed in smaller pieces instead. "
-                "Consider a lower `max_input_tokens`, a higher `max_tokens`, or a faster model."
-            )
-        if reflection_skipped:
-            notices.append(
-                f"⚠️ {reflection_skipped} — the self-reflection audit was "
-                "skipped, so findings may include false positives."
-            )
-        # Findings the model DID raise and the run then hid: an ignore
-        # fingerprint, an inline pragma, or a 👎 from a previous run. Reporting
-        # the remaining count as a clean bill of health would let a suppression
-        # quietly convert a real finding into "LGTM".
-        if suppressed:
-            plural = _plural(suppressed)
-            notices.append(
-                f"🙈 {suppressed} finding{plural} suppressed (ignored fingerprint, "
-                "inline `lgtmaybe: ignore`, or a 👎 from a previous run) — not "
-                "counted below."
-            )
-        # Deterministic hits on code this PR did not touch. Scanners read whole
-        # files, so this is routine rather than a fault — but silently dropping
-        # them would make a repo with a pre-existing secret look clean, so say
-        # the number and where to look.
-        if off_diff:
-            plural = _plural(off_diff)
-            notices.append(
-                f"🔍 {off_diff} scan finding{plural} skipped — on unchanged lines "
-                "outside this PR's diff. Run the tool over the repository to see them."
-            )
-        # Business this run's count cannot see: our own conversations from
-        # earlier runs that nobody has resolved. An incremental run may not have
-        # re-reviewed their files at all, so their absence here is no evidence
-        # they were fixed.
-        if ctx.open_finding_threads:
-            count = ctx.open_finding_threads
-            subject = _plural(count, "conversation is", "conversations are")
-            notices.append(
-                f"💬 {count} earlier lgtmaybe {subject} still unresolved on this PR — "
-                "this run's count covers what it reviewed now, not those."
-            )
-
+        )
         if notices:
             return filtered, "\n\n".join([*notices, summary_line])
         # A genuinely clean review (nothing flagged, every call succeeded) gets an
