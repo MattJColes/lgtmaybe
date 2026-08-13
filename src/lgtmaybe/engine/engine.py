@@ -36,7 +36,6 @@ from lgtmaybe.core.ports import (
     ProviderClient,
     ProviderTruncated,
     ProviderWallTimeout,
-    ReviewEngine,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.github import is_reviewable
@@ -573,7 +572,7 @@ class ReviewIncompleteError(Exception):
     """
 
 
-class LLMReviewEngine(ReviewEngine):
+class LLMReviewEngine:
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
     def __init__(

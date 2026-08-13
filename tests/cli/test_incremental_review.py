@@ -17,7 +17,6 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
-from lgtmaybe.core.ports import ReviewEngine
 from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 
@@ -37,7 +36,7 @@ CTX = PRContext(
 )
 
 
-class RecordingEngine(ReviewEngine):
+class RecordingEngine:
     """Returns canned findings; records the ctx it was asked to review."""
 
     def __init__(self, findings: list[ReviewFinding] | None = None) -> None:
@@ -295,9 +294,8 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
 
     from lgtmaybe.cli import run_diagram
     from lgtmaybe.core.models import PRContext, ProviderResult
-    from lgtmaybe.core.ports import GitHubGateway
 
-    class PlainGateway(GitHubGateway):
+    class PlainGateway:
         def __init__(self) -> None:
             self.comments: list[str] = []
 

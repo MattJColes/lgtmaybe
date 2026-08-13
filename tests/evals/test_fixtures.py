@@ -16,7 +16,6 @@ import pytest
 from evals import run as run_mod
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig, ReviewFinding
-from lgtmaybe.core.ports import ProviderClient
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.astgrep import build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
@@ -210,7 +209,7 @@ def test_real_ast_grep_resolves_cross_file_symbols_in_the_corpus() -> None:
     assert resolve("SavedSubmittalSetV2") == ["migrations/models.py"]
 
 
-class _ScriptedProvider(ProviderClient):
+class _ScriptedProvider:
     """Returns a different canned text per successive call (records each call)."""
 
     def __init__(self, texts: list[str]) -> None:

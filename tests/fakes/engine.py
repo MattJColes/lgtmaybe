@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 
 from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
-from lgtmaybe.core.ports import ProviderClient, ReviewEngine
+from lgtmaybe.core.ports import ProviderClient
 
 
-class FakeEngine(ReviewEngine):
+class FakeEngine:
     def __init__(self, provider: ProviderClient) -> None:
         self._provider = provider
 

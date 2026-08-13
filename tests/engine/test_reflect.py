@@ -14,7 +14,6 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
-from lgtmaybe.core.ports import ProviderClient
 from lgtmaybe.engine.compress import count_tokens
 from lgtmaybe.engine.reflect import _head_tail, reflect_findings
 from tests.fakes import FakeProvider
@@ -222,7 +221,7 @@ def test_unparseable_verdict_keeps_all() -> None:
     assert survivors == [_HIGH, _LOW_CONF]  # safe default
 
 
-class _RaisingProvider(ProviderClient):
+class _RaisingProvider:
     """A ProviderClient whose complete() always raises (quota/auth/network)."""
 
     def complete(self, messages: list[dict[str, str]], model: str, **opts: object):
@@ -437,7 +436,7 @@ def test_head_tail_returns_text_and_accurate_token_count() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _ScriptedProvider(ProviderClient):
+class _ScriptedProvider:
     """A ProviderClient that returns a different canned text per successive call.
 
     Records every call's messages/model/opts (like FakeProvider) so a test can
