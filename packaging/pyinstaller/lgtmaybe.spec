@@ -3,12 +3,17 @@
 from pathlib import Path
 import shutil
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 project_root = Path(SPECPATH).parents[1]
 ast_grep = shutil.which("ast-grep")
 
-datas = collect_data_files("lgtmaybe") + collect_data_files("litellm")
+# copy_metadata ships the dist-info alongside the code. `lgtmaybe --version`
+# reads the installed distribution's metadata, and a frozen executable has none
+# of its own — so without this the portable exe, the one install a user cannot
+# identify any other way (no pip, no uv tool list), is the one that answers
+# "unknown".
+datas = collect_data_files("lgtmaybe") + collect_data_files("litellm") + copy_metadata("lgtmaybe")
 binaries = [(ast_grep, ".")] if ast_grep else []
 hiddenimports = ["tiktoken_ext", "tiktoken_ext.openai_public"]
 

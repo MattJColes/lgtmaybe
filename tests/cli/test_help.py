@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+
 import click
 from click.testing import CliRunner
 
@@ -122,3 +124,33 @@ def test_unknown_provider_fails_with_a_usage_error() -> None:
     assert result.exit_code == 2
     assert "bogus" in result.output
     assert "openai-compatible" in result.output
+
+
+def test_version_flag_prints_a_machine_readable_line(monkeypatch) -> None:
+    """`lgtmaybe --version` is how a benchmark runner (or a support ticket)
+    records which executable it ran, so the line is `lgtmaybe <version>` — one
+    stable, parseable shape rather than click's default `main, version X`.
+
+    The version is stubbed so the assertion is about the FORMAT, not about this
+    test host happening to have distribution metadata installed.
+    """
+    import lgtmaybe.core.version as version_module
+
+    monkeypatch.setattr(version_module.metadata, "version", lambda _name: "1.2.3")
+    result = CliRunner().invoke(main, ["--version"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "lgtmaybe 1.2.3"
+
+
+def test_version_flag_survives_an_uninstalled_checkout(monkeypatch) -> None:
+    """A source checkout with no dist-info still has to exit 0 — the flag is a
+    diagnostic, and one that fails is worse than one that says "unknown"."""
+    import lgtmaybe.core.version as version_module
+
+    def _fail(_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError("lgtmaybe")
+
+    monkeypatch.setattr(version_module.metadata, "version", _fail)
+    result = CliRunner().invoke(main, ["--version"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "lgtmaybe unknown"

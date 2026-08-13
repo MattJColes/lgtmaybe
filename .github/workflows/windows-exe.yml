@@ -94,6 +94,13 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not ($reviewHelp | Select-String -Quiet "Usage")) {
             throw "lgtmaybe.exe review --help failed"
           }
+          # The version has to survive freezing: it comes from the distribution
+          # metadata the spec copies in, and "lgtmaybe unknown" means that copy
+          # was lost — which would ship an executable nobody can identify.
+          $version = & $exe --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne "lgtmaybe ${{ steps.ver.outputs.version }}") {
+            throw "lgtmaybe.exe --version reported '$version'"
+          }
 
           $size = (Get-Item $exe).Length
           Write-Output "Executable size: $size bytes ($([math]::Round($size / 1MB, 1)) MiB)"

@@ -29,13 +29,24 @@ def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
     assert "workflow_dispatch:" in text
     assert job["runs-on"] == "windows-latest"
     assert "uv run pyinstaller packaging/pyinstaller/lgtmaybe.spec" in runs
-    for command in ("--help", "config path", "review --help"):
+    for command in ("--help", "config path", "review --help", "--version"):
         assert command in runs
     assert "gh release upload" in runs
     assert runs.count('--repo "$env:GITHUB_REPOSITORY"') == 2
     assert "gh release upload failed with exit code $LASTEXITCODE" in runs
     assert "windows-x86_64.exe" in runs
     assert ".Length" in runs
+
+
+def test_pyinstaller_spec_ships_the_distribution_metadata() -> None:
+    """`lgtmaybe --version` reads the installed distribution's metadata, and a
+    frozen executable has none unless the spec copies it in — so without this the
+    winget build, the one install that cannot be identified any other way, is
+    exactly the one that answers "unknown"."""
+    spec = (_ROOT / "packaging" / "pyinstaller" / "lgtmaybe.spec").read_text(encoding="utf-8")
+
+    assert "copy_metadata" in spec
+    assert 'copy_metadata("lgtmaybe")' in spec
 
 
 def test_winget_workflow_updates_the_portable_package() -> None:
