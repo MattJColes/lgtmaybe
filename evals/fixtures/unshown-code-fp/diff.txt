@@ -1,0 +1,24 @@
+diff --git a/scheduler/dispatch.py b/scheduler/dispatch.py
+index ed83bce..00af502 100644
+--- a/scheduler/dispatch.py
++++ b/scheduler/dispatch.py
+@@ -203,3 +203,19 @@ def percentile(latencies: list[float], pct: float) -> float:
+     ordered = sorted(latencies)
+     rank = max(1, min(len(ordered), round(pct / 100 * len(ordered))))
+     return ordered[rank - 1]
++
++
++def worker_count(provider: str, configured: int) -> int:
++    """How many workers the fan-out may run against *provider*.
++
++    A provider that serves one stream at a time is pinned to a single worker
++    whatever the user configured; everybody else gets what they asked for.
++    """
++    if provider in SINGLE_STREAM_PROVIDERS:
++        return 1
++    return configured
++
++
++def average_latency(samples: list[float]) -> float:
++    """Mean latency across *samples*, in seconds."""
++    return sum(samples) / len(samples)

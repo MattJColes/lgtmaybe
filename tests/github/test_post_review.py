@@ -600,7 +600,7 @@ def test_resolve_fixed_rewrites_fingerprint_to_resolved_marker() -> None:
 
 @respx.mock
 def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
-    """A failed marker rewrite reopens the thread for a later retry."""
+    """A failed marker rewrite leaves the thread open for a later retry."""
     _mark_existing_review()
     gone_fp = finding_fingerprint("src/old.py", "Removed bug")
     graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1", comment_id=555)])
@@ -610,11 +610,11 @@ def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    # Must not raise, but the thread cannot stay resolved with active markers.
+    # Must not raise, and resolution is never attempted without retired markers.
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
-    assert graphql.resolved == ["THREAD1"]
-    assert graphql.unresolved == ["THREAD1"]
+    assert graphql.resolved == []
+    assert graphql.unresolved == []
     assert graphql.replies == []
 
 
@@ -1175,7 +1175,46 @@ def test_failed_resolve_posts_no_reply() -> None:
 
     assert graphql.replies == [], "replied on a thread that was never resolved"
     assert graphql.resolved == []
-    assert patched == [], "rewrote the fingerprint marker of an unresolved thread"
+    assert len(patched) == 2
+    assert "lgtmaybe-resolved-fingerprint" in json.loads(patched[0].content)["body"]
+    assert json.loads(patched[1].content)["body"].endswith(f"<!-- lgtmaybe-finding:{gone_fp} -->")
+
+
+@respx.mock
+def test_missing_comment_id_never_attempts_resolution() -> None:
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1", comment_id=None)])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.resolved == []
+    assert graphql.replies == []
+
+
+@respx.mock
+def test_failed_resolve_and_marker_restore_never_fail_the_review() -> None:
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+
+    def forbid_resolve(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        if "resolveReviewThread" in payload.get("query", ""):
+            return httpx.Response(200, json={"data": None, "errors": [{"message": "denied"}]})
+        return graphql(request)
+
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=forbid_resolve)
+    patches = iter([httpx.Response(200, json={}), httpx.Response(500)])
+    respx.route(method="PATCH").mock(side_effect=lambda request: next(patches))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+
+    assert graphql.resolved == []
+    assert graphql.replies == []
 
 
 @respx.mock
