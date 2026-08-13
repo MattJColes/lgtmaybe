@@ -21,7 +21,6 @@ from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
@@ -110,9 +109,16 @@ _log = get_logger(__name__)
 #   exception: it batches and keeps full `--max-model-len` per request.
 #
 #   The one case for lowering this back to 1 is a very slow local model, where
-#   six queued calls could each wait out the per-request timeout.
+#   six queued calls could each wait out the per-request timeout — and the local
+#   per-call default is scaled by this width precisely so that they do not.
+#
+# There is deliberately no per-provider exception list. One briefly survived as
+# an empty frozenset feeding a branch that could never fire, and it cost four
+# separate false review findings: the name asserted that ollama resolved to 1
+# while the value said otherwise, and the value sat 200 lines from its only
+# reader — outside any diff hunk that touched it. Whatever replaces this should
+# be a value a reader can see, not a name they have to trust.
 _CLOUD_MAX_WORKERS = 6
-_SINGLE_STREAM_PROVIDERS: frozenset[Provider] = frozenset()
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
         ReviewCategory.security.value,
@@ -325,8 +331,6 @@ def concurrency_cap(cfg: ReviewConfig) -> int:
     """
     if cfg.max_concurrency is not None:
         return max(1, cfg.max_concurrency)
-    if cfg.provider in _SINGLE_STREAM_PROVIDERS:
-        return 1
     return _CLOUD_MAX_WORKERS
 
 
