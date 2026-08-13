@@ -596,7 +596,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
 | `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice (a cancelled or timed-out job does the same, via SIGINT/SIGTERM). `0` disables |
-| `max_concurrency` | auto (6 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
+| `max_concurrency` | auto (6, every provider) | Concurrent review calls across the whole fan-out. Set `1` for a serial local run |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks, zizmor, ast-grep and osv-scanner post directly with no model call. The image bundles these tools and an offline vulnerability database |
@@ -1930,7 +1930,10 @@ to set anything for a normal run. (Direct cloud providers default to 600 s.)
 **That default scales with the fan-out.** Because the calls queue, the budget has
 to cover the wait as well as the work: at the default width of six the resolved
 per-call timeout is `1800 × 6`, **bounded by `max_review_seconds`** (3600 s by
-default) so no single call can outlive the review it belongs to. At
+default; `0` disables the deadline and with it the cap) — though never trimmed
+below ollama's own 1800 s, so a deadline set under that does not shrink it. (And it bounds the budget rather than the wall clock: the
+deadline decides when a call may *start*, so one that begins just inside it still
+runs its budget out.) At
 `max_concurrency: 1` there is no queue and the budget is the plain 1800 s. Every
 run logs which number it resolved, and why:
 
@@ -2196,7 +2199,11 @@ lgtmaybe review --provider openai-compatible --model <model> \
 **Queueing does not cost you a timeout.** A queued request's clock starts when it
 is sent, not when the slot frees, so lgtmaybe scales the `openai-compatible`
 per-call default (1800 s) by the fan-out width — `1800 × 6` at the default,
-bounded by `max_review_seconds` (3600 s) so no call outlives the review. An
+bounded by `max_review_seconds` (3600 s; `0` disables the deadline and the cap
+with it) — though never trimmed below the 1800 s provider default, so a deadline
+set under that does not shrink it, and a bound on
+the budget rather than the wall clock, since the deadline gates when a call may
+start rather than cutting a running one short. An
 explicit `timeout` is honoured exactly as written, at any width. Each run logs the
 number it resolved and the width it assumed:
 
@@ -5792,7 +5799,7 @@ configurable in `.lgtmaybe.yml` (see
 | `max_files` | 50 | Reviews the top-N changed files; posts a "reviewed top N of M" notice if there are more. |
 | `max_file_diff_lines` | 2000 | Skips any single file whose diff is longer, naming it in the summary. `0` disables. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. |
-| `max_concurrency` | 6 cloud / 1 ollama, openai-compatible | Concurrent model calls across the whole fan-out (all batches share one pool). |
+| `max_concurrency` | 6, every provider | Concurrent model calls across the whole fan-out (all batches share one pool). Local throughput is set on the server (`OLLAMA_NUM_PARALLEL`, llama.cpp `-np`, vLLM batching); set this to `1` for serial. |
 | `max_review_seconds` | 3600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
 | `categories` | all nine | Which review lenses to run; an explicit list overrides the preset grouping and runs those lenses one call each. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
@@ -6052,8 +6059,8 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    same four run on every provider — worker count changes only how they are
    scheduled. `full` runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
-   provider port, sized by `max_concurrency` (default 6 for cloud, 1 for
-   ollama and openai-compatible), so batches never wait on each other.
+   provider port, sized by `max_concurrency` (default 6 for every provider,
+   local included), so batches never wait on each other.
 
    Each call is shaped as a shared cacheable prefix —
    a lens-independent system preamble, then the wrapped diff — followed by
