@@ -56,6 +56,7 @@ from lgtmaybe.providers.factory import (
     build_provider,
     cheaper_reflect_sibling,
     default_timeout_for,
+    resolve_max_tokens,
 )
 
 
@@ -249,10 +250,11 @@ def build_provider_engine(
     extra: dict[str, Any] = {}
     if cfg.provider is Provider.ollama and cfg.num_ctx is not None:
         extra["num_ctx"] = cfg.num_ctx
-    # An output cap is only sent when asked for: omitting it lets the model's own
-    # ceiling apply, so nothing truncates a long findings payload by default.
-    # Every provider honours it (litellm normalises the param), so unlike num_ctx
-    # it is not gated on the provider.
+    # The output cap. Forwarded verbatim — including the 0 that means "uncapped"
+    # — because the factory is what interprets it: unset resolves to a
+    # provider-aware default there (a finite ceiling for ollama, none for the
+    # hosted routes), exactly as the timeout does. Not gated on the provider;
+    # every route honours it, since litellm normalises the param.
     if cfg.max_tokens is not None:
         extra["max_tokens"] = cfg.max_tokens
     # Reasoning budget, sent only when asked for. litellm normalises the param
@@ -278,18 +280,33 @@ def build_provider_engine(
     # all but the first wait their turn with their timeout clocks already
     # running — so the default is scaled by the width there, and only there.
     # This is the one place that knows both numbers.
+    #
+    # The output ceiling rides along for the same reason, and it needs the naming
+    # more than the timeout does: a truncated lens reports "response truncated at
+    # the 8192-token `max_tokens` ceiling", which reads as the user's own setting
+    # even when nobody set it. Announced up front, `uncapped` included — that is
+    # the state that puts a run back on the timeout for its only stop.
     concurrency = concurrency_cap(cfg)
     effective_timeout = (
         cfg.timeout if cfg.timeout is not None else _bounded_default(cfg, concurrency)
     )
+    ceiling = resolve_max_tokens(cfg.provider, cfg.max_tokens)
     _log.info(
-        "per-call timeout resolved",
+        "per-call budget resolved",
         extra={
             "lgtmaybe_version": package_version(),
             "provider": cfg.provider.value,
             "timeout_s": effective_timeout,
             "timeout_source": "configured" if cfg.timeout is not None else "provider default",
             "concurrency": concurrency,
+            "max_tokens": ceiling,
+            "max_tokens_source": (
+                "uncapped"
+                if ceiling is None
+                else "configured"
+                if cfg.max_tokens
+                else "provider default"
+            ),
         },
     )
     provider = build_provider(

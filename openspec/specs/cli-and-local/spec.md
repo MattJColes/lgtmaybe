@@ -147,6 +147,17 @@ SHALL stop after answering instead of inventing a task for the reader.
 - **WHEN** an answer requires more than one bounded action
 - **THEN** those actions are presented as the fewest numbered steps that still work
 
+#### Scenario: the diff is context for a question, not a review request
+- **WHEN** the diff is wrapped for `/ask`
+- **THEN** it carries the same neutralised untrusted-data guard as a review diff
+  but neither the review task restatement nor the review lead-in, which would ask
+  for the findings JSON object from a call whose answer is prose
+
+#### Scenario: the model answers with a machine envelope
+- **WHEN** the response is entirely a JSON object or array
+- **THEN** it is refused rather than posted, while prose that merely quotes braces
+  or a fenced JSON example is relayed
+
 ### Requirement: Local review needs no GitHub
 
 `lgtmaybe review` in a repo SHALL build the context from git alone: branch
@@ -304,9 +315,9 @@ major.
 <!-- anchor: distribution.action-major -->
 
 #### Scenario: package major is released
-- **WHEN** the package version belongs to major v1
-- **THEN** the Action defaults to the v1 image and maintained workflows use
-  `MattJColes/lgtmaybe@v1`
+- **WHEN** the package version belongs to major v2
+- **THEN** the Action defaults to the v2 image and maintained workflows use
+  `MattJColes/lgtmaybe@v2`
 
 #### Scenario: a future major changes
 - **WHEN** the package major changes without updating the Action image default

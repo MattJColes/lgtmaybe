@@ -69,7 +69,9 @@ _ONE_FILE_ONE_HUNK = """diff --git a/one.py b/one.py
 # what explains a small diff truncating at all.
 _CEILING = (
     "response hit the 16384-token `max_tokens` ceiling (16200 reasoning) before "
-    "finishing — raise `max_tokens`, or lower `max_input_tokens` so each call covers less"
+    "finishing — the batch is re-reviewed in smaller pieces automatically, so a lens "
+    "that keeps doing it is usually generation instability in the model, which a "
+    "higher ceiling makes more expensive rather than prevents"
 )
 
 
@@ -293,6 +295,28 @@ def test_a_reasoning_dominated_truncation_keeps_its_salvage() -> None:
     assert [f.title for f in findings] == ["sep is never validated"]
     assert "results may be incomplete" in summary
     assert "reasoning_effort" in summary
+
+
+def test_a_reasoning_dominated_truncation_offers_the_cap_as_well() -> None:
+    """Naming only `reasoning_effort` states the pessimistic case as fact.
+
+    Two different failures produce identical numbers. Thinking that *expands to
+    fill* whatever ceiling it is given is immune to a bigger cap — the case
+    issue #348 measured, and the one where lowering the effort is the only move.
+    Thinking with a bounded natural size that merely exceeds this ceiling is the
+    opposite: raising the cap fixes it outright, and lowering the effort buys
+    the fix in review quality instead. One truncation cannot tell the two apart
+    — only re-running at a higher cap can — so the reader is handed both levers
+    rather than the pessimistic one asserted as proven.
+    """
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        LLMReviewEngine(_TruncatesOnReasoning()).review(
+            _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+        )
+
+    reason = str(exc_info.value)
+    assert "reasoning_effort" in reason
+    assert "raise `max_tokens`" in reason
 
 
 def test_a_truncation_that_spent_its_ceiling_on_findings_is_still_split() -> None:

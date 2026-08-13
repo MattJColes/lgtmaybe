@@ -399,10 +399,20 @@ pattern, event bus, plugin framework.
      output. Skippable via `--no-reflect` for weaker models that over-prune. The auditor
      also drops **cross-file false positives** — findings whose validity hinges on
      an assumption about code outside the diff (a guard/field/handler that may live
-     in an unshown file) — while **carving out gap findings** (a missing test/doc on
-     the diff itself stays valid). This mirrors the shared review rule (below) that
-     tells every lens the diff is only a **slice of the codebase**, so it should
-     hedge a cross-file absence-claim and lower its severity rather than assert it.
+     in an unshown file) — while **carving out gap findings** (performance,
+     complexity, intent, spec). The test/doc half of that carve-out is
+     **conditional**: a "no test for this" finding keeps its protection only when
+     the test or doc file is shown in the diff or in the grounded file text.
+     Unconditional, it instructed the auditor *not* to prune the exact claim the
+     cross-file rule forbids — a test living in an untouched file is not a missing
+     test — which is the seam a real false positive landed in. This mirrors the
+     shared review rule (below) that tells every lens the diff is only a **slice of
+     the codebase**, so it should hedge a cross-file absence-claim and lower its
+     severity rather than assert it — a rule that covers both a symbol's
+     **existence** and its **value**: you may not assume what an unshown constant,
+     default, config entry or collection *contains*, only that it exists (a
+     constant named for a policy may hold an empty set, hundreds of lines away in
+     the same file).
    - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
      reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
      one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
@@ -643,6 +653,13 @@ Split by whether it can be deterministic, because that decides where it lives:
   example — one genuine in-diff catch (a logged secret) plus three forbidden
   cross-file traps (model_dump-vs-V2, idempotency re-run, tenant_id null) — and it
   measures the codebase-humility behavior the review prompt + reflection enforce.
-  Real-spend hosted-provider e2e remains label-gated in `action-e2e.yml`.
+  **`unshown-code-fp`** is its sibling for the two shapes cross-file-fp cannot
+  express (its changed file is new, so nothing of it is unshown): a short edit at
+  the bottom of a long existing module traps a claim about **what an unshown
+  constant in the SAME file contains** (an empty frozenset ~180 lines up, the
+  `_SINGLE_STREAM_PROVIDERS` shape) and a claim that the change is **untested**
+  when the test lives in a file the diff never touched — the shape reflection's
+  gap-finding carve-out currently protects. Real-spend hosted-provider e2e
+  remains label-gated in `action-e2e.yml`.
 
 [litellm]: https://github.com/BerriAI/litellm

@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v1
+      - uses: MattJColes/lgtmaybe@v2
         with:
           provider: bedrock
           model: us.anthropic.claude-sonnet-4-6

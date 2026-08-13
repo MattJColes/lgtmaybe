@@ -630,7 +630,7 @@
     "max_tokens": {
       "anyOf": [
         {
-          "minimum": 1,
+          "minimum": 0,
           "type": "integer"
         },
         {
