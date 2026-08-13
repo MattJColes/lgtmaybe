@@ -230,8 +230,10 @@ names a ceiling hit its own way is caught downstream by the parser instead.
 Timeouts SHALL default long for providers that may front a slow model —
 local-capable ones (ollama/openai-compatible) and openrouter, a gateway to
 arbitrary models including slow reasoning ones — and short for direct cloud
-providers; the litellm model string is derived per provider so users give bare
-model ids.
+providers; a local-capable default SHALL additionally scale with the fan-out
+width, bounded by the whole-review deadline, because a queued call spends that
+budget waiting rather than working; the litellm model string is derived per
+provider so users give bare model ids.
 <!-- anchor: provider.defaults -->
 
 #### Scenario: no timeout configured
@@ -241,6 +243,17 @@ model ids.
 #### Scenario: openrouter gets the generous default
 - **WHEN** `timeout` is unset and the provider is openrouter
 - **THEN** the generous (long) default applies, not the cloud one
+
+#### Scenario: a local fan-out queues behind one slot
+- **WHEN** `timeout` is unset, the provider is local-capable, and the fan-out is
+  wider than one
+- **THEN** the default is multiplied by that width, so a call whose wait is spent
+  in the server's queue still has a full budget for the work itself
+
+#### Scenario: the widened budget would outlive the run
+- **WHEN** that scaled default exceeds `max_review_seconds`
+- **THEN** it is clamped to the deadline — never below the provider's own default,
+  and never clamped at all when the deadline is disabled
 
 #### Scenario: the documented default and the resolved one disagree
 - **WHEN** a provider's resolved default stops matching the seconds the Action

@@ -158,7 +158,18 @@ lgtmaybe review --provider openai-compatible --model <model> \
   --api-base http://localhost:8000/v1 --max-concurrency 6
 ```
 
-For a single-slot server, say so and let lgtmaybe queue nothing:
+**Queueing does not cost you a timeout.** A queued request's clock starts when it
+is sent, not when the slot frees, so lgtmaybe scales the `openai-compatible`
+per-call default (1800 s) by the fan-out width — `1800 × 6` at the default,
+bounded by `max_review_seconds` (3600 s) so no call outlives the review. An
+explicit `timeout` is honoured exactly as written, at any width. Each run logs the
+number it resolved and the width it assumed:
+
+```
+per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+```
+
+For a single-slot server, you can still say so and let lgtmaybe queue nothing:
 
 ```yaml
 # .lgtmaybe.yml

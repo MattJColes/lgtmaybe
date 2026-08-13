@@ -313,7 +313,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
     return notices
 
 
-def _concurrency_cap(cfg: ReviewConfig) -> int:
+def concurrency_cap(cfg: ReviewConfig) -> int:
     """How many model calls this run may have in flight: the explicit cap, else
     the provider-aware default.
 
@@ -332,7 +332,7 @@ def _concurrency_cap(cfg: ReviewConfig) -> int:
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
     """The fan-out pool size: the cap above, narrowed to the work there is."""
-    return max(1, min(_concurrency_cap(cfg), task_count))
+    return max(1, min(concurrency_cap(cfg), task_count))
 
 
 @dataclass(frozen=True)
@@ -542,7 +542,7 @@ class _Run:
     budget_at: int | None
     # Mid-review retrieval budget in tokens, or None when a lens may not defer.
     retrieval_budget: int | None
-    # How many calls this backend will serve at once (_concurrency_cap). Carried
+    # How many calls this backend will serve at once (concurrency_cap). Carried
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
@@ -893,7 +893,7 @@ class LLMReviewEngine:
             deadline_at=deadline_at,
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
-            concurrency=_concurrency_cap(cfg),
+            concurrency=concurrency_cap(cfg),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
