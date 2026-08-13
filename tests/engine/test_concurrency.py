@@ -28,8 +28,10 @@ def _cfg(provider: Provider, **overrides: object) -> ReviewConfig:
 
 class TestResolveWorkers:
     @pytest.mark.parametrize("provider", _CLOUD_PROVIDERS)
-    def test_cloud_defaults_to_eight(self, provider: Provider) -> None:
-        assert _resolve_workers(_cfg(provider), task_count=100) == 8
+    def test_cloud_defaults_to_six(self, provider: Provider) -> None:
+        """Six, not eight: the fan-out is one API key, and eight concurrent calls
+        against a per-minute-metered gateway rate-limits itself."""
+        assert _resolve_workers(_cfg(provider), task_count=100) == 6
 
     @pytest.mark.parametrize("provider", [Provider.ollama, Provider.openai_compatible])
     def test_single_stream_providers_default_to_one(self, provider: Provider) -> None:

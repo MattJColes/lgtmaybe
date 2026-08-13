@@ -69,7 +69,7 @@ changes only how they are scheduled, so a cloud review overlaps them while a
 single-slot local one runs them in turn. `--preset full` (or `preset: full` in
 `.lgtmaybe.yml`) restores the one-call-per-lens deep audit for release branches.
 On top of that, all calls across all batches share **one concurrency pool**
-(`max_concurrency`, default 8 on cloud providers) and share a **cached
+(`max_concurrency`, default 6 on cloud providers) and share a **cached
 preamble-plus-diff prefix** on the routes that support it, so the diff is
 processed once per batch, not once per lens. Add `--profile` to any run to see exactly where
 the time and tokens went.
@@ -80,7 +80,7 @@ latency:
 - `preset` (default `fast`) — four calls, one per concern (security, correctness, code health, artefacts), the same on every provider; `full` runs one call per lens.
 - `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
 - `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
-- `max_concurrency` (default 8 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.
+- `max_concurrency` (default 6 cloud / 1 ollama and openai-compatible) — concurrent model calls across the whole fan-out.
 - `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
 - `categories` (default all nine) — which review lenses to run; an explicit list overrides the preset grouping and runs exactly those lenses, one call each.
 - `min_severity` (default `low`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.

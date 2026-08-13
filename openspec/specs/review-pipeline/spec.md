@@ -49,7 +49,7 @@ stage failure surfaces to the caller.
 ### Requirement: Per-lens fan-out through one bounded executor
 
 Every `(batch, lens)` call SHALL run through one global bounded executor sized
-by `max_concurrency` (auto: eight cloud, one for Ollama/OpenAI-compatible). The
+by `max_concurrency` (auto: six cloud, one for Ollama/OpenAI-compatible). The
 executor size SHALL determine only how the preset's calls are scheduled, never
 how many there are.
 <!-- anchor: engine.fan-out -->
@@ -66,6 +66,31 @@ how many there are.
 #### Scenario: deep audit
 - **WHEN** a review uses the `full` preset
 - **THEN** every built-in category runs, including tests and documentation
+
+### Requirement: A transiently-failed call is re-run once
+
+A `(batch, lens)` call that failed on the provider SHALL be re-run exactly once
+after the fan-out drains, so one flaky call does not void the round's verdict.
+Failures the reviewer's own request caused, and ceilings the user set, SHALL NOT
+be re-run. Every rescue SHALL re-check the deadline, the token budget and the
+interrupt first, and a run with no failures SHALL cost no extra calls.
+<!-- anchor: engine.rescue -->
+
+#### Scenario: one lens hits a transient provider failure
+- **WHEN** a lens call fails on a rate limit, a 5xx or a stalled connection while
+  its siblings succeed
+- **THEN** it runs once more after the wave drains, and a review that recovers
+  posts as complete instead of partial
+
+#### Scenario: the failure would repeat identically
+- **WHEN** a call returns unparseable output, hits the `max_tokens` ceiling, or
+  fails after the oversized-batch split already retried it smaller
+- **THEN** it is not re-run: the same request fails the same way, at cost
+
+#### Scenario: the re-run fails too
+- **WHEN** the rescue attempt fails as well
+- **THEN** the round reports itself incomplete, naming the lens it lost, and no
+  further attempt is made
 
 ### Requirement: Findings merge and dedupe across lenses
 

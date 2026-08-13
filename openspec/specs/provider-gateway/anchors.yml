@@ -22,6 +22,12 @@ provider.complete:
       stopBy: end
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.backoff:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_retry_wait$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.param-drop:
   rule:
     kind: function_definition

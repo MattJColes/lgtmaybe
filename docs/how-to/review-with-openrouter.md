@@ -94,6 +94,27 @@ lgtmaybe treats this refusal as permanent and stops after one attempt — your
 balance cannot grow mid-review, so retrying every lens would only waste runner
 time before reporting the same failure.
 
+## Rate limits
+
+A *capacity* 429 is different: it is temporary, and lgtmaybe handles it for you.
+Rate-limited calls back off on a 5s–60s ladder — long enough to reach a fresh
+per-minute window — and honour OpenRouter's own `Retry-After` when it sends one.
+Anything still failing when the fan-out drains is re-run once. You will usually
+see nothing at all; a review that could not recover says so in its summary, and
+names the lens it lost.
+
+If you *are* seeing rate limits, the review's own burst is worth a look before
+the model is. Every `(batch, lens)` call shares one concurrency pool and one API
+key, so a wide fan-out can meter itself:
+
+```yaml
+max_concurrency: 3
+```
+
+OpenRouter's per-key request limits scale with your credit balance, and free
+model variants carry their own hard daily and per-minute caps, so a paid model
+on a topped-up key rate-limits far less than the same review on a free one.
+
 ## Persist non-secret defaults
 
 ```yaml

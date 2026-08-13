@@ -87,16 +87,21 @@ _log = get_logger(__name__)
 
 # Auto concurrency (cfg.max_concurrency=None), resolved per provider:
 #
-# - Cloud providers get 8. The adapter's exponential backoff absorbs a capacity
-#   429 on a lower-tier account, and on bedrock cache reads don't count against
-#   rate limits — so bursting the fan-out is safe, and every extra worker cuts
-#   a full-latency wave off the wall clock.
+# - Cloud providers get 6. Every extra worker cuts a full-latency wave off the
+#   wall clock, so the pull is upward — but the fan-out is one API key, and the
+#   gateways that meter a key meter it per minute, so past some width the burst
+#   rate-limits ITSELF. It did: eight concurrent calls against one OpenRouter key
+#   produced three consecutive reviews reporting "1 of 4 review calls failed" on
+#   a 429. The adapter's backoff (now long enough to outlast a rate window) and
+#   the rescue wave both make that survivable rather than fatal; six is the same
+#   fix from the other end — a quarter less burst for a sixth less parallelism.
+#   Teams on a high rate tier can raise it with `max_concurrency`.
 # - A single ollama instance serves a model serially, so concurrent calls only
 #   queue up and time out: 1.
 # - openai-compatible is honest about the worst case: a llama.cpp / LM Studio
-#   single-slot server wants 1, while a vLLM server batches happily at 8 —
+#   single-slot server wants 1, while a vLLM server batches happily —
 #   default to 1 and let --max-concurrency raise it for batching servers.
-_CLOUD_MAX_WORKERS = 8
+_CLOUD_MAX_WORKERS = 6
 _SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
