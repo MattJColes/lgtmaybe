@@ -364,16 +364,9 @@ def test_review_config_accepts_reflect_false() -> None:
     assert cfg.reflect is False
 
 
-def test_review_config_answer_replies_defaults_to_true() -> None:
-    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert cfg.answer_replies is True
-
-
-def test_review_config_accepts_answer_replies_false() -> None:
-    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", answer_replies=False)
-    assert cfg.answer_replies is False
-    restored = ReviewConfig.model_validate_json(cfg.model_dump_json())
-    assert restored.answer_replies is False
+def test_review_config_rejects_removed_answer_replies_option() -> None:
+    with pytest.raises(ValidationError, match="answer_replies"):
+        ReviewConfig(provider=Provider.ollama, model="llama3", answer_replies=True)
 
 
 def test_review_config_resolve_fixed_defaults_to_true() -> None:

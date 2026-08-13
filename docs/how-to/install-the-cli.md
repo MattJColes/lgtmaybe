@@ -26,6 +26,18 @@ lgtmaybe --help
 That prints the command list with usage examples; `<command> --help`
 (e.g. `lgtmaybe review --help`) shows the full option reference for one command.
 
+To record which build you are running — for a bug report, or to pin the
+executable a benchmark ran against — ask it:
+
+```bash
+lgtmaybe --version
+```
+
+It prints one parseable line, `lgtmaybe <version>`, and works the same for every
+install (pip, Homebrew, or the portable Windows executable). A source checkout
+that was never installed has no version metadata to read and says
+`lgtmaybe unknown`.
+
 Upgrade later with `pip install --upgrade lgtmaybe`.
 
 ## Install on Windows (WinGet)

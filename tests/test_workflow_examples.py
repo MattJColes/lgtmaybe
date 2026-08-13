@@ -15,8 +15,8 @@ _PROJECT_VERSION = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encod
 ]["version"]
 _ACTION_REF = f"MattJColes/lgtmaybe@v{_PROJECT_VERSION.split('.', maxsplit=1)[0]}"
 _STARTER_WORKFLOWS = _REPO_ROOT / "examples" / "workflows"
-# The events lgtmaybe itself fires: posting a comment (auto-diagram, /ask, the
-# summary) emits issue_comment, and posting inline findings emits
+# The events lgtmaybe itself fires: posting a top-level comment (auto-diagram,
+# /ask) emits issue_comment, and posting inline findings emits
 # pull_request_review_comment.
 _SELF_TRIGGERED_EVENTS = {
     "issue_comment",
@@ -181,6 +181,20 @@ def test_self_triggered_workflows_discriminate_concurrency_by_event() -> None:
             )
 
 
+def test_concurrency_comments_name_the_actual_cancellation_source() -> None:
+    for path in _workflows():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if "issue_comment" not in _triggers(workflow) or not _concurrency_blocks(workflow):
+            continue
+
+        source = path.read_text(encoding="utf-8")
+        assert "posts comments during a review" not in source, path.name
+        if "concurrency" in workflow:
+            assert "automatic diagram posts an issue_comment event" in source, path.name
+        else:
+            assert "eligible slash-command" in source, path.name
+
+
 def test_comment_arm_starts_no_job_without_a_slash_command() -> None:
     """A comment carrying no slash command must not start the issue_comment job.
 
@@ -228,19 +242,21 @@ def test_comment_arm_starts_no_job_without_a_slash_command() -> None:
             "check inside the issue_comment arm — as a separate `||` branch (or "
             "negated) it lets any commenter start a job"
         )
-        # The pull_request_review_comment arm is the answer_replies path, whose
-        # replies are plain prose. Gating it on a command would disable the
-        # feature outright, so it must inspect no comment body at all.
-        [reply_arm] = [arm for arm in arms if "'pull_request_review_comment'" in arm]
-        assert "github.event.comment.body" not in reply_arm, (
-            f"{path.name} gates the reply arm on a slash command; replies carry none"
-        )
         # One reference per command and nowhere else. With all five living in the
         # issue_comment arm checked above, this is what pins that no other arm —
         # pull_request_target included — gates on the comment body.
         assert flat.count("github.event.comment.body") == len(SlashCommand), (
             f"{path.name} references the comment body outside the issue_comment arm"
         )
+
+
+def test_workflows_do_not_subscribe_to_review_comment_events() -> None:
+    for path in _workflows():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        condition = str(workflow["jobs"]["review"].get("if", ""))
+
+        assert "pull_request_review_comment" not in _triggers(workflow), path.name
+        assert "pull_request_review_comment" not in condition, path.name
 
 
 def test_dogfood_workflow_uses_the_public_app_identity() -> None:

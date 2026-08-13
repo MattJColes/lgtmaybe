@@ -116,32 +116,25 @@ included — when the model reports no run-time flow.
   becomes a labelled section with its HTML wrapper removed, and the Mermaid
   source stays intact to paste elsewhere
 
-### Requirement: Finding-thread replies are answered in-thread
+### Requirement: Stale review-comment events are inert
 
-A `pull_request_review_comment` reply in a finding thread lgtmaybe opened SHALL
-be answered in that same thread — using the finding and its surrounding diff
-hunk as context, the reply treated as untrusted input — only when it is a
-freshly *created* reply from a non-bot author whose thread root carries the
-finding marker, and gated on `answer_replies`; every other case posts nothing so
-the reviewer never answers itself.
-<!-- anchor: cli.review-reply -->
+The Action SHALL exit successfully on a `pull_request_review_comment` event
+before loading review configuration, constructing a provider, or accessing
+GitHub, so an obsolete workflow trigger cannot spend tokens or post output.
+<!-- anchor: cli.review-comment-noop -->
 
-#### Scenario: PR author replies in a finding thread
-- **WHEN** the author replies to a lgtmaybe finding comment and `answer_replies` is on
-- **THEN** lgtmaybe answers in that thread using the finding + hunk as context
-
-#### Scenario: a bot reply arrives
-- **WHEN** the review-comment author is a bot, or it is not a freshly created reply
-- **THEN** nothing is posted, so the reviewer never loops on its own replies
+#### Scenario: an old workflow delivers a review-comment event
+- **WHEN** the Action receives `pull_request_review_comment`
+- **THEN** it exits successfully without reading review config, calling a
+  provider, or posting to GitHub
 
 ### Requirement: Conversational answers are directly actionable
 
-Provider prompts for `/ask` answers and finding-thread replies SHALL require the
-response to begin with the direct answer, omit preamble, tangents, recap, and
-closing pleasantries, use numbered steps only when the work is genuinely
-multi-step, and end with one concrete next action only when action remains.
-Purely informational answers SHALL stop after answering instead of inventing a
-task for the reader.
+Provider prompts for `/ask` answers SHALL require the response to begin with the
+direct answer, omit preamble, tangents, recap, and closing pleasantries, use
+numbered steps only when the work is genuinely multi-step, and end with one
+concrete next action only when action remains. Purely informational answers
+SHALL stop after answering instead of inventing a task for the reader.
 <!-- anchor: cli.response-style -->
 
 #### Scenario: User asks a direct question
@@ -151,10 +144,6 @@ task for the reader.
 #### Scenario: Answer requires several actions
 - **WHEN** an answer requires more than one bounded action
 - **THEN** those actions are presented as the fewest numbered steps that still work
-
-#### Scenario: Finding thread has one remaining action
-- **WHEN** a finding-thread reply confirms that the finding still needs work
-- **THEN** the reply ends with exactly one concrete next action for the author
 
 ### Requirement: Local review needs no GitHub
 

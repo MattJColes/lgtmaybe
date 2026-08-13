@@ -793,12 +793,6 @@ class ReviewConfig(_Strict):
     # Run the self-reflection pass that filters low-confidence findings. Disable
     # it (--no-reflect) when a weaker model drops valid findings during reflection.
     reflect: bool = True
-    # Answer a PR author who replies inside a review conversation lgtmaybe opened
-    # on a finding: the reply is answered in that same thread, using the finding
-    # and its surrounding diff hunk as context. GitHub posting only (a
-    # pull_request_review_comment event); the reply text is treated as untrusted
-    # input. On by default; set false to leave finding threads unanswered.
-    answer_replies: bool = True
     # Model used for the self-reflection (false-positive audit) pass. None falls
     # back to `model`. Point it at a stronger model so a weaker reviewer's findings
     # get audited by a better judge. Same provider/credentials as `model` — only

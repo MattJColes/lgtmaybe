@@ -453,11 +453,6 @@
   "additionalProperties": false,
   "description": "How to run one review: provider/model, severity floor, filters, caps.",
   "properties": {
-    "answer_replies": {
-      "default": true,
-      "title": "Answer Replies",
-      "type": "boolean"
-    },
     "api_base": {
       "anyOf": [
         {

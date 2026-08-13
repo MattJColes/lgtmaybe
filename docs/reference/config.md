@@ -16,7 +16,6 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `answer_replies` | boolean | No | `True` | Answer Replies |
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `False` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
@@ -607,11 +606,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
   "additionalProperties": false,
   "description": "How to run one review: provider/model, severity floor, filters, caps.",
   "properties": {
-    "answer_replies": {
-      "default": true,
-      "title": "Answer Replies",
-      "type": "boolean"
-    },
     "api_base": {
       "anyOf": [
         {

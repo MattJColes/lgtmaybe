@@ -214,6 +214,12 @@ def test_every_mapped_env_var_is_read_by_the_cli() -> None:
     assert _env_block_input_names() == {f"INPUT_{key.upper()}" for key in action_inputs()}
 
 
+def test_removed_answer_replies_input_is_absent() -> None:
+    assert "answer_replies" not in _action()["inputs"]
+    assert "INPUT_ANSWER_REPLIES" not in _run_lgtmaybe_step()["env"]
+    assert "answer_replies" not in action_inputs()
+
+
 def test_docker_run_forwards_the_step_environment_by_env_file() -> None:
     """The env file is generated from the step's own env, not a second name list.
 
