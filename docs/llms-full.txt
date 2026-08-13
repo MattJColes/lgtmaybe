@@ -1717,6 +1717,7 @@ the findings; to post reviews on real pull requests, use the
 - [Inside the GitHub Action's container](#inside-the-github-actions-container)
 - [Get findings as JSON](#get-findings-as-json)
 - [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
+- [Concurrency on a local server](#concurrency-on-a-local-server)
 - [Slow models and timeouts](#slow-models-and-timeouts)
 - [Troubleshooting](#troubleshooting)
 
@@ -1870,14 +1871,76 @@ agent (such as Claude Code) can read and apply, so you can review and fix a
 branch locally before opening a PR. See
 [Fix findings with an AI agent](fix-findings-with-an-ai-agent.md).
 
+## Concurrency on a local server
+
+lgtmaybe fans its review calls out across a pool sized by `max_concurrency`,
+**6 by default on every provider, local included**. That is a ceiling on what
+lgtmaybe will have in flight — it is not a promise your server will run them at
+once, and the distinction matters:
+
+- **A default ollama runs one at a time.** `OLLAMA_NUM_PARALLEL` is `1` unless you
+  set it, so five of six calls simply queue (up to `OLLAMA_MAX_QUEUE`, 512). They
+  are not lost and nothing fails; the wall clock is your server's throughput
+  either way. Raising `max_concurrency` alone therefore changes nothing.
+- **The knob that matters is on the server.** Start ollama with
+  `OLLAMA_NUM_PARALLEL=4` and four calls genuinely run together.
+- **It costs memory, in proportion.** Ollama allocates the context window *per
+  parallel slot*: four slots at `num_ctx` 32768 needs 128k of context allocated,
+  not 32k. This is the usual reason a machine that reviewed happily at one slot
+  falls over at four.
+
+So the two settings want to match. If you have raised the server, tell lgtmaybe:
+
+```bash
+lgtmaybe review --max-concurrency 4
+```
+
+**How to tell which you got.** `--profile` already answers it, no extra flag
+needed: compare the per-call `elapsed` column against the `review` stage total.
+If the calls' elapsed times sum to roughly the stage time, they ran one after
+another; if they sum to well over it, they genuinely overlapped.
+
+```
+review             95.32s        <- stage total
+correctness         52.02s   |
+spec                45.64s   |   sum is ~3x the stage,
+artefacts           43.67s   |   so these overlapped
+security            43.30s   |
+```
+
+**Queue time is already paid for.** A queued call's timeout clock starts when the
+request is *sent*, not when your server gets to it, so on a single-slot box the
+last call in a six-wide fan-out would otherwise have to be served within the same
+budget as the first. lgtmaybe scales the local default by the fan-out width to
+cover that (see below), so you should not need to intervene. If you would rather
+not have the calls queue at all:
+
+```yaml
+# .lgtmaybe.yml
+max_concurrency: 1
+```
+
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
 long default per-request timeout (1800 seconds)** automatically — you don't need
 to set anything for a normal run. (Direct cloud providers default to 600 s.)
 
+**That default scales with the fan-out.** Because the calls queue, the budget has
+to cover the wait as well as the work: at the default width of six the resolved
+per-call timeout is `1800 × 6`, **bounded by `max_review_seconds`** (3600 s by
+default) so no single call can outlive the review it belongs to. At
+`max_concurrency: 1` there is no queue and the budget is the plain 1800 s. Every
+run logs which number it resolved, and why:
+
+```
+per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+```
+
+An explicit `timeout` is never scaled — `timeout: 600` means 600 at any width.
+
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 1800.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 3600.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
@@ -1893,20 +1956,16 @@ timeout: 1800
 ```
 
 The review fans out **four calls** under the default `fast` preset (nine under
-`--preset full`). lgtmaybe runs those **serially for
-ollama**: a single ollama instance serves one request at a time, so firing them
-concurrently would only make each wait and time out. The trade-off is
-wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — four serial calls instead of nine is the
-single biggest local speed-up.
+`--preset full`). On a default ollama those queue rather than overlap, so a slow
+model takes roughly `lens calls × per-call time` — which is exactly why `fast` is
+the default: four calls instead of nine is the single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
-`OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — the same four calls then overlap instead of queueing, which is close to
-a 4× wall-clock win. By default lgtmaybe issues ollama calls one at a time. Add
-`--profile` to any run to see the per-call breakdown.
+`OLLAMA_NUM_PARALLEL` on the **ollama server** as described above — the same four
+calls then overlap instead of queueing, which is close to a 4× wall-clock win.
+Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
@@ -1923,9 +1982,15 @@ pretending the PR is clean.
 
 For a **large diff** this can mean the prompt plus the findings don't fit in
 ollama's context window and the output gets truncated. lgtmaybe runs ollama with
-a generous context (`num_ctx` of 32768) and **structured JSON output** (it also
-disables "thinking" so reasoning models like qwen3.x emit the findings directly),
-which covers most reviews.
+a generous context (`num_ctx` of 32768) and **structured JSON output**, which
+covers most reviews.
+
+lgtmaybe does not pass ollama's `think` flag either way. Ollama already defaults
+thinking **on** for a model that supports it and rejects the flag outright for one
+that does not, so sending nothing is the only choice that is right for both.
+lgtmaybe used to force it off — that made reasoning models review with their
+reasoning switched off, which measurement says is the single biggest lever on
+finding quality there is.
 
 For a big multi-file change ("vibe-coded" commits across many files), raise the
 context window with `--num-ctx` so the whole diff and the findings fit — this is
@@ -1994,6 +2059,7 @@ anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag
 - [llama.cpp (local, keyless)](#llamacpp-local-keyless)
 - [LM Studio (local, keyless)](#lm-studio-local-keyless)
 - [vLLM (local or self-hosted, keyless)](#vllm-local-or-self-hosted-keyless)
+- [Concurrency: what each server can actually take](#concurrency-what-each-server-can-actually-take)
 - [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
 - [Gateways that don't support JSON mode (`response_format`)](#gateways-that-dont-support-json-mode-response_format)
 
@@ -2091,6 +2157,57 @@ lgtmaybe review \
   --provider openai-compatible \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --api-base http://localhost:8000/v1
+```
+
+## Concurrency: what each server can actually take
+
+lgtmaybe fans out across a pool sized by `max_concurrency`, **6 by default on
+every provider**. That is a ceiling on what it will have in flight; whether your
+server runs them together is the server's business, and the three above differ
+sharply.
+
+| server | concurrent by default? | raising it |
+|---|---|---|
+| **vLLM** | yes — continuous batching | close to free; each request keeps the full `--max-model-len` |
+| **llama.cpp** | no, one slot | `-np N` adds slots, but **splits one KV cache between them** |
+| **LM Studio** | no, single-slot | not exposed; leave `max_concurrency` at 1 |
+
+The llama.cpp trap is worth spelling out, because it fails as a quality problem
+rather than an error. `-np` divides the context you asked for: `-c 32768 -np 4`
+leaves each slot **8k**, and a lgtmaybe review prompt is comfortably larger than
+that, so the diff is silently truncated and the model reviews something it was
+never fully shown. Size `-c` as `slots × per-slot-context`:
+
+```bash
+llama-server -m ./model.gguf --port 8000 -np 4 -c 131072   # 4 slots × 32k each
+```
+
+vLLM allocates KV blocks dynamically rather than carving them up front, so
+concurrent requests each keep the full `--max-model-len`. That is why it is the
+local server to reach for when review latency matters:
+
+```bash
+vllm serve <model> --port 8000 --max-model-len 32768
+lgtmaybe review --provider openai-compatible --model <model> \
+  --api-base http://localhost:8000/v1 --max-concurrency 6
+```
+
+**Queueing does not cost you a timeout.** A queued request's clock starts when it
+is sent, not when the slot frees, so lgtmaybe scales the `openai-compatible`
+per-call default (1800 s) by the fan-out width — `1800 × 6` at the default,
+bounded by `max_review_seconds` (3600 s) so no call outlives the review. An
+explicit `timeout` is honoured exactly as written, at any width. Each run logs the
+number it resolved and the width it assumed:
+
+```
+per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+```
+
+For a single-slot server, you can still say so and let lgtmaybe queue nothing:
+
+```yaml
+# .lgtmaybe.yml
+max_concurrency: 1
 ```
 
 ## Persist it in `.lgtmaybe.yml`
@@ -3743,6 +3860,30 @@ of thought. Raising the cap from 16k to 32k had not helped; it only bought the
 model more room to think.
 
 Unset sends nothing, so a route without a reasoning channel is unaffected.
+
+#### But do not read "cheaper" as "better value"
+
+Bounding thinking is the fix for a **reasoning-bound truncation**. It is not a
+free saving, and the direction that saves tokens is not the direction that finds
+bugs. Measured on lgtmaybe's own repo, two runs per setting on the same diff:
+
+| | `low` | `medium` |
+|---|---|---|
+| findings | 2, 2 | 5, 4 |
+| false positives | 0, 1 | 0, 0 |
+| output tokens | ~4–5k | ~14k |
+| **total billable** | 180,704 | 187,191 |
+
+`medium` roughly triples output tokens and still costs about **4% more in total**,
+because a review is overwhelmingly input: the diff, the context, the system
+prompt. Weighting output at 4× its input price puts it nearer 20%. Either way,
+nothing like the 3× the output column suggests.
+
+What it bought was a bug in lgtmaybe's own retry backoff that `low` missed in
+both its runs — and `low` produced the only false positive of the four. So treat
+`reasoning_effort` as a **quality** dial that happens to move cost a little, not a
+cost dial that happens to move quality. Turn it down when reasoning is eating your
+`max_tokens` ceiling; do not turn it down to save money.
 
 #### On OpenRouter, check the log line
 
@@ -6119,10 +6260,16 @@ network recovers but a dead-end failure surfaces fast:
   clock — see the formula below — but the fan-out is *one* API key, and past
   some width the burst
   rate-limits itself against a per-minute-metered gateway; raise it if your rate
-  tier is generous), **1** for ollama (a single local instance serves a model
-  one request at a time, so concurrent calls would only queue up and time out)
-  and **1** for openai-compatible (honest about a single-slot llama.cpp/LM
-  Studio server; raise it explicitly for a batching vLLM server). Flattening
+  tier is generous), and the same **6** for local
+  providers. Local used to be pinned to 1 because a default ollama serves one
+  request at a time — but that is a property of the *server*, not a reason to cap
+  the client: a server that can batch was capped for nothing, and one that cannot
+  loses nothing by having work queued for it (ollama queues up to
+  `OLLAMA_MAX_QUEUE` rather than failing). What decides local throughput is
+  `OLLAMA_NUM_PARALLEL` / llama.cpp's `-np` / vLLM's batching, and raising those
+  costs memory per slot — see
+  [running locally](../how-to/run-locally-with-ollama.md). Drop this to 1 for a
+  very slow local model, where six queued calls could each wait out the timeout. Flattening
   the pool across batches means wall time is `ceil(batches × lenses / workers)`
   call-latencies rather than `batches × ceil(lenses / workers)`.
 

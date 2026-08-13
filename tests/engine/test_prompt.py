@@ -127,6 +127,22 @@ def test_prompt_requires_failure_scenarios_independently_of_severity() -> None:
     assert "regardless of severity" in prompt
 
 
+def test_prompt_requires_action_first_finding_prose() -> None:
+    prompt = build_shared_preamble().lower()
+
+    assert "corrective action" in prompt
+    assert "cause and observable impact" in prompt
+    assert "preamble" in prompt
+    assert "closing pleasantries" in prompt
+
+
+def test_prompt_uses_a_plain_problem_title_without_a_concrete_fix() -> None:
+    prompt = build_shared_preamble().lower()
+
+    assert "no concrete correction" in prompt
+    assert "state the problem plainly" in prompt
+
+
 def test_contract_requires_suggestion_to_be_replacement_code() -> None:
     """`suggestion` is rendered in a committable code fence, so it must be literal
     replacement code (or null) — never prose. Explanation belongs in `body`."""

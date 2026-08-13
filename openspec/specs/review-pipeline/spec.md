@@ -49,7 +49,7 @@ stage failure surfaces to the caller.
 ### Requirement: Per-lens fan-out through one bounded executor
 
 Every `(batch, lens)` call SHALL run through one global bounded executor sized
-by `max_concurrency` (auto: six cloud, one for Ollama/OpenAI-compatible). The
+by `max_concurrency` (auto: six, every provider). The
 executor size SHALL determine only how the preset's calls are scheduled, never
 how many there are. The rescue wave and the oversized-batch split each run in a
 pool of their own, entered only after the fan-out's has closed or from a worker
@@ -62,8 +62,9 @@ result deadlocks once that pool saturates.
 - **THEN** the security, correctness, code-health, and artefacts calls share the
   bounded executor and may overlap
 
-#### Scenario: single-worker default review
-- **WHEN** a fast review uses Ollama auto-concurrency or `max_concurrency: 1`
+#### Scenario: single-worker review
+- **WHEN** a review sets `max_concurrency: 1` — a very slow local model, or a
+  server whose own parallelism is one and whose calls must not queue
 - **THEN** the same four calls run within the single-worker pool, serially
 
 #### Scenario: deep audit

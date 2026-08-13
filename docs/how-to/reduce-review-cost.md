@@ -262,6 +262,30 @@ model more room to think.
 
 Unset sends nothing, so a route without a reasoning channel is unaffected.
 
+#### But do not read "cheaper" as "better value"
+
+Bounding thinking is the fix for a **reasoning-bound truncation**. It is not a
+free saving, and the direction that saves tokens is not the direction that finds
+bugs. Measured on lgtmaybe's own repo, two runs per setting on the same diff:
+
+| | `low` | `medium` |
+|---|---|---|
+| findings | 2, 2 | 5, 4 |
+| false positives | 0, 1 | 0, 0 |
+| output tokens | ~4–5k | ~14k |
+| **total billable** | 180,704 | 187,191 |
+
+`medium` roughly triples output tokens and still costs about **4% more in total**,
+because a review is overwhelmingly input: the diff, the context, the system
+prompt. Weighting output at 4× its input price puts it nearer 20%. Either way,
+nothing like the 3× the output column suggests.
+
+What it bought was a bug in lgtmaybe's own retry backoff that `low` missed in
+both its runs — and `low` produced the only false positive of the four. So treat
+`reasoning_effort` as a **quality** dial that happens to move cost a little, not a
+cost dial that happens to move quality. Turn it down when reasoning is eating your
+`max_tokens` ceiling; do not turn it down to save money.
+
 #### On OpenRouter, check the log line
 
 litellm forwards `reasoning_effort` to OpenRouter only for models its capability

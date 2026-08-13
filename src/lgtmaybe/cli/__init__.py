@@ -45,6 +45,7 @@ from lgtmaybe.engine import (
     LLMReviewEngine,
     SymbolResolver,
     build_symbol_resolver,
+    concurrency_cap,
     request_interrupt,
 )
 from lgtmaybe.engine.profiling import profiler
@@ -169,6 +170,25 @@ def parse_pr_url(pr_url: str) -> tuple[str, int]:
     return f"{match['owner']}/{match['repo']}", int(match["number"])
 
 
+def _bounded_default(cfg: ReviewConfig, concurrency: int) -> int:
+    """The provider default, widened for queue time, then bounded by the run.
+
+    Six workers against the generous local default is three hours of per-call
+    budget, and the whole-review deadline cannot take it back: that deadline only
+    skips calls that have not *started*, and a fan-out narrower than the pool
+    starts all of its calls at once. So the clamp happens here instead — no
+    single call gets a budget outliving the review it belongs to.
+
+    Bounded in both directions. ``max_review_seconds: 0`` means "no deadline",
+    not "zero seconds"; and the clamp may only take back what the scaling added,
+    never drag a call below the provider default it would have had at width one.
+    """
+    scaled = default_timeout_for(cfg.provider, concurrency=concurrency)
+    if not cfg.max_review_seconds:
+        return scaled
+    return max(default_timeout_for(cfg.provider), min(scaled, cfg.max_review_seconds))
+
+
 def build_provider_engine(
     cfg: ReviewConfig,
     runtime: RuntimeOptions,
@@ -226,8 +246,15 @@ def build_provider_engine(
     # versioned independently: a budget that looks impossible against the
     # documented default is usually an older image, and the only way to tell from
     # a log is for the run to name its own build.
+    #
+    # The width is part of the budget on a local endpoint. lgtmaybe issues the
+    # whole fan-out at once, and a single-slot server (ollama's default) makes
+    # all but the first wait their turn with their timeout clocks already
+    # running — so the default is scaled by the width there, and only there.
+    # This is the one place that knows both numbers.
+    concurrency = concurrency_cap(cfg)
     effective_timeout = (
-        cfg.timeout if cfg.timeout is not None else default_timeout_for(cfg.provider)
+        cfg.timeout if cfg.timeout is not None else _bounded_default(cfg, concurrency)
     )
     _log.info(
         "per-call timeout resolved",
@@ -236,6 +263,7 @@ def build_provider_engine(
             "provider": cfg.provider.value,
             "timeout_s": effective_timeout,
             "timeout_source": "configured" if cfg.timeout is not None else "provider default",
+            "concurrency": concurrency,
         },
     )
     provider = build_provider(
@@ -245,7 +273,10 @@ def build_provider_engine(
         api_base=auth.api_base,
         azure_ad_token=auth.azure_ad_token,
         fallback_model=runtime.fallback_model,
-        timeout=cfg.timeout,
+        # The resolved value, not cfg.timeout — the widening and its bound are
+        # decided above, and passing the raw setting would have the factory
+        # resolve a second, unbounded number that the log above then misreports.
+        timeout=effective_timeout,
         temperature=cfg.temperature,
         **extra,
     )

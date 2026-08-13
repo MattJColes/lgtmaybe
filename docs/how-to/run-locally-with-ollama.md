@@ -27,6 +27,7 @@ the findings; to post reviews on real pull requests, use the
 - [Inside the GitHub Action's container](#inside-the-github-actions-container)
 - [Get findings as JSON](#get-findings-as-json)
 - [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
+- [Concurrency on a local server](#concurrency-on-a-local-server)
 - [Slow models and timeouts](#slow-models-and-timeouts)
 - [Troubleshooting](#troubleshooting)
 
@@ -180,14 +181,76 @@ agent (such as Claude Code) can read and apply, so you can review and fix a
 branch locally before opening a PR. See
 [Fix findings with an AI agent](fix-findings-with-an-ai-agent.md).
 
+## Concurrency on a local server
+
+lgtmaybe fans its review calls out across a pool sized by `max_concurrency`,
+**6 by default on every provider, local included**. That is a ceiling on what
+lgtmaybe will have in flight — it is not a promise your server will run them at
+once, and the distinction matters:
+
+- **A default ollama runs one at a time.** `OLLAMA_NUM_PARALLEL` is `1` unless you
+  set it, so five of six calls simply queue (up to `OLLAMA_MAX_QUEUE`, 512). They
+  are not lost and nothing fails; the wall clock is your server's throughput
+  either way. Raising `max_concurrency` alone therefore changes nothing.
+- **The knob that matters is on the server.** Start ollama with
+  `OLLAMA_NUM_PARALLEL=4` and four calls genuinely run together.
+- **It costs memory, in proportion.** Ollama allocates the context window *per
+  parallel slot*: four slots at `num_ctx` 32768 needs 128k of context allocated,
+  not 32k. This is the usual reason a machine that reviewed happily at one slot
+  falls over at four.
+
+So the two settings want to match. If you have raised the server, tell lgtmaybe:
+
+```bash
+lgtmaybe review --max-concurrency 4
+```
+
+**How to tell which you got.** `--profile` already answers it, no extra flag
+needed: compare the per-call `elapsed` column against the `review` stage total.
+If the calls' elapsed times sum to roughly the stage time, they ran one after
+another; if they sum to well over it, they genuinely overlapped.
+
+```
+review             95.32s        <- stage total
+correctness         52.02s   |
+spec                45.64s   |   sum is ~3x the stage,
+artefacts           43.67s   |   so these overlapped
+security            43.30s   |
+```
+
+**Queue time is already paid for.** A queued call's timeout clock starts when the
+request is *sent*, not when your server gets to it, so on a single-slot box the
+last call in a six-wide fan-out would otherwise have to be served within the same
+budget as the first. lgtmaybe scales the local default by the fan-out width to
+cover that (see below), so you should not need to intervene. If you would rather
+not have the calls queue at all:
+
+```yaml
+# .lgtmaybe.yml
+max_concurrency: 1
+```
+
 ## Slow models and timeouts
 
 Local models are slow, especially large ones on CPU, so lgtmaybe gives **ollama a
 long default per-request timeout (1800 seconds)** automatically — you don't need
 to set anything for a normal run. (Direct cloud providers default to 600 s.)
 
+**That default scales with the fan-out.** Because the calls queue, the budget has
+to cover the wait as well as the work: at the default width of six the resolved
+per-call timeout is `1800 × 6`, **bounded by `max_review_seconds`** (3600 s by
+default) so no single call can outlive the review it belongs to. At
+`max_concurrency: 1` there is no queue and the budget is the plain 1800 s. Every
+run logs which number it resolved, and why:
+
+```
+per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+```
+
+An explicit `timeout` is never scaled — `timeout: 600` means 600 at any width.
+
 If a big model still times out — you'll see
-`litellm.Timeout: Connection timed out after 1800.0 seconds` — raise it explicitly:
+`litellm.Timeout: Connection timed out after 3600.0 seconds` — raise it explicitly:
 
 ```bash
 # CLI flag (seconds):
@@ -203,20 +266,16 @@ timeout: 1800
 ```
 
 The review fans out **four calls** under the default `fast` preset (nine under
-`--preset full`). lgtmaybe runs those **serially for
-ollama**: a single ollama instance serves one request at a time, so firing them
-concurrently would only make each wait and time out. The trade-off is
-wall-clock time. A slow model takes roughly `lens calls × per-call time`, which
-is exactly why `fast` is the default — four serial calls instead of nine is the
-single biggest local speed-up.
+`--preset full`). On a default ollama those queue rather than overlap, so a slow
+model takes roughly `lens calls × per-call time` — which is exactly why `fast` is
+the default: four calls instead of nine is the single biggest local speed-up.
 
 To go faster still, narrow the lenses with `categories:` in `.lgtmaybe.yml`
 (e.g. just `security` and `correctness`), use a smaller model, or give ollama
 more GPU. If you have the VRAM to truly serve requests in parallel, raise
-`OLLAMA_NUM_PARALLEL` on the **ollama server** and raise `--max-concurrency` to
-match — the same four calls then overlap instead of queueing, which is close to
-a 4× wall-clock win. By default lgtmaybe issues ollama calls one at a time. Add
-`--profile` to any run to see the per-call breakdown.
+`OLLAMA_NUM_PARALLEL` on the **ollama server** as described above — the same four
+calls then overlap instead of queueing, which is close to a 4× wall-clock win.
+Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
@@ -233,9 +292,15 @@ pretending the PR is clean.
 
 For a **large diff** this can mean the prompt plus the findings don't fit in
 ollama's context window and the output gets truncated. lgtmaybe runs ollama with
-a generous context (`num_ctx` of 32768) and **structured JSON output** (it also
-disables "thinking" so reasoning models like qwen3.x emit the findings directly),
-which covers most reviews.
+a generous context (`num_ctx` of 32768) and **structured JSON output**, which
+covers most reviews.
+
+lgtmaybe does not pass ollama's `think` flag either way. Ollama already defaults
+thinking **on** for a model that supports it and rejects the flag outright for one
+that does not, so sending nothing is the only choice that is right for both.
+lgtmaybe used to force it off — that made reasoning models review with their
+reasoning switched off, which measurement says is the single biggest lever on
+finding quality there is.
 
 For a big multi-file change ("vibe-coded" commits across many files), raise the
 context window with `--num-ctx` so the whole diff and the findings fit — this is

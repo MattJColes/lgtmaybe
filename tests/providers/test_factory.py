@@ -161,10 +161,16 @@ class TestBuildProvider:
         provider = build_provider(Provider.ollama, "llama2", timeout=45)
         assert provider.default_opts.get("timeout") == 45
 
-    def test_ollama_disables_thinking(self) -> None:
-        # Thinking models return empty content under structured output otherwise.
+    def test_ollama_leaves_thinking_to_ollama(self) -> None:
+        """Send nothing, because either literal is wrong for some model.
+
+        Ollama's chat route defaults thinking ON for a thinking-capable model
+        when the field is unset, and 400s if a non-thinking model is asked for
+        it. Pinning False switched reasoning off for every local reasoning
+        model; pinning True would break every non-reasoning one.
+        """
         provider = build_provider(Provider.ollama, "qwen3.6:35b", api_base="http://localhost:11434")
-        assert provider.default_opts.get("think") is False
+        assert "think" not in provider.default_opts
 
     def test_cloud_does_not_set_think(self) -> None:
         provider = build_provider(Provider.openai, "gpt-4o", api_key="sk-test")
@@ -375,3 +381,66 @@ class TestOpenRouterReasoning:
         built = build_provider(Provider.openai, "gpt-4o", api_key="k", reasoning_effort="low")
 
         assert "extra_body" not in built.default_opts
+
+
+class TestQueuedTimeoutScaling:
+    """A local server may run one request at a time while lgtmaybe issues the
+    whole fan-out at once. Every queued call's timeout clock starts when the
+    request is *sent*, not when the server picks it up, so the last call in a
+    six-wide fan-out can burn its entire budget waiting its turn and time out
+    having never been served. Scaling the default by the fan-out width is what
+    keeps the budget a budget for *work* rather than for work-plus-queue.
+    """
+
+    def test_a_local_default_scales_with_the_fan_out_width(self) -> None:
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        one = default_timeout_for(Provider.ollama, concurrency=1)
+        six = default_timeout_for(Provider.ollama, concurrency=6)
+        assert six == one * 6
+
+    def test_openai_compatible_scales_too(self) -> None:
+        # llama.cpp and vLLM front the same single-box failure mode.
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        assert default_timeout_for(Provider.openai_compatible, concurrency=4) == (
+            default_timeout_for(Provider.openai_compatible, concurrency=1) * 4
+        )
+
+    def test_a_hosted_provider_does_not_scale(self) -> None:
+        """Hosted endpoints serve concurrent requests rather than queueing them,
+        so there is no queue time to cover — scaling there would only delay the
+        moment a genuinely stuck call is reported."""
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        for hosted in (Provider.openai, Provider.anthropic, Provider.bedrock):
+            assert default_timeout_for(hosted, concurrency=6) == default_timeout_for(hosted)
+
+    def test_openrouter_does_not_scale(self) -> None:
+        """A gateway is hosted capacity, not one box — it gets the generous
+        default for slow *models*, not for a queue it does not have."""
+        from lgtmaybe.providers.factory import default_timeout_for
+
+        assert default_timeout_for(Provider.openrouter, concurrency=6) == default_timeout_for(
+            Provider.openrouter
+        )
+
+    def test_serial_local_is_unchanged(self) -> None:
+        """The mitigation must be free when there is no queue: width 1 is the
+        pre-existing number, byte for byte."""
+        from lgtmaybe.providers.factory import _SLOW_TIMEOUT, default_timeout_for
+
+        assert default_timeout_for(Provider.ollama, concurrency=1) == _SLOW_TIMEOUT
+        assert default_timeout_for(Provider.ollama) == _SLOW_TIMEOUT
+
+    def test_an_explicit_timeout_is_never_scaled(self) -> None:
+        """`timeout: 600` means 600. Scaling a number the user chose would make
+        the setting mean something other than what it says."""
+        provider = build_provider(Provider.ollama, "qwen3.6:35b", timeout=600, concurrency=6)
+        assert provider.default_opts["timeout"] == 600
+
+    def test_build_provider_applies_the_scaled_default(self) -> None:
+        from lgtmaybe.providers.factory import _SLOW_TIMEOUT
+
+        provider = build_provider(Provider.ollama, "qwen3.6:35b", concurrency=6)
+        assert provider.default_opts["timeout"] == _SLOW_TIMEOUT * 6

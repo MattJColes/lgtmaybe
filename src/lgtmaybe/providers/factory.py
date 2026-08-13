@@ -63,6 +63,27 @@ _SLOW_TIMEOUT = 1800
 # Providers whose endpoint may be a slow model (local server or open gateway).
 _SLOW_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})
 
+# Providers whose endpoint may be ONE box that serves requests in turn.
+#
+# lgtmaybe issues its whole lens fan-out at once, so on a single-slot server
+# (ollama's OLLAMA_NUM_PARALLEL is 1 by default; llama.cpp without `-np`) five
+# of six requests sit in the server's queue. Their timeout clocks are already
+# running: the budget is measured from the moment the request is SENT, not from
+# the moment the server starts on it. Unscaled, the last call in a six-wide
+# fan-out has to be served within the same 1800s as the first, and on a slow
+# model it can blow its budget having never been looked at — which posts
+# "results may be incomplete" for a lens that was never actually slow.
+#
+# So the default is multiplied by the fan-out width for these two, and only
+# these two. A hosted endpoint (including openrouter, which is capacity rather
+# than a box) serves concurrently and has no queue to cover, and scaling there
+# would buy nothing but a longer wait before a genuinely stuck call is reported.
+#
+# This does not run unbounded: `max_review_seconds` (3600s by default) is a
+# whole-review deadline that stops queued work regardless of what any single
+# call's budget says, so the scaled number is a ceiling the run rarely reaches.
+_MAY_QUEUE = frozenset({Provider.ollama, Provider.openai_compatible})
+
 # Ollama context window. Big enough to hold a real review prompt + diff + the
 # emitted findings; ollama's own default (~4k) truncates the output to a stub.
 # Sized to hold a real multi-file diff review — 16k was tight enough that a real
@@ -70,9 +91,19 @@ _SLOW_CAPABLE = frozenset({Provider.ollama, Provider.openai_compatible, Provider
 _OLLAMA_NUM_CTX = 32768
 
 
-def default_timeout_for(provider: Provider) -> int:
-    """The auto timeout (seconds) for a provider when none is given explicitly."""
-    return _SLOW_TIMEOUT if provider in _SLOW_CAPABLE else CLOUD_TIMEOUT
+def default_timeout_for(provider: Provider, *, concurrency: int = 1) -> int:
+    """The auto timeout (seconds) for a provider when none is given explicitly.
+
+    ``concurrency`` is the fan-out width the run will use. For a provider that
+    may be a single-slot local server (:data:`_MAY_QUEUE`) the default is
+    multiplied by it, so a call that spends its wait in the server's queue is
+    still given a full budget for the work itself. Everywhere else it is
+    ignored — see the comment on :data:`_MAY_QUEUE`.
+    """
+    base = _SLOW_TIMEOUT if provider in _SLOW_CAPABLE else CLOUD_TIMEOUT
+    if provider in _MAY_QUEUE:
+        return base * max(1, concurrency)
+    return base
 
 
 def cheaper_reflect_sibling(provider: Provider, model: str) -> str | None:
@@ -195,13 +226,16 @@ def build_provider(
     azure_ad_token: str | None = None,
     fallback_model: str | None = None,
     timeout: int | None = None,
+    concurrency: int = 1,
     **extra_opts: Any,
 ) -> LiteLLMProvider:
     """Build a configured LiteLLMProvider for the given provider and model.
 
     ``timeout`` of ``None`` resolves to a provider-aware default
     (:func:`default_timeout_for`) — so ollama always gets a long timeout without
-    the caller having to ask. An explicit value is honoured as-is.
+    the caller having to ask, scaled by ``concurrency`` when the endpoint may be
+    a server that queues. An explicit value is honoured as-is: ``timeout: 600``
+    means 600, at any fan-out width.
     """
     # litellm's import is multi-second; deferring it here keeps `import
     # lgtmaybe.cli` fast for commands that never build a provider (config, help).
@@ -217,7 +251,9 @@ def build_provider(
     # map keys on comes into existence.
     _honour_param_support(provider, model, opts)
 
-    opts["timeout"] = timeout if timeout is not None else default_timeout_for(provider)
+    opts["timeout"] = (
+        timeout if timeout is not None else default_timeout_for(provider, concurrency=concurrency)
+    )
 
     if api_key is not None:
         opts["api_key"] = api_key
@@ -229,11 +265,23 @@ def build_provider(
     is_ollama = provider is Provider.ollama
     if is_ollama:
         opts["api_base"] = api_base or DEFAULT_OLLAMA_BASE
-        # Disable "thinking" for ollama models. Thinking models (qwen3.x) otherwise
-        # route their whole answer to the reasoning channel and return EMPTY content
-        # under structured output — so JSON-mode yields nothing to parse. With
-        # think=False they emit the findings JSON directly.
-        opts["think"] = False
+        # `think` is deliberately NOT sent. Ollama already decides it per model —
+        # its chat route defaults thinking ON for a thinking-capable model when the
+        # field is unset, and 400s outright if you ask a non-thinking model for it.
+        # So sending nothing gets the right answer for both, where sending either
+        # literal gets one of them wrong.
+        #
+        # This used to be pinned to False, because a thinking model routed its whole
+        # answer into the reasoning channel and returned EMPTY content under
+        # structured output, leaving JSON mode nothing to parse. Two things have
+        # since made that the wrong trade. Ollama now separates the trace into
+        # `message.thinking` and leaves the answer in `message.content`; and when a
+        # backend does still come back empty under a schema, the adapter drops
+        # `response_format` and re-sends (see LiteLLMProvider._call), remembering it
+        # for the rest of the run. The cost of being wrong is one re-send; the cost
+        # of pinning it False was every local reasoning model reviewing with its
+        # reasoning switched off, which four measured runs say is the single
+        # biggest lever on finding quality there is.
         # Ollama's default context window (~4k) is smaller than a real review
         # prompt (system prompt + wrapped diff + context lines), which truncates
         # the output to a stub. Give it enough room to read the prompt AND emit the

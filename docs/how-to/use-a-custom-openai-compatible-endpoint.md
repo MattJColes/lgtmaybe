@@ -25,6 +25,7 @@ anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag
 - [llama.cpp (local, keyless)](#llamacpp-local-keyless)
 - [LM Studio (local, keyless)](#lm-studio-local-keyless)
 - [vLLM (local or self-hosted, keyless)](#vllm-local-or-self-hosted-keyless)
+- [Concurrency: what each server can actually take](#concurrency-what-each-server-can-actually-take)
 - [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
 - [Gateways that don't support JSON mode (`response_format`)](#gateways-that-dont-support-json-mode-response_format)
 
@@ -122,6 +123,57 @@ lgtmaybe review \
   --provider openai-compatible \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --api-base http://localhost:8000/v1
+```
+
+## Concurrency: what each server can actually take
+
+lgtmaybe fans out across a pool sized by `max_concurrency`, **6 by default on
+every provider**. That is a ceiling on what it will have in flight; whether your
+server runs them together is the server's business, and the three above differ
+sharply.
+
+| server | concurrent by default? | raising it |
+|---|---|---|
+| **vLLM** | yes — continuous batching | close to free; each request keeps the full `--max-model-len` |
+| **llama.cpp** | no, one slot | `-np N` adds slots, but **splits one KV cache between them** |
+| **LM Studio** | no, single-slot | not exposed; leave `max_concurrency` at 1 |
+
+The llama.cpp trap is worth spelling out, because it fails as a quality problem
+rather than an error. `-np` divides the context you asked for: `-c 32768 -np 4`
+leaves each slot **8k**, and a lgtmaybe review prompt is comfortably larger than
+that, so the diff is silently truncated and the model reviews something it was
+never fully shown. Size `-c` as `slots × per-slot-context`:
+
+```bash
+llama-server -m ./model.gguf --port 8000 -np 4 -c 131072   # 4 slots × 32k each
+```
+
+vLLM allocates KV blocks dynamically rather than carving them up front, so
+concurrent requests each keep the full `--max-model-len`. That is why it is the
+local server to reach for when review latency matters:
+
+```bash
+vllm serve <model> --port 8000 --max-model-len 32768
+lgtmaybe review --provider openai-compatible --model <model> \
+  --api-base http://localhost:8000/v1 --max-concurrency 6
+```
+
+**Queueing does not cost you a timeout.** A queued request's clock starts when it
+is sent, not when the slot frees, so lgtmaybe scales the `openai-compatible`
+per-call default (1800 s) by the fan-out width — `1800 × 6` at the default,
+bounded by `max_review_seconds` (3600 s) so no call outlives the review. An
+explicit `timeout` is honoured exactly as written, at any width. Each run logs the
+number it resolved and the width it assumed:
+
+```
+per-call timeout resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
+```
+
+For a single-slot server, you can still say so and let lgtmaybe queue nothing:
+
+```yaml
+# .lgtmaybe.yml
+max_concurrency: 1
 ```
 
 ## Persist it in `.lgtmaybe.yml`

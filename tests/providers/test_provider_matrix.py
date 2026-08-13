@@ -174,20 +174,17 @@ class TestEngineBehaviourMatrix:
     behaviour must hold whatever the backend is.
     """
 
-    # Auto max_concurrency per provider: 1 for single-stream backends (ollama
-    # serves serially; openai-compatible may front a single-slot llama.cpp/LM
-    # Studio server), 6 for hosted cloud — wide enough to overlap the fan-out,
-    # narrow enough that one API key does not rate-limit itself.
-    SINGLE_STREAM = (Provider.ollama, Provider.openai_compatible)
-
+    # Auto max_concurrency is 6 for every provider — wide enough to overlap the
+    # fan-out, narrow enough that one API key does not rate-limit itself. Local
+    # backends are no longer special-cased: what bounds their throughput is the
+    # server's own parallelism setting, not this pool's width.
     @pytest.mark.parametrize("provider", list(Provider))
     def test_auto_concurrency_default(self, provider: Provider) -> None:
         from lgtmaybe.core.models import ReviewConfig
         from lgtmaybe.engine.engine import _resolve_workers
 
         cfg = ReviewConfig(provider=provider, model="m")
-        expected = 1 if provider in self.SINGLE_STREAM else 6
-        assert _resolve_workers(cfg, task_count=99) == expected
+        assert _resolve_workers(cfg, task_count=99) == 6
 
     @pytest.mark.parametrize("provider", list(Provider))
     def test_fast_preset_makes_four_calls_on_every_provider(self, provider: Provider) -> None:

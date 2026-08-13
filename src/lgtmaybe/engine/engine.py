@@ -94,13 +94,25 @@ _log = get_logger(__name__)
 #   the rescue wave both make that survivable rather than fatal; six is the same
 #   fix from the other end — a quarter less burst for a quarter less parallelism.
 #   Teams on a high rate tier can raise it with `max_concurrency`.
-# - A single ollama instance serves a model serially, so concurrent calls only
-#   queue up and time out: 1.
-# - openai-compatible is honest about the worst case: a llama.cpp / LM Studio
-#   single-slot server wants 1, while a vLLM server batches happily —
-#   default to 1 and let --max-concurrency raise it for batching servers.
+# - Local providers (ollama, openai-compatible) get the same 6. They used to get
+#   1, on the reasoning that a local server processes one request at a time so a
+#   wider pool would only queue. The queueing is real, but the conclusion was
+#   wrong in both directions: a server that CAN batch was capped at 1 for no
+#   reason, and a server that cannot loses nothing by having work queued for it —
+#   ollama queues (up to OLLAMA_MAX_QUEUE, 512) rather than failing, so the wall
+#   clock is the server's throughput either way.
+#
+#   The knob that actually decides local throughput is on the SERVER, not here:
+#   `OLLAMA_NUM_PARALLEL` (1 by default), llama.cpp's `-np`, vLLM's batching.
+#   Raising those costs memory in proportion — ollama allocates context per
+#   parallel slot, and llama.cpp splits one KV cache across slots, so `-c 32768
+#   -np 4` leaves each slot 8k, well under a single review prompt. vLLM is the
+#   exception: it batches and keeps full `--max-model-len` per request.
+#
+#   The one case for lowering this back to 1 is a very slow local model, where
+#   six queued calls could each wait out the per-request timeout.
 _CLOUD_MAX_WORKERS = 6
-_SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
+_SINGLE_STREAM_PROVIDERS: frozenset[Provider] = frozenset()
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
         ReviewCategory.security.value,
@@ -301,7 +313,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
     return notices
 
 
-def _concurrency_cap(cfg: ReviewConfig) -> int:
+def concurrency_cap(cfg: ReviewConfig) -> int:
     """How many model calls this run may have in flight: the explicit cap, else
     the provider-aware default.
 
@@ -320,7 +332,7 @@ def _concurrency_cap(cfg: ReviewConfig) -> int:
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
     """The fan-out pool size: the cap above, narrowed to the work there is."""
-    return max(1, min(_concurrency_cap(cfg), task_count))
+    return max(1, min(concurrency_cap(cfg), task_count))
 
 
 @dataclass(frozen=True)
@@ -530,7 +542,7 @@ class _Run:
     budget_at: int | None
     # Mid-review retrieval budget in tokens, or None when a lens may not defer.
     retrieval_budget: int | None
-    # How many calls this backend will serve at once (_concurrency_cap). Carried
+    # How many calls this backend will serve at once (concurrency_cap). Carried
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
@@ -881,7 +893,7 @@ class LLMReviewEngine:
             deadline_at=deadline_at,
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
-            concurrency=_concurrency_cap(cfg),
+            concurrency=concurrency_cap(cfg),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
@@ -1469,10 +1481,11 @@ class LLMReviewEngine:
         # construction rather than by argument. It costs at most `width` threads
         # for the duration of one split, and a split is the exceptional path.
         #
-        # Width is the backend's own concurrency (never the piece count): a
-        # single-stream server — ollama, a one-slot llama.cpp — serves calls
-        # serially, so two at once would only queue and eat the timeout. At
-        # width 1 the executor runs them in submission order, exactly as the
+        # Width is the review's own concurrency (never the piece count), so a
+        # user who has told us what their backend can take — `max_concurrency`,
+        # which on a local server is how they describe its parallelism — gets
+        # that answer in both pools rather than one setting meaning two things.
+        # At width 1 the executor runs them in submission order, exactly as the
         # serial loop did. A splitting worker is blocked, not calling, so the
         # calls in flight peak at the fan-out's width times this one — the
         # adapter's backoff absorbs that burst, and it only happens on the run
