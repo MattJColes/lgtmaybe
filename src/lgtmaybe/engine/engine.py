@@ -1689,9 +1689,11 @@ def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
     meaningless without the ceiling it is a share of — so a route that reports
     neither keeps the split it has always had.
 
-    The returned reason replaces the adapter's, which offers only "raise
-    `max_tokens`" and never mentions the thinking that actually spent it. Both
-    levers are named, because these numbers cannot say which one is the fix.
+    The returned reason replaces the adapter's, which promises a split this
+    failure is not going to get and warns that a higher ceiling makes things
+    worse — true of the content runaway it was written for, and the wrong half
+    of the advice here. Both levers are named instead, because these numbers
+    cannot say which one is the fix.
     Thinking that *expands to fill* whatever ceiling it is given is immune to a
     bigger cap — the case recorded above, where the effort is the only move.
     Thinking with a bounded natural size that merely exceeds this ceiling looks
