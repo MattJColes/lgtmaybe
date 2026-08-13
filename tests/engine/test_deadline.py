@@ -46,7 +46,12 @@ class _SlowProvider(FakeProvider):
 
 def _cfg(**overrides: object) -> ReviewConfig:
     defaults: dict[str, object] = {
-        "provider": Provider.ollama,  # serial: calls execute one at a time
+        "provider": Provider.openai,
+        # Serial on purpose, so a deadline crossed during the first call leaves
+        # the rest queued and skippable. Stated outright rather than leaning on a
+        # provider that used to resolve to one worker — local providers now get
+        # the same six as cloud, so the proxy no longer holds.
+        "max_concurrency": 1,
         "model": "m",
         "categories": [
             ReviewCategory.security,

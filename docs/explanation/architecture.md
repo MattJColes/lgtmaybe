@@ -295,10 +295,16 @@ network recovers but a dead-end failure surfaces fast:
   clock — see the formula below — but the fan-out is *one* API key, and past
   some width the burst
   rate-limits itself against a per-minute-metered gateway; raise it if your rate
-  tier is generous), **1** for ollama (a single local instance serves a model
-  one request at a time, so concurrent calls would only queue up and time out)
-  and **1** for openai-compatible (honest about a single-slot llama.cpp/LM
-  Studio server; raise it explicitly for a batching vLLM server). Flattening
+  tier is generous), and the same **6** for local
+  providers. Local used to be pinned to 1 because a default ollama serves one
+  request at a time — but that is a property of the *server*, not a reason to cap
+  the client: a server that can batch was capped for nothing, and one that cannot
+  loses nothing by having work queued for it (ollama queues up to
+  `OLLAMA_MAX_QUEUE` rather than failing). What decides local throughput is
+  `OLLAMA_NUM_PARALLEL` / llama.cpp's `-np` / vLLM's batching, and raising those
+  costs memory per slot — see
+  [running locally](../how-to/run-locally-with-ollama.md). Drop this to 1 for a
+  very slow local model, where six queued calls could each wait out the timeout. Flattening
   the pool across batches means wall time is `ceil(batches × lenses / workers)`
   call-latencies rather than `batches × ceil(lenses / workers)`.
 

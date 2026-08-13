@@ -318,12 +318,13 @@ def test_the_pieces_of_a_split_batch_are_reviewed_concurrently() -> None:
     assert sorted(f.path for f in findings) == ["one.py", "two.py"]
 
 
-def test_a_single_stream_provider_still_reviews_its_pieces_one_at_a_time() -> None:
+def test_one_worker_reviews_the_split_pieces_one_at_a_time() -> None:
     """The split is bounded by the review's own concurrency, not by piece count.
 
-    A single ollama instance serves a model serially: two concurrent calls only
-    queue up and eat the timeout. Whatever the fan-out is allowed, the split is
-    allowed — never more.
+    Whatever the fan-out is allowed, the split is allowed — never more. Pinned
+    with `max_concurrency=1` outright: this used to lean on ollama resolving to a
+    single worker, which is no longer true, and serialism was always what the
+    test meant rather than any particular provider.
     """
     provider = _TimeoutThenSlowPieces()
     LLMReviewEngine(provider).review(
@@ -331,6 +332,7 @@ def test_a_single_stream_provider_still_reviews_its_pieces_one_at_a_time() -> No
         ReviewConfig(
             provider=Provider.ollama,
             model="qwen3-coder",
+            max_concurrency=1,
             categories=[ReviewCategory.security],
             reflect=False,
             prompt_cache=False,
@@ -344,11 +346,10 @@ def test_an_explicit_concurrency_lifts_the_split_off_the_single_stream_default()
     """The user's number wins over the provider default, in the split as in the
     fan-out.
 
-    ollama's 1 is a default for the usual deployment — one instance, one slot —
-    not a property of the backend: an ollama started with several parallel slots
-    (and a batching vLLM behind `openai-compatible`) serves concurrent calls
-    happily, which is exactly why `max_concurrency` is exposed. Honouring it in
-    only one of the two pools would make one setting mean two different things.
+    A local server's throughput is set on the server (`OLLAMA_NUM_PARALLEL`,
+    llama.cpp `-np`, vLLM's batching), so `max_concurrency` is how the user tells
+    lgtmaybe what their server can take. Honouring it in only one of the two
+    pools would make one setting mean two different things.
     """
     provider = _TimeoutThenPairedPieces()
     LLMReviewEngine(provider).review(

@@ -352,12 +352,12 @@ class TestRescueWave:
         deterministically and instantly; the deadline's route is pinned
         separately below.
 
-        Serial provider, so the first call raises the flag and the second is
+        One worker, so the first call raises the flag and the second is
         skipped.
         """
         provider = _InterruptOnFirstCall()
 
-        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg(provider=Provider.ollama))
+        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg(max_concurrency=1))
 
         assert len(provider.calls) == 1
         assert "interrupted" in summary
@@ -389,7 +389,7 @@ class TestRescueWave:
         provider = _CrossesTheDeadline()
         # ollama resolves to one worker, so the calls are strictly serial: the
         # first runs, crosses the deadline, and the second is skipped by it.
-        cfg = _cfg(provider=Provider.ollama, max_review_seconds=1)
+        cfg = _cfg(max_concurrency=1, max_review_seconds=1)
         with patch.object(engine_module.time, "perf_counter", stepped):
             _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
 
