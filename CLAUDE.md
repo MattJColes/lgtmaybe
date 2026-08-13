@@ -304,7 +304,7 @@ pattern, event bus, plugin framework.
      — defined inline in `.lgtmaybe.yml` or in skill files loaded by the config
      loader's `lens_paths` directive. The engine builds a uniform `_Lens` per
      built-in category **and** per custom lens (`engine._build_lenses`,
-     `prompt.build_lens_prompt`) and fans them all out identically through the same
+     `prompt.build_custom_lens_block`) and fans them all out identically through the same
      merge/dedupe/reflect pipeline. Lens text enters the system prompt, so it is
      **trusted config only** — never sourced from PR-author content (on
      `pull_request_target` config comes from the base, not the PR head). Covered by
@@ -406,8 +406,8 @@ pattern, event bus, plugin framework.
    - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
      reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
      one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
-   - **Prompt caching (split prefix):** with `prompt_cache` on (default) every
-     review call is shaped as a shared cacheable prefix — a lens-independent
+   - **Prompt caching (split prefix):** every review call is shaped as a shared
+     cacheable prefix — a lens-independent
      system preamble (`prompt.build_shared_preamble`), then the wrapped diff
      (+hints) as the first user block — with the lens checklist + example as
      the final uncached user block. On routes with an explicit cache breakpoint
@@ -420,11 +420,8 @@ pattern, event bus, plugin framework.
      pay N cache writes. Reflection splits the same way, so deferral re-judges
      read the audit's system+diff prefix. Feature-detected per model (litellm
      capability map); every other provider gets the user blocks joined back
-     into the single plain message it always received. `prompt_cache: false`
-     restores the legacy lens-in-system shape byte-for-byte.
-     `ReviewConfig.prompt_cache` (CLI `--prompt-cache/--no-prompt-cache`,
-     Action input `prompt_cache`); cache read/creation token counts land on
-     `ProviderResult` and are logged.
+     into one plain user message. Cache read/creation token counts land on
+     `ProviderResult` and are logged. There is one prompt shape and no opt-out.
    - **Summary line:** names the **model** used (no cost — lgtmaybe does not
      compute or report cost). `ReviewConfig.summary_template` (default None)
      lets teams restyle it with `{count}`/`{provider}`/`{model}` placeholders;

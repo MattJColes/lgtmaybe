@@ -24,7 +24,6 @@ provides defaults for all runs.
   - [function_context](#function_context)
   - [timeout](#timeout)
   - [structured_output](#structured_output)
-  - [prompt_cache](#prompt_cache)
   - [reflect](#reflect)
   - [min_confidence](#min_confidence)
   - [mid_review_retrieval](#mid_review_retrieval)
@@ -262,58 +261,6 @@ structured_output: false   # only if your gateway rejects JSON-schema mode
 
 Default: `true`. See
 [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md#gateways-that-dont-support-json-mode-response_format).
-
-### prompt_cache
-
-Reuse the expensive shared prefix — system preamble plus the wrapped diff —
-across the per-lens review calls and the reflection call, instead of re-paying
-full input price for it on every one. lgtmaybe fans out several model calls per
-review and they all begin with that same prefix, so it shapes every call
-identically and lets the backend serve it from cache.
-
-Two mechanisms, picked per route:
-
-| Route | How it caches |
-|---|---|
-| **anthropic**, **bedrock** Claude/Nova, **vertex** (Claude and Gemini), **zai** GLM, **openrouter** (claude / gemini / glm / minimax / z-ai models) | lgtmaybe marks the prefix with an explicit `cache_control` breakpoint |
-| **openai**, **azure**, **deepseek** (direct or via openrouter) | the backend caches a repeated prefix automatically — the identical shape is all it needs |
-| **ollama**, `openai-compatible` | the request is sent unchanged |
-
-Support is feature-detected per model, so a route in the first row whose model
-litellm doesn't know about simply falls back to the second behaviour — a missed
-discount, never an error. The diff-independent parts of the prompt are what get
-reused; per-PR content still enters the prefix, which is why it is only ever
-shared *within* one review.
-
-On a large diff lgtmaybe also runs a **warm-up primer**: the first lens of a
-batch is dispatched alone and the rest release when it returns, so a fully
-concurrent first wave doesn't all miss the cache (and, on breakpoint routes, all
-pay the cache-write surcharge). This applies on every provider — it is about the
-shape of the first wave, not about the marker.
-
-Every call also carries a `prompt_cache_key` derived from the prefix itself:
-identical across the lenses of one batch, different for another PR. OpenRouter
-uses it to pin the whole fan-out to a single provider endpoint from the first
-call (without a key it only starts doing that *after* it notices a cache hit,
-which a concurrent wave reaches too late), and OpenAI takes the same field as a
-cache-routing hint. It is a digest, not prompt content.
-
-**Minimums are per model**, and a prefix below one is silently not cached — no
-error, just no discount. Roughly: 1,024 tokens for Claude Sonnet 4.x / Opus
-4–4.1 and Gemini 2.5 Flash, 2,048 for Claude Haiku 3.5, 4,096 for Claude Opus
-4.5+ / Haiku 4.5 and Gemini 2.5 Pro. lgtmaybe marks from 1,024 up so it never
-misses a chance on the lower-minimum models; on a higher-minimum model a small
-diff simply won't cache. Check with `--profile`, which reports cache read and
-write tokens.
-
-Leaving it on costs nothing. Turn it off only to rule caching out while
-debugging provider behaviour. CLI: `--no-prompt-cache`.
-
-```yaml
-prompt_cache: false   # send every call uncached, and never warm the batch
-```
-
-Default: `true`.
 
 ### reflect
 

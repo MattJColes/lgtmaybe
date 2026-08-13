@@ -124,7 +124,7 @@ low-value findings as well as spend.
 
 ### 3. Check prompt caching is actually working
 
-`prompt_cache` is **on by default**, and when it works it takes most of the
+Prompt caching is **always enabled**, and when it works it takes most of the
 sting out of the lens multiplier: lenses 2..N read the shared system-preamble
 plus diff prefix from cache instead of paying full input price for it.
 
@@ -310,8 +310,8 @@ Ways to keep the bill honest if you want it:
 
 - pair it with `max_review_tokens`, so the worst case is bounded rather than
   merely unlikely — a deferral arriving past the ceiling is skipped and reported;
-- leave `prompt_cache` on: the fetched text rides the lens's own block, so a
-  deferral never invalidates the prefix its sibling lenses read from cache;
+- fetched text rides the lens's own block, so a deferral never invalidates the
+  prefix its sibling lenses read from cache;
 - turn on `triage_model` first, so fewer files reach the lenses that might defer.
 
 Measure it rather than assume: run `python -m evals.run` with and without

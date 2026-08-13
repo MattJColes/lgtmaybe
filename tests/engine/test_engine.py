@@ -74,7 +74,7 @@ def _reflection_calls(provider: FakeProvider) -> list[dict]:
 def _all_text(call: dict) -> str:
     """Every message's content joined — prompt text wherever the shape put it.
 
-    The default (prompt_cache on) message shape is split: shared preamble in
+    The message shape is split: shared preamble in
     the system message, diff in one user message, the lens block in another —
     so assertions about "the prompt" search all of it.
     """
@@ -2311,10 +2311,11 @@ def test_dependency_findings_survive_the_off_diff_drop(monkeypatch) -> None:  # 
 
 def _security_lens_text(cfg: ReviewConfig) -> str:
     from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.prompt import build_shared_preamble
 
     lenses = _build_lenses(cfg, has_intent=False)
     lens = next(lo for lo in lenses if lo.id == ReviewCategory.security.value)
-    return (lens.system_prompt + lens.user_block).lower()
+    return (build_shared_preamble() + lens.user_block).lower()
 
 
 def test_security_lens_asks_for_secrets_by_default() -> None:
@@ -2363,6 +2364,7 @@ def test_every_lens_is_told_the_redaction_marker_is_not_a_finding() -> None:
     being told what it is, a lens reports our own marker as a leaked secret."""
     cfg = ReviewConfig(provider=Provider.openai, model="m")
     from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.prompt import build_shared_preamble
 
     for lens in _build_lenses(cfg, has_intent=False):
-        assert REDACTED_PLACEHOLDER in lens.system_prompt
+        assert REDACTED_PLACEHOLDER in build_shared_preamble() + lens.user_block

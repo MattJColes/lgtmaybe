@@ -90,7 +90,7 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    provider port, sized by `max_concurrency` (default 6 for cloud, 1 for
    ollama and openai-compatible), so batches never wait on each other.
 
-   With `prompt_cache` on, each call is shaped as a shared cacheable prefix —
+   Each call is shaped as a shared cacheable prefix —
    a lens-independent system preamble, then the wrapped diff — followed by
    the lens-specific instruction as the final user block. On routes that
    take an explicit cache breakpoint (anthropic, bedrock Claude/Nova, vertex

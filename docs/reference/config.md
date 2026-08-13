@@ -47,7 +47,6 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
-| `prompt_cache` | boolean | No | `True` | Prompt Cache |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
@@ -840,11 +839,6 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "preset": {
       "$ref": "#/$defs/ReviewPreset",
       "default": "fast"
-    },
-    "prompt_cache": {
-      "default": true,
-      "title": "Prompt Cache",
-      "type": "boolean"
     },
     "provider": {
       "$ref": "#/$defs/Provider"

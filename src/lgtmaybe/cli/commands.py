@@ -395,14 +395,6 @@ local_diff_options = _stack(
     "the auditor re-judges with the real definition (--no-symbol-resolution disables)",
 )
 @click.option(
-    "--prompt-cache/--no-prompt-cache",
-    default=None,
-    help="Shape every call as a shared cacheable prefix, and mark an explicit "
-    "cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, "
-    "vertex, zai GLM, openrouter) — cached reads are billed at a steep "
-    "discount. Safe no-op elsewhere (--no-prompt-cache disables)",
-)
-@click.option(
     "--spec/--no-spec",
     "spec_review",
     default=None,

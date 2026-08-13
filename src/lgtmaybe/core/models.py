@@ -967,17 +967,6 @@ class ReviewConfig(_Strict):
     # prose/reasoning instead of findings. Disable for a model/provider that
     # doesn't support it (the lenient parser is the fallback).
     structured_output: bool = True
-    # Reuse the shared prefix (system preamble + wrapped diff) across the
-    # per-lens fan-out and the reflection call instead of re-paying full input
-    # price for it on every call. On routes taking an explicit breakpoint
-    # (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM,
-    # openrouter's claude/gemini/glm/minimax) the adapter marks it with
-    # cache_control;
-    # backends that cache a repeated prefix automatically (openai, azure,
-    # deepseek) need only the identical shape, which this also gives them. Also
-    # enables the per-batch warm-up primer. Feature-detected per model and a
-    # safe no-op on ollama/openai-compatible, so leaving it on costs nothing.
-    prompt_cache: bool = True
 
     @model_validator(mode="after")
     def _lens_ids_are_unique(self) -> ReviewConfig:
