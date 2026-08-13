@@ -502,6 +502,7 @@ class DiagramResult(_Strict):
     """
 
     title: str = ""
+    summary: str = ""
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
     steps: list[DiagramStep] = Field(default_factory=list)
@@ -856,8 +857,9 @@ class ReviewConfig(_Strict):
     auto_describe: bool = False
     # Auto-diagram: like auto_describe, but posts a compact change diagram —
     # a Mermaid flowchart of the components the PR touches (with an ASCII
-    # fallback), rendered natively in the comment — when a PR is opened or
-    # reopened. Its own comment, updated in place on later /diagram runs.
+    # fallback), rendered natively in the comment — when a PR is opened,
+    # reopened, or updated. Its own comment, updated in place on later pushes
+    # and /diagram runs.
     # Best-effort; a diagram failure never blocks the review. Default on —
     # no yaml needed; set false to opt out.
     auto_diagram: bool = True

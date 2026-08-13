@@ -546,10 +546,10 @@ def action() -> None:
     event_action = str(event.get("action") or "")
     cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
-    # Auto-describe / auto-diagram (opt-in): on a freshly opened PR, post the
-    # structured description and/or the change diagram first — both best-effort,
-    # neither blocks the review. execute_review shares one gateway and one
-    # PR-context fetch across the extras and the review itself.
+    # Auto-description stays open/reopen-only; auto-diagram also refreshes on a
+    # synchronize push so a replacement run cannot lose it. Both are best-effort
+    # and post after the review. execute_review shares one gateway and one PR-context
+    # fetch across the extras and the review itself.
     execute_review(
         cfg,
         runtime,

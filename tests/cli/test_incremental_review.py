@@ -244,13 +244,14 @@ def test_run_describe_posts_via_the_idempotent_upsert() -> None:
     assert github.comments == []
 
 
-def test_auto_diagram_only_on_open_events_when_enabled() -> None:
+def test_auto_diagram_on_pr_change_events_when_enabled() -> None:
     from lgtmaybe.cli import should_auto_diagram
 
     on = make_cfg(auto_diagram=True)
     assert should_auto_diagram(on, event_action="opened") is True
     assert should_auto_diagram(on, event_action="reopened") is True
-    assert should_auto_diagram(on, event_action="synchronize") is False
+    assert should_auto_diagram(on, event_action="synchronize") is True
+    assert should_auto_diagram(on, event_action="closed") is False
     assert should_auto_diagram(make_cfg(), event_action="opened") is True  # default on
     assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="opened") is False
 
