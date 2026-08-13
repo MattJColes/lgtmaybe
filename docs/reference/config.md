@@ -119,8 +119,9 @@ The normalised return value of one LLM completion, including token usage.
 | `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
 | `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
+| `output_ceiling` | integer / null | No | `null` | Output Ceiling |
 | `output_tokens` | integer | Yes | — | Output Tokens |
-| `reasoning_tokens` | integer | No | `0` | Reasoning Tokens |
+| `reasoning_tokens` | integer / null | No | `null` | Reasoning Tokens |
 | `text` | string | Yes | — | Text |
 
 ## PRContext
@@ -1145,14 +1146,33 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Input Tokens",
       "type": "integer"
     },
+    "output_ceiling": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Ceiling"
+    },
     "output_tokens": {
       "title": "Output Tokens",
       "type": "integer"
     },
     "reasoning_tokens": {
-      "default": 0,
-      "title": "Reasoning Tokens",
-      "type": "integer"
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Tokens"
     },
     "text": {
       "title": "Text",

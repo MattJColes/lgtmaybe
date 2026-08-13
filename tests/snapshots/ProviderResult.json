@@ -22,14 +22,33 @@
       "title": "Input Tokens",
       "type": "integer"
     },
+    "output_ceiling": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Ceiling"
+    },
     "output_tokens": {
       "title": "Output Tokens",
       "type": "integer"
     },
     "reasoning_tokens": {
-      "default": 0,
-      "title": "Reasoning Tokens",
-      "type": "integer"
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Tokens"
     },
     "text": {
       "title": "Text",

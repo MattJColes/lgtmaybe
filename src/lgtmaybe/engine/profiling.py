@@ -42,9 +42,22 @@ class CallRecord:
     cache_read_tokens: int
     cache_creation_tokens: int
     error: str | None = None  # None on success; the concise failure reason otherwise
-    # Thinking tokens inside `output_tokens` (0 = the route reported no breakdown).
+    # Thinking tokens inside `output_tokens`. None = the route reported no
+    # breakdown, which is NOT the same as zero and must not render as one.
     # Keyword-defaulted so every existing caller keeps working unchanged.
-    reasoning_tokens: int = 0
+    reasoning_tokens: int | None = None
+    # The `max_tokens` ceiling this call was sent with (None = uncapped). The
+    # denominator of the reasoning share — the figure that answers "does this
+    # pair of settings have headroom on the real workload?", which before this
+    # only became visible when a call FAILED, in the truncation message.
+    output_ceiling: int | None = None
+
+    @property
+    def reasoning_share(self) -> float | None:
+        """Reasoning as a fraction of the ceiling, or None when either is unknown."""
+        if not self.reasoning_tokens or not self.output_ceiling:
+            return None
+        return self.reasoning_tokens / self.output_ceiling
 
 
 @dataclass(frozen=True)
@@ -82,7 +95,8 @@ class Profiler:
         output_tokens: int,
         cache_read_tokens: int,
         cache_creation_tokens: int,
-        reasoning_tokens: int = 0,
+        reasoning_tokens: int | None = None,
+        output_ceiling: int | None = None,
         error: str | None = None,
     ) -> None:
         """Record one provider call and log it as a structured line."""
@@ -96,6 +110,7 @@ class Profiler:
             cache_read_tokens=cache_read_tokens,
             cache_creation_tokens=cache_creation_tokens,
             reasoning_tokens=reasoning_tokens,
+            output_ceiling=output_ceiling,
             error=error,
         )
         with self._lock:
@@ -106,6 +121,8 @@ class Profiler:
         # model did no thinking, which is not what it means.
         if not reasoning_tokens:
             del extra["reasoning_tokens"]
+        if output_ceiling is None:
+            del extra["output_ceiling"]
         if not error:
             del extra["error"]
         _log.info("provider call", extra=extra)
@@ -122,6 +139,7 @@ class Profiler:
             cache_read_tokens=result.cache_read_tokens,
             cache_creation_tokens=result.cache_creation_tokens,
             reasoning_tokens=result.reasoning_tokens,
+            output_ceiling=result.output_ceiling,
         )
 
     def record_error(
@@ -149,7 +167,11 @@ class Profiler:
             attempts=attempts_of(exc),
             input_tokens=getattr(exc, "input_tokens", None) or 0,
             output_tokens=getattr(exc, "output_tokens", None) or 0,
-            reasoning_tokens=getattr(exc, "reasoning_tokens", None) or 0,
+            reasoning_tokens=getattr(exc, "reasoning_tokens", None),
+            # A truncation's ceiling IS its output_tokens — it generated all the
+            # way to it — so the share it reports is 100% by construction, which
+            # is exactly the diagnosis.
+            output_ceiling=getattr(exc, "output_tokens", None),
             # A truncation is billed as ordinary input; the route reports no cache
             # breakdown alongside the ceiling error, so claiming one would be
             # invention rather than accounting.
@@ -202,14 +224,24 @@ class Profiler:
 
         # `think_tok` sits next to `out_tok` deliberately: side by side they are
         # the whole story of a lens that ran for a minute and wrote 50 tokens.
+        # `think_%` is that count against the `max_tokens` ceiling it came out
+        # of — the ratio, not either raw number, is what says whether this pair
+        # of settings still has headroom on the real workload.
         lines.append(
             f"{'call':<16} {'batch':>5} {'tries':>5} {'elapsed':>9} "
-            f"{'in_tok':>8} {'out_tok':>8} {'think_tok':>9} {'cache_rd':>8} {'cache_wr':>8}  error"
+            f"{'in_tok':>8} {'out_tok':>8} {'think_tok':>9} {'think_%':>8} "
+            f"{'cache_rd':>8} {'cache_wr':>8}  error"
         )
         for call in sorted(calls, key=lambda c: c.elapsed, reverse=True):
+            # A dash, never a zero, on both: a route that reported no breakdown
+            # did not tell us the model thought nothing, and an uncapped call has
+            # no denominator to be a share of.
+            thinking = "-" if call.reasoning_tokens is None else f"{call.reasoning_tokens}"
+            share = call.reasoning_share
+            percent = "-" if share is None else f"{round(100 * share)}%"
             lines.append(
                 f"{call.label:<16} {call.batch:>5} {call.attempts:>5} {call.elapsed:>8.2f}s "
-                f"{call.input_tokens:>8} {call.output_tokens:>8} {call.reasoning_tokens:>9} "
+                f"{call.input_tokens:>8} {call.output_tokens:>8} {thinking:>9} {percent:>8} "
                 f"{call.cache_read_tokens:>8} {call.cache_creation_tokens:>8}  "
                 f"{call.error or '-'}"
             )
@@ -218,9 +250,9 @@ class Profiler:
         read = sum(c.cache_read_tokens for c in calls)
         created = sum(c.cache_creation_tokens for c in calls)
         lines.append(f"cache: {read} tokens read / {created} created across {len(calls)} calls")
-        reasoning_line = self._render_reasoning(calls)
-        if reasoning_line:
-            lines.append(reasoning_line)
+        for extra_line in (self._render_reasoning(calls), self._render_headroom(calls)):
+            if extra_line:
+                lines.append(extra_line)
         lines.append(self.render_total())
         return "\n".join(lines)
 
@@ -233,13 +265,51 @@ class Profiler:
         that. The share is computed here rather than left to the reader, because
         it is the ratio — not either raw count — that says whether the output
         ceiling is being spent on findings or on reasoning.
+
+        Both sums are restricted to the calls that REPORTED a breakdown. Dividing
+        known reasoning by every call's output mixes a measurement with a silence
+        and understates the share by however much the unreporting calls
+        generated — badly, when they generated most of it. Whether every call is
+        counted is said out loud rather than left for the reader to assume.
         """
-        reasoning = sum(c.reasoning_tokens for c in calls)
-        if not reasoning:
+        measured = [c for c in calls if c.reasoning_tokens is not None]
+        if not measured:
+            # Nothing REPORTED — the only case with nothing to say. A run whose
+            # routes all reported 0 has measured something (a model that did no
+            # thinking), and suppressing it here would put it back in the same
+            # bucket as silence, which is the distinction this line exists for.
             return ""
-        output = sum(c.output_tokens for c in calls)
+        reasoning = sum(c.reasoning_tokens or 0 for c in measured)
+        output = sum(c.output_tokens for c in measured)
         share = round(100 * reasoning / output) if output else 0
-        return f"reasoning: {reasoning:,} of {output:,} output tokens ({share}%)"
+        line = f"reasoning: {reasoning:,} of {output:,} output tokens ({share}%)"
+        if len(measured) == len(calls):
+            return line
+        return f"{line[:-1]}, across {len(measured)} of {len(calls)} calls reporting it)"
+
+    @staticmethod
+    def _render_headroom(calls: list[CallRecord]) -> str:
+        """The largest reasoning share any single call reached — "" when unknown.
+
+        The one line that answers the question the raw counts do not: is the
+        configured `max_tokens` / `reasoning_effort` pair close to the edge on
+        this workload? An aggregate share hides it — a run whose lenses average
+        20% can still contain the call that spent the whole ceiling thinking and
+        wrote nothing, which is exactly the failure this exists to make visible
+        before it happens rather than after.
+
+        The call is named, because "which lens" is the next question and the
+        table is long.
+        """
+        scored = [(c.reasoning_share, c) for c in calls if c.reasoning_share is not None]
+        if not scored:
+            return ""
+        share, call = max(scored, key=lambda pair: pair[0] or 0.0)
+        return (
+            f"largest reasoning share: {round(100 * (share or 0))}% of the "
+            f"{call.output_ceiling:,}-token ceiling ({call.reasoning_tokens:,} tokens, "
+            f"{call.label}, batch {call.batch})"
+        )
 
     def render_total(self) -> str:
         """One line: what this run spent, formatted for a human.

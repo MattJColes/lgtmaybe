@@ -243,6 +243,22 @@ total), which is the comparison a truncated call cannot give you: a call that
 hit the ceiling spent reasoning + findings ≥ `max_tokens` by definition, so it
 tells you nothing about the healthy calls sitting beside it.
 
+Two more numbers answer the headroom question directly, so you do not have to
+work the ratio out per row:
+
+- the **`think_%`** column — that call's thinking as a share of the `max_tokens`
+  ceiling it came out of;
+- a **`largest reasoning share:`** line under the table, naming the single
+  closest call to the ceiling and which lens it was.
+
+An 8,192-token cap whose worst lens reports 50% has real headroom. One reporting
+95% is a truncation that has not happened yet — and the aggregate `reasoning:`
+line will not show you that, because one runaway hides inside an average.
+
+A route that reports no breakdown renders as `-` in both columns and prints no
+`largest` line. That is not zero: it means the route never said, and there is
+nothing to conclude either way.
+
 ### When the cap is not the lever
 
 If `think_tok` is most of `out_tok`, raising `max_tokens` will not fix the
