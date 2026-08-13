@@ -386,9 +386,7 @@ class TestGitHubReviewErrorSurfacing:
         )
 
         with pytest.raises(click.ClickException):
-            cli_module.execute_review(
-                _default_cfg(), RuntimeOptions(pr_url="x"), diagram=True
-            )
+            cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"), diagram=True)
 
         assert github.marked_reviewed == ["head2222", None]
         assert len(github.posted) == 2

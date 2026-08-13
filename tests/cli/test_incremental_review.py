@@ -200,9 +200,7 @@ def test_incremental_validates_prior_findings_and_allows_only_fixed_resolution()
 
         def list_active_findings(self) -> list[ActiveFinding]:
             return [
-                ActiveFinding(
-                    thread_id="FIXED", path="src/app.py", body="old bug", outdated=True
-                ),
+                ActiveFinding(thread_id="FIXED", path="src/app.py", body="old bug", outdated=True),
                 ActiveFinding(thread_id="OPEN", path="src/other.py", body="still broken"),
             ]
 
