@@ -559,7 +559,15 @@ class LiteLLMProvider:
             count_request()
             try:
                 return self._map_response(
-                    _completion_with_wall_timeout(model, messages, kwargs), model
+                    _completion_with_wall_timeout(model, messages, kwargs),
+                    model,
+                    # Read off the request that was actually sent, not off
+                    # `default_opts`: a per-call `max_tokens` overrides the one
+                    # this provider was built with, and judging a 256-token call
+                    # against a 4,096 default would miss every ceiling hit.
+                    # `max_completion_tokens` is the same ceiling under the newer
+                    # OpenAI spelling, which litellm accepts either way.
+                    kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"),
                 )
             except Exception as exc:
                 if not self._drop_rejected_param(exc, kwargs):
@@ -645,7 +653,9 @@ class LiteLLMProvider:
             out[run_start:] = [{"role": "user", "content": merged}]
         return out
 
-    def _map_response(self, response: Any, model: str) -> ProviderResult:
+    def _map_response(
+        self, response: Any, model: str, ceiling: int | None = None
+    ) -> ProviderResult:
         # Some providers return null content (e.g. a model that answered only via
         # a reasoning channel under JSON mode); treat that as empty, not a crash.
         text: str = response.choices[0].message.content or ""
@@ -666,7 +676,19 @@ class LiteLLMProvider:
         # because it is the whole explanation for a fifteen-line diff truncating —
         # a reasoning model spends this same budget on thought before it writes a
         # single finding, so the cap, not the diff, is what needs raising.
-        if _finish_reason(response) == "length":
+        #
+        # Second test, for the routes that never say it. litellm maps an
+        # unrecognised finish reason to `stop`, and ollama's route reports
+        # nothing useful at all, so a call cut off at the cap arrives looking
+        # like a clean finish — measured on a local benchmark as two lens calls
+        # reporting exactly the configured 512 output tokens with an empty error
+        # column, which had the tooling downstream counting zero truncations.
+        # Spending the ceiling to the token is not a stopping point a model
+        # chooses; it is what being cut off looks like from the outside. Only
+        # ever applied against a ceiling WE set (`ceiling`) — with none
+        # configured there is nothing to compare against and a long answer is
+        # just a long answer.
+        if _finish_reason(response) == "length" or _spent_the_ceiling(output_tokens, ceiling):
             reasoning = _reasoning_tokens(usage)
             detail = f" ({reasoning} reasoning)" if reasoning else ""
             raise ProviderTruncated(
@@ -709,6 +731,17 @@ class LiteLLMProvider:
             # thinking they did by two different readings of the same field.
             reasoning_tokens=_reasoning_tokens(usage),
         )
+
+
+def _spent_the_ceiling(output_tokens: int, ceiling: int | None) -> bool:
+    """Whether this response generated all the way to the ceiling we configured.
+
+    ``>=`` rather than ``==``: some routes count a token or two past the cap, and
+    a ceiling hit reported as 513-of-512 is still a ceiling hit. A ``ceiling`` of
+    None (or 0, the uncapped escape hatch) means we set no cap, so there is
+    nothing to judge against and this never fires.
+    """
+    return ceiling is not None and ceiling > 0 and output_tokens >= ceiling
 
 
 def _finish_reason(response: Any) -> str | None:
