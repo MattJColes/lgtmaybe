@@ -11,7 +11,7 @@ It reads the **conventional commits** merged to `main` and keeps a "Release PR"
 open that bumps the version and regenerates `CHANGELOG.md`. **Merging that PR** is
 the release: it cuts the tag and the GitHub release, then the same run publishes —
 **PyPI** via trusted publishing (OIDC) and the **GHCR image** + floating major
-tag (`v{major}`, currently `v1`) via the reusable `.github/workflows/release.yml`
+tag (`v{major}`, currently `v2`) via the reusable `.github/workflows/release.yml`
 (built-in `GITHUB_TOKEN`). No publish tokens live in secrets.
 
 A third workflow, `.github/workflows/homebrew.yml`, regenerates the **Homebrew
