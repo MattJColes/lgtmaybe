@@ -909,10 +909,18 @@ def _reasoning_tokens(usage: Any) -> int | None:
     None rather than 0, because they are different claims: "it never said" and
     "it did no thinking" send a reader to different conclusions about whether the
     ceiling has headroom, and only one of them is knowable here.
+
+    A route that DOES report the breakdown and puts 0 in it has said the second
+    one, and that is kept: it is a measurement, and a non-reasoning model landing
+    at 0% belongs in the table beside the ones that did not. Booleans are
+    excluded explicitly — `True` is an `int` in Python, and a route filling the
+    field with a flag would otherwise be read as "one reasoning token".
     """
     details = getattr(usage, "completion_tokens_details", None)
     value = getattr(details, "reasoning_tokens", None)
-    return value if isinstance(value, int) and value > 0 else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def _cache_usage(usage: Any) -> tuple[int, int]:

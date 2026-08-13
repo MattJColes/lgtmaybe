@@ -588,8 +588,7 @@ class ProviderResult(_Strict):
     cache_creation_tokens: int = 0
     # Tokens the model spent thinking before it wrote a word of the answer, when
     # the route reports them. A SUBSET of `output_tokens`, never an addition to
-    # it — the two are added nowhere, or the budget double-counts. Zero on routes
-    # that report no breakdown, which means "not reported", NOT "did no thinking".
+    # it — the two are added nowhere, or the budget double-counts.
     #
     # It is on the success path for a reason: read only off truncated calls (where
     # it was first surfaced, to name the cause) the number cannot answer the

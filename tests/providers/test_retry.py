@@ -1597,6 +1597,31 @@ class TestTheCeilingRidesTheResult:
         assert result.output_ceiling == 8192
         assert result.reasoning_tokens == 1200
 
+    def test_a_per_call_ceiling_overrides_the_provider_default(self) -> None:
+        """`complete` merges per-call opts over the provider's, so the ceiling a
+        request carried is not always the one it was built with. A share against
+        the wrong denominator is worse than no share, and this is the only place
+        the right one is knowable."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5", max_tokens=8192)
+
+        with patch("litellm.completion", return_value=_reasoning_response(1200)):
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], model="openai/gpt-5.5", max_tokens=2048
+            )
+
+        assert result.output_ceiling == 2048
+
+    def test_an_explicitly_reported_zero_is_kept_as_a_measurement(self) -> None:
+        """A route that reports the breakdown and puts 0 in it HAS said the model
+        did no thinking. That belongs in the table at 0%, beside the calls that
+        did — conflating it with silence loses a real reading."""
+        provider = LiteLLMProvider(model="openai/gpt-4o")
+
+        with patch("litellm.completion", return_value=_reasoning_response(0)):
+            result = provider.complete([{"role": "user", "content": "hi"}], model="openai/gpt-4o")
+
+        assert result.reasoning_tokens == 0
+
     def test_no_ceiling_configured_reports_none(self) -> None:
         provider = LiteLLMProvider(model="openai/gpt-5.5")
 

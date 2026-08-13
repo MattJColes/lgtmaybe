@@ -616,6 +616,40 @@ class TestReasoningShareIsLegibleFromAnyRun:
         assert "85%" in rendered  # 7000 / 8192
         assert "artefacts" in rendered.split("largest", 1)[1]
 
+    def test_the_aggregate_does_not_divide_by_unreported_calls(self) -> None:
+        """Dividing known reasoning by EVERY call's output mixes a measurement
+        with a silence, and understates the share by however much the
+        unreporting calls generated — badly, when they generated most of it.
+
+        The line says what it covered rather than leaving the reader to assume
+        it covered everything."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=10,
+            output_tokens=1000,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            reasoning_tokens=900,
+        )
+        p.record_call(  # a route that reports no breakdown, and generated a lot
+            label="artefacts",
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=10,
+            output_tokens=9000,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+        )
+
+        rendered = p.render()
+        assert "reasoning: 900 of 1,000 output tokens (90%" in rendered  # not 9%
+        assert "1 of 2 calls reporting it" in rendered
+
     def test_no_share_is_claimed_when_no_ceiling_was_configured(self) -> None:
         """`max_tokens` unset means there is no denominator — a share against a
         number nobody chose would be invention, not accounting."""

@@ -265,13 +265,23 @@ class Profiler:
         that. The share is computed here rather than left to the reader, because
         it is the ratio — not either raw count — that says whether the output
         ceiling is being spent on findings or on reasoning.
+
+        Both sums are restricted to the calls that REPORTED a breakdown. Dividing
+        known reasoning by every call's output mixes a measurement with a silence
+        and understates the share by however much the unreporting calls
+        generated — badly, when they generated most of it. Whether every call is
+        counted is said out loud rather than left for the reader to assume.
         """
-        reasoning = sum(c.reasoning_tokens or 0 for c in calls)
+        measured = [c for c in calls if c.reasoning_tokens is not None]
+        reasoning = sum(c.reasoning_tokens or 0 for c in measured)
         if not reasoning:
             return ""
-        output = sum(c.output_tokens for c in calls)
+        output = sum(c.output_tokens for c in measured)
         share = round(100 * reasoning / output) if output else 0
-        return f"reasoning: {reasoning:,} of {output:,} output tokens ({share}%)"
+        line = f"reasoning: {reasoning:,} of {output:,} output tokens ({share}%)"
+        if len(measured) == len(calls):
+            return line
+        return f"{line[:-1]}, across {len(measured)} of {len(calls)} calls reporting it)"
 
     @staticmethod
     def _render_headroom(calls: list[CallRecord]) -> str:
