@@ -561,13 +561,7 @@ class LiteLLMProvider:
                 return self._map_response(
                     _completion_with_wall_timeout(model, messages, kwargs),
                     model,
-                    # Read off the request that was actually sent, not off
-                    # `default_opts`: a per-call `max_tokens` overrides the one
-                    # this provider was built with, and judging a 256-token call
-                    # against a 4,096 default would miss every ceiling hit.
-                    # `max_completion_tokens` is the same ceiling under the newer
-                    # OpenAI spelling, which litellm accepts either way.
-                    kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"),
+                    _configured_ceiling(kwargs),
                 )
             except Exception as exc:
                 if not self._drop_rejected_param(exc, kwargs):
@@ -731,6 +725,26 @@ class LiteLLMProvider:
             # thinking they did by two different readings of the same field.
             reasoning_tokens=_reasoning_tokens(usage),
         )
+
+
+def _configured_ceiling(kwargs: dict[str, Any]) -> int | None:
+    """The output ceiling this request was actually sent with, if any.
+
+    Read off the request rather than off ``default_opts``: a per-call
+    ``max_tokens`` overrides the one the provider was built with, and judging a
+    256-token call against a 4,096 default would miss every ceiling hit.
+
+    ``max_completion_tokens`` is the same ceiling under the newer OpenAI
+    spelling, which litellm accepts either way — but it is only consulted when
+    ``max_tokens`` is ABSENT, never when it is merely falsy. ``max_tokens: 0`` is
+    the uncapped escape hatch, and falling through on it would re-impose a
+    ceiling the caller explicitly turned off, then report a truncation against
+    it.
+    """
+    if "max_tokens" in kwargs:
+        ceiling: int | None = kwargs["max_tokens"]
+        return ceiling
+    return kwargs.get("max_completion_tokens")
 
 
 def _spent_the_ceiling(output_tokens: int, ceiling: int | None) -> bool:

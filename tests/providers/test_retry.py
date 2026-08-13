@@ -1479,6 +1479,34 @@ class TestCeilingHitWithoutAFinishReason:
 
         assert result.output_tokens == 65536
 
+    def test_the_newer_openai_spelling_is_the_same_ceiling(self) -> None:
+        """litellm accepts `max_completion_tokens` for the same cap, so a caller
+        that uses it must get the same detection."""
+        with patch("litellm.completion", return_value=self._at_ceiling(512)):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    "ollama/qwen2.5-coder:3b",
+                    max_completion_tokens=512,
+                )
+
+    def test_an_explicit_zero_wins_over_the_other_spelling(self) -> None:
+        """`max_tokens=0` is the uncapped escape hatch, and it is chosen by being
+        PRESENT, not by being truthy. Falling through to a second spelling would
+        re-impose a ceiling the caller explicitly turned off — and then report a
+        truncation against it."""
+        with patch("litellm.completion", return_value=self._at_ceiling(512)):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "ollama/qwen2.5-coder:3b",
+                max_tokens=0,
+                max_completion_tokens=512,
+            )
+
+        assert result.output_tokens == 512
+
     def test_the_body_still_travels_for_salvage(self) -> None:
         """Same contract as a reported truncation: the findings completed before
         the cut are real, and the engine recovers them."""
