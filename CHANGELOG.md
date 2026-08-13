@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.0.1...lgtmaybe-v2.1.0) (2026-08-13)
+
+
+### Features
+
+* **engine:** retry a reasoning-bound truncation at a lower effort ([#434](https://github.com/MattJColes/lgtmaybe/issues/434)) ([83e3736](https://github.com/MattJColes/lgtmaybe/commit/83e37366d3909c2a63e56b19ef410765f6b10c3e))
+* **engine:** tell every lens what it was not shown ([#433](https://github.com/MattJColes/lgtmaybe/issues/433)) ([495bf40](https://github.com/MattJColes/lgtmaybe/commit/495bf40eb9884e29a6197180aa74b2aabf4e0e9d))
+* **profiling:** report the reasoning share of every call, not just failed ones ([#436](https://github.com/MattJColes/lgtmaybe/issues/436)) ([35fa139](https://github.com/MattJColes/lgtmaybe/commit/35fa139e97bc66b5b3aed50e3ad83fb6f98b7cca))
+
 ## [2.0.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.0.0...lgtmaybe-v2.0.1) (2026-08-13)
 
 
