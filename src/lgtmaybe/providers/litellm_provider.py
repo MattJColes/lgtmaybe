@@ -665,14 +665,23 @@ class LiteLLMProvider:
         # they cannot move. The reasoning count is named when the route reports it,
         # because it is the whole explanation for a fifteen-line diff truncating —
         # a reasoning model spends this same budget on thought before it writes a
-        # single finding, so the cap, not the diff, is what needs raising.
+        # single finding.
+        #
+        # The advice deliberately does NOT say "raise `max_tokens`". Measured (see
+        # .lgtmaybe.yml): the dominant truncation is a CONTENT runaway — ~961
+        # tokens of thought against ~32,700 of output, zero findings salvaged, on
+        # roughly one lens call in five — which no ceiling prevents. Raising it
+        # only buys a larger wasted call: at 32k a single runaway was 80-93% of a
+        # review's wall clock, at 8k it is ~95s. The engine already splits the
+        # batch, so the reader's real lever is the model, not this number.
         if _finish_reason(response) == "length":
             reasoning = _reasoning_tokens(usage)
             detail = f" ({reasoning} reasoning)" if reasoning else ""
             raise ProviderTruncated(
                 f"response hit the {output_tokens}-token `max_tokens` ceiling{detail} before "
-                "finishing — raise `max_tokens`, or lower `max_input_tokens` so each call "
-                "covers less",
+                "finishing — the batch is re-reviewed in smaller pieces automatically, so a "
+                "lens that keeps doing it is usually generation instability in the model, "
+                "which a higher ceiling makes more expensive rather than prevents",
                 text=text,
                 # The same two numbers as the message, carried as data: the engine
                 # decides whether shrinking the payload can help from the ratio
