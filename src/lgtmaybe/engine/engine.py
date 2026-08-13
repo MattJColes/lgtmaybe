@@ -21,7 +21,6 @@ from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
-    Provider,
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
@@ -81,9 +80,9 @@ from .triage import triage_files
 
 _log = get_logger(__name__)
 
-# Auto concurrency (cfg.max_concurrency=None), resolved per provider:
+# Auto concurrency (cfg.max_concurrency=None) — one number, every provider:
 #
-# - Cloud providers get 6. An extra worker can cut a full-latency wave off the
+# - Six everywhere. An extra worker can cut a full-latency wave off the
 #   wall clock (only when it changes how many waves there are — wall time is
 #   ceil(batches × lenses / workers)), so the pull is upward — but the fan-out
 #   is one API key, and the
@@ -94,7 +93,7 @@ _log = get_logger(__name__)
 #   the rescue wave both make that survivable rather than fatal; six is the same
 #   fix from the other end — a quarter less burst for a quarter less parallelism.
 #   Teams on a high rate tier can raise it with `max_concurrency`.
-# - Local providers (ollama, openai-compatible) get the same 6. They used to get
+# - Local providers used to get
 #   1, on the reasoning that a local server processes one request at a time so a
 #   wider pool would only queue. The queueing is real, but the conclusion was
 #   wrong in both directions: a server that CAN batch was capped at 1 for no
@@ -110,9 +109,14 @@ _log = get_logger(__name__)
 #   exception: it batches and keeps full `--max-model-len` per request.
 #
 #   The one case for lowering this back to 1 is a very slow local model, where
-#   six queued calls could each wait out the per-request timeout.
-_CLOUD_MAX_WORKERS = 6
-_SINGLE_STREAM_PROVIDERS: frozenset[Provider] = frozenset()
+#   six queued calls could each wait out the per-request timeout — and the local
+#   per-call default is scaled by this width precisely so that they do not.
+#
+# There is deliberately no per-provider exception list. If one is ever needed
+# again, keep it a value a reader can see next to the branch that reads it: the
+# last one was a named-but-empty set two hundred lines away, which read as a
+# policy it no longer had.
+_DEFAULT_MAX_WORKERS = 6
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
         ReviewCategory.security.value,
@@ -315,7 +319,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
 
 def concurrency_cap(cfg: ReviewConfig) -> int:
     """How many model calls this run may have in flight: the explicit cap, else
-    the provider-aware default.
+    the common default — one number, not a per-provider one.
 
     A property of the *backend*, independent of how much work there is — which
     is why it is separate from the pool size below. The oversized-batch split
@@ -325,9 +329,7 @@ def concurrency_cap(cfg: ReviewConfig) -> int:
     """
     if cfg.max_concurrency is not None:
         return max(1, cfg.max_concurrency)
-    if cfg.provider in _SINGLE_STREAM_PROVIDERS:
-        return 1
-    return _CLOUD_MAX_WORKERS
+    return _DEFAULT_MAX_WORKERS
 
 
 def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:

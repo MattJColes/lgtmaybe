@@ -254,6 +254,12 @@ def test_auto_diagram_on_pr_change_events_when_enabled() -> None:
     assert should_auto_diagram(on, event_action="closed") is False
     assert should_auto_diagram(make_cfg(), event_action="opened") is True  # default on
     assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="opened") is False
+    # The opt-out has to hold on every eligible event, not just the first one.
+    # Asserting it only on `opened` lets a mutant that ORs synchronize into the
+    # enable condition — the plausible slip when adding a new event — pass the
+    # whole suite while ignoring `auto_diagram: false` on a push.
+    assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="synchronize") is False
+    assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="reopened") is False
 
 
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:

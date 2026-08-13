@@ -176,8 +176,20 @@ def _bounded_default(cfg: ReviewConfig, concurrency: int) -> int:
     Six workers against the generous local default is three hours of per-call
     budget, and the whole-review deadline cannot take it back: that deadline only
     skips calls that have not *started*, and a fan-out narrower than the pool
-    starts all of its calls at once. So the clamp happens here instead — no
-    single call gets a budget outliving the review it belongs to.
+    starts all of its calls at once. So the clamp happens here instead.
+
+    What it bounds is the *budget*, not the wall clock, and only down to the
+    provider's own default. Two things keep it short of "no call outlives the
+    review". The deadline is a start gate, so a call beginning just inside it
+    still runs its full budget afterwards; and the floor below wins over a
+    deadline set beneath it, so ``max_review_seconds: 600`` still resolves 1800.
+    What the clamp buys, when the deadline is at or above that floor: a
+    pathological run is capped at roughly twice the deadline where unclamped it
+    is four times. Below the floor it buys nothing, because the floor wins —
+    ``max_review_seconds: 600`` resolves 1800, and the same run is four times the
+    deadline again. Making the wall clock itself the bound needs a per-call
+    budget computed from the deadline *remaining* at call time, which the port
+    does not currently carry.
 
     Bounded in both directions. ``max_review_seconds: 0`` means "no deadline",
     not "zero seconds"; and the clamp may only take back what the scaling added,

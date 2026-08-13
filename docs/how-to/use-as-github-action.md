@@ -234,7 +234,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `triage_model` | — | Cheap model that runs first to skip plainly-non-substantive files and rank the rest by risk; security-relevant files always escalate past triage. Unset = no triage |
 | `reflect_model` | defaults to `model` | Model for the self-reflection (false-positive audit) pass — point it at a stronger model to audit a weaker reviewer's findings |
 | `max_review_seconds` | `3600` | Soft wall-clock ceiling for the whole review; once passed, queued calls are skipped and partial results post with a notice (a cancelled or timed-out job does the same, via SIGINT/SIGTERM). `0` disables |
-| `max_concurrency` | auto (6 cloud, 1 ollama/openai-compatible) | Concurrent review calls across the whole fan-out |
+| `max_concurrency` | auto (6, every provider) | Concurrent review calls across the whole fan-out. Set `1` for a serial local run |
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks, zizmor, ast-grep and osv-scanner post directly with no model call. The image bundles these tools and an offline vulnerability database |
