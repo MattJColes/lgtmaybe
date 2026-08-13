@@ -34,6 +34,7 @@ BASE_URL = "https://api.github.com"
 PR_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}"
 REVIEWS_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/reviews"
 REVIEW_COMMENTS_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/comments"
+ISSUE_COMMENTS_URL = f"{BASE_URL}/repos/{REPO}/issues/{PR_NUMBER}/comments"
 GRAPHQL_URL = f"{BASE_URL}/graphql"
 
 MARKER = "<!-- lgtmaybe -->"
@@ -155,6 +156,69 @@ def test_last_reviewed_sha_none_on_api_error() -> None:
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(500))
 
     assert _gateway().last_reviewed_sha() is None
+
+
+@respx.mock
+def test_diagrammed_head_is_the_completed_head_when_required() -> None:
+    review = [{"id": 7, "body": f"Old summary\n\n{MARKER}"}]
+    diagram = [
+        {
+            "id": 9,
+            "body": "Diagram\n\n<!-- lgtmaybe-diagram -->\n"
+            "<!-- lgtmaybe-diagrammed:cafe1234 -->",
+        }
+    ]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=review))
+    respx.route(method="GET", url__startswith=ISSUE_COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=diagram)
+    )
+
+    assert _gateway().last_completed_sha(diagram_required=True) == "cafe1234"
+
+
+@respx.mock
+def test_review_marker_is_completion_when_diagram_is_disabled() -> None:
+    review = [
+        {"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}
+    ]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=review))
+
+    assert _gateway().last_completed_sha(diagram_required=False) == "cafe1234"
+
+
+@respx.mock
+def test_diagram_marker_without_review_is_not_complete() -> None:
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+
+    assert _gateway().last_completed_sha(diagram_required=True) is None
+
+
+@respx.mock
+def test_manual_diagram_refresh_preserves_the_completed_head() -> None:
+    existing = [
+        {
+            "id": 9,
+            "body": "Old diagram\n\n<!-- lgtmaybe-diagram -->\n"
+            "<!-- lgtmaybe-diagrammed:cafe1234 -->",
+        }
+    ]
+    respx.route(method="GET", url__startswith=ISSUE_COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=existing)
+    )
+    captured: dict[str, object] = {}
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"id": 9})
+
+    respx.route(
+        method="PATCH",
+        url=f"{BASE_URL}/repos/{REPO}/issues/comments/9",
+    ).mock(side_effect=capture)
+
+    _gateway().post_diagram_comment("New manual diagram")
+
+    assert "<!-- lgtmaybe-diagrammed:cafe1234 -->" in str(captured["body"])
 
 
 # ---------------------------------------------------------------------------

@@ -12,13 +12,15 @@ from __future__ import annotations
 
 from lgtmaybe.cli import resolve_auto_incremental, run_review
 from lgtmaybe.core.models import (
+    ActiveFinding,
     PRContext,
+    ProviderResult,
     ReviewConfig,
     ReviewFinding,
     Severity,
 )
 from tests.conftest import make_cfg
-from tests.fakes import FakeGitHub
+from tests.fakes import FakeGitHub, FakeProvider
 
 FULL_DIFF = (
     "diff --git a/src/app.py b/src/app.py\n@@ -1 +1,2 @@\n old\n+new\n"
@@ -39,13 +41,18 @@ CTX = PRContext(
 class RecordingEngine:
     """Returns canned findings; records the ctx it was asked to review."""
 
-    def __init__(self, findings: list[ReviewFinding] | None = None) -> None:
+    def __init__(
+        self,
+        findings: list[ReviewFinding] | None = None,
+        summary: str = "1 finding · summary",
+    ) -> None:
         self.findings = findings or []
+        self.summary = summary
         self.reviewed_ctxs: list[PRContext] = []
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         self.reviewed_ctxs.append(ctx)
-        return list(self.findings), "1 finding · summary"
+        return list(self.findings), self.summary
 
 
 class IncrementalFakeGitHub(FakeGitHub):
@@ -64,10 +71,10 @@ class IncrementalFakeGitHub(FakeGitHub):
         self.compare_calls: list[tuple[str, str]] = []
         self.marked_reviewed: list[str | None] = []
         self.scopes: list[set[str] | None] = []
-        self.last_reviewed_calls = 0
+        self.last_completed_calls: list[bool] = []
 
-    def last_reviewed_sha(self) -> str | None:
-        self.last_reviewed_calls += 1
+    def last_completed_sha(self, *, diagram_required: bool) -> str | None:
+        self.last_completed_calls.append(diagram_required)
         return self._last_sha
 
     def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
@@ -119,13 +126,18 @@ def test_force_push_falls_back_to_full_review() -> None:
     assert github.compare_calls == [("head1111", "head2222")]
 
 
-def test_same_head_falls_back_to_full_review_without_compare() -> None:
+def test_same_completed_head_is_a_no_op() -> None:
     github = IncrementalFakeGitHub(CTX, last_sha="head2222", compare_result=INC_DIFF)
     engine = RecordingEngine()
 
-    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
+    findings, summary = run_review(
+        github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False
+    )
 
-    assert engine.reviewed_ctxs[0].diff == FULL_DIFF
+    assert findings == []
+    assert "already complete" in summary.lower()
+    assert engine.reviewed_ctxs == []
+    assert github.posted == []
     assert github.compare_calls == []
 
 
@@ -136,7 +148,7 @@ def test_incremental_off_never_queries_the_marker() -> None:
     run_review(github=github, engine=engine, cfg=make_cfg(), dry_run=False)  # default: auto/off
 
     assert engine.reviewed_ctxs[0].diff == FULL_DIFF
-    assert github.last_reviewed_calls == 0
+    assert github.last_completed_calls == []
 
 
 def test_gateway_without_incremental_methods_reviews_full() -> None:
@@ -176,6 +188,77 @@ def test_full_review_still_marks_the_watermark() -> None:
     run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
 
     assert github.marked_reviewed == ["head2222"]
+
+
+def test_incremental_validates_prior_findings_and_allows_only_fixed_resolution() -> None:
+    class HybridGitHub(IncrementalFakeGitHub):
+        def __init__(self) -> None:
+            super().__init__(CTX, last_sha="head1111", compare_result=INC_DIFF)
+            self.fixed_thread_ids: list[set[str]] = []
+
+        def list_active_findings(self) -> list[ActiveFinding]:
+            return [
+                ActiveFinding(thread_id="FIXED", path="src/app.py", body="old bug"),
+                ActiveFinding(thread_id="OPEN", path="src/other.py", body="still broken"),
+            ]
+
+        def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
+            self.fixed_thread_ids.append(thread_ids)
+
+    provider = FakeProvider(
+        result=ProviderResult(
+            text=(
+                '{"verdicts": ['
+                '{"thread_id":"FIXED","status":"fixed","reason":"removed"},'
+                '{"thread_id":"OPEN","status":"still_open","reason":"remains"}'
+                "]}"
+            ),
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+    github = HybridGitHub()
+
+    findings, summary = run_review(
+        github=github,
+        engine=RecordingEngine(),
+        cfg=make_cfg(incremental=True),
+        dry_run=False,
+        provider=provider,
+    )
+
+    assert findings == []
+    assert github.fixed_thread_ids == [{"FIXED"}]
+    assert "1 fixed" in summary
+    assert "1 still open" in summary
+
+
+def test_full_review_does_not_run_followup_validation() -> None:
+    class HybridGitHub(IncrementalFakeGitHub):
+        def list_active_findings(self) -> list[ActiveFinding]:
+            raise AssertionError("full review must not read active findings")
+
+    github = HybridGitHub(CTX, last_sha="head1111", compare_result=INC_DIFF)
+
+    run_review(
+        github=github,
+        engine=RecordingEngine(),
+        cfg=make_cfg(incremental=False),
+        dry_run=False,
+        provider=FakeProvider(),
+    )
+
+
+def test_incomplete_review_does_not_advance_the_watermark() -> None:
+    from lgtmaybe.engine import INCOMPLETE_MARKER
+
+    github = IncrementalFakeGitHub(CTX, last_sha=None)
+    engine = RecordingEngine(summary=f"partial\n{INCOMPLETE_MARKER}")
+
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
+
+    assert github.marked_reviewed == [None]
+    assert len(github.posted) == 1
 
 
 def test_dry_run_never_marks_or_scopes() -> None:

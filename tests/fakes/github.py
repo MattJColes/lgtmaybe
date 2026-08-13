@@ -45,8 +45,10 @@ class FakeGitHub:
         """Idempotent PR-description upsert — beyond the frozen port."""
         self.described.append(body)
 
-    def post_diagram_comment(self, body: str) -> None:
+    def post_diagram_comment(self, body: str, *, completed_sha: str | None = None) -> None:
         """Idempotent change-diagram upsert — beyond the frozen port."""
+        if completed_sha is not None:
+            body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
         self.diagrams.append(body)
 
     def create_check_run(self, head_sha: str, conclusion: str, title: str, summary: str) -> None:

@@ -271,6 +271,40 @@ class ReviewFinding(_Strict):
         return value
 
 
+class FindingValidationStatus(StrEnum):
+    """A follow-up verdict for one previously posted finding."""
+
+    fixed = "fixed"
+    still_open = "still_open"
+    uncertain = "uncertain"
+
+
+class ActiveFinding(_Strict):
+    """One unresolved lgtmaybe finding root read back from GitHub."""
+
+    thread_id: str
+    comment_id: int | None = None
+    path: str
+    body: str
+    fingerprint: str | None = None
+    identity: str | None = None
+    outdated: bool = False
+
+
+class FindingValidation(_Strict):
+    """The model's explicit follow-up verdict for one active thread."""
+
+    thread_id: str
+    status: FindingValidationStatus
+    reason: str
+
+
+class FindingValidationResult(_Strict):
+    """Structured-output envelope for follow-up finding validation."""
+
+    verdicts: list[FindingValidation]
+
+
 _BUILTIN_LENS_IDS: frozenset[str] = frozenset(c.value for c in ReviewCategory)
 
 # Category prefix stamped on a finding that came from a deterministic tool

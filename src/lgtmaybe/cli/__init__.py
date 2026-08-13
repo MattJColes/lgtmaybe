@@ -134,13 +134,23 @@ def run_diagram(
     provider: ProviderClient,
     cfg: ReviewConfig,
     ctx: PRContext | None = None,
+    *,
+    completed_sha: str | None = None,
 ) -> None:
     """Build the change diagram and post it idempotently."""
     from lgtmaybe.engine.diagram import build_diagram
 
-    _run_upsert(
-        github, provider, cfg, build=build_diagram, post_method="post_diagram_comment", ctx=ctx
-    )
+    body = build_diagram(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    post = getattr(github, "post_diagram_comment", None)
+    if post is not None:
+        if completed_sha is None:
+            post(body)
+        else:
+            post(body, completed_sha=completed_sha)
+        return
+    post_comment = getattr(github, "post_issue_comment", None)
+    if post_comment is not None:
+        post_comment(body)
 
 
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
@@ -376,6 +386,8 @@ def run_review(
     cfg: ReviewConfig,
     dry_run: bool,
     ctx: PRContext | None = None,
+    provider: ProviderClient | None = None,
+    diagram_required: bool = False,
 ) -> tuple[list[ReviewFinding], str]:
     """Core review pipeline — pure function over injected ports.
 
@@ -396,7 +408,11 @@ def run_review(
         if callable(want_manifests):
             want_manifests(cfg.static_analysis.enabled)
         ctx = github.get_pr_context()
-    review_ctx, incremental_since = _incremental_context(github, ctx, cfg)
+    review_ctx, incremental_since, already_complete = _incremental_context(
+        github, ctx, cfg, diagram_required=diagram_required
+    )
+    if already_complete:
+        return [], f"Head {ctx.head_sha[:7]} is already complete; nothing changed."
     review_ctx = _apply_learned_feedback(github, review_ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
@@ -411,19 +427,25 @@ def run_review(
                 extra={"count": len(dropped)},
             )
         findings = [f for f in findings if f.side == "RIGHT"]
+        validation_summary = _validate_prior_findings(
+            github, provider, cfg, review_ctx, findings
+        )
         summary += (
             f"\n\n_Incremental review of the changes since {incremental_since[:7]} — "
             "earlier findings stay open until fixed._"
         )
+        if validation_summary:
+            summary += f"\n\n{validation_summary}"
 
     if not dry_run:
         # Record the watermark: this run completed a review of the current
         # head, so the NEXT run may review only what lands after it. Never set
         # on the failure path (a failure notice posts via post_review without
         # this) — an unreviewed commit must not be skipped.
+        complete = INCOMPLETE_MARKER not in summary
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
-            mark_reviewed(ctx.head_sha)
+            mark_reviewed(ctx.head_sha if complete else None)
         if incremental_since is not None:
             set_scope = getattr(github, "set_incremental_scope", None)
             if set_scope is not None:
@@ -469,6 +491,10 @@ def run_review(
         # incremental diff's context lines aren't necessarily in the PR diff.
         with profiler.stage("post"):
             github.post_review(findings, summary, diff=ctx.diff)
+        if diagram_required and complete:
+            if provider is None:
+                raise ValueError("a provider is required for automatic diagram completion")
+            run_diagram(github, provider, cfg, ctx=ctx, completed_sha=ctx.head_sha)
 
     return findings, summary
 
@@ -497,8 +523,12 @@ def _fail_on_check(findings: list[ReviewFinding], fail_on: Severity) -> tuple[st
 
 
 def _incremental_context(
-    github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig
-) -> tuple[PRContext, str | None]:
+    github: GitHubGateway,
+    ctx: PRContext,
+    cfg: ReviewConfig,
+    *,
+    diagram_required: bool = False,
+) -> tuple[PRContext, str | None, bool]:
     """The context to review: ``(incremental ctx, last-reviewed sha)`` or ``(ctx, None)``.
 
     Incremental only when ``cfg.incremental`` is truthy (None = auto resolves
@@ -508,27 +538,106 @@ def _incremental_context(
     a usable increment. Everything else returns the full context untouched.
     """
     if not cfg.incremental:
-        return ctx, None
+        return ctx, None, False
+    last_completed_sha = getattr(github, "last_completed_sha", None)
     last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
     compare_diff = getattr(github, "compare_diff", None)
-    if last_reviewed_sha is None or compare_diff is None:
-        return ctx, None
-    last_sha = last_reviewed_sha()
-    if not last_sha or last_sha == ctx.head_sha:
-        return ctx, None
+    if compare_diff is None or (last_completed_sha is None and last_reviewed_sha is None):
+        return ctx, None, False
+    if last_completed_sha is not None:
+        last_sha = last_completed_sha(diagram_required=diagram_required)
+    elif last_reviewed_sha is not None:
+        last_sha = last_reviewed_sha()
+    else:  # guarded above; keeps the optional callable narrowed for type-checkers
+        return ctx, None, False
+    if not last_sha:
+        return ctx, None, False
+    if last_sha == ctx.head_sha:
+        return ctx, None, True
     increment = compare_diff(last_sha, ctx.head_sha)
     if not increment or not increment.strip():
-        return ctx, None
+        return ctx, None, False
     _log.info(
         "incremental review",
         extra={"since": last_sha, "head": ctx.head_sha},
     )
-    return ctx.model_copy(update={"diff": increment}), last_sha
+    return ctx.model_copy(update={"diff": increment}), last_sha, False
 
 
 def _diff_paths(diff: str) -> set[str]:
     """The file paths named by a unified diff's ``diff --git`` headers."""
     return set(FILE_HEADER_RE.findall(diff))
+
+
+def _validate_prior_findings(
+    github: GitHubGateway,
+    provider: ProviderClient | None,
+    cfg: ReviewConfig,
+    ctx: PRContext,
+    current_findings: list[ReviewFinding],
+) -> str:
+    """Validate active prior findings and install the explicit resolve allowlist."""
+    list_active = getattr(github, "list_active_findings", None)
+    set_fixed = getattr(github, "set_validated_fixed_threads", None)
+    if list_active is None or set_fixed is None:
+        return ""
+    try:
+        active = list_active()
+    except Exception as exc:  # noqa: BLE001 - failure leaves every thread open
+        _log.warning("reading active findings for validation failed: %s", exc)
+        set_fixed(set())
+        return "_Follow-up validation was unavailable; earlier findings remain open._"
+    if not active:
+        set_fixed(set())
+        return ""
+
+    from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
+    from lgtmaybe.engine.validate import validate_findings
+    from lgtmaybe.github.rest_gateway import finding_fingerprint, finding_identity
+
+    current_keys = {
+        key
+        for finding in current_findings
+        for key in (finding_fingerprint(finding.path, finding.title), finding_identity(finding))
+    }
+    reproduced = [
+        finding
+        for finding in active
+        if ({finding.fingerprint, finding.identity} - {None}) & current_keys
+    ]
+    unmatched = [finding for finding in active if finding not in reproduced]
+    verdicts = [
+        FindingValidation(
+            thread_id=finding.thread_id,
+            status=FindingValidationStatus.still_open,
+            reason="the incremental review reproduced this finding",
+        )
+        for finding in reproduced
+    ]
+    if provider is None:
+        verdicts.extend(
+            FindingValidation(
+                thread_id=finding.thread_id,
+                status=FindingValidationStatus.uncertain,
+                reason="no provider was available for follow-up validation",
+            )
+            for finding in unmatched
+        )
+    else:
+        verdicts.extend(validate_findings(provider, cfg, unmatched, ctx))
+
+    fixed = {
+        verdict.thread_id
+        for verdict in verdicts
+        if verdict.status is FindingValidationStatus.fixed
+    }
+    set_fixed(fixed)
+    counts = Counter(verdict.status for verdict in verdicts)
+    return (
+        f"_Follow-up validation: {counts[FindingValidationStatus.fixed]} fixed, "
+        f"{counts[FindingValidationStatus.still_open]} still open, "
+        f"{counts[FindingValidationStatus.uncertain]} uncertain._"
+    )
 
 
 def execute_local_review(
@@ -664,7 +773,15 @@ def execute_review(
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
     try:
-        run_review(github=github, engine=engine, cfg=cfg, dry_run=False, ctx=ctx)
+        run_review(
+            github=github,
+            engine=engine,
+            cfg=cfg,
+            dry_run=False,
+            ctx=ctx,
+            provider=provider,
+            diagram_required=diagram,
+        )
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
@@ -677,7 +794,7 @@ def execute_review(
         # harmless. In a `finally` so a failed review still gets its extras,
         # exactly as when they ran first.
         if ctx is not None:
-            _post_extras(github, provider, cfg, ctx, describe=describe, diagram=diagram)
+            _post_extras(github, provider, cfg, ctx, describe=describe, diagram=False)
 
     if runtime.profile:
         click.echo(profiler.render())

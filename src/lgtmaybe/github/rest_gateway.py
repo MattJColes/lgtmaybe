@@ -26,6 +26,7 @@ from lgtmaybe.core.models import (
     EFFORT_PREFIX,
     SECURITY_LABEL,
     SPLITTING_LABEL,
+    ActiveFinding,
     PRContext,
     ReviewFinding,
 )
@@ -93,6 +94,7 @@ _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 # this review covered, so the next run can review only the commits pushed
 # since (commit-scoped incremental review). The capture group is the SHA.
 _REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
+_DIAGRAMMED_MARKER = re.compile(r"<!-- lgtmaybe-diagrammed:([0-9a-f]{7,40}) -->")
 
 
 def finding_fingerprint(path: str, title: str) -> str:
@@ -357,6 +359,7 @@ class RestGitHubGateway:
         # paths — a finding absent merely because its file wasn't re-reviewed
         # this run must never be spuriously resolved. None = full review.
         self._incremental_paths: set[str] | None = None
+        self._validated_fixed_thread_ids: set[str] | None = None
         # Whether to fetch dependency manifests for the vulnerability scanner
         # (set via set_scan_manifests). Off by default so the overwhelming
         # majority of runs — static analysis is opt-in — pay no extra API calls.
@@ -606,16 +609,20 @@ class RestGitHubGateway:
         """
         self._upsert_marked_comment(body, self._describe_marker)
 
-    def post_diagram_comment(self, body: str) -> None:
+    def post_diagram_comment(self, body: str, *, completed_sha: str | None = None) -> None:
         """Post or update the change-diagram comment, idempotently.
 
         Its marker family is disjoint from the describe and review markers, so
         the three comments never clobber each other. Adapter-only, beyond the
         frozen port.
         """
-        self._upsert_marked_comment(body, self._diagram_marker)
+        if completed_sha is not None:
+            body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
+        self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
 
-    def _upsert_marked_comment(self, body: str, marker: str) -> None:
+    def _upsert_marked_comment(
+        self, body: str, marker: str, *, preserve: re.Pattern[str] | None = None
+    ) -> None:
         """Post *body* as an issue comment stamped with *marker*, or edit the
         existing comment carrying that marker in place."""
         stamped = f"{body}\n\n{marker}"
@@ -623,6 +630,10 @@ class RestGitHubGateway:
         for resp in self._paginate(f"{url}?per_page=100"):
             for comment in resp.json():
                 if marker in (comment.get("body") or ""):
+                    if preserve is not None and preserve.search(stamped) is None:
+                        previous = preserve.search(comment.get("body") or "")
+                        if previous is not None:
+                            stamped += f"\n{previous.group(0)}"
                     patched = self._client.patch(
                         f"{self._api}/issues/comments/{comment['id']}",
                         headers=self._json_headers,
@@ -726,6 +737,25 @@ class RestGitHubGateway:
         match = _REVIEWED_MARKER.search(body)
         return match.group(1) if match else None
 
+    def last_completed_sha(self, *, diagram_required: bool) -> str | None:
+        """Return the latest head whose required review outputs were posted."""
+        if not diagram_required:
+            return self.last_reviewed_sha()
+        try:
+            if self._find_existing_review_entry() is None:
+                return None
+            url = f"{self._issue_api}/comments?per_page=100"
+            for resp in self._paginate(url):
+                for comment in resp.json():
+                    body = comment.get("body") or ""
+                    if self._diagram_marker not in body:
+                        continue
+                    match = _DIAGRAMMED_MARKER.search(body)
+                    return match.group(1) if match else None
+        except httpx.HTTPError:
+            return None
+        return None
+
     def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
         """Unified diff of the commits between *base_sha* and *head_sha*, or None.
 
@@ -774,6 +804,37 @@ class RestGitHubGateway:
         conversation must stay open rather than be spuriously resolved.
         """
         self._incremental_paths = paths
+
+    def list_active_findings(self) -> list[ActiveFinding]:
+        """Read our unresolved finding roots for explicit follow-up validation."""
+        active: list[ActiveFinding] = []
+        for node in self._walk_review_threads(
+            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+        ):
+            if node.get("isResolved"):
+                continue
+            first = _first_comment(node)
+            body = first.get("body", "") or ""
+            fingerprint = _FINDING_MARKER.search(body)
+            identity = _IDENTITY_MARKER.search(body)
+            if fingerprint is None and identity is None:
+                continue
+            active.append(
+                ActiveFinding(
+                    thread_id=node["id"],
+                    comment_id=first.get("databaseId"),
+                    path=node.get("path") or "",
+                    body=body,
+                    fingerprint=fingerprint.group(1) if fingerprint else None,
+                    identity=identity.group(1) if identity else None,
+                    outdated=bool(node.get("isOutdated")),
+                )
+            )
+        return active
+
+    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
+        """Restrict hybrid resolve-on-fix to explicitly validated thread ids."""
+        self._validated_fixed_thread_ids = set(thread_ids)
 
     def mark_reviewed(self, head_sha: str | None) -> None:
         """Declare that this run is a completed review of *head_sha*.
@@ -1122,21 +1183,23 @@ class RestGitHubGateway:
         ):
             if node.get("isResolved"):
                 continue
-            if not node.get("isOutdated"):
-                continue
-            if (
-                self._incremental_paths is not None
-                and node.get("path") not in self._incremental_paths
-            ):
-                # Incremental run: this file wasn't re-reviewed, so its
-                # finding's absence is no evidence it was fixed.
-                continue
+            if self._validated_fixed_thread_ids is not None:
+                if node.get("id") not in self._validated_fixed_thread_ids:
+                    continue
+            else:
+                if not node.get("isOutdated"):
+                    continue
+                if (
+                    self._incremental_paths is not None
+                    and node.get("path") not in self._incremental_paths
+                ):
+                    continue
             first = _first_comment(node)
             first_body = first.get("body", "")
             keys = _finding_keys(first_body)
             if not keys:
                 continue  # not one of ours
-            if keys & current:
+            if self._validated_fixed_thread_ids is None and keys & current:
                 continue  # still flagged this run (however worded) — leave it open
             fixed.append((node["id"], first.get("databaseId"), first_body))
         return fixed

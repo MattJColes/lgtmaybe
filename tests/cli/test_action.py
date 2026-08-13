@@ -97,7 +97,7 @@ class TestActionRouting:
         monkeypatch.setattr(
             cli_module,
             "run_diagram",
-            lambda github, provider, cfg, ctx=None: called.append(True),
+            lambda github, provider, cfg, ctx=None, completed_sha=None: called.append(True),
         )
 
         event = _write_event(
@@ -209,9 +209,9 @@ class TestActionRouting:
                 self.writes.append("describe")
                 super().post_describe_comment(body)
 
-            def post_diagram_comment(self, body: str) -> None:
+            def post_diagram_comment(self, body: str, *, completed_sha: str | None = None) -> None:
                 self.writes.append("diagram")
-                super().post_diagram_comment(body)
+                super().post_diagram_comment(body, completed_sha=completed_sha)
 
         github = _OrderedGitHub()
         provider = FakeProvider()
@@ -239,7 +239,7 @@ class TestActionRouting:
         result = CliRunner().invoke(main, ["action"])
 
         assert result.exit_code == 0, result.output
-        assert github.writes == ["review", "describe", "diagram"]
+        assert github.writes == ["review", "diagram", "describe"]
 
     def test_issue_comment_event_routes_slash_command(self, tmp_path, monkeypatch):
         github = FakeGitHub()
