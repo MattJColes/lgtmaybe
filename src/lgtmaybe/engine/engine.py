@@ -1481,10 +1481,11 @@ class LLMReviewEngine:
         # construction rather than by argument. It costs at most `width` threads
         # for the duration of one split, and a split is the exceptional path.
         #
-        # Width is the backend's own concurrency (never the piece count): a
-        # single-stream server — ollama, a one-slot llama.cpp — serves calls
-        # serially, so two at once would only queue and eat the timeout. At
-        # width 1 the executor runs them in submission order, exactly as the
+        # Width is the review's own concurrency (never the piece count), so a
+        # user who has told us what their backend can take — `max_concurrency`,
+        # which on a local server is how they describe its parallelism — gets
+        # that answer in both pools rather than one setting meaning two things.
+        # At width 1 the executor runs them in submission order, exactly as the
         # serial loop did. A splitting worker is blocked, not calling, so the
         # calls in flight peak at the fan-out's width times this one — the
         # adapter's backoff absorbs that burst, and it only happens on the run

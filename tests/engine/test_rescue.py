@@ -387,8 +387,8 @@ class TestRescueWave:
             return base + (10_000.0 if crossed.is_set() else 0.0)
 
         provider = _CrossesTheDeadline()
-        # ollama resolves to one worker, so the calls are strictly serial: the
-        # first runs, crosses the deadline, and the second is skipped by it.
+        # One worker, so the calls are strictly serial: the first runs, crosses
+        # the deadline, and the second is skipped by it.
         cfg = _cfg(max_concurrency=1, max_review_seconds=1)
         with patch.object(engine_module.time, "perf_counter", stepped):
             _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
