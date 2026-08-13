@@ -15,9 +15,8 @@ network. The contract under test:
 - only the shared prefix is marked — the per-lens block stays outside it;
 - below the lowest documented minimum cacheable block (1,024 tokens) the request
   is sent unchanged, since no model can cache a prefix that small;
-- with ``prompt_cache`` off, or on a route with neither mechanism (ollama,
-  openai-compatible), the request is byte-for-byte what it was before this
-  feature existed;
+- on a route with neither mechanism (ollama, openai-compatible), split user
+  blocks are merged into one plain message;
 - a sticky ``prompt_cache_key`` derived from the prefix pins the fan-out to one
   provider endpoint;
 - cache read / write token counts are mapped into ``ProviderResult`` under every
@@ -91,10 +90,15 @@ def _messages(system: str = _BIG_SYSTEM) -> list[dict[str, str]]:
     ]
 
 
-def _sent_messages(model: str, *, prompt_cache: bool, system: str = _BIG_SYSTEM) -> list[Any]:
+def test_removed_prompt_cache_option_is_rejected_at_construction() -> None:
+    with pytest.raises(TypeError, match="prompt_cache.*removed"):
+        LiteLLMProvider(prompt_cache=False)
+
+
+def _sent_messages(model: str, *, system: str = _BIG_SYSTEM) -> list[Any]:
     """Run one completion and return the messages litellm actually received."""
     with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
-        provider = LiteLLMProvider(model=model, prompt_cache=prompt_cache)
+        provider = LiteLLMProvider(model=model)
         provider.complete(_messages(system), model)
     return mock_completion.call_args.kwargs["messages"]
 
@@ -102,7 +106,7 @@ def _sent_messages(model: str, *, prompt_cache: bool, system: str = _BIG_SYSTEM)
 class TestCacheControlMarking:
     @pytest.mark.parametrize("model", _CACHEABLE_MODELS)
     def test_system_prompt_marked_cacheable_on_supported_models(self, model: str) -> None:
-        sent = _sent_messages(model, prompt_cache=True)
+        sent = _sent_messages(model)
         system = sent[0]
         assert system["role"] == "system"
         # Content becomes a single text block carrying the cache breakpoint.
@@ -114,7 +118,7 @@ class TestCacheControlMarking:
 
     @pytest.mark.parametrize("model", _CACHEABLE_MODELS)
     def test_dynamic_user_content_stays_outside_the_cached_region(self, model: str) -> None:
-        sent = _sent_messages(model, prompt_cache=True)
+        sent = _sent_messages(model)
         user = sent[1]
         assert user["role"] == "user"
         # The user message (diff + intent — volatile) is untouched: a plain
@@ -123,23 +127,19 @@ class TestCacheControlMarking:
 
     @pytest.mark.parametrize("model", _UNCACHEABLE_MODELS)
     def test_request_unchanged_on_providers_without_cache_control(self, model: str) -> None:
-        sent = _sent_messages(model, prompt_cache=True)
-        assert sent == _messages()
-
-    def test_request_unchanged_when_prompt_cache_disabled(self) -> None:
-        sent = _sent_messages(_CACHEABLE_MODELS[0], prompt_cache=False)
+        sent = _sent_messages(model)
         assert sent == _messages()
 
     def test_request_unchanged_below_minimum_cacheable_tokens(self) -> None:
         """Anthropic silently ignores cache blocks under 1,024 tokens — sending
         the marker would be a no-op, so the adapter doesn't rewrite the message."""
-        sent = _sent_messages(_CACHEABLE_MODELS[0], prompt_cache=True, system=_SMALL_SYSTEM)
+        sent = _sent_messages(_CACHEABLE_MODELS[0], system=_SMALL_SYSTEM)
         assert sent == _messages(_SMALL_SYSTEM)
 
     def test_request_unchanged_without_a_system_message(self) -> None:
         messages = [{"role": "user", "content": "hi"}]
         with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
-            provider = LiteLLMProvider(model=_CACHEABLE_MODELS[0], prompt_cache=True)
+            provider = LiteLLMProvider(model=_CACHEABLE_MODELS[0])
             provider.complete(list(messages), _CACHEABLE_MODELS[0])
         assert mock_completion.call_args.kwargs["messages"] == messages
 
@@ -150,13 +150,13 @@ class TestCacheControlMarking:
             "lgtmaybe.providers.litellm_provider.supports_prompt_caching",
             side_effect=RuntimeError("boom"),
         ):
-            sent = _sent_messages(_CACHEABLE_MODELS[0], prompt_cache=True)
+            sent = _sent_messages(_CACHEABLE_MODELS[0])
         assert sent == _messages()
 
     def test_original_messages_list_is_not_mutated(self) -> None:
         messages = _messages()
         with patch("litellm.completion", return_value=_fake_response()):
-            provider = LiteLLMProvider(model=_CACHEABLE_MODELS[0], prompt_cache=True)
+            provider = LiteLLMProvider(model=_CACHEABLE_MODELS[0])
             provider.complete(messages, _CACHEABLE_MODELS[0])
         assert messages == _messages()
 
@@ -174,9 +174,9 @@ def _split_messages(system: str = _BIG_SYSTEM, prefix: str = _DIFF_PREFIX) -> li
     ]
 
 
-def _sent_split(model: str, *, prompt_cache: bool, system: str = _BIG_SYSTEM) -> list[Any]:
+def _sent_split(model: str, *, system: str = _BIG_SYSTEM) -> list[Any]:
     with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
-        provider = LiteLLMProvider(model=model, prompt_cache=prompt_cache)
+        provider = LiteLLMProvider(model=model)
         provider.complete(_split_messages(system), model)
     return mock_completion.call_args.kwargs["messages"]
 
@@ -192,7 +192,7 @@ class TestSplitShapeCacheMarking:
 
     @pytest.mark.parametrize("model", _CACHEABLE_MODELS)
     def test_prefix_block_carries_the_breakpoint_and_lens_block_does_not(self, model: str) -> None:
-        sent = _sent_split(model, prompt_cache=True)
+        sent = _sent_split(model)
         assert len(sent) == 2  # system + ONE merged user message
         [sys_block] = sent[0]["content"]
         assert sys_block["cache_control"] == {"type": "ephemeral"}
@@ -205,7 +205,7 @@ class TestSplitShapeCacheMarking:
     def test_small_system_still_caches_once_the_diff_crosses_the_minimum(self) -> None:
         """The 1,024-token minimum applies to the cumulative prefix, not per
         block: a small preamble plus a big diff still earns the diff breakpoint."""
-        sent = _sent_split(_CACHEABLE_MODELS[0], prompt_cache=True, system=_SMALL_SYSTEM)
+        sent = _sent_split(_CACHEABLE_MODELS[0], system=_SMALL_SYSTEM)
         # System alone is under the minimum → left as a plain string.
         assert sent[0]["content"] == _SMALL_SYSTEM
         prefix_block, lens_block = sent[1]["content"]
@@ -214,15 +214,10 @@ class TestSplitShapeCacheMarking:
 
     @pytest.mark.parametrize("model", _UNCACHEABLE_MODELS)
     def test_split_shape_merges_to_one_plain_user_message_elsewhere(self, model: str) -> None:
-        sent = _sent_split(model, prompt_cache=True)
+        sent = _sent_split(model)
         assert len(sent) == 2
         assert sent[0] == {"role": "system", "content": _BIG_SYSTEM}
         assert sent[1] == {"role": "user", "content": f"{_DIFF_PREFIX}\n\n{_LENS_BLOCK}"}
-
-    def test_split_shape_merges_plain_when_prompt_cache_off(self) -> None:
-        sent = _sent_split(_CACHEABLE_MODELS[0], prompt_cache=False)
-        assert sent[1] == {"role": "user", "content": f"{_DIFF_PREFIX}\n\n{_LENS_BLOCK}"}
-        assert sent[0]["content"] == _BIG_SYSTEM
 
 
 class TestOpenRouterBreakpoints:
@@ -277,7 +272,7 @@ class TestOpenRouterBreakpoints:
         """deepseek via openrouter still gets our breakpoint — harmless (litellm
         removes it) and it keeps the split prefix identical across lenses, which
         is what deepseek's automatic caching keys on."""
-        sent = _sent_split("openrouter/deepseek/deepseek-chat", prompt_cache=True)
+        sent = _sent_split("openrouter/deepseek/deepseek-chat")
         assert len(sent) == 2
         assert sent[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
@@ -289,7 +284,7 @@ class TestCacheUsageMapping:
             cache_creation_input_tokens=345,
         )
         with patch("litellm.completion", return_value=response):
-            provider = LiteLLMProvider(model=_CACHEABLE_MODELS[0], prompt_cache=True)
+            provider = LiteLLMProvider(model=_CACHEABLE_MODELS[0])
             result = provider.complete(_messages(), _CACHEABLE_MODELS[0])
         assert result.cache_read_tokens == 1200
         assert result.cache_creation_tokens == 345
@@ -342,33 +337,12 @@ class TestCacheUsageMapping:
         assert result.cache_creation_tokens == 0
 
 
-class TestFactoryThreading:
-    def test_factory_passes_prompt_cache_to_the_provider(self) -> None:
-        provider = build_provider(Provider.anthropic, "claude-sonnet-4", prompt_cache=True)
-        assert provider.prompt_cache is True
-
-    def test_factory_default_is_off_for_direct_construction(self) -> None:
-        provider = build_provider(Provider.anthropic, "claude-sonnet-4")
-        assert provider.prompt_cache is False
-
-    def test_prompt_cache_never_reaches_litellm_kwargs(self) -> None:
-        """`prompt_cache` steers the adapter; it must not leak into the
-        completion call as an (unknown) litellm parameter."""
-        provider = build_provider(Provider.anthropic, "claude-sonnet-4", prompt_cache=True)
-        assert "prompt_cache" not in provider.default_opts
-        with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
-            provider.complete(_messages(), "anthropic/claude-sonnet-4")
-        assert "prompt_cache" not in mock_completion.call_args.kwargs
-
-
 class TestProviderMatrix:
     """Every provider either applies the marker or safely no-ops — never errors."""
 
     @pytest.mark.parametrize("provider", list(Provider))
-    def test_prompt_cache_on_is_safe_for_every_provider(self, provider: Provider) -> None:
-        client = build_provider(
-            provider, "some-model", api_base="http://localhost:1234", prompt_cache=True
-        )
+    def test_prompt_caching_is_safe_for_every_provider(self, provider: Provider) -> None:
+        client = build_provider(provider, "some-model", api_base="http://localhost:1234")
         with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
             result = client.complete(_messages(), "some-model")
         assert result.text == "ok"
@@ -392,7 +366,7 @@ def test_capability_lookup_memoized_per_model() -> None:
             return_value=True,
         ) as lookup,
     ):
-        provider = LiteLLMProvider(model=model, prompt_cache=True)
+        provider = LiteLLMProvider(model=model)
         for _ in range(3):
             provider.complete(_messages(), model)
     assert lookup.call_count == 1
@@ -409,9 +383,9 @@ class TestStickyCacheKey:
     """
 
     @staticmethod
-    def _sent_kwargs(model: str, *, prompt_cache: bool = True) -> dict[str, Any]:
+    def _sent_kwargs(model: str) -> dict[str, Any]:
         with patch("litellm.completion", return_value=_fake_response()) as mock_completion:
-            provider = LiteLLMProvider(model=model, prompt_cache=prompt_cache)
+            provider = LiteLLMProvider(model=model)
             provider.complete(_split_messages(), model)
         return dict(mock_completion.call_args.kwargs)
 
@@ -425,7 +399,7 @@ class TestStickyCacheKey:
     def test_a_different_prefix_gets_a_different_key(self) -> None:
         model = "openrouter/anthropic/claude-sonnet-4.5"
         with patch("litellm.completion", return_value=_fake_response()) as mock:
-            provider = LiteLLMProvider(model=model, prompt_cache=True)
+            provider = LiteLLMProvider(model=model)
             provider.complete(_split_messages(), model)
             provider.complete(_split_messages(prefix=_DIFF_PREFIX + "\n+another"), model)
         keys = [c.kwargs["prompt_cache_key"] for c in mock.call_args_list]
@@ -438,20 +412,15 @@ class TestStickyCacheKey:
         messages = _split_messages()
         other = [*messages[:-1], {"role": "user", "content": "A totally different lens block."}]
         with patch("litellm.completion", return_value=_fake_response()) as mock:
-            provider = LiteLLMProvider(model=model, prompt_cache=True)
+            provider = LiteLLMProvider(model=model)
             provider.complete(messages, model)
             provider.complete(other, model)
         keys = [c.kwargs["prompt_cache_key"] for c in mock.call_args_list]
         assert keys[0] == keys[1]
 
-    def test_no_key_when_prompt_cache_is_off(self) -> None:
-        assert "prompt_cache_key" not in self._sent_kwargs(
-            "openrouter/anthropic/claude-sonnet-4.5", prompt_cache=False
-        )
-
     def test_caller_supplied_key_wins(self) -> None:
         model = "openrouter/anthropic/claude-sonnet-4.5"
         with patch("litellm.completion", return_value=_fake_response()) as mock:
-            provider = LiteLLMProvider(model=model, prompt_cache=True)
+            provider = LiteLLMProvider(model=model)
             provider.complete(_split_messages(), model, prompt_cache_key="mine")
         assert mock.call_args.kwargs["prompt_cache_key"] == "mine"

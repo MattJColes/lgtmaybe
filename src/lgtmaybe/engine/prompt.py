@@ -846,33 +846,13 @@ ARTEFACTS_GROUP = LensGroup(
 FAST_GROUPS: tuple[LensGroup, ...] = (CODE_HEALTH_GROUP, ARTEFACTS_GROUP)
 
 
-def _legacy(section: str, example: str, language: str | None, retrieval: bool) -> str:
-    """The legacy (``prompt_cache: false``) lens layout: it all rides the system message.
-
-    Every legacy builder below is this one assembly with a different
-    ``(section, example)`` pair, so the layout lives here once.
-    """
-    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}"
-    return f"{_localised_header(language)}\n{example}\n\n{section}\n\n{rules}\n"
-
-
 def _block(section: str, example: str) -> str:
-    """The split layout's final user block — the uncached lens half of :func:`_legacy`."""
+    """The split layout's final uncached lens block."""
     return f"{_LENS_LEAD_IN}\n\n{section}\n\n{example}"
 
 
-def build_group_prompt(
-    group: LensGroup,
-    language: str | None = None,
-    dependency_health: bool = True,
-    retrieval: bool = False,
-) -> str:
-    """A merged lens's system prompt (legacy shape, ``prompt_cache: false``)."""
-    return _legacy(_group_section(group, dependency_health), group.example, language, retrieval)
-
-
 def build_group_block(group: LensGroup, dependency_health: bool = True) -> str:
-    """A merged lens's user block (split shape — see :func:`build_lens_block`)."""
+    """A merged lens's user block."""
     return _block(_group_section(group, dependency_health), group.example)
 
 
@@ -886,15 +866,8 @@ def _correctness_section(include_intent: bool) -> str:
     return f"{_CORRECTNESS_INTENT_PREFIX}\n{_CORRECTNESS_SECTION}\n\n{_INTENT_SECTION}"
 
 
-def build_correctness_prompt(
-    include_intent: bool, language: str | None = None, retrieval: bool = False
-) -> str:
-    """The fast preset's correctness call, system-prompt (legacy) shape."""
-    return _legacy(_correctness_section(include_intent), _CORRECTNESS_EXAMPLE, language, retrieval)
-
-
 def build_correctness_block(include_intent: bool) -> str:
-    """The fast preset's correctness call, user-block (split) shape."""
+    """The fast preset's correctness call user block."""
     return _block(_correctness_section(include_intent), _CORRECTNESS_EXAMPLE)
 
 
@@ -1031,9 +1004,7 @@ Example: {"findings": [...], "needs": ["app/models.py", "already_applied"]}"""
 def retrieval_rules(retrieval: bool) -> str:
     """The deferral ask, or ``""`` when mid-review retrieval is off.
 
-    A single gate shared by every prompt shape (split preamble and all four
-    legacy system prompts), so the ask can never reach one shape and miss
-    another — and so "off" is provably a zero-byte change everywhere.
+    A single gate on the shared preamble makes "off" a zero-byte change.
     """
     return _RETRIEVAL_RULES if retrieval else ""
 
@@ -1107,37 +1078,3 @@ def build_custom_lens_block(lens: CustomLens) -> str:
     lens rides the shared cached prefix exactly like a built-in one.
     """
     return _block(*_custom_lens_parts(lens))
-
-
-@lru_cache(maxsize=len(ReviewCategory) * 16)
-def build_system_prompt(
-    category: ReviewCategory,
-    language: str | None = None,
-    dependency_health: bool = True,
-    secret_scanning: bool = True,
-    retrieval: bool = False,
-) -> str:
-    """Return the system message for the review LLM's *category* lens.
-
-    The prompt carries only that lens's section and a matching worked example.
-
-    Cached: the prompts are deterministic, and the engine rebuilds one per
-    category on every batch — caching makes those rebuilds free. Keyed on
-    *language* too (constant within a run), and byte-identical to the
-    pre-language prompt when unset.
-    """
-    section = _category_section(category, dependency_health, secret_scanning)
-    return _legacy(section, _CATEGORY_EXAMPLES[category], language, retrieval)
-
-
-def build_lens_prompt(
-    lens: CustomLens, language: str | None = None, retrieval: bool = False
-) -> str:
-    """Return the system message for a user-defined ("BYO") lens.
-
-    Same scaffold as a built-in category — shared header, one worked example, the
-    lens section, shared rules — so a custom lens behaves like any other in the
-    fan-out. The example is the lens's own when supplied, else the generic one.
-    """
-    section, example = _custom_lens_parts(lens)
-    return _legacy(section, example, language, retrieval)

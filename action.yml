@@ -98,10 +98,6 @@ inputs:
     description: "During reflection, use ast-grep to resolve a deferred finding's referenced symbol to the file that defines it — searched in a read-only shallow clone of the PR's base branch — so the auditor re-judges a cross-file finding against the real definition. On by default; set to false to disable."
     required: false
     default: ""
-  prompt_cache:
-    description: "Shape every per-lens call as a shared cacheable prefix, and mark an explicit cache breakpoint on the routes that take one (anthropic, bedrock Claude/Nova, vertex Claude+Gemini, zai GLM, openrouter claude/gemini/glm/minimax) — cached reads are billed at a steep discount. Feature-detected per model and a safe no-op elsewhere. On by default; set to false to disable."
-    required: false
-    default: ""
   incremental:
     description: "Commit-scoped incremental review: on a synchronize push, review only the diff of the commits added since the last completed review instead of the whole PR. Auto by default (on for synchronize, full review everywhere else); set to true/false to force. Falls back to a full review after a force-push/rebase or when no previous review exists. `/review full` forces a full re-review on demand."
     required: false
@@ -303,7 +299,6 @@ runs:
         INPUT_STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
         INPUT_MID_REVIEW_RETRIEVAL: ${{ inputs.mid_review_retrieval }}
         INPUT_SYMBOL_RESOLUTION: ${{ inputs.symbol_resolution }}
-        INPUT_PROMPT_CACHE: ${{ inputs.prompt_cache }}
         INPUT_INCREMENTAL: ${{ inputs.incremental }}
         INPUT_SPEC_REVIEW: ${{ inputs.spec_review }}
         INPUT_STATIC_ANALYSIS: ${{ inputs.static_analysis }}

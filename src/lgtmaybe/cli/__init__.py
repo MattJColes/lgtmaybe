@@ -248,7 +248,6 @@ def build_provider_engine(
         fallback_model=runtime.fallback_model,
         timeout=cfg.timeout,
         temperature=cfg.temperature,
-        prompt_cache=cfg.prompt_cache,
         **extra,
     )
     engine = LLMReviewEngine(provider, fetch_file=fetch_file, resolve_symbol=resolve_symbol)

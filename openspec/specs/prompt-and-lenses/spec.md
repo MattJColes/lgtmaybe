@@ -9,22 +9,24 @@ identically to the built-ins.
 ## Requirements
 ### Requirement: Split-prefix prompt shape for caching
 
-With `prompt_cache` on (default), every review call SHALL share a
-lens-independent system preamble and diff prefix, with the lens checklist as
-the final uncached block — so on routes with cache breakpoints, lenses 2..N
-read the preamble-plus-diff from cache. Other providers get the blocks joined
-back into the single plain message they always received.
+Every review call SHALL share a lens-independent system preamble and diff
+prefix, with the lens checklist as the final uncached block, so routes with
+cache breakpoints let lenses 2..N read the preamble-plus-diff from cache.
+Providers without explicit cache support SHALL receive the user blocks joined
+into one plain user message.
 <!-- anchor: prompt.shared-preamble -->
 
 #### Scenario: provider without cache support
 - **WHEN** the model's route has no explicit cache breakpoint
-- **THEN** the call is byte-for-byte the legacy single-message shape
+- **THEN** the adapter joins the split user blocks into one plain user message
 
 #### Scenario: output language configured
 - **WHEN** `ReviewConfig.language` is set
 - **THEN** the shared preamble carries a directive to write the `title`/`body`
-  prose in that language (structural fields and `suggestion` code unchanged),
-  keyed on the language so the prefix stays byte-identical across the fan-out
+  prose in that language while leaving structural fields and suggestion code
+  unchanged
+
+#### Scenario: output language unset
 - **WHEN** `language` is unset
 - **THEN** the preamble is byte-identical to the pre-language prompt
 

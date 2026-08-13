@@ -58,14 +58,10 @@ from .profiling import profiler
 from .prompt import (
     FAST_GROUPS,
     build_correctness_block,
-    build_correctness_prompt,
     build_custom_lens_block,
     build_group_block,
-    build_group_prompt,
     build_lens_block,
-    build_lens_prompt,
     build_shared_preamble,
-    build_system_prompt,
 )
 from .redact import redact
 from .reflect import reflect_findings
@@ -331,19 +327,14 @@ def _resolve_workers(cfg: ReviewConfig, task_count: int) -> int:
 class _Lens:
     """One review lens in the fan-out: a built-in category or a user-defined lens.
 
-    Holds both prompt shapes so the fan-out is uniform — the engine no longer
-    cares whether a lens came from ``ReviewCategory`` or ``extra_lenses``.
-    ``system_prompt`` is the legacy monolithic shape (lens text in the system
-    message, used when ``prompt_cache`` is off); ``user_block`` is the split
-    (cache-shaped) layout's final user message (used when it is on — the
-    default), where the system message is the shared preamble instead.
+    ``user_block`` is the split layout's final user message, keeping the lens
+    checklist outside the shared preamble and diff prefix.
     ``carries_intent`` is true only for the built-in intent lens, the one call
     that receives the stated-intent block; ``carries_spec`` likewise for the spec
     lens and the committed-specification block.
     """
 
     id: str
-    system_prompt: str
     user_block: str
     carries_intent: bool = False
     carries_spec: bool = False
@@ -354,9 +345,7 @@ class _Lens:
     allowed_categories: frozenset[str] | None = None
 
 
-def _build_lenses(
-    cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False, retrieval: bool = False
-) -> list[_Lens]:
+def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
     The fast preset runs the nine everyday built-ins as FOUR distinct lenses —
@@ -376,9 +365,6 @@ def _build_lenses(
     both on one call degrades it. So a matched spec adds a FIFTH call — paid only
     in repositories that commit a spec the PR is delivering.
 
-    ``retrieval`` adds the one-round deferral ask to the legacy (``prompt_cache:
-    false``) system prompts — the split shape carries it on the shared preamble
-    instead, built per call. Off, every prompt here is byte-identical.
     """
     # Whether the model should still be asked for dependency-advisory claims.
     # Config-derived on purpose: keying this on whether the binary happens to be
@@ -394,12 +380,6 @@ def _build_lenses(
         lenses = [
             _Lens(
                 id=ReviewCategory.security.value,
-                system_prompt=build_system_prompt(
-                    ReviewCategory.security,
-                    cfg.language,
-                    secret_scanning=secrets,
-                    retrieval=retrieval,
-                ),
                 user_block=build_lens_block(ReviewCategory.security, secret_scanning=secrets),
             ),
         ]
@@ -411,7 +391,6 @@ def _build_lenses(
         lenses.append(
             _Lens(
                 id=ReviewCategory.correctness.value,
-                system_prompt=build_correctness_prompt(has_intent, cfg.language, retrieval),
                 user_block=build_correctness_block(has_intent),
                 carries_intent=has_intent,
                 allowed_categories=correctness_categories if has_intent else None,
@@ -420,27 +399,17 @@ def _build_lenses(
         lenses += [
             _Lens(
                 id=group.id,
-                system_prompt=build_group_prompt(
-                    group, cfg.language, dependency_health=deps, retrieval=retrieval
-                ),
                 user_block=build_group_block(group, dependency_health=deps),
                 allowed_categories=frozenset(c.value for c in group.members),
             )
             for group in FAST_GROUPS
         ]
         if has_spec:
-            lenses.append(_spec_lens(cfg, retrieval))
+            lenses.append(_spec_lens())
     else:
         lenses = [
             _Lens(
                 id=category.value,
-                system_prompt=build_system_prompt(
-                    category,
-                    cfg.language,
-                    dependency_health=deps,
-                    secret_scanning=secrets,
-                    retrieval=retrieval,
-                ),
                 user_block=build_lens_block(
                     category, dependency_health=deps, secret_scanning=secrets
                 ),
@@ -458,7 +427,6 @@ def _build_lenses(
     lenses += [
         _Lens(
             id=lens.id,
-            system_prompt=build_lens_prompt(lens, cfg.language, retrieval),
             user_block=build_custom_lens_block(lens),
         )
         for lens in cfg.extra_lenses
@@ -466,11 +434,10 @@ def _build_lenses(
     return lenses
 
 
-def _spec_lens(cfg: ReviewConfig, retrieval: bool) -> _Lens:
+def _spec_lens() -> _Lens:
     """The spec lens, built the same way in either preset."""
     return _Lens(
         id=ReviewCategory.spec.value,
-        system_prompt=build_system_prompt(ReviewCategory.spec, cfg.language, retrieval=retrieval),
         user_block=build_lens_block(ReviewCategory.spec),
         carries_spec=True,
     )
@@ -558,10 +525,6 @@ class _Run:
     # Constrains output to the findings schema (provider-native JSON mode) on
     # review calls only — the reflection call keeps its own format.
     response_format: type[ReviewResult] | None
-    # The message shape: True (prompt_cache on, the default) splits the prompt
-    # into a cacheable shared prefix plus the lens block; False is the legacy
-    # lens-in-system layout.
-    split_prompt: bool
     language: str | None
     deadline_at: float | None
     budget_at: int | None
@@ -629,7 +592,7 @@ def _lens_messages(
     spec_block: str | None = None,
     context: str | None = None,
 ) -> list[Message]:
-    """The messages for one lens call, in whichever prompt shape is configured.
+    """The split-prefix messages for one lens call.
 
     ``context`` is the fetched-for-a-deferral file text (see
     :meth:`LLMReviewEngine._review_with_context`). It rides the lens's own block —
@@ -639,48 +602,27 @@ def _lens_messages(
     instructions stay closest to the answer.
     """
     # Only the intent lens pays the intent-block tokens (and its injection
-    # surface); the other lenses never see PR-authored prose. In the split shape
-    # it rides the lens block — NOT the shared prefix — so their cached prefix
+    # surface); the other lenses never see PR-authored prose. It rides the lens
+    # block — NOT the shared prefix — so their cached prefix
     # stays identical. The spec block is gated the same way, for the same two
     # reasons: it is large, and it is untrusted.
     intent = intent_block if lens.carries_intent else None
     spec = spec_block if lens.carries_spec else None
     retrieval = run.retrieval_budget is not None
-    if run.split_prompt:
-        # The directory block joins the ONE prefix string rather than adding
-        # a fourth message: the adapter puts its cache breakpoint on the last
-        # prefix block, and it varies per batch exactly like the hints do, so
-        # it is warmed once by the primer and read by lenses 2..N.
-        prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
-        suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
-        if spec is not None:
-            suffix = f"{spec}\n\n{suffix}"
-        if intent is not None:
-            suffix = f"{intent}\n\n{suffix}"
-        return [
-            {"role": "system", "content": build_shared_preamble(run.language, retrieval)},
-            {"role": "user", "content": prefix},
-            {"role": "user", "content": suffix},
-        ]
-
-    user_content = wrapped
+    # The directory block joins the ONE prefix string rather than adding a
+    # fourth message: the adapter puts its cache breakpoint on the last prefix
+    # block, and it varies per batch exactly like the hints do, so it is warmed
+    # once by the primer and read by lenses 2..N.
+    prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
+    suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
     if spec is not None:
-        user_content = f"{spec}\n\n{user_content}"
+        suffix = f"{spec}\n\n{suffix}"
     if intent is not None:
-        user_content = f"{intent}\n\n{user_content}"
-    if hint_block is not None:
-        # Static-analysis grounding: every lens sees the hints (each judges
-        # relevance to its own concern) ahead of the diff they refer to.
-        user_content = f"{hint_block}\n\n{user_content}"
-    if dir_block is not None:
-        # Directory-scoped instructions/context lead, same as in the split
-        # shape, so the two layouts stay behaviourally comparable.
-        user_content = f"{dir_block}\n\n{user_content}"
-    if context is not None:
-        user_content = f"{user_content}\n\n{context}"
+        suffix = f"{intent}\n\n{suffix}"
     return [
-        {"role": "system", "content": lens.system_prompt},
-        {"role": "user", "content": user_content},
+        {"role": "system", "content": build_shared_preamble(run.language, retrieval)},
+        {"role": "user", "content": prefix},
+        {"role": "user", "content": suffix},
     ]
 
 
@@ -780,7 +722,6 @@ class LLMReviewEngine:
             cfg,
             has_intent=clean_intent is not None,
             has_spec=clean_spec is not None,
-            retrieval=retrieval_budget is not None,
         )
 
         # 2. Split into per-file patches and drop generated/binary/vendored noise,
@@ -936,7 +877,6 @@ class LLMReviewEngine:
             # Constrain output to the findings schema (provider-native JSON mode) per
             # review call — NOT globally, so the reflection call keeps its own format.
             response_format=ReviewResult if cfg.structured_output else None,
-            split_prompt=cfg.prompt_cache,
             language=cfg.language,
             deadline_at=deadline_at,
             budget_at=budget_at,
@@ -986,12 +926,7 @@ class LLMReviewEngine:
             # re-writing it. Gated on diff size (see _WARMUP_MIN_TOKENS) so a
             # small diff keeps full concurrency, and on a fan-out wide enough
             # for there to be a wave at all.
-            warm = (
-                cfg.prompt_cache
-                and workers > 1
-                and len(lenses) > 1
-                and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS
-            )
+            warm = workers > 1 and len(lenses) > 1 and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS
             batch_calls = [
                 _PreparedCall(
                     lens_id=lens.id,
@@ -1324,14 +1259,10 @@ class LLMReviewEngine:
         :meth:`_review_split`). None means "already a piece" — no further
         splitting.
 
-        ``run.split_prompt`` selects the message shape. True (``prompt_cache`` on —
-        the default): shared system preamble, then the shared prefix (hints +
-        diff) as one user message, then the lens block (intent + checklist +
-        example) as a final user message — every lens call shares the same
-        expensive prefix, which caching providers then serve from cache. False:
-        the legacy shape (lens text in the system prompt, one user message),
-        kept as the escape hatch for a model that reviews worse under the
-        split layout.
+        Every call uses the shared system preamble, then the shared prefix
+        (hints + diff) as one user message, then the lens block (intent +
+        checklist + example) as a final user message. Caching providers serve
+        the identical expensive prefix from cache.
 
         ``run.retrieval_budget`` (None = off) opts this call into the one deferral
         a lens may make: answering with ``needs``, it is re-run once with that code

@@ -686,11 +686,6 @@
       "$ref": "#/$defs/ReviewPreset",
       "default": "fast"
     },
-    "prompt_cache": {
-      "default": true,
-      "title": "Prompt Cache",
-      "type": "boolean"
-    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },

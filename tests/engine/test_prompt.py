@@ -8,7 +8,11 @@ import pytest
 
 from lgtmaybe.core.models import CustomLens, ReviewCategory, ReviewFinding, Severity
 from lgtmaybe.engine import prompt as prompt_module
-from lgtmaybe.engine.prompt import build_lens_prompt, build_shared_preamble, build_system_prompt
+from lgtmaybe.engine.prompt import (
+    build_custom_lens_block,
+    build_lens_block,
+    build_shared_preamble,
+)
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 
 
@@ -18,7 +22,28 @@ def _union_prompt() -> str:
     Production only ever builds per-category prompts; asserting against the
     union checks "some lens covers X" without caring which one.
     """
-    return "\n\n".join(build_system_prompt(c) for c in ReviewCategory)
+    return "\n\n".join(_built_in_prompt(c) for c in ReviewCategory)
+
+
+def _built_in_prompt(
+    category: ReviewCategory,
+    language: str | None = None,
+    dependency_health: bool = True,
+    secret_scanning: bool = True,
+    retrieval: bool = False,
+) -> str:
+    return "\n\n".join(
+        (
+            build_shared_preamble(language, retrieval),
+            build_lens_block(category, dependency_health, secret_scanning),
+        )
+    )
+
+
+def _custom_lens_prompt(
+    lens: CustomLens, language: str | None = None, retrieval: bool = False
+) -> str:
+    return "\n\n".join((build_shared_preamble(language, retrieval), build_custom_lens_block(lens)))
 
 
 # A term that appears only in each category's own section, used to prove a
@@ -37,12 +62,9 @@ _SIGNATURE = {
 }
 
 
-def test_build_system_prompt_is_cached() -> None:
-    """The per-category prompts are deterministic, so building one twice must
-    return the identical cached object (the engine rebuilds them every batch)."""
-    assert build_system_prompt(ReviewCategory.security) is build_system_prompt(
-        ReviewCategory.security
-    )
+def test_lens_block_is_cached() -> None:
+    """The engine rebuilds deterministic per-category blocks every batch."""
+    assert build_lens_block(ReviewCategory.security) is build_lens_block(ReviewCategory.security)
 
 
 def test_prompt_contains_all_severity_levels() -> None:
@@ -76,7 +98,7 @@ def test_prompt_contains_json_contract() -> None:
     ],
 )
 def test_defect_examples_include_a_failure_scenario(category: ReviewCategory) -> None:
-    prompt = build_system_prompt(category)
+    prompt = _built_in_prompt(category)
 
     assert '"failure_scenario": "' in prompt
 
@@ -92,7 +114,7 @@ def test_defect_examples_include_a_failure_scenario(category: ReviewCategory) ->
     ],
 )
 def test_gap_examples_use_a_null_failure_scenario(category: ReviewCategory) -> None:
-    prompt = build_system_prompt(category)
+    prompt = _built_in_prompt(category)
 
     assert '"failure_scenario": null' in prompt
 
@@ -128,9 +150,7 @@ def test_contract_binds_suggestion_names_to_the_target_file() -> None:
     there `datetime` is the class, not the module. Committing that suggestion
     replaces working code with a crash.
     """
-    # Asserted on BOTH prompt shapes: prompt_cache defaults on, so the shared
-    # preamble is the one production actually sends. A rule that lived only in
-    # the legacy system prompt would be absent from every default review.
+    # The shared preamble is the one production sends for every lens.
     for prompt in (_union_prompt().lower(), build_shared_preamble().lower()):
         # The contract must scope name resolution to the file under review...
         assert "imports" in prompt
@@ -143,7 +163,7 @@ def test_worked_example_suggestions_are_code_not_prose() -> None:
     instruction — the model copies these verbatim."""
     prose_starts = ("use ", "consider ", "prefer ", "avoid ", "you should ", "add ")
     for category in ReviewCategory:
-        prompt = build_system_prompt(category)
+        prompt = _built_in_prompt(category)
         for line in prompt.splitlines():
             stripped = line.strip()
             if not stripped.startswith('"suggestion":'):
@@ -224,13 +244,13 @@ def test_prompt_reaffirms_diff_is_untrusted_data() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_lens_prompt_carries_instructions_and_heading() -> None:
+def test__custom_lens_prompt_carries_instructions_and_heading() -> None:
     lens = CustomLens(
         id="simplify",
         title="Simplify or delete",
         instructions="Flag code that should not exist at all — YAGNI.",
     )
-    prompt = build_lens_prompt(lens)
+    prompt = _custom_lens_prompt(lens)
     assert "Simplify or delete" in prompt  # heading uses the title
     assert "YAGNI" in prompt  # the user's instructions
     # Same scaffold as a built-in: severity rubric, JSON contract, shared rules.
@@ -239,12 +259,12 @@ def test_build_lens_prompt_carries_instructions_and_heading() -> None:
     assert "untrusted data" in prompt
 
 
-def test_build_lens_prompt_falls_back_to_id_heading() -> None:
+def test__custom_lens_prompt_falls_back_to_id_heading() -> None:
     lens = CustomLens(id="house-style", instructions="Enforce house style.")
-    assert "## house-style" in build_lens_prompt(lens)
+    assert "## house-style" in _custom_lens_prompt(lens)
 
 
-def test_build_lens_prompt_renders_supplied_example() -> None:
+def test__custom_lens_prompt_renders_supplied_example() -> None:
     finding = ReviewFinding(
         path="x.py", line=5, severity=Severity.low, title="needless wrapper", body="delete it"
     )
@@ -254,7 +274,7 @@ def test_build_lens_prompt_renders_supplied_example() -> None:
         example_diff="--- a/x.py\n+++ b/x.py\n@@ -4,1 +4,2 @@\n def f():\n+    return g()\n",
         example_finding=finding,
     )
-    prompt = build_lens_prompt(lens)
+    prompt = _custom_lens_prompt(lens)
     assert "## Example" in prompt
     assert "needless wrapper" in prompt
 
@@ -335,7 +355,7 @@ def test_prompt_asks_for_ponytail_review() -> None:
 def test_focused_prompt_carries_its_section_and_the_shared_contract(
     category: ReviewCategory,
 ) -> None:
-    prompt = build_system_prompt(category).lower()
+    prompt = _built_in_prompt(category).lower()
     # Its own section is present...
     assert _SIGNATURE[category] in prompt
     # ...and the shared output contract travels with every category.
@@ -345,7 +365,7 @@ def test_focused_prompt_carries_its_section_and_the_shared_contract(
 
 @pytest.mark.parametrize("category", list(ReviewCategory), ids=lambda c: c.value)
 def test_focused_prompt_excludes_other_categories(category: ReviewCategory) -> None:
-    prompt = build_system_prompt(category).lower()
+    prompt = _built_in_prompt(category).lower()
     for other, marker in _SIGNATURE.items():
         if other is not category:
             assert marker not in prompt, f"{category.value} prompt leaked {other.value} section"
@@ -365,7 +385,7 @@ def test_union_of_focused_prompts_contains_every_category() -> None:
 
 def test_prompt_asks_for_concurrency_and_race_review() -> None:
     """Races, TOCTOU, and async mistakes are first-class correctness targets."""
-    prompt = build_system_prompt(ReviewCategory.correctness).lower()
+    prompt = _built_in_prompt(ReviewCategory.correctness).lower()
     assert "race" in prompt
     assert "toctou" in prompt
     assert "await" in prompt  # coroutine called without await / blocking in async
@@ -373,7 +393,7 @@ def test_prompt_asks_for_concurrency_and_race_review() -> None:
 
 def test_prompt_asks_for_numeric_and_datetime_review() -> None:
     """Numeric and date/time bug classes are cued explicitly."""
-    prompt = build_system_prompt(ReviewCategory.correctness).lower()
+    prompt = _built_in_prompt(ReviewCategory.correctness).lower()
     assert "timezone" in prompt
     assert "division by zero" in prompt
     assert "float" in prompt
@@ -381,7 +401,7 @@ def test_prompt_asks_for_numeric_and_datetime_review() -> None:
 
 
 def test_prompt_names_csrf_redirect_xxe_and_mass_assignment() -> None:
-    prompt = build_system_prompt(ReviewCategory.security).lower()
+    prompt = _built_in_prompt(ReviewCategory.security).lower()
     assert "csrf" in prompt
     assert "redirect" in prompt
     assert "xxe" in prompt
@@ -391,7 +411,7 @@ def test_prompt_names_csrf_redirect_xxe_and_mass_assignment() -> None:
 
 def test_prompt_covers_ci_and_iac_misconfiguration() -> None:
     """Workflow/IaC files are a review surface, not just application code."""
-    prompt = build_system_prompt(ReviewCategory.security).lower()
+    prompt = _built_in_prompt(ReviewCategory.security).lower()
     assert "workflow" in prompt
     assert "iam" in prompt
     assert "container" in prompt
@@ -399,7 +419,7 @@ def test_prompt_covers_ci_and_iac_misconfiguration() -> None:
 
 
 def test_prompt_flags_weak_tests_not_just_missing_ones() -> None:
-    prompt = build_system_prompt(ReviewCategory.tests).lower()
+    prompt = _built_in_prompt(ReviewCategory.tests).lower()
     assert "assertion-free" in prompt or "no assertions" in prompt
     assert "mock" in prompt
     assert "sleep" in prompt
@@ -407,19 +427,19 @@ def test_prompt_flags_weak_tests_not_just_missing_ones() -> None:
 
 def test_prompt_flags_stale_documentation() -> None:
     """A docstring/comment the diff just made wrong is worse than no docs."""
-    prompt = build_system_prompt(ReviewCategory.documentation).lower()
+    prompt = _built_in_prompt(ReviewCategory.documentation).lower()
     assert "stale" in prompt
     assert "contradict" in prompt
 
 
 def test_prompt_flags_unbounded_growth_and_leaks() -> None:
-    prompt = build_system_prompt(ReviewCategory.performance).lower()
+    prompt = _built_in_prompt(ReviewCategory.performance).lower()
     assert "cache" in prompt
     assert "eviction" in prompt
 
 
 def test_prompt_flags_typosquats_and_license_conflicts() -> None:
-    prompt = build_system_prompt(ReviewCategory.deprecation).lower()
+    prompt = _built_in_prompt(ReviewCategory.deprecation).lower()
     assert "typosquat" in prompt
     assert "license" in prompt
 
@@ -430,7 +450,7 @@ def test_prompt_flags_typosquats_and_license_conflicts() -> None:
 
 
 def test_prompt_asks_for_intent_review() -> None:
-    prompt = build_system_prompt(ReviewCategory.intent).lower()
+    prompt = _built_in_prompt(ReviewCategory.intent).lower()
     assert "stated intent" in prompt
     assert "out-of-scope" in prompt or "out of scope" in prompt
     assert "commit" in prompt  # commit messages carry the intent on the CLI
@@ -439,7 +459,7 @@ def test_prompt_asks_for_intent_review() -> None:
 def test_prompt_asks_for_spec_review() -> None:
     """The spec lens judges the diff against the repository's committed spec —
     OpenSpec / Spec Kit / Kiro all commit requirements, a design and a task list."""
-    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    prompt = _built_in_prompt(ReviewCategory.spec).lower()
     assert "specification" in prompt
     assert "requirement" in prompt
     # Both halves: does the diff deliver the spec, and does the spec cover the diff.
@@ -450,7 +470,7 @@ def test_prompt_asks_for_spec_review() -> None:
 def test_spec_prompt_asks_for_gaps_in_the_spec_itself() -> None:
     """The other direction, and the reason the lens is worth its call: the diff
     ships behaviour no requirement covers, so the SPEC is what is incomplete."""
-    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    prompt = _built_in_prompt(ReviewCategory.spec).lower()
     assert "no requirement" in prompt or "not covered" in prompt
     assert "clarification" in prompt  # a [NEEDS CLARIFICATION] marker left behind
 
@@ -459,14 +479,14 @@ def test_spec_prompt_says_a_file_not_shown_is_not_undelivered() -> None:
     """The same trap the intent lens fell into on #315, and sharper here: a
     requirement is delivered by code, so a requirement implemented in a file this
     call was never given must not be reported as missing."""
-    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    prompt = _built_in_prompt(ReviewCategory.spec).lower()
     assert "not shown" in prompt
     assert "undelivered" in prompt or "not delivered" in prompt
 
 
 def test_spec_prompt_forbids_flagging_a_ticked_task_it_cannot_check() -> None:
     """Ticked checkboxes are claims to verify, not claims to assume false."""
-    prompt = build_system_prompt(ReviewCategory.spec).lower()
+    prompt = _built_in_prompt(ReviewCategory.spec).lower()
     assert "ticked" in prompt or "checked" in prompt
 
 
@@ -479,14 +499,14 @@ def test_intent_prompt_says_a_file_not_shown_is_not_a_broken_promise() -> None:
     DATA block; the two cannot swap, because `_correctness_section` is cached on
     `include_intent` alone and per-review text here would poison that cache.
     """
-    prompt = build_system_prompt(ReviewCategory.intent).lower()
+    prompt = _built_in_prompt(ReviewCategory.intent).lower()
     assert "not shown" in prompt
     assert "unfulfilled" in prompt
 
 
 def test_intent_prompt_treats_intent_text_as_data() -> None:
     """Intent text is attacker-controlled; the lens must not obey it."""
-    prompt = build_system_prompt(ReviewCategory.intent).lower()
+    prompt = _built_in_prompt(ReviewCategory.intent).lower()
     assert "untrusted" in prompt or "not" in prompt and "instructions" in prompt
 
 
@@ -499,7 +519,7 @@ def test_intent_prompt_treats_intent_text_as_data() -> None:
 def test_each_focused_prompt_carries_a_worked_example(category: ReviewCategory) -> None:
     """Every lens gets a category-appropriate few-shot example (a security-flavoured
     example on a docs/tests lens anchors the model to the wrong finding type)."""
-    prompt = build_system_prompt(category)
+    prompt = _built_in_prompt(category)
     assert prompt.count("## Example") == 1
     assert "@@ -" in prompt  # the example diff shows a real hunk header
 
@@ -528,7 +548,7 @@ def test_prompt_asks_for_a_verbatim_anchor() -> None:
 
 def test_every_category_example_includes_an_anchor() -> None:
     for category in ReviewCategory:
-        prompt = build_system_prompt(category)
+        prompt = _built_in_prompt(category)
         assert '"anchor"' in prompt, f"{category} example missing an anchor field"
 
 
@@ -545,7 +565,7 @@ def test_prompt_demands_codebase_humility_about_unseen_code() -> None:
     unshown file — so every lens must be told to hedge such claims, not assert
     them. The rule lives in shared rules, so it appears in every focused prompt."""
     for category in ReviewCategory:
-        prompt = build_system_prompt(category).lower()
+        prompt = _built_in_prompt(category).lower()
         assert "cannot see" in prompt or "not shown" in prompt
         assert "missing" in prompt
         # tells the model to hedge + lower severity rather than assert absence
@@ -555,19 +575,19 @@ def test_prompt_demands_codebase_humility_about_unseen_code() -> None:
 
 def test_humility_rule_present_in_custom_lens_prompt() -> None:
     lens = CustomLens(id="x", instructions="flag foo")
-    assert "cannot see" in build_lens_prompt(lens).lower()
+    assert "cannot see" in _custom_lens_prompt(lens).lower()
 
 
 def test_prompt_warns_cross_hunk_is_one_file_not_duplicate() -> None:
     for category in ReviewCategory:
-        prompt = build_system_prompt(category).lower()
+        prompt = _built_in_prompt(category).lower()
         assert "windows into the same file" in prompt
         assert "defined twice" in prompt
 
 
 def test_prompt_guards_whole_file_symbol_claims() -> None:
     for category in ReviewCategory:
-        prompt = build_system_prompt(category).lower()
+        prompt = _built_in_prompt(category).lower()
         assert "undefined" in prompt
         assert "unless the diff" in prompt
         assert "hedge" in prompt
@@ -575,14 +595,14 @@ def test_prompt_guards_whole_file_symbol_claims() -> None:
 
 def test_prompt_guards_unused_import_inside_functions() -> None:
     for category in ReviewCategory:
-        prompt = build_system_prompt(category).lower()
+        prompt = _built_in_prompt(category).lower()
         assert "unused" in prompt
         assert "depends(" in prompt
 
 
 def test_prompt_demands_library_and_cloud_semantics_humility() -> None:
     for category in ReviewCategory:
-        prompt = build_system_prompt(category).lower()
+        prompt = _built_in_prompt(category).lower()
         assert "sdk" in prompt
         assert "encoding" in prompt
         assert "iam" in prompt or "access policy" in prompt
@@ -590,14 +610,14 @@ def test_prompt_demands_library_and_cloud_semantics_humility() -> None:
 
 
 def test_prompt_does_not_predict_test_runtime_failures() -> None:
-    prompt = build_system_prompt(ReviewCategory.tests).lower()
+    prompt = _built_in_prompt(ReviewCategory.tests).lower()
     assert "cannot run the suite" in prompt
     assert "fixtures" in prompt
     assert "predict" in prompt
 
 
 def test_prompt_intent_fulfilment_is_not_a_defect() -> None:
-    prompt = build_system_prompt(ReviewCategory.intent).lower()
+    prompt = _built_in_prompt(ReviewCategory.intent).lower()
     assert "fulfils the stated intent" in prompt or "fulfils the intent" in prompt
     assert "deliberate removal" in prompt
 
@@ -612,14 +632,14 @@ def test_empty_review_shape_stated_once(category: ReviewCategory) -> None:
     """`{"findings": []}` is stated once (in the shared rules), not repeated in
     every worked example — the examples ride the uncached per-lens block, so a
     per-example restatement is paid on every fan-out call."""
-    assert build_system_prompt(category).count('{"findings": []}') == 1
+    assert _built_in_prompt(category).count('{"findings": []}') == 1
 
 
 @pytest.mark.parametrize("category", list(ReviewCategory))
 def test_lens_sections_do_not_restate_the_changed_lines_rule(category: ReviewCategory) -> None:
     """The changed-lines-only rule lives in the shared rules (cached preamble);
     per-lens restatements ride the uncached suffix on every call."""
-    prompt = build_system_prompt(category)
+    prompt = _built_in_prompt(category)
     assert "only raise findings on changed lines" not in prompt
     # The authoritative shared-rules statement remains.
     assert "Comment ONLY on changed lines" in prompt
@@ -637,35 +657,33 @@ _LANG = "Japanese"
 
 
 def test_language_directive_absent_by_default() -> None:
-    """Unset language ⇒ the preamble and every legacy per-category prompt are
-    byte-identical to the pre-language build — the prompt-cache contract depends
-    on this default staying stable."""
+    """Unset language leaves every retained prompt byte-identical."""
     default = build_shared_preamble()
     assert build_shared_preamble(None) == default
     assert "Output language" not in default
     assert "do not translate" not in default
     for category in ReviewCategory:
-        assert build_system_prompt(category, None) == build_system_prompt(category)
-        assert "Output language" not in build_system_prompt(category)
+        assert _built_in_prompt(category, None) == _built_in_prompt(category)
+        assert "Output language" not in _built_in_prompt(category)
 
 
 def test_language_directive_present_when_set() -> None:
     """A set language adds a directive naming the prose fields (`title`/`body`)
-    and the language, in both the split preamble and the legacy prompt."""
+    and the language to the shared preamble."""
     preamble = build_shared_preamble(_LANG)
     assert preamble != build_shared_preamble()
     assert _LANG in preamble
     assert "`title`" in preamble and "`body`" in preamble
     # Structural fields + suggestion code stay untranslated.
     assert "do not translate" in preamble
-    legacy = build_system_prompt(ReviewCategory.security, _LANG)
-    assert _LANG in legacy and "`title`" in legacy and "do not translate" in legacy
+    prompt = _built_in_prompt(ReviewCategory.security, _LANG)
+    assert _LANG in prompt and "`title`" in prompt and "do not translate" in prompt
 
 
 def test_custom_lens_prompt_carries_language_directive() -> None:
     lens = CustomLens(id="naming", instructions="Flag bad names.")
-    assert build_lens_prompt(lens, None) == build_lens_prompt(lens)
-    assert _LANG in build_lens_prompt(lens, _LANG)
+    assert _custom_lens_prompt(lens, None) == _custom_lens_prompt(lens)
+    assert _LANG in _custom_lens_prompt(lens, _LANG)
 
 
 # ---------------------------------------------------------------------------
@@ -684,7 +702,7 @@ def test_scanner_carveouts_are_composed_without_prose_subtraction() -> None:
 
 def test_dependency_health_bullets_are_present_by_default() -> None:
     """Nothing changes for the vast majority — static analysis is opt-in."""
-    prompt = build_system_prompt(ReviewCategory.deprecation).lower()
+    prompt = _built_in_prompt(ReviewCategory.deprecation).lower()
 
     assert "known" in prompt and "advisor" in prompt
     assert "abandoned" in prompt or "yanked" in prompt
@@ -696,7 +714,7 @@ def test_advisory_claims_drop_when_a_scanner_covers_them() -> None:
     With osv-scanner reporting advisories deterministically, asking the model
     for them too only invites a confident wrong answer beside an accurate one.
     """
-    narrowed = build_system_prompt(ReviewCategory.deprecation, dependency_health=False).lower()
+    narrowed = _built_in_prompt(ReviewCategory.deprecation, dependency_health=False).lower()
 
     assert "advisor" not in narrowed
     assert "abandoned" not in narrowed and "yanked" not in narrowed
@@ -704,7 +722,7 @@ def test_advisory_claims_drop_when_a_scanner_covers_them() -> None:
 
 def test_narrowing_keeps_what_a_scanner_cannot_answer() -> None:
     """Deprecated APIs, EOL runtimes and typosquats are not in a CVE database."""
-    narrowed = build_system_prompt(ReviewCategory.deprecation, dependency_health=False).lower()
+    narrowed = _built_in_prompt(ReviewCategory.deprecation, dependency_health=False).lower()
 
     assert "deprecat" in narrowed
     assert "end-of-life" in narrowed
@@ -744,7 +762,7 @@ def test_no_lens_is_told_to_flag_redacted_placeholders() -> None:
     """The security lens used to say "even if they look redacted, flag the
     practice" — which turns every redacted diff into a finding."""
     for category in ReviewCategory:
-        prompt = build_system_prompt(category).lower()
+        prompt = _built_in_prompt(category).lower()
         assert "look redacted" not in prompt
         assert "even if they look" not in prompt
 
@@ -756,7 +774,7 @@ def test_no_lens_is_told_to_flag_redacted_placeholders() -> None:
 
 def test_hardcoded_secret_bullet_is_present_by_default() -> None:
     """Static analysis is opt-in, so the default prompt is unchanged."""
-    prompt = build_system_prompt(ReviewCategory.security).lower()
+    prompt = _built_in_prompt(ReviewCategory.security).lower()
 
     assert "hardcoded secrets" in prompt
 
@@ -765,14 +783,14 @@ def test_secret_claims_drop_when_a_scanner_covers_them() -> None:
     """gitleaks reports committed secrets deterministically, and redaction has
     already stripped them from the diff — so the lens cannot see what it is
     being asked to find, while the ask still costs tokens on every call."""
-    narrowed = build_system_prompt(ReviewCategory.security, secret_scanning=False).lower()
+    narrowed = _built_in_prompt(ReviewCategory.security, secret_scanning=False).lower()
 
     assert "hardcoded secrets" not in narrowed
 
 
 def test_secret_narrowing_keeps_the_rest_of_the_security_lens() -> None:
     """Only the bullet a scanner owns goes; the OWASP checklist stays."""
-    narrowed = build_system_prompt(ReviewCategory.security, secret_scanning=False).lower()
+    narrowed = _built_in_prompt(ReviewCategory.security, secret_scanning=False).lower()
 
     assert "owasp" in narrowed
     assert "ssrf" in narrowed
@@ -807,7 +825,7 @@ def test_preamble_is_byte_identical_when_retrieval_is_off() -> None:
     assert build_shared_preamble(retrieval=False) == default
     assert '"needs"' not in default
     for category in ReviewCategory:
-        assert build_system_prompt(category, retrieval=False) == build_system_prompt(category)
+        assert _built_in_prompt(category, retrieval=False) == _built_in_prompt(category)
 
 
 def test_preamble_asks_for_needs_when_retrieval_is_on() -> None:
@@ -822,21 +840,6 @@ def test_preamble_asks_for_needs_when_retrieval_is_on() -> None:
     assert "only" in preamble.lower()
 
 
-def test_legacy_system_prompts_carry_the_same_gate() -> None:
-    """`prompt_cache: false` keeps the lens in the system prompt — the deferral
-    ask has to reach that shape too, or the feature is silently off there."""
-    from lgtmaybe.engine.prompt import (
-        CODE_HEALTH_GROUP,
-        build_correctness_prompt,
-        build_group_prompt,
-    )
-
-    assert '"needs"' in build_system_prompt(ReviewCategory.security, retrieval=True)
-    assert '"needs"' in build_group_prompt(CODE_HEALTH_GROUP, retrieval=True)
-    assert '"needs"' in build_correctness_prompt(False, retrieval=True)
-    assert '"needs"' in build_lens_prompt(CustomLens(id="x", instructions="y"), retrieval=True)
-    # …and every one of them is unchanged when it is off.
-    assert build_group_prompt(CODE_HEALTH_GROUP, retrieval=False) == build_group_prompt(
-        CODE_HEALTH_GROUP
-    )
-    assert build_correctness_prompt(False, retrieval=False) == build_correctness_prompt(False)
+def test_all_lenses_receive_the_shared_retrieval_gate() -> None:
+    assert '"needs"' in _built_in_prompt(ReviewCategory.security, retrieval=True)
+    assert '"needs"' in _custom_lens_prompt(CustomLens(id="x", instructions="y"), retrieval=True)
