@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from lgtmaybe.core.models import PRContext, ReviewFinding
-from lgtmaybe.core.ports import GitHubGateway
 
 _DEFAULT_CTX = PRContext(
     diff="--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n",
@@ -15,7 +14,7 @@ _DEFAULT_CTX = PRContext(
 )
 
 
-class FakeGitHub(GitHubGateway):
+class FakeGitHub:
     """A GitHubGateway backed by in-memory state."""
 
     def __init__(self, ctx: PRContext | None = None) -> None:

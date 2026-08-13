@@ -48,7 +48,6 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.core.ports import (
     Message,
-    ProviderClient,
     ProviderTruncated,
     ProviderWallTimeout,
 )
@@ -377,7 +376,7 @@ litellm.drop_params = True
 litellm.suppress_debug_info = True
 
 
-class LiteLLMProvider(ProviderClient):
+class LiteLLMProvider:
     """ProviderClient backed by litellm with retry and optional fallback."""
 
     def __init__(
