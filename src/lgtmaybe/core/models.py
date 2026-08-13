@@ -587,6 +587,34 @@ def attempts_of(exc: BaseException) -> int:
     return value if isinstance(value, int) and value > 0 else 0
 
 
+# Whether the adapter judged a failure UNRECOVERABLE: bad credentials, exhausted
+# quota, spent prepaid credit, a request the model refuses. No later attempt in
+# this run can succeed, so nothing downstream should spend a billed call finding
+# that out again. Carried on the exception for the same reason as the attempt
+# count above — a failure has no result object to ride home on — and deliberately
+# NARROWER than the adapter's own "don't retry this immediately" rule: a blown
+# wall clock is not retried in place (the identical request has the identical
+# budget) yet a stalled upstream may well answer a genuinely later request, so it
+# is not stamped.
+_UNRECOVERABLE_ATTR = "lgtmaybe_unrecoverable"
+
+
+def stamp_unrecoverable(exc: BaseException) -> None:
+    """Mark *exc* as a failure no later attempt in this run can fix.
+
+    Best effort, exactly like :func:`stamp_attempts`: an exception type that
+    refuses attributes is not worth failing a review over — it just reports the
+    failure as possibly-transient, which costs at most one extra call.
+    """
+    with suppress(Exception):
+        setattr(exc, _UNRECOVERABLE_ATTR, True)
+
+
+def is_unrecoverable(exc: BaseException) -> bool:
+    """True when the adapter said no later attempt at *exc*'s call can succeed."""
+    return getattr(exc, _UNRECOVERABLE_ATTR, False) is True
+
+
 class PRContext(_Strict):
     """Everything the engine needs about a PR — fetched via API, never checkout."""
 
@@ -926,12 +954,13 @@ class ReviewConfig(_Strict):
     # this above it. See docs/how-to/reduce-review-cost.md.
     max_review_tokens: int = Field(default=0, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
-    # (batch, lens) task shares one pool). None means auto: 8 for hosted cloud
-    # providers (their retry layer absorbs a capacity 429, and on bedrock cache
-    # reads don't count against rate limits), 1 for ollama (a single instance
+    # (batch, lens) task shares one pool). None means auto: 6 for hosted cloud
+    # providers (wide enough to overlap the fan-out, narrow enough that one API
+    # key does not rate-limit itself against a per-minute-metered gateway —
+    # raise it if your rate tier is generous), 1 for ollama (a single instance
     # serves a model serially — concurrent calls just queue and time out), and
     # 1 for openai-compatible (a llama.cpp/LM Studio single-slot server wants
-    # 1; a vLLM server batches happily at 8 — raise it explicitly for those).
+    # 1; a vLLM server batches happily — raise it explicitly for those).
     max_concurrency: int | None = Field(default=None, ge=1)
     # Constrain model output to the findings JSON schema via litellm
     # response_format (provider-native JSON mode). Keeps models from returning

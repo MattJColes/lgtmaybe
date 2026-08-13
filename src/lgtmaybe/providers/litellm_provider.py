@@ -7,11 +7,14 @@ optional fallback model.
 from __future__ import annotations
 
 import hashlib
+import math
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import litellm
@@ -28,15 +31,21 @@ from litellm.exceptions import (
 )
 from litellm.utils import supports_prompt_caching
 from tenacity import (
+    RetryCallState,
     retry,
     retry_if_exception,
     stop_after_attempt,
-    stop_after_delay,
+    stop_before_delay,
     wait_exponential_jitter,
 )
 
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ProviderResult, attempts_of, stamp_attempts
+from lgtmaybe.core.models import (
+    ProviderResult,
+    attempts_of,
+    stamp_attempts,
+    stamp_unrecoverable,
+)
 from lgtmaybe.core.ports import (
     Message,
     ProviderClient,
@@ -157,9 +166,30 @@ def _mentions(exc: BaseException, markers: tuple[str, ...]) -> bool:
     return any(marker in msg for marker in markers)
 
 
+def _is_unrecoverable(exc: BaseException) -> bool:
+    """True when NO later attempt at this call can succeed — not in this run.
+
+    Bad credentials, exhausted quota, spent prepaid credit, a request the model
+    refuses: the condition cannot change while the review runs. Narrower than
+    :func:`_is_permanent`, which additionally refuses to retry a call *in place*
+    when only an identical immediate re-send is on offer. The engine reads this
+    one (via the stamp in :func:`stamp_unrecoverable`) to decide whether its
+    rescue wave is worth a billed call — and a stalled upstream, which is
+    permanent for an immediate retry, may well answer a genuinely later request.
+    """
+    if isinstance(exc, _PERMANENT_ERROR_TYPES):
+        return True
+    # A 429 is permanent only when it's a quota/billing one; a capacity 429 retries.
+    if isinstance(exc, RateLimitError):
+        return _mentions(exc, _QUOTA_MARKERS)
+    return _mentions(exc, _EXPIRED_CREDENTIAL_MARKERS) or _mentions(
+        exc, _INSUFFICIENT_CREDIT_MARKERS
+    )
+
+
 def _is_permanent(exc: BaseException) -> bool:
     """True when retrying *exc* cannot plausibly succeed, so we should not."""
-    if isinstance(exc, _PERMANENT_ERROR_TYPES):
+    if _is_unrecoverable(exc):
         return True
     # A blown wall clock is not a blip: the retry re-sends the identical request
     # against the identical budget, so attempts 2..N can only fail the same way
@@ -178,14 +208,113 @@ def _is_permanent(exc: BaseException) -> bool:
     # labour. Only the engine holds the batch, so only the engine can change the
     # payload; the adapter can only re-send the same oversized one, which is the
     # attempt worth refusing.
-    if isinstance(exc, ProviderTruncated):
-        return True
-    # A 429 is permanent only when it's a quota/billing one; a capacity 429 retries.
+    return isinstance(exc, ProviderTruncated)
+
+
+# How long to back off between attempts, by what failed.
+#
+# The generic ladder is for a blip — a connection reset, an ollama server still
+# warming up, a 5xx. Sub-second is right there: the condition is gone by the time
+# the next request lands.
+#
+# A capacity 429 is not that. Gateways that meter a key — OpenRouter above all —
+# meter it per MINUTE, so the generic ladder (with tenacity's default `jitter=1`
+# that is roughly 1.1s + 1.2s + 1.4s) puts all four attempts inside the SAME
+# window, where they can only fail identically. That is how three consecutive
+# reviews each came back "1 of 4 review calls failed" on a rate limit while the
+# other three lenses sailed through. So a rate limit gets its own, much slower
+# ladder: long enough for the next attempt to land in a fresh window.
+#
+# Both stay well inside the call's existing `stop_after_delay` budget
+# (2.5 × timeout — 1,500s on direct cloud, 4,500s on the slow-capable routes
+# openrouter/ollama/openai-compatible), so nothing new needs bounding.
+_RATE_LIMIT_BACKOFF_INITIAL = 5.0
+_RATE_LIMIT_BACKOFF_MAX = 60.0
+
+# The most we will honour from a server-supplied `Retry-After`. A gateway that
+# asks for an hour is reporting a limit no single review can outwait, and
+# sleeping on it would burn the whole run's wall clock inside one lens. Clamp,
+# let the attempt fail, and let the engine's rescue wave (or, failing that, the
+# incomplete-results notice) be what handles it.
+_RETRY_AFTER_CEILING = 120.0
+
+_generic_wait = wait_exponential_jitter(initial=0.1, max=5)
+_rate_limit_wait = wait_exponential_jitter(
+    initial=_RATE_LIMIT_BACKOFF_INITIAL, max=_RATE_LIMIT_BACKOFF_MAX
+)
+
+
+def _response_headers(exc: BaseException) -> Mapping[str, str] | None:
+    """The response headers *exc* carries, from wherever litellm put them.
+
+    Three places, because litellm's own ``_get_response_headers`` looks in the
+    same three: the exception's ``headers`` attribute, the ``response`` it wraps,
+    and the ``litellm_response_headers`` its exception mapper stamps on the way
+    out. Which one is populated depends on the route, so reading only one loses
+    the header on the others.
+    """
+    for source in (
+        getattr(exc, "headers", None),
+        getattr(getattr(exc, "response", None), "headers", None),
+        getattr(exc, "litellm_response_headers", None),
+    ):
+        if source:
+            return source  # type: ignore[no-any-return]
+    return None
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Seconds *exc*'s ``Retry-After`` asks us to wait, or None if it said nothing.
+
+    RFC 9110 allows either delta-seconds or an HTTP-date, and the Cloudflare edge
+    these gateways sit behind sends both forms, so both are read. A stale date
+    floors at zero rather than going negative, and an unparseable value is
+    treated as no header at all — a malformed hint must never crash the retry
+    loop, which is the one place left that can still rescue the call.
+
+    Deliberately only ``Retry-After``: it is the one header every 429 route
+    sends, and it says what we actually need in the units we need it. The
+    ``X-RateLimit-Reset`` families disagree on units (seconds here, epoch
+    milliseconds there) between providers, so parsing them would be guesswork
+    dressed as precision.
+    """
+    headers = _response_headers(exc)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        seconds = None
+    if seconds is not None:
+        # `float()` parses "nan" and "inf" perfectly happily, and either would
+        # travel through the clamp below into tenacity's sleep — raising from
+        # inside the retry loop, the one place left that can still rescue this
+        # call. A header we can't use is a header we don't have.
+        return max(0.0, seconds) if math.isfinite(seconds) else None
+    try:
+        when = parsedate_to_datetime(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+
+def _retry_wait(retry_state: RetryCallState) -> float:
+    """How long to wait before the next attempt, chosen by what just failed."""
+    outcome = retry_state.outcome
+    exc = outcome.exception() if outcome is not None else None
     if isinstance(exc, RateLimitError):
-        return _mentions(exc, _QUOTA_MARKERS)
-    return _mentions(exc, _EXPIRED_CREDENTIAL_MARKERS) or _mentions(
-        exc, _INSUFFICIENT_CREDIT_MARKERS
-    )
+        after = _retry_after_seconds(exc)
+        if after is not None:
+            # The server told us when it will take us back. Nothing we compute
+            # can beat that, so honour it — up to the ceiling above.
+            return min(after, _RETRY_AFTER_CEILING)
+        return _rate_limit_wait(retry_state)
+    return _generic_wait(retry_state)
 
 
 def _rejects_response_format(exc: Exception) -> bool:
@@ -338,9 +467,15 @@ class LiteLLMProvider(ProviderClient):
 
         @retry(
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
+            # stop_BEFORE_delay, not after: `after` reads the clock only once a
+            # wait has already been taken, so a call with most of its budget
+            # spent could still sleep out a full `Retry-After` on top of it —
+            # two minutes past a budget that had all but run out. `before` weighs
+            # the UPCOMING sleep, so a wait that would blow the budget ends the
+            # call instead of being taken.
             stop=stop_after_attempt(_MAX_ATTEMPTS)
-            | stop_after_delay(timeout * _CALL_BUDGET_MULTIPLIER),
-            wait=wait_exponential_jitter(initial=0.1, max=5),
+            | stop_before_delay(timeout * _CALL_BUDGET_MULTIPLIER),
+            wait=_retry_wait,
             reraise=True,
         )
         def _call() -> ProviderResult:
@@ -366,8 +501,12 @@ class LiteLLMProvider(ProviderClient):
         except BaseException as exc:
             # A failure has no ProviderResult to ride home on, so the count goes
             # on the exception — else the instrumentation records a budget-burning
-            # failure as `attempts=0`, which reads as "never retried".
+            # failure as `attempts=0`, which reads as "never retried". The same
+            # channel carries whether any later attempt could have helped, which
+            # is what stops the engine's rescue wave re-billing a dead key.
             stamp_attempts(exc, attempts)
+            if _is_unrecoverable(exc):
+                stamp_unrecoverable(exc)
             raise
         return result.model_copy(update={"attempts": attempts})
 

@@ -29,6 +29,7 @@ from lgtmaybe.core.models import (
     ReviewResult,
     StaticAnalysisTool,
     ToolMode,
+    is_unrecoverable,
 )
 from lgtmaybe.core.ports import (
     Message,
@@ -87,16 +88,23 @@ _log = get_logger(__name__)
 
 # Auto concurrency (cfg.max_concurrency=None), resolved per provider:
 #
-# - Cloud providers get 8. The adapter's exponential backoff absorbs a capacity
-#   429 on a lower-tier account, and on bedrock cache reads don't count against
-#   rate limits — so bursting the fan-out is safe, and every extra worker cuts
-#   a full-latency wave off the wall clock.
+# - Cloud providers get 6. An extra worker can cut a full-latency wave off the
+#   wall clock (only when it changes how many waves there are — wall time is
+#   ceil(batches × lenses / workers)), so the pull is upward — but the fan-out
+#   is one API key, and the
+#   gateways that meter a key meter it per minute, so past some width the burst
+#   rate-limits ITSELF. It did: eight concurrent calls against one OpenRouter key
+#   produced three consecutive reviews reporting "1 of 4 review calls failed" on
+#   a 429. The adapter's backoff (now long enough to outlast a rate window) and
+#   the rescue wave both make that survivable rather than fatal; six is the same
+#   fix from the other end — a quarter less burst for a sixth less parallelism.
+#   Teams on a high rate tier can raise it with `max_concurrency`.
 # - A single ollama instance serves a model serially, so concurrent calls only
 #   queue up and time out: 1.
 # - openai-compatible is honest about the worst case: a llama.cpp / LM Studio
-#   single-slot server wants 1, while a vLLM server batches happily at 8 —
+#   single-slot server wants 1, while a vLLM server batches happily —
 #   default to 1 and let --max-concurrency raise it for batching servers.
-_CLOUD_MAX_WORKERS = 8
+_CLOUD_MAX_WORKERS = 6
 _SINGLE_STREAM_PROVIDERS = frozenset({Provider.ollama, Provider.openai_compatible})
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
@@ -370,6 +378,52 @@ def _spec_lens(cfg: ReviewConfig, retrieval: bool) -> _Lens:
 # One prepared _review_lens call, ready to submit to the fan-out pool.
 _LensOutcome = tuple[list[ReviewFinding], str | None]
 _ReviewTask = partial[_LensOutcome]
+
+
+class _RetryableReason(str):
+    """A failure reason a later, identical call could still succeed at.
+
+    The provider was briefly unavailable — a capacity 429, a 5xx, a stalled
+    connection, a blown wall clock — so the same request issued once the fan-out
+    has drained is worth one more go (see :meth:`LLMReviewEngine._rescue`). That
+    is the opposite of a failure we caused: unparseable output at temperature 0
+    returns the same unparseable answer, and a ceiling the user set
+    (`max_review_seconds`, `max_review_tokens`, a termination signal) is not a
+    fault to retry past at all.
+
+    A plain ``str`` subclass, deliberately: every existing consumer — the
+    ``errors`` list, the summary's f-strings, the ``_BUDGET_SKIP_REASON``
+    comparison — keeps working byte-for-byte, and the flag rides along beside the
+    text instead of a wider outcome tuple threaded through six call sites.
+    """
+
+    __slots__ = ()
+
+
+def _rescuable(reason: str | None) -> bool:
+    """True when *reason* is a provider-side failure worth one more attempt."""
+    return isinstance(reason, _RetryableReason)
+
+
+# How many rescue calls run at once. The wave exists BECAUSE the backend was
+# under pressure — a capacity limit, an overloaded endpoint — so re-bursting the
+# full fan-out width into it is the one thing most likely to reproduce the
+# failure it is trying to undo. Two is enough to keep a multi-lens rescue from
+# running strictly end-to-end.
+_RESCUE_WORKERS = 2
+
+
+@dataclass(frozen=True)
+class _PreparedCall:
+    """One lens call ready to submit, and the lens it speaks for.
+
+    The lens id travels with the task so a failure can be NAMED — a failed
+    security lens and a failed documentation lens read identically as a bare
+    count, and they are not remotely the same news.
+    """
+
+    lens_id: str
+    task: _ReviewTask
 
 
 @dataclass(frozen=True)
@@ -745,6 +799,9 @@ class LLMReviewEngine(ReviewEngine):
         total_calls = 0
         failed_calls = 0
         errors: list[str] = []
+        # The lens ids behind those errors, in the same order — the summary names
+        # them, because "1 of 4 failed" says nothing about whether to worry.
+        failed_lenses: list[str] = []
 
         # 5. Fan out one call per (batch, lens) through ONE global pool. The old
         #    shape — a fresh pool per batch, joined before the next batch starts —
@@ -768,7 +825,7 @@ class LLMReviewEngine(ReviewEngine):
             concurrency=_concurrency_cap(cfg),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
-        per_batch: list[tuple[bool, list[_ReviewTask]]] = []
+        per_batch: list[tuple[bool, list[_PreparedCall]]] = []
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
@@ -816,32 +873,41 @@ class LLMReviewEngine(ReviewEngine):
                 and len(lenses) > 1
                 and count_tokens(wrapped) >= _WARMUP_MIN_TOKENS
             )
-            batch_tasks = [
-                partial(
-                    self._review_lens,
-                    run,
-                    wrapped,
-                    intent_block,
-                    hint_block,
-                    dir_block,
-                    batch_num,
-                    lens,
-                    batch,
-                    spec_block=spec_block,
+            batch_calls = [
+                _PreparedCall(
+                    lens_id=lens.id,
+                    task=partial(
+                        self._review_lens,
+                        run,
+                        wrapped,
+                        intent_block,
+                        hint_block,
+                        dir_block,
+                        batch_num,
+                        lens,
+                        batch,
+                        spec_block=spec_block,
+                    ),
                 )
                 for lens in lenses
             ]
-            per_batch.append((warm, batch_tasks))
+            per_batch.append((warm, batch_calls))
 
         with profiler.stage("review"):
             # Results keyed by task index and consumed in task order, so the
             # findings stay deterministic (dedupe's first-wins tiebreak is
-            # order-sensitive) whatever order the futures complete in.
-            for findings, error in self._fan_out(per_batch, workers):
+            # order-sensitive) whatever order the futures complete in. Zipped
+            # back against the calls in that same order so a failure can name
+            # the lens it lost.
+            calls = [call for _, batch_calls in per_batch for call in batch_calls]
+            for call, (findings, error) in zip(
+                calls, self._fan_out(per_batch, workers), strict=True
+            ):
                 total_calls += 1
                 if error is not None:
                     failed_calls += 1
                     errors.append(error)
+                    failed_lenses.append(call.lens_id)
                 all_findings.extend(findings)
 
         # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
@@ -1033,9 +1099,15 @@ class LLMReviewEngine(ReviewEngine):
         # without matching prose the user may have restyled (summary_template).
         if failed_calls:
             detail = errors[-1] if errors else "timeout or unparseable output"
+            # Name the lenses, not just a count: a lost security lens and a lost
+            # documentation lens are the same number and very different news, and
+            # the reader has no other way to tell which one this was. Deduped and
+            # sorted so a lens that failed on several batches is named once.
+            lost = ", ".join(sorted(set(failed_lenses)))
+            which = f"{lost} — " if lost else ""
             notices.append(
                 f"⚠️ {failed_calls} of {total_calls} review calls failed "
-                f"({detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
+                f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
             )
         # A batch that had to be shrunk is a standing signal that the diff is at
         # the edge of what this model finishes in one call — say it, or the next
@@ -1098,9 +1170,9 @@ class LLMReviewEngine(ReviewEngine):
         return filtered, summary_line
 
     def _fan_out(
-        self, per_batch: list[tuple[bool, list[_ReviewTask]]], workers: int
+        self, per_batch: list[tuple[bool, list[_PreparedCall]]], workers: int
     ) -> list[_LensOutcome]:
-        """Run every (batch, lens) task through one pool; results in task order.
+        """Run every (batch, lens) call through one pool; results in call order.
 
         Batches flagged for cache warm-up submit only their FIRST lens; the
         rest of that batch is released when the primer completes (having
@@ -1108,25 +1180,28 @@ class LLMReviewEngine(ReviewEngine):
         batches submit everything up front. Cross-batch work interleaves
         freely — batch 2's primer runs while batch 1's followers are in
         flight, so warming never re-serialises the whole review.
+
+        Whatever failed transiently then gets one more go; see :meth:`_rescue`.
         """
+        calls = [call for _, batch_calls in per_batch for call in batch_calls]
         results: dict[int, _LensOutcome] = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
             pending: dict[Future[_LensOutcome], int] = {}
             primer_batch: dict[Future[_LensOutcome], int] = {}
-            deferred: dict[int, list[tuple[int, _ReviewTask]]] = {}
+            deferred: dict[int, list[tuple[int, _PreparedCall]]] = {}
             index = 0
-            for batch_index, (warm, batch_tasks) in enumerate(per_batch):
-                indexed = list(enumerate(batch_tasks, start=index))
-                index += len(batch_tasks)
+            for batch_index, (warm, batch_calls) in enumerate(per_batch):
+                indexed = list(enumerate(batch_calls, start=index))
+                index += len(batch_calls)
                 if warm:
                     primer_index, primer = indexed[0]
-                    future = pool.submit(primer)
+                    future = pool.submit(primer.task)
                     pending[future] = primer_index
                     primer_batch[future] = batch_index
                     deferred[batch_index] = indexed[1:]
                 else:
-                    for task_index, task in indexed:
-                        pending[pool.submit(task)] = task_index
+                    for call_index, call in indexed:
+                        pending[pool.submit(call.task)] = call_index
             while pending:
                 # wait() copies its argument internally, so passing the dict's
                 # keys directly avoids building a second throwaway set per loop.
@@ -1137,9 +1212,60 @@ class LLMReviewEngine(ReviewEngine):
                     if batch_index >= 0:
                         # Primer done (pass or fail — a failed primer must not
                         # strand its batch): release the deferred lens calls.
-                        for task_index, task in deferred.pop(batch_index, []):
-                            pending[pool.submit(task)] = task_index
-        return [results[i] for i in sorted(results)]
+                        for call_index, call in deferred.pop(batch_index, []):
+                            pending[pool.submit(call.task)] = call_index
+        return self._rescue(calls, [results[i] for i in sorted(results)])
+
+    def _rescue(
+        self, calls: list[_PreparedCall], outcomes: list[_LensOutcome]
+    ) -> list[_LensOutcome]:
+        """Re-run the calls that failed on the provider, once, and merge them in.
+
+        One flaky call used to void the whole round: three consecutive reviews
+        each reported "1 of 4 review calls failed" while the other three lenses
+        succeeded, and a run fifteen minutes later found what the partial rounds
+        had missed. The lenses that answered are not the problem — the one that
+        did not is, and the cheapest honest fix is to ask it again.
+
+        Bounded on every axis that matters:
+
+        - **Only provider-side failures** (:class:`_RetryableReason`). Unparseable
+          output re-runs to the same unparseable answer at temperature 0, and a
+          ceiling the user set is not a fault to retry past.
+        - **One wave.** The rescue's own outcome is never rescued again, because
+          this runs once — a lens that is genuinely down costs exactly one extra
+          call and then reports itself, rather than grinding.
+        - **Every ceiling still applies.** Each rescue re-enters ``_review_lens``,
+          which re-checks ``_skip_reason`` first, so `max_review_seconds`, the
+          token budget and a termination signal all still stop it dead.
+        - **A pool of its own, entered only after the fan-out's has closed.** Never
+          submitted from inside a fan-out worker: a worker that submits to its own
+          pool and blocks on the result deadlocks the moment the pool saturates
+          (the same trap ``_review_split`` avoids by construction). And narrow —
+          see :data:`_RESCUE_WORKERS`.
+
+        Findings from both attempts are kept and left to the pipeline's ``_dedupe``
+        to collapse, exactly as a deferral's re-run is: a wall timeout can salvage
+        real findings before it fails, and binning them because the second attempt
+        also produced some would lose work the provider already billed for.
+        """
+        retrying = [i for i, (_, error) in enumerate(outcomes) if _rescuable(error)]
+        if not retrying:
+            return outcomes
+        _log.warning(
+            "re-running review calls that failed on the provider",
+            extra={"calls": len(retrying), "lenses": [calls[i].lens_id for i in retrying]},
+        )
+        merged = list(outcomes)
+        width = min(len(retrying), _RESCUE_WORKERS)
+        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-rescue") as pool:
+            # map() yields in submission order, so the merge stays deterministic
+            # however the calls interleave.
+            rescued = list(pool.map(lambda i: calls[i].task(), retrying))
+        for index, (findings, error) in zip(retrying, rescued, strict=True):
+            first_findings, _ = merged[index]
+            merged[index] = (first_findings + findings, error)
+        return merged
 
     def _review_lens(
         self,
@@ -1347,6 +1473,9 @@ class LLMReviewEngine(ReviewEngine):
         """
         pieces = _split_batch(batch)
         if len(pieces) < 2:
+            # Nothing smaller to try, so nothing has retried this call at all —
+            # the reason travels on unchanged, retryable flag and all, and a
+            # transient stall still gets its one go from the rescue wave.
             return [], reason
         _log.warning(
             "review call was too big for one response — retrying on smaller pieces",
@@ -1406,7 +1535,13 @@ class LLMReviewEngine(ReviewEngine):
         # claimed the batch was reviewed — a clean bill of health for code no model
         # ever saw. The last error is reported (the split's own failure, not the
         # original timeout) so the notice names what actually went wrong.
-        return findings, errors[-1] if errors else None
+        #
+        # Reported PLAIN, never retryable: the split is already this call's retry,
+        # and it retried with the one change that can help — a smaller payload. A
+        # rescue on top would re-send the original oversized request, which is
+        # exactly the "identical request against an identical budget" the adapter
+        # refuses to repeat, at up to twice the calls.
+        return findings, str(errors[-1]) if errors else None
 
     def _complete_lens(
         self,
@@ -1442,7 +1577,21 @@ class LLMReviewEngine(ReviewEngine):
         try:
             result = self._provider.complete(messages, model=model, **opts)
         except Exception as exc:
-            reason = _error_reason(exc)
+            # Retryable by default: this is the provider faltering, not us, so the
+            # rescue wave gets one more go once the fan-out has drained. Two
+            # exceptions, both because the second call is guaranteed to buy the
+            # same answer at full price:
+            #
+            # - a truncation is a blown output CEILING, and the identical request
+            #   runs to the identical ceiling;
+            # - a failure the adapter stamped UNRECOVERABLE — a dead key, a spent
+            #   quota, a refused request — cannot resolve itself mid-review. The
+            #   adapter already made that judgement to decide its own retries;
+            #   re-deriving it here from the message text would be a second copy
+            #   of the rule, drifting from the first.
+            reason: str = _error_reason(exc)
+            if not isinstance(exc, ProviderTruncated) and not is_unrecoverable(exc):
+                reason = _RetryableReason(reason)
             profiler.record_error(lens.id, batch_num, time.perf_counter() - started, exc, reason)
             _log.warning(
                 "review call failed",
