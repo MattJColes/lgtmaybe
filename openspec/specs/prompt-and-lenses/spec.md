@@ -130,14 +130,16 @@ preamble byte-identical to a review with no rules configured.
 - **THEN** no workspace file is read and the prompt is byte-identical to before
   the feature
 
-### Requirement: The intent lens is told which files it cannot see
+### Requirement: Every lens is told which files it cannot see
 
-Each intent call SHALL name the PR's changed files absent from the diff it is
-given, and the rubric SHALL rule that a claim about such a file is not shown,
-not undone. The list SHALL be derived by subtracting the batch's paths from the
-PR's changed files — covering the skip filter, path globs, file cap, triage,
-incremental scope, and batching alike — capped, and carried inside the
-neutralised intent block.
+Each review call SHALL name the PR's changed files absent from the diff it is
+given, and the intent rubric SHALL rule that a claim about such a file is not
+shown, not undone. The list SHALL be derived by subtracting the batch's paths
+from the PR's changed files — covering the skip filter, path globs, file cap,
+triage, incremental scope, and batching alike — capped once for every block that
+renders it, and carried inside a neutralised block: the intent and spec blocks
+for the lenses that judge a whole-PR promise, and a per-batch block on the
+shared cacheable prefix for every lens. Nothing hidden SHALL emit no block.
 <!-- anchor: prompt.intent-visibility -->
 
 #### Scenario: a generated file the skip filter dropped
@@ -152,6 +154,10 @@ neutralised intent block.
 #### Scenario: the batch shows the whole PR
 - **WHEN** no changed file is missing from the batch
 - **THEN** no list is added and the block is byte-identical to before the feature
+
+#### Scenario: a lens that judges code, not a promise
+- **WHEN** a security or correctness call is given a batch missing a changed file
+- **THEN** it too is named the hidden file, rather than left to infer absence
 
 ### Requirement: Defect prompts require a concrete failure scenario
 

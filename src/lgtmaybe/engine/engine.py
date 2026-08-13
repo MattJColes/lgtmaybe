@@ -51,7 +51,14 @@ from .compress import (
     trailing_context_lines,
 )
 from .directory import build_directory_block, load_context_files, rules_for
-from .injection import wrap_context, wrap_diff, wrap_hints, wrap_intent, wrap_spec
+from .injection import (
+    wrap_context,
+    wrap_diff,
+    wrap_hints,
+    wrap_intent,
+    wrap_not_shown,
+    wrap_spec,
+)
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
 from .prompt import (
@@ -548,6 +555,11 @@ class _Run:
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
+    # The PR's full changed-file list. Carried for the same reason as
+    # `concurrency`: a split piece shows FEWER files than the batch it came from,
+    # so it has to derive its own not-shown manifest rather than inherit the
+    # batch's — which would leave a piece silently unaware of its siblings' files.
+    changed_files: tuple[str, ...] = ()
 
 
 def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
@@ -604,6 +616,7 @@ def _lens_messages(
     lens: _Lens,
     *,
     spec_block: str | None = None,
+    hidden_block: str | None = None,
     context: str | None = None,
 ) -> list[Message]:
     """The split-prefix messages for one lens call.
@@ -627,7 +640,9 @@ def _lens_messages(
     # fourth message: the adapter puts its cache breakpoint on the last prefix
     # block, and it varies per batch exactly like the hints do, so it is warmed
     # once by the primer and read by lenses 2..N.
-    prefix = "\n\n".join(part for part in (dir_block, hint_block, wrapped) if part is not None)
+    prefix = "\n\n".join(
+        part for part in (dir_block, hint_block, hidden_block, wrapped) if part is not None
+    )
     suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
     if spec is not None:
         suffix = f"{spec}\n\n{suffix}"
@@ -896,6 +911,7 @@ class LLMReviewEngine:
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
+            changed_files=tuple(ctx.changed_files),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
@@ -906,8 +922,16 @@ class LLMReviewEngine:
             # messages can quote hostile file content — same posture as the
             # diff) and wrapped as their own neutralised untrusted block.
             batch_paths = {path for path, _ in batch}
+            not_visible = files_not_visible(ctx.changed_files, batch_paths)
             batch_hints = [h for h in sa_hints if h.path in batch_paths]
             hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
+            # What this call was NOT shown, for EVERY lens — not just the two that
+            # judge a whole-PR promise. Absence stated as fact beats absence
+            # inferred from "code you rely on may live in files you CANNOT see",
+            # which asks the model to reason about what it cannot observe. None
+            # when the batch shows the whole PR, so the common case adds nothing
+            # to the cached prefix.
+            hidden_block = wrap_not_shown(not_visible)
             # Directory rules matching THIS batch's files, with the context
             # files they name. Batch-scoped like the hints above, so a batch
             # never pays for another directory's instructions.
@@ -955,6 +979,7 @@ class LLMReviewEngine:
                         lens,
                         batch,
                         spec_block=spec_block,
+                        hidden_block=hidden_block,
                     ),
                 )
                 for lens in lenses
@@ -1259,6 +1284,7 @@ class LLMReviewEngine:
         batch: list[tuple[str, str]] | None = None,
         *,
         spec_block: str | None = None,
+        hidden_block: str | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
 
@@ -1300,6 +1326,7 @@ class LLMReviewEngine:
                 batch_num=batch_num,
                 lens=lens,
                 spec_block=spec_block,
+                hidden_block=hidden_block,
             )
         )
         on_needs = (
@@ -1316,10 +1343,18 @@ class LLMReviewEngine:
                 batch_num=batch_num,
                 lens=lens,
                 spec_block=spec_block,
+                hidden_block=hidden_block,
             )
         )
         messages = _lens_messages(
-            run, wrapped, intent_block, hint_block, dir_block, lens, spec_block=spec_block
+            run,
+            wrapped,
+            intent_block,
+            hint_block,
+            dir_block,
+            lens,
+            spec_block=spec_block,
+            hidden_block=hidden_block,
         )
         return self._complete_lens(
             messages, run.model, run.response_format, batch_num, lens, on_oversized, on_needs
@@ -1339,6 +1374,7 @@ class LLMReviewEngine:
         batch_num: int,
         lens: _Lens,
         spec_block: str | None = None,
+        hidden_block: str | None = None,
     ) -> _LensOutcome:
         """Re-run one lens with the bounded, read-only code it asked to read.
 
@@ -1399,6 +1435,7 @@ class LLMReviewEngine:
             dir_block,
             lens,
             spec_block=spec_block,
+            hidden_block=hidden_block,
             context=wrap_context(fetched),
         )
         retry, error = self._complete_lens(
@@ -1418,6 +1455,7 @@ class LLMReviewEngine:
         batch_num: int,
         lens: _Lens,
         spec_block: str | None = None,
+        hidden_block: str | None = None,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
 
@@ -1459,6 +1497,12 @@ class LLMReviewEngine:
         )
 
         def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
+            # Recomputed, never inherited: this piece carries a subset of the
+            # batch's files, so the batch's manifest would omit exactly the
+            # sibling-piece files this call is now missing.
+            piece_hidden = wrap_not_shown(
+                files_not_visible(run.changed_files, {path for path, _ in piece})
+            )
             return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
@@ -1468,6 +1512,7 @@ class LLMReviewEngine:
                 batch_num,
                 lens,
                 spec_block=spec_block,
+                hidden_block=piece_hidden,
             )
 
         # The pieces are independent calls, so they run CONCURRENTLY — serially
