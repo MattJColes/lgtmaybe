@@ -12,10 +12,10 @@ from typing import Any
 
 from evals.rlm import RunSample, StrategyReport, _UsageTrackingProvider, verdict
 from lgtmaybe.core.models import ProviderResult
-from lgtmaybe.core.ports import Message, ProviderClient
+from lgtmaybe.core.ports import Message
 
 
-class _Fake(ProviderClient):
+class _Fake:
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         return ProviderResult(text="{}", input_tokens=7, output_tokens=3)
 

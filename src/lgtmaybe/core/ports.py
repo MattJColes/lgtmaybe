@@ -8,8 +8,7 @@ parallel tracks can build against stable signatures.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol
 
 from .models import PRContext, ProviderResult, ReviewConfig, ReviewFinding
 
@@ -49,8 +48,12 @@ class ProviderTruncated(Exception):
     take the salvage without also seeing that the lens was cut short.
 
     ``reasoning_tokens`` (None when the route reports no breakdown — which is not
-    the same as zero) and ``output_tokens`` (the ceiling actually reached) carry
-    the *diagnosis* as data rather than as prose. A reasoning model spends this
+    the same as zero), ``output_tokens`` (the ceiling actually reached) and
+    ``input_tokens`` carry the *diagnosis* as data rather than as prose.
+    ``input_tokens`` is here for a second reason: a truncation is routinely the
+    most expensive call in a run, and the spend ceiling has to be able to charge
+    for it. Reporting a failure as free is how a runaway hides from the very
+    budget that exists to stop it. A reasoning model spends this
     same budget on thought, so a truncation where the thinking accounts for
     essentially the whole ceiling is not a payload problem at all: covering less
     does not shrink a thinking budget, and only `reasoning_effort` moves it. The
@@ -64,29 +67,30 @@ class ProviderTruncated(Exception):
         text: str = "",
         reasoning_tokens: int | None = None,
         output_tokens: int | None = None,
+        input_tokens: int | None = None,
     ) -> None:
         super().__init__(message)
         self.text = text
         self.reasoning_tokens = reasoning_tokens
         self.output_tokens = output_tokens
+        self.input_tokens = input_tokens
 
 
-class ProviderClient(ABC):
+class ProviderClient(Protocol):
     """Port: an LLM backend that returns a normalised completion."""
 
-    @abstractmethod
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         """Run one completion and return text + token usage."""
+        ...
 
 
-class GitHubGateway(ABC):
+class GitHubGateway(Protocol):
     """Port: read a PR's context and post a review back."""
 
-    @abstractmethod
     def get_pr_context(self) -> PRContext:
         """Fetch the PR diff and metadata via API (never check out PR code)."""
+        ...
 
-    @abstractmethod
     def post_review(
         self, findings: list[ReviewFinding], summary: str, diff: str | None = None
     ) -> None:
@@ -96,15 +100,16 @@ class GitHubGateway(ABC):
         positions; when omitted the adapter re-fetches it. Callers that already
         hold the context should pass it to avoid a redundant round-trip.
         """
+        ...
 
-    @abstractmethod
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone comment to the PR conversation (in-thread reply)."""
+        ...
 
 
-class ReviewEngine(ABC):
+class ReviewEngine(Protocol):
     """Port: turn a PR context + config into findings and a summary."""
 
-    @abstractmethod
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Produce (findings, summary) for the given PR and config."""
+        ...

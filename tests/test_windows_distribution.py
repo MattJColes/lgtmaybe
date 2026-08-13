@@ -29,7 +29,7 @@ def test_windows_exe_workflow_builds_smokes_and_uploads() -> None:
     assert "workflow_dispatch:" in text
     assert job["runs-on"] == "windows-latest"
     assert "uv run pyinstaller packaging/pyinstaller/lgtmaybe.spec" in runs
-    for command in ("--help", "config path", "help review"):
+    for command in ("--help", "config path", "review --help"):
         assert command in runs
     assert "gh release upload" in runs
     assert runs.count('--repo "$env:GITHUB_REPOSITORY"') == 2

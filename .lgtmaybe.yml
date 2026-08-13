@@ -8,59 +8,58 @@ exclude_paths:
   - docs/llms*.txt            # whole-docs corpus + index (generate_llms_txt.py)
   - docs/reference/config.md  # generated from ReviewConfig (generate_reference.py)
 
-# Bound what one call may generate. A correctness lens once ran to this model's
-# full 65,536-token output ceiling and came back cut off mid-JSON — 21 minutes
-# and 65k tokens for a single lens, against ~5.5k for the other three combined.
-# The truncation is legible now (it names itself, and the findings it finished
-# emitting survive), but nothing bounded the cost of getting there.
+# Bound what one call may generate — and, more to the point, bound what a
+# RUNAWAY call may generate.
 #
-# 16k was ~7x the largest output a healthy lens had produced here (2,261 tokens),
-# and that turned out to be the wrong measure. Under a reasoning model the cap
-# also pays for thinking tokens, and this model spends most of it there: on #309
-# it truncated 3 of 4 lenses, and on #311 — a fifteen-line diff — it still
-# truncated 1 of 4 at the same 16,384. That is the starvation this comment
-# already warned about, observed: a cap sized to a plain model's findings
-# payload truncates every lens rather than only a runaway.
+# History, because this value has moved three times and every move was upward.
+# The cap was raised to 16k, then to 32k, chasing lens calls that truncated; the
+# measurements behind those moves showed 25,963-35,463 reasoning tokens per
+# truncation and concluded that the cap was the wrong lever because raising it
+# only buys the model more room to think. That conclusion was drawn while
+# `reasoning_effort` was being silently dropped on OpenRouter, and this comment
+# asked the next person to re-measure before moving the value again.
 #
-# 32k restores the thinking headroom while still bounding the runaway at half
-# the model's own 65,536 ceiling, so a lens that goes away still stops in half
-# the time instead of 21 minutes. It also keeps the pre-flight reservation
-# OpenRouter charges against max_tokens well under the full ceiling.
-max_tokens: 32768
+# Re-measured, twice, on the same diff, with the budget actually enforced:
+#
+#   run          truncated lens   reasoning   output    that call   whole review
+#   low                code-health       516  ~32,250        380s           410s
+#   medium             security          961  ~32,700        288s           361s
+#
+# Three things follow. Thinking is bounded now (~500-1000, not ~30,000), so the
+# old diagnosis is spent. `reasoning_effort` is not the lever either — `medium`
+# truncated too, on a different lens. And the truncation is a CONTENT runaway,
+# not a thinking one: 961 tokens of thought against ~32,700 of output, salvaging
+# zero findings, where the same material split in half produced 1,122 tokens.
+# Roughly one lens call in five does this. It is model-level generation
+# instability, and no cap prevents it.
+#
+# So the cap's job is not prevention, it is blast radius — and at 32k the blast
+# radius was the entire review: 93% and 80% of those two runs' wall clock went on
+# one call that said nothing. At 8k a runaway costs ~95s instead of ~380s.
+#
+# 8,192 against a largest-healthy-output of 937 tokens at `low` (~9x headroom)
+# and 3,986 at `medium` (~2x). A truncation is not fatal in any case: the engine
+# splits the batch and reviews the pieces, which is how both runs still produced
+# findings from the lens that ran away.
+#
+# The coupling is what makes this number hard, so: the cap pays for THINKING as
+# well as output on this model. 8,192 is comfortable at `low` and `medium`. It
+# would need raising again at `high`/`xhigh`, where thinking alone can approach
+# it — and at that point re-measure rather than guessing, the same way this
+# number was arrived at.
+max_tokens: 8192
 
-# ...and 32k did not fix it either, which is what finally identified the real
-# lever. Measured on #321's review, with the reasoning-token instrumentation
-# from #319 reporting on successful calls for the first time:
+# Bound what the model spends THINKING, as opposed to answering.
 #
-#   lens          reasoning   outcome
-#   security         33,660   truncated
-#   security         35,463   truncated
-#   security         33,180   truncated
-#   artefacts        33,775   truncated
-#   artefacts        25,963   truncated
-#   correctness      32,194   truncated   (1,003s)
-#   correctness      33,232   truncated
-#   code-health      28,909   OK — of 29,642 output tokens, i.e. 97.5%
-#   artefacts         2,443   OK — of 2,939 output tokens
+# Connected for real since #369 — litellm forwards `reasoning_effort` on
+# openrouter only for models its capability map flags reasoning-capable, and this
+# repo's model is not in that map, so `drop_params` discarded the value in
+# silence. It now goes out in OpenRouter's own top-level `reasoning` object, and
+# a param that would be dropped is warned about at startup instead of vanishing.
 #
-# Five of nine calls spent the ENTIRE 32,768 ceiling on thought before writing
-# a finding, and the one big success wrote ~733 tokens of findings after 28,909
-# tokens of thinking. Raising the cap never worked because the cap does not
-# separate thinking from answering — it buys the model more room to think.
-#
-# The table above is real. The conclusion first drawn from it — "`low` is the
-# separate lever, step up to `medium` if findings look shallow" — was not: the
-# lever was never connected. litellm forwards `reasoning_effort` on openrouter
-# only for models its capability map already flags reasoning-capable, and the
-# model this repo points at is not in that map, so `drop_params` discarded the
-# value in silence. The proof it was still being discarded after this line was
-# added: #367's review, with `low` set right here, spent 34,012 reasoning tokens
-# on one lens against the 32,768 ceiling above and truncated.
-#
-# It is connected now — the budget goes out in OpenRouter's own top-level
-# `reasoning` object for models litellm won't forward it for, and a param that
-# would be dropped is warned about at startup instead of vanishing. So the
-# numbers below have yet to be re-measured against a budget that was actually
-# enforced. Read them as the evidence that the cap is the wrong lever, not as
-# evidence about what `low` does. Re-measure before moving this value.
+# Measured at `low`: ~343-914 reasoning tokens per lens, i.e. the bound holds.
+# `medium` costs 3.3x the output tokens (91% of them thinking) and found 5
+# findings against `low`'s 2 on the same diff — a real quality difference, and a
+# real bill. Left at `low` deliberately; moving it is a quality decision that
+# wants its own change and its own evidence, not a side effect of this one.
 reasoning_effort: low

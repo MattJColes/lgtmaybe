@@ -36,7 +36,6 @@ from lgtmaybe.core.ports import (
     ProviderClient,
     ProviderTruncated,
     ProviderWallTimeout,
-    ReviewEngine,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.github import is_reviewable
@@ -97,7 +96,7 @@ _log = get_logger(__name__)
 #   produced three consecutive reviews reporting "1 of 4 review calls failed" on
 #   a 429. The adapter's backoff (now long enough to outlast a rate window) and
 #   the rescue wave both make that survivable rather than fatal; six is the same
-#   fix from the other end — a quarter less burst for a sixth less parallelism.
+#   fix from the other end — a quarter less burst for a quarter less parallelism.
 #   Teams on a high rate tier can raise it with `max_concurrency`.
 # - A single ollama instance serves a model serially, so concurrent calls only
 #   queue up and time out: 1.
@@ -573,7 +572,7 @@ class ReviewIncompleteError(Exception):
     """
 
 
-class LLMReviewEngine(ReviewEngine):
+class LLMReviewEngine:
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
     def __init__(

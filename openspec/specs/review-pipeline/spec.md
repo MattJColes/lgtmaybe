@@ -51,7 +51,10 @@ stage failure surfaces to the caller.
 Every `(batch, lens)` call SHALL run through one global bounded executor sized
 by `max_concurrency` (auto: six cloud, one for Ollama/OpenAI-compatible). The
 executor size SHALL determine only how the preset's calls are scheduled, never
-how many there are.
+how many there are. The rescue wave and the oversized-batch split each run in a
+pool of their own, entered only after the fan-out's has closed or from a worker
+that is already blocked — a worker that submits to its own pool and waits on the
+result deadlocks once that pool saturates.
 <!-- anchor: engine.fan-out -->
 
 #### Scenario: parallel-capable default review

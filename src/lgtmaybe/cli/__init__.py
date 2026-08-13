@@ -20,14 +20,13 @@ import sys
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import click
 
 from lgtmaybe.cli.render import flatten_details, render_findings
-from lgtmaybe.cli.runtime import RuntimeOptions
 from lgtmaybe.core.diffparse import FILE_HEADER_RE, hunk_for_line
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -57,6 +56,18 @@ from lgtmaybe.providers.factory import (
     cheaper_reflect_sibling,
     default_timeout_for,
 )
+
+
+@dataclass(frozen=True)
+class RuntimeOptions:
+    """Call-time options resolved from CLI flags or GitHub Action inputs."""
+
+    api_key: str | None = None
+    api_base: str | None = None
+    fallback_model: str | None = None
+    pr_url: str | None = None
+    profile: bool = False
+
 
 _log = get_logger(__name__)
 
@@ -878,7 +889,7 @@ Examples:
   lgtmaybe review --format json            Machine-readable findings
   lgtmaybe diagram                         Diagram the components you touched
   lgtmaybe config init                     One-time provider/model setup
-  lgtmaybe help COMMAND                    Detailed help for any command
+  lgtmaybe review --help                   Detailed help for a command
 \b
 Docs: https://lgtmaybe.coles.codes/
 """

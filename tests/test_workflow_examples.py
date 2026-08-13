@@ -259,18 +259,32 @@ def test_dogfood_workflow_uses_the_public_app_identity() -> None:
 
 
 # The cap that was observed to STARVE the reviewer rather than bound it: at
-# 16,384 a reasoning model spent the budget on thinking and truncated 3 of 4
-# lenses on one PR, and 1 of 4 on a fifteen-line diff — where input size cannot
-# be the cause. The floor is set from that failure, not from the findings
-# payload of a plain model, because `max_tokens` pays for thinking too.
-_STARVED_CAP = 16_384
-# The largest output any healthy lens has been observed to generate on the
-# dogfood review (artefacts, 2,261 tokens; security and code-health were under
-# 1,800) — kept as the reason the floor is a multiple of it, not a sibling of it.
-_OBSERVED_HEALTHY_OUTPUT = 2_261
+# The floor USED to be 16,384, set from a real failure: at that cap a reasoning
+# model spent the whole budget thinking and truncated 3 of 4 lenses on one PR,
+# and 1 of 4 on a fifteen-line diff — where input size cannot be the cause.
+#
+# That floor is superseded, because the mechanism behind it is gone rather than
+# because the failure was misread. `max_tokens` pays for thinking as well as
+# output, and at the time `reasoning_effort` was being silently dropped on
+# OpenRouter (#369), so thinking was unbounded and routinely ate 25,963-35,463
+# tokens — which is what made a 16,384 cap starve an ordinary call. With the
+# budget actually enforced, two measured runs on a 21-file diff put reasoning at
+# 343-914 tokens on `low` and 961-3,624 on `medium`. Nothing can starve at 16k
+# any more, and holding the floor there costs 4x the blast radius of every
+# runaway for a danger that no longer exists.
+#
+# So the floor is re-derived from what a healthy call actually generates, with
+# headroom, and it stays COUPLED to `reasoning_effort` — raise that and this
+# must be re-measured, which is the trap the old floor was built out of.
+_OBSERVED_HEALTHY_OUTPUT = 3_986
+_HEADROOM = 2
+_STARVED_CAP = _OBSERVED_HEALTHY_OUTPUT * _HEADROOM
 # The ceiling deepseek-v4-pro ran to when a lens went away: 65,536 tokens and
 # 21 minutes for a single call, against ~5.5k for the other three combined.
 _RUNAWAY_OUTPUT = 65_536
+# Effort settings the floor above has actually been measured against. A config
+# outside this set has never been measured, and the floor is not evidence for it.
+_MEASURED_EFFORTS = {"low", "medium"}
 
 
 def test_dogfood_config_caps_what_one_call_may_generate() -> None:
@@ -282,20 +296,26 @@ def test_dogfood_config_caps_what_one_call_may_generate() -> None:
     like OpenRouter it also shrinks the pre-flight reservation, which is charged
     against `max_tokens` before a single token is generated.
 
-    The floor is the other half of the bargain, and it is set from an observed
-    failure: at 16,384 this reasoning model truncated lenses on a fifteen-line
-    diff, spending the budget on thinking before it wrote findings. A cap that
-    low reports a problem it created.
+    The floor is the other half of the bargain: a cap below what a healthy lens
+    generates reports a problem it created. It is derived from the largest output
+    any healthy lens has been measured producing, times headroom — and it is only
+    evidence for the `reasoning_effort` settings it was measured at, because this
+    budget pays for thinking too.
     """
     config = yaml.safe_load((_REPO_ROOT / ".lgtmaybe.yml").read_text(encoding="utf-8"))
     cap = config.get("max_tokens")
 
     assert cap is not None, ".lgtmaybe.yml must cap max_tokens — see the reasoning above"
-    assert cap > _STARVED_CAP, (
-        f"max_tokens={cap} is at or below the cap observed to starve a reasoning model "
-        f"({_STARVED_CAP} tokens truncated lenses on a fifteen-line diff) — this budget "
-        f"pays for thinking as well as the ~{_OBSERVED_HEALTHY_OUTPUT}-token findings "
-        "payload, so a starved cap truncates every lens rather than only a runaway"
+    assert config.get("reasoning_effort") in _MEASURED_EFFORTS, (
+        f"reasoning_effort={config.get('reasoning_effort')!r} is outside the settings the "
+        f"max_tokens floor was measured at ({sorted(_MEASURED_EFFORTS)}) — this budget pays "
+        "for thinking as well as output, so re-measure the largest healthy output at the new "
+        "setting before trusting the floor below"
+    )
+    assert cap >= _STARVED_CAP, (
+        f"max_tokens={cap} leaves no headroom over the largest healthy lens output measured "
+        f"({_OBSERVED_HEALTHY_OUTPUT} tokens) — a cap this low truncates ordinary calls "
+        f"rather than only runaway ones. Floor is {_HEADROOM}x that, i.e. {_STARVED_CAP}"
     )
     assert cap < _RUNAWAY_OUTPUT, (
         f"max_tokens={cap} does not bound the runaway it exists to bound "
