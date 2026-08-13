@@ -19,12 +19,15 @@ from typing import TYPE_CHECKING, Any
 
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import Provider
-from lgtmaybe.providers.constants import CLOUD_TIMEOUT, DEFAULT_OLLAMA_BASE
 
 if TYPE_CHECKING:
     from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
 _log = get_logger(__name__)
+
+DEFAULT_OLLAMA_BASE = "http://localhost:11434"
+CLOUD_TIMEOUT = 600
+OPENAI_COMPATIBLE_PLACEHOLDER_KEY = "lgtmaybe-no-key"
 
 _PREFIXES: dict[Provider, str] = {
     Provider.openai: "openai",
@@ -54,7 +57,7 @@ _PREFIXES: dict[Provider, str] = {
 # "results may be incomplete" with no findings, which a human reads as a clean
 # review. Waiting longer for an answer beats reporting a confident nothing, so
 # these are deliberately far above what a healthy call needs. The cloud one is
-# shared with the adapter's fallback (providers.constants.CLOUD_TIMEOUT).
+# shared with the adapter's fallback.
 _SLOW_TIMEOUT = 1800
 
 # Providers whose endpoint may be a slow model (local server or open gateway).

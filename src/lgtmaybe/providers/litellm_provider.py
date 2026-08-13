@@ -52,7 +52,7 @@ from lgtmaybe.core.ports import (
     ProviderTruncated,
     ProviderWallTimeout,
 )
-from lgtmaybe.providers.constants import CLOUD_TIMEOUT
+from lgtmaybe.providers.factory import CLOUD_TIMEOUT
 
 _log = get_logger(__name__)
 
