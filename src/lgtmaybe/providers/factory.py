@@ -102,11 +102,14 @@ _OLLAMA_NUM_CTX = 32768
 # seconds, and the stop is *reported* — a truncation posts the incomplete
 # notice, where a timeout posts the same notice half an hour later.
 #
-# 8192 is a quarter of `_OLLAMA_NUM_CTX`: measured findings payloads are
-# hundreds of tokens, so the rest is headroom for a thinking model (ollama now
-# leaves thinking on for a model that supports it, and reasoning is drawn from
-# this same budget). Sized against the window it shares rather than picked flat,
-# so raising `num_ctx` for a big diff is not silently undone here.
+# 8192 is a quarter of the default `_OLLAMA_NUM_CTX`: measured findings payloads
+# are hundreds of tokens, so the rest is headroom for a thinking model (ollama
+# now leaves thinking on for a model that supports it, and reasoning is drawn
+# from this same budget). Derived from that window so the two numbers are
+# related rather than arbitrary — but it is a FIXED ceiling: raising `num_ctx`
+# for a big diff buys room for the prompt, not a longer answer, and `max_tokens`
+# is the knob for that. Deliberately, since a bigger window is asked for to fit
+# the input and should not quietly re-license the runaway decode.
 #
 # Only ollama. openrouter and openai-compatible can also front a slow endpoint,
 # but they can equally be a hosted API with its own sane ceiling, and capping

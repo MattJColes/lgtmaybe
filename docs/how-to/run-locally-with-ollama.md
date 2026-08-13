@@ -239,11 +239,14 @@ timeout — half an hour of sustained GPU for a single lens on a one-file diff, 
 hours for a whole review.
 
 So an ollama review runs with a **default output ceiling of 8192 tokens per
-call** (a quarter of the 32768 `num_ctx` it shares). Measured findings payloads
-are hundreds of tokens, so the rest is headroom for a thinking model — reasoning
-is drawn from this same budget. Hosted providers get no default ceiling; they
-don't have this problem, and capping them would truncate long findings for
-nothing.
+call** — a quarter of the default 32768 `num_ctx`. Measured findings payloads are
+hundreds of tokens, so the rest is headroom for a thinking model — reasoning is
+drawn from this same budget. Hosted providers get no default ceiling; they don't
+have this problem, and capping them would truncate long findings for nothing.
+
+The ceiling is a fixed number, not a fraction of your window: raising `num_ctx`
+for a big diff buys room for the **prompt**, not for a longer answer. Use
+`max_tokens` when you want a longer answer.
 
 Every run says which ceiling it resolved and where it came from:
 
