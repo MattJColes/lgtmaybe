@@ -12,6 +12,12 @@ provider.credentials:
     has: { field: name, regex: '^resolve_credentials$' }
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.reasoning-accounting:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_reasoning_tokens$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.complete:
   rule:
     kind: function_definition

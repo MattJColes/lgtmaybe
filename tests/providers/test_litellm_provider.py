@@ -82,13 +82,15 @@ class TestLiteLLMProvider:
         # adding it to `output_tokens` would double-count against the budget.
         assert result.output_tokens == 1200
 
-    def test_a_route_without_reasoning_detail_reports_zero(self) -> None:
-        """No detail is not an error — a non-reasoning route simply reports 0."""
+    def test_a_route_without_reasoning_detail_reports_unknown(self) -> None:
+        """No detail is not an error, and it is not a zero either: "the route
+        never said" and "the model thought nothing" send a reader to opposite
+        conclusions about whether the ceiling has headroom."""
         with patch("litellm.completion", return_value=_fake_response()):
             provider = LiteLLMProvider()
             result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
-        assert result.reasoning_tokens == 0
+        assert result.reasoning_tokens is None
 
     def test_complete_passes_messages_and_model_to_litellm(self) -> None:
         response = _fake_response()

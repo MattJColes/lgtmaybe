@@ -85,8 +85,10 @@ class TestProfiler:
         )
         assert p.calls[0].reasoning_tokens == 1100
 
-    def test_reasoning_tokens_default_to_zero(self) -> None:
-        """Non-reasoning routes report nothing, and callers may omit it."""
+    def test_reasoning_tokens_default_to_unknown(self) -> None:
+        """Non-reasoning routes report nothing, and callers may omit it — which
+        records as None. A 0 would claim the model did no thinking; nobody said
+        that, and the profile table would print it as if somebody had."""
         p = Profiler()
         p.record_call(
             label="security",
@@ -98,7 +100,7 @@ class TestProfiler:
             cache_read_tokens=0,
             cache_creation_tokens=0,
         )
-        assert p.calls[0].reasoning_tokens == 0
+        assert p.calls[0].reasoning_tokens is None
 
     def test_reset_clears_prior_records(self) -> None:
         p = Profiler()
@@ -542,3 +544,94 @@ class TestCeilingHitsReachTheProfile:
             )
 
         assert profiler.calls[-1].error is None
+
+
+class TestReasoningShareIsLegibleFromAnyRun:
+    """`max_tokens` pays for thinking AND answering, so the two settings are
+    coupled — but the split only became visible when a call FAILED, in the
+    truncation message. A healthy call that came within a few hundred tokens of
+    the ceiling looked identical to one that used a fifth of it, which is why
+    settling `reasoning_effort` needed a bespoke four-run experiment.
+    """
+
+    def test_a_route_that_reports_no_breakdown_renders_as_unknown_not_zero(self) -> None:
+        """A zero would claim the model did no thinking. It said nothing."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.5,
+            attempts=1,
+            input_tokens=100,
+            output_tokens=20,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+        )
+
+        assert p.calls[0].reasoning_tokens is None
+        row = next(line for line in p.render().splitlines() if line.startswith("security"))
+        assert " 0 " not in row.split("20", 1)[1][:12]
+        assert "-" in row
+
+    def test_a_call_reports_its_reasoning_as_a_share_of_the_ceiling(self) -> None:
+        """The ratio is the number that answers "is there headroom?" — neither
+        raw count says it, and computing it by hand is what this replaces."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.5,
+            attempts=1,
+            input_tokens=100,
+            output_tokens=4000,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            reasoning_tokens=4096,
+            output_ceiling=8192,
+        )
+
+        row = next(line for line in p.render().splitlines() if line.startswith("security"))
+        assert "4096" in row
+        assert "50%" in row
+
+    def test_the_summary_names_the_largest_share_seen(self) -> None:
+        """So the headroom question is answered without reading every row."""
+        p = Profiler()
+        for label, reasoning in (("security", 800), ("artefacts", 7000)):
+            p.record_call(
+                label=label,
+                batch=1,
+                elapsed=1.0,
+                attempts=1,
+                input_tokens=10,
+                output_tokens=reasoning + 100,
+                cache_read_tokens=0,
+                cache_creation_tokens=0,
+                reasoning_tokens=reasoning,
+                output_ceiling=8192,
+            )
+
+        rendered = p.render()
+        assert "largest" in rendered
+        assert "85%" in rendered  # 7000 / 8192
+        assert "artefacts" in rendered.split("largest", 1)[1]
+
+    def test_no_share_is_claimed_when_no_ceiling_was_configured(self) -> None:
+        """`max_tokens` unset means there is no denominator — a share against a
+        number nobody chose would be invention, not accounting."""
+        p = Profiler()
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=10,
+            output_tokens=900,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            reasoning_tokens=800,
+        )
+
+        rendered = p.render()
+        assert "800" in rendered
+        assert "largest" not in rendered

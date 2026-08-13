@@ -595,7 +595,17 @@ class ProviderResult(_Strict):
     # it was first surfaced, to name the cause) the number cannot answer the
     # question it exists for, because such a call has reasoning + findings >=
     # max_tokens by definition and so offers no healthy call to compare against.
-    reasoning_tokens: int = 0
+    # None, not 0: "the route reported no breakdown" and "the model did no
+    # thinking" are different claims, and a 0 in the profile table asserts the
+    # second one. ProviderTruncated has always drawn that line; the success path
+    # drew it as a zero, which is the path a healthy run is judged from.
+    reasoning_tokens: int | None = None
+    # The output ceiling this request actually carried (`max_tokens`), or None
+    # when none was configured. Stamped here because only the adapter knows it —
+    # it is resolved per provider and overridable per call — and because the
+    # reasoning SHARE, not either raw count, is what says whether the ceiling has
+    # headroom. A share needs a denominator that was really sent.
+    output_ceiling: int | None = None
     # Completion attempts the adapter made to produce this result (1 = first try).
     # Feeds the timing instrumentation so a call that burned its retry budget is
     # distinguishable from one that was merely slow.

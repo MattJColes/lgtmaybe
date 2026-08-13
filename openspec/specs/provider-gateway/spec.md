@@ -97,6 +97,24 @@ cause, since a ceiling-hitting call offers no healthy call to compare against.
 - **WHEN** retries on the primary model are exhausted and a fallback is set
 - **THEN** the call completes on the fallback model instead of failing the review
 
+### Requirement: The reasoning spend is reported against what it was drawn from
+
+A response's reasoning-token count SHALL be reported as **unknown** when the
+route gives no breakdown — never as zero, which asserts the model did no
+thinking. The `max_tokens` ceiling the request actually carried SHALL ride the
+result alongside it, so the spend can be read as a SHARE of its own budget: the
+two settings are coupled (one ceiling pays for thought and answer alike), and
+neither raw count says whether the pair has headroom left.
+<!-- anchor: provider.reasoning-accounting -->
+
+#### Scenario: the route reports no breakdown
+- **WHEN** a successful response carries no `completion_tokens_details`
+- **THEN** the count is unknown, and nothing is claimed about the thinking done
+
+#### Scenario: no ceiling was configured
+- **WHEN** a request goes out with no `max_tokens`
+- **THEN** no ceiling rides the result, and no share is computed from one
+
 ### Requirement: Backoff matches what failed
 
 Retry backoff SHALL be chosen by the failure. A capacity rate limit SHALL back

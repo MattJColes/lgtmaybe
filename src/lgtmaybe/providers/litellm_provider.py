@@ -703,7 +703,7 @@ class LiteLLMProvider:
                 # between them, and re-reading them out of the prose above would be
                 # parsing our own sentence. None, not 0, when the route reported no
                 # breakdown — "it never said" must not read as "it thought nothing".
-                reasoning_tokens=reasoning or None,
+                reasoning_tokens=reasoning,
                 output_tokens=output_tokens,
                 # Not diagnosis but accounting: the prompt was sent and billed,
                 # so the spend ceiling must see it (see profiling.record_error).
@@ -732,6 +732,11 @@ class LiteLLMProvider:
             # succeeded and a call that hit the ceiling can never report the
             # thinking they did by two different readings of the same field.
             reasoning_tokens=_reasoning_tokens(usage),
+            # The denominator for that count. Carried from the request rather
+            # than looked up later: a per-call `max_tokens` overrides the
+            # provider's, and a share against the wrong ceiling is worse than no
+            # share at all.
+            output_ceiling=ceiling,
         )
 
 
@@ -893,17 +898,21 @@ def _supports_cache_control(model: str) -> bool:
         return False
 
 
-def _reasoning_tokens(usage: Any) -> int:
-    """Output tokens the model spent thinking, or 0 when the route doesn't say.
+def _reasoning_tokens(usage: Any) -> int | None:
+    """Output tokens the model spent thinking, or None when the route doesn't say.
 
     litellm normalises this onto ``completion_tokens_details.reasoning_tokens``
     for the routes that report it. Read defensively — a route that omits the
     wrapper, or fills it with a non-number, must not turn a truncation report
-    into a crash — and 0 simply means "no breakdown to show".
+    into a crash.
+
+    None rather than 0, because they are different claims: "it never said" and
+    "it did no thinking" send a reader to different conclusions about whether the
+    ceiling has headroom, and only one of them is knowable here.
     """
     details = getattr(usage, "completion_tokens_details", None)
     value = getattr(details, "reasoning_tokens", None)
-    return value if isinstance(value, int) and value > 0 else 0
+    return value if isinstance(value, int) and value > 0 else None
 
 
 def _cache_usage(usage: Any) -> tuple[int, int]:

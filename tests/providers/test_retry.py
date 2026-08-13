@@ -20,6 +20,18 @@ from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
 
 
+def _reasoning_response(reasoning: int, content: str = "ok") -> Any:
+    """A response whose route DOES report the thinking/answer breakdown."""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(
+            prompt_tokens=5,
+            completion_tokens=10,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=reasoning),
+        ),
+    )
+
+
 def _fake_response(content: str = "ok") -> Any:
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
@@ -1568,3 +1580,38 @@ class TestTruncationAdviceMatchesTheMeasurement:
 
     def test_it_names_the_model_as_the_lever_that_actually_moves_this(self) -> None:
         assert "model" in self._message()
+
+
+class TestTheCeilingRidesTheResult:
+    """The reasoning share needs a denominator, and only the adapter knows it —
+    `max_tokens` is resolved per provider and can be overridden per call, so the
+    ceiling this request actually carried is stamped on the result rather than
+    re-derived downstream from a setting that may not be the one sent."""
+
+    def test_a_successful_call_reports_the_ceiling_it_was_sent_with(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", max_tokens=8192)
+
+        with patch("litellm.completion", return_value=_reasoning_response(1200)):
+            result = provider.complete([{"role": "user", "content": "hi"}], model="openai/gpt-5.5")
+
+        assert result.output_ceiling == 8192
+        assert result.reasoning_tokens == 1200
+
+    def test_no_ceiling_configured_reports_none(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        with patch("litellm.completion", return_value=_fake_response("{}")):
+            result = provider.complete([{"role": "user", "content": "hi"}], model="openai/gpt-5.5")
+
+        assert result.output_ceiling is None
+
+    def test_a_route_with_no_breakdown_reports_unknown_not_zero(self) -> None:
+        """`None` and `0` are different claims: "it never said" versus "it did no
+        thinking". `ProviderTruncated` already draws that line; the success path
+        drew it as a zero."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        with patch("litellm.completion", return_value=_fake_response("{}")):
+            result = provider.complete([{"role": "user", "content": "hi"}], model="openai/gpt-5.5")
+
+        assert result.reasoning_tokens is None
