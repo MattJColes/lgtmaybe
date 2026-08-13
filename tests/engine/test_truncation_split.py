@@ -125,6 +125,21 @@ def _cut_off_json(path: str, anchor: str, title: str) -> str:
     return '{"findings": [' + json.dumps(_finding(path, anchor, title)) + ', {"path": "one.py", "li'
 
 
+# Which files' CHANGES a call was given — not merely which paths it names.
+# Every call also names the files it was NOT shown (the not-shown manifest), so a
+# filename appearing in the prompt no longer means its diff is in it. These fakes
+# decide "was this the whole batch or one piece?", so they have to look at the
+# added lines.
+_ADDED = {
+    "one.py": "first_change = os.getcwd()",
+    "two.py": "second_change = sys.maxsize",
+}
+
+
+def _shows(diff: str, *paths: str) -> bool:
+    return all(_ADDED[path] in diff for path in paths)
+
+
 class _TruncatesUntilSmaller(FakeProvider):
     """Blows the output ceiling while both files ride one call; answers a half.
 
@@ -140,9 +155,9 @@ class _TruncatesUntilSmaller(FakeProvider):
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         diff = "\n".join(str(m.get("content", "")) for m in messages)
         self.diffs.append(diff)
-        if "one.py" in diff and "two.py" in diff:
+        if _shows(diff, "one.py", "two.py"):
             raise ProviderTruncated(_CEILING, text=self._partial)
-        path = "one.py" if "one.py" in diff else "two.py"
+        path = "one.py" if _shows(diff, "one.py") else "two.py"
         anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
         return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
 
@@ -157,7 +172,7 @@ def test_an_over_ceiling_batch_is_split_and_its_halves_reviewed() -> None:
     assert sorted(f.path for f in findings) == ["one.py", "two.py"]
     # The oversized call, then one per half — never the same oversized payload twice.
     assert len(provider.diffs) == 3
-    assert sum("one.py" in d and "two.py" in d for d in provider.diffs) == 1
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1
 
 
 def test_findings_completed_before_the_cut_survive_the_split() -> None:
@@ -331,7 +346,7 @@ def test_a_truncation_that_spent_its_ceiling_on_findings_is_still_split() -> Non
     class _TruncatesWithLittleThought(_TruncatesUntilSmaller):
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             diff = "\n".join(str(m.get("content", "")) for m in messages)
-            if "one.py" in diff and "two.py" in diff:
+            if _shows(diff, "one.py", "two.py"):
                 self.diffs.append(diff)
                 raise ProviderTruncated(
                     _CEILING,
@@ -370,7 +385,7 @@ def test_a_piece_that_truncates_on_reasoning_names_the_lever_too() -> None:
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             diff = "\n".join(str(m.get("content", "")) for m in messages)
             self.diffs.append(diff)
-            whole_batch = "one.py" in diff and "two.py" in diff
+            whole_batch = _shows(diff, "one.py", "two.py")
             raise ProviderTruncated(
                 _CEILING,
                 text="",
@@ -407,9 +422,9 @@ def test_a_piece_that_fails_is_still_reported() -> None:
     class _OneHalfRefuses(FakeProvider):
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             diff = "\n".join(str(m.get("content", "")) for m in messages)
-            if "one.py" in diff and "two.py" in diff:
+            if _shows(diff, "one.py", "two.py"):
                 raise ProviderTruncated(_CEILING, text="")
-            if "two.py" in diff:
+            if _shows(diff, "two.py"):
                 raise RuntimeError("insufficient_quota")
             return ProviderResult(
                 text=_finding_json("one.py", "first_change = os.getcwd()"),

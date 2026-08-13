@@ -286,7 +286,11 @@ def test_engine_reviews_only_triage_survivors() -> None:
     for call in lens_calls:
         sent = call["messages"][1]["content"]
         assert "src/util.py" in sent
-        assert "docs/readme.md" not in sent
+        # Its CONTENT is what triage withheld. Its NAME is still on the call, in
+        # the not-shown manifest — a lens that knows a file was skipped is better
+        # placed than one left to infer it.
+        assert "+typo fix" not in sent
+        assert "docs/readme.md" in sent
     # The summary is transparent about what triage skipped.
     assert "1" in summary and "triage" in summary.lower()
 

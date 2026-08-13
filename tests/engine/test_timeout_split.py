@@ -99,9 +99,24 @@ def _finding_json(path: str, anchor: str) -> str:
 
 def _piece_json(diff: str) -> str:
     """The answer a split piece gives, anchored in whichever file it carries."""
-    path = "one.py" if "one.py" in diff else "two.py"
+    path = "one.py" if _shows(diff, "one.py") else "two.py"
     anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
     return _finding_json(path, anchor)
+
+
+# Which files' CHANGES a call was given — not merely which paths it names.
+# Every call also names the files it was NOT shown (the not-shown manifest), so a
+# filename appearing in the prompt no longer means its diff is in it. These fakes
+# decide "was this the whole batch or one piece?", so they have to look at the
+# added lines.
+_ADDED = {
+    "one.py": "first_change = os.getcwd()",
+    "two.py": "second_change = sys.maxsize",
+}
+
+
+def _shows(diff: str, *paths: str) -> bool:
+    return all(_ADDED[path] in diff for path in paths)
 
 
 class _TimeoutUntilSmaller(FakeProvider):
@@ -118,9 +133,9 @@ class _TimeoutUntilSmaller(FakeProvider):
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         diff = "\n".join(str(m.get("content", "")) for m in messages)
         self.diffs.append(diff)
-        if "one.py" in diff and "two.py" in diff:
+        if _shows(diff, "one.py", "two.py"):
             raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
-        path = "one.py" if "one.py" in diff else "two.py"
+        path = "one.py" if _shows(diff, "one.py") else "two.py"
         anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
         return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
 
@@ -134,7 +149,7 @@ def test_a_timed_out_batch_is_split_and_its_halves_reviewed() -> None:
     assert sorted(f.path for f in findings) == ["one.py", "two.py"]
     # The oversized call, then one per half — never the same oversized payload twice.
     assert len(provider.diffs) == 3
-    assert sum("one.py" in d and "two.py" in d for d in provider.diffs) == 1
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1
 
 
 def test_the_split_is_reported_not_silent() -> None:
@@ -158,9 +173,9 @@ def test_a_piece_that_fails_is_still_reported() -> None:
     class _OneHalfRefuses(FakeProvider):
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             diff = "\n".join(str(m.get("content", "")) for m in messages)
-            if "one.py" in diff and "two.py" in diff:
+            if _shows(diff, "one.py", "two.py"):
                 raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
-            if "two.py" in diff:
+            if _shows(diff, "two.py"):
                 raise RuntimeError("insufficient_quota")
             return ProviderResult(
                 text=_finding_json("one.py", "first_change = os.getcwd()"),
@@ -249,7 +264,7 @@ class _TimeoutThenSlowPieces(FakeProvider):
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         diff = "\n".join(str(m.get("content", "")) for m in messages)
-        if "one.py" in diff and "two.py" in diff:
+        if _shows(diff, "one.py", "two.py"):
             raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
         with self._lock:
             self._in_flight += 1
@@ -289,7 +304,7 @@ class _TimeoutThenPairedPieces(FakeProvider):
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         diff = "\n".join(str(m.get("content", "")) for m in messages)
-        if "one.py" in diff and "two.py" in diff:
+        if _shows(diff, "one.py", "two.py"):
             raise ProviderWallTimeout("provider request exceeded 1800s (waited 1800.001s)")
         try:
             self._barrier.wait()
