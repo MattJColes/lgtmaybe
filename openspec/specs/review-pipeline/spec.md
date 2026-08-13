@@ -231,6 +231,19 @@ says nothing about size is not split at all.
 - **THEN** no pieces are reviewed, the salvage is kept, and the notice names both
   levers, since the counts alone cannot say which one is the fix
 
+#### Scenario: the ceiling went on the answer
+- **WHEN** a truncated call spent only a small share of the ceiling reasoning
+- **THEN** the batch is split as usual — that call really did have more to say
+  than one response could hold
+
+#### Scenario: the route reports no reasoning count
+- **WHEN** a truncation carries no reasoning breakdown at all
+- **THEN** the batch is split as usual, because silence is not evidence of thinking
+
+#### Scenario: the failure says nothing about size
+- **WHEN** a lens call fails for any other reason (quota, bad key, unparseable)
+- **THEN** no split happens, because nothing suggests the payload was the problem
+
 ### Requirement: A reasoning-bound truncation is retried once at a lower effort
 
 A lens whose truncation was reasoning-bound SHALL be re-run once with its
@@ -239,8 +252,9 @@ call's salvage — the sibling of the split, changing the one variable that can
 move a thinking budget. Exactly one attempt: a retry that truncates the same way
 reports plain. The step is always downward, never offered on a payload-bound
 truncation, and a no-op when no effort is configured, so a review that never set
-one is byte-identical. A lens that only answered after stepping down SHALL be
-named in the summary.
+one is byte-identical. The retry SHALL re-check the whole-review deadline, token
+budget and interrupt first, so it can never spend past a stop. A lens that only
+answered after stepping down SHALL be named in the summary.
 <!-- anchor: engine.reasoning-step-down -->
 
 #### Scenario: the lower effort fits
@@ -256,18 +270,10 @@ named in the summary.
 - **WHEN** the provider reports no reasoning effort to step down from
 - **THEN** nothing is retried and nothing is spent
 
-#### Scenario: the ceiling went on the answer
-- **WHEN** a truncated call spent only a small share of the ceiling reasoning
-- **THEN** the batch is split as usual — that call really did have more to say
-  than one response could hold
-
-#### Scenario: the route reports no reasoning count
-- **WHEN** a truncation carries no reasoning breakdown at all
-- **THEN** the batch is split as usual, because silence is not evidence of thinking
-
-#### Scenario: the failure says nothing about size
-- **WHEN** a lens call fails for any other reason (quota, bad key, unparseable)
-- **THEN** no split happens, because nothing suggests the payload was the problem
+#### Scenario: a ceiling was reached while the first call was finishing
+- **WHEN** the deadline, the token budget or a termination signal lands before
+  the step-down begins
+- **THEN** the retry is not issued and the truncation is reported as it stands
 
 ### Requirement: A lens may defer once for bounded read-only context
 

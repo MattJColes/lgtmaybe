@@ -602,3 +602,23 @@ def test_a_payload_bound_truncation_splits_and_does_not_step_down() -> None:
 
     assert sorted(f.path for f in findings) == ["one.py", "two.py"]  # the split still ran
     assert _SplitsAndCountsStepDowns.asked == 0
+
+
+def test_the_step_down_does_not_spend_past_a_whole_review_ceiling() -> None:
+    """This path reaches `_complete_lens` directly, so it does not get the
+    re-check the split's pieces inherit by re-entering `_review_lens`.
+
+    A retry that begins past the deadline, the token budget, or a termination
+    signal would spend after the review was told to stop — which is the guarantee
+    the partial-results notice rests on."""
+    provider = _TruncatesUntilEffortDrops(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(
+            _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]),
+            # A budget of one token: the first call blows it, so the retry must
+            # not run — the truncation is reported, nothing more is spent.
+            _cfg(max_review_tokens=1),
+        )
+
+    assert provider.efforts == ["medium"]  # no step-down attempted

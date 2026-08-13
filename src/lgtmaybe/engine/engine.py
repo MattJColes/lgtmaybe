@@ -1340,7 +1340,14 @@ class LLMReviewEngine:
             run, wrapped, intent_block, hint_block, dir_block, lens, spec_block=spec_block
         )
         return self._complete_lens(
-            messages, run.model, run.response_format, batch_num, lens, on_oversized, on_needs
+            messages,
+            run.model,
+            run.response_format,
+            batch_num,
+            lens,
+            on_oversized,
+            on_needs,
+            run=run,
         )
 
     def _review_with_context(
@@ -1420,7 +1427,7 @@ class LLMReviewEngine:
             context=wrap_context(fetched),
         )
         retry, error = self._complete_lens(
-            messages, run.model, run.response_format, batch_num, lens, None, None
+            messages, run.model, run.response_format, batch_num, lens, None, None, run=run
         )
         return findings + retry, error
 
@@ -1568,6 +1575,7 @@ class LLMReviewEngine:
         batch_num: int,
         lens: _Lens,
         reason: str,
+        run: _Run | None = None,
     ) -> _LensOutcome:
         """Re-run one lens once with its reasoning effort stepped down a level.
 
@@ -1594,6 +1602,12 @@ class LLMReviewEngine:
         - **Nothing when the effort is unset.** The adapter answers None for the
           library default, so a user who never configured it pays nothing and
           sends byte-identical requests.
+        - **Every whole-review ceiling still applies.** ``_skip_reason`` is
+          re-checked before the call, exactly as ``_review_split``'s pieces do by
+          re-entering ``_review_lens`` — this path reaches ``_complete_lens``
+          directly, so it has to make that check itself. A retry that would begin
+          past the deadline, the token budget or a termination signal reports the
+          truncation it already had instead of spending past a stop.
 
         Returns the retry's ``(findings, error)``. The cut call's salvage is
         merged by the caller, exactly as the split's is.
@@ -1602,6 +1616,10 @@ class LLMReviewEngine:
         # lives in provider-shaped opts (a flat `reasoning_effort`, or
         # OpenRouter's nested `reasoning` object), and the engine has no business
         # knowing which. A provider without it simply never steps down.
+        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+            # Past a ceiling: the run is already stopping, and the notice it will
+            # carry is the truncation's, not a skip's — this call never happened.
+            return [], reason
         lower = getattr(self._provider, "lower_reasoning_effort", None)
         step_down = lower() if callable(lower) else None
         if not step_down:
@@ -1611,7 +1629,7 @@ class LLMReviewEngine:
             extra={"lens": lens.id, "batch": batch_num, "effort": step_down},
         )
         findings, error = self._complete_lens(
-            messages, model, response_format, batch_num, lens, None, None, effort=step_down
+            messages, model, response_format, batch_num, lens, None, None, effort=step_down, run=run
         )
         if error is None:
             # Recorded on the way OUT, not the way in: the notice claims findings
@@ -1632,6 +1650,7 @@ class LLMReviewEngine:
         on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
         *,
         effort: dict[str, Any] | None = None,
+        run: _Run | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
@@ -1711,7 +1730,7 @@ class LLMReviewEngine:
                         # review proving it.
                         return completed, exhausted
                     retried, retry_reason = self._retry_lower_effort(
-                        messages, model, response_format, batch_num, lens, exhausted
+                        messages, model, response_format, batch_num, lens, exhausted, run
                     )
                     return completed + retried, retry_reason
                 if on_oversized is None:
