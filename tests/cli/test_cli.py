@@ -211,6 +211,32 @@ class TestReviewCommandLocal:
         assert result.exit_code == 0, result.output
         assert seen == {"max_file_diff_lines": 500}
 
+    def test_review_forwards_named_options_without_a_manual_signature(self, monkeypatch):
+        seen: dict[str, object] = {}
+
+        class _CapturingEngine(FakeEngine):
+            def review(self, ctx, cfg):
+                seen.update(max_files=cfg.max_files, recursive=cfg.recursive)
+                return super().review(ctx, cfg)
+
+        _patch_local(monkeypatch, engine=_CapturingEngine(FakeProvider()))
+        result = CliRunner().invoke(
+            main,
+            [
+                "review",
+                "--provider",
+                "ollama",
+                "--model",
+                "llama3",
+                "--max-files",
+                "7",
+                "--no-recursive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert seen == {"max_files": 7, "recursive": False}
+
 
 class TestDiagramCommand:
     def _patch_diagram_provider(self, monkeypatch):
