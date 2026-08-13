@@ -424,6 +424,8 @@ class LiteLLMProvider:
         fallback_model: str | None = None,
         **default_opts: Any,
     ) -> None:
+        if "prompt_cache" in default_opts:
+            raise TypeError("prompt_cache was removed; prompt caching is always enabled")
         self.model = model
         self.fallback_model = fallback_model
         self.default_opts: dict[str, Any] = default_opts

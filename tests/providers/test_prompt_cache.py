@@ -90,6 +90,11 @@ def _messages(system: str = _BIG_SYSTEM) -> list[dict[str, str]]:
     ]
 
 
+def test_removed_prompt_cache_option_is_rejected_at_construction() -> None:
+    with pytest.raises(TypeError, match="prompt_cache.*removed"):
+        LiteLLMProvider(prompt_cache=False)
+
+
 def _sent_messages(model: str, *, system: str = _BIG_SYSTEM) -> list[Any]:
     """Run one completion and return the messages litellm actually received."""
     with patch("litellm.completion", return_value=_fake_response()) as mock_completion:

@@ -98,9 +98,10 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    families)
    the prefix is marked with `cache_control`; on backends that cache
    automatically (OpenAI, Azure, DeepSeek) the identical prefix is enough on
-   its own. Either way every call after a batch's first reads that
-   preamble-plus-diff prefix from cache, and on big diffs a warm-up primer
-   runs the first lens alone so a concurrent wave doesn't all miss it.
+   its own. On cache-capable routes, every call after a batch's first reads the
+   preamble-plus-diff prefix from cache. Unsupported routes use the merged-message
+   fallback and do not promise cache reads. On big diffs, a warm-up primer runs
+   the first lens alone so a concurrent wave doesn't all miss it.
 
    Each lens's focused structured prompt requests JSON output with
    the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,

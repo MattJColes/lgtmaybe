@@ -311,7 +311,7 @@ Ways to keep the bill honest if you want it:
 - pair it with `max_review_tokens`, so the worst case is bounded rather than
   merely unlikely — a deferral arriving past the ceiling is skipped and reported;
 - fetched text rides the lens's own block, so a deferral never invalidates the
-  prefix its sibling lenses read from cache;
+  shared prefix; on cache-capable routes, sibling lenses can reuse that prefix;
 - turn on `triage_model` first, so fewer files reach the lenses that might defer.
 
 Measure it rather than assume: run `python -m evals.run` with and without

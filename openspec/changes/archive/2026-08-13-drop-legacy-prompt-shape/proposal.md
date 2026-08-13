@@ -21,4 +21,4 @@ None.
 
 ## Impact
 
-Prompt construction, provider setup, CLI/Action configuration, generated reference documentation, and prompt-cache tests change. Provider compatibility and cache accounting remain unchanged.
+Prompt construction, provider setup, CLI/Action configuration, generated reference documentation, and prompt-cache tests change. Routes without explicit cache support still receive merged plain user messages; users who previously disabled caching may see different cache usage and token accounting.
