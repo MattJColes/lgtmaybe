@@ -147,7 +147,7 @@ needed — so a diagram posts automatically when a PR is opened or reopened and
 refreshes after later pushes. To opt out, set it in your workflow:
 
 ```yaml
-      - uses: MattJColes/lgtmaybe@v1
+      - uses: MattJColes/lgtmaybe@v2
         with:
           provider: anthropic
           model: claude-sonnet-4-6
