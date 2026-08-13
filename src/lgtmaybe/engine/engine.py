@@ -1610,10 +1610,16 @@ class LLMReviewEngine:
             "retrying the lens once at a lower reasoning effort",
             extra={"lens": lens.id, "batch": batch_num, "effort": step_down},
         )
-        self._stepped_down.add(lens.id)
-        return self._complete_lens(
+        findings, error = self._complete_lens(
             messages, model, response_format, batch_num, lens, None, None, effort=step_down
         )
+        if error is None:
+            # Recorded on the way OUT, not the way in: the notice claims findings
+            # came from the lower setting, and a retry that truncated again
+            # produced no such findings. That run reports the failure it already
+            # had — claiming a recovery on top of it would be two wrong notices.
+            self._stepped_down.add(lens.id)
+        return findings, error
 
     def _complete_lens(
         self,

@@ -501,6 +501,47 @@ def test_a_second_reasoning_bound_truncation_reports_and_stops() -> None:
     assert "reasoning_effort" in str(exc_info.value)
 
 
+def test_a_failed_step_down_is_not_reported_as_a_recovery() -> None:
+    """The notice says findings came from the lower setting. A retry that
+    truncated again produced none, so claiming it would be a second wrong notice
+    stacked on the failure the run already reports."""
+
+    class _TruncatesEverywhereButAnswersOneFile(_TruncatesUntilEffortDrops):
+        """two.py answers at any effort; one.py truncates at every effort.
+
+        Both lenses have to be in one run, or the review raises before a summary
+        is ever built.
+        """
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            diff = "\n".join(str(m.get("content", "")) for m in messages)
+            if "second_change" in diff and "first_change" not in diff:
+                return ProviderResult(
+                    text=_finding_json("two.py", "second_change = sys.maxsize"),
+                    input_tokens=5,
+                    output_tokens=5,
+                )
+            self.efforts.append(opts.get("reasoning_effort", self._effort))
+            raise ProviderTruncated(
+                _CEILING,
+                text="",
+                reasoning_tokens=_REASONING_SPENT,
+                output_tokens=_REASONING_CEILING,
+            )
+
+    provider = _TruncatesEverywhereButAnswersOneFile()
+    ctx = _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"])
+
+    _findings, summary = LLMReviewEngine(provider).review(
+        ctx,
+        _cfg(max_input_tokens=60),  # one batch per file, so one lens survives
+    )
+
+    assert provider.efforts == ["medium", "low"]  # it did step down, and failed
+    assert "re-run once at a lower" not in summary
+    assert "results may be incomplete" in summary
+
+
 def test_no_retry_when_reasoning_effort_is_unset() -> None:
     """Byte-identical behaviour for the users who never configured it: there is
     no lower level to step to, so nothing is retried and nothing is spent."""
