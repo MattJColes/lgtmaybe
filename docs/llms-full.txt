@@ -1943,12 +1943,22 @@ per-call budget resolved  timeout_s=3600  max_tokens=8192  max_tokens_source="pr
 If a lens does hit it you get a **truncation notice**, not a silent clean review:
 
 ```
-response truncated at the 8192-token `max_tokens` ceiling — raise `max_tokens`,
-or lower `max_input_tokens` so each call covers less
+response truncated at the 8192-token `max_tokens` ceiling — the batch is
+re-reviewed in smaller pieces automatically, so a lens that keeps doing it is
+usually generation instability in the model, which a higher ceiling makes more
+expensive rather than prevents
 ```
 
-Raise it, or turn it off entirely with `0` — which puts the run back on the
-timeout as its only stop:
+**One truncation is not a reason to raise the cap.** The batch is re-reviewed in
+smaller pieces on its own, so a lens that trips it occasionally has still been
+reviewed. A model that runs away repeatedly is generating past the ceiling rather
+than being cut short by it — a bigger ceiling just buys a longer wasted call, and
+a different model is the lever that moves it.
+
+Where a raise *is* right is a genuinely long answer being cut off — a large diff
+with many real findings, salvaging most of them each time. Then raise it, or turn
+the cap off entirely with `0`, which puts the run back on the timeout as its only
+stop:
 
 ```bash
 lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 16384
