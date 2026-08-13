@@ -9,9 +9,11 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import litellm
@@ -28,6 +30,7 @@ from litellm.exceptions import (
 )
 from litellm.utils import supports_prompt_caching
 from tenacity import (
+    RetryCallState,
     retry,
     retry_if_exception,
     stop_after_attempt,
@@ -188,6 +191,106 @@ def _is_permanent(exc: BaseException) -> bool:
     )
 
 
+# How long to back off between attempts, by what failed.
+#
+# The generic ladder is for a blip — a connection reset, an ollama server still
+# warming up, a 5xx. Sub-second is right there: the condition is gone by the time
+# the next request lands.
+#
+# A capacity 429 is not that. Gateways that meter a key — OpenRouter above all —
+# meter it per MINUTE, so the generic ladder (with tenacity's default `jitter=1`
+# that is roughly 1.1s + 1.2s + 1.4s) puts all four attempts inside the SAME
+# window, where they can only fail identically. That is how three consecutive
+# reviews each came back "1 of 4 review calls failed" on a rate limit while the
+# other three lenses sailed through. So a rate limit gets its own, much slower
+# ladder: long enough for the next attempt to land in a fresh window.
+#
+# Both stay well inside the call's existing `stop_after_delay` budget
+# (2.5 × timeout — 1,500s on direct cloud, 4,500s on the slow-capable routes
+# openrouter/ollama/openai-compatible), so nothing new needs bounding.
+_RATE_LIMIT_BACKOFF_INITIAL = 5.0
+_RATE_LIMIT_BACKOFF_MAX = 60.0
+
+# The most we will honour from a server-supplied `Retry-After`. A gateway that
+# asks for an hour is reporting a limit no single review can outwait, and
+# sleeping on it would burn the whole run's wall clock inside one lens. Clamp,
+# let the attempt fail, and let the engine's rescue wave (or, failing that, the
+# incomplete-results notice) be what handles it.
+_RETRY_AFTER_CEILING = 120.0
+
+_generic_wait = wait_exponential_jitter(initial=0.1, max=5)
+_rate_limit_wait = wait_exponential_jitter(
+    initial=_RATE_LIMIT_BACKOFF_INITIAL, max=_RATE_LIMIT_BACKOFF_MAX
+)
+
+
+def _response_headers(exc: BaseException) -> Mapping[str, str] | None:
+    """The response headers *exc* carries, from wherever litellm put them.
+
+    Three places, because litellm's own ``_get_response_headers`` looks in the
+    same three: the exception's ``headers`` attribute, the ``response`` it wraps,
+    and the ``litellm_response_headers`` its exception mapper stamps on the way
+    out. Which one is populated depends on the route, so reading only one loses
+    the header on the others.
+    """
+    for source in (
+        getattr(exc, "headers", None),
+        getattr(getattr(exc, "response", None), "headers", None),
+        getattr(exc, "litellm_response_headers", None),
+    ):
+        if source:
+            return source  # type: ignore[no-any-return]
+    return None
+
+
+def _retry_after_seconds(exc: BaseException) -> float | None:
+    """Seconds *exc*'s ``Retry-After`` asks us to wait, or None if it said nothing.
+
+    RFC 9110 allows either delta-seconds or an HTTP-date, and the Cloudflare edge
+    these gateways sit behind sends both forms, so both are read. A stale date
+    floors at zero rather than going negative, and an unparseable value is
+    treated as no header at all — a malformed hint must never crash the retry
+    loop, which is the one place left that can still rescue the call.
+
+    Deliberately only ``Retry-After``: it is the one header every 429 route
+    sends, and it says what we actually need in the units we need it. The
+    ``X-RateLimit-Reset`` families disagree on units (seconds here, epoch
+    milliseconds there) between providers, so parsing them would be guesswork
+    dressed as precision.
+    """
+    headers = _response_headers(exc)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        pass
+    try:
+        when = parsedate_to_datetime(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, (when - datetime.now(UTC)).total_seconds())
+
+
+def _retry_wait(retry_state: RetryCallState) -> float:
+    """How long to wait before the next attempt, chosen by what just failed."""
+    outcome = retry_state.outcome
+    exc = outcome.exception() if outcome is not None else None
+    if isinstance(exc, RateLimitError):
+        after = _retry_after_seconds(exc)
+        if after is not None:
+            # The server told us when it will take us back. Nothing we compute
+            # can beat that, so honour it — up to the ceiling above.
+            return min(after, _RETRY_AFTER_CEILING)
+        return _rate_limit_wait(retry_state)
+    return _generic_wait(retry_state)
+
+
 def _rejects_response_format(exc: Exception) -> bool:
     """True when an API error means the model won't take our structured-output param.
 
@@ -340,7 +443,7 @@ class LiteLLMProvider(ProviderClient):
             retry=retry_if_exception(lambda exc: not _is_permanent(exc)),
             stop=stop_after_attempt(_MAX_ATTEMPTS)
             | stop_after_delay(timeout * _CALL_BUDGET_MULTIPLIER),
-            wait=wait_exponential_jitter(initial=0.1, max=5),
+            wait=_retry_wait,
             reraise=True,
         )
         def _call() -> ProviderResult:

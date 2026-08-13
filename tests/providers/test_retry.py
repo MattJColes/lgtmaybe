@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -799,7 +801,13 @@ class TestFailFastOnPermanentErrors:
                 )
             return good
 
-        with patch("litellm.completion", side_effect=flaky):
+        # The rate-limit ladder starts at five seconds on purpose (see
+        # _RATE_LIMIT_BACKOFF_INITIAL); this test is about the retry happening at
+        # all, so it is not made to sit through one.
+        with (
+            patch("litellm.completion", side_effect=flaky),
+            patch.object(provider_module, "_rate_limit_wait", lambda _: 0.0),
+        ):
             provider = LiteLLMProvider()
             result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
@@ -1082,3 +1090,111 @@ class TestFallback:
             provider = LiteLLMProvider()
             with pytest.raises(RuntimeError):
                 provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+
+class TestRateLimitBackoff:
+    """A capacity 429 is a rate *window*, not a blip.
+
+    The generic ladder (`initial=0.1, max=5`, tenacity's default `jitter=1`) puts
+    all four attempts inside about four seconds, which is nothing against a
+    per-minute limit — every attempt lands in the same window and fails
+    identically. So a rate limit waits on its own, much longer, ladder, and
+    prefers the server's own `Retry-After` when it sends one.
+    """
+
+    @staticmethod
+    def _state(exc: BaseException, attempt: int = 1) -> Any:
+        """A minimal tenacity RetryCallState stand-in.
+
+        `wait_exponential_jitter` reads only `attempt_number`, and `_retry_wait`
+        only that plus the outcome's exception — so the real class, which wants a
+        retry object and the called function, buys the test nothing.
+        """
+        return SimpleNamespace(
+            attempt_number=attempt,
+            outcome=SimpleNamespace(exception=lambda: exc),
+        )
+
+    @staticmethod
+    def _rate_limited(**kwargs: Any) -> litellm.RateLimitError:
+        return litellm.RateLimitError(
+            message="RateLimitError: OpenrouterException - rate limit exceeded",
+            model="deepseek/deepseek-v4-flash",
+            llm_provider="openrouter",
+            **kwargs,
+        )
+
+    def _429(self, headers: dict[str, str]) -> httpx.Response:
+        return httpx.Response(
+            429, headers=headers, request=httpx.Request("POST", "https://openrouter.ai")
+        )
+
+    def test_retry_after_header_is_honoured(self) -> None:
+        """The server said when to come back; that beats any ladder we invent."""
+        exc = self._rate_limited(response=self._429({"retry-after": "30"}))
+        assert provider_module._retry_wait(self._state(exc)) == 30.0
+
+    def test_retry_after_is_read_from_the_headers_attribute(self) -> None:
+        """litellm carries headers in three different places depending on the
+        route (its own `_get_response_headers` looks in all three) — the direct
+        `headers` attribute is one of them, and it is set independently of
+        `response`."""
+        exc = self._rate_limited(headers={"retry-after": "45"})
+        assert provider_module._retry_wait(self._state(exc)) == 45.0
+
+    def test_retry_after_is_read_from_litellm_response_headers(self) -> None:
+        """The third place: litellm stamps the mapped exception with
+        `litellm_response_headers` on its way out of the exception mapper."""
+        exc = self._rate_limited()
+        exc.litellm_response_headers = {"Retry-After": "12"}
+        assert provider_module._retry_wait(self._state(exc)) == 12.0
+
+    def test_retry_after_accepts_an_http_date(self) -> None:
+        """RFC 9110 allows either delta-seconds or an HTTP-date, and the
+        Cloudflare edge these gateways sit behind sends both forms."""
+        when = datetime.now(UTC) + timedelta(seconds=40)
+        exc = self._rate_limited(response=self._429({"retry-after": format_datetime(when)}))
+        wait = provider_module._retry_wait(self._state(exc))
+        # Second-granularity header plus the clock moving under the test.
+        assert 35 <= wait <= 41
+
+    def test_a_retry_after_in_the_past_waits_no_time(self) -> None:
+        """A stale HTTP-date must not produce a negative wait."""
+        when = datetime.now(UTC) - timedelta(seconds=120)
+        exc = self._rate_limited(response=self._429({"retry-after": format_datetime(when)}))
+        assert provider_module._retry_wait(self._state(exc)) == 0.0
+
+    def test_an_absurd_retry_after_is_clamped(self) -> None:
+        """A day-long hint is a limit we will never outwait inside one review —
+        clamp it, let the attempt fail, and let the engine's rescue wave or the
+        incomplete notice take it from there."""
+        exc = self._rate_limited(response=self._429({"retry-after": "86400"}))
+        wait = provider_module._retry_wait(self._state(exc))
+        assert wait == provider_module._RETRY_AFTER_CEILING
+
+    def test_a_garbage_retry_after_falls_through_to_the_ladder(self) -> None:
+        """An unparseable header is no header — never a crash inside the wait."""
+        exc = self._rate_limited(response=self._429({"retry-after": "soon"}))
+        wait = provider_module._retry_wait(self._state(exc))
+        assert wait >= provider_module._RATE_LIMIT_BACKOFF_INITIAL
+
+    def test_a_headerless_rate_limit_uses_the_long_ladder(self) -> None:
+        """No hint from the server: back off on the rate-limit ladder, not the
+        generic one — the whole point is to outlast a per-minute window."""
+        exc = self._rate_limited()
+        first = provider_module._retry_wait(self._state(exc, attempt=1))
+        later = provider_module._retry_wait(self._state(exc, attempt=4))
+        assert first >= provider_module._RATE_LIMIT_BACKOFF_INITIAL
+        assert later > first
+        assert later <= provider_module._RATE_LIMIT_BACKOFF_MAX
+
+    def test_other_transient_errors_keep_the_fast_ladder(self) -> None:
+        """The slow ladder is for rate limits only. A connection blip (an ollama
+        server warming up) must still retry in fractions of a second."""
+        wait = provider_module._retry_wait(self._state(RuntimeError("connection reset")))
+        assert wait < provider_module._RATE_LIMIT_BACKOFF_INITIAL
+
+    def test_a_wait_with_no_outcome_does_not_crash(self) -> None:
+        """tenacity computes a wait before the first outcome exists."""
+        state = SimpleNamespace(attempt_number=1, outcome=None)
+        assert provider_module._retry_wait(state) >= 0
