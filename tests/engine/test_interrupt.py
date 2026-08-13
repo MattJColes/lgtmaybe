@@ -68,7 +68,15 @@ class _InterruptingProvider(FakeProvider):
 
 def _cfg(**overrides: object) -> ReviewConfig:
     defaults: dict[str, object] = {
-        "provider": Provider.ollama,  # serial: calls execute one at a time
+        "provider": Provider.openai,
+        # Serial on purpose, so the ceiling tripping during the first call leaves
+        # the rest queued and skippable. Stated outright rather than leaning on a
+        # provider that used to resolve to one worker — local providers now get
+        # the same six as cloud, so the proxy no longer holds. While it did, this
+        # suite failed roughly one run in ten: the ceiling still tripped, just one
+        # call later. A ceiling test that passes by luck is worse than one that
+        # fails.
+        "max_concurrency": 1,
         "model": "m",
         "categories": [
             ReviewCategory.security,

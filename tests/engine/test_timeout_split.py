@@ -340,7 +340,7 @@ def test_one_worker_reviews_the_split_pieces_one_at_a_time() -> None:
     assert provider.max_in_flight == 1
 
 
-def test_an_explicit_concurrency_lifts_the_split_off_the_single_stream_default() -> None:
+def test_an_explicit_concurrency_lifts_the_split_off_the_auto_default() -> None:
     """The user's number wins over the provider default, in the split as in the
     fan-out.
 

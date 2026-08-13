@@ -87,8 +87,8 @@ preset fans out one call per category, and custom lenses join the same fan-out.)
    same four run on every provider — worker count changes only how they are
    scheduled. `full` runs one call per category. Every
    (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
-   provider port, sized by `max_concurrency` (default 6 for cloud, 1 for
-   ollama and openai-compatible), so batches never wait on each other.
+   provider port, sized by `max_concurrency` (default 6 for every provider,
+   local included), so batches never wait on each other.
 
    Each call is shaped as a shared cacheable prefix —
    a lens-independent system preamble, then the wrapped diff — followed by
