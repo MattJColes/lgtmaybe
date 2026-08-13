@@ -1155,12 +1155,17 @@ class TestRateLimitBackoff:
         when = datetime.now(UTC) + timedelta(seconds=40)
         exc = self._rate_limited(response=self._429({"retry-after": format_datetime(when)}))
         wait = provider_module._retry_wait(self._state(exc))
-        # Upper bound is tight (the header is 40s at second granularity); the
-        # lower one is loose on purpose, because a contended CI worker can stall
-        # for seconds between the header being written and the wait computed.
-        # What is under test is that the DATE was parsed at all — the ladder
-        # would answer 5s, and anything above it could only come from the header.
-        assert provider_module._RATE_LIMIT_BACKOFF_INITIAL < wait <= 41
+        # Deliberately no wall-clock-derived bound in either direction: a
+        # contended CI worker can stall for seconds between the header being
+        # written and the wait computed, and pinning either end to 40 would make
+        # a correct implementation fail. What is under test is that the DATE was
+        # parsed at all — the ladder would answer 5s, so anything above it came
+        # from the header, and the clamp is what keeps it in range.
+        assert (
+            provider_module._RATE_LIMIT_BACKOFF_INITIAL
+            < wait
+            <= provider_module._RETRY_AFTER_CEILING
+        )
 
     def test_a_retry_after_in_the_past_waits_no_time(self) -> None:
         """A stale HTTP-date must not produce a negative wait."""

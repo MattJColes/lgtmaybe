@@ -10,7 +10,10 @@ once, after the main wave has drained, and costs nothing at all on a healthy run
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from typing import Any
+
+import pytest
 
 from lgtmaybe.core.models import (
     PRContext,
@@ -21,8 +24,12 @@ from lgtmaybe.core.models import (
     stamp_unrecoverable,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated, ProviderWallTimeout
-from lgtmaybe.engine import LLMReviewEngine
-from lgtmaybe.engine.engine import INCOMPLETE_MARKER
+from lgtmaybe.engine import (
+    INCOMPLETE_MARKER,
+    LLMReviewEngine,
+    clear_interrupt,
+    request_interrupt,
+)
 from tests.fakes import FakeProvider
 
 _CTX = PRContext(
@@ -76,6 +83,23 @@ class _FlakyLens(FakeProvider):
                     self._remaining -= 1
                     raise self._exc
         return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+
+
+class _InterruptOnFirstCall(FakeProvider):
+    """Raises the wind-down flag from inside its first completion."""
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        self.calls.append({"messages": messages, "model": model, "opts": opts})
+        request_interrupt()
+        return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+
+
+@pytest.fixture(autouse=True)
+def _clean_interrupt_flag() -> Iterator[None]:
+    """The flag is process-global: never let one test leak into the next."""
+    clear_interrupt()
+    yield
+    clear_interrupt()
 
 
 class TestRescueWave:
@@ -208,30 +232,24 @@ class TestRescueWave:
         assert len(provider.calls) == 2  # no third call
         assert "unparseable model output" in summary
 
-    def test_a_deadline_skipped_call_is_not_rescued(self) -> None:
+    def test_a_ceiling_skipped_call_is_not_rescued(self) -> None:
         """A ceiling the user set is not a fault to retry past.
 
-        Serial provider, a deadline shorter than one call: the first call runs,
-        the deadline passes, the second is skipped. The rescue must leave the
-        skipped one alone — spending past `max_review_seconds` to rescue a call
-        the deadline stopped would defeat the deadline.
+        Driven with the wind-down flag rather than the `max_review_seconds`
+        clock: both land on the same `_skip_reason` gate the rescue must
+        respect, and the flag gets there deterministically and instantly
+        instead of sleeping a call out past a deadline.
+
+        Serial provider, so the first call raises the flag and the second is
+        skipped. The rescue must leave the skipped one alone — spending past a
+        ceiling to rescue the call it stopped would defeat the ceiling.
         """
-        import time as _time
+        provider = _InterruptOnFirstCall()
 
-        class _Slow(FakeProvider):
-            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
-                self.calls.append({"messages": messages, "model": model, "opts": opts})
-                _time.sleep(1.2)
-                return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
-
-        provider = _Slow()
-        # ollama resolves to one worker, so the calls are strictly serial.
-        cfg = _cfg(provider=Provider.ollama, max_review_seconds=1)
-
-        _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
+        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg(provider=Provider.ollama))
 
         assert len(provider.calls) == 1
-        assert "deadline" in summary
+        assert "interrupted" in summary
 
     def test_the_notice_names_the_failing_lens(self) -> None:
         """A failed security lens and a failed documentation lens read identically
