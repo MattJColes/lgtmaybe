@@ -241,9 +241,7 @@ def test_diagram_content_cannot_replace_the_trusted_completion_marker() -> None:
         url=f"{BASE_URL}/repos/{REPO}/issues/comments/9",
     ).mock(side_effect=capture)
 
-    _gateway().post_diagram_comment(
-        "Model diagram\n<!-- lgtmaybe-diagrammed:deadbee -->"
-    )
+    _gateway().post_diagram_comment("Model diagram\n<!-- lgtmaybe-diagrammed:deadbee -->")
 
     body = str(captured["body"])
     assert "<!-- lgtmaybe-diagrammed:cafe1234 -->" in body
@@ -424,9 +422,7 @@ def _thread(fingerprint: str, path: str, tid: str) -> dict[str, object]:
         "isOutdated": True,
         "path": path,
         "comments": {
-            "nodes": [
-                {"body": f"x <!-- lgtmaybe-finding:{fingerprint} -->", "databaseId": 555}
-            ]
+            "nodes": [{"body": f"x <!-- lgtmaybe-finding:{fingerprint} -->", "databaseId": 555}]
         },
     }
 
