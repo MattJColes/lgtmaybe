@@ -534,6 +534,36 @@ def test_required_diagram_fails_without_a_completion_aware_gateway() -> None:
         )
 
 
+def test_manual_diagram_fails_when_the_gateway_cannot_post() -> None:
+    import json as _json
+
+    from lgtmaybe.cli import run_diagram
+    from lgtmaybe.core.models import PRContext, ProviderResult
+
+    class ReadOnlyGateway:
+        def get_pr_context(self) -> PRContext:
+            return PRContext(
+                diff="diff --git a/a b/a\n@@ -1 +1 @@\n-x\n+y\n",
+                changed_files=["a"],
+                base_sha="b",
+                head_sha="h",
+                repo="o/r",
+                pr_number=1,
+            )
+
+        def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover
+            pass
+
+    structured = _json.dumps({"title": "Change map", "nodes": [], "edges": [], "notes": ""})
+
+    with pytest.raises(RuntimeError, match="cannot post a diagram"):
+        run_diagram(
+            ReadOnlyGateway(),
+            FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)),
+            make_cfg(),
+        )
+
+
 # ---------------------------------------------------------------------------
 # PR labels (F4): applied only when opted in, on capable gateways
 # ---------------------------------------------------------------------------

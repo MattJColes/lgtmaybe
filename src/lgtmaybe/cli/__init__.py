@@ -153,6 +153,8 @@ def run_diagram(
     post_comment = getattr(github, "post_issue_comment", None)
     if post_comment is not None:
         post_comment(body)
+        return
+    raise RuntimeError("the GitHub gateway cannot post a diagram")
 
 
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
@@ -736,10 +738,11 @@ def _post_extras(
     describe: bool,
     diagram: bool,
 ) -> None:
-    """Post the auto extras (description, diagram) over a prefetched context.
+    """Post best-effort extras over a prefetched context.
 
-    Each is independently best-effort: a failure is logged and swallowed so an
-    extra can never turn a completed review into a failed run.
+    Automatic descriptions remain best-effort. Required automatic diagrams are
+    posted by ``run_review`` and never enter this helper; the ``diagram`` option
+    remains only for callers that explicitly request a best-effort diagram.
     """
     for enabled, run, name in (
         (describe, run_describe, "describe"),
@@ -759,12 +762,12 @@ def execute_review(
     describe: bool = False,
     diagram: bool = False,
 ) -> None:
-    """Build adapters, run the review, surface failures back to the PR.
+    """Build adapters, run the review, and surface failures back to the PR.
 
-    Shared by the ``review`` command and the ``action`` entrypoint. With
-    ``describe``/``diagram`` on (the action's auto extras), the adapters are
-    built once and the expensive O(files) PR-context fetch happens once —
-    extras and review all reuse them.
+    Shared by the ``review`` command and Action entrypoint. Automatic
+    descriptions are best-effort after review; an automatic diagram is a
+    required completion step inside ``run_review``. Both reuse one adapter set
+    and the prefetched O(files) PR context.
     """
     profiler.reset()
     # Adapter construction can fail before we have any way to post (bad URL,
@@ -776,10 +779,9 @@ def execute_review(
 
     ctx: PRContext | None = None
     if describe or diagram:
-        # The extras are best-effort and must never block the review. A failed
-        # prefetch just means run_review fetches (and surfaces) it itself. The
-        # fetch happens here, before the review, so the review reuses it — only
-        # the posting is deferred (see _post_extras).
+        # A failed prefetch means run_review fetches and surfaces the failure
+        # itself. Fetching here lets the review, required diagram, and optional
+        # description share one current-head context.
         try:
             ctx = github.get_pr_context()
         except Exception:

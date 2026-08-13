@@ -23,15 +23,15 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 
 ### Requirement: Resolving threads is best-effort GraphQL
 
-A follow-up run SHALL classify each earlier active finding as `fixed`, `still_open`, or `uncertain` from structured model output. Only `fixed` findings SHALL be resolved via GraphQL; `still_open`, `uncertain`, malformed, and missing verdicts SHALL remain open without repetitive replies. After a successful resolve, the opening comment's fingerprint and identity markers SHALL be rewritten into disjoint resolved families before the one cosmetic fixed reply is attempted. Each thread remains independently best-effort and identity-wide permission refusal SHALL stop further resolution attempts in that wave without failing the review.
+A follow-up run SHALL classify each earlier active finding as `fixed`, `still_open`, or `uncertain` from structured model output. A finding SHALL be resolved via GraphQL only when the model returns `fixed` and GitHub independently marks its anchored thread outdated; every other verdict SHALL remain open without repetitive replies. After a successful resolve, the opening comment's fingerprint and identity markers SHALL be rewritten into disjoint resolved families before the one cosmetic fixed reply is attempted. Each thread remains independently best-effort and identity-wide permission refusal SHALL stop further resolution attempts in that wave without failing the review.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: a prior finding is explicitly fixed
-- **WHEN** validation returns a well-formed `fixed` verdict for its active identity
+- **WHEN** validation returns `fixed` for its active identity and GitHub marks its anchor outdated
 - **THEN** its thread is resolved, its active markers are rewritten, and one fixed reply is attempted
 
 #### Scenario: validation cannot prove a fix
-- **WHEN** validation returns `still_open`, `uncertain`, malformed output, or no verdict
+- **WHEN** validation is invalid, inconclusive, or says `fixed` for a thread whose anchor is not outdated
 - **THEN** the thread remains open and receives no repetitive reply
 
 #### Scenario: GraphQL call errors
@@ -49,3 +49,7 @@ A follow-up run SHALL classify each earlier active finding as `fixed`, `still_op
 #### Scenario: the reply fails after a successful resolve
 - **WHEN** the thread resolves but its reply errors
 - **THEN** the active markers are still rewritten so the resolved finding may reappear later if the problem returns
+
+#### Scenario: the marker rewrite fails after resolve
+- **WHEN** the thread resolves but its active-marker rewrite fails
+- **THEN** the thread is reopened and receives no fixed reply, preserving retryable state

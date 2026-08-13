@@ -240,6 +240,8 @@ class TestActionRouting:
 
         assert result.exit_code == 0, result.output
         assert github.writes == ["review", "diagram", "describe"]
+        marker = f"<!-- lgtmaybe-diagrammed:{github.get_pr_context().head_sha} -->"
+        assert marker in github.diagrams[0]
 
     def test_issue_comment_event_routes_slash_command(self, tmp_path, monkeypatch):
         github = FakeGitHub()
