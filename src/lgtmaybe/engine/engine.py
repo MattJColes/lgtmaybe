@@ -1689,9 +1689,18 @@ def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
     meaningless without the ceiling it is a share of — so a route that reports
     neither keeps the split it has always had.
 
-    The returned reason replaces the adapter's, whose advice ("raise
-    `max_tokens`") is the one thing that provably does not work here: the cap
-    does not separate thinking from answering, so raising it buys more thinking.
+    The returned reason replaces the adapter's, which promises a split this
+    failure is not going to get and warns that a higher ceiling makes things
+    worse — true of the content runaway it was written for, and the wrong half
+    of the advice here. Both levers are named instead, because these numbers
+    cannot say which one is the fix.
+    Thinking that *expands to fill* whatever ceiling it is given is immune to a
+    bigger cap — the case recorded above, where the effort is the only move.
+    Thinking with a bounded natural size that merely exceeds this ceiling looks
+    identical here and is the opposite case: the cap fixes it outright, and
+    lowering the effort pays for the fix in review quality instead. Only a
+    re-run at a higher cap separates them, so the reader is handed the choice
+    rather than one of the two asserted as proven.
     """
     if not isinstance(exc, ProviderTruncated):
         return None
@@ -1703,7 +1712,8 @@ def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
     return (
         f"{type(exc).__name__}: spent {reasoning} of the {ceiling}-token `max_tokens` "
         "ceiling on reasoning, so the batch was not split — a smaller payload cannot "
-        "shrink a thinking budget; lower `reasoning_effort` instead"
+        "shrink a thinking budget. Lower `reasoning_effort`, or raise `max_tokens` if "
+        "this model simply thinks bigger than the ceiling"
     )
 
 
