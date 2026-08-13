@@ -473,6 +473,7 @@ class _GraphQL:
         self._threads = threads
         self.replies: list[dict[str, object]] = []
         self.resolved: list[str] = []
+        self.unresolved: list[str] = []
         self.queried = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -499,6 +500,9 @@ class _GraphQL:
         if "addPullRequestReviewThreadReply" in query:
             self.replies.append(variables)
             return httpx.Response(200, json={"data": {"addPullRequestReviewThreadReply": {}}})
+        if "unresolveReviewThread" in query:
+            self.unresolved.append(variables["threadId"])
+            return httpx.Response(200, json={"data": {"unresolveReviewThread": {}}})
         if "resolveReviewThread" in query:
             self.resolved.append(variables["threadId"])
             return httpx.Response(200, json={"data": {"resolveReviewThread": {}}})
@@ -596,8 +600,7 @@ def test_resolve_fixed_rewrites_fingerprint_to_resolved_marker() -> None:
 
 @respx.mock
 def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
-    """The fingerprint-marker PATCH is best-effort like the rest of resolve-on-fix:
-    a failure is swallowed and the thread is still resolved."""
+    """A failed marker rewrite reopens the thread for a later retry."""
     _mark_existing_review()
     gone_fp = finding_fingerprint("src/old.py", "Removed bug")
     graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1", comment_id=555)])
@@ -607,10 +610,12 @@ def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    # Must not raise, and the thread still resolves.
+    # Must not raise, but the thread cannot stay resolved with active markers.
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["THREAD1"]
+    assert graphql.unresolved == ["THREAD1"]
+    assert graphql.replies == []
 
 
 @respx.mock
