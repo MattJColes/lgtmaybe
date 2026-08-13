@@ -1403,6 +1403,122 @@ class TestMalformedRetryAfter:
             assert wait <= provider_module._RATE_LIMIT_BACKOFF_MAX
 
 
+class TestCeilingHitWithoutAFinishReason:
+    """A response that spent the whole configured ceiling IS a ceiling hit, even
+    when the route never says so.
+
+    litellm normalises `finish_reason` through a fixed map and rewrites anything
+    it doesn't recognise to `stop`, and ollama's route reports nothing useful at
+    all — so a call cut off at the cap arrives looking like a clean finish. In a
+    20-repository local benchmark two lens calls reported exactly the configured
+    512 output tokens with an empty error column, and the tooling downstream
+    counted zero truncations.
+
+    Spending the ceiling to the token is not something a model does by choosing
+    to stop there; it is what being cut off looks like. So it is treated as one.
+    """
+
+    @staticmethod
+    def _at_ceiling(completion_tokens: int, reason: str | None = "stop") -> Any:
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"findings": [{"path": "a.py"'),
+                    finish_reason=reason,
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=900, completion_tokens=completion_tokens),
+        )
+
+    def test_output_at_the_configured_ceiling_is_truncated(self) -> None:
+        with patch("litellm.completion", return_value=self._at_ceiling(512)):
+            provider = LiteLLMProvider(max_tokens=512)
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "ollama/qwen2.5-coder:3b")
+
+        assert "512" in str(exc_info.value)
+        assert exc_info.value.output_tokens == 512
+
+    def test_a_per_call_ceiling_is_honoured_over_the_default(self) -> None:
+        """The engine may pass its own `max_tokens`; the check has to judge the
+        ceiling this call actually ran under, not the one it was built with."""
+        with patch("litellm.completion", return_value=self._at_ceiling(256)):
+            provider = LiteLLMProvider(max_tokens=4096)
+            with pytest.raises(ProviderTruncated):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    "ollama/qwen2.5-coder:3b",
+                    max_tokens=256,
+                )
+
+    def test_output_over_the_ceiling_is_truncated(self) -> None:
+        """Some routes count a token or two past the cap. Still a ceiling hit."""
+        with patch("litellm.completion", return_value=self._at_ceiling(513)):
+            provider = LiteLLMProvider(max_tokens=512)
+            with pytest.raises(ProviderTruncated):
+                provider.complete([{"role": "user", "content": "hi"}], "ollama/qwen2.5-coder:3b")
+
+    def test_output_below_the_ceiling_is_a_normal_answer(self) -> None:
+        """The guard must not fire on a model that simply finished. This is the
+        common case, and a false truncation would post an incomplete notice on a
+        review that was complete."""
+        with patch("litellm.completion", return_value=self._at_ceiling(511)):
+            provider = LiteLLMProvider(max_tokens=512)
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "ollama/qwen2.5-coder:3b"
+            )
+
+        assert result.output_tokens == 511
+
+    def test_an_uncapped_call_is_never_judged_against_a_ceiling(self) -> None:
+        """With no configured ceiling there is nothing to compare against, and a
+        long answer is just a long answer."""
+        with patch("litellm.completion", return_value=self._at_ceiling(65536)):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openrouter/deepseek")
+
+        assert result.output_tokens == 65536
+
+    def test_the_newer_openai_spelling_is_the_same_ceiling(self) -> None:
+        """litellm accepts `max_completion_tokens` for the same cap, so a caller
+        that uses it must get the same detection."""
+        with patch("litellm.completion", return_value=self._at_ceiling(512)):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    "ollama/qwen2.5-coder:3b",
+                    max_completion_tokens=512,
+                )
+
+    def test_an_explicit_zero_wins_over_the_other_spelling(self) -> None:
+        """`max_tokens=0` is the uncapped escape hatch, and it is chosen by being
+        PRESENT, not by being truthy. Falling through to a second spelling would
+        re-impose a ceiling the caller explicitly turned off — and then report a
+        truncation against it."""
+        with patch("litellm.completion", return_value=self._at_ceiling(512)):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "ollama/qwen2.5-coder:3b",
+                max_tokens=0,
+                max_completion_tokens=512,
+            )
+
+        assert result.output_tokens == 512
+
+    def test_the_body_still_travels_for_salvage(self) -> None:
+        """Same contract as a reported truncation: the findings completed before
+        the cut are real, and the engine recovers them."""
+        with patch("litellm.completion", return_value=self._at_ceiling(512)):
+            provider = LiteLLMProvider(max_tokens=512)
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], "ollama/qwen2.5-coder:3b")
+
+        assert exc_info.value.text == '{"findings": [{"path": "a.py"'
+        assert exc_info.value.input_tokens == 900
+
+
 class TestTruncationAdviceMatchesTheMeasurement:
     """The ceiling message must not send the reader to the knob that measurably
     makes this worse.

@@ -197,12 +197,9 @@ the user set, not the model's own — plus the reasoning-token count where the
 route reports it, and SHALL carry the cut-off body so the engine can salvage the
 findings finished before the cut, and both counts as data so a caller can tell a
 long answer from exhausted thinking without reading the message. It SHALL NOT be
-retried — at temperature 0 the
-identical request reaches the identical ceiling, and each attempt costs a full
-ceiling-length generation — while a configured fallback model is still tried.
-Detection reads the finish reason only where the route reports it plainly:
-litellm rewrites a reason it does not recognise to `stop`, so a route that
-names a ceiling hit its own way is caught downstream by the parser instead.
+retried — at temperature 0 the identical request reaches the identical ceiling,
+and each attempt costs a full ceiling-length generation — while a configured
+fallback model is still tried.
 <!-- anchor: provider.truncation -->
 
 #### Scenario: the model generates to its output limit
@@ -220,10 +217,30 @@ names a ceiling hit its own way is caught downstream by the parser instead.
 - **THEN** the failure carries none either, never zero — "it never said" must not
   read as "it thought nothing"
 
+### Requirement: A ceiling hit is detected even when the route will not say
+
+Detection SHALL read the finish reason where the route reports it plainly, and
+SHALL additionally treat a response that generated to a ceiling lgtmaybe itself
+configured as a ceiling hit. litellm rewrites a finish reason it does not
+recognise to `stop`, and ollama reports nothing useful, so on those routes
+spending the whole cap is the only evidence there is — and without this a cut-off
+call renders in the profile as a clean, cheap success, which is what had
+benchmark tooling counting zero truncations. Judged only against a ceiling
+lgtmaybe set: with none configured a long answer is just a long answer.
+<!-- anchor: provider.ceiling-detection -->
+
 #### Scenario: the route misreports why it stopped
 - **WHEN** a provider reports a ceiling hit under a name litellm maps to `stop`
-- **THEN** the response still reaches the parser, which reports the truncation
-  from the unclosed JSON itself
+- **THEN** spending the configured ceiling is itself read as the truncation, so
+  the profile marks the call rather than showing a clean row
+
+#### Scenario: the answer simply finished
+- **WHEN** a completion stops below the configured ceiling
+- **THEN** it is an ordinary success, never a truncation
+
+#### Scenario: nothing was capped
+- **WHEN** no ceiling was configured for the call
+- **THEN** no output length is read as a truncation
 
 ### Requirement: Defaults are provider-aware
 

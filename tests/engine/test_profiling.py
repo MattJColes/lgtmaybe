@@ -449,3 +449,96 @@ class TestEnginePipelineTiming:
         with pytest.raises(engine_mod.ReviewIncompleteError):
             LLMReviewEngine(_BurntBudget()).review(_CTX, cfg)
         assert profiler.calls[-1].attempts == 2
+
+
+class TestCeilingHitsReachTheProfile:
+    """The row for a call that spent its whole output ceiling must say so.
+
+    This is the seam the fix is for: the adapter classifies the ceiling hit, the
+    profiler renders it. A local benchmark saw two lens calls report exactly the
+    configured 512 output tokens with an empty error column, so the tooling
+    reading that column counted zero truncations and could not exclude the call
+    time — the row looked like a clean, cheap success.
+    """
+
+    @staticmethod
+    def _at_ceiling(completion_tokens: int) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"findings": [{"path": "a.py"'),
+                    # `stop`, not `length` — the case the profile used to miss.
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=900, completion_tokens=completion_tokens),
+        )
+
+    def test_a_ceiling_hit_without_a_finish_reason_is_marked(self) -> None:
+        from unittest.mock import patch
+
+        from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+        profiler.reset()
+        provider = LiteLLMProvider(max_tokens=512)
+        with (
+            patch("litellm.completion", return_value=self._at_ceiling(512)),
+            pytest.raises(ProviderTruncated),
+        ):
+            timed_complete(
+                provider,
+                [{"role": "user", "content": "hi"}],
+                model="ollama/qwen2.5-coder:3b",
+                label="ponytail",
+            )
+
+        call = profiler.calls[-1]
+        assert call.error is not None, "the profile row gave no truncation marker"
+        assert "Truncated" in call.error
+        # And it is charged for what it spent: the row a reader is looking at is
+        # routinely the most expensive call in the run.
+        assert (call.input_tokens, call.output_tokens) == (900, 512)
+
+    def test_the_rendered_error_column_is_not_a_dash(self) -> None:
+        """Asserted on the rendered table, because `-` in that column is exactly
+        what the benchmark tooling read as "no truncation here"."""
+        from unittest.mock import patch
+
+        from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+        profiler.reset()
+        provider = LiteLLMProvider(max_tokens=512)
+        with (
+            patch("litellm.completion", return_value=self._at_ceiling(512)),
+            pytest.raises(ProviderTruncated),
+        ):
+            timed_complete(
+                provider,
+                [{"role": "user", "content": "hi"}],
+                model="ollama/qwen2.5-coder:3b",
+                label="ponytail",
+            )
+
+        row = next(line for line in profiler.render().splitlines() if line.startswith("ponytail"))
+        assert not row.rstrip().endswith("-"), f"error column read as empty: {row!r}"
+        assert "Truncated" in row
+
+    def test_a_normal_answer_still_renders_clean(self) -> None:
+        """The guard must not paint every local call as truncated."""
+        from unittest.mock import patch
+
+        from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+        profiler.reset()
+        provider = LiteLLMProvider(max_tokens=512)
+        with patch("litellm.completion", return_value=self._at_ceiling(200)):
+            timed_complete(
+                provider,
+                [{"role": "user", "content": "hi"}],
+                model="ollama/qwen2.5-coder:3b",
+                label="ponytail",
+            )
+
+        assert profiler.calls[-1].error is None
