@@ -51,6 +51,9 @@ class CallRecord:
     # pair of settings have headroom on the real workload?", which before this
     # only became visible when a call FAILED, in the truncation message.
     output_ceiling: int | None = None
+    # Parsed review findings. None for non-review calls and failures; zero is a
+    # successful lens that explicitly returned an empty findings payload.
+    findings: int | None = None
 
     @property
     def reasoning_share(self) -> float | None:
@@ -76,12 +79,14 @@ class Profiler:
     _started: float = field(default_factory=time.perf_counter)
     calls: list[CallRecord] = field(default_factory=list)
     stages: list[StageRecord] = field(default_factory=list)
+    returned_findings: int | None = None
 
     def reset(self) -> None:
         """Start a fresh run: drop prior records and restart the wall clock."""
         with self._lock:
             self.calls = []
             self.stages = []
+            self.returned_findings = None
             self._started = time.perf_counter()
 
     def record_call(
@@ -97,6 +102,7 @@ class Profiler:
         cache_creation_tokens: int,
         reasoning_tokens: int | None = None,
         output_ceiling: int | None = None,
+        findings: int | None = None,
         error: str | None = None,
     ) -> None:
         """Record one provider call and log it as a structured line."""
@@ -111,6 +117,7 @@ class Profiler:
             cache_creation_tokens=cache_creation_tokens,
             reasoning_tokens=reasoning_tokens,
             output_ceiling=output_ceiling,
+            findings=findings,
             error=error,
         )
         with self._lock:
@@ -123,11 +130,22 @@ class Profiler:
             del extra["reasoning_tokens"]
         if output_ceiling is None:
             del extra["output_ceiling"]
+        if findings is None:
+            del extra["findings"]
         if not error:
             del extra["error"]
         _log.info("provider call", extra=extra)
 
-    def record_result(self, label: str, batch: int, elapsed: float, result: ProviderResult) -> None:
+    def record_result(
+        self,
+        label: str,
+        batch: int,
+        elapsed: float,
+        result: ProviderResult,
+        *,
+        findings: int | None = None,
+        error: str | None = None,
+    ) -> None:
         """Record a successful call: usage counters straight off *result*."""
         self.record_call(
             label=label,
@@ -140,7 +158,14 @@ class Profiler:
             cache_creation_tokens=result.cache_creation_tokens,
             reasoning_tokens=result.reasoning_tokens,
             output_ceiling=result.output_ceiling,
+            findings=findings,
+            error=error,
         )
+
+    def record_returned_findings(self, count: int) -> None:
+        """Record how many findings survived the review pipeline."""
+        with self._lock:
+            self.returned_findings = count
 
     def record_error(
         self, label: str, batch: int, elapsed: float, exc: BaseException, reason: str | None = None
@@ -214,6 +239,7 @@ class Profiler:
             total = time.perf_counter() - self._started
             calls = list(self.calls)
             stages = list(self.stages)
+            returned_findings = self.returned_findings
 
         lines = ["== lgtmaybe profile ==", f"total wall time: {total:.1f}s", ""]
 
@@ -230,7 +256,7 @@ class Profiler:
         lines.append(
             f"{'call':<16} {'batch':>5} {'tries':>5} {'elapsed':>9} "
             f"{'in_tok':>8} {'out_tok':>8} {'think_tok':>9} {'think_%':>8} "
-            f"{'cache_rd':>8} {'cache_wr':>8}  error"
+            f"{'cache_rd':>8} {'cache_wr':>8} {'findings':>8}  error"
         )
         for call in sorted(calls, key=lambda c: c.elapsed, reverse=True):
             # A dash, never a zero, on both: a route that reported no breakdown
@@ -239,17 +265,22 @@ class Profiler:
             thinking = "-" if call.reasoning_tokens is None else f"{call.reasoning_tokens}"
             share = call.reasoning_share
             percent = "-" if share is None else f"{round(100 * share)}%"
+            findings = "-" if call.findings is None else str(call.findings)
             lines.append(
                 f"{call.label:<16} {call.batch:>5} {call.attempts:>5} {call.elapsed:>8.2f}s "
                 f"{call.input_tokens:>8} {call.output_tokens:>8} {thinking:>9} {percent:>8} "
-                f"{call.cache_read_tokens:>8} {call.cache_creation_tokens:>8}  "
-                f"{call.error or '-'}"
+                f"{call.cache_read_tokens:>8} {call.cache_creation_tokens:>8} "
+                f"{findings:>8}  {call.error or '-'}"
             )
         lines.append("")
 
         read = sum(c.cache_read_tokens for c in calls)
         created = sum(c.cache_creation_tokens for c in calls)
         lines.append(f"cache: {read} tokens read / {created} created across {len(calls)} calls")
+        parsed = [c.findings for c in calls if c.findings is not None]
+        if parsed or returned_findings is not None:
+            returned = "-" if returned_findings is None else str(returned_findings)
+            lines.append(f"findings: {sum(parsed)} parsed / {returned} returned")
         for extra_line in (self._render_reasoning(calls), self._render_headroom(calls)):
             if extra_line:
                 lines.append(extra_line)

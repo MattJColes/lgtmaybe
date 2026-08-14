@@ -1164,6 +1164,7 @@ class LLMReviewEngine:
                 filtered = apply_finding_rules(filtered, cfg)
 
         summary_line = _summary_line(len(filtered), cfg)
+        profiler.record_returned_findings(len(filtered))
 
         notices = _build_notices(
             _NoticeState(
@@ -1786,12 +1787,19 @@ class LLMReviewEngine:
                 findings, split_reason = on_oversized(reason)
                 return completed + findings, split_reason
             return [], reason
-        profiler.record_result(lens.id, batch_num, time.perf_counter() - started, result)
+        elapsed = time.perf_counter() - started
         salvaged = 0
         try:
             findings = parse_findings(result.text)
         except ParseError as exc:
             if not exc.truncated:
+                profiler.record_result(
+                    lens.id,
+                    batch_num,
+                    elapsed,
+                    result,
+                    error="unparseable model output",
+                )
                 _log.warning("unparseable model output", extra={"lens": lens.id})
                 return [], "unparseable model output"
             # A response cut off at the output ceiling is not a badly-behaved
@@ -1818,6 +1826,14 @@ class LLMReviewEngine:
                 f"{recovered_note}"
             )
             _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
+            profiler.record_result(
+                lens.id,
+                batch_num,
+                elapsed,
+                result,
+                findings=salvaged,
+                error=reason,
+            )
             # The findings fall through to be stamped like any others, but the
             # reason travels with them: the call still counts as failed, so the
             # incomplete notice fires and a partial lens is never read as a clean
@@ -1825,6 +1841,13 @@ class LLMReviewEngine:
             # half-answer this whole path exists to prevent.
             return _stamp_categories(findings, lens), reason
         findings = _stamp_categories(findings, lens)
+        profiler.record_result(
+            lens.id,
+            batch_num,
+            elapsed,
+            result,
+            findings=len(findings),
+        )
         if on_needs is not None:
             needs = parse_needs(result.text)
             if needs:
