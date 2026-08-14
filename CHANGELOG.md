@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.2...lgtmaybe-v2.1.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **github:** post re-run inline findings when the run was incomplete ([#445](https://github.com/MattJColes/lgtmaybe/issues/445)) ([d145b70](https://github.com/MattJColes/lgtmaybe/commit/d145b70aa6bf0ca8a8d6889efaf57dd8b59b0374))
+
 ## [2.1.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.1...lgtmaybe-v2.1.2) (2026-08-14)
 
 
