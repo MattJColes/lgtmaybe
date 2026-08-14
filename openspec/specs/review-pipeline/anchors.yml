@@ -133,3 +133,13 @@ engine.scan-manifests:
     kind: function_definition
     has: { field: name, regex: '^is_scannable_manifest$' }
   files: [src/lgtmaybe/github/**/*.py]
+
+engine.profile-findings:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^render$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^Profiler$' }
+      stopBy: end
+  files: [src/lgtmaybe/engine/profiling.py]
