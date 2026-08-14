@@ -25,6 +25,9 @@ is what makes `pull_request_target` (secrets available) safe on fork PRs.
 Reviews SHALL post as one batched REST review (inline comments + summary),
 with a hidden marker comment enabling in-place updates on re-run — the marker
 also carries the last-reviewed-SHA watermark that drives incremental review.
+When GitHub rejects an individual rerun comment with 422, posting SHALL continue
+and the rejected finding SHALL be preserved in the updated review body. Other
+posting failures SHALL remain fatal.
 <!-- anchor: github.post-review -->
 
 #### Scenario: review re-runs on the same PR
@@ -36,6 +39,15 @@ also carries the last-reviewed-SHA watermark that drives incremental review.
   is an in-place edit nobody is notified about
 - **THEN** the notice also posts as a PR comment, so a partial review is never
   indistinguishable from a clean one
+
+#### Scenario: GitHub rejects one rerun comment position
+- **WHEN** one new inline comment returns 422 and later comments remain valid
+- **THEN** later comments still post and the rejected finding appears in the
+  review body instead of failing the whole review
+
+#### Scenario: GitHub rejects a rerun comment for another reason
+- **WHEN** an individual comment returns a non-422 error
+- **THEN** the review fails without claiming that finding was delivered
 
 ### Requirement: Findings carry fingerprints
 
@@ -150,7 +162,6 @@ A follow-up run SHALL classify each earlier active finding as `fixed`, `still_op
 - **WHEN** the thread resolves but its reply errors
 - **THEN** the fingerprint marker is still rewritten — a resolved thread is never
   revisited, so leaving an active marker would suppress the finding forever
-
 
 ### Requirement: Downvoted findings are read from 👎 reactions
 
