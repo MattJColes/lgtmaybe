@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 import respx
 
 from lgtmaybe.core.models import ReviewFinding, Severity
@@ -58,6 +59,26 @@ FINDING = ReviewFinding(
     title="Import order",
     body="sys should be before os",
 )
+
+SECOND_FINDING = ReviewFinding(
+    path="src/app.py",
+    line=3,
+    side="RIGHT",
+    severity=Severity.high,
+    title="Validate the imported module",
+    body="the second finding must still reach GitHub",
+)
+
+TWO_FINDING_DIFF = """\
+diff --git a/src/app.py b/src/app.py
+index 0000001..0000002 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -1 +1,3 @@
+ import os
++import sys
++import app
+"""
 
 
 def _gateway() -> RestGitHubGateway:
@@ -365,6 +386,121 @@ def test_rerun_posts_new_inline_comment_with_commit_id() -> None:
     assert posted[0]["line"] == 2
     assert posted[0]["side"] == "RIGHT"
     assert posted[0]["commit_id"] == "headsha123"
+
+
+@respx.mock
+def test_rerun_demotes_a_422_comment_and_posts_later_findings() -> None:
+    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
+    updated_bodies: list[str] = []
+
+    def capture_update(request: httpx.Request) -> httpx.Response:
+        updated_bodies.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={"id": 99})
+
+    respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(side_effect=capture_update)
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    posted_paths: list[str] = []
+
+    def reject_then_accept(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        posted_paths.append(payload["path"] + f":{payload['line']}")
+        if len(posted_paths) == 1:
+            return httpx.Response(
+                422,
+                json={
+                    "message": "Validation Failed",
+                    "errors": [{"field": "line", "code": "invalid"}],
+                },
+            )
+        return httpx.Response(201, json={"id": 1000})
+
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(side_effect=reject_then_accept)
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.post_review([FINDING, SECOND_FINDING], "2 findings", diff=TWO_FINDING_DIFF)
+
+    assert posted_paths == ["src/app.py:2", "src/app.py:3"]
+    assert len(updated_bodies) == 2
+    assert "### Additional findings" in updated_bodies[-1]
+    assert "Import order" in updated_bodies[-1]
+    assert "Validate the imported module" not in updated_bodies[-1]
+
+
+@respx.mock
+def test_rerun_logs_sanitized_422_validation_details(caplog: pytest.LogCaptureFixture) -> None:
+    _mock_update_flow(existing_comment_fps=[])
+    validation_error = respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "message": "Validation Failed",
+                "errors": [
+                    {
+                        "resource": "PullRequestReviewComment",
+                        "field": "line",
+                        "value": FINDING.body,
+                    }
+                ],
+            },
+        )
+    )
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+    assert validation_error.called
+    assert "src/app.py:2:RIGHT" in caplog.text
+    assert "Validation Failed" in caplog.text
+    assert "PullRequestReviewComment" in caplog.text
+    assert FINDING.body not in caplog.text
+    assert TOKEN not in caplog.text
+
+
+@respx.mock
+def test_rerun_keeps_non_422_comment_errors_fatal() -> None:
+    _mock_update_flow(existing_comment_fps=[])
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(403, json={"message": "Forbidden"})
+    )
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+
+@respx.mock
+def test_rerun_fails_when_the_recovery_body_cannot_be_updated() -> None:
+    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
+    update_attempts = 0
+
+    def accept_then_reject_update(_request: httpx.Request) -> httpx.Response:
+        nonlocal update_attempts
+        update_attempts += 1
+        return httpx.Response(200 if update_attempts == 1 else 500, json={"id": 99})
+
+    respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(side_effect=accept_then_reject_update)
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(422, json={"message": "Validation Failed"})
+    )
+
+    gateway = _gateway()
+    gateway.mark_reviewed("headsha123")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+    assert update_attempts == 2
 
 
 @respx.mock

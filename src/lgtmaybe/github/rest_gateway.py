@@ -481,7 +481,8 @@ class RestGitHubGateway:
             diff = self._fetch_pr_diff()
 
         commentable: CommentableLines = build_commentable_lines(diff or "")
-        comments, demoted, broad = self._partition_findings(findings, commentable)
+        inline, demoted, broad = self._partition_findings(findings, commentable)
+        comments = [comment for comment, _finding in inline]
 
         body = f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
         if self._reviewed_sha:
@@ -511,7 +512,21 @@ class RestGitHubGateway:
             # NEW findings (fingerprints not already on the PR) as individual
             # review comments — otherwise a re-run's fresh findings would only
             # ever appear in the summary body, silently losing their line.
-            self._post_new_inline_comments(comments, self._reviewed_sha)
+            rejected = self._post_new_inline_comments(inline, self._reviewed_sha)
+            if rejected:
+                body = (
+                    f"{summary}{_render_demoted([*demoted, *rejected])}"
+                    f"{_render_broad(broad)}\n\n{self._marker}"
+                )
+                if self._reviewed_sha:
+                    body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+                resp = self._client.put(
+                    update_url,
+                    headers=self._json_headers,
+                    json={"body": body},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
             # A re-run: any of our prior conversations whose finding is now gone
             # (and whose code changed) is fixed — collapse it. Best-effort, so a
             # GraphQL hiccup never fails an otherwise-successful review.
@@ -857,8 +872,10 @@ class RestGitHubGateway:
         self._reviewed_sha = head_sha
 
     def _post_new_inline_comments(
-        self, comments: list[dict[str, Any]], head_sha: str | None
-    ) -> None:
+        self,
+        inline: list[tuple[dict[str, Any], ReviewFinding]],
+        head_sha: str | None,
+    ) -> list[ReviewFinding]:
         """Post the inline comments whose finding isn't already on the PR.
 
         The review-update endpoint only replaces the body, so on a re-run new
@@ -877,14 +894,17 @@ class RestGitHubGateway:
         a re-run of the same N findings posts nothing, while an N+1th occurrence
         the last run missed is still a new finding and still posts.
 
-        Best-effort as a whole — without a head SHA there is nothing to anchor
-        to, so nothing posts.
+        A comment GitHub rejects with 422 is returned to the caller for demotion
+        into the review body; later comments still post. Other errors remain
+        fatal. Without a head SHA there is nothing to anchor to, so nothing
+        posts.
         """
-        if not comments or head_sha is None:
-            return
+        if not inline or head_sha is None:
+            return []
         unmatched = self._existing_finding_keys()
         url = f"{self._pr_api}/comments"
-        for comment in comments:
+        rejected: list[ReviewFinding] = []
+        for comment, finding in inline:
             keys = _finding_keys(comment.get("body", ""))
             already = next((i for i, e in enumerate(unmatched) if e & keys), None)
             if already is not None:
@@ -896,7 +916,35 @@ class RestGitHubGateway:
                 json={**comment, "commit_id": head_sha},
                 timeout=_TIMEOUT,
             )
+            if resp.status_code == 422:
+                try:
+                    error = resp.json()
+                except ValueError:
+                    error = {}
+                message = error.get("message") if isinstance(error, dict) else None
+                raw_errors = error.get("errors") if isinstance(error, dict) else None
+                errors = (
+                    [
+                        {key: item[key] for key in ("resource", "field", "code") if key in item}
+                        for item in raw_errors
+                        if isinstance(item, dict)
+                    ]
+                    if isinstance(raw_errors, list)
+                    else None
+                )
+                _log.warning(
+                    "GitHub rejected inline comment at %s:%s:%s with 422: "
+                    "message=%r errors=%r; demoting to review body",
+                    finding.path,
+                    finding.line,
+                    finding.side,
+                    message,
+                    errors,
+                )
+                rejected.append(finding)
+                continue
             resp.raise_for_status()
+        return rejected
 
     def _existing_finding_keys(self) -> list[set[str]]:
         """Hidden ids of the lgtmaybe findings already posted inline on the PR.
@@ -1363,7 +1411,11 @@ class RestGitHubGateway:
     def _partition_findings(
         findings: list[ReviewFinding],
         commentable: CommentableLines,
-    ) -> tuple[list[dict[str, Any]], list[ReviewFinding], list[ReviewFinding]]:
+    ) -> tuple[
+        list[tuple[dict[str, Any], ReviewFinding]],
+        list[ReviewFinding],
+        list[ReviewFinding],
+    ]:
         """Split findings into inline comments, body-demoted, and broad findings.
 
         A finding is posted inline only when it is confidently placed
@@ -1379,7 +1431,7 @@ class RestGitHubGateway:
         so it renders in the collapsed "Broader observations" block instead of
         cluttering the must-fix inline list.
         """
-        comments: list[dict[str, Any]] = []
+        inline: list[tuple[dict[str, Any], ReviewFinding]] = []
         demoted: list[ReviewFinding] = []
         broad: list[ReviewFinding] = []
         for f in findings:
@@ -1409,5 +1461,5 @@ class RestGitHubGateway:
             fp = finding_fingerprint(f.path, f.title)
             comment["body"] += f"\n\n<!-- lgtmaybe-finding:{fp} -->"
             comment["body"] += f"\n<!-- lgtmaybe-identity:{finding_identity(f)} -->"
-            comments.append(comment)
-        return comments, demoted, broad
+            inline.append((comment, f))
+        return inline, demoted, broad
