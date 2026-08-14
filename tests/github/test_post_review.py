@@ -24,6 +24,7 @@ TOKEN = "ghp_test"
 BASE_URL = "https://api.github.com"
 PR_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}"
 REVIEWS_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/reviews"
+REVIEW_COMMENTS_URL = f"{BASE_URL}/repos/{REPO}/pulls/{PR_NUMBER}/comments"
 COMMENTS_URL = f"{BASE_URL}/repos/{REPO}/issues/{PR_NUMBER}/comments"
 GRAPHQL_URL = f"{BASE_URL}/graphql"
 
@@ -118,6 +119,15 @@ def test_post_review_updates_existing_review_on_second_call() -> None:
 
     respx.route(method="PUT", url=update_url).mock(side_effect=capture_update)
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
+    # Re-run posting (#443): the finding posts individually, anchored to the
+    # lazily-fetched PR head.
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(200, json=_pr_detail()))
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1000})
+    )
 
     client = httpx.Client()
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=client)
@@ -164,6 +174,14 @@ def test_post_review_finds_existing_review_past_first_page() -> None:
 
     respx.route(method="PUT", url=update_url).mock(side_effect=capture_update)
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
+    # Re-run posting (#443): see the second-call test above.
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(200, json=_pr_detail()))
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1000})
+    )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
@@ -458,12 +476,22 @@ def test_post_review_with_distinct_marker_keys_coexist() -> None:
 
 def _mark_existing_review() -> None:
     """Route the reviews GET so an existing lgtmaybe review is found (a re-run)
-    and the PUT that updates its summary succeeds."""
+    and the PUT that updates its summary succeeds. Also routes the calls a
+    re-run's individual inline posting now makes (#443): the posted-comments
+    listing (dedupe), the comment POST, and the lazy PR-head fetch that anchors
+    a run with no completion watermark."""
     existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
     )
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1000})
+    )
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(200, json=_pr_detail()))
 
 
 class _GraphQL:
@@ -1064,6 +1092,15 @@ def test_reviews_list_fetched_once_per_run() -> None:
     respx.route(method="PUT", url=f"{REVIEWS_URL}/{existing_review_id}").mock(
         return_value=httpx.Response(200, json={"id": existing_review_id})
     )
+    # Re-run posting (#443): the finding posts individually; neither call
+    # touches the reviews list, which is what this test counts.
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(200, json=_pr_detail()))
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1000})
+    )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     assert gw.last_reviewed_sha() == "def5678"
@@ -1560,7 +1597,6 @@ def test_badge_leaves_the_hidden_markers_byte_identical() -> None:
 def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
     """A comment posted before badges existed (an unbadged title line) is still
     recognised on the next run, so upgrading causes no re-post storm."""
-    _mark_existing_review()
     respx.route(method="POST", url=GRAPHQL_URL).mock(
         side_effect=_GraphQL([])  # no prior threads to resolve
     )
@@ -1572,6 +1608,8 @@ def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
         f"<!-- lgtmaybe-finding:{finding_fingerprint(finding.path, finding.title)} -->\n"
         f"<!-- lgtmaybe-identity:{finding_identity(finding)} -->"
     )
+    # Registered BEFORE _mark_existing_review so this legacy listing wins over
+    # the helper's empty one (first matching route wins in respx).
     respx.route(method="GET", url__startswith=f"{PR_URL}/comments").mock(
         return_value=httpx.Response(200, json=[{"id": 1, "body": legacy_body}])
     )
@@ -1582,6 +1620,7 @@ def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
         return httpx.Response(201, json={"id": 2})
 
     respx.route(method="POST", url=f"{PR_URL}/comments").mock(side_effect=capture_post)
+    _mark_existing_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     gw.mark_reviewed("deadbee")

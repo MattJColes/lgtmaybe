@@ -546,6 +546,58 @@ def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
     assert posted[0]["path"] == "src/app.py"
 
 
+@respx.mock
+def test_incomplete_rerun_still_posts_new_inline_findings() -> None:
+    """#443: an incomplete re-run carries no completion watermark
+    (``mark_reviewed(None)``), but its successful calls still computed findings
+    and the summary still counts them — they must reach GitHub inline, anchored
+    to the PR's current head, rather than vanish between count and post."""
+    posted, put_route = _mock_update_flow(existing_comment_fps=[])
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json={"head": {"sha": "headsha999"}})
+    )
+
+    gateway = _gateway()
+    gateway.mark_reviewed(None)
+    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+    assert put_route.called  # summary still updated in place
+    assert len(posted) == 1
+    assert posted[0]["commit_id"] == "headsha999"
+    assert posted[0]["path"] == "src/app.py"
+
+
+@respx.mock
+def test_rerun_without_any_resolvable_head_demotes_new_findings_to_the_body(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The anchor-less fallback must never silently drop findings (#443): when
+    no head SHA can be resolved at all, the unmatched candidates demote into
+    the review body — the same recovery as a 422 — with a warning."""
+    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
+    updated_bodies: list[str] = []
+
+    def capture_update(request: httpx.Request) -> httpx.Response:
+        updated_bodies.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={"id": 99})
+
+    respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(side_effect=capture_update)
+    respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(503))
+
+    gateway = _gateway()
+    gateway.mark_reviewed(None)
+    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+
+    assert len(updated_bodies) == 2  # recovery body re-PUT with the demoted finding
+    assert "### Additional findings" in updated_bodies[-1]
+    assert "Import order" in updated_bodies[-1]
+    assert "demoting" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # incremental scope on resolve-on-fix
 # ---------------------------------------------------------------------------
@@ -604,6 +656,9 @@ def test_incremental_scope_never_resolves_thread_outside_reviewed_paths() -> Non
     """A finding on an un-re-reviewed file is absent from this run's findings
     only because its hunk wasn't in the increment — its thread must stay open."""
     posted, _put = _mock_update_flow(existing_comment_fps=[])
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json={"head": {"sha": "headsha999"}})
+    )
     graphql = _GraphQL(
         threads=[
             _thread(finding_fingerprint("other.py", "old bug"), path="other.py", tid="OUT"),
@@ -624,6 +679,9 @@ def test_incremental_scope_never_resolves_thread_outside_reviewed_paths() -> Non
 @respx.mock
 def test_no_scope_keeps_full_resolve_behaviour() -> None:
     posted, _put = _mock_update_flow(existing_comment_fps=[])
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json={"head": {"sha": "headsha999"}})
+    )
     graphql = _GraphQL(
         threads=[_thread(finding_fingerprint("other.py", "old bug"), path="other.py", tid="T1")]
     )

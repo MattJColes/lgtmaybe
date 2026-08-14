@@ -40,6 +40,13 @@ posting failures SHALL remain fatal.
 - **THEN** the notice also posts as a PR comment, so a partial review is never
   indistinguishable from a clean one
 
+#### Scenario: an incomplete re-run computed findings
+- **WHEN** a re-run stamps no completion watermark but its calls produced new
+  findings
+- **THEN** those findings still post inline, anchored to the PR's current head
+  — or, when no head can be resolved, are demoted into the review body — never
+  silently dropped between the summary count and GitHub
+
 #### Scenario: GitHub rejects one rerun comment position
 - **WHEN** one new inline comment returns 422 and later comments remain valid
 - **THEN** later comments still post and the rejected finding appears in the

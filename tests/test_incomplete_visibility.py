@@ -274,11 +274,22 @@ def test_notice_is_visible_on_a_re_run() -> None:
         )[1]
     )
     # No inline comments already on the PR, and posting one succeeds.
+    inline_posts: list[dict[str, object]] = []
+
+    def capture_inline(request: httpx.Request) -> httpx.Response:
+        inline_posts.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": 1})
+
     respx.route(method="GET", url__startswith=f"{_BASE}/repos/{_REPO}/pulls/{_PR}/comments").mock(
         return_value=httpx.Response(200, json=[])
     )
     respx.route(method="POST", url=f"{_BASE}/repos/{_REPO}/pulls/{_PR}/comments").mock(
-        return_value=httpx.Response(201, json={"id": 1})
+        side_effect=capture_inline
+    )
+    # An incomplete run stamps no watermark, so the re-run's inline finding
+    # anchors to the lazily-fetched PR head instead (#443).
+    respx.route(method="GET", url=f"{_BASE}/repos/{_REPO}/pulls/{_PR}").mock(
+        return_value=httpx.Response(200, json={"head": {"sha": "headsha999"}})
     )
     posted_comments: list[str] = []
     respx.route(method="POST", url=_ISSUE_COMMENTS_URL).mock(
@@ -308,6 +319,11 @@ def test_notice_is_visible_on_a_re_run() -> None:
         "post as new PR activity"
     )
     assert "results may be incomplete" in posted_comments[0]
+    # #443: the incomplete run's finding must still reach GitHub inline — the
+    # summary counted it, so silently dropping it between count and post is a
+    # green run that delivered nothing.
+    assert len(inline_posts) == 1, "the finding an incomplete re-run computed must still post"
+    assert inline_posts[0]["commit_id"] == "headsha999"
 
 
 def test_incomplete_marker_cannot_be_mistaken_for_another_marker_family() -> None:
