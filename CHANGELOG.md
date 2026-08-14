@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.3...lgtmaybe-v2.1.4) (2026-08-14)
+
+
+### Bug Fixes
+
+* **release:** make the homebrew gate wait for the PyPI publish ([#447](https://github.com/MattJColes/lgtmaybe/issues/447)) ([1806faf](https://github.com/MattJColes/lgtmaybe/commit/1806fafaf1415c158c067cc6fed54d11fa3f0828))
+
 ## [2.1.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.2...lgtmaybe-v2.1.3) (2026-08-14)
 
 
