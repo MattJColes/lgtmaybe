@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.1...lgtmaybe-v2.1.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* trace review findings through profile ([#441](https://github.com/MattJColes/lgtmaybe/issues/441)) ([8f21f4d](https://github.com/MattJColes/lgtmaybe/commit/8f21f4db2c8f4df6a56d2acae6e0a603f63aef77))
+
 ## [2.1.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.0...lgtmaybe-v2.1.1) (2026-08-14)
 
 
