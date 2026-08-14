@@ -453,6 +453,58 @@ class TestEnginePipelineTiming:
         assert profiler.calls[-1].attempts == 2
 
 
+class TestFindingFlowDiagnostics:
+    def test_valid_empty_responses_report_zero_parsed_and_returned(self) -> None:
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.security],
+            reflect=False,
+        )
+        provider = FakeProvider(
+            result=ProviderResult(text='{"findings": []}', input_tokens=9, output_tokens=1)
+        )
+
+        LLMReviewEngine(provider).review(_CTX, cfg)
+
+        profile = profiler.render()
+        row = next(line for line in profile.splitlines() if line.startswith("security"))
+        assert row.split()[-2:] == ["0", "-"]
+        assert "findings: 0 parsed / 0 returned" in profile
+
+    def test_unparseable_response_is_an_error_not_zero_findings(self) -> None:
+        from lgtmaybe.engine.engine import ReviewIncompleteError
+
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.security],
+            reflect=False,
+        )
+        provider = FakeProvider(
+            result=ProviderResult(text="looks clean", input_tokens=9, output_tokens=2)
+        )
+
+        with pytest.raises(ReviewIncompleteError):
+            LLMReviewEngine(provider).review(_CTX, cfg)
+
+        row = next(line for line in profiler.render().splitlines() if line.startswith("security"))
+        assert row.endswith("       -  unparseable model output")
+
+    def test_profile_exposes_findings_removed_downstream(self) -> None:
+        cfg = ReviewConfig(
+            provider=Provider.ollama,
+            model="llama3",
+            categories=[ReviewCategory.security],
+            min_severity="high",
+            reflect=False,
+        )
+
+        LLMReviewEngine(FakeProvider()).review(_CTX, cfg)
+
+        assert "findings: 1 parsed / 0 returned" in profiler.render()
+
+
 class TestCeilingHitsReachTheProfile:
     """The row for a call that spent its whole output ceiling must say so.
 
