@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.0...lgtmaybe-v2.1.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **github:** preserve findings rejected by GitHub ([#438](https://github.com/MattJColes/lgtmaybe/issues/438)) ([801d195](https://github.com/MattJColes/lgtmaybe/commit/801d195cbc1a78af3ac396a24d86571f8791b0e4))
+
 ## [2.1.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.0.1...lgtmaybe-v2.1.0) (2026-08-13)
 
 
