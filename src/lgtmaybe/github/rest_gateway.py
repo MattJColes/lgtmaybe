@@ -512,7 +512,13 @@ class RestGitHubGateway:
             # NEW findings (fingerprints not already on the PR) as individual
             # review comments — otherwise a re-run's fresh findings would only
             # ever appear in the summary body, silently losing their line.
-            rejected = self._post_new_inline_comments(inline, self._reviewed_sha)
+            # Anchored to the completion watermark when there is one, else the
+            # PR's current head: an incomplete run stamps no watermark, but the
+            # findings its successful calls produced are real and still belong
+            # inline — anchoring them to nothing silently dropped them (#443).
+            rejected = self._post_new_inline_comments(
+                inline, self._reviewed_sha or self._anchor_sha()
+            )
             if rejected:
                 body = (
                     f"{summary}{_render_demoted([*demoted, *rejected])}"
@@ -871,6 +877,24 @@ class RestGitHubGateway:
         """
         self._reviewed_sha = head_sha
 
+    def _anchor_sha(self) -> str | None:
+        """The PR's current head SHA, for anchoring re-run inline comments.
+
+        The fallback when the completion watermark is absent — i.e. an
+        incomplete run, whose ``mark_reviewed(None)`` correctly suppresses the
+        watermark stamp but must not also suppress the findings the run did
+        compute. The head cached by ``get_pr_context``, with the same lazy
+        metadata fetch ``get_file_contents`` uses when no context was fetched;
+        None when even that fails, in which case the caller demotes rather than
+        drops.
+        """
+        if self._head_sha is None:
+            try:
+                self._head_sha = self._pr_meta()["head"]["sha"]
+            except (httpx.HTTPError, KeyError, TypeError):
+                return None
+        return self._head_sha
+
     def _post_new_inline_comments(
         self,
         inline: list[tuple[dict[str, Any], ReviewFinding]],
@@ -896,10 +920,11 @@ class RestGitHubGateway:
 
         A comment GitHub rejects with 422 is returned to the caller for demotion
         into the review body; later comments still post. Other errors remain
-        fatal. Without a head SHA there is nothing to anchor to, so nothing
-        posts.
+        fatal. Without a head SHA there is nothing to anchor to, so unmatched
+        candidates are demoted into the review body the same way — never
+        dropped silently.
         """
-        if not inline or head_sha is None:
+        if not inline:
             return []
         unmatched = self._existing_finding_keys()
         url = f"{self._pr_api}/comments"
@@ -909,6 +934,16 @@ class RestGitHubGateway:
             already = next((i for i, e in enumerate(unmatched) if e & keys), None)
             if already is not None:
                 unmatched.pop(already)  # consumed — it can't absorb a second candidate
+                continue
+            if head_sha is None:
+                _log.warning(
+                    "no head SHA to anchor a new inline comment at %s:%s:%s — "
+                    "demoting to review body",
+                    finding.path,
+                    finding.line,
+                    finding.side,
+                )
+                rejected.append(finding)
                 continue
             resp = self._client.post(
                 url,
