@@ -99,3 +99,15 @@ def test_release_please_sequences_windows_exe_before_winget() -> None:
     assert jobs["winget"]["secrets"] == {
         "WINGET_TOKEN": "${{ secrets.WINGET_TOKEN }}",
     }
+
+
+def test_release_please_sequences_pypi_before_homebrew() -> None:
+    """The brew gate pip-installs the exact release version from PyPI, so it
+    must not race the publisher (the 2.1.3 release failed exactly this way)."""
+    _text, workflow = read_workflow("release-please.yml")
+    jobs = workflow["jobs"]
+
+    assert jobs["homebrew"]["needs"] == ["release-please", "pypi"]
+    # And a failed publish must skip the gate rather than push an uninstallable
+    # formula: no `always()` in the job's condition.
+    assert "always()" not in jobs["homebrew"]["if"]

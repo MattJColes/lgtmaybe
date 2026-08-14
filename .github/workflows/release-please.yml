@@ -102,8 +102,13 @@ jobs:
   # GITHUB_TOKEN. The formula installs from PyPI wheels (no
   # `update-python-resources`, so no 24h PyPI cooldown) and publishes
   # immediately; homebrew.yml's daily schedule is only a safety net.
+  # Needs `pypi`, not just release-please: the install gate pip-installs the
+  # exact release version from PyPI, so racing the publisher fails the gate
+  # with "No matching distribution found" whenever brew's setup finishes first.
+  # A failed PyPI publish skips this job entirely — a formula whose wheels
+  # aren't downloadable must not reach the tap.
   homebrew:
-    needs: release-please
+    needs: [release-please, pypi]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     uses: ./.github/workflows/homebrew.yml
     with:
