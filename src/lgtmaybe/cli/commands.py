@@ -381,6 +381,14 @@ local_diff_options = _stack(
     "parser still handles fenced/prose output either way)",
 )
 @click.option(
+    "--repair-unparseable/--no-repair-unparseable",
+    default=None,
+    help="When a review call's reply can't be parsed into findings, send the reply "
+    "back once — with the schema, without the diff — asking for it in the required "
+    "shape (on by default; --no-repair-unparseable disables). Costs nothing on a "
+    "healthy run: it fires only on a call that already failed",
+)
+@click.option(
     "--mid-review-retrieval/--no-mid-review-retrieval",
     default=None,
     help="Let a review lens defer once for bounded read-only context: rather than "

@@ -90,6 +90,10 @@ inputs:
     description: "Constrain model output to the findings JSON schema via the provider's response_format (JSON mode). On by default; set to false for an openai-compatible gateway/proxy that rejects response_format (the lenient parser still handles fenced/prose output either way)."
     required: false
     default: ""
+  repair_unparseable:
+    description: "When a review call's reply can't be parsed into findings, send the reply back once — with the schema, without the diff — asking for it in the required shape. A model that answered with real review in the wrong wrapper is billed for it either way; without this all of it is discarded. On by default; set to false to disable. Costs nothing on a healthy run: it fires only on a call that already failed."
+    required: false
+    default: ""
   mid_review_retrieval:
     description: "Let a review lens defer ONCE for bounded, read-only codebase context: instead of hedging or dropping a finding that hinges on code outside the diff, the lens names the files (or symbols) it must read, lgtmaybe fetches them read-only, and re-runs that one lens with them. Off by default — it costs at most one extra model call per (batch, lens); set to true to trade tokens for cross-file recall."
     required: false
@@ -293,6 +297,7 @@ runs:
         INPUT_RESOLVE_FIXED: ${{ inputs.resolve_fixed }}
         INPUT_RECURSIVE: ${{ inputs.recursive }}
         INPUT_STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
+        INPUT_REPAIR_UNPARSEABLE: ${{ inputs.repair_unparseable }}
         INPUT_MID_REVIEW_RETRIEVAL: ${{ inputs.mid_review_retrieval }}
         INPUT_SYMBOL_RESOLUTION: ${{ inputs.symbol_resolution }}
         INPUT_INCREMENTAL: ${{ inputs.incremental }}

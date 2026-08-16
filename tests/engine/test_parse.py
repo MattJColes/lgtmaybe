@@ -7,7 +7,7 @@ import json
 import pytest
 
 from lgtmaybe.core.models import ReviewFinding, Severity
-from lgtmaybe.engine.parse import ParseError, parse_findings
+from lgtmaybe.engine.parse import ParseError, ParseFailure, parse_findings
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -216,6 +216,103 @@ def test_empty_string_raises_parse_error() -> None:
 def test_whitespace_only_raises_parse_error() -> None:
     with pytest.raises(ParseError):
         parse_findings("   \n\t  ")
+
+
+# ---------------------------------------------------------------------------
+# failure shape — "it did not parse" is not a diagnosis. A model that answered
+# in prose, one that emitted broken JSON, and one that emitted clean JSON of the
+# wrong shape are three different faults with three different fixes, and the
+# parser is the only place that can still tell them apart. Reported so a run can
+# name its own cause without anyone re-running it with the raw body captured.
+# ---------------------------------------------------------------------------
+
+
+def test_prose_is_reported_as_prose() -> None:
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings("I reviewed the diff and found no issues worth raising.")
+    assert exc_info.value.shape is ParseFailure.prose
+
+
+def test_bracket_bearing_prose_is_still_prose() -> None:
+    """Prose routinely carries brackets ("reviewed 3 files [a, b, c]"), and the
+    whole reason extraction scans for balanced spans is that they are not JSON.
+    Reporting one as malformed JSON would send the reader hunting a syntax bug
+    in a model that never attempted the format at all."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings("I reviewed 3 files [a.py, b.py, c.py] and found nothing.")
+    assert exc_info.value.shape is ParseFailure.prose
+
+
+def test_broken_json_is_reported_as_malformed() -> None:
+    """A balanced span that json.loads refuses: the model meant to emit JSON and
+    got the syntax wrong — a different fix from a model that ignored the ask."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('{"findings": [{"path": "a.py" "line": 1}]}')
+    assert exc_info.value.shape is ParseFailure.malformed_json
+
+
+def test_valid_json_of_the_wrong_shape_is_reported_as_not_findings() -> None:
+    """Clean JSON that was never findings-shaped — the model complied with
+    "return JSON" and ignored the schema entirely."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('["security", "performance"]')
+    assert exc_info.value.shape is ParseFailure.not_findings
+
+
+@pytest.mark.parametrize("raw", ["42", "true", "null", '"no findings"'])
+def test_a_bare_json_scalar_is_not_findings_not_prose(raw: str) -> None:
+    """Valid JSON with no container to find. The model DID emit JSON, just not a
+    findings payload — calling that prose would send the reader to the prompt
+    when the schema is what was ignored."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+    assert exc_info.value.shape is ParseFailure.not_findings
+
+
+def test_findings_shaped_but_invalid_is_reported_as_schema() -> None:
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('{"findings": [{"path": "a.py", "severity": "nope"}]}')
+    assert exc_info.value.shape is ParseFailure.schema
+
+
+def test_a_wrong_shaped_object_is_a_schema_violation() -> None:
+    """A bare object is read as a single finding, so an object of the wrong shape
+    reaches the strict schema and fails there rather than never being findings-
+    shaped at all."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings('{"summary": "looks fine", "issues": ["none"]}')
+    assert exc_info.value.shape is ParseFailure.schema
+
+
+def test_empty_response_is_reported_as_empty() -> None:
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings("   \n\t  ")
+    assert exc_info.value.shape is ParseFailure.empty
+
+
+def test_truncation_reports_its_own_shape() -> None:
+    raw = '{"findings": [{"path": "a.py", "line": 1, "side": "RIGHT", "severity": "high", "ti'
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+    assert exc_info.value.shape is ParseFailure.truncated
+    assert exc_info.value.truncated is True
+
+
+def test_the_shape_renders_as_its_bare_name() -> None:
+    """It rides into a reason string and a log field, so it must not render as
+    ``ParseFailure.prose`` or as a repr with quotes around it."""
+    assert f"{ParseFailure.prose}" == "prose"
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [s for s in ParseFailure if s is not ParseFailure.truncated],
+)
+def test_only_the_truncated_shape_reads_as_truncated(shape: ParseFailure) -> None:
+    """``truncated`` is derived from the shape rather than tracked beside it, so
+    the two can never disagree about the same failure."""
+    assert ParseError("boom", shape=shape).truncated is False
+    assert ParseError("boom", shape=ParseFailure.truncated).truncated is True
 
 
 # ---------------------------------------------------------------------------

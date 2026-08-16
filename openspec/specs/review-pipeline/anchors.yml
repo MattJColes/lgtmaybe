@@ -22,6 +22,12 @@ engine.rescue:
     has: { field: name, regex: '^_rescue$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+engine.repair:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^repair_findings$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.dedupe:
   rule:
     kind: function_definition

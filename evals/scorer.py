@@ -102,6 +102,19 @@ class FixtureScore(BaseModel):
     adjudicable_count: int = 0
     forbidden_count: int = 0
     unexpected_count: int = 0
+    # Why individual model calls failed, one entry per failed call, as
+    # "<lens>: <reason>". `parsed_ok` only goes False when EVERY call failed and
+    # nothing came back, and it cannot tell a parse failure from a timeout or a
+    # spent quota — so a run where three of four lenses returned prose scores
+    # `parsed_ok=True` with merely depressed recall, which is how an intermittent
+    # schema-compliance problem hides. Reported, never gated: `run.py::_gate`
+    # keeps its parse/recall/clean bars unchanged.
+    lens_failures: list[str] = []
+    # What this fixture alone cost. Read off the profiler, which the harness now
+    # resets per fixture — previously the process-wide singleton accumulated
+    # every earlier fixture's counts and nobody read them at all.
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     @property
     def recall(self) -> float:
@@ -170,6 +183,9 @@ def score_fixture(
     *,
     forbidden: list[ExpectedFinding] | None = None,
     parsed_ok: bool = True,
+    lens_failures: list[str] | None = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
 ) -> FixtureScore:
     """Score *findings* against the *expected* manifest for one fixture.
 
@@ -213,11 +229,14 @@ def score_fixture(
         adjudicable_count=adjudicable,
         forbidden_count=forbidden_count,
         unexpected_count=unexpected_count,
+        lens_failures=lens_failures or [],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
 
 
 # ---------------------------------------------------------------------------
-# Shared eval-runner plumbing (used by both run.py and rlm.py); co-located
+# Shared eval-runner plumbing (used by run.py and evals.ab); co-located
 # with Fixture, the manifest type they all take.
 # ---------------------------------------------------------------------------
 

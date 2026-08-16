@@ -429,16 +429,56 @@ class LiteLLMProvider:
         self.model = model
         self.fallback_model = fallback_model
         self.default_opts: dict[str, Any] = default_opts
-        # Set once a structured-output call comes back empty (see _call): the
-        # backend's JSON-schema decoder is broken for this model, so every
-        # subsequent call skips response_format up front instead of paying a
-        # wasted empty round-trip first. Sticky for the life of this provider.
-        self._skip_response_format = False
+        # Models that have proved they won't take response_format — either by
+        # 400ing on it or by decoding it to nothing (see _call). Their later
+        # calls skip it up front instead of paying a wasted round-trip first.
+        #
+        # Keyed by MODEL, not by provider instance. One instance serves the
+        # primary and the fallback, and the triage/review/reflect slots share
+        # its credentials, so an instance-wide flag let a rejection by any one
+        # of them silently downgrade the others to prompt-instructed JSON —
+        # a quality regression on the strong model triggered by a model it
+        # never ran.
+        self._schema_dropped: set[str] = set()
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
         # pure function of it. Instance-scoped (not lru_cache) so tests that
         # patch the litellm lookup stay isolated.
         self._cache_capable: dict[str, bool] = {}
+
+    def _disable_response_format(self, model: str, why: str) -> None:
+        """Record — and announce — that *model* will not take the schema.
+
+        Announced because the consequence is invisible otherwise: every later
+        call for this model falls back to prompt-instructed JSON, and a model
+        that then answers in prose surfaces as "every review lens returned
+        unparseable output" with nothing connecting the two. This repo already
+        holds itself to that rule for every other param (``provider.factory``
+        names the ones litellm's map says will be discarded); the schema drop
+        was the one exemption.
+
+        Once per model, not once per lens: the fan-out sends the same shape N
+        times and N identical warnings would bury the one that matters.
+        """
+        if model in self._schema_dropped:
+            return
+        self._schema_dropped.add(model)
+        _log.warning(
+            "structured output disabled for this model — later calls send "
+            "prompt-instructed JSON only, which a weaker model may not honour",
+            extra={"model": model, "reason": why},
+        )
+
+    def schema_dropped(self) -> bool:
+        """Whether any model lost ``response_format`` during this run.
+
+        Adapter-only, beyond the frozen ``ProviderClient`` port, like
+        ``lower_reasoning_effort`` above: the engine feature-detects it so it can
+        name the downgrade in the review notice when calls also failed. A port
+        method would oblige every fake and every future adapter to answer a
+        question only this one can.
+        """
+        return bool(self._schema_dropped)
 
     def lower_reasoning_effort(self) -> dict[str, Any] | None:
         """Per-call opts that step this provider's reasoning effort down one level.
@@ -551,7 +591,7 @@ class LiteLLMProvider:
         def _call() -> ProviderResult:
             # A prior call already proved this model's JSON-schema mode returns
             # empty, so don't pay the wasted round-trip again — drop it up front.
-            if self._skip_response_format:
+            if model in self._schema_dropped:
                 kwargs.pop("response_format", None)
             result = self._raw_completion(model, messages, kwargs, count_request)
             # Some grammar-constrained backends (notably LM Studio fronting a
@@ -561,7 +601,7 @@ class LiteLLMProvider:
             # schema and retry once: the model then emits the findings as normal
             # (fenced) text we can parse. Remember it so later calls skip it too.
             if not result.text.strip() and kwargs.get("response_format") is not None:
-                self._skip_response_format = True
+                self._disable_response_format(model, "empty-response")
                 kwargs.pop("response_format")
                 result = self._raw_completion(model, messages, kwargs, count_request)
             return result
@@ -602,10 +642,10 @@ class LiteLLMProvider:
                     _configured_ceiling(kwargs),
                 )
             except Exception as exc:
-                if not self._drop_rejected_param(exc, kwargs):
+                if not self._drop_rejected_param(exc, model, kwargs):
                     raise
 
-    def _drop_rejected_param(self, exc: Exception, kwargs: dict[str, Any]) -> bool:
+    def _drop_rejected_param(self, exc: Exception, model: str, kwargs: dict[str, Any]) -> bool:
         """Strip the one request param *exc* says this model won't take.
 
         Two params are sent for review quality rather than necessity —
@@ -623,10 +663,10 @@ class LiteLLMProvider:
             kwargs.pop("temperature")
             return True
         if kwargs.get("response_format") is not None and _rejects_response_format(exc):
-            # Remembered for the whole provider, not just this call: the lens
-            # fan-out sends the same shape N times, and without this every one of
-            # them pays its own rejected round-trip first.
-            self._skip_response_format = True
+            # Remembered for this model's later calls, not just this one: the
+            # lens fan-out sends the same shape N times, and without this every
+            # one of them pays its own rejected round-trip first.
+            self._disable_response_format(model, "rejected")
             kwargs.pop("response_format")
             return True
         return False

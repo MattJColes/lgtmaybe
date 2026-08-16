@@ -163,6 +163,15 @@ def test_per_fixture_precision_printed(
     assert "precision=" in out
 
 
+def _run_json(capsys: pytest.CaptureFixture[str], extra: list[str]) -> dict[str, object]:
+    """Run the harness with --json and return the parsed payload."""
+    rc = run_mod.main(
+        ["--provider", "ollama", "--model", "m", "--min-recall", "0.0", "--json", *extra]
+    )
+    assert rc in (0, 1)
+    return json.loads(capsys.readouterr().out)  # type: ignore[no-any-return]
+
+
 def test_json_flag_emits_machine_readable_scores(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -546,3 +555,87 @@ def test_preset_defaults_to_the_production_default(monkeypatch: pytest.MonkeyPat
     """Without --preset the eval measures what production ships: fast."""
     seen = _capture_cfg(monkeypatch, [*_BASE_ARGV, "--fixture", "badcode"])
     assert seen and all(cfg.preset.value == "fast" for cfg in seen)
+
+
+# ---------------------------------------------------------------------------
+# per-call failure detail
+#
+# `parsed_ok` is a single boolean that only goes False when EVERY call failed
+# and nothing came back, and it conflates a parse failure with a timeout, a bad
+# key and a spent quota. A run where three of four lenses returned prose scores
+# `parsed_ok=True` with merely depressed recall — which is exactly how an
+# intermittent schema-compliance problem hides. The per-call reasons the engine
+# already records are the fix.
+# ---------------------------------------------------------------------------
+
+
+def test_failed_lenses_are_reported_per_fixture(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class _Prose(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            return ProviderResult(text="no issues here", input_tokens=7, output_tokens=3)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _Prose())
+    payload = _run_json(capsys, ["--fixture", "badcode"])
+
+    failures = payload["fixtures"][0]["lens_failures"]
+    assert failures, "a wholly unparseable run must name what failed"
+    assert all("unparseable model output (prose)" in f for f in failures)
+
+
+def test_a_clean_fixture_reports_no_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    payload = _run_json(capsys, ["--fixture", "badcode"])
+    assert payload["fixtures"][0]["lens_failures"] == []
+
+
+def test_token_totals_are_per_fixture_not_cumulative(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The profiler is a process-wide singleton the harness never reset, so a
+    multi-fixture run silently accumulated every earlier fixture's counts."""
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    payload = _run_json(capsys, ["--fixture", "badcode", "--fixture", "lazy-imports"])
+
+    first, second = payload["fixtures"]
+    assert first["output_tokens"] > 0
+    assert second["output_tokens"] > 0
+    # Equality, not an inequality: identical work on both fixtures must report
+    # identical totals. A cumulative profiler would make the second strictly
+    # larger, which is the only thing this can actually detect.
+    assert second["output_tokens"] == first["output_tokens"]
+    assert second["input_tokens"] == first["input_tokens"], (
+        "identical work on both fixtures must report identical, non-accumulating totals"
+    )
+
+
+def test_the_json_payload_names_the_model(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without it a cross-model benchmark's own output cannot say which model
+    produced which row."""
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    payload = _run_json(capsys, ["--fixture", "badcode"])
+    assert payload["model"] == "m"
+    assert payload["provider"] == "ollama"
+
+
+def test_a_failed_call_is_printed_before_the_misses_it_explains(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class _Prose(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            return ProviderResult(text="no issues here", input_tokens=7, output_tokens=3)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _Prose())
+    run_mod.main(
+        ["--provider", "ollama", "--model", "m", "--min-recall", "0.0", "--fixture", "badcode"]
+    )
+    out = capsys.readouterr().out
+    assert "CALL FAILED" in out
+    assert "(prose)" in out, "the operator reads this line, so it names the shape"

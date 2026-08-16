@@ -90,12 +90,42 @@ interrupt first, and a run with no failures SHALL cost no extra calls.
 - **WHEN** a call returns unparseable output, hits the `max_tokens` ceiling,
   fails after the oversized-batch split already retried it smaller, or fails on
   a condition that cannot change mid-run — a spent quota, a dead credential
-- **THEN** it is not re-run: the same request fails the same way, at cost
+- **THEN** the identical request is not re-issued: it fails the same way, at
+  cost. A reply that could not be parsed may still be reformatted once by a
+  DIFFERENT request (see "An unparseable reply is reformatted once")
 
 #### Scenario: the re-run fails too
 - **WHEN** the rescue attempt fails as well
 - **THEN** the round reports itself incomplete, naming the lens it lost, and no
   further attempt is made
+
+### Requirement: An unparseable reply is reformatted once
+
+A review reply that could not be parsed into findings SHALL be sent back to the
+model exactly once — carrying the reply and the output schema, and no diff —
+asking for it in the required shape. This is a different request from the one
+that failed, which is why it is not the identical re-run the rescue wave
+forbids. It SHALL be skipped for a truncated or empty reply, SHALL re-check
+every ceiling first, SHALL never reformat its own output, and SHALL be able only
+to ADD findings: any failure leaves the call's existing failure reason intact.
+A reformatted lens SHALL count as complete and SHALL be named in the summary,
+since a model that needs this is not honouring the schema.
+<!-- anchor: engine.repair -->
+
+#### Scenario: the model answers in prose
+- **WHEN** a lens returns a complete review in the wrong wrapper
+- **THEN** it is reformatted into findings, and the lens posts as complete
+  rather than reporting nothing
+
+#### Scenario: the reply was cut off
+- **WHEN** a reply hit the output ceiling mid-container
+- **THEN** it is not reformatted — its complete findings are already salvaged,
+  and asking a model to finish a cut-off answer invites it to invent the tail
+
+#### Scenario: the reformat fails too
+- **WHEN** the reformatted reply is itself unparseable, or the call raises
+- **THEN** no findings are added, the original failure reason stands, and no
+  third call is made
 
 ### Requirement: Findings merge and dedupe across lenses
 

@@ -727,6 +727,11 @@
       "default": null,
       "title": "Reflect Model"
     },
+    "repair_unparseable": {
+      "default": true,
+      "title": "Repair Unparseable",
+      "type": "boolean"
+    },
     "resolve_fixed": {
       "default": true,
       "title": "Resolve Fixed",
