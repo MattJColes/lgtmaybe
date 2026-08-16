@@ -19,6 +19,7 @@ from pathlib import Path
 
 from lgtmaybe.core.models import Provider, ReviewCategory, ReviewConfig, StaticAnalysisConfig
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError, build_symbol_resolver
+from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.local import local_file_reader
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import build_provider
@@ -198,19 +199,29 @@ def _review(
         # its own `openspec/` never leaks that into a fixture's review.
         workspace_root=manifest.corpus_root or manifest.fixture_root,
     )
+    # Per fixture, not per run: the profiler is a process-wide singleton, so
+    # without this each fixture's totals carry every earlier fixture's calls —
+    # and nothing here read them at all, so the drift was invisible.
+    profiler.reset()
     try:
         findings, _summary = engine.review(ctx, cfg)
-        return score_fixture(
-            manifest.name,
-            findings,
-            manifest.expected,
-            forbidden=manifest.forbidden,
-            parsed_ok=True,
-        )
+        parsed_ok = True
     except ReviewIncompleteError:
-        return score_fixture(
-            manifest.name, [], manifest.expected, forbidden=manifest.forbidden, parsed_ok=False
-        )
+        findings, parsed_ok = [], False
+    return score_fixture(
+        manifest.name,
+        findings,
+        manifest.expected,
+        forbidden=manifest.forbidden,
+        parsed_ok=parsed_ok,
+        # The per-call detail `parsed_ok` cannot carry. The engine already
+        # records a reason per failed call — now shape-tagged — so a run can say
+        # "3 of 4 lenses returned prose" instead of scoring a clean pass with
+        # unexplained recall.
+        lens_failures=[f"{c.label}: {c.error}" for c in profiler.calls if c.error],
+        input_tokens=sum(c.input_tokens for c in profiler.calls),
+        output_tokens=sum(c.output_tokens for c in profiler.calls),
+    )
 
 
 def _print(score: FixtureScore) -> None:
@@ -224,6 +235,10 @@ def _print(score: FixtureScore) -> None:
         f"findings={score.findings_count} "
         f"anchored={score.anchored_rate:4.0%} ({score.anchored_count}/{score.findings_count})"
     )
+    # Before the misses, because a failed call explains the misses under it: a
+    # lens that never parsed did not "miss" anything, it never reported.
+    for failure in score.lens_failures:
+        print(f"    CALL FAILED: {failure}")
     for miss in score.missed:
         print(f"    missed: {miss}")
     for fp in score.false_positives:
@@ -405,6 +420,10 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "fixtures": [s.model_dump() for s in scores],
                     "passed": ok,
+                    # Named so a cross-model benchmark's own output says which
+                    # model produced which row.
+                    "provider": args.provider,
+                    "model": args.model,
                     "aggregate_recall": aggregate,
                     **pooled,
                 }
