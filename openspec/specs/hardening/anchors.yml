@@ -39,3 +39,9 @@ hardening.parse:
     kind: function_definition
     has: { field: name, regex: '^parse_findings$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+hardening.parse-diagnosis:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_unparseable_reason$' }
+  files: [src/lgtmaybe/engine/**/*.py]
