@@ -604,7 +604,10 @@ def test_token_totals_are_per_fixture_not_cumulative(
     first, second = payload["fixtures"]
     assert first["output_tokens"] > 0
     assert second["output_tokens"] > 0
-    assert second["output_tokens"] < first["output_tokens"] + second["output_tokens"] + 1
+    # Equality, not an inequality: identical work on both fixtures must report
+    # identical totals. A cumulative profiler would make the second strictly
+    # larger, which is the only thing this can actually detect.
+    assert second["output_tokens"] == first["output_tokens"]
     assert second["input_tokens"] == first["input_tokens"], (
         "identical work on both fixtures must report identical, non-accumulating totals"
     )

@@ -14,8 +14,9 @@ so much cheaper than re-running the lens, whose batch is orders of magnitude
 larger and whose cache position has gone cold by the time the fan-out drains.
 
 Fails safe in the strict sense: it can only ever ADD findings. Every failure
-path returns an empty list, so the caller keeps the failure reason it already
-had and a partial review never becomes no review.
+path returns ``None``, so the caller keeps the failure reason it already had and
+a partial review never becomes no review. ``None`` is distinct from ``[]``,
+which is a successful reformat of a reply that raised no issues.
 """
 
 from __future__ import annotations
@@ -76,15 +77,21 @@ def repair_findings(
     reply: str,
     shape: ParseFailure,
     lens_id: str,
-) -> list[ReviewFinding]:
-    """Reformat *reply* into findings; ``[]`` when that cannot be done.
+) -> list[ReviewFinding] | None:
+    """Reformat *reply* into findings; ``None`` when that could not be done.
+
+    ``None`` and ``[]`` are different answers and the caller branches on which:
+    ``[]`` is a SUCCESSFUL reformat of a reply that raised no issues (a lens is
+    entitled to find nothing, and saying so in prose is the exact fault this
+    repairs), while ``None`` is the repair itself failing. Collapsing them would
+    report a lens that genuinely found nothing as unparseable.
 
     One attempt, never recursive — the repair's own output is not repaired. Two
     unparseable replies in a row is a model that cannot do this, and a third
     call is only spend.
     """
     if not cfg.repair_unparseable or shape not in _RECOVERABLE or not reply.strip():
-        return []
+        return None
 
     # Neutralised, not merely quoted: the reply is model output derived from an
     # attacker-controlled diff on a fork PR, so echoing it back could close a
@@ -110,7 +117,7 @@ def repair_findings(
         # the caller is already on its failure path with a reason to report, and a
         # raising repair would turn a partial review into no review at all.
         _log.warning("repair re-ask failed", extra={"lens": lens_id}, exc_info=True)
-        return []
+        return None
 
     _log.warning(
         "reformatted an unparseable reply",

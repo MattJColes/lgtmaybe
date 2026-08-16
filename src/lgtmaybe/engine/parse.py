@@ -215,6 +215,16 @@ def _classify(raw: str) -> ParseFailure:
     text = _strip_think_blocks(raw).strip()
     if not text:
         return ParseFailure.empty
+    # A complete scalar (``42``, ``true``, ``null``, ``"no findings"``) is valid
+    # JSON with no container to find, so the span walk below would call it prose.
+    # Checked first: reaching here at all means nothing findings-shaped
+    # validated, so whatever this decodes to was never findings.
+    try:
+        json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return ParseFailure.not_findings
     spans = [
         span
         for i, ch in enumerate(text)

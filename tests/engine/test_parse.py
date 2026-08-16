@@ -259,6 +259,16 @@ def test_valid_json_of_the_wrong_shape_is_reported_as_not_findings() -> None:
     assert exc_info.value.shape is ParseFailure.not_findings
 
 
+@pytest.mark.parametrize("raw", ["42", "true", "null", '"no findings"'])
+def test_a_bare_json_scalar_is_not_findings_not_prose(raw: str) -> None:
+    """Valid JSON with no container to find. The model DID emit JSON, just not a
+    findings payload — calling that prose would send the reader to the prompt
+    when the schema is what was ignored."""
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(raw)
+    assert exc_info.value.shape is ParseFailure.not_findings
+
+
 def test_findings_shaped_but_invalid_is_reported_as_schema() -> None:
     with pytest.raises(ParseError) as exc_info:
         parse_findings('{"findings": [{"path": "a.py", "severity": "nope"}]}')

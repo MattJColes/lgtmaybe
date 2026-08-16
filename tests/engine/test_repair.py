@@ -143,7 +143,7 @@ def test_it_runs_at_most_once() -> None:
     """The repair's own output is never repaired: two unparseable replies in a
     row is a model that cannot do this, and a third call is just spend."""
     provider = _Reformatter(text="still just prose, sorry")
-    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") == []
+    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") is None
     assert len(provider.calls) == 1
 
 
@@ -152,20 +152,20 @@ def test_a_truncated_reply_is_never_reformatted() -> None:
     re-split; asking a model to finish a cut-off answer invites it to invent
     the tail."""
     provider = _Reformatter()
-    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.truncated, "security") == []
+    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.truncated, "security") is None
     assert provider.calls == []
 
 
 def test_an_empty_reply_is_never_reformatted() -> None:
     provider = _Reformatter()
-    assert repair_findings(provider, make_cfg(), "", ParseFailure.empty, "security") == []
+    assert repair_findings(provider, make_cfg(), "", ParseFailure.empty, "security") is None
     assert provider.calls == []
 
 
 def test_it_is_off_when_disabled() -> None:
     provider = _Reformatter()
     cfg = make_cfg(repair_unparseable=False)
-    assert repair_findings(provider, cfg, _PROSE, ParseFailure.prose, "security") == []
+    assert repair_findings(provider, cfg, _PROSE, ParseFailure.prose, "security") is None
     assert provider.calls == []
 
 
@@ -182,17 +182,17 @@ def test_a_provider_error_never_escapes() -> None:
         def complete(self, messages, model, **opts):  # type: ignore[override]
             raise RuntimeError("quota exhausted")
 
-    assert repair_findings(_Exploding(), make_cfg(), _PROSE, ParseFailure.prose, "security") == []
+    assert repair_findings(_Exploding(), make_cfg(), _PROSE, ParseFailure.prose, "security") is None
 
 
 def test_an_unparseable_repair_yields_no_findings() -> None:
     provider = _Reformatter(text="I still cannot do JSON.")
-    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") == []
+    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") is None
 
 
 def test_a_repair_that_invents_a_bad_finding_yields_nothing() -> None:
     provider = _Reformatter(text=json.dumps({"findings": [{"path": "a.py", "severity": "nope"}]}))
-    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") == []
+    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") is None
 
 
 # ---------------------------------------------------------------------------
@@ -211,3 +211,11 @@ def test_findings_from_a_repair_are_ordinary_findings() -> None:
     findings = repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security")
     assert isinstance(findings[0], ReviewFinding)
     assert findings[0].severity is Severity.high
+
+
+def test_a_successful_empty_repair_is_not_a_failure() -> None:
+    """`[]` and `None` are different answers: a lens is entitled to find nothing,
+    and saying so in prose is the exact fault this repairs. Reporting that as
+    unparseable would be a false failure."""
+    provider = _Reformatter(text=json.dumps({"findings": []}))
+    assert repair_findings(provider, make_cfg(), _PROSE, ParseFailure.prose, "security") == []

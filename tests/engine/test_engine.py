@@ -2724,3 +2724,22 @@ def test_a_failed_repair_leaves_the_review_partial() -> None:
     with pytest.raises(ReviewIncompleteError) as exc_info:
         engine.review(_CTX, make_cfg())
     assert "prose" in str(exc_info.value)
+
+
+def test_a_repair_that_finds_nothing_still_counts_as_complete() -> None:
+    """A lens is entitled to find nothing, and saying so in prose is exactly the
+    fault the repair fixes. Reporting that as unparseable would be a false
+    failure — so an EMPTY reformat is a success, not a fall-through."""
+
+    class _ProseThenEmpty(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages)
+            if "convert a code reviewer" in prompt:
+                return ProviderResult(text='{"findings": []}', input_tokens=1, output_tokens=1)
+            return ProviderResult(text="no issues found", input_tokens=1, output_tokens=1)
+
+    findings, summary = LLMReviewEngine(_ProseThenEmpty()).review(_CTX, make_cfg())
+    assert findings == []
+    assert "results may be incomplete" not in summary
+    assert "reformatted by a second call" in summary

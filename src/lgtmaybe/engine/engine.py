@@ -1858,7 +1858,7 @@ class LLMReviewEngine:
                     repaired = repair_findings(
                         self._provider, run.cfg, result.text, exc.shape, lens.id
                     )
-                    if repaired:
+                    if repaired is not None:
                         # Complete, not partial: nothing is missing, so this must
                         # not trip the incomplete notice. Reported through its own
                         # notice instead, like a lens that stepped its reasoning

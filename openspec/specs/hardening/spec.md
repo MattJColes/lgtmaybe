@@ -122,13 +122,13 @@ of brackets that were never a container.
 
 ### Requirement: A parse failure is diagnosable after the fact
 
-A failed review call SHALL report its parse-failure shape and the length of the
-reply wherever the failure already travels — the log, the profile row, and the
-review notice — so the fault is nameable without re-running the review. The
-reply body itself SHALL NOT be logged by default, and SHALL be redacted and
-length-capped when debug logging asks for it. Where several calls failed, the
-notice SHALL name the MOST COMMON failure rather than the last, so one odd
-failure cannot mask a wave of identical ones.
+A failed review call SHALL report its parse-failure shape wherever the failure
+already travels — the log, the profile row, and the review notice — so the fault
+is nameable without re-running the review, and SHALL report the reply's length
+in the log. The reply body itself SHALL NOT be logged by default, and SHALL be
+redacted and length-capped when debug logging asks for it. Where several calls
+failed, the notice SHALL name the MOST COMMON failure rather than the last, so
+one odd failure cannot mask a wave of identical ones.
 <!-- anchor: hardening.parse-diagnosis -->
 
 #### Scenario: a lens returns output that will not parse
