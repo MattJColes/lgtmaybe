@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -1713,3 +1714,107 @@ class TestSteppingReasoningEffortDown:
         provider.lower_reasoning_effort()
 
         assert provider.default_opts["reasoning_effort"] == "high"
+
+
+class TestSchemaDropIsVisibleAndScoped:
+    """Dropping ``response_format`` silently downgrades every later call to
+    prompt-instructed JSON, and a weaker model then plausibly answers in prose —
+    which reads as "every review lens returned unparseable output" with nothing
+    in the log to connect the two. The repo's own spec already says a configured
+    param is never discarded in silence (``provider.param-support``); this is
+    that rule applied to the one drop that was exempt from it."""
+
+    BEDROCK_400 = TestRejectedStructuredOutputParam.BEDROCK_400
+
+    def _rejecting(self, *, reject_model: str) -> Any:
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs and kwargs["model"] == reject_model:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        return side_effect
+
+    def test_rejection_is_announced(self, caplog: pytest.LogCaptureFixture) -> None:
+        model = "bedrock/us.anthropic.claude-opus-4-8"
+        with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
+            provider = LiteLLMProvider()
+            with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+                provider.complete(
+                    [{"role": "user", "content": "a"}], model, response_format={"x": 1}
+                )
+        warnings = [r for r in caplog.records if "structured output" in r.getMessage()]
+        assert warnings, "a silent downgrade is exactly what left this undiagnosable"
+        assert getattr(warnings[0], "model", None) == model
+        assert getattr(warnings[0], "reason", None) == "rejected"
+
+    def test_the_announcement_fires_once_per_model_not_once_per_lens(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        model = "bedrock/us.anthropic.claude-opus-4-8"
+        with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
+            provider = LiteLLMProvider()
+            with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+                for _ in range(4):
+                    provider.complete(
+                        [{"role": "user", "content": "a"}], model, response_format={"x": 1}
+                    )
+        assert len([r for r in caplog.records if "structured output" in r.getMessage()]) == 1
+
+    def test_an_empty_structured_response_is_announced(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        calls: list[bool] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            calls.append(has_rf)
+            return _fake_response("" if has_rf else '{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+                provider.complete(
+                    [{"role": "user", "content": "a"}], "openai/gpt-4o", response_format={"x": 1}
+                )
+        warnings = [r for r in caplog.records if "structured output" in r.getMessage()]
+        assert warnings
+        assert getattr(warnings[0], "reason", None) == "empty-response"
+
+    def test_the_drop_is_scoped_to_the_model_that_rejected_it(self) -> None:
+        """One provider serves the primary and the fallback, and the triage,
+        review and reflect slots all share it. Scoped to the instance, a
+        rejection by ANY of them silently downgrades the rest — a quality
+        regression on the strong model triggered by a model it never ran."""
+        primary = "bedrock/us.anthropic.claude-opus-4-8"
+        fallback = "openai/gpt-4o"
+        seen: list[tuple[str, bool]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            seen.append((kwargs["model"], has_rf))
+            if has_rf and kwargs["model"] == primary:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        # No pinned model: one instance, two model slots, exactly as the factory
+        # builds it for triage_model / model / reflect_model.
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete([{"role": "user", "content": "a"}], primary, response_format={"x": 1})
+            provider.complete(
+                [{"role": "user", "content": "b"}], fallback, response_format={"x": 1}
+            )
+
+        assert (fallback, True) in seen, "the second model never rejected anything"
+
+    def test_the_drop_is_queryable_for_the_review_notice(self) -> None:
+        model = "bedrock/us.anthropic.claude-opus-4-8"
+        with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
+            provider = LiteLLMProvider()
+            assert provider.schema_dropped() is False
+            provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
+            assert provider.schema_dropped() is True

@@ -22,8 +22,13 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.engine.compress import count_tokens
+from lgtmaybe.engine.engine import (
+    _SCHEMA_DROP_NOTE,
+    _build_notices,
+    _NoticeState,
+    passes_path_filters,
+)
 from lgtmaybe.engine.engine import LLMReviewEngine as EngineClass
-from lgtmaybe.engine.engine import _build_notices, _NoticeState, passes_path_filters
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
@@ -52,6 +57,7 @@ def test_notice_builder_preserves_notice_order() -> None:
             failed_lenses=[],
             split_batches=0,
             stepped_down=[],
+            schema_dropped=False,
             reflection_skipped=None,
             suppressed=1,
             off_diff=1,
@@ -2624,6 +2630,7 @@ def test_the_notice_names_the_most_common_failure_not_the_last() -> None:
             failed_lenses=["security", "correctness", "artefacts", "health"],
             split_batches=0,
             stepped_down=[],
+            schema_dropped=False,
             reflection_skipped=None,
             suppressed=0,
             off_diff=0,
@@ -2633,3 +2640,43 @@ def test_the_notice_names_the_most_common_failure_not_the_last() -> None:
     joined = " ".join(notices)
     assert "prose" in joined
     assert "RateLimitError" not in joined
+
+
+def test_a_dropped_schema_is_named_in_the_notice_when_calls_failed() -> None:
+    """The drop is the likeliest CAUSE of the failures right above it, so a
+    reader looking at "4 of 4 calls returned prose" is told the schema went away
+    mid-run rather than being left to find it in the Actions log."""
+
+    class _SchemaDroppingProvider(_ProseProvider):
+        def schema_dropped(self) -> bool:
+            return True
+
+    engine = LLMReviewEngine(_SchemaDroppingProvider())
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        engine.review(_CTX, make_cfg())
+    assert _SCHEMA_DROP_NOTE in str(exc_info.value)
+
+
+def test_a_clean_review_never_mentions_the_dropped_schema() -> None:
+    """A run that dropped the schema and still parsed everything has nothing to
+    explain, and the clean path must stay byte-identical."""
+
+    class _CleanButDropped(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            return ProviderResult(text='{"findings": []}', input_tokens=10, output_tokens=5)
+
+        def schema_dropped(self) -> bool:
+            return True
+
+    _findings, summary = LLMReviewEngine(_CleanButDropped()).review(_CTX, make_cfg())
+    assert _SCHEMA_DROP_NOTE not in summary
+
+
+def test_a_provider_that_cannot_answer_is_not_asked_twice() -> None:
+    """Adapter-only, like lower_reasoning_effort: a provider without the method
+    simply never reports a drop, rather than every fake growing one."""
+    engine = LLMReviewEngine(_ProseProvider())
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        engine.review(_CTX, make_cfg())
+    assert _SCHEMA_DROP_NOTE not in str(exc_info.value)

@@ -238,6 +238,7 @@ class _NoticeState:
     failed_lenses: list[str]
     split_batches: int
     stepped_down: list[str]
+    schema_dropped: bool
     reflection_skipped: str | None
     suppressed: int
     off_diff: int
@@ -294,6 +295,8 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"⚠️ {state.failed_calls} of {state.total_calls} review calls failed "
             f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
         )
+    if state.failed_calls and state.schema_dropped:
+        notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
     if state.split_batches:
         plural = _plural(state.split_batches, many="es")
         was = _plural(state.split_batches, "was", "were")
@@ -689,6 +692,17 @@ class ReviewIncompleteError(Exception):
 class LLMReviewEngine:
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
+    def _schema_dropped(self) -> bool:
+        """Whether the adapter gave up on structured output during this run.
+
+        Feature-detected, like ``lower_reasoning_effort``: it is an adapter-only
+        method beyond the frozen ``ProviderClient`` port, so a provider that
+        cannot answer simply never reports a drop rather than every fake in the
+        suite growing a method to say "no".
+        """
+        probe = getattr(self._provider, "schema_dropped", None)
+        return bool(probe()) if callable(probe) else False
+
     def __init__(
         self,
         provider: ProviderClient,
@@ -743,6 +757,7 @@ class LLMReviewEngine:
         self._stepped_down: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
+        #    (see _schema_dropped below for the other adapter-only probe)
         with profiler.stage("redact"):
             clean_diff = redact(ctx.diff)
 
@@ -1040,11 +1055,13 @@ class LLMReviewEngine:
         #     failure still reaches the summary through the incomplete-results
         #     notice, so nothing is hidden either way.
         if total_calls > 0 and failed_calls == total_calls and not all_findings:
-            detail = errors[-1] if errors else "no usable output"
+            # The most common error, not the last — see _build_notices.
+            detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
+            hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
             raise ReviewIncompleteError(
                 f"review incomplete — every review call failed ({detail}). "
                 "Check the provider credentials/quota, model, and timeout "
-                "(ollama: a larger model needs a longer --timeout), then retry."
+                f"(ollama: a larger model needs a longer --timeout), then retry.{hint}"
             )
 
         reviewed_diff = "\n".join(patch for _, patch in file_patches)
@@ -1190,6 +1207,7 @@ class LLMReviewEngine:
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
+                schema_dropped=self._schema_dropped(),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
                 off_diff=off_diff,
@@ -2129,6 +2147,17 @@ def _raw_excerpt(text: str) -> str:
         return clean
     elided = len(clean) - _RAW_HEAD_CHARS - _RAW_TAIL_CHARS
     return f"{clean[:_RAW_HEAD_CHARS]}\n…[{elided} chars elided]…\n{clean[-_RAW_TAIL_CHARS:]}"
+
+
+# Shown only alongside a failure, because on its own a dropped schema explains
+# nothing — plenty of models parse fine without it. Next to "every call returned
+# prose" it is very likely the cause, and it is the one part of that story the
+# reader cannot see from the PR.
+_SCHEMA_DROP_NOTE = (
+    "The model refused the structured-output schema partway through this run, so "
+    "later calls asked for JSON in the prompt only — a likely cause of the failures "
+    "above. The provider log names which model and why."
+)
 
 
 def _unparseable_reason(exc: ParseError, lens_id: str, text: str) -> str:
