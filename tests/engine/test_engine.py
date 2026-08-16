@@ -25,6 +25,7 @@ from lgtmaybe.engine.compress import count_tokens
 from lgtmaybe.engine.engine import LLMReviewEngine as EngineClass
 from lgtmaybe.engine.engine import _build_notices, _NoticeState, passes_path_filters
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
+from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
 
 _REFLECT_MARKER = "auditing another reviewer"
@@ -1328,14 +1329,16 @@ def test_findings_completed_before_a_truncation_are_kept() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad_output",
+    ("bad_output", "shape"),
     [
-        "I reviewed everything and it looks fine to me.",
-        '{"findings": [{"path": "a.py", "severity": "nope"}]}',
+        ("I reviewed everything and it looks fine to me.", "prose"),
+        ('{"findings": [{"path": "a.py", "severity": "nope"}]}', "schema"),
+        ('{"findings": [{"path": "a.py" "line": 1}]}', "malformed_json"),
+        ('["security", "performance"]', "not_findings"),
     ],
-    ids=["prose", "schema-violation"],
+    ids=["prose", "schema-violation", "malformed-json", "not-findings"],
 )
-def test_a_parse_failure_that_is_not_a_truncation_says_so(bad_output: str) -> None:
+def test_a_parse_failure_that_is_not_a_truncation_says_so(bad_output: str, shape: str) -> None:
     """The negative of the truncation notice, and the reason it is worth pinning
     in both directions: telling a maintainer their output was cut off when the
     model actually answered in prose (or broke the schema) sends them to
@@ -1369,6 +1372,9 @@ def test_a_parse_failure_that_is_not_a_truncation_says_so(bad_output: str) -> No
     assert [f.title for f in findings] == ["sec"]
     assert "unparseable" in summary.lower()
     assert "truncated" not in summary.lower()
+    # …and WHICH parse failure, because "unparseable" alone does not say whether
+    # to look at the prompt, the schema, or the model.
+    assert shape in summary
 
 
 def test_a_wholly_truncated_review_that_salvaged_findings_is_not_an_error() -> None:
@@ -2495,3 +2501,135 @@ def test_a_split_piece_derives_its_own_manifest_not_the_batch_s() -> None:
         )
         assert shown in piece
         assert hidden in piece, "the piece was not told about its sibling's file"
+
+
+# ---------------------------------------------------------------------------
+# unparseable output — diagnosing it after the fact
+#
+# "unparseable" alone sends a maintainer nowhere: a model that answered in prose
+# and one that emitted broken JSON need different fixes, and the raw body is gone
+# by the time anyone reads the log. So the shape is named everywhere the failure
+# already travels, and the body itself is available — redacted and capped —
+# behind the log level that already exists for exactly this.
+# ---------------------------------------------------------------------------
+
+
+class _ProseProvider(FakeProvider):
+    """Every lens answers in prose, the way a model ignoring the schema does."""
+
+    body = "I reviewed the diff and found no issues worth raising."
+
+    def complete(self, messages, model, **opts):  # type: ignore[override]
+        self.calls.append({"messages": messages, "model": model, "opts": opts})
+        return ProviderResult(text=self.body, input_tokens=10, output_tokens=5)
+
+
+def test_unparseable_reason_names_the_failure_shape() -> None:
+    """The reason string is what reaches CallRecord.error, the --profile row and
+    the PR notice, so carrying the shape there covers all three at once."""
+    engine = LLMReviewEngine(_ProseProvider())
+    with pytest.raises(ReviewIncompleteError):
+        engine.review(_CTX, make_cfg())
+
+
+def test_unparseable_call_logs_the_shape_and_the_response_length(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine = LLMReviewEngine(_ProseProvider())
+    with caplog.at_level(logging.WARNING, logger="lgtmaybe.engine.engine"):
+        with pytest.raises(ReviewIncompleteError):
+            engine.review(_CTX, make_cfg())
+    unparseable = [r for r in caplog.records if "unparseable" in r.getMessage()]
+    assert unparseable, "the failure must still be logged"
+    assert getattr(unparseable[0], "shape", None) == "prose"
+    assert getattr(unparseable[0], "response_chars", None) == len(_ProseProvider.body)
+
+
+def test_the_response_body_is_not_logged_at_the_default_level(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The body is model output and can echo the diff, so the default level
+    reports its shape and its size and nothing of its content."""
+    engine = LLMReviewEngine(_ProseProvider())
+    with caplog.at_level(logging.WARNING, logger="lgtmaybe.engine.engine"):
+        with pytest.raises(ReviewIncompleteError):
+            engine.review(_CTX, make_cfg())
+    for record in caplog.records:
+        assert _ProseProvider.body not in str(getattr(record, "response_head", ""))
+        assert _ProseProvider.body not in record.getMessage()
+
+
+def test_the_response_body_is_logged_at_debug_level(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine = LLMReviewEngine(_ProseProvider())
+    with caplog.at_level(logging.DEBUG, logger="lgtmaybe.engine.engine"):
+        with pytest.raises(ReviewIncompleteError):
+            engine.review(_CTX, make_cfg())
+    heads = [getattr(r, "response_head", "") for r in caplog.records]
+    assert any(_ProseProvider.body in str(h) for h in heads)
+
+
+def test_the_logged_body_is_redacted(caplog: pytest.LogCaptureFixture) -> None:
+    """core.logging only substitutes secrets registered with it, so the content
+    redactor has to run here or a key in the model's own reply reaches the log."""
+
+    class _LeakyProvider(_ProseProvider):
+        body = "I found the key AKIAIOSFODNN7EXAMPLE in the diff."
+
+    engine = LLMReviewEngine(_LeakyProvider())
+    with caplog.at_level(logging.DEBUG, logger="lgtmaybe.engine.engine"):
+        with pytest.raises(ReviewIncompleteError):
+            engine.review(_CTX, make_cfg())
+    heads = " ".join(str(getattr(r, "response_head", "")) for r in caplog.records)
+    assert "AKIAIOSFODNN7EXAMPLE" not in heads
+    assert REDACTED_PLACEHOLDER in heads
+
+
+def test_the_logged_body_is_capped_but_its_true_length_is_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _HugeProvider(_ProseProvider):
+        body = "no issues found. " * 5000
+
+    engine = LLMReviewEngine(_HugeProvider())
+    with caplog.at_level(logging.DEBUG, logger="lgtmaybe.engine.engine"):
+        with pytest.raises(ReviewIncompleteError):
+            engine.review(_CTX, make_cfg())
+    records = [r for r in caplog.records if getattr(r, "response_head", None)]
+    assert records
+    assert len(str(records[0].response_head)) < len(_HugeProvider.body)
+    assert records[0].response_chars == len(_HugeProvider.body)
+
+
+def test_the_notice_names_the_most_common_failure_not_the_last() -> None:
+    """Three lenses returning prose and one hitting a rate limit is a schema
+    problem, but reporting only the last error names the rate limit and sends
+    the reader to the wrong knob."""
+    notices = _build_notices(
+        _NoticeState(
+            cfg=ReviewConfig(provider=Provider.ollama, model="m"),
+            capped_files=False,
+            total_files=1,
+            oversized=[],
+            skipped_by_triage=[],
+            errors=[
+                "unparseable model output (prose)",
+                "unparseable model output (prose)",
+                "unparseable model output (prose)",
+                "RateLimitError: slow down",
+            ],
+            total_calls=4,
+            failed_calls=4,
+            failed_lenses=["security", "correctness", "artefacts", "health"],
+            split_batches=0,
+            stepped_down=[],
+            reflection_skipped=None,
+            suppressed=0,
+            off_diff=0,
+            open_finding_threads=0,
+        )
+    )
+    joined = " ".join(notices)
+    assert "prose" in joined
+    assert "RateLimitError" not in joined

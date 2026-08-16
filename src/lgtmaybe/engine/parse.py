@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator
+from enum import StrEnum
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -33,30 +34,69 @@ from lgtmaybe.core.models import ReviewFinding
 _M = TypeVar("_M", bound=BaseModel)
 
 
+class ParseFailure(StrEnum):
+    """Which fault produced an unparseable response.
+
+    "It did not parse" is not a diagnosis: a model that answered in prose, one
+    that meant to emit JSON and got the syntax wrong, and one that emitted clean
+    JSON of a shape nobody asked for are three different problems with three
+    different fixes. The parser is the only place that can still tell them
+    apart — by the time the engine sees a ``ParseError`` the evidence is gone —
+    so it says which, and the reason travels far enough that a run names its own
+    cause without anyone re-running it with the raw body captured.
+
+    A ``StrEnum`` because it rides into reason strings and JSON log fields,
+    where ``ParseFailure.prose`` would read as a leaked repr.
+    """
+
+    empty = "empty"
+    """The provider returned nothing at all."""
+    prose = "prose"
+    """No balanced JSON delimiter ever opened — the model ignored the ask."""
+    malformed_json = "malformed_json"
+    """JSON was attempted and does not decode."""
+    not_findings = "not_findings"
+    """Valid JSON that was never findings-shaped."""
+    schema = "schema"
+    """Findings-shaped, but rejected by the strict schema."""
+    truncated = "truncated"
+    """Cut off mid-JSON — the model ran out of output tokens."""
+
+
 class ParseError(Exception):
     """Raised when the LLM response cannot be parsed into findings.
 
-    ``truncated`` distinguishes the two faults behind that: a response cut off
-    mid-JSON (the model ran out of output tokens) versus one that is simply not
-    findings JSON (prose, or a schema violation). They send a maintainer to
-    different fixes, so the reviewer must not report them as the same thing.
+    ``shape`` names which fault it was (see ``ParseFailure``). ``truncated``
+    predates it and remains the flag callers branch on — a response cut off
+    mid-JSON is not a badly-behaved model, and the salvage below applies only to
+    it — but it is now *derived* from the shape rather than tracked beside it,
+    so the two can never disagree about the same failure.
 
     ``recovered`` carries the findings the model finished emitting before a
     truncation — real, schema-valid work worth posting. It rides on the error
     rather than being returned, because a caller must not be able to take the
     salvage without also seeing that the lens was cut short.
+
+    The offending text is deliberately *not* carried here. Every caller parses
+    text it already holds, so a ``raw`` field would hand back its own argument —
+    and keeping the provider's body out of this module is what lets it stay
+    free of logging, config and redaction concerns.
     """
 
     def __init__(
         self,
         message: str,
         *,
-        truncated: bool = False,
+        shape: ParseFailure,
         recovered: list[ReviewFinding] | None = None,
     ) -> None:
         super().__init__(message)
-        self.truncated = truncated
+        self.shape = shape
         self.recovered = recovered or []
+
+    @property
+    def truncated(self) -> bool:
+        return self.shape is ParseFailure.truncated
 
 
 # Regex to strip trailing commas before ] or }
@@ -149,6 +189,48 @@ def iter_json_values(raw: str) -> Iterator[Any]:
             span = _balanced_span(text, i)
             if span is not None:
                 yield from _try(span)
+
+
+def _classify(raw: str) -> ParseFailure:
+    """Which non-truncation fault *raw* is, told apart by how far it got.
+
+    Cold path only — reached once a call has already failed, so re-walking the
+    text costs nothing next to the model call that produced it. Written as its
+    own walk rather than by instrumenting ``iter_json_values``, whose signature
+    is shared with reflection, ``parse_structured`` and the truncation salvage;
+    none of them want a second return value to answer a question only the
+    failure path asks.
+
+    The whole-text candidate ``iter_json_values`` tries first is deliberately
+    *not* counted as an attempt at JSON: prose is text that does not decode, so
+    counting it would make every prose response look like broken JSON. Only a
+    balanced delimiter is evidence the model reached for a container at all —
+    and only one carrying a quote, because the reason extraction scans for
+    balanced spans in the first place is that prose is full of brackets that are
+    not JSON (``reviewed 3 files [a, b, c]``). A findings payload cannot exist
+    without a quoted key, so a span with no quote in it never was one, and
+    calling it malformed would send the reader hunting a syntax bug in a model
+    that never attempted the format.
+    """
+    text = _strip_think_blocks(raw).strip()
+    if not text:
+        return ParseFailure.empty
+    spans = [
+        span
+        for i, ch in enumerate(text)
+        if ch in _CLOSER and (span := _balanced_span(text, i)) is not None and '"' in span
+    ]
+    if not spans:
+        return ParseFailure.prose
+    for span in spans:
+        try:
+            json.loads(_TRAILING_COMMA_RE.sub(r"\1", span))
+        except json.JSONDecodeError:
+            continue
+        # Something decoded, so the syntax was fine and the shape was not — the
+        # findings-shaped candidates are already exhausted by the caller.
+        return ParseFailure.not_findings
+    return ParseFailure.malformed_json
 
 
 def _is_unterminated(text: str) -> bool:
@@ -269,7 +351,7 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
         ParseError: if the text cannot be recovered into valid findings.
     """
     if not raw or not raw.strip():
-        raise ParseError("Empty response from provider")
+        raise ParseError("Empty response from provider", shape=ParseFailure.empty)
 
     # A findings-shaped candidate can still fail validation — e.g. a small model
     # emits a chatter object ({"note": "found 1 issue"}) before the real envelope,
@@ -304,14 +386,18 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     if _is_unterminated(_strip_think_blocks(raw)):
         raise ParseError(
             "Response ended mid-JSON — the model ran out of output tokens",
-            truncated=True,
+            shape=ParseFailure.truncated,
             recovered=_recover_complete_findings(raw),
         )
     if single is not None:
         return single
     if last_error is not None:
-        raise ParseError(f"Finding validation failed: {last_error}") from last_error
-    raise ParseError("Cannot parse JSON findings from response")
+        # Something WAS findings-shaped and the strict schema refused it, which
+        # `_classify` cannot see: by its lights the payload decoded fine.
+        raise ParseError(
+            f"Finding validation failed: {last_error}", shape=ParseFailure.schema
+        ) from last_error
+    raise ParseError("Cannot parse JSON findings from response", shape=_classify(raw))
 
 
 def parse_structured(

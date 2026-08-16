@@ -8,8 +8,10 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -276,7 +278,16 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "`categories`, lower `context_lines`)."
         )
     if state.failed_calls:
-        detail = state.errors[-1] if state.errors else "timeout or unparseable output"
+        # The MOST COMMON error, not the last one. Three lenses returning prose
+        # and a fourth hitting a rate limit is a schema problem, but the last
+        # error names the rate limit and sends the reader to the wrong knob —
+        # and a wave that fails the same way N times is exactly the shape worth
+        # reporting. Identical to the old behaviour when there is one error.
+        detail = (
+            Counter(state.errors).most_common(1)[0][0]
+            if state.errors
+            else "timeout or unparseable output"
+        )
         lost = ", ".join(sorted(set(state.failed_lenses)))
         which = f"{lost} — " if lost else ""
         notices.append(
@@ -1793,15 +1804,9 @@ class LLMReviewEngine:
             findings = parse_findings(result.text)
         except ParseError as exc:
             if not exc.truncated:
-                profiler.record_result(
-                    lens.id,
-                    batch_num,
-                    elapsed,
-                    result,
-                    error="unparseable model output",
-                )
-                _log.warning("unparseable model output", extra={"lens": lens.id})
-                return [], "unparseable model output"
+                reason = _unparseable_reason(exc, lens.id, result.text)
+                profiler.record_result(lens.id, batch_num, elapsed, result, error=reason)
+                return [], reason
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a
             # prompt bug instead of the ceiling they hit. The notice on the PR is
@@ -2098,6 +2103,59 @@ def _intent_text(ctx: PRContext) -> str:
     if subjects:
         parts.append("Commit messages:\n" + "\n".join(f"- {s}" for s in subjects))
     return "\n\n".join(parts)
+
+
+# How much of an unparseable reply is logged at DEBUG. Head *and* tail: a prose
+# preamble shows at the top and an unclosed container or a stray fence at the
+# bottom, and the two are different diagnoses. The observed failures ran
+# 676–1,201 tokens (roughly 2.7–4.8 KB), so this captures most of them whole —
+# and `response_chars` always reports the true length, so a cap never hides how
+# much was left out.
+_RAW_HEAD_CHARS = 2000
+_RAW_TAIL_CHARS = 500
+
+
+def _raw_excerpt(text: str) -> str:
+    """A capped, redacted excerpt of a model reply, safe to put in a log.
+
+    Redacted BEFORE slicing: cutting first could split a PEM block across the
+    elision and leave each half unmatched by the redactor. ``core.logging``
+    only substitutes secrets explicitly registered with it, so the content
+    redactor has to run here or a key the model quoted back at us reaches the
+    log untouched.
+    """
+    clean = redact(text)
+    if len(clean) <= _RAW_HEAD_CHARS + _RAW_TAIL_CHARS:
+        return clean
+    elided = len(clean) - _RAW_HEAD_CHARS - _RAW_TAIL_CHARS
+    return f"{clean[:_RAW_HEAD_CHARS]}\n…[{elided} chars elided]…\n{clean[-_RAW_TAIL_CHARS:]}"
+
+
+def _unparseable_reason(exc: ParseError, lens_id: str, text: str) -> str:
+    """Report a reply that could not be parsed, and return the reason to post.
+
+    "Unparseable" alone sends a maintainer nowhere — a model answering in prose
+    and one emitting broken JSON need different fixes — so the shape rides in
+    the returned reason, which is already carried to ``CallRecord.error``, the
+    ``--profile`` row and the PR notice. That covers all three without a new
+    field on any of them.
+
+    The body itself is model output and can echo the diff, so the default level
+    gets its size and its shape and nothing of its content. The body goes out
+    only at DEBUG, which is the opt-in this repo already has for exactly this;
+    a dedicated flag would be four files of plumbing to say what
+    ``LGTMAYBE_LOG_LEVEL`` already says.
+    """
+    reason = f"unparseable model output ({exc.shape})"
+    extra: dict[str, Any] = {
+        "lens": lens_id,
+        "shape": str(exc.shape),
+        "response_chars": len(text),
+    }
+    if _log.isEnabledFor(logging.DEBUG) and text:
+        extra["response_head"] = _raw_excerpt(text)
+    _log.warning(reason, extra=extra)
+    return reason
 
 
 def _error_reason(exc: BaseException) -> str:

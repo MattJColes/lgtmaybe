@@ -87,6 +87,26 @@ the prompt is built, so redacted values never reach the LLM or appear in logs.
 Redaction is a best-effort defence. Do not commit real secrets to your
 repository and rely on this alone.
 
+## Model replies in the log
+
+When a model's reply cannot be parsed into findings, lgtmaybe logs why. At the
+default log level it records only **which** parse failure it was (`prose`,
+`malformed_json`, `not_findings`, `schema`, `truncated`, `empty`) and **how many
+characters** the reply was — never its content.
+
+Set `LGTMAYBE_LOG_LEVEL=DEBUG` and the log line additionally carries a capped
+excerpt of the reply itself (the first 2,000 and last 500 characters, with the
+gap marked). This exists so a model that stops honouring the output schema can
+be diagnosed without re-running the review. The excerpt:
+
+- is passed through the same secret redaction described above before it is
+  logged, and is redacted **before** it is cut, so a truncated match cannot slip
+  past the redactor;
+- is written to **stderr**, alongside the other structured JSON log lines —
+  never to stdout (the machine-readable channel) and never to the PR;
+- is model output, which can quote the diff back. That is why it is off unless
+  you ask for it.
+
 ## Prompt-injection defence
 
 PR diff content is treated as untrusted input throughout the pipeline. lgtmaybe
