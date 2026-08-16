@@ -322,7 +322,10 @@ class TestRescueWave:
     def test_unparseable_output_is_not_rescued(self) -> None:
         """Determinism cuts both ways: at temperature 0 the same request returns
         the same unparseable answer, so a rescue would only buy a second billed
-        failure. Left to the incomplete notice instead."""
+        failure. Left to the incomplete notice instead.
+
+        Repair off, so this pins the rescue rule alone — the reformat re-ask is
+        a different request and is covered by the test below."""
 
         class _Gibberish(FakeProvider):
             def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
@@ -333,10 +336,39 @@ class TestRescueWave:
 
         provider = _Gibberish()
 
-        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg())
+        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg(repair_unparseable=False))
 
         assert len(provider.calls) == 2  # no third call
         assert "unparseable model output" in summary
+
+    def test_the_extra_call_after_unparseable_output_is_a_reformat_not_a_rescue(self) -> None:
+        """The boundary between the two mechanisms, stated as a test.
+
+        A rescue re-issues the SAME request, which is why unparseable output is
+        excluded from it. The repair re-ask sends the model's own reply back with
+        the schema and no diff — a different request, and the only one of the two
+        that can recover anything here."""
+
+        class _Gibberish(FakeProvider):
+            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+                prompt = "\n".join(str(m.get("content", "")) for m in messages)
+                self.calls.append({"messages": messages, "model": model, "opts": opts})
+                text = "not json at all" if _SECURITY_MARKER in prompt else _FINDING_JSON
+                return ProviderResult(text=text, input_tokens=1, output_tokens=1)
+
+        provider = _Gibberish()
+        LLMReviewEngine(provider).review(_CTX, _cfg())
+
+        assert len(provider.calls) == 3
+        prompts = [
+            "\n".join(str(m.get("content", "")) for m in call["messages"])
+            for call in provider.calls
+        ]
+        # Found by content, not by position: the repair runs inline in its own
+        # lens's thread, so it need not be the last call to land.
+        reformats = [p for p in prompts if "not json at all" in p]
+        assert len(reformats) == 1
+        assert _SECURITY_MARKER not in reformats[0], "a re-run of the lens, not a reformat"
 
     def test_a_ceiling_still_holds_through_the_rescue_wave(self) -> None:
         """A ceiling the user set must survive the rescue, not just precede it.

@@ -74,6 +74,7 @@ from .prompt import (
 )
 from .redact import redact
 from .reflect import reflect_findings
+from .repair import repair_findings
 from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
 from .static_analysis import (
     SCAN_CATEGORY_PREFIX,
@@ -238,6 +239,7 @@ class _NoticeState:
     failed_lenses: list[str]
     split_batches: int
     stepped_down: list[str]
+    repaired: list[str]
     schema_dropped: bool
     reflection_skipped: str | None
     suppressed: int
@@ -294,6 +296,16 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"⚠️ {state.failed_calls} of {state.total_calls} review calls failed "
             f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
+        )
+    if state.repaired:
+        count = len(state.repaired)
+        listed = ", ".join(f"`{lens}`" for lens in state.repaired)
+        notices.append(
+            f"🔧 {count} lens{_plural(count, many='es')} returned output that did not "
+            f"parse and was reformatted by a second call ({listed}). Those findings are "
+            "complete — but a model that keeps doing this is not honouring the output "
+            "schema, which costs an extra call every time. Check the provider log for a "
+            "dropped `response_format`, or try a different model."
         )
     if state.failed_calls and state.schema_dropped:
         notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
@@ -581,6 +593,10 @@ class _Run:
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
+    # The whole config, for the settings a call reads only on its failure path
+    # (the repair re-ask) — carried rather than re-threaded as parameters that
+    # every hop between review() and _complete_lens would have to re-declare.
+    cfg: ReviewConfig
     # The PR's full changed-file list. Carried for the same reason as
     # `concurrency`: a split piece shows FEWER files than the batch it came from,
     # so it has to derive its own not-shown manifest rather than inherit the
@@ -755,6 +771,10 @@ class LLMReviewEngine:
         # not calls — the same lens stepping down in two batches is one fact
         # about the review, not two.
         self._stepped_down: set[str] = set()
+        # Lenses whose unparseable reply was reformatted into findings by a
+        # second call (see repair.py). Keyed by lens for the same reason as
+        # `_stepped_down`: one fact about the review, not one per batch.
+        self._repaired: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
         #    (see _schema_dropped below for the other adapter-only probe)
@@ -954,6 +974,7 @@ class LLMReviewEngine:
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
+            cfg=cfg,
             changed_files=tuple(ctx.changed_files),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
@@ -1207,6 +1228,7 @@ class LLMReviewEngine:
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
+                repaired=sorted(self._repaired),
                 schema_dropped=self._schema_dropped(),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
@@ -1824,6 +1846,25 @@ class LLMReviewEngine:
             if not exc.truncated:
                 reason = _unparseable_reason(exc, lens.id, result.text)
                 profiler.record_result(lens.id, batch_num, elapsed, result, error=reason)
+                # One reformat attempt at the answer the model already produced
+                # and was already billed for. A DIFFERENT request — the reply
+                # plus the schema, no diff — which is why it does not fall under
+                # the rule that an unparseable call is never re-run: that rule is
+                # about re-issuing the identical request at temperature 0.
+                #
+                # Ceilings are re-checked first: this is a new model call, and a
+                # run already past its deadline or budget must not start one.
+                if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is None:
+                    repaired = repair_findings(
+                        self._provider, run.cfg, result.text, exc.shape, lens.id
+                    )
+                    if repaired:
+                        # Complete, not partial: nothing is missing, so this must
+                        # not trip the incomplete notice. Reported through its own
+                        # notice instead, like a lens that stepped its reasoning
+                        # effort down — successful, but worth saying out loud.
+                        self._repaired.add(lens.id)
+                        return _stamp_categories(repaired, lens), None
                 return [], reason
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a

@@ -107,6 +107,17 @@ be diagnosed without re-running the review. The excerpt:
 - is model output, which can quote the diff back. That is why it is off unless
   you ask for it.
 
+## The repair re-ask
+
+When a review call's reply cannot be parsed into findings, lgtmaybe sends that
+reply back to the **same provider** once, with the output schema and a request
+to re-express it in the required shape (`repair_unparseable`, on by default).
+
+This adds no new data: the reply is the model's own output about a diff it has
+already been sent, and the repair call carries **no diff, no context lines, and
+no PR metadata** — only the reply itself, capped and wrapped as untrusted data.
+It happens at most once per failed call and never recursively.
+
 ## Prompt-injection defence
 
 PR diff content is treated as untrusted input throughout the pipeline. lgtmaybe

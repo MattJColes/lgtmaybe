@@ -4253,6 +4253,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
+| `repair_unparseable` | boolean | No | `True` | Repair Unparseable |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
 | `spec_paths` | list[string] | No | `[]` | Spec Paths |
 | `spec_review` | boolean | No | `True` | Spec Review |
@@ -5082,6 +5083,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Reflect Model"
+    },
+    "repair_unparseable": {
+      "default": true,
+      "title": "Repair Unparseable",
+      "type": "boolean"
     },
     "resolve_fixed": {
       "default": true,
@@ -6605,6 +6611,17 @@ be diagnosed without re-running the review. The excerpt:
   never to stdout (the machine-readable channel) and never to the PR;
 - is model output, which can quote the diff back. That is why it is off unless
   you ask for it.
+
+## The repair re-ask
+
+When a review call's reply cannot be parsed into findings, lgtmaybe sends that
+reply back to the **same provider** once, with the output schema and a request
+to re-express it in the required shape (`repair_unparseable`, on by default).
+
+This adds no new data: the reply is the model's own output about a diff it has
+already been sent, and the repair call carries **no diff, no context lines, and
+no PR metadata** — only the reply itself, capped and wrapped as untrusted data.
+It happens at most once per failed call and never recursively.
 
 ## Prompt-injection defence
 

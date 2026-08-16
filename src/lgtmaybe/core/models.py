@@ -1017,6 +1017,14 @@ class ReviewConfig(_Strict):
     # prose/reasoning instead of findings. Disable for a model/provider that
     # doesn't support it (the lenient parser is the fallback).
     structured_output: bool = True
+    # When a review call's reply can't be parsed into findings, send the reply
+    # back once — with the schema, without the diff — asking for it in the
+    # required shape. A model that answered with real review in the wrong
+    # wrapper has done the work and is billed for it either way; without this
+    # all of it is discarded. Costs nothing on a healthy run: it fires only on a
+    # call that already failed and already returned nothing. Bounded to one
+    # attempt, never recursive, and it can only ever add findings.
+    repair_unparseable: bool = True
 
     @model_validator(mode="after")
     def _lens_ids_are_unique(self) -> ReviewConfig:

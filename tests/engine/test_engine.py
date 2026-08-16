@@ -57,6 +57,7 @@ def test_notice_builder_preserves_notice_order() -> None:
             failed_lenses=[],
             split_batches=0,
             stepped_down=[],
+            repaired=[],
             schema_dropped=False,
             reflection_skipped=None,
             suppressed=1,
@@ -2630,6 +2631,7 @@ def test_the_notice_names_the_most_common_failure_not_the_last() -> None:
             failed_lenses=["security", "correctness", "artefacts", "health"],
             split_batches=0,
             stepped_down=[],
+            repaired=[],
             schema_dropped=False,
             reflection_skipped=None,
             suppressed=0,
@@ -2680,3 +2682,45 @@ def test_a_provider_that_cannot_answer_is_not_asked_twice() -> None:
     with pytest.raises(ReviewIncompleteError) as exc_info:
         engine.review(_CTX, make_cfg())
     assert _SCHEMA_DROP_NOTE not in str(exc_info.value)
+
+
+def test_a_repaired_lens_is_named_in_its_own_notice() -> None:
+    """Complete, not partial: nothing is missing, so this must not trip the
+    incomplete notice. But a model that cannot emit its own schema costs an
+    extra call every time, which is worth saying out loud."""
+
+    class _ProseThenJson(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages)
+            if "convert a code reviewer" in prompt:
+                finding = ReviewFinding(
+                    path="src/app.py",
+                    line=1,
+                    side="RIGHT",
+                    severity=Severity.high,
+                    title="sec",
+                    body="b",
+                    failure_scenario="boom",
+                )
+                return ProviderResult(
+                    text=json.dumps({"findings": [finding.model_dump(mode="json")]}),
+                    input_tokens=10,
+                    output_tokens=5,
+                )
+            return ProviderResult(text="prose, sorry", input_tokens=10, output_tokens=5)
+
+    findings, summary = LLMReviewEngine(_ProseThenJson()).review(_CTX, make_cfg())
+
+    assert findings, "the reformatted findings are real findings"
+    assert "reformatted by a second call" in summary
+    assert "results may be incomplete" not in summary
+
+
+def test_a_failed_repair_leaves_the_review_partial() -> None:
+    """A repair may only ever ADD findings: when it cannot, the caller keeps the
+    reason it already had and the incomplete notice still fires."""
+    engine = LLMReviewEngine(_ProseProvider())
+    with pytest.raises(ReviewIncompleteError) as exc_info:
+        engine.review(_CTX, make_cfg())
+    assert "prose" in str(exc_info.value)
