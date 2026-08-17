@@ -196,16 +196,22 @@ class TestProfileJsonFile:
 
         assert capsys.readouterr().out, "the findings still printed"
 
-    def test_nothing_is_written_when_not_asked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_nothing_is_written_when_not_asked(
+        self,
+        _local_run,  # type: ignore[no-untyped-def]
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Exercise the early return, not an unrelated directory.
 
-        An empty `tmp_path` proves nothing here: a run without ``--profile-json``
+        An empty `tmp_path` proved nothing here: a run without ``--profile-json``
         was never pointed at it, so the assertion held whether or not the default
-        path wrote a file somewhere else. Watch the write itself instead.
+        path wrote a file somewhere else. Keep the full CLI path — so a
+        regression in option wiring is still caught — and watch the write itself
+        instead of a directory the run never knew about.
         """
         written: list[Path] = []
         monkeypatch.setattr(Path, "write_text", lambda self, *_a, **_k: written.append(self))
 
-        cli._write_profile_json(cli.RuntimeOptions())
+        _local_run()
 
         assert written == []
