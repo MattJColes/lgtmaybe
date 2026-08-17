@@ -1816,6 +1816,23 @@ class LLMReviewEngine:
             self._drop_response_format(model)
         return findings, error
 
+    def _sends_response_format(self, model: str) -> bool:
+        """Whether the schema this call asked for actually reached the provider.
+
+        Passing ``response_format`` is not the same as sending it: the adapter
+        strips it for a model that has already refused it (a 400, or schema mode
+        decoding to nothing), and from here that call looks identical to one
+        made under enforcement. Re-running such a lens "without the schema"
+        would re-send the request that just failed, byte for byte — a wasted
+        full-diff call, and exactly what ``engine.rescue`` forbids.
+
+        Feature-detected and **fail-open**, like every other adapter probe: an
+        adapter that cannot answer is assumed to have sent what it was given, so
+        the recovery keeps working rather than silently switching itself off.
+        """
+        probe = getattr(self._provider, "sends_response_format", None)
+        return bool(probe(model)) if callable(probe) else True
+
     def _drop_response_format(self, model: str) -> None:
         """Tell the adapter this model's schema mode is not working.
 
@@ -1979,7 +1996,11 @@ class LLMReviewEngine:
                     # 2. The reformat could not do it either. If this call sent
                     #    the provider's schema, that enforcement is the remaining
                     #    suspect — re-run the lens once without it.
-                    if response_format is not None and run.cfg.retry_without_schema:
+                    if (
+                        response_format is not None
+                        and run.cfg.retry_without_schema
+                        and self._sends_response_format(model)
+                    ):
                         retried, retry_error = self._retry_without_schema(
                             messages, model, batch_num, lens, reason, run
                         )
