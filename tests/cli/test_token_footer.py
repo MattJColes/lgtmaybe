@@ -210,7 +210,15 @@ class TestProfileJsonFile:
         instead of a directory the run never knew about.
         """
         written: list[Path] = []
-        monkeypatch.setattr(Path, "write_text", lambda self, *_a, **_k: written.append(self))
+        real_write_text = Path.write_text
+
+        def spy(self: Path, *args: object, **kwargs: object) -> int:
+            # Wraps, never replaces: a spy that swallowed the write would also
+            # hide a write this test is not looking for.
+            written.append(self)
+            return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "write_text", spy)
 
         _local_run()
 
