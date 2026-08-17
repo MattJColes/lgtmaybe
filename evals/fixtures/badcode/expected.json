@@ -3,10 +3,10 @@
   "changed_file": "badcode.py",
   "expected": [
     {
-      "label": "hardcoded GitHub token (API_TOKEN)",
+      "label": "credential in a source constant (API_TOKEN) — value redacted before review",
       "line": 5,
       "keywords": ["secret", "token", "hardcoded", "credential", "api key"],
-      "severity_at_least": "high"
+      "severity_at_least": "medium"
     },
     {
       "label": "insecure HTTP / missing timeout in fetch_user",

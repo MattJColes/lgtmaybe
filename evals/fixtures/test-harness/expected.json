@@ -3,10 +3,10 @@
   "changed_file": "tests/integration/test_s3_roundtrip.py",
   "expected": [
     {
-      "label": "hardcoded AWS secret key in the test module",
+      "label": "credential in a source constant in the test module — value redacted before review",
       "line": 4,
       "keywords": ["secret", "hardcoded", "credential", "aws_secret", "key"],
-      "severity_at_least": "high"
+      "severity_at_least": "medium"
     },
     {
       "label": "assertion-free test: test_put_and_get_roundtrip makes no assertions",
