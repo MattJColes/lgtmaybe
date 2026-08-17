@@ -371,6 +371,29 @@ was *not* shown:
   it in the diff, while `tests/test_dispatch.py` covers it in a file the PR never
   touched, so "this change is untested" is true of the diff and wrong as a defect.
 
+### Separating a reproducible failure from an intermittent one
+
+A single pass says a fixture passed or failed; it cannot say whether the model
+*reliably* passes it. `--repeats N` runs every selected fixture N times and adds
+a spread line per fixture — mean/min/max recall plus `parsed=n/N`:
+
+```bash
+uv run python -m evals.run --provider ollama --model qwen3.6:35b \
+  --api-base http://localhost:11434 --repeats 5
+```
+
+That distinction is the one a structured-output audit turns on: a model that
+fails to produce parseable output on *every* repeat of a case has a reproducible
+defect worth reporting upstream, while one that fails on some repeats has a
+flakiness problem you handle with the repair pass instead.
+
+The per-fixture rows stay flat (N entries per fixture), so pooled recall and
+precision keep their meaning and `evals/ab.py` is unaffected. Two bars do get
+strictly harsher, because they are all-quantified over the rows: one parse
+failure or one forbidden finding in **any** repeat fails the run. That is what
+you want from a false-positive gate, but it means a `--repeats 5` run is not
+comparable to a single pass at the same `--min-recall`.
+
 ### Measuring what the fast preset trades away
 
 The default `fast` preset covers the nine lenses in four grouped calls;
