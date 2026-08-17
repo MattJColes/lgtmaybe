@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.4...lgtmaybe-v2.2.0) (2026-08-17)
+
+
+### Features
+
+* **cli:** give the profile a machine-readable form, and stop it corrupting stdout ([#460](https://github.com/MattJColes/lgtmaybe/issues/460)) ([ff86872](https://github.com/MattJColes/lgtmaybe/commit/ff86872d1fcda2b93b27f374b90561336c1ed98d))
+* **engine:** re-ask a lens without the schema when its reply won't parse ([#463](https://github.com/MattJColes/lgtmaybe/issues/463)) ([2a241cd](https://github.com/MattJColes/lgtmaybe/commit/2a241cd723512a80a27030fbce252c6851afc506)), closes [#454](https://github.com/MattJColes/lgtmaybe/issues/454)
+* **evals:** run each fixture N times so flaky and reproducible failures separate ([#461](https://github.com/MattJColes/lgtmaybe/issues/461)) ([b8d0568](https://github.com/MattJColes/lgtmaybe/commit/b8d0568187c608fc474b07d9ebe0267d3b48589e)), closes [#458](https://github.com/MattJColes/lgtmaybe/issues/458)
+* make structured-output compliance failures diagnosable and survivable ([#450](https://github.com/MattJColes/lgtmaybe/issues/450)) ([d1c4f4d](https://github.com/MattJColes/lgtmaybe/commit/d1c4f4d0dc7389ff72412dca30d179d53693b96b))
+
+
+### Bug Fixes
+
+* **engine:** don't re-ask a lens whose schema the adapter already stripped ([#465](https://github.com/MattJColes/lgtmaybe/issues/465)) ([60d7944](https://github.com/MattJColes/lgtmaybe/commit/60d79447b0f647f5406c493204bafbc4ee2796ab))
+* **provider:** don't step down an effort the route would discard ([#459](https://github.com/MattJColes/lgtmaybe/issues/459)) ([464b5b6](https://github.com/MattJColes/lgtmaybe/commit/464b5b65099af7fda943ee905513787379adea60))
+* **provider:** give a reasoning-bound truncation a lever when no effort was set ([#452](https://github.com/MattJColes/lgtmaybe/issues/452)) ([abe7dac](https://github.com/MattJColes/lgtmaybe/commit/abe7dac224caa5f87e70d546726acb030bd52308))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 8 updates ([#449](https://github.com/MattJColes/lgtmaybe/issues/449)) ([047e8b4](https://github.com/MattJColes/lgtmaybe/commit/047e8b4302e17f57ed9d2137963d9c2a4f69f471))
+
 ## [2.1.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.3...lgtmaybe-v2.1.4) (2026-08-14)
 
 
