@@ -1,0 +1,51 @@
+{
+  "name": "rust-safety",
+  "changed_file": "src/billing.rs",
+  "expected": [
+    {
+      "label": "hardcoded GitHub token (API_TOKEN)",
+      "line": 4,
+      "keywords": ["secret", "token", "hardcoded", "credential", "api key"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "unsigned subtraction in charge() underflows when amount > balance",
+      "line": 8,
+      "keywords": [
+        "underflow",
+        "overflow",
+        "u64",
+        "unsigned",
+        "panic",
+        "wrap",
+        "checked_sub",
+        "saturating"
+      ],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "unwrap() in parse_port panics on malformed input",
+      "line": 13,
+      "keywords": ["unwrap", "panic", "parse", "error handling", "expect", "result"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "off-by-one in average() — the range starts at 1",
+      "line": 19,
+      "keywords": ["off-by-one", "index", "range", "first element", "skip", "boundary"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "command injection via sh -c in run_report",
+      "line": 27,
+      "keywords": ["injection", "shell", "command", "sh -c"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "TLS verification disabled (danger_accept_invalid_certs) in fetch_account",
+      "line": 37,
+      "keywords": ["tls", "certificate", "verification", "insecure", "mitm", "https"],
+      "severity_at_least": "high"
+    }
+  ]
+}

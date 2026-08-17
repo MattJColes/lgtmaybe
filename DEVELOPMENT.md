@@ -394,6 +394,30 @@ failure or one forbidden finding in **any** repeat fails the run. That is what
 you want from a false-positive gate, but it means a `--repeats 5` run is not
 comparable to a single pass at the same `--min-recall`.
 
+### Languages other than Python
+
+`rust-safety`, `go-concurrency` and `typescript-web` cover the languages
+`engine/astgrep.py` registers beyond Python. Each plants a bug the language
+*specifically* invites — Rust's `u64` subtraction underflowing, Go's
+unsynchronised map write from goroutines, JS comparing a seconds-based JWT `exp`
+against a millisecond `Date.now()` — alongside the portable catches (hardcoded
+token, injection, off-by-one) so recall is comparable across all three.
+
+Two things worth knowing before adding another:
+
+- The prompt's worked examples are all Python filenames
+  (`engine/prompt.py`). Not a hard dependency, but a real bias — if a non-Python
+  fixture under-recalls, suspect the prompt before the fixture.
+- The bundled semgrep pack declares only Python and JavaScript/TypeScript, so
+  `--static-analysis` grounds the TypeScript fixture and is a no-op on the Rust
+  and Go ones. An A/B of the fusion is only meaningful on the languages the pack
+  covers.
+
+Each ships a `repo/` corpus holding the file it adds, so `tests/evals` can check
+that real ast-grep resolves a symbol in that language. Anchor Rust cases on
+`function_item` or `struct_item`: `impl_item` exposes no tree-sitter `name`
+field, so a bare `impl Foo` block will never bind by name.
+
 ### Measuring what the fast preset trades away
 
 The default `fast` preset covers the nine lenses in four grouped calls;

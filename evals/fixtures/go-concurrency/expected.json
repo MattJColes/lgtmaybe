@@ -1,0 +1,53 @@
+{
+  "name": "go-concurrency",
+  "changed_file": "report/report.go",
+  "expected": [
+    {
+      "label": "hardcoded GitHub token (apiToken)",
+      "line": 12,
+      "keywords": ["secret", "token", "hardcoded", "credential", "api key"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "SQL injection via fmt.Sprintf in FindUser",
+      "line": 16,
+      "keywords": ["sql injection", "injection", "sprintf", "parameterized", "placeholder"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "ignored error from http.Get leaves resp nil, then dereferenced",
+      "line": 28,
+      "keywords": ["error", "ignored", "nil", "dereference", "panic", "unchecked"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "response body never closed in FetchAll — leaks connections",
+      "line": 28,
+      "keywords": ["close", "body", "leak", "resource", "defer", "file descriptor"],
+      "severity_at_least": "low"
+    },
+    {
+      "label": "unbounded goroutine fan-out in FetchAll — one per URL, no limit",
+      "line": 26,
+      "keywords": ["unbounded", "goroutine", "limit", "semaphore", "worker pool", "resource"]
+    },
+    {
+      "label": "concurrent map write in FetchAll — unsynchronised across goroutines",
+      "line": 29,
+      "keywords": ["race", "data race", "concurrent map", "mutex", "goroutine", "unsynchronized"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "command injection via sh -c in RunReport",
+      "line": 38,
+      "keywords": ["injection", "shell", "command", "sh -c"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "off-by-one in Average() — the loop starts at 1",
+      "line": 44,
+      "keywords": ["off-by-one", "index", "loop", "first element", "skip", "boundary"],
+      "severity_at_least": "medium"
+    }
+  ]
+}
