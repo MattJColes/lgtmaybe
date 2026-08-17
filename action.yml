@@ -94,6 +94,10 @@ inputs:
     description: "When a review call's reply can't be parsed into findings, send the reply back once — with the schema, without the diff — asking for it in the required shape. A model that answered with real review in the wrong wrapper is billed for it either way; without this all of it is discarded. On by default; set to false to disable. Costs nothing on a healthy run: it fires only on a call that already failed."
     required: false
     default: ""
+  retry_without_schema:
+    description: "Last resort when a reply won't parse and the reformat above couldn't fix it: re-run that one lens without response_format, on the theory that provider-native schema enforcement is what broke a reply the prompt would otherwise have got right. On by default; set to false to disable. Bounded to one re-run per lens, and only offered to a call that actually sent the schema — so a run with structured_output off pays nothing. A re-run that works marks the model, so later calls skip the schema instead of failing the same way."
+    required: false
+    default: ""
   mid_review_retrieval:
     description: "Let a review lens defer ONCE for bounded, read-only codebase context: instead of hedging or dropping a finding that hinges on code outside the diff, the lens names the files (or symbols) it must read, lgtmaybe fetches them read-only, and re-runs that one lens with them. Off by default — it costs at most one extra model call per (batch, lens); set to true to trade tokens for cross-file recall."
     required: false
@@ -298,6 +302,7 @@ runs:
         INPUT_RECURSIVE: ${{ inputs.recursive }}
         INPUT_STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
         INPUT_REPAIR_UNPARSEABLE: ${{ inputs.repair_unparseable }}
+        INPUT_RETRY_WITHOUT_SCHEMA: ${{ inputs.retry_without_schema }}
         INPUT_MID_REVIEW_RETRIEVAL: ${{ inputs.mid_review_retrieval }}
         INPUT_SYMBOL_RESOLUTION: ${{ inputs.symbol_resolution }}
         INPUT_INCREMENTAL: ${{ inputs.incremental }}

@@ -28,6 +28,12 @@ engine.repair:
     has: { field: name, regex: '^repair_findings$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+engine.schemaless-retry:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_retry_without_schema$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.dedupe:
   rule:
     kind: function_definition

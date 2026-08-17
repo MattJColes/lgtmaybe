@@ -160,7 +160,9 @@ param supported, and the refusal is only visible in the error. A dropped
 every model the provider serves, and SHALL be announced once — a silent
 downgrade to prompt-instructed JSON is indistinguishable from a model that
 simply stopped honouring the schema. litellm's stdout banner SHALL be
-suppressed, since stdout carries machine-readable output.
+suppressed, since stdout carries machine-readable output. The engine MAY ask for
+the same drop, on the one trigger the adapter cannot see: a reply that arrives
+well-formed and turns out not to be findings.
 <!-- anchor: provider.param-drop -->
 
 #### Scenario: the route rejects the structured-output field

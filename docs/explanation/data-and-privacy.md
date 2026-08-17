@@ -118,6 +118,21 @@ already been sent, and the repair call carries **no diff, no context lines, and
 no PR metadata** — only the reply itself, capped and wrapped as untrusted data.
 It happens at most once per failed call and never recursively.
 
+## The schema-less re-run
+
+When that reformat fails too *and* the original call carried the provider's JSON
+schema, lgtmaybe re-runs that one lens once with the schema omitted
+(`retry_without_schema`, on by default) — the prompt asks for JSON regardless,
+so a model whose constrained decoding produced something unreadable often
+answers fine without it.
+
+Unlike the repair, this **does re-send the diff** — it is the same request minus
+one parameter, to the same provider, so nothing new leaves the process and
+nothing new is exposed, but it is a second full send rather than a small one. It
+runs at most once per lens per batch, only after the cheaper repair has failed,
+and only where a schema was actually sent. Set `retry_without_schema: false` to
+turn it off.
+
 ## Prompt-injection defence
 
 PR diff content is treated as untrusted input throughout the pipeline. lgtmaybe
