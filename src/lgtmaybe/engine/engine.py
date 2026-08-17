@@ -8,6 +8,7 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -240,6 +241,7 @@ class _NoticeState:
     split_batches: int
     stepped_down: list[str]
     repaired: list[str]
+    re_asked: list[str]
     schema_dropped: bool
     reflection_skipped: str | None
     suppressed: int
@@ -306,6 +308,17 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "complete — but a model that keeps doing this is not honouring the output "
             "schema, which costs an extra call every time. Check the provider log for a "
             "dropped `response_format`, or try a different model."
+        )
+    if state.re_asked:
+        count = len(state.re_asked)
+        listed = ", ".join(f"`{lens}`" for lens in state.re_asked)
+        notices.append(
+            f"🧷 {count} lens{_plural(count, many='es')} returned output that did not parse "
+            f"under the provider's JSON schema and answered when re-asked without the schema "
+            f"({listed}). Those findings are complete — but this model's structured-output "
+            "mode is producing replies lgtmaybe cannot read, so every affected lens costs two "
+            "wasted calls before the one that works. Set `structured_output: false` to skip "
+            "them, or use a model whose JSON mode works."
         )
     if state.failed_calls and state.schema_dropped:
         notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
@@ -775,6 +788,10 @@ class LLMReviewEngine:
         # second call (see repair.py). Keyed by lens for the same reason as
         # `_stepped_down`: one fact about the review, not one per batch.
         self._repaired: set[str] = set()
+        # Lenses that only parsed once the provider's JSON schema was taken off
+        # the request (see _retry_without_schema). Keyed by lens for the same
+        # reason as the two above.
+        self._re_asked: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
         #    (see _schema_dropped below for the other adapter-only probe)
@@ -1229,6 +1246,7 @@ class LLMReviewEngine:
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
                 repaired=sorted(self._repaired),
+                re_asked=sorted(self._re_asked),
                 schema_dropped=self._schema_dropped(),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
@@ -1736,6 +1754,82 @@ class LLMReviewEngine:
             self._stepped_down.add(lens.id)
         return findings, error
 
+    def _retry_without_schema(
+        self,
+        messages: list[Message],
+        model: str,
+        batch_num: int,
+        lens: _Lens,
+        reason: str,
+        run: _Run,
+    ) -> _LensOutcome:
+        """Re-run one lens once with provider-native schema enforcement off.
+
+        The third structured-output fallback, and the only one the adapter could
+        not have found for itself. It already handles a provider that *rejects*
+        ``response_format`` (a 400 naming the param) and one whose schema mode
+        decodes to an *empty* string. A reply that arrives non-empty, well-formed
+        on the wire, and simply is not findings looks like a clean success from
+        down there — only the parser knows better.
+
+        The theory this acts on: the prompt asks for the findings JSON regardless
+        of the schema, and the parser is lenient about fences, prose wrappers and
+        trailing commas, so a model whose constrained decoding produced something
+        unusable may well answer perfectly without it. Two Claude models did
+        exactly this through OpenRouter, losing every lens in an observation.
+
+        Bounded like the step-down beside it:
+
+        - **One attempt.** ``recover=False`` marks the re-run, and that is the
+          same flag the unparseable branch checks before offering a recovery, so
+          a re-run that fails reports plain rather than reformatting again.
+        - **Only after the cheap salvage.** The reformat call sends no diff and
+          costs a fraction of this; ordering by cost is deliberate.
+        - **Only where a schema was actually sent.** With ``structured_output``
+          off there is no enforcement to blame and the re-run would be the
+          byte-identical request the rescue wave forbids.
+        - **No split, no deferral** (both callbacks None): the payload was never
+          the problem.
+        - **Every whole-review ceiling still applies** — ``_skip_reason`` is
+          re-checked here because the reformat before it already spent a call.
+
+        A re-run that *works* is evidence, not noise: the model is told to stop
+        sending the schema, so later batches skip the two wasted calls instead of
+        rediscovering this. A re-run that fails proves nothing — one bad reply is
+        not a broken schema mode, and disabling it for the rest of the run would
+        be a quality regression on every later call — so nothing is remembered.
+        """
+        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+            return [], reason
+        _log.warning(
+            "re-asking the lens without the provider's JSON schema",
+            extra={"lens": lens.id, "batch": batch_num},
+        )
+        findings, error = self._complete_lens(
+            messages, model, None, batch_num, lens, None, None, recover=False, run=run
+        )
+        if error is None:
+            # Recorded on the way OUT, like the step-down: a re-run that failed
+            # too produced no findings to claim, and marking the model off the
+            # back of it would disable structured output on a guess.
+            self._re_asked.add(lens.id)
+            self._drop_response_format(model)
+        return findings, error
+
+    def _drop_response_format(self, model: str) -> None:
+        """Tell the adapter this model's schema mode is not working.
+
+        Feature-detected like ``schema_dropped`` and ``lower_reasoning_effort``,
+        and the first of the three that WRITES. It stays off the frozen
+        ``ProviderClient`` port for the same reason they do: the knowledge is
+        adapter-shaped (which litellm model string keys the drop), and a provider
+        that cannot honour it should simply not remember rather than every fake
+        in the suite growing a no-op.
+        """
+        drop = getattr(self._provider, "drop_response_format", None)
+        if callable(drop):
+            drop(model, "unparseable-output")
+
     def _complete_lens(
         self,
         messages: list[Message],
@@ -1747,6 +1841,7 @@ class LLMReviewEngine:
         on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
         *,
         effort: dict[str, Any] | None = None,
+        recover: bool = True,
         run: _Run | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
@@ -1769,6 +1864,10 @@ class LLMReviewEngine:
         (see :meth:`_retry_lower_effort`). Not None also MARKS this call as that
         retry, which is what bounds it to one: the step-down is only ever offered
         to a call that has not already taken it.
+
+        ``recover`` is the same idea for the unparseable path: False marks a call
+        that IS a recovery, so it may not start another. Set only by
+        :meth:`_retry_without_schema`, which is the second and last level.
         """
         opts: dict[str, Any] = {"response_format": response_format} if response_format else {}
         if effort is not None:
@@ -1844,17 +1943,29 @@ class LLMReviewEngine:
             findings = parse_findings(result.text)
         except ParseError as exc:
             if not exc.truncated:
-                reason = _unparseable_reason(exc, lens.id, result.text)
+                reason = _unparseable_reason(
+                    exc, lens.id, result.text, schema_mode=response_format is not None
+                )
                 profiler.record_result(lens.id, batch_num, elapsed, result, error=reason)
-                # One reformat attempt at the answer the model already produced
-                # and was already billed for. A DIFFERENT request — the reply
-                # plus the schema, no diff — which is why it does not fall under
-                # the rule that an unparseable call is never re-run: that rule is
-                # about re-issuing the identical request at temperature 0.
+                # Two recoveries, cheapest first, and `recover` gates BOTH: the
+                # schema-less re-run below re-enters here with it False, so a
+                # failing retry reports plain instead of starting its own
+                # reformat. One flag, because both are the same judgement —
+                # "may this failed call spend another one?".
                 #
-                # Ceilings are re-checked first: this is a new model call, and a
+                # Ceilings are re-checked first: these are new model calls, and a
                 # run already past its deadline or budget must not start one.
-                if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is None:
+                if (
+                    recover
+                    and run is not None
+                    and _skip_reason(run.deadline_at, run.budget_at, lens) is None
+                ):
+                    # 1. One reformat attempt at the answer the model already
+                    #    produced and was already billed for. A DIFFERENT request
+                    #    — the reply plus the schema, no diff — which is why it
+                    #    does not fall under the rule that an unparseable call is
+                    #    never re-run: that rule is about re-issuing the identical
+                    #    request at temperature 0.
                     repaired = repair_findings(
                         self._provider, run.cfg, result.text, exc.shape, lens.id
                     )
@@ -1865,6 +1976,15 @@ class LLMReviewEngine:
                         # effort down — successful, but worth saying out loud.
                         self._repaired.add(lens.id)
                         return _stamp_categories(repaired, lens), None
+                    # 2. The reformat could not do it either. If this call sent
+                    #    the provider's schema, that enforcement is the remaining
+                    #    suspect — re-run the lens once without it.
+                    if response_format is not None and run.cfg.retry_without_schema:
+                        retried, retry_error = self._retry_without_schema(
+                            messages, model, batch_num, lens, reason, run
+                        )
+                        if retry_error is None:
+                            return retried, None
                 return [], reason
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a
@@ -2201,7 +2321,24 @@ _SCHEMA_DROP_NOTE = (
 )
 
 
-def _unparseable_reason(exc: ParseError, lens_id: str, text: str) -> str:
+def _response_digest(text: str) -> str:
+    """A short, content-free identifier for a model reply.
+
+    Two failures are only comparable if you can tell whether they are the same
+    failure, and the benchmark evidence behind this could not: it recorded that
+    a case failed in all three repeats without being able to say whether the
+    three replies were identical. A digest answers that across runs, machines
+    and log aggregators while carrying nothing of the reply — which may quote
+    the diff back, so it can never go in a default-level log.
+
+    Truncated because it is an identifier, not a checksum: 12 hex characters is
+    48 bits, far past any collision a review will produce, and short enough to
+    read off a log line.
+    """
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _unparseable_reason(exc: ParseError, lens_id: str, text: str, *, schema_mode: bool) -> str:
     """Report a reply that could not be parsed, and return the reason to post.
 
     "Unparseable" alone sends a maintainer nowhere — a model answering in prose
@@ -2221,6 +2358,12 @@ def _unparseable_reason(exc: ParseError, lens_id: str, text: str) -> str:
         "lens": lens_id,
         "shape": str(exc.shape),
         "response_chars": len(text),
+        # Identity without content: is this the same reply the last run failed on?
+        "response_sha256": _response_digest(text),
+        # Was provider-native schema enforcement active? Without it, "the model
+        # ignored the schema" and "there was no schema" read identically in a
+        # log, and they call for opposite fixes.
+        "schema_mode": schema_mode,
     }
     if _log.isEnabledFor(logging.DEBUG) and text:
         extra["response_head"] = _raw_excerpt(text)

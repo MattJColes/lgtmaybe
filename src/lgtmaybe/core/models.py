@@ -1025,6 +1025,16 @@ class ReviewConfig(_Strict):
     # call that already failed and already returned nothing. Bounded to one
     # attempt, never recursive, and it can only ever add findings.
     repair_unparseable: bool = True
+    # Last resort when a reply won't parse AND the cheap reformat above couldn't
+    # fix it: re-run that one lens without response_format, on the theory that
+    # provider-native schema enforcement is what broke a reply the prompt would
+    # otherwise have got right (the prompt asks for JSON regardless, and the
+    # parser is lenient). Bounded to one re-run per (batch, lens), never
+    # recursive, and only offered to a call that actually sent the schema — so a
+    # run with structured_output off pays nothing and never re-sends an
+    # identical request. A re-run that works marks the model, so later calls
+    # skip the schema instead of failing the same way.
+    retry_without_schema: bool = True
 
     @model_validator(mode="after")
     def _lens_ids_are_unique(self) -> ReviewConfig:

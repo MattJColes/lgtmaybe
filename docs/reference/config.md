@@ -53,6 +53,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `reflect_model` | string / null | No | `null` | Reflect Model |
 | `repair_unparseable` | boolean | No | `True` | Repair Unparseable |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
+| `retry_without_schema` | boolean | No | `True` | Retry Without Schema |
 | `spec_paths` | list[string] | No | `[]` | Spec Paths |
 | `spec_review` | boolean | No | `True` | Spec Review |
 | `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
@@ -890,6 +891,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "resolve_fixed": {
       "default": true,
       "title": "Resolve Fixed",
+      "type": "boolean"
+    },
+    "retry_without_schema": {
+      "default": true,
+      "title": "Retry Without Schema",
       "type": "boolean"
     },
     "spec_paths": {

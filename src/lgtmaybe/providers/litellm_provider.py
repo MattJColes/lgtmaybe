@@ -478,6 +478,27 @@ class LiteLLMProvider:
             extra={"model": model, "reason": why},
         )
 
+    def drop_response_format(self, model: str, why: str) -> None:
+        """Stop sending the schema for *model* — asked by the engine, not inferred.
+
+        The two existing triggers are things the adapter can see for itself: a
+        400 naming the param, and schema mode decoding to an empty string. The
+        third cannot be seen from here at all — a reply that arrives non-empty
+        and well-formed on the wire, and turns out not to be findings. Only the
+        engine parses, so only the engine knows.
+
+        Hence the first engine→adapter *setter*, where ``schema_dropped`` and
+        ``lower_reasoning_effort`` are read-only probes. It stays off the frozen
+        ``ProviderClient`` port for the same reason they do: the engine
+        feature-detects it, and an adapter that cannot honour it simply never
+        remembers.
+
+        Keyed exactly as ``complete`` resolves the model, so the entry matches
+        the one ``_call`` looks up — a factory-built provider carries the
+        prefixed litellm string, and the engine only knows ``cfg.model``.
+        """
+        self._disable_response_format(self.model or model, why)
+
     def schema_dropped(self) -> bool:
         """Whether any model lost ``response_format`` during this run.
 

@@ -324,8 +324,9 @@ class TestRescueWave:
         the same unparseable answer, so a rescue would only buy a second billed
         failure. Left to the incomplete notice instead.
 
-        Repair off, so this pins the rescue rule alone — the reformat re-ask is
-        a different request and is covered by the test below."""
+        Both recoveries off, so this pins the rescue rule alone — each of them
+        sends a DIFFERENT request (the reformat re-ask carries no diff, the
+        schema-less re-run drops a parameter) and each has its own suite."""
 
         class _Gibberish(FakeProvider):
             def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
@@ -336,7 +337,9 @@ class TestRescueWave:
 
         provider = _Gibberish()
 
-        _, summary = LLMReviewEngine(provider).review(_CTX, _cfg(repair_unparseable=False))
+        _, summary = LLMReviewEngine(provider).review(
+            _CTX, _cfg(repair_unparseable=False, retry_without_schema=False)
+        )
 
         assert len(provider.calls) == 2  # no third call
         assert "unparseable model output" in summary
