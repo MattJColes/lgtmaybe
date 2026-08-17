@@ -8,6 +8,7 @@ The footer goes to stderr so machine-readable formats stay pipeable.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import click
 import pytest
@@ -195,7 +196,16 @@ class TestProfileJsonFile:
 
         assert capsys.readouterr().out, "the findings still printed"
 
-    def test_nothing_is_written_when_not_asked(self, _local_run, tmp_path) -> None:  # type: ignore[no-untyped-def]
-        _local_run()
+    def test_nothing_is_written_when_not_asked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Exercise the early return, not an unrelated directory.
 
-        assert list(tmp_path.iterdir()) == []
+        An empty `tmp_path` proves nothing here: a run without ``--profile-json``
+        was never pointed at it, so the assertion held whether or not the default
+        path wrote a file somewhere else. Watch the write itself instead.
+        """
+        written: list[Path] = []
+        monkeypatch.setattr(Path, "write_text", lambda self, *_a, **_k: written.append(self))
+
+        cli._write_profile_json(cli.RuntimeOptions())
+
+        assert written == []
