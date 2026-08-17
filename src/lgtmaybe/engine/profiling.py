@@ -28,6 +28,12 @@ from lgtmaybe.core.ports import Message, ProviderClient
 
 _log = get_logger(__name__)
 
+# Bumped when `Profiler.as_dict`'s shape changes in a way a pinned consumer
+# would notice. Adding a field is not such a change; removing or re-meaning one
+# is. Nothing else in the repo emits a versioned payload — this output exists to
+# be pinned against, which is why it starts one.
+_PROFILE_SCHEMA_VERSION = 1
+
 
 @dataclass(frozen=True)
 class CallRecord:
@@ -232,6 +238,36 @@ class Profiler:
             with self._lock:
                 self.stages.append(StageRecord(name=name, elapsed=elapsed))
             _log.info("stage completed", extra={"stage": name, "elapsed_s": round(elapsed, 3)})
+
+    def as_dict(self) -> dict[str, Any]:
+        """The profile as data, for a consumer that should not parse the table.
+
+        The table is a human artefact, and its one correctness decision — `-` for
+        an unknown reasoning count, never `0`, because 0 asserts the model did no
+        thinking — is exactly what breaks a naive `int()` on the column. A
+        downstream harness lost roughly a tenth of every call row it recorded to
+        that. So unknown stays ``None`` here and serialises to JSON `null`: still
+        not zero, but no longer something to string-match.
+
+        ``reasoning_share`` is the ratio the table rounds into an integer percent;
+        a consumer wants the number it was rounded from.
+
+        ``schema_version`` is a new convention rather than an existing one —
+        nothing else in the repo emits a versioned payload — and it is here
+        because the whole point of this output is that it can be pinned against.
+        """
+        with self._lock:
+            calls, stages = list(self.calls), list(self.stages)
+            returned = self.returned_findings
+            wall = time.perf_counter() - self._started
+        return {
+            "schema_version": _PROFILE_SCHEMA_VERSION,
+            "wall_seconds": wall,
+            "total_tokens": sum(c.input_tokens + c.output_tokens for c in calls),
+            "returned_findings": returned,
+            "stages": [{"name": s.name, "elapsed": s.elapsed} for s in stages],
+            "calls": [{**asdict(call), "reasoning_share": call.reasoning_share} for call in calls],
+        }
 
     def render(self) -> str:
         """The ``--profile`` summary as plain text (reads well in an Action log)."""

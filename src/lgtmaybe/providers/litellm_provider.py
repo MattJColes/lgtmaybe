@@ -423,12 +423,20 @@ class LiteLLMProvider:
         *,
         model: str = "",
         fallback_model: str | None = None,
+        effort_override_supported: bool = True,
         **default_opts: Any,
     ) -> None:
         if "prompt_cache" in default_opts:
             raise TypeError("prompt_cache was removed; prompt caching is always enabled")
         self.model = model
         self.fallback_model = fallback_model
+        # Whether this model's capability entry will actually carry a
+        # `reasoning_effort` we invent for a step-down retry. Defaults True and
+        # is only ever set False when litellm's map POSITIVELY omits the param:
+        # the map does not know the newest models, which are exactly the ones
+        # that truncate on reasoning, so silence has to mean "try it" or the
+        # retry would be withheld from the models it exists for.
+        self._effort_override_supported = effort_override_supported
         self.default_opts: dict[str, Any] = default_opts
         # Models that have proved they won't take response_format — either by
         # 400ing on it or by decoding it to nothing (see _call). Their later
@@ -536,6 +544,12 @@ class LiteLLMProvider:
         # identically. OpenRouter takes the nested object regardless of model.
         if self.model.startswith(_OPENROUTER_PREFIX):
             return {"extra_body": {**extra, "reasoning": {"effort": _EFFORT_FLOOR}}}
+        # Flat param, so `drop_params` gets a say. A route whose capability entry
+        # omits it would have the floor stripped and re-send the request that
+        # just failed — billed twice for one answer. Report the original failure
+        # instead; the engine already stops when this answers None.
+        if not self._effort_override_supported:
+            return None
         return {"reasoning_effort": _EFFORT_FLOOR}
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:

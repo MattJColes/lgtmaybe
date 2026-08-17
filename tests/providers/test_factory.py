@@ -507,3 +507,34 @@ class TestOutputCeiling:
         empty answer rather than an unbounded one."""
         provider = build_provider(Provider.ollama, "qwen3.5:4b", max_tokens=0)
         assert "max_tokens" not in provider.default_opts
+
+
+def test_build_provider_tells_the_adapter_whether_the_route_takes_an_effort() -> None:
+    """The capability answer lives in the factory — it holds the Provider enum and
+    the raw model name that `dropped_params` needs, and the adapter holds neither.
+
+    Fails OPEN: only a map that POSITIVELY omits the param marks a route
+    incapable, because litellm's map does not know the newest models."""
+    from lgtmaybe.providers import factory as factory_mod
+
+    seen: dict[str, object] = {}
+
+    def fake_dropped(_provider: object, _model: str, params: object) -> list[str]:
+        seen["params"] = list(params)  # type: ignore[arg-type]
+        return ["reasoning_effort"]
+
+    original = factory_mod.dropped_params
+    factory_mod.dropped_params = fake_dropped  # type: ignore[assignment]
+    try:
+        provider = build_provider(Provider.openai, "gpt-5.5", api_key="k")
+    finally:
+        factory_mod.dropped_params = original  # type: ignore[assignment]
+
+    assert "reasoning_effort" in seen["params"]  # type: ignore[operator]
+    assert provider._effort_override_supported is False
+
+
+def test_build_provider_defaults_to_capable_when_the_map_is_silent() -> None:
+    provider = build_provider(Provider.openai, "gpt-5.5", api_key="k")
+
+    assert provider._effort_override_supported is True
