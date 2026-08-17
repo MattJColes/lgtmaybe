@@ -64,7 +64,8 @@ lgtmaybe/
 │   │   ├── injection.py     #   prompt-injection defense + delimiter break-out guard
 │   │   ├── compress.py      #   token-aware batching + hunk context expansion
 │   │   ├── prompt.py        #   per-category system prompts (OWASP checklist, etc.)
-│   │   ├── parse.py         #   lenient JSON → ReviewFinding parsing/repair
+│   │   ├── parse.py         #   lenient JSON → ReviewFinding parsing; names the failure shape
+│   │   ├── repair.py        #   one reformat re-ask at a reply that would not parse
 │   │   └── reflect.py       #   self-reflection pass that drops low-confidence findings
 │   │
 │   ├── providers/           # LLM adapter (the ProviderClient side)

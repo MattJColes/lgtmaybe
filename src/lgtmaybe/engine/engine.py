@@ -8,8 +8,10 @@ Pipeline: redact → compress/batch → (per batch) fan out one call per review
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -72,6 +74,7 @@ from .prompt import (
 )
 from .redact import redact
 from .reflect import reflect_findings
+from .repair import repair_findings
 from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
 from .static_analysis import (
     SCAN_CATEGORY_PREFIX,
@@ -236,6 +239,8 @@ class _NoticeState:
     failed_lenses: list[str]
     split_batches: int
     stepped_down: list[str]
+    repaired: list[str]
+    schema_dropped: bool
     reflection_skipped: str | None
     suppressed: int
     off_diff: int
@@ -276,13 +281,34 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "`categories`, lower `context_lines`)."
         )
     if state.failed_calls:
-        detail = state.errors[-1] if state.errors else "timeout or unparseable output"
+        # The MOST COMMON error, not the last one. Three lenses returning prose
+        # and a fourth hitting a rate limit is a schema problem, but the last
+        # error names the rate limit and sends the reader to the wrong knob —
+        # and a wave that fails the same way N times is exactly the shape worth
+        # reporting. Identical to the old behaviour when there is one error.
+        detail = (
+            Counter(state.errors).most_common(1)[0][0]
+            if state.errors
+            else "timeout or unparseable output"
+        )
         lost = ", ".join(sorted(set(state.failed_lenses)))
         which = f"{lost} — " if lost else ""
         notices.append(
             f"⚠️ {state.failed_calls} of {state.total_calls} review calls failed "
             f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
         )
+    if state.repaired:
+        count = len(state.repaired)
+        listed = ", ".join(f"`{lens}`" for lens in state.repaired)
+        notices.append(
+            f"🔧 {count} lens{_plural(count, many='es')} returned output that did not "
+            f"parse and was reformatted by a second call ({listed}). Those findings are "
+            "complete — but a model that keeps doing this is not honouring the output "
+            "schema, which costs an extra call every time. Check the provider log for a "
+            "dropped `response_format`, or try a different model."
+        )
+    if state.failed_calls and state.schema_dropped:
+        notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
     if state.split_batches:
         plural = _plural(state.split_batches, many="es")
         was = _plural(state.split_batches, "was", "were")
@@ -567,6 +593,10 @@ class _Run:
     # for the oversized-batch split, which runs its pieces in a pool of its own
     # and must not out-run what the fan-out itself is allowed.
     concurrency: int
+    # The whole config, for the settings a call reads only on its failure path
+    # (the repair re-ask) — carried rather than re-threaded as parameters that
+    # every hop between review() and _complete_lens would have to re-declare.
+    cfg: ReviewConfig
     # The PR's full changed-file list. Carried for the same reason as
     # `concurrency`: a split piece shows FEWER files than the batch it came from,
     # so it has to derive its own not-shown manifest rather than inherit the
@@ -678,6 +708,17 @@ class ReviewIncompleteError(Exception):
 class LLMReviewEngine:
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
+    def _schema_dropped(self) -> bool:
+        """Whether the adapter gave up on structured output during this run.
+
+        Feature-detected, like ``lower_reasoning_effort``: it is an adapter-only
+        method beyond the frozen ``ProviderClient`` port, so a provider that
+        cannot answer simply never reports a drop rather than every fake in the
+        suite growing a method to say "no".
+        """
+        probe = getattr(self._provider, "schema_dropped", None)
+        return bool(probe()) if callable(probe) else False
+
     def __init__(
         self,
         provider: ProviderClient,
@@ -730,8 +771,13 @@ class LLMReviewEngine:
         # not calls — the same lens stepping down in two batches is one fact
         # about the review, not two.
         self._stepped_down: set[str] = set()
+        # Lenses whose unparseable reply was reformatted into findings by a
+        # second call (see repair.py). Keyed by lens for the same reason as
+        # `_stepped_down`: one fact about the review, not one per batch.
+        self._repaired: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
+        #    (see _schema_dropped below for the other adapter-only probe)
         with profiler.stage("redact"):
             clean_diff = redact(ctx.diff)
 
@@ -928,6 +974,7 @@ class LLMReviewEngine:
             budget_at=budget_at,
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
+            cfg=cfg,
             changed_files=tuple(ctx.changed_files),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
@@ -1029,11 +1076,13 @@ class LLMReviewEngine:
         #     failure still reaches the summary through the incomplete-results
         #     notice, so nothing is hidden either way.
         if total_calls > 0 and failed_calls == total_calls and not all_findings:
-            detail = errors[-1] if errors else "no usable output"
+            # The most common error, not the last — see _build_notices.
+            detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
+            hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
             raise ReviewIncompleteError(
                 f"review incomplete — every review call failed ({detail}). "
                 "Check the provider credentials/quota, model, and timeout "
-                "(ollama: a larger model needs a longer --timeout), then retry."
+                f"(ollama: a larger model needs a longer --timeout), then retry.{hint}"
             )
 
         reviewed_diff = "\n".join(patch for _, patch in file_patches)
@@ -1179,6 +1228,8 @@ class LLMReviewEngine:
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
+                repaired=sorted(self._repaired),
+                schema_dropped=self._schema_dropped(),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
                 off_diff=off_diff,
@@ -1793,15 +1844,28 @@ class LLMReviewEngine:
             findings = parse_findings(result.text)
         except ParseError as exc:
             if not exc.truncated:
-                profiler.record_result(
-                    lens.id,
-                    batch_num,
-                    elapsed,
-                    result,
-                    error="unparseable model output",
-                )
-                _log.warning("unparseable model output", extra={"lens": lens.id})
-                return [], "unparseable model output"
+                reason = _unparseable_reason(exc, lens.id, result.text)
+                profiler.record_result(lens.id, batch_num, elapsed, result, error=reason)
+                # One reformat attempt at the answer the model already produced
+                # and was already billed for. A DIFFERENT request — the reply
+                # plus the schema, no diff — which is why it does not fall under
+                # the rule that an unparseable call is never re-run: that rule is
+                # about re-issuing the identical request at temperature 0.
+                #
+                # Ceilings are re-checked first: this is a new model call, and a
+                # run already past its deadline or budget must not start one.
+                if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is None:
+                    repaired = repair_findings(
+                        self._provider, run.cfg, result.text, exc.shape, lens.id
+                    )
+                    if repaired is not None:
+                        # Complete, not partial: nothing is missing, so this must
+                        # not trip the incomplete notice. Reported through its own
+                        # notice instead, like a lens that stepped its reasoning
+                        # effort down — successful, but worth saying out loud.
+                        self._repaired.add(lens.id)
+                        return _stamp_categories(repaired, lens), None
+                return [], reason
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a
             # prompt bug instead of the ceiling they hit. The notice on the PR is
@@ -2098,6 +2162,70 @@ def _intent_text(ctx: PRContext) -> str:
     if subjects:
         parts.append("Commit messages:\n" + "\n".join(f"- {s}" for s in subjects))
     return "\n\n".join(parts)
+
+
+# How much of an unparseable reply is logged at DEBUG. Head *and* tail: a prose
+# preamble shows at the top and an unclosed container or a stray fence at the
+# bottom, and the two are different diagnoses. The observed failures ran
+# 676–1,201 tokens (roughly 2.7–4.8 KB), so this captures most of them whole —
+# and `response_chars` always reports the true length, so a cap never hides how
+# much was left out.
+_RAW_HEAD_CHARS = 2000
+_RAW_TAIL_CHARS = 500
+
+
+def _raw_excerpt(text: str) -> str:
+    """A capped, redacted excerpt of a model reply, safe to put in a log.
+
+    Redacted BEFORE slicing: cutting first could split a PEM block across the
+    elision and leave each half unmatched by the redactor. ``core.logging``
+    only substitutes secrets explicitly registered with it, so the content
+    redactor has to run here or a key the model quoted back at us reaches the
+    log untouched.
+    """
+    clean = redact(text)
+    if len(clean) <= _RAW_HEAD_CHARS + _RAW_TAIL_CHARS:
+        return clean
+    elided = len(clean) - _RAW_HEAD_CHARS - _RAW_TAIL_CHARS
+    return f"{clean[:_RAW_HEAD_CHARS]}\n…[{elided} chars elided]…\n{clean[-_RAW_TAIL_CHARS:]}"
+
+
+# Shown only alongside a failure, because on its own a dropped schema explains
+# nothing — plenty of models parse fine without it. Next to "every call returned
+# prose" it is very likely the cause, and it is the one part of that story the
+# reader cannot see from the PR.
+_SCHEMA_DROP_NOTE = (
+    "The model refused the structured-output schema partway through this run, so "
+    "later calls asked for JSON in the prompt only — a likely cause of the failures "
+    "above. The provider log names which model and why."
+)
+
+
+def _unparseable_reason(exc: ParseError, lens_id: str, text: str) -> str:
+    """Report a reply that could not be parsed, and return the reason to post.
+
+    "Unparseable" alone sends a maintainer nowhere — a model answering in prose
+    and one emitting broken JSON need different fixes — so the shape rides in
+    the returned reason, which is already carried to ``CallRecord.error``, the
+    ``--profile`` row and the PR notice. That covers all three without a new
+    field on any of them.
+
+    The body itself is model output and can echo the diff, so the default level
+    gets its size and its shape and nothing of its content. The body goes out
+    only at DEBUG, which is the opt-in this repo already has for exactly this;
+    a dedicated flag would be four files of plumbing to say what
+    ``LGTMAYBE_LOG_LEVEL`` already says.
+    """
+    reason = f"unparseable model output ({exc.shape})"
+    extra: dict[str, Any] = {
+        "lens": lens_id,
+        "shape": str(exc.shape),
+        "response_chars": len(text),
+    }
+    if _log.isEnabledFor(logging.DEBUG) and text:
+        extra["response_head"] = _raw_excerpt(text)
+    _log.warning(reason, extra=extra)
+    return reason
 
 
 def _error_reason(exc: BaseException) -> str:

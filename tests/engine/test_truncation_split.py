@@ -36,6 +36,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine, clear_interrupt, request_interrupt
 from lgtmaybe.engine.engine import ReviewIncompleteError
+from lgtmaybe.providers.litellm_provider import _EFFORT_FLOOR, LiteLLMProvider
 from tests.fakes import FakeProvider
 
 _TWO_FILE_DIFF = """diff --git a/one.py b/one.py
@@ -503,6 +504,41 @@ def test_a_reasoning_bound_truncation_retries_once_at_a_lower_effort() -> None:
     assert [f.title for f in findings] == ["unchecked value in one.py"]
     # Not silent: a lens that answered only after being told to think less is a
     # fact about this review, and the summary says so.
+    assert "reasoning_effort" in summary
+
+
+def test_a_model_reasoning_at_its_own_default_still_gets_the_retry() -> None:
+    """The configuration this failure actually arrives in, wired end to end.
+
+    A benchmark run lost 8 observations across three models (GLM 4.7 Flash,
+    Nemotron, Laguna) that exhausted a 16k output ceiling thinking. None had an
+    explicit `reasoning_effort`, and the adapter answered "nothing to step down
+    from" for exactly that case — so the one lever that can move a thinking
+    budget was unavailable to the only models that needed it.
+
+    Uses the REAL adapter method rather than a fake's, because the defect was in
+    the seam between the two: the engine was always willing to retry, and was
+    always told there was nothing to retry with."""
+
+    class _UnconfiguredReasoner(_TruncatesUntilEffortDrops):
+        # An OpenRouter route with nothing configured — the shape all three
+        # models arrived in, and the one where the effort rides nested.
+        model = "openrouter/z-ai/glm-4.7-flash"
+        default_opts: dict[str, Any] = {}
+        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            nested = opts.get("extra_body", {}).get("reasoning", {})
+            return super().complete(messages, model, reasoning_effort=nested.get("effort"))
+
+    provider = _UnconfiguredReasoner(effort=None, answers_at=_EFFORT_FLOOR)
+
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
+    )
+
+    assert provider.efforts == [None, _EFFORT_FLOOR]  # nothing, then the floor
+    assert [f.title for f in findings] == ["unchecked value in one.py"]
     assert "reasoning_effort" in summary
 
 

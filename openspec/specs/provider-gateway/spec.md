@@ -156,8 +156,11 @@ the structured-output `response_format` when the route rejects the field it
 becomes (Bedrock Converse answers `output_config.format: Extra inputs are not
 permitted`). `drop_params` cannot cover these: the capability map reports the
 param supported, and the refusal is only visible in the error. A dropped
-`response_format` SHALL be remembered for the provider's later calls. litellm's
-stdout banner SHALL be suppressed, since stdout carries machine-readable output.
+`response_format` SHALL be remembered for THAT MODEL's later calls, never for
+every model the provider serves, and SHALL be announced once — a silent
+downgrade to prompt-instructed JSON is indistinguishable from a model that
+simply stopped honouring the schema. litellm's stdout banner SHALL be
+suppressed, since stdout carries machine-readable output.
 <!-- anchor: provider.param-drop -->
 
 #### Scenario: the route rejects the structured-output field
@@ -165,6 +168,12 @@ stdout banner SHALL be suppressed, since stdout carries machine-readable output.
   derived from `response_format`
 - **THEN** the call is re-sent without it and the rest of the lens fan-out skips
   it up front, instead of every lens failing on a permanent 400
+
+#### Scenario: another model shares the provider
+- **WHEN** one model rejects the schema while a second model — a fallback, or
+  the triage or reflect slot — is served by the same client
+- **THEN** the second model keeps sending `response_format`, rather than losing
+  it to a refusal from a model it never ran
 
 #### Scenario: an unrelated error arrives on the same call
 - **WHEN** a failure under those params names neither a rejected param nor a

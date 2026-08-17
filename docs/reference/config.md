@@ -51,6 +51,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
 | `reflect_model` | string / null | No | `null` | Reflect Model |
+| `repair_unparseable` | boolean | No | `True` | Repair Unparseable |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
 | `spec_paths` | list[string] | No | `[]` | Spec Paths |
 | `spec_review` | boolean | No | `True` | Spec Review |
@@ -880,6 +881,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Reflect Model"
+    },
+    "repair_unparseable": {
+      "default": true,
+      "title": "Repair Unparseable",
+      "type": "boolean"
     },
     "resolve_fixed": {
       "default": true,

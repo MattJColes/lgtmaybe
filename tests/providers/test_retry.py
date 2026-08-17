@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -17,7 +18,12 @@ import pytest
 from lgtmaybe.core.models import attempts_of, is_unrecoverable
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
-from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
+from lgtmaybe.providers.litellm_provider import (
+    _EFFORT_FLOOR,
+    _EFFORT_LADDER,
+    _MAX_ATTEMPTS,
+    LiteLLMProvider,
+)
 
 
 def _reasoning_response(reasoning: Any, content: str = "ok") -> Any:
@@ -1675,12 +1681,72 @@ class TestSteppingReasoningEffortDown:
 
         assert provider.lower_reasoning_effort() is None
 
-    def test_an_unset_effort_steps_nowhere(self) -> None:
-        """The library default. A user who never configured this must send
-        byte-identical requests, so there is nothing to retry with."""
+    def test_an_unset_effort_steps_to_the_floor(self) -> None:
+        """The case that matters most and used to have no answer.
+
+        A model that reasons by DEFAULT, run without an explicit effort, is
+        exactly the configuration that burns its whole output ceiling thinking —
+        and returning None here meant the one lever that can move a thinking
+        budget was unavailable to it. There is no configured rung to step down
+        from, so the step is to a named floor instead.
+
+        Safe because this is only ever consulted after a reasoning-bound
+        truncation: a healthy call still sends byte-identical requests."""
         provider = LiteLLMProvider(model="openai/gpt-5.5")
 
-        assert provider.lower_reasoning_effort() is None
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": _EFFORT_FLOOR}
+
+    def test_the_floor_is_a_real_reduction_not_the_bottom(self) -> None:
+        """Not `none`: a model whose thinking overran is still a reasoning model,
+        and switching thought off entirely trades a truncated review for a worse
+        one. The floor bounds the thinking rather than removing it."""
+        assert _EFFORT_FLOOR in _EFFORT_LADDER
+        assert _EFFORT_LADDER.index(_EFFORT_FLOOR) > 0
+
+    def test_the_floor_takes_openrouters_nested_shape(self) -> None:
+        """OpenRouter carries the effort in a nested object, and the models that
+        truncate this way are mostly reached through it — so the floor has to be
+        available on that route too, without losing the rest of extra_body."""
+        provider = LiteLLMProvider(
+            model="openrouter/z-ai/glm-4.7-flash",
+            extra_body={"provider": {"sort": "latency"}},
+        )
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {
+                "provider": {"sort": "latency"},
+                "reasoning": {"effort": _EFFORT_FLOOR},
+            }
+        }
+
+    def test_the_floor_takes_the_nested_shape_with_no_extra_body_at_all(self) -> None:
+        """The shape follows the ROUTE, not whether extra_body happens to exist.
+
+        litellm forwards the flat param only for models its capability map flags
+        reasoning-capable, and the newest models are not in it — which is exactly
+        the set that truncates this way. A flat param here would be dropped and
+        the retry would fail identically. OpenRouter takes the nested object
+        regardless of model, so that is what the floor uses."""
+        provider = LiteLLMProvider(model="openrouter/nvidia/nemotron")
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {"reasoning": {"effort": _EFFORT_FLOOR}}
+        }
+
+    def test_an_unrelated_extra_body_does_not_make_a_route_nested(self) -> None:
+        """extra_body is not evidence of the nested shape — a caller can set it
+        for any provider option. Only OpenRouter reads a nested `reasoning`, so
+        anywhere else the floor must go out as the flat param the route wants."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5", extra_body={"service_tier": "priority"})
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": _EFFORT_FLOOR}
+
+    def test_stepping_to_the_floor_is_still_not_a_mutation(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        provider.lower_reasoning_effort()
+
+        assert "reasoning_effort" not in provider.default_opts
 
     def test_default_is_a_sentinel_not_a_rung(self) -> None:
         """`default` says "let the route decide" — there is no telling what sits
@@ -1713,3 +1779,107 @@ class TestSteppingReasoningEffortDown:
         provider.lower_reasoning_effort()
 
         assert provider.default_opts["reasoning_effort"] == "high"
+
+
+class TestSchemaDropIsVisibleAndScoped:
+    """Dropping ``response_format`` silently downgrades every later call to
+    prompt-instructed JSON, and a weaker model then plausibly answers in prose —
+    which reads as "every review lens returned unparseable output" with nothing
+    in the log to connect the two. The repo's own spec already says a configured
+    param is never discarded in silence (``provider.param-support``); this is
+    that rule applied to the one drop that was exempt from it."""
+
+    BEDROCK_400 = TestRejectedStructuredOutputParam.BEDROCK_400
+
+    def _rejecting(self, *, reject_model: str) -> Any:
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs and kwargs["model"] == reject_model:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        return side_effect
+
+    def test_rejection_is_announced(self, caplog: pytest.LogCaptureFixture) -> None:
+        model = "bedrock/us.anthropic.claude-opus-4-8"
+        with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
+            provider = LiteLLMProvider()
+            with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+                provider.complete(
+                    [{"role": "user", "content": "a"}], model, response_format={"x": 1}
+                )
+        warnings = [r for r in caplog.records if "structured output" in r.getMessage()]
+        assert warnings, "a silent downgrade is exactly what left this undiagnosable"
+        assert getattr(warnings[0], "model", None) == model
+        assert getattr(warnings[0], "reason", None) == "rejected"
+
+    def test_the_announcement_fires_once_per_model_not_once_per_lens(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        model = "bedrock/us.anthropic.claude-opus-4-8"
+        with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
+            provider = LiteLLMProvider()
+            with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+                for _ in range(4):
+                    provider.complete(
+                        [{"role": "user", "content": "a"}], model, response_format={"x": 1}
+                    )
+        assert len([r for r in caplog.records if "structured output" in r.getMessage()]) == 1
+
+    def test_an_empty_structured_response_is_announced(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        calls: list[bool] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            calls.append(has_rf)
+            return _fake_response("" if has_rf else '{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+                provider.complete(
+                    [{"role": "user", "content": "a"}], "openai/gpt-4o", response_format={"x": 1}
+                )
+        warnings = [r for r in caplog.records if "structured output" in r.getMessage()]
+        assert warnings
+        assert getattr(warnings[0], "reason", None) == "empty-response"
+
+    def test_the_drop_is_scoped_to_the_model_that_rejected_it(self) -> None:
+        """One provider serves the primary and the fallback, and the triage,
+        review and reflect slots all share it. Scoped to the instance, a
+        rejection by ANY of them silently downgrades the rest — a quality
+        regression on the strong model triggered by a model it never ran."""
+        primary = "bedrock/us.anthropic.claude-opus-4-8"
+        fallback = "openai/gpt-4o"
+        seen: list[tuple[str, bool]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            has_rf = "response_format" in kwargs
+            seen.append((kwargs["model"], has_rf))
+            if has_rf and kwargs["model"] == primary:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        # No pinned model: one instance, two model slots, exactly as the factory
+        # builds it for triage_model / model / reflect_model.
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete([{"role": "user", "content": "a"}], primary, response_format={"x": 1})
+            provider.complete(
+                [{"role": "user", "content": "b"}], fallback, response_format={"x": 1}
+            )
+
+        assert (fallback, True) in seen, "the second model never rejected anything"
+
+    def test_the_drop_is_queryable_for_the_review_notice(self) -> None:
+        model = "bedrock/us.anthropic.claude-opus-4-8"
+        with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
+            provider = LiteLLMProvider()
+            assert provider.schema_dropped() is False
+            provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
+            assert provider.schema_dropped() is True

@@ -41,6 +41,7 @@ from tenacity import (
 
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
+    Provider,
     ProviderResult,
     attempts_of,
     stamp_attempts,
@@ -51,7 +52,7 @@ from lgtmaybe.core.ports import (
     ProviderTruncated,
     ProviderWallTimeout,
 )
-from lgtmaybe.providers.factory import CLOUD_TIMEOUT
+from lgtmaybe.providers.factory import CLOUD_TIMEOUT, litellm_model_string
 
 _log = get_logger(__name__)
 
@@ -429,24 +430,72 @@ class LiteLLMProvider:
         self.model = model
         self.fallback_model = fallback_model
         self.default_opts: dict[str, Any] = default_opts
-        # Set once a structured-output call comes back empty (see _call): the
-        # backend's JSON-schema decoder is broken for this model, so every
-        # subsequent call skips response_format up front instead of paying a
-        # wasted empty round-trip first. Sticky for the life of this provider.
-        self._skip_response_format = False
+        # Models that have proved they won't take response_format — either by
+        # 400ing on it or by decoding it to nothing (see _call). Their later
+        # calls skip it up front instead of paying a wasted round-trip first.
+        #
+        # Keyed by MODEL, not by provider instance. One instance serves the
+        # primary and the fallback, and the triage/review/reflect slots share
+        # its credentials, so an instance-wide flag let a rejection by any one
+        # of them silently downgrade the others to prompt-instructed JSON —
+        # a quality regression on the strong model triggered by a model it
+        # never ran.
+        self._schema_dropped: set[str] = set()
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
         # pure function of it. Instance-scoped (not lru_cache) so tests that
         # patch the litellm lookup stay isolated.
         self._cache_capable: dict[str, bool] = {}
 
+    def _disable_response_format(self, model: str, why: str) -> None:
+        """Record — and announce — that *model* will not take the schema.
+
+        Announced because the consequence is invisible otherwise: every later
+        call for this model falls back to prompt-instructed JSON, and a model
+        that then answers in prose surfaces as "every review lens returned
+        unparseable output" with nothing connecting the two. This repo already
+        holds itself to that rule for every other param (``provider.factory``
+        names the ones litellm's map says will be discarded); the schema drop
+        was the one exemption.
+
+        Once per model, not once per lens: the fan-out sends the same shape N
+        times and N identical warnings would bury the one that matters.
+        """
+        if model in self._schema_dropped:
+            return
+        self._schema_dropped.add(model)
+        _log.warning(
+            "structured output disabled for this model — later calls send "
+            "prompt-instructed JSON only, which a weaker model may not honour",
+            extra={"model": model, "reason": why},
+        )
+
+    def schema_dropped(self) -> bool:
+        """Whether any model lost ``response_format`` during this run.
+
+        Adapter-only, beyond the frozen ``ProviderClient`` port, like
+        ``lower_reasoning_effort`` above: the engine feature-detects it so it can
+        name the downgrade in the review notice when calls also failed. A port
+        method would oblige every fake and every future adapter to answer a
+        question only this one can.
+        """
+        return bool(self._schema_dropped)
+
     def lower_reasoning_effort(self) -> dict[str, Any] | None:
         """Per-call opts that step this provider's reasoning effort down one level.
 
-        ``None`` when there is nothing to step: no effort configured (the library
-        default — a user who never set it must send byte-identical requests), a
-        value already at the floor, or ``default``, which names no position on the
-        ladder and so cannot be moved down from.
+        ``None`` when there is nothing to step: a value already at the bottom of
+        the ladder, or ``default``, which names no position on it and so cannot
+        be moved down from.
+
+        With NO effort configured the step is to ``_EFFORT_FLOOR`` rather than
+        nowhere. That case used to answer ``None`` — to keep a run that never set
+        an effort sending byte-identical requests — but it is the very
+        configuration that produces this failure: a model reasoning at its own
+        default is the one that spends a whole output ceiling thinking, and
+        answering ``None`` left it the only model with no lever at all. The
+        byte-identical guarantee is unaffected, because this is consulted ONLY
+        after a reasoning-bound truncation: a healthy call never reaches here.
 
         Adapter-only, beyond the frozen ``ProviderClient`` port, and deliberately
         so: the effort lives in one of two provider-shaped places — a flat
@@ -454,7 +503,7 @@ class LiteLLMProvider:
         re-routes it into for OpenRouter (see ``_honour_param_support``, where
         sending both is a 400). The engine asks for "one level less" and gets back
         opts in whichever shape this provider was built with; it never learns
-        which, and a provider that cannot answer simply never steps down.
+        which.
 
         Read off ``default_opts`` because that is where the configured value was
         resolved, and returned as an override rather than mutated in place: this
@@ -464,9 +513,8 @@ class LiteLLMProvider:
         if isinstance(flat, str):
             lower = _one_level_lower(flat)
             return {"reasoning_effort": lower} if lower else None
-        extra = self.default_opts.get("extra_body")
-        if not isinstance(extra, dict):
-            return None
+        raw_extra = self.default_opts.get("extra_body")
+        extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
         nested = extra.get("reasoning")
         if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
             lower = _one_level_lower(nested["effort"])
@@ -476,7 +524,19 @@ class LiteLLMProvider:
             # per-call opts over the defaults a key at a time, so a partial
             # extra_body here would drop every other key it carries.
             return {"extra_body": {**extra, "reasoning": {**nested, "effort": lower}}}
-        return None
+        # Nothing configured in either shape, so the floor picks its own shape —
+        # from the ROUTE, never from whether `extra_body` happens to exist, which
+        # a caller may set for any unrelated provider option.
+        #
+        # OpenRouter gets the nested object for the same reason the factory
+        # re-routes a configured effort into it: litellm forwards the flat param
+        # only for models its capability map flags reasoning-capable, and the
+        # newest models are not in that map — exactly the set that truncates this
+        # way. A flat param there would be dropped and the retry would fail
+        # identically. OpenRouter takes the nested object regardless of model.
+        if self.model.startswith(_OPENROUTER_PREFIX):
+            return {"extra_body": {**extra, "reasoning": {"effort": _EFFORT_FLOOR}}}
+        return {"reasoning_effort": _EFFORT_FLOOR}
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
@@ -551,7 +611,7 @@ class LiteLLMProvider:
         def _call() -> ProviderResult:
             # A prior call already proved this model's JSON-schema mode returns
             # empty, so don't pay the wasted round-trip again — drop it up front.
-            if self._skip_response_format:
+            if model in self._schema_dropped:
                 kwargs.pop("response_format", None)
             result = self._raw_completion(model, messages, kwargs, count_request)
             # Some grammar-constrained backends (notably LM Studio fronting a
@@ -561,7 +621,7 @@ class LiteLLMProvider:
             # schema and retry once: the model then emits the findings as normal
             # (fenced) text we can parse. Remember it so later calls skip it too.
             if not result.text.strip() and kwargs.get("response_format") is not None:
-                self._skip_response_format = True
+                self._disable_response_format(model, "empty-response")
                 kwargs.pop("response_format")
                 result = self._raw_completion(model, messages, kwargs, count_request)
             return result
@@ -602,10 +662,10 @@ class LiteLLMProvider:
                     _configured_ceiling(kwargs),
                 )
             except Exception as exc:
-                if not self._drop_rejected_param(exc, kwargs):
+                if not self._drop_rejected_param(exc, model, kwargs):
                     raise
 
-    def _drop_rejected_param(self, exc: Exception, kwargs: dict[str, Any]) -> bool:
+    def _drop_rejected_param(self, exc: Exception, model: str, kwargs: dict[str, Any]) -> bool:
         """Strip the one request param *exc* says this model won't take.
 
         Two params are sent for review quality rather than necessity —
@@ -623,10 +683,10 @@ class LiteLLMProvider:
             kwargs.pop("temperature")
             return True
         if kwargs.get("response_format") is not None and _rejects_response_format(exc):
-            # Remembered for the whole provider, not just this call: the lens
-            # fan-out sends the same shape N times, and without this every one of
-            # them pays its own rejected round-trip first.
-            self._skip_response_format = True
+            # Remembered for this model's later calls, not just this one: the
+            # lens fan-out sends the same shape N times, and without this every
+            # one of them pays its own rejected round-trip first.
+            self._disable_response_format(model, "rejected")
             kwargs.pop("response_format")
             return True
         return False
@@ -782,6 +842,21 @@ class LiteLLMProvider:
 # which is a "let the route decide" sentinel rather than a rung — there is no
 # telling what it is one level below.
 _EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+
+# Where a step-down lands when NOTHING was configured to step down from — the
+# case that produces this failure most often, since a model reasoning at its own
+# default is precisely the one that spends a whole output ceiling thinking.
+#
+# `low` rather than `none` or `minimal`: a model whose thinking overran is still
+# a reasoning model, and switching thought off entirely trades a truncated
+# review for a worse one. `low` is also the rung every reasoning route
+# understands, where the two below it are unevenly supported.
+_EFFORT_FLOOR = "low"
+
+# ``openrouter/`` — derived rather than spelled out, so it cannot drift from the
+# route prefix the factory builds model strings with. The one route that reads a
+# nested ``reasoning`` object.
+_OPENROUTER_PREFIX = litellm_model_string(Provider.openrouter, "")
 
 
 def _one_level_lower(effort: str) -> str | None:

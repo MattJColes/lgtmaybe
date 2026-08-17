@@ -489,7 +489,10 @@ class TestFindingFlowDiagnostics:
             LLMReviewEngine(provider).review(_CTX, cfg)
 
         row = next(line for line in profiler.render().splitlines() if line.startswith("security"))
-        assert row.endswith("       -  unparseable model output")
+        # The dash is the point — a parse failure is not zero findings. The shape
+        # rides in the same column rather than earning one of its own: it is only
+        # ever non-empty on a row that already carries an error.
+        assert row.endswith("       -  unparseable model output (prose)")
 
     def test_profile_exposes_findings_removed_downstream(self) -> None:
         cfg = ReviewConfig(
