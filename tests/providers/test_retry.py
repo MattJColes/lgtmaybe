@@ -1883,3 +1883,53 @@ class TestSchemaDropIsVisibleAndScoped:
             assert provider.schema_dropped() is False
             provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
             assert provider.schema_dropped() is True
+
+
+class TestTheFloorRespectsRouteCapability:
+    """The floor is only worth sending if the route will actually carry it.
+
+    litellm runs with `drop_params=True`, so a `reasoning_effort` a model's
+    capability entry omits is stripped silently — and the retry then goes out
+    byte-identical to the request that just failed, which is exactly what
+    `engine.rescue` forbids: "the identical request is not re-issued: it fails
+    the same way, at cost."
+
+    Narrow but reachable: it needs a route that REPORTS reasoning tokens (or
+    `_reasoning_exhausted_reason` never fires) while not ACCEPTING the param.
+    Those come from different places — `completion_tokens_details` versus
+    litellm's capability map — so they can disagree.
+    """
+
+    def test_a_route_that_cannot_take_the_param_steps_nowhere(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", effort_override_supported=False)
+
+        assert provider.lower_reasoning_effort() is None
+
+    def test_an_unknown_route_still_gets_the_floor(self) -> None:
+        """Fail OPEN. litellm's map does not know the newest models — precisely
+        the set that truncates this way — so treating silence as "cannot" would
+        withhold the retry from the models it was built for."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": _EFFORT_FLOOR}
+
+    def test_openrouter_ignores_the_capability_answer(self) -> None:
+        """The nested object never passes through litellm's param mapping, so
+        drop_params cannot strip it — OpenRouter takes it regardless of model."""
+        provider = LiteLLMProvider(
+            model="openrouter/z-ai/glm-4.7-flash", effort_override_supported=False
+        )
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {"reasoning": {"effort": _EFFORT_FLOOR}}
+        }
+
+    def test_a_configured_effort_still_steps_down_regardless(self) -> None:
+        """The user asked for this param by name. If the route drops it, that was
+        already true of every healthy call — the step-down is not the place to
+        start second-guessing a configured setting."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.5", reasoning_effort="high", effort_override_supported=False
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "medium"}

@@ -340,8 +340,19 @@ def build_provider(
         # supplies an explicit base (e.g. a proxy) is honoured too.
         opts["api_base"] = api_base
 
+    # Answered here because this is where both halves live: `dropped_params`
+    # needs the Provider enum and the RAW model name, and the adapter holds
+    # neither — only the already-prefixed litellm string. Fails open by
+    # construction: `dropped_params` returns [] both when the param is supported
+    # and when the lookup fails, so only a map that positively omits it marks the
+    # route incapable.
+    effort_supported = "reasoning_effort" not in dropped_params(
+        provider, model, ["reasoning_effort"]
+    )
+
     return LiteLLMProvider(
         model=resolved_model,
         fallback_model=resolved_fallback,
+        effort_override_supported=effort_supported,
         **opts,
     )
