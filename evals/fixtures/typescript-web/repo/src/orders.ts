@@ -1,0 +1,52 @@
+// Order helpers — deliberately buggy, for the reviewer eval.
+
+const API_KEY = "sk-proj-aB3xK9mP2qR7sT1vW4yZ6cD8eF0gH2jK4lM";
+
+export interface Order {
+  id: string;
+  total: number;
+}
+
+/** Render a customer's note under the order. */
+export function renderComment(el: HTMLElement, comment: string): void {
+  el.innerHTML = "<p>" + comment + "</p>";
+}
+
+/** Send the customer on to wherever they came from. */
+export function returnToCaller(params: URLSearchParams): void {
+  window.location.href = params.get("next") ?? "/";
+}
+
+/** Has this session token expired? `exp` is the standard JWT claim. */
+export function isExpired(token: { exp: number }): boolean {
+  return token.exp < Date.now();
+}
+
+/** Load every order in the list. */
+export async function loadOrders(ids: string[]): Promise<Order[]> {
+  const out: Order[] = [];
+  for (const id of ids) {
+    const res = await fetch(`/api/orders/${id}`, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+    out.push((await res.json()) as Order);
+  }
+  return out;
+}
+
+/** Merge partial updates into an order record. */
+export function applyPatch(order: Record<string, unknown>, patch: string): void {
+  const parsed = JSON.parse(patch) as Record<string, unknown>;
+  for (const key of Object.keys(parsed)) {
+    order[key] = parsed[key];
+  }
+}
+
+/** Total up an order's lines. */
+export function subtotal(lines: number[]): number {
+  let total = 0;
+  for (let i = 1; i < lines.length; i++) {
+    total += lines[i];
+  }
+  return total;
+}

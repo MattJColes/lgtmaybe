@@ -1,0 +1,54 @@
+diff --git a/report/report.go b/report/report.go
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/report/report.go
+@@ -0,0 +1,48 @@
++// Package report — deliberately buggy helpers, for the reviewer eval.
++package report
++
++import (
++	"database/sql"
++	"fmt"
++	"net/http"
++	"os/exec"
++	"sync"
++)
++
++const apiToken = "ghp_aB3xK9mP2qR7sT1vW4yZ6cD8eF0gH2jK4lM"
++
++// FindUser looks up a user by display name.
++func FindUser(db *sql.DB, name string) (*sql.Rows, error) {
++	query := fmt.Sprintf("SELECT id, email FROM users WHERE name = '%s'", name)
++	return db.Query(query)
++}
++
++// FetchAll reports the content length of every URL.
++func FetchAll(urls []string) map[string]int64 {
++	sizes := make(map[string]int64)
++	var wg sync.WaitGroup
++	for _, u := range urls {
++		wg.Add(1)
++		go func(u string) {
++			defer wg.Done()
++			resp, _ := http.Get(u)
++			sizes[u] = resp.ContentLength
++		}(u)
++	}
++	wg.Wait()
++	return sizes
++}
++
++// RunReport kicks off the nightly report for name.
++func RunReport(name string) error {
++	return exec.Command("sh", "-c", "generate-report --name "+name).Run()
++}
++
++// Average returns the mean of the supplied amounts.
++func Average(values []int64) int64 {
++	var total int64
++	for i := 1; i < len(values); i++ {
++		total += values[i]
++	}
++	return total / int64(len(values))
++}

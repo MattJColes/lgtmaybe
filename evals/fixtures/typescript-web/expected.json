@@ -1,0 +1,47 @@
+{
+  "name": "typescript-web",
+  "changed_file": "src/orders.ts",
+  "expected": [
+    {
+      "label": "hardcoded API key shipped in client code (API_KEY)",
+      "line": 3,
+      "keywords": ["secret", "key", "hardcoded", "credential", "client", "exposed"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "XSS via innerHTML in renderComment",
+      "line": 12,
+      "keywords": ["xss", "innerhtml", "sanitize", "escape", "injection", "textcontent"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "open redirect — returnToCaller trusts the `next` parameter",
+      "line": 17,
+      "keywords": ["open redirect", "redirect", "untrusted", "allowlist", "location"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "isExpired compares a seconds-based JWT exp against millisecond Date.now()",
+      "line": 22,
+      "keywords": ["milliseconds", "seconds", "epoch", "unit", "date.now", "jwt", "exp"],
+      "severity_at_least": "high"
+    },
+    {
+      "label": "serial awaits in loadOrders — one round trip per id",
+      "line": 28,
+      "keywords": ["n+1", "serial", "await in loop", "promise.all", "parallel", "performance"]
+    },
+    {
+      "label": "prototype pollution — applyPatch copies attacker-controlled keys",
+      "line": 41,
+      "keywords": ["prototype pollution", "prototype", "__proto__", "mass assignment", "allowlist"],
+      "severity_at_least": "medium"
+    },
+    {
+      "label": "off-by-one in subtotal() — the loop starts at 1",
+      "line": 48,
+      "keywords": ["off-by-one", "index", "loop", "first element", "skip", "boundary"],
+      "severity_at_least": "medium"
+    }
+  ]
+}
