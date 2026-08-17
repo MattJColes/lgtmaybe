@@ -3,7 +3,7 @@
   "changed_file": "src/api/handlers.py",
   "expected": [
     {
-      "label": "hardcoded API token in handlers.py (API_TOKEN)",
+      "label": "credential in a source constant in handlers.py (API_TOKEN) — value redacted before review",
       "line": 6,
       "keywords": ["secret", "token", "hardcoded", "credential", "api key", "api_token"],
       "severity_at_least": "low"
@@ -42,7 +42,7 @@
       "severity_at_least": "medium"
     },
     {
-      "label": "hardcoded database password in settings.py",
+      "label": "credential in a source constant in settings.py — value redacted before review",
       "line": 5,
       "keywords": ["password", "hardcoded", "secret", "credential"],
       "severity_at_least": "low"
