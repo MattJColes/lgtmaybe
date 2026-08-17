@@ -423,6 +423,87 @@ def test_spec_delivery_corpus_refutes_its_forbidden_traps() -> None:
 
 
 # ---------------------------------------------------------------------------
+# non-Python fixtures
+#
+# The corpus was fourteen Python cases while the reviewer claims to work on any
+# diff — and the prompt's worked examples are all Python filenames, so a
+# language bias would have been invisible. One fixture per language ast-grep
+# already registers beyond Python gives that claim something to fail against.
+# ---------------------------------------------------------------------------
+
+_LANGUAGE_FIXTURES = {
+    "rust-safety": ".rs",
+    "go-concurrency": ".go",
+    "typescript-web": ".ts",
+}
+
+
+@pytest.mark.parametrize(("name", "suffix"), sorted(_LANGUAGE_FIXTURES.items()))
+def test_language_fixture_is_well_formed(name: str, suffix: str) -> None:
+    """Same structural bar as the FP fixtures: it loads, every entry has keywords
+    to score against, and every expected line is a real changed RIGHT line —
+    ``changed_line_index`` is language-agnostic, so a Rust diff parses unchanged
+    and a wrong line number is a fixture bug, not a language one."""
+    diff, manifest = _fixture(name)
+
+    assert manifest.changed_file.endswith(suffix)
+    assert is_reviewable(manifest.changed_file), f"{name}: skipped as generated/binary"
+    assert manifest.expected, f"{name}: needs expected findings or it scores nothing"
+
+    changed = _changed_lines(diff, manifest.changed_file)
+    assert changed, f"{name}: diff has no changed RIGHT lines"
+    for entry in manifest.expected:
+        assert entry.keywords, f"{name}: {entry.label!r} has no keywords"
+        assert entry.line in changed, (
+            f"{name}: line {entry.line} ({entry.label!r}) is not a changed line; "
+            f"changed lines are {sorted(changed)}"
+        )
+
+
+def test_language_fixtures_plant_bugs_only_that_language_can_have() -> None:
+    """A fixture that just transliterated `badcode.py` would measure nothing about
+    the language. Each one turns on a rule specific to it: Rust's unsigned
+    subtraction, Go's unsynchronised map write, JS's millisecond epoch against a
+    seconds-based JWT claim."""
+    by_name = {m.name: m for _d, m in run_mod._load_fixtures()}
+
+    rust = " ".join(k.lower() for e in by_name["rust-safety"].expected for k in e.keywords)
+    assert "underflow" in rust, "rust: no unsigned-subtraction finding"
+    assert "panic" in rust, "rust: nothing about unwrap/panic"
+
+    go = " ".join(k.lower() for e in by_name["go-concurrency"].expected for k in e.keywords)
+    assert "race" in go, "go: no data-race finding"
+
+    ts = " ".join(k.lower() for e in by_name["typescript-web"].expected for k in e.keywords)
+    assert "xss" in ts, "typescript: no DOM-injection finding"
+    assert "milliseconds" in ts or "seconds" in ts, "typescript: no epoch-unit finding"
+
+
+@pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep binary not installed")
+@pytest.mark.parametrize(
+    ("name", "symbol", "path"),
+    [
+        # Rust `impl_item` exposes no tree-sitter `name` field, so an `impl` block
+        # cannot bind by name — anchor on `function_item` instead.
+        ("rust-safety", "charge", "src/billing.rs"),
+        ("go-concurrency", "FetchAll", "report/report.go"),
+        ("typescript-web", "renderComment", "src/orders.ts"),
+    ],
+)
+def test_symbol_resolution_reaches_each_language(name: str, symbol: str, path: str) -> None:
+    """Real ast-grep, over the fixture's own corpus. Resolution is what a
+    cross-file deferral rides on, and it is registered per language — so
+    "lgtmaybe works on Go" is only true if this holds for Go."""
+    _diff, manifest = _fixture(name)
+    root = manifest.corpus_root
+    assert root is not None, f"{name}: needs a repo/ corpus to resolve against"
+
+    resolve = build_symbol_resolver(lambda: root)
+    assert resolve is not None
+    assert resolve(symbol) == [path]
+
+
+# ---------------------------------------------------------------------------
 # static-hints fixture (F1 A/B) + head/ loading
 # ---------------------------------------------------------------------------
 
