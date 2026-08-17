@@ -124,8 +124,38 @@ since a model that needs this is not honouring the schema.
 
 #### Scenario: the reformat fails too
 - **WHEN** the reformatted reply is itself unparseable, or the call raises
-- **THEN** no findings are added, the original failure reason stands, and no
-  third call is made
+- **THEN** no findings are added and the original failure reason stands, unless
+  the schema-less re-run below recovers the lens
+
+### Requirement: A schema-bound parse failure is re-asked without the schema
+
+A parse failure on a call that sent the provider's JSON schema SHALL be re-asked
+once with the schema omitted, when the reformat above could not recover it.
+This is the last of three structured-output fallbacks and the only one the
+adapter cannot detect for itself: a reply that is non-empty and well-formed on
+the wire, but is not findings, looks like a clean success from there. It SHALL
+run only after the reformat, which is an order of magnitude cheaper; SHALL never
+re-ask its own output; and SHALL re-check every ceiling first. A re-run that
+parses SHALL mark that model so later calls skip the schema, and SHALL be named
+in the summary; a re-run that fails SHALL mark nothing, since one bad reply does
+not prove a broken schema mode.
+<!-- anchor: engine.schemaless-retry -->
+
+#### Scenario: the model's JSON mode produces unreadable replies
+- **WHEN** a lens returns non-empty prose under `response_format` and the
+  reformat cannot recover it
+- **THEN** the lens is re-run without the schema and its findings post as
+  complete
+
+#### Scenario: no schema was ever sent
+- **WHEN** the same failure happens with structured output off
+- **THEN** nothing is re-asked, because the re-run would be the identical
+  request the rescue wave forbids
+
+#### Scenario: the re-run fails too
+- **WHEN** the schema-less reply is unparseable as well
+- **THEN** the original reason stands, no further call is made, and the model is
+  not marked
 
 ### Requirement: Findings merge and dedupe across lenses
 
