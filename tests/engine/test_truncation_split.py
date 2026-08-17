@@ -594,15 +594,42 @@ def test_a_failed_step_down_is_not_reported_as_a_recovery() -> None:
     assert "results may be incomplete" in summary
 
 
-def test_no_retry_when_reasoning_effort_is_unset() -> None:
-    """Byte-identical behaviour for the users who never configured it: there is
-    no lower level to step to, so nothing is retried and nothing is spent."""
+def test_no_retry_when_the_adapter_has_no_step_to_offer() -> None:
+    """The engine's half of the contract: when the adapter answers None, the
+    original failure is reported and nothing more is spent.
+
+    Renamed from `test_no_retry_when_reasoning_effort_is_unset`, which no longer
+    described production: since #452 an unset effort steps to a floor rather than
+    nowhere, so the old name asserted the opposite of what the adapter does. The
+    fake still answers None, which is now the *incapable-route* case — a route
+    whose capability entry omits `reasoning_effort`, where sending it would be
+    stripped and re-send the request that just failed."""
     provider = _TruncatesUntilEffortDrops(effort=None, answers_at=_TruncatesUntilEffortDrops._NEVER)
 
     with pytest.raises(ReviewIncompleteError):
         LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
 
     assert provider.efforts == [None]  # one call, no step-down
+
+
+def test_an_incapable_route_reports_rather_than_re_sending_the_same_request() -> None:
+    """End to end through the REAL adapter method, which is where the decision
+    lives. A route litellm's map says cannot take `reasoning_effort` gets no
+    retry: the floor would be stripped by drop_params and the second call would
+    be byte-identical to the first, billed twice for one answer."""
+
+    class _IncapableRoute(_TruncatesUntilEffortDrops):
+        model = "openai/gpt-5.5"
+        default_opts: dict[str, Any] = {}
+        _effort_override_supported = False
+        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+
+    provider = _IncapableRoute(effort=None, answers_at=_EFFORT_FLOOR)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == [None]  # never a second, identical request
 
 
 def test_the_step_down_keeps_what_the_cut_call_completed() -> None:
