@@ -13,6 +13,7 @@ This package is split into three layers:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -69,6 +70,10 @@ class RuntimeOptions:
     fallback_model: str | None = None
     pr_url: str | None = None
     profile: bool = False
+    # Where to write the machine-readable profile, if anywhere. A PATH rather
+    # than a stream: stdout already carries the findings under --json/--agent,
+    # and a file collides with nothing whatever the output format is.
+    profile_json: Path | None = None
 
 
 _log = get_logger(__name__)
@@ -708,14 +713,33 @@ def execute_local_review(
         raise click.ClickException(str(exc)) from exc
 
     click.echo(render_findings(findings, summary, fmt=fmt))
+    _write_profile_json(runtime)
     if runtime.profile:
-        click.echo(profiler.render())
+        # stdout carries the deliverable, so the table only shares it when the
+        # deliverable is for a human. Under --json/--agent stdout is a machine
+        # channel and the table made it unparseable — `--json --profile | jq`
+        # simply failed. Same rule the footer below already follows.
+        click.echo(profiler.render(), err=fmt != "human")
     elif profiler.total_tokens():
         # The meter. A local review is the one that runs dozens of times a day
         # against a metered API, so what it spent is reported by default rather
         # than only under --profile (whose table already ends with this line —
         # hence the elif). stderr keeps --json / --agent output pipeable.
         click.echo(profiler.render_total(), err=True)
+
+
+def _write_profile_json(runtime: RuntimeOptions) -> None:
+    """Write the structured profile, when one was asked for.
+
+    Best-effort by design: a review that produced findings must not fail because
+    a diagnostic file could not be written.
+    """
+    if runtime.profile_json is None:
+        return
+    try:
+        runtime.profile_json.write_text(json.dumps(profiler.as_dict(), indent=2), encoding="utf-8")
+    except OSError as exc:
+        _log.warning("could not write the profile json", extra={"error": str(exc)})
 
 
 def execute_local_diagram(

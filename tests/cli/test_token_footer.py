@@ -7,6 +7,8 @@ The footer goes to stderr so machine-readable formats stay pipeable.
 
 from __future__ import annotations
 
+import json
+
 import click
 import pytest
 
@@ -53,10 +55,10 @@ def _local_run(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     monkeypatch.setattr(cli, "build_provider_engine", lambda *a, **k: (_StubEngine(), object()))
     monkeypatch.setattr(cli, "local_pr_context", lambda **k: _CTX)
 
-    def run(fmt: str = "human", profile: bool = False) -> None:
+    def run(fmt: str = "human", profile: bool = False, profile_json=None) -> None:  # type: ignore[no-untyped-def]
         cli.execute_local_review(
             ReviewConfig(provider=Provider.openai, model="m"),
-            cli.RuntimeOptions(profile=profile),
+            cli.RuntimeOptions(profile=profile, profile_json=profile_json),
             base=None,
             working=False,
             fmt=fmt,
@@ -130,3 +132,70 @@ class TestLocalTokenFooter:
                 fmt="human",
             )
         assert "billable" not in capsys.readouterr().err
+
+
+class TestProfileDoesNotBreakMachineOutput:
+    """`--json --profile` was unpipeable: the findings array and the human table
+    went to the same stream, so `lgtmaybe review --json --profile | jq` failed.
+
+    The convention already existed — the token footer is routed to stderr with
+    the comment "stderr keeps --json / --agent output pipeable" — and the profile
+    table was the one output ignoring it.
+    """
+
+    def test_json_output_stays_parseable_under_profile(self, _local_run, capsys) -> None:  # type: ignore[no-untyped-def]
+        _local_run(profile=True, fmt="json")
+        captured = capsys.readouterr()
+
+        json.loads(captured.out)
+        assert "lgtmaybe profile" in captured.err
+
+    def test_agent_output_stays_clean_under_profile(self, _local_run, capsys) -> None:  # type: ignore[no-untyped-def]
+        _local_run(profile=True, fmt="agent")
+        captured = capsys.readouterr()
+
+        assert "lgtmaybe profile" not in captured.out
+        assert "lgtmaybe profile" in captured.err
+
+    def test_a_human_run_keeps_the_table_on_stdout(self, _local_run, capsys) -> None:  # type: ignore[no-untyped-def]
+        """Nothing changes for a human reader: stdout is not a machine channel
+        there, so moving it would be churn for its own sake."""
+        _local_run(profile=True)
+
+        assert "lgtmaybe profile" in capsys.readouterr().out
+
+
+class TestProfileJsonFile:
+    """A file rather than a stream. stdout already carries the findings under
+    --json/--agent, and stderr carries the structured logs — a path collides with
+    neither, whatever the output format is."""
+
+    def test_it_writes_the_structured_profile(self, _local_run, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        target = tmp_path / "profile.json"
+
+        _local_run(profile_json=target)
+
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        assert payload["schema_version"] >= 1
+        assert payload["calls"], "the run made calls; they belong in the payload"
+
+    def test_it_coexists_with_json_findings_on_stdout(self, _local_run, tmp_path, capsys) -> None:  # type: ignore[no-untyped-def]
+        target = tmp_path / "profile.json"
+
+        _local_run(fmt="json", profile_json=target)
+
+        json.loads(capsys.readouterr().out)
+        assert json.loads(target.read_text(encoding="utf-8"))["calls"]
+
+    def test_an_unwritable_path_does_not_fail_the_review(
+        self, _local_run, tmp_path, capsys
+    ) -> None:  # type: ignore[no-untyped-def]
+        """A review that produced findings must not be lost to a diagnostic file."""
+        _local_run(profile_json=tmp_path / "nope" / "profile.json")
+
+        assert capsys.readouterr().out, "the findings still printed"
+
+    def test_nothing_is_written_when_not_asked(self, _local_run, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        _local_run()
+
+        assert list(tmp_path.iterdir()) == []

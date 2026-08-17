@@ -742,3 +742,94 @@ class TestReasoningShareIsLegibleFromAnyRun:
         rendered = p.render()
         assert "800" in rendered
         assert "largest" not in rendered
+
+
+class TestProfileAsData:
+    """The table is a human artefact that consumers were parsing anyway.
+
+    A downstream harness screen-scraped it column-by-column and lost ~10% of
+    every call row to one sentinel: `-` for an unknown reasoning count, which
+    `int()` refuses. The structured form exists so nobody has to do that, and its
+    one hard rule is that unknown stays `null` — never `0`, which would assert
+    the model did no thinking, and never `"-"`, which has to be string-matched.
+    """
+
+    def _record(self, **overrides: object) -> None:
+        defaults: dict[str, object] = {
+            "label": "security",
+            "batch": 1,
+            "elapsed": 1.5,
+            "attempts": 1,
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+        }
+        defaults.update(overrides)
+        profiler.record_call(**defaults)  # type: ignore[arg-type]
+
+    def test_an_unknown_reasoning_count_is_null_not_zero(self) -> None:
+        self._record(reasoning_tokens=None)
+
+        payload = profiler.as_dict()
+
+        assert payload["calls"][0]["reasoning_tokens"] is None
+
+    def test_a_known_reasoning_count_survives_as_a_number(self) -> None:
+        self._record(reasoning_tokens=1234, output_ceiling=16384)
+
+        call = profiler.as_dict()["calls"][0]
+
+        assert call["reasoning_tokens"] == 1234
+        assert call["output_ceiling"] == 16384
+
+    def test_the_reasoning_share_is_a_ratio_not_a_rendered_percent(self) -> None:
+        """The table rounds it to an integer percent with a `%` suffix. A
+        consumer wants the number it was rounded from."""
+        self._record(reasoning_tokens=8192, output_ceiling=16384)
+
+        assert profiler.as_dict()["calls"][0]["reasoning_share"] == pytest.approx(0.5)
+
+    def test_a_clean_call_reports_no_error(self) -> None:
+        self._record()
+
+        assert profiler.as_dict()["calls"][0]["error"] is None
+
+    def test_stages_and_totals_ride_along(self) -> None:
+        with profiler.stage("redact"):
+            pass
+        self._record()
+
+        payload = profiler.as_dict()
+
+        assert [s["name"] for s in payload["stages"]] == ["redact"]
+        assert payload["total_tokens"] == 300
+        assert payload["wall_seconds"] >= 0
+
+    def test_it_carries_a_schema_version(self) -> None:
+        """The whole point is something consumers can pin against, so the shape
+        has to be able to say when it changed."""
+        assert isinstance(profiler.as_dict()["schema_version"], int)
+
+    def test_every_table_column_has_a_field(self) -> None:
+        """Parity with the human table: anyone migrating off screen-scraping must
+        not have to keep the table for one missing column."""
+        self._record(reasoning_tokens=10, output_ceiling=100, findings=2, error=None)
+
+        call = profiler.as_dict()["calls"][0]
+
+        for field in (
+            "label",
+            "batch",
+            "attempts",
+            "elapsed",
+            "input_tokens",
+            "output_tokens",
+            "reasoning_tokens",
+            "reasoning_share",
+            "cache_read_tokens",
+            "cache_creation_tokens",
+            "findings",
+            "error",
+        ):
+            assert field in call, f"{field} is in the table but not the payload"

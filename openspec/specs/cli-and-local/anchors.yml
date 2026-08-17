@@ -46,6 +46,12 @@ cli.response-style:
     has: { field: name, regex: '^_answer_question$' }
   files: [src/lgtmaybe/cli/slash.py]
 
+cli.profile-output:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_write_profile_json$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.local-context:
   rule:
     kind: function_definition

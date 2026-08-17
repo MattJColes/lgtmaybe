@@ -182,6 +182,30 @@ against the worktree's top level, not the caller's directory.
 - **WHEN** `lgtmaybe review` runs from a package directory, not the repo root
 - **THEN** it sees the whole worktree, with each file's head text loaded
 
+### Requirement: Diagnostics never corrupt machine output
+
+stdout SHALL carry only the review's deliverable. The opt-in profile table is a
+human artefact, so it SHALL move to stderr whenever the findings themselves are
+machine-readable — otherwise a run asking for both emits neither cleanly. The
+profile SHALL also be available as data, written to a path rather than a stream
+so it collides with no output format, carrying a schema version so a consumer
+can pin against it, and reporting an unknown count as null rather than a
+sentinel a parser must string-match. A diagnostic that cannot be written SHALL
+NOT fail a review that produced findings.
+<!-- anchor: cli.profile-output -->
+
+#### Scenario: machine-readable findings with the profile enabled
+- **WHEN** a review is asked for JSON findings and the profile together
+- **THEN** stdout parses as the findings alone, and the table is on stderr
+
+#### Scenario: a consumer wants the profile as data
+- **WHEN** a profile path is given
+- **THEN** the file holds a versioned payload whose unknown counts are null
+
+#### Scenario: the profile path cannot be written
+- **WHEN** writing the profile file fails
+- **THEN** the review still reports its findings
+
 ### Requirement: Config layers merge, secrets never persist
 
 Config SHALL merge user-level file → repo `.lgtmaybe.yml` → CLI flags (most
