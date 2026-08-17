@@ -371,6 +371,28 @@ was *not* shown:
   it in the diff, while `tests/test_dispatch.py` covers it in a file the PR never
   touched, so "this change is untested" is true of the diff and wrong as a defect.
 
+### Secret findings are scored after redaction
+
+Redaction is the **first** pipeline stage, so it runs on the fixtures too. A
+fixture that plants `API_TOKEN = "ghp_…"` shows the model:
+
+```
++API_TOKEN = "[REDACTED]"
+```
+
+The constant name and the inline assignment survive; the value does not. So the
+finding those fixtures actually measure is *"a credential is held in a source
+constant instead of configuration"* — a fair catch, graded `medium` — and **not**
+*"a live token is committed"*, which the input cannot support and which would
+penalise a model right to decline. Their labels say so, and
+`test_no_expectation_is_graded_on_a_value_the_model_never_saw` enforces it
+mechanically across every fixture, because the bar moves whenever
+`engine/redact.py` does.
+
+If you want a finding scored against a real value, don't bypass the redactor —
+the harness exists to exercise the pipeline. Plant something it doesn't match,
+and say in the label that that is what you did.
+
 ### Separating a reproducible failure from an intermittent one
 
 A single pass says a fixture passed or failed; it cannot say whether the model

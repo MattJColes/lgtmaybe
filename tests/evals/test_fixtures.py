@@ -9,16 +9,25 @@ ollama e2e run.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 
 import pytest
 
 from evals import run as run_mod
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
-from lgtmaybe.core.models import PRContext, Provider, ProviderResult, ReviewConfig, ReviewFinding
+from lgtmaybe.core.models import (
+    PRContext,
+    Provider,
+    ProviderResult,
+    ReviewConfig,
+    ReviewFinding,
+    Severity,
+)
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.astgrep import build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
+from lgtmaybe.engine.redact import redact
 from lgtmaybe.engine.reflect import reflect_findings
 from lgtmaybe.github import is_reviewable
 from lgtmaybe.local import local_file_reader
@@ -420,6 +429,90 @@ def test_spec_delivery_corpus_refutes_its_forbidden_traps() -> None:
 
     assert "expires_at" in models, "the column trap needs the field to already exist"
     assert "redeemed_at IS NULL" in repo, "the idempotency trap needs a conditional update"
+
+
+# ---------------------------------------------------------------------------
+# redaction runs on the fixtures too
+# ---------------------------------------------------------------------------
+
+
+def _redacted_lines(diff: str) -> dict[int, str]:
+    """RIGHT line number → text, for every changed line redaction blanked a value on.
+
+    Keyed by line only, no path — mirroring ``scorer._matches``, which compares
+    ``finding.line`` alone because an ``ExpectedFinding`` names no file. On a
+    multi-file fixture two files can therefore share a line number, and this
+    inherits that ambiguity rather than inventing a stricter rule the scorer
+    does not apply.
+    """
+    index = changed_line_index(redact(diff))
+    return {
+        line: text
+        for (_path, side), entries in index.items()
+        if side == "RIGHT"
+        for line, text in entries
+        if "[REDACTED]" in text
+    }
+
+
+# A NAME, an assignment, then the marker — `API_TOKEN = "[REDACTED]"`,
+# `const apiToken = "[REDACTED]"`, `"api_token": "[REDACTED]"`,
+# `const API_TOKEN: &str = "[REDACTED]"`. What survives redaction is exactly
+# what the finding is left to key on.
+_NAMED_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*[\"']?\s*[:=][^\[]*\[REDACTED\]")
+
+
+def test_no_expectation_is_graded_on_a_value_the_model_never_saw() -> None:
+    """Redaction is the FIRST pipeline stage, so it runs on the fixtures too.
+
+    A fixture that plants ``API_TOKEN = "ghp_…"`` shows the model
+    ``API_TOKEN = "[REDACTED]"``: the constant name and the inline assignment
+    survive, the secret does not. "A credential is held in a source constant"
+    is still a fair catch there; "a live token is committed", graded `high`,
+    is not — the input cannot support it, and a model right to decline would
+    lose recall for being right.
+
+    So: an expectation sitting on a redacted line may not demand a severity
+    only a live secret could justify. Mechanical rather than per-fixture,
+    because the bar moves whenever ``engine/redact.py`` does — five fixtures
+    drifted this way unnoticed before anyone looked.
+    """
+    for diff, manifest in run_mod._load_fixtures():
+        redacted = _redacted_lines(diff)
+        for exp in manifest.expected:
+            if exp.line not in redacted or exp.severity_at_least is None:
+                continue
+            assert exp.severity_at_least <= Severity.medium, (
+                f"{manifest.name}: {exp.label!r} demands {exp.severity_at_least} on line "
+                f"{exp.line}, which the model sees as [REDACTED]"
+            )
+
+
+def test_the_secret_fixtures_still_show_the_credential_assignment() -> None:
+    """The other half of the same invariant: redaction must leave enough for the
+    finding to be *possible*. It replaces only the value, so the name and the
+    assignment survive — if that ever changes, these expectations become
+    unreachable rather than merely harder, and the test above cannot see it.
+
+    Derived from the fixtures, never a hand-kept list: a named list would have to
+    be updated by whoever adds the next secret fixture, and the one that shipped
+    with this check already omitted two of the seven it claimed to cover.
+    """
+    covered: list[str] = []
+    for diff, manifest in run_mod._load_fixtures():
+        redacted = _redacted_lines(diff)
+        for exp in manifest.expected:
+            if exp.line not in redacted:
+                continue
+            covered.append(f"{manifest.name}:{exp.line}")
+            assert _NAMED_ASSIGNMENT.search(redacted[exp.line]), (
+                f"{manifest.name}: line {exp.line} is {redacted[exp.line]!r} — redaction took "
+                f"the name or the assignment with the value, so {exp.label!r} is now unreachable"
+            )
+
+    # A guard that silently checked nothing would pass forever. Every fixture
+    # planting a credential is expected to reach here.
+    assert len(covered) >= 8, f"only {covered} reached the check — has the redactor stopped firing?"
 
 
 # ---------------------------------------------------------------------------

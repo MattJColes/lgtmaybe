@@ -3,10 +3,10 @@
   "changed_file": "service.py",
   "expected": [
     {
-      "label": "hardcoded GitHub token in load_config (hunk 1)",
+      "label": "credential in a source constant in load_config (hunk 1) — value redacted before review",
       "line": 17,
       "keywords": ["secret", "token", "hardcoded", "credential", "api key"],
-      "severity_at_least": "high"
+      "severity_at_least": "medium"
     },
     {
       "label": "SQL injection in find_by_email (hunk 2)",

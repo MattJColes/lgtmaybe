@@ -3,10 +3,10 @@
   "changed_file": "src/orders.ts",
   "expected": [
     {
-      "label": "hardcoded API key shipped in client code (API_KEY)",
+      "label": "credential in a source constant shipped to the client (API_KEY) — value redacted before review",
       "line": 3,
       "keywords": ["secret", "key", "hardcoded", "credential", "client", "exposed"],
-      "severity_at_least": "high"
+      "severity_at_least": "medium"
     },
     {
       "label": "XSS via innerHTML in renderComment",
