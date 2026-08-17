@@ -100,6 +100,7 @@ nav:
           - Releasing: how-to/releasing.md
   - Reference:
       - Configuration: reference/config.md
+      - Profile output: reference/profile.md
   - Explanation:
       - What gets reviewed: explanation/what-gets-reviewed.md
       - Architecture: explanation/architecture.md

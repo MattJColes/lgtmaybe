@@ -92,11 +92,19 @@ def _check_diff_mode(working: bool, uncommitted: bool) -> None:
 
 
 def _runtime(
-    api_key: str | None, api_base: str | None, fallback_model: str | None, profile: bool = False
+    api_key: str | None,
+    api_base: str | None,
+    fallback_model: str | None,
+    profile: bool = False,
+    profile_json: Path | None = None,
 ) -> RuntimeOptions:
     """The RuntimeOptions every ``model_options`` command builds from its flags."""
     return RuntimeOptions(
-        api_key=api_key, api_base=api_base, fallback_model=fallback_model, profile=profile
+        api_key=api_key,
+        api_base=api_base,
+        fallback_model=fallback_model,
+        profile=profile,
+        profile_json=profile_json,
     )
 
 
@@ -424,6 +432,15 @@ local_diff_options = _stack(
     "pip install lgtmaybe[static-analysis])",
 )
 @click.option(
+    "--profile-json",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Write the profile as JSON to PATH — per-call tokens, timings, findings "
+    "and errors, with an unknown reasoning count as null rather than a `-` a "
+    "parser has to string-match. A file, not a stream, so it never collides with "
+    "--json or --agent output",
+)
+@click.option(
     "--profile",
     is_flag=True,
     default=False,
@@ -446,6 +463,7 @@ def review(**inputs: Any) -> None:
         inputs.pop("api_base"),
         inputs.pop("fallback_model"),
         profile=inputs.pop("profile"),
+        profile_json=inputs.pop("profile_json"),
     )
     static_analysis = inputs.pop("static_analysis")
     base = inputs.pop("base")
