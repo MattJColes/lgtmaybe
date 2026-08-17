@@ -41,6 +41,7 @@ from tenacity import (
 
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
+    Provider,
     ProviderResult,
     attempts_of,
     stamp_attempts,
@@ -51,7 +52,7 @@ from lgtmaybe.core.ports import (
     ProviderTruncated,
     ProviderWallTimeout,
 )
-from lgtmaybe.providers.factory import CLOUD_TIMEOUT
+from lgtmaybe.providers.factory import CLOUD_TIMEOUT, litellm_model_string
 
 _log = get_logger(__name__)
 
@@ -513,10 +514,7 @@ class LiteLLMProvider:
             lower = _one_level_lower(flat)
             return {"reasoning_effort": lower} if lower else None
         raw_extra = self.default_opts.get("extra_body")
-        if not isinstance(raw_extra, dict):
-            # No nested shape to read or answer in — the flat one it is.
-            return {"reasoning_effort": _EFFORT_FLOOR}
-        extra: dict[str, Any] = raw_extra
+        extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
         nested = extra.get("reasoning")
         if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
             lower = _one_level_lower(nested["effort"])
@@ -526,10 +524,19 @@ class LiteLLMProvider:
             # per-call opts over the defaults a key at a time, so a partial
             # extra_body here would drop every other key it carries.
             return {"extra_body": {**extra, "reasoning": {**nested, "effort": lower}}}
-        # Nothing configured in either shape. Answer in the shape this provider
-        # was BUILT with, so the floor reaches an OpenRouter route the same way a
-        # configured effort would have — that is where most of these models live.
-        return {"extra_body": {**extra, "reasoning": {"effort": _EFFORT_FLOOR}}}
+        # Nothing configured in either shape, so the floor picks its own shape —
+        # from the ROUTE, never from whether `extra_body` happens to exist, which
+        # a caller may set for any unrelated provider option.
+        #
+        # OpenRouter gets the nested object for the same reason the factory
+        # re-routes a configured effort into it: litellm forwards the flat param
+        # only for models its capability map flags reasoning-capable, and the
+        # newest models are not in that map — exactly the set that truncates this
+        # way. A flat param there would be dropped and the retry would fail
+        # identically. OpenRouter takes the nested object regardless of model.
+        if self.model.startswith(_OPENROUTER_PREFIX):
+            return {"extra_body": {**extra, "reasoning": {"effort": _EFFORT_FLOOR}}}
+        return {"reasoning_effort": _EFFORT_FLOOR}
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
@@ -845,6 +852,11 @@ _EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
 # review for a worse one. `low` is also the rung every reasoning route
 # understands, where the two below it are unevenly supported.
 _EFFORT_FLOOR = "low"
+
+# ``openrouter/`` — derived rather than spelled out, so it cannot drift from the
+# route prefix the factory builds model strings with. The one route that reads a
+# nested ``reasoning`` object.
+_OPENROUTER_PREFIX = litellm_model_string(Provider.openrouter, "")
 
 
 def _one_level_lower(effort: str) -> str | None:

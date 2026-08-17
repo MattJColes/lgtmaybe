@@ -521,8 +521,15 @@ def test_a_model_reasoning_at_its_own_default_still_gets_the_retry() -> None:
     always told there was nothing to retry with."""
 
     class _UnconfiguredReasoner(_TruncatesUntilEffortDrops):
+        # An OpenRouter route with nothing configured — the shape all three
+        # models arrived in, and the one where the effort rides nested.
+        model = "openrouter/z-ai/glm-4.7-flash"
         default_opts: dict[str, Any] = {}
         lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            nested = opts.get("extra_body", {}).get("reasoning", {})
+            return super().complete(messages, model, reasoning_effort=nested.get("effort"))
 
     provider = _UnconfiguredReasoner(effort=None, answers_at=_EFFORT_FLOOR)
 

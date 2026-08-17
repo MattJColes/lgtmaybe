@@ -1703,7 +1703,7 @@ class TestSteppingReasoningEffortDown:
         assert _EFFORT_FLOOR in _EFFORT_LADDER
         assert _EFFORT_LADDER.index(_EFFORT_FLOOR) > 0
 
-    def test_an_unset_nested_effort_also_steps_to_the_floor(self) -> None:
+    def test_the_floor_takes_openrouters_nested_shape(self) -> None:
         """OpenRouter carries the effort in a nested object, and the models that
         truncate this way are mostly reached through it — so the floor has to be
         available on that route too, without losing the rest of extra_body."""
@@ -1718,6 +1718,28 @@ class TestSteppingReasoningEffortDown:
                 "reasoning": {"effort": _EFFORT_FLOOR},
             }
         }
+
+    def test_the_floor_takes_the_nested_shape_with_no_extra_body_at_all(self) -> None:
+        """The shape follows the ROUTE, not whether extra_body happens to exist.
+
+        litellm forwards the flat param only for models its capability map flags
+        reasoning-capable, and the newest models are not in it — which is exactly
+        the set that truncates this way. A flat param here would be dropped and
+        the retry would fail identically. OpenRouter takes the nested object
+        regardless of model, so that is what the floor uses."""
+        provider = LiteLLMProvider(model="openrouter/nvidia/nemotron")
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {"reasoning": {"effort": _EFFORT_FLOOR}}
+        }
+
+    def test_an_unrelated_extra_body_does_not_make_a_route_nested(self) -> None:
+        """extra_body is not evidence of the nested shape — a caller can set it
+        for any provider option. Only OpenRouter reads a nested `reasoning`, so
+        anywhere else the floor must go out as the flat param the route wants."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5", extra_body={"service_tier": "priority"})
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": _EFFORT_FLOOR}
 
     def test_stepping_to_the_floor_is_still_not_a_mutation(self) -> None:
         provider = LiteLLMProvider(model="openai/gpt-5.5")
