@@ -280,11 +280,13 @@ A lens whose truncation was reasoning-bound SHALL be re-run once with its
 `reasoning_effort` stepped down one level, merging its findings with the cut
 call's salvage — the sibling of the split, changing the one variable that can
 move a thinking budget. Exactly one attempt: a retry that truncates the same way
-reports plain. The step is always downward, never offered on a payload-bound
-truncation, and a no-op when no effort is configured, so a review that never set
-one is byte-identical. The retry SHALL re-check the whole-review deadline, token
-budget and interrupt first, so it can never spend past a stop. A lens that only
-answered after stepping down SHALL be named in the summary.
+reports plain. The step is always downward and never offered on a payload-bound
+truncation. With no effort configured there is no rung to descend, so the step
+SHALL be to a named floor — the configuration a model reasoning at its own
+default arrives in, which must not be the one with no lever. The retry SHALL
+re-check the whole-review deadline, token budget and interrupt first, so it can
+never spend past a stop. A lens that only answered after stepping down SHALL be
+named in the summary.
 <!-- anchor: engine.reasoning-step-down -->
 
 #### Scenario: the lower effort fits
@@ -297,7 +299,14 @@ answered after stepping down SHALL be named in the summary.
 - **THEN** it reports and stops — one attempt, never a walk down the ladder
 
 #### Scenario: no effort was configured
-- **WHEN** the provider reports no reasoning effort to step down from
+- **WHEN** a reasoning-bound truncation comes from a run that set no effort
+- **THEN** the retry goes out at the floor, in whichever shape that provider
+  carries its effort — the model was thinking at its own default, which is why
+  the ceiling went
+
+#### Scenario: the effort is already at the bottom
+- **WHEN** the configured effort is the lowest rung, or names no position on the
+  ladder at all
 - **THEN** nothing is retried and nothing is spent
 
 #### Scenario: a ceiling was reached while the first call was finishing

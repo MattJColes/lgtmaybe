@@ -18,7 +18,12 @@ import pytest
 from lgtmaybe.core.models import attempts_of, is_unrecoverable
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
-from lgtmaybe.providers.litellm_provider import _MAX_ATTEMPTS, LiteLLMProvider
+from lgtmaybe.providers.litellm_provider import (
+    _EFFORT_FLOOR,
+    _EFFORT_LADDER,
+    _MAX_ATTEMPTS,
+    LiteLLMProvider,
+)
 
 
 def _reasoning_response(reasoning: Any, content: str = "ok") -> Any:
@@ -1676,12 +1681,50 @@ class TestSteppingReasoningEffortDown:
 
         assert provider.lower_reasoning_effort() is None
 
-    def test_an_unset_effort_steps_nowhere(self) -> None:
-        """The library default. A user who never configured this must send
-        byte-identical requests, so there is nothing to retry with."""
+    def test_an_unset_effort_steps_to_the_floor(self) -> None:
+        """The case that matters most and used to have no answer.
+
+        A model that reasons by DEFAULT, run without an explicit effort, is
+        exactly the configuration that burns its whole output ceiling thinking —
+        and returning None here meant the one lever that can move a thinking
+        budget was unavailable to it. There is no configured rung to step down
+        from, so the step is to a named floor instead.
+
+        Safe because this is only ever consulted after a reasoning-bound
+        truncation: a healthy call still sends byte-identical requests."""
         provider = LiteLLMProvider(model="openai/gpt-5.5")
 
-        assert provider.lower_reasoning_effort() is None
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": _EFFORT_FLOOR}
+
+    def test_the_floor_is_a_real_reduction_not_the_bottom(self) -> None:
+        """Not `none`: a model whose thinking overran is still a reasoning model,
+        and switching thought off entirely trades a truncated review for a worse
+        one. The floor bounds the thinking rather than removing it."""
+        assert _EFFORT_FLOOR in _EFFORT_LADDER
+        assert _EFFORT_LADDER.index(_EFFORT_FLOOR) > 0
+
+    def test_an_unset_nested_effort_also_steps_to_the_floor(self) -> None:
+        """OpenRouter carries the effort in a nested object, and the models that
+        truncate this way are mostly reached through it — so the floor has to be
+        available on that route too, without losing the rest of extra_body."""
+        provider = LiteLLMProvider(
+            model="openrouter/z-ai/glm-4.7-flash",
+            extra_body={"provider": {"sort": "latency"}},
+        )
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {
+                "provider": {"sort": "latency"},
+                "reasoning": {"effort": _EFFORT_FLOOR},
+            }
+        }
+
+    def test_stepping_to_the_floor_is_still_not_a_mutation(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+
+        provider.lower_reasoning_effort()
+
+        assert "reasoning_effort" not in provider.default_opts
 
     def test_default_is_a_sentinel_not_a_rung(self) -> None:
         """`default` says "let the route decide" — there is no telling what sits

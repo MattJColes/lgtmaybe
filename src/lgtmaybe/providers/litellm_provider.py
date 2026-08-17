@@ -483,10 +483,18 @@ class LiteLLMProvider:
     def lower_reasoning_effort(self) -> dict[str, Any] | None:
         """Per-call opts that step this provider's reasoning effort down one level.
 
-        ``None`` when there is nothing to step: no effort configured (the library
-        default — a user who never set it must send byte-identical requests), a
-        value already at the floor, or ``default``, which names no position on the
-        ladder and so cannot be moved down from.
+        ``None`` when there is nothing to step: a value already at the bottom of
+        the ladder, or ``default``, which names no position on it and so cannot
+        be moved down from.
+
+        With NO effort configured the step is to ``_EFFORT_FLOOR`` rather than
+        nowhere. That case used to answer ``None`` — to keep a run that never set
+        an effort sending byte-identical requests — but it is the very
+        configuration that produces this failure: a model reasoning at its own
+        default is the one that spends a whole output ceiling thinking, and
+        answering ``None`` left it the only model with no lever at all. The
+        byte-identical guarantee is unaffected, because this is consulted ONLY
+        after a reasoning-bound truncation: a healthy call never reaches here.
 
         Adapter-only, beyond the frozen ``ProviderClient`` port, and deliberately
         so: the effort lives in one of two provider-shaped places — a flat
@@ -494,7 +502,7 @@ class LiteLLMProvider:
         re-routes it into for OpenRouter (see ``_honour_param_support``, where
         sending both is a 400). The engine asks for "one level less" and gets back
         opts in whichever shape this provider was built with; it never learns
-        which, and a provider that cannot answer simply never steps down.
+        which.
 
         Read off ``default_opts`` because that is where the configured value was
         resolved, and returned as an override rather than mutated in place: this
@@ -504,9 +512,11 @@ class LiteLLMProvider:
         if isinstance(flat, str):
             lower = _one_level_lower(flat)
             return {"reasoning_effort": lower} if lower else None
-        extra = self.default_opts.get("extra_body")
-        if not isinstance(extra, dict):
-            return None
+        raw_extra = self.default_opts.get("extra_body")
+        if not isinstance(raw_extra, dict):
+            # No nested shape to read or answer in — the flat one it is.
+            return {"reasoning_effort": _EFFORT_FLOOR}
+        extra: dict[str, Any] = raw_extra
         nested = extra.get("reasoning")
         if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
             lower = _one_level_lower(nested["effort"])
@@ -516,7 +526,10 @@ class LiteLLMProvider:
             # per-call opts over the defaults a key at a time, so a partial
             # extra_body here would drop every other key it carries.
             return {"extra_body": {**extra, "reasoning": {**nested, "effort": lower}}}
-        return None
+        # Nothing configured in either shape. Answer in the shape this provider
+        # was BUILT with, so the floor reaches an OpenRouter route the same way a
+        # configured effort would have — that is where most of these models live.
+        return {"extra_body": {**extra, "reasoning": {"effort": _EFFORT_FLOOR}}}
 
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
         merged = {**self.default_opts, **opts}
@@ -822,6 +835,16 @@ class LiteLLMProvider:
 # which is a "let the route decide" sentinel rather than a rung — there is no
 # telling what it is one level below.
 _EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
+
+# Where a step-down lands when NOTHING was configured to step down from — the
+# case that produces this failure most often, since a model reasoning at its own
+# default is precisely the one that spends a whole output ceiling thinking.
+#
+# `low` rather than `none` or `minimal`: a model whose thinking overran is still
+# a reasoning model, and switching thought off entirely trades a truncated
+# review for a worse one. `low` is also the rung every reasoning route
+# understands, where the two below it are unevenly supported.
+_EFFORT_FLOOR = "low"
 
 
 def _one_level_lower(effort: str) -> str | None:
