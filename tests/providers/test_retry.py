@@ -1884,6 +1884,42 @@ class TestSchemaDropIsVisibleAndScoped:
             provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
             assert provider.schema_dropped() is True
 
+    def test_the_engine_can_ask_for_the_drop_and_later_calls_honour_it(self) -> None:
+        """The one trigger the adapter cannot see for itself: a reply that
+        arrives well-formed and turns out not to be findings. Only the engine
+        parses, so only the engine can ask — and the ask has to reach the same
+        keyed entry `_call` looks up, or every later call repeats the failure."""
+        model = "openai/gpt-4o"
+        seen: list[bool] = []
+
+        def side_effect(*_args: Any, **kwargs: Any) -> Any:
+            seen.append("response_format" in kwargs)
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
+            assert provider.sends_response_format(model) is True
+
+            provider.drop_response_format(model, "unparseable-output")
+            assert provider.sends_response_format(model) is False
+
+            provider.complete([{"role": "user", "content": "b"}], model, response_format={"x": 1})
+
+        assert seen == [True, False], "the schema must stop going out after the ask"
+
+    def test_the_ask_is_keyed_by_the_provider_s_own_model_string(self) -> None:
+        """A factory-built provider carries the resolved litellm model string
+        while the engine only knows `cfg.model`. Both name the same call, so both
+        must land on the same entry — else the drop is recorded against a model
+        nothing ever calls."""
+        provider = LiteLLMProvider(model="openrouter/anthropic/claude-haiku-4.5")
+
+        provider.drop_response_format("claude-haiku-4.5", "unparseable-output")
+
+        assert provider.sends_response_format("claude-haiku-4.5") is False
+        assert provider.schema_dropped() is True
+
 
 class TestTheFloorRespectsRouteCapability:
     """The floor is only worth sending if the route will actually carry it.

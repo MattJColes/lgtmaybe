@@ -499,6 +499,20 @@ class LiteLLMProvider:
         """
         self._disable_response_format(self.model or model, why)
 
+    def sends_response_format(self, model: str) -> bool:
+        """Whether a call for *model* would actually carry the schema.
+
+        The engine passes ``response_format`` on every lens call, but ``_call``
+        strips it for a model already known to refuse it — so "the engine asked
+        for a schema" and "a schema went out" are different facts. The
+        schema-less re-run turns on the second: blaming enforcement that was
+        never applied would re-send the request that just failed, byte for byte,
+        which is precisely what that retry exists to avoid.
+
+        Keyed as ``complete`` resolves the model, like ``drop_response_format``.
+        """
+        return (self.model or model) not in self._schema_dropped
+
     def schema_dropped(self) -> bool:
         """Whether any model lost ``response_format`` during this run.
 

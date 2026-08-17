@@ -217,6 +217,60 @@ def test_it_is_off_when_disabled() -> None:
     assert len(_repair_calls(provider)) == 1
 
 
+def test_a_model_whose_schema_the_adapter_already_strips_is_not_re_asked() -> None:
+    """Passing `response_format` is not the same as sending it.
+
+    The adapter strips the schema for a model that already refused it, and from
+    the engine that call looks identical to one made under enforcement. Re-running
+    it "without the schema" would re-send the request that just failed, byte for
+    byte — the identical retry the rescue wave forbids, at full diff price.
+    """
+
+    class _SchemaAlreadyStripped(_NeverComplies):
+        def sends_response_format(self, model: str) -> bool:
+            return False
+
+    provider = _SchemaAlreadyStripped()
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_CTX, _cfg())
+
+    assert len(_lens_calls(provider)) == 1
+    assert len(_repair_calls(provider)) == 1
+
+
+def test_an_adapter_that_cannot_answer_still_gets_the_retry() -> None:
+    """Fail-open, like every other adapter probe: an adapter with no opinion is
+    assumed to have sent what it was given, so the recovery keeps working rather
+    than silently switching itself off."""
+    provider = _CompliesOnlyWithoutTheSchema()
+    assert not hasattr(provider, "sends_response_format")
+
+    findings, _summary = LLMReviewEngine(provider).review(_CTX, _cfg())
+
+    assert findings
+
+
+def test_a_ceiling_reached_by_the_repair_stops_the_retry() -> None:
+    """The re-run re-sends the whole diff, so it is the most expensive thing on
+    this path — a budget the first call and its reformat have already spent must
+    not be blown by it."""
+
+    class _ExpensiveRepair(_NeverComplies):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            result = super().complete(messages, model, **opts)
+            if _is_repair(messages):
+                # Push the running total past the budget mid-recovery.
+                return ProviderResult(text=result.text, input_tokens=10_000, output_tokens=10_000)
+            return result
+
+    provider = _ExpensiveRepair()
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_CTX, _cfg(max_review_tokens=5_000))
+
+    assert len(_repair_calls(provider)) == 1, "the reformat ran and spent the budget"
+    assert len(_lens_calls(provider)) == 1, "…so the full-diff re-run never started"
+
+
 def test_a_truncated_reply_stays_on_the_truncation_path() -> None:
     """Its complete findings are already salvaged and its batch is already
     re-split; the schema is not what cut it off."""
@@ -260,6 +314,47 @@ def test_a_successful_retry_tells_the_adapter_to_stop_sending_the_schema() -> No
 
     assert provider.dropped, "later calls must not repeat the schema-mode failure"
     assert provider.dropped[0][0] == "m", "keyed by the model the engine called"
+
+
+def test_a_later_lens_skips_the_schema_after_the_first_one_recovered() -> None:
+    """The point of remembering, asserted end to end.
+
+    Recording the `drop_response_format` call only proves the engine asked. What
+    the feature promises is that the NEXT lens stops paying the two wasted calls
+    — which a wrong model key, or options rebuilt from scratch per call, would
+    break while the recording assertion still passed.
+    """
+
+    class _AdapterLike(_CompliesOnlyWithoutTheSchema):
+        """Mirrors the real adapter: it strips the schema for a marked model."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._dropped: set[str] = set()
+
+        def drop_response_format(self, model: str, why: str) -> None:
+            self._dropped.add(model)
+
+        def sends_response_format(self, model: str) -> bool:
+            return model not in self._dropped
+
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            if model in self._dropped:
+                opts.pop("response_format", None)
+            return super().complete(messages, model, **opts)
+
+    provider = _AdapterLike()
+    findings, _summary = LLMReviewEngine(provider).review(
+        _CTX, _cfg(categories=[ReviewCategory.security, ReviewCategory.correctness])
+    )
+
+    assert findings
+    lens_calls = _lens_calls(provider)
+    # The first lens pays the full recovery: schema call, then the schema-less
+    # re-run. Every later call goes out schema-less from the start.
+    assert lens_calls[0]["opts"].get("response_format") is not None
+    assert all("response_format" not in c["opts"] for c in lens_calls[1:])
+    assert len(_repair_calls(provider)) == 1, "only the first lens needed a reformat"
 
 
 def test_a_failed_retry_remembers_nothing() -> None:
