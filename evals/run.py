@@ -15,7 +15,9 @@ import argparse
 import json
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
+from statistics import fmean
 
 from lgtmaybe.core.models import Provider, ReviewCategory, ReviewConfig, StaticAnalysisConfig
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError, build_symbol_resolver
@@ -245,6 +247,32 @@ def _print(score: FixtureScore) -> None:
         print(f"    FALSE POSITIVE: {fp}")
 
 
+def _print_spread(scores: list[FixtureScore]) -> None:
+    """Report the recall spread of every fixture run more than once.
+
+    A mean on its own cannot say whether a model is reliable: 50% recall is a
+    fixture half-caught every time, or fully caught half the time, and those are
+    different defects. The min/max is what separates them — and `parsed=n/N` is
+    the same distinction for the failure the structured-output audit turned on,
+    where one model failed a case on every repeat and another failed it on some.
+    """
+    by_name: dict[str, list[FixtureScore]] = defaultdict(list)
+    for score in scores:
+        by_name[score.name].append(score)
+    repeated = {name: runs for name, runs in by_name.items() if len(runs) > 1}
+    if not repeated:
+        return
+    print()
+    for name, runs in repeated.items():
+        recalls = [s.recall for s in runs]
+        parsed = sum(1 for s in runs if s.parsed_ok)
+        print(
+            f"{name:14} over {len(runs):2} runs  recall "
+            f"mean={fmean(recalls):5.0%} min={min(recalls):5.0%} max={max(recalls):5.0%}  "
+            f"parsed={parsed}/{len(runs)}"
+        )
+
+
 def _gate(scores: list[FixtureScore], min_recall: float) -> tuple[bool, float]:
     """Decide pass/fail for a run and report the aggregate recall.
 
@@ -260,6 +288,13 @@ def _gate(scores: list[FixtureScore], min_recall: float) -> tuple[bool, float]:
     - Every fixture must be *clean*: a forbidden (cross-file false-positive)
       finding firing is a humility regression, so any one fails the run. Only
       fixtures that declare `forbidden` can trip this — the rest are always clean.
+
+    Under `--repeats N` the scores list carries N entries per fixture, so both
+    all-quantified bars get strictly harsher: one parse failure or one forbidden
+    hit in ANY repeat fails the run. That is deliberate for a false-positive
+    gate — an intermittent humility regression is still a regression — but it
+    does mean a repeated run is not comparable to a single-pass one at the same
+    --min-recall. Recall pools over the repeats and stays comparable.
     """
     total_expected = sum(s.expected_count for s in scores)
     total_matched = sum(s.matched_count for s in scores)
@@ -371,6 +406,14 @@ def main(argv: list[str] | None = None) -> int:
         "measure what two-stage routing costs in recall on the fixture set",
     )
     ap.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="run every selected fixture N times (default 1) — a single pass cannot "
+        "tell a model that fails a case reproducibly from one that fails it "
+        "intermittently, and that distinction is what a compliance audit turns on",
+    )
+    ap.add_argument(
         "--json",
         dest="json_out",
         action="store_true",
@@ -406,7 +449,13 @@ def main(argv: list[str] | None = None) -> int:
             triage_model=args.triage_model,
             preset=args.preset,
         )
+        # FLAT, deliberately: `evals.ab` parses `fixtures` as a plain list of
+        # FixtureScore and pools raw counts, so N entries per fixture pool
+        # correctly with no change there. Nesting would break it, and ab's
+        # parsing has no test to catch that. Repeats are the INNER loop so a
+        # fixture's runs print adjacent, under its own spread line.
         for diff, m in fixtures
+        for _ in range(max(1, args.repeats))
     ]
 
     ok, aggregate = _gate(scores, args.min_recall)
@@ -424,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
                     # model produced which row.
                     "provider": args.provider,
                     "model": args.model,
+                    "repeats": args.repeats,
                     "aggregate_recall": aggregate,
                     **pooled,
                 }
@@ -433,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for score in scores:
         _print(score)
+    _print_spread(scores)
     print(
         f"\naggregate recall {aggregate:.0%} — "
         + ("PASS" if ok else "FAIL")
