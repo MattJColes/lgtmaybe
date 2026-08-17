@@ -37,7 +37,7 @@ pub fn fetch_account(id: &str) -> Result<String, reqwest::Error> {
         .danger_accept_invalid_certs(true)
         .build()?;
     client
-        .get(&format!("http://internal-api/accounts/{}", id))
+        .get(&format!("https://internal-api/accounts/{}", id))
         .header("Authorization", format!("Bearer {}", API_TOKEN))
         .send()?
         .text()

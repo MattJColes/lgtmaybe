@@ -21,6 +21,17 @@
       "severity_at_least": "medium"
     },
     {
+      "label": "response body never closed in FetchAll — leaks connections",
+      "line": 28,
+      "keywords": ["close", "body", "leak", "resource", "defer", "file descriptor"],
+      "severity_at_least": "low"
+    },
+    {
+      "label": "unbounded goroutine fan-out in FetchAll — one per URL, no limit",
+      "line": 26,
+      "keywords": ["unbounded", "goroutine", "limit", "semaphore", "worker pool", "resource"]
+    },
+    {
       "label": "concurrent map write in FetchAll — unsynchronised across goroutines",
       "line": 29,
       "keywords": ["race", "data race", "concurrent map", "mutex", "goroutine", "unsynchronized"],
