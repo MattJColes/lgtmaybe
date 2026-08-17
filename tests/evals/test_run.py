@@ -639,3 +639,123 @@ def test_a_failed_call_is_printed_before_the_misses_it_explains(
     out = capsys.readouterr().out
     assert "CALL FAILED" in out
     assert "(prose)" in out, "the operator reads this line, so it names the shape"
+
+
+# ---------------------------------------------------------------------------
+# repeats
+#
+# Without a repeat axis a fixture either passed or failed, and nothing separated
+# "this model can't do it" from "this model does it four times in five". That
+# distinction is what the structured-output audit turned on: one model failed a
+# case consistently across three repeats (a reproducible defect), another failed
+# intermittently. Neither was expressible here.
+# ---------------------------------------------------------------------------
+
+
+def test_repeats_run_each_fixture_more_than_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def fake_review(_diff, manifest, *_a, **_k):  # type: ignore[no-untyped-def]
+        seen.append(manifest.name)
+        return FixtureScore(
+            name=manifest.name,
+            parsed_ok=True,
+            expected_count=1,
+            matched_count=1,
+            findings_count=1,
+            missed=[],
+        )
+
+    monkeypatch.setattr(run_mod, "_review", fake_review)
+    run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "m",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--repeats",
+            "3",
+        ]
+    )
+
+    assert seen == ["badcode", "badcode", "badcode"]
+
+
+def test_one_repeat_is_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing invocations must cost exactly what they cost before."""
+    seen: list[str] = []
+
+    def fake_review(_diff, manifest, *_a, **_k):  # type: ignore[no-untyped-def]
+        seen.append(manifest.name)
+        return FixtureScore(
+            name=manifest.name,
+            parsed_ok=True,
+            expected_count=1,
+            matched_count=1,
+            findings_count=1,
+            missed=[],
+        )
+
+    monkeypatch.setattr(run_mod, "_review", fake_review)
+    run_mod.main(
+        ["--provider", "ollama", "--model", "m", "--min-recall", "0.0", "--fixture", "badcode"]
+    )
+
+    assert seen == ["badcode"]
+
+
+def test_the_payload_stays_a_flat_list_so_the_ab_harness_still_parses_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """evals.ab does `FixtureScore.model_validate(f) for f in payload["fixtures"]`
+    and pools raw counts. A flat list of N entries per fixture keeps that working
+    and pools correctly; nesting would break it, and ab's parsing has no test to
+    catch that."""
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    payload = _run_json(capsys, ["--fixture", "badcode", "--repeats", "2"])
+
+    assert payload["repeats"] == 2
+    assert [f["name"] for f in payload["fixtures"]] == ["badcode", "badcode"]
+    assert [FixtureScore.model_validate(f).name for f in payload["fixtures"]]
+
+
+def test_repeated_runs_report_their_spread(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A single number cannot say whether a model is reliable. The point of
+    repeats is the spread, so it has to reach the operator."""
+    recalls = iter([1.0, 0.0])
+
+    def fake_review(_diff, manifest, *_a, **_k):  # type: ignore[no-untyped-def]
+        matched = int(next(recalls))
+        return FixtureScore(
+            name=manifest.name,
+            parsed_ok=True,
+            expected_count=1,
+            matched_count=matched,
+            findings_count=matched,
+            missed=[],
+        )
+
+    monkeypatch.setattr(run_mod, "_review", fake_review)
+    run_mod.main(
+        [
+            "--provider",
+            "ollama",
+            "--model",
+            "m",
+            "--min-recall",
+            "0.0",
+            "--fixture",
+            "badcode",
+            "--repeats",
+            "2",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "min" in out and "max" in out
