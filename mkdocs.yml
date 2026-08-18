@@ -75,6 +75,7 @@ nav:
   - How-to:
       - Install & run:
           - Install the CLI: how-to/install-the-cli.md
+          - Choose a review model: how-to/choose-a-review-model.md
           - Use as a GitHub Action: how-to/use-as-github-action.md
           - Post as lgtmaybe[bot]: how-to/post-as-a-github-app.md
       - Cloud providers (API key):
