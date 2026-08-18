@@ -460,15 +460,35 @@ def _schema_tool_kwargs(response_format: Any) -> dict[str, Any] | None:
     }
 
 
+def _is_schema_tool(tools: Any) -> bool:
+    """Whether *tools* is the one tool :func:`_schema_tool_kwargs` builds.
+
+    The adapter owns only the tool it added. Everything that reacts to tool mode
+    — stripping it, re-sending without it, reading the answer out of it — asks
+    this first, so a caller's own ``tools`` are never retired, overwritten, or
+    mistaken for our schema. Nothing in lgtmaybe passes tools today; this keeps
+    the adapter honest for anything that later does.
+    """
+    if not isinstance(tools, list) or len(tools) != 1 or not isinstance(tools[0], Mapping):
+        return False
+    function = tools[0].get("function")
+    return isinstance(function, Mapping) and function.get("name") == _SCHEMA_TOOL_NAME
+
+
 def _tool_call_arguments(message: Any) -> str:
-    """The first tool call's arguments, or "" when the reply used none.
+    """Our schema tool's arguments, or "" when the reply didn't call it.
 
     Under a forced tool call the answer rides in the arguments and ``content`` is
     empty, so a reader that only ever looks at ``content`` reports every lens as
-    having returned nothing.
+    having returned nothing. Matched by name rather than taking the first call of
+    any kind: a reply that answered in ``content`` and called something else on
+    the side must not have that call read as its answer.
     """
     for call in getattr(message, "tool_calls", None) or []:
-        arguments = getattr(getattr(call, "function", None), "arguments", None)
+        function = getattr(call, "function", None)
+        if getattr(function, "name", None) != _SCHEMA_TOOL_NAME:
+            continue
+        arguments = getattr(function, "arguments", None)
         if isinstance(arguments, str) and arguments.strip():
             return arguments
     return ""
@@ -588,6 +608,11 @@ class LiteLLMProvider:
         to the schema, just through the mechanism its route implements. Once per
         model, like that warning — the lens fan-out sends the same shape N times.
         """
+        tools = kwargs.get("tools")
+        if tools is not None and not _is_schema_tool(tools):
+            # The caller brought their own tools; swapping ours in would drop
+            # them. Their request shape wins — fall through to the plain drop.
+            return False
         tool_kwargs = _schema_tool_kwargs(kwargs.get("response_format"))
         if tool_kwargs is None:
             return False
@@ -604,9 +629,16 @@ class LiteLLMProvider:
 
     @staticmethod
     def _strip_schema(kwargs: dict[str, Any]) -> None:
-        """Remove every structured-output mechanism from this request."""
-        for key in ("response_format", "tools", "tool_choice"):
-            kwargs.pop(key, None)
+        """Remove every structured-output mechanism THIS ADAPTER added.
+
+        The tool half is conditional: a caller's own ``tools`` are not ours to
+        retire, so giving up on the schema must not disable unrelated tool use
+        for the model for the rest of the run.
+        """
+        kwargs.pop("response_format", None)
+        if _is_schema_tool(kwargs.get("tools")):
+            kwargs.pop("tools", None)
+            kwargs.pop("tool_choice", None)
 
     def drop_response_format(self, model: str, why: str) -> None:
         """Stop sending the schema for *model* — asked by the engine, not inferred.
@@ -804,7 +836,7 @@ class LiteLLMProvider:
             # schema and retry once: the model then emits the findings as normal
             # (fenced) text we can parse. Remember it so later calls skip it too.
             if not result.text.strip() and (
-                kwargs.get("response_format") is not None or kwargs.get("tools")
+                kwargs.get("response_format") is not None or _is_schema_tool(kwargs.get("tools"))
             ):
                 self._disable_response_format(model, "empty-response")
                 self._strip_schema(kwargs)
@@ -880,7 +912,7 @@ class LiteLLMProvider:
                 self._disable_response_format(model, "rejected")
                 kwargs.pop("response_format")
             return True
-        if kwargs.get("tools") and _rejects_tool_config(exc):
+        if _is_schema_tool(kwargs.get("tools")) and _rejects_tool_config(exc):
             self._disable_response_format(model, "tool-rejected")
             self._strip_schema(kwargs)
             return True
