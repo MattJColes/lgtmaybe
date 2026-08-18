@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.2.0...lgtmaybe-v2.3.0) (2026-08-18)
+
+
+### Features
+
+* **provider:** keep structured output on routes that reject response_format ([#470](https://github.com/MattJColes/lgtmaybe/issues/470)) ([28830c2](https://github.com/MattJColes/lgtmaybe/commit/28830c23e19dfbd895a1d357a094fb8a78e0eba5))
+
 ## [2.2.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.1.4...lgtmaybe-v2.2.0) (2026-08-17)
 
 
