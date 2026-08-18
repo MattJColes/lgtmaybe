@@ -15,7 +15,7 @@ import httpx
 import litellm
 import pytest
 
-from lgtmaybe.core.models import attempts_of, is_unrecoverable
+from lgtmaybe.core.models import ReviewResult, attempts_of, is_unrecoverable
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.litellm_provider import (
@@ -41,6 +41,18 @@ def _reasoning_response(reasoning: Any, content: str = "ok") -> Any:
 def _fake_response(content: str = "ok") -> Any:
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=10),
+    )
+
+
+def _tool_call_response(arguments: str, content: str = "") -> Any:
+    """A reply that answered through a forced tool call, as Bedrock's Converse
+    endpoint does — the payload is in the arguments, the content is empty."""
+    call = SimpleNamespace(
+        function=SimpleNamespace(name="lgtmaybe_structured_output", arguments=arguments)
+    )
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=[call]))],
         usage=SimpleNamespace(prompt_tokens=5, completion_tokens=10),
     )
 
@@ -682,6 +694,278 @@ class TestRejectedStructuredOutputParam:
                 )
 
         assert calls == 1
+
+
+class TestSchemaAsToolFallback:
+    """A route that refuses ``response_format`` has not necessarily refused
+    *structured output* — Bedrock's Converse endpoint implements it as a forced
+    tool call instead. Giving up on the schema at the first 400 downgrades the
+    whole review to prompt-instructed JSON when enforcement was available all
+    along, one request shape away."""
+
+    BEDROCK_400 = TestRejectedStructuredOutputParam.BEDROCK_400
+    MODEL = "bedrock/us.anthropic.claude-opus-5"
+
+    def _rejects_response_format(self, arguments: str = '{"findings": []}') -> Any:
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            if "tools" in kwargs:
+                return _tool_call_response(arguments)
+            return _fake_response("prose, not findings")
+
+        return side_effect
+
+    def test_rejection_re_sends_the_schema_as_a_forced_tool_call(self) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            return self._rejects_response_format()(*args, **kwargs)
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert "response_format" not in seen[1]
+        tool = seen[1]["tools"][0]["function"]
+        assert tool["parameters"]["properties"]["findings"]
+        # Forced, not offered: an optional tool lets the model answer in prose
+        # and the enforcement is worth nothing.
+        assert seen[1]["tool_choice"]["function"]["name"] == tool["name"]
+
+    def test_the_answer_comes_from_the_tool_call_arguments(self) -> None:
+        """Under a forced tool call the findings ride in the arguments, and the
+        message content is empty — reading only content reports every lens as
+        having returned nothing."""
+        payload = '{"findings": [{"path": "a.py", "line": 1, "severity": "low", "title": "t"}]}'
+        with patch("litellm.completion", side_effect=self._rejects_response_format(payload)):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == payload
+
+    def test_later_calls_go_straight_to_tool_mode(self) -> None:
+        """Sticky like the plain drop: the lens fan-out sends the same shape N
+        times and must not each pay its own rejected round-trip."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+            else:
+                seen.append("tools" if "tools" in kwargs else "plain")
+            return self._rejects_response_format()(*args, **kwargs)
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            for _ in range(3):
+                provider.complete(
+                    [{"role": "user", "content": "a"}], self.MODEL, response_format=ReviewResult
+                )
+
+        assert seen == ["rf", "tools", "tools", "tools"]
+
+    def test_tool_mode_is_not_a_downgrade(self) -> None:
+        """The schema is still enforced, so the review must not carry a notice
+        telling the user structured output was lost."""
+        with patch("litellm.completion", side_effect=self._rejects_response_format()):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert provider.schema_dropped() is False
+        assert provider.sends_response_format(self.MODEL) is True
+
+    def test_a_route_that_refuses_tools_too_falls_back_to_plain(self) -> None:
+        """Two recoveries, in order of how much they preserve: schema → tool →
+        prompt-instructed JSON. The last one is the real downgrade."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            if "tools" in kwargs:
+                seen.append("tools")
+                raise litellm.BadRequestError(
+                    message="BedrockException - toolConfig: Extra inputs are not permitted",
+                    model=kwargs["model"],
+                    llm_provider="bedrock",
+                )
+            seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen == ["rf", "tools", "plain"]
+        assert provider.schema_dropped() is True
+
+    def test_a_tool_mode_reply_with_no_tool_call_falls_back_to_plain(self) -> None:
+        """A route can accept ``tools`` and ignore them. An empty content with no
+        tool call is the same dead end as an empty schema-mode reply."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            if "tools" in kwargs:
+                seen.append("tools")
+                return _fake_response("")
+            seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen == ["rf", "tools", "plain"]
+
+    def test_a_schema_we_cannot_express_as_a_tool_drops_straight_to_plain(self) -> None:
+        """No schema to put in the tool's parameters means a tool call would
+        enforce nothing — skip the wasted round-trip."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            seen.append("tools" if "tools" in kwargs else "plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}],
+                self.MODEL,
+                response_format={"type": "json_object"},
+            )
+
+        assert seen == ["rf", "plain"]
+
+    def test_a_callers_own_tools_survive_the_downgrade(self) -> None:
+        """The adapter removes only the tool IT added. A caller's tools are not
+        ours to retire, so a `response_format` this route never accepted must not
+        permanently disable unrelated tool use for the model."""
+        caller_tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        seen: list[Any] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs.get("tools"))
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            # A schema we cannot express as a tool, so enforcement is given up
+            # outright and the caller's tools are the only ones in play.
+            for _ in range(2):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    self.MODEL,
+                    response_format={"type": "json_object"},
+                    tools=caller_tools,
+                )
+
+        assert seen == [caller_tools, caller_tools, caller_tools]
+
+    def test_a_callers_own_tools_are_never_overwritten(self) -> None:
+        """With tools already on the request, the schema swap would clobber them
+        — so the rejection degrades straight to prompt-instructed JSON instead."""
+        caller_tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        seen: list[Any] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs.get("tools"))
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}],
+                self.MODEL,
+                response_format=ReviewResult,
+                tools=caller_tools,
+            )
+
+        assert seen == [caller_tools, caller_tools]
+        assert provider.schema_dropped() is True
+
+    def test_a_callers_tool_call_does_not_become_the_answer(self) -> None:
+        """Reading arguments off any tool call would hijack a reply that answered
+        in `content` and called a caller's tool on the side."""
+        call = SimpleNamespace(
+            function=SimpleNamespace(name="get_weather", arguments='{"city": "London"}')
+        )
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="the real answer", tool_calls=[call])
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=10),
+        )
+
+        with patch("litellm.completion", return_value=response):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], self.MODEL)
+
+        assert result.text == "the real answer"
+
+    def test_the_engine_can_still_turn_enforcement_off(self) -> None:
+        """``drop_response_format`` is the engine saying a reply parsed to
+        nothing useful. Tool mode is enforcement, so it has to go too — else the
+        re-run re-sends the request that just failed."""
+        with patch("litellm.completion", side_effect=self._rejects_response_format()):
+            provider = LiteLLMProvider(model=self.MODEL)
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+            provider.drop_response_format(self.MODEL, "unparseable")
+            assert provider.sends_response_format(self.MODEL) is False
+
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append("tools" if "tools" in kwargs else "plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert seen == ["plain"]
 
 
 class TestEmptyStructuredOutputFallback:

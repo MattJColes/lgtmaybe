@@ -30,6 +30,7 @@ from litellm.exceptions import (
     RateLimitError,
 )
 from litellm.utils import supports_prompt_caching
+from pydantic import BaseModel
 from tenacity import (
     RetryCallState,
     retry,
@@ -355,6 +356,17 @@ def _retry_wait(retry_state: RetryCallState) -> float:
     return _generic_wait(retry_state)
 
 
+# Phrases a backend uses to say "I do not know this request field". Matched
+# loosely because the wording is the backend's, not litellm's.
+_REJECTION_PHRASES = ("not permitted", "not supported", "unsupported", "unknown", "unexpected")
+
+
+def _rejects_field(exc: Exception, *names: str) -> bool:
+    """True when *exc* reads as "this route does not take <one of names>"."""
+    msg = str(exc).lower()
+    return any(name in msg for name in names) and any(p in msg for p in _REJECTION_PHRASES)
+
+
 def _rejects_response_format(exc: Exception) -> bool:
     """True when an API error means the model won't take our structured-output param.
 
@@ -370,18 +382,116 @@ def _rejects_response_format(exc: Exception) -> bool:
     ``drop_params`` cannot help here: it drops params litellm's capability map
     says a model lacks, and for these models the map says the param is supported.
     So the rejection is read off the error instead: the field name plus a
-    rejection phrase, matched loosely because the wording is the backend's, not
-    litellm's. A false positive costs one re-send without the param (the prompt
-    still asks for JSON and the parser is lenient); a false negative costs the
-    whole review.
+    rejection phrase. A false positive costs one re-send in tool mode (see
+    :func:`_schema_tool_kwargs`); a false negative costs the whole review.
     """
-    msg = str(exc).lower()
-    if not any(field in msg for field in ("response_format", "output_config", "responseformat")):
+    return _rejects_field(exc, "response_format", "output_config", "responseformat")
+
+
+def _rejects_tool_config(exc: Exception) -> bool:
+    """True when an API error means the route won't take the tool schema either.
+
+    The second half of :func:`_rejects_response_format`: a route that refuses
+    ``response_format`` is asked for the same schema as a forced tool call
+    instead, and a route that refuses *that* has genuinely no structured-output
+    mechanism left. Bedrock names the Converse field (``toolConfig``); the
+    OpenAI-shaped routes name ``tools`` / ``tool_choice``.
+    """
+    return _rejects_field(exc, "toolconfig", "tool_choice", "toolchoice", "tools")
+
+
+# The one tool we ever offer. Named, not anonymous, because ``tool_choice`` has
+# to point at it by name to make the call forced rather than optional — an
+# optional tool lets the model answer in prose and enforces nothing.
+_SCHEMA_TOOL_NAME = "lgtmaybe_structured_output"
+
+
+def _json_schema_of(response_format: Any) -> dict[str, Any] | None:
+    """The JSON Schema inside a ``response_format``, or None if there isn't one.
+
+    Two shapes reach here: the pydantic model the engine passes (litellm derives
+    the schema from it) and litellm's own ``{"type": "json_schema",
+    "json_schema": {"schema": …}}`` dict. Anything else — ``{"type":
+    "json_object"}``, say — constrains nothing we could put in a tool's
+    parameters, so there is no tool call worth making.
+    """
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        return response_format.model_json_schema()
+    if isinstance(response_format, Mapping):
+        nested = response_format.get("json_schema")
+        schema = nested.get("schema") if isinstance(nested, Mapping) else None
+        if isinstance(schema, Mapping):
+            return dict(schema)
+    return None
+
+
+def _schema_tool_kwargs(response_format: Any) -> dict[str, Any] | None:
+    """The same schema expressed as a forced tool call, or None if it can't be.
+
+    A route refusing ``response_format`` has not necessarily refused *structured
+    output*. Bedrock's Converse endpoint implements it as tool use — a
+    ``toolConfig`` whose ``inputSchema`` is the shape you want back, plus a
+    ``toolChoice`` naming that tool — which is exactly what litellm's
+    OpenAI-shaped ``tools`` / ``tool_choice`` translate into. So the recovery
+    from a rejected ``response_format`` is to ask for the same schema through
+    the mechanism the route does implement, before giving up on enforcement and
+    falling back to prompt-instructed JSON.
+
+    That matters most on the newest models — the ones litellm's capability map
+    doesn't know yet, so ``drop_params`` leaves the unsupported field on and the
+    service 400s the whole review.
+    """
+    schema = _json_schema_of(response_format)
+    if schema is None:
+        return None
+    return {
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": _SCHEMA_TOOL_NAME,
+                    "description": "Return the result. Call this exactly once, with the "
+                    "whole answer as its arguments.",
+                    "parameters": schema,
+                },
+            }
+        ],
+        "tool_choice": {"type": "function", "function": {"name": _SCHEMA_TOOL_NAME}},
+    }
+
+
+def _is_schema_tool(tools: Any) -> bool:
+    """Whether *tools* is the one tool :func:`_schema_tool_kwargs` builds.
+
+    The adapter owns only the tool it added. Everything that reacts to tool mode
+    — stripping it, re-sending without it, reading the answer out of it — asks
+    this first, so a caller's own ``tools`` are never retired, overwritten, or
+    mistaken for our schema. Nothing in lgtmaybe passes tools today; this keeps
+    the adapter honest for anything that later does.
+    """
+    if not isinstance(tools, list) or len(tools) != 1 or not isinstance(tools[0], Mapping):
         return False
-    return any(
-        phrase in msg
-        for phrase in ("not permitted", "not supported", "unsupported", "unknown", "unexpected")
-    )
+    function = tools[0].get("function")
+    return isinstance(function, Mapping) and function.get("name") == _SCHEMA_TOOL_NAME
+
+
+def _tool_call_arguments(message: Any) -> str:
+    """Our schema tool's arguments, or "" when the reply didn't call it.
+
+    Under a forced tool call the answer rides in the arguments and ``content`` is
+    empty, so a reader that only ever looks at ``content`` reports every lens as
+    having returned nothing. Matched by name rather than taking the first call of
+    any kind: a reply that answered in ``content`` and called something else on
+    the side must not have that call read as its answer.
+    """
+    for call in getattr(message, "tool_calls", None) or []:
+        function = getattr(call, "function", None)
+        if getattr(function, "name", None) != _SCHEMA_TOOL_NAME:
+            continue
+        arguments = getattr(function, "arguments", None)
+        if isinstance(arguments, str) and arguments.strip():
+            return arguments
+    return ""
 
 
 def _rejects_temperature(exc: Exception) -> bool:
@@ -449,6 +559,11 @@ class LiteLLMProvider:
         # a quality regression on the strong model triggered by a model it
         # never ran.
         self._schema_dropped: set[str] = set()
+        # Models whose schema now travels as a forced tool call instead (see
+        # `_schema_tool_kwargs`). Disjoint from `_schema_dropped`: this set is
+        # enforcement preserved by another mechanism, that one is enforcement
+        # given up. Keyed by MODEL for the same reason.
+        self._schema_tool: set[str] = set()
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
         # pure function of it. Instance-scoped (not lru_cache) so tests that
@@ -472,11 +587,58 @@ class LiteLLMProvider:
         if model in self._schema_dropped:
             return
         self._schema_dropped.add(model)
+        # Tool mode was enforcement; giving up on the schema retires it too.
+        self._schema_tool.discard(model)
         _log.warning(
             "structured output disabled for this model — later calls send "
             "prompt-instructed JSON only, which a weaker model may not honour",
             extra={"model": model, "reason": why},
         )
+
+    def _use_schema_tool(self, model: str, kwargs: dict[str, Any]) -> bool:
+        """Swap this request's ``response_format`` for the equivalent tool call.
+
+        Returns False when there is nothing to swap — no schema in the
+        ``response_format`` (so the tool would enforce nothing), or the request
+        is already in tool mode. False means the caller should fall through to
+        the real downgrade.
+
+        Announced at info, not warning, precisely because it is *not* the
+        downgrade ``_disable_response_format`` announces: the model is still held
+        to the schema, just through the mechanism its route implements. Once per
+        model, like that warning — the lens fan-out sends the same shape N times.
+        """
+        tools = kwargs.get("tools")
+        if tools is not None and not _is_schema_tool(tools):
+            # The caller brought their own tools; swapping ours in would drop
+            # them. Their request shape wins — fall through to the plain drop.
+            return False
+        tool_kwargs = _schema_tool_kwargs(kwargs.get("response_format"))
+        if tool_kwargs is None:
+            return False
+        kwargs.pop("response_format", None)
+        kwargs.update(tool_kwargs)
+        if model not in self._schema_tool:
+            self._schema_tool.add(model)
+            _log.info(
+                "structured output sent as a forced tool call for this model — "
+                "the schema is still enforced",
+                extra={"model": model},
+            )
+        return True
+
+    @staticmethod
+    def _strip_schema(kwargs: dict[str, Any]) -> None:
+        """Remove every structured-output mechanism THIS ADAPTER added.
+
+        The tool half is conditional: a caller's own ``tools`` are not ours to
+        retire, so giving up on the schema must not disable unrelated tool use
+        for the model for the rest of the run.
+        """
+        kwargs.pop("response_format", None)
+        if _is_schema_tool(kwargs.get("tools")):
+            kwargs.pop("tools", None)
+            kwargs.pop("tool_choice", None)
 
     def drop_response_format(self, model: str, why: str) -> None:
         """Stop sending the schema for *model* — asked by the engine, not inferred.
@@ -658,20 +820,26 @@ class LiteLLMProvider:
             reraise=True,
         )
         def _call() -> ProviderResult:
-            # A prior call already proved this model's JSON-schema mode returns
-            # empty, so don't pay the wasted round-trip again — drop it up front.
+            # A prior call already settled how this model takes (or refuses) the
+            # schema, so don't pay the wasted round-trip again — apply it up front.
             if model in self._schema_dropped:
-                kwargs.pop("response_format", None)
+                self._strip_schema(kwargs)
+            elif model in self._schema_tool:
+                self._use_schema_tool(model, kwargs)
             result = self._raw_completion(model, messages, kwargs, count_request)
             # Some grammar-constrained backends (notably LM Studio fronting a
             # "thinking" model like qwen3.x) return EMPTY content under a
-            # response_format JSON schema — the schema decoder yields nothing. The
+            # response_format JSON schema — the schema decoder yields nothing. A
+            # route that accepts `tools` and then ignores them is the same dead
+            # end (nothing in the content, no tool call to read instead). The
             # prompt already asks for JSON and the parser is lenient, so drop the
             # schema and retry once: the model then emits the findings as normal
             # (fenced) text we can parse. Remember it so later calls skip it too.
-            if not result.text.strip() and kwargs.get("response_format") is not None:
+            if not result.text.strip() and (
+                kwargs.get("response_format") is not None or _is_schema_tool(kwargs.get("tools"))
+            ):
                 self._disable_response_format(model, "empty-response")
-                kwargs.pop("response_format")
+                self._strip_schema(kwargs)
                 result = self._raw_completion(model, messages, kwargs, count_request)
             return result
 
@@ -724,6 +892,11 @@ class LiteLLMProvider:
         to drop the param and re-send; ``kwargs`` is the dict every later retry
         of this call reuses, so the drop sticks for them too.
 
+        Structured output gets two recoveries rather than one, in order of how
+        much they keep: a rejected ``response_format`` becomes the same schema as
+        a forced tool call, and only a route that refuses *that* too falls back
+        to prompt-instructed JSON.
+
         Returns True when something was dropped and the call is worth re-sending.
         """
         if "temperature" in kwargs and _rejects_temperature(exc):
@@ -731,12 +904,17 @@ class LiteLLMProvider:
             # own default.
             kwargs.pop("temperature")
             return True
+        # Both branches remember the outcome for this model's later calls, not
+        # just this one: the lens fan-out sends the same shape N times, and
+        # without that every one of them pays its own rejected round-trip first.
         if kwargs.get("response_format") is not None and _rejects_response_format(exc):
-            # Remembered for this model's later calls, not just this one: the
-            # lens fan-out sends the same shape N times, and without this every
-            # one of them pays its own rejected round-trip first.
-            self._disable_response_format(model, "rejected")
-            kwargs.pop("response_format")
+            if not self._use_schema_tool(model, kwargs):
+                self._disable_response_format(model, "rejected")
+                kwargs.pop("response_format")
+            return True
+        if _is_schema_tool(kwargs.get("tools")) and _rejects_tool_config(exc):
+            self._disable_response_format(model, "tool-rejected")
+            self._strip_schema(kwargs)
             return True
         return False
 
@@ -799,7 +977,13 @@ class LiteLLMProvider:
     ) -> ProviderResult:
         # Some providers return null content (e.g. a model that answered only via
         # a reasoning channel under JSON mode); treat that as empty, not a crash.
-        text: str = response.choices[0].message.content or ""
+        message = response.choices[0].message
+        text: str = message.content or ""
+        # In tool mode the answer IS the tool call's arguments and `content` holds
+        # nothing (or a preamble). Prefer the arguments wherever a call came back:
+        # they are the schema-enforced payload, where the content is whatever the
+        # model said around it.
+        text = _tool_call_arguments(message) or text
         usage = response.usage
         input_tokens: int = usage.prompt_tokens
         output_tokens: int = usage.completion_tokens
