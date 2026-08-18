@@ -1,4 +1,4 @@
-# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (deepseek-v4-flash).
+# Dogfood: lgtmaybe reviews its own PRs via OpenRouter (google/gemini-3.7-flash).
 # Runs the in-repo action (./) so changes to action.yml are exercised too.
 # Add an OPENROUTER_API_KEY repo secret.
 #
@@ -9,7 +9,7 @@
 # Reviews run automatically on PRs from trusted authors (owner / member /
 # collaborator), and on demand via slash commands (/review, /improve, /ask,
 # /describe, /diagram) — a maintainer can opt an external PR in by commenting
-# /review on it. deepseek-v4-flash is cheap enough to run per-PR; on a
+# /review on it. gemini-3.7-flash is cheap enough to run per-PR; on a
 # `synchronize` push the review is incremental (only the new commits).
 name: lgtmaybe
 
@@ -92,28 +92,44 @@ jobs:
         with:
           image: lgtmaybe:dogfood
           provider: openrouter
-          # deepseek-v4-flash is cheap enough to run on every PR, which is what a
-          # per-PR dogfood needs: a pricier model exhausts the key's monthly
-          # limit, and OpenRouter then rejects each call with a 402 ("requires
-          # more credits, or fewer max_tokens") — every lens fails and the review
-          # posts nothing.
-          # The bare id is what OpenRouter rejected on #319 — `{"message":
-          # "deepseek/deepseek-v4-flash-latest is not a valid model ID","code":
-          # 400}` on every lens, so the review posted a failure instead of a
-          # review. The `~` prefix is the floating-alias form; quoted because a
-          # bare `~` is YAML's null and leading-`~` scalars are easy to misread.
-          model: "openai/gpt-5.6-luna"
-          # The default 100k input budget hands one call more diff than it can
-          # answer for: the response is cut off mid-JSON and the lens is lost
-          # (three of four on #309). Smaller batches keep each answer inside the
-          # output ceiling.
+          # google/gemini-3.7-flash (released 2026-08-13) is Google's Flash-class
+          # workhorse for coding and agentic work: cheap enough to run on every
+          # PR — which is what a per-PR dogfood needs; a pricier model exhausts
+          # the key's monthly limit, and OpenRouter then rejects each call with
+          # a 402 — with a 1M-token context no dogfood diff comes near. Routed
+          # through OpenRouter so the existing OPENROUTER_API_KEY keeps working:
+          # lgtmaybe has no native gemini provider, and vertex would mean
+          # standing up WIF for a dogfood.
+          # The id is OpenRouter's exact catalogue form. A guessed variant is
+          # what OpenRouter rejected on #319 — `{"message": "... is not a valid
+          # model ID","code": 400}` on every lens, so the review posted a
+          # failure instead of a review.
+          model: "google/gemini-3.7-flash"
+          # Gemini 3 models are tuned for their default temperature of 1.0:
+          # Google's Gemini 3 developer guide warns that lowering it risks
+          # looping and degraded reasoning, and its migration advice is to
+          # remove explicit low-temperature settings outright. lgtmaybe
+          # defaults to 0.0 for reproducible reviews, so this override is
+          # load-bearing — do not delete it for determinism's sake.
+          # `reasoning_effort: medium` (.lgtmaybe.yml) maps onto this model's
+          # thinking levels, where MEDIUM is also the model default (3.7 Flash
+          # rejects MINIMAL with a validation error).
+          temperature: "1.0"
+          # The default 100k input budget hands one call more diff than its
+          # output budget can answer for: the response is cut off mid-JSON and
+          # the lens is lost (three of four on #309). Smaller batches keep each
+          # answer inside the output ceiling.
           #
-          # That ceiling is lgtmaybe's own `max_tokens` (.lgtmaybe.yml), NOT the
-          # model's — an earlier revision of this comment said the model "tops
-          # out at 16k", which sent the reader to a knob they cannot move. The
-          # 16k was ours, against a model that ran to 65,536 when a lens went
-          # away. Reasoning models spend that same budget on thought before
-          # writing a finding; `--profile` reports the split (`think_tok`).
+          # That ceiling is lgtmaybe's own `max_tokens` (16,384 in
+          # .lgtmaybe.yml), NOT the model's — an earlier revision of this
+          # comment said the model "tops out at 16k", which sent the reader to
+          # a knob they cannot move. The 16k is ours, against models that ran
+          # to 65,536 when a lens went away (gemini-3.7-flash's output window
+          # is also 65,536). Reasoning models spend that same budget on thought
+          # before writing a finding; `--profile` reports the split
+          # (`think_tok`). Two models in a row truncated lenses at that cap on
+          # bigger batches, so the smaller batches stay until re-measured on
+          # this one.
           max_input_tokens: 40000
           profile: true
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
