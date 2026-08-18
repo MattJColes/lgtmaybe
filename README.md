@@ -147,10 +147,13 @@ the
 [GitHub Action](#use-as-a-github-action). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
 
-> **Picking a model:** use a **coding** model, and **bigger/newer is more
-> accurate**. Our benchmark numbers are for a small `qwen3.5:4b`; a larger,
-> current coding model catches more. See
-> [Which model?](docs/how-to/run-locally-with-ollama.md#which-model-and-will-it-fit).
+> **Picking a model:** compare cloud and local models separately. In the current
+> cloud breadth results, Qwen 3.8 Max and GLM 5.2 scored 71.4% and 72.2%
+> balanced F1; Qwen reported 8 false positives and GLM reported 24. The only
+> current local breadth run is Qwen 3.6 35B at 57.1% balanced F1. See the
+> [cloud and local model guide](docs/how-to/choose-a-review-model.md), or inspect
+> the
+> [live benchmark results](https://github.com/MattJColes/lgtmaybe-benchmarks).
 
 ## Providers
 
@@ -180,6 +183,7 @@ are published at the docs root.
 
 **How-to guides** — task recipes
 
+- [Choose a review model](docs/how-to/choose-a-review-model.md)
 - [Review with OpenAI](docs/how-to/review-with-openai.md)
 - [Review with Claude (Anthropic)](docs/how-to/review-with-anthropic.md)
 - [Review with OpenRouter](docs/how-to/review-with-openrouter.md)
