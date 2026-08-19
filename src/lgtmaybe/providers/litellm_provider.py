@@ -827,19 +827,36 @@ class LiteLLMProvider:
             elif model in self._schema_tool:
                 self._use_schema_tool(model, kwargs)
             result = self._raw_completion(model, messages, kwargs, count_request)
+            # An empty completion is never a valid answer: a lens that found
+            # nothing still owes `{"findings": []}`. So retry once, whatever the
+            # request carried.
+            #
             # Some grammar-constrained backends (notably LM Studio fronting a
             # "thinking" model like qwen3.x) return EMPTY content under a
             # response_format JSON schema — the schema decoder yields nothing. A
             # route that accepts `tools` and then ignores them is the same dead
-            # end (nothing in the content, no tool call to read instead). The
-            # prompt already asks for JSON and the parser is lenient, so drop the
-            # schema and retry once: the model then emits the findings as normal
-            # (fenced) text we can parse. Remember it so later calls skip it too.
-            if not result.text.strip() and (
-                kwargs.get("response_format") is not None or _is_schema_tool(kwargs.get("tools"))
-            ):
-                self._disable_response_format(model, "empty-response")
-                self._strip_schema(kwargs)
+            # end (nothing in the content, no tool call to read instead). Where
+            # the request carried one, the schema is the first suspect, so it is
+            # dropped before the retry and remembered so later calls skip it.
+            #
+            # Where it carried no schema the retry still happens, and used not
+            # to. That left the case with NO recovery anywhere: the engine
+            # cannot reformat an empty body (`repair_findings` returns None on
+            # one) and has no schema left to drop, so the lens failed outright —
+            # seen in the field as "unparseable model output (empty)" on a run
+            # where an earlier call had already disabled structured output. An
+            # empty body carries no evidence that the request was at fault, and
+            # re-issuing it is the only move left.
+            #
+            # One retry, never a loop: `_raw_completion` is called at most twice
+            # here, so a model answering empty twice reports empty rather than
+            # spending a third call.
+            if not result.text.strip():
+                if kwargs.get("response_format") is not None or _is_schema_tool(
+                    kwargs.get("tools")
+                ):
+                    self._disable_response_format(model, "empty-response")
+                    self._strip_schema(kwargs)
                 result = self._raw_completion(model, messages, kwargs, count_request)
             return result
 
