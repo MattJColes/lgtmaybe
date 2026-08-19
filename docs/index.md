@@ -1,5 +1,5 @@
 ---
-description: Provider-agnostic AI code review for pull requests — OpenAI, Claude, Bedrock, Vertex, Azure, ollama and any OpenAI-compatible endpoint. Inline review comments, keyless OIDC/WIF cloud auth, GitHub Action + CLI.
+description: Provider-agnostic AI code review for pull and merge requests on GitHub, GitLab and Gitea — OpenAI, Claude, Bedrock, Vertex, Azure, ollama and any OpenAI-compatible endpoint. Inline review comments, keyless OIDC/WIF cloud auth, GitHub Action + GitLab CI + CLI.
 ---
 
 <div class="hero" markdown>
@@ -11,13 +11,13 @@ description: Provider-agnostic AI code review for pull requests — OpenAI, Clau
 </div>
 
 lgtmaybe reviews the code a pull request changes. Pick OpenAI, Claude, Bedrock,
-Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it as a
-GitHub Action or from your terminal. GitHub gets inline comments and one
-summary; locally, you get the same findings before you push.
+Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it on
+**GitHub, GitLab, or Gitea** — or from your terminal. The change gets inline
+comments and one summary; locally, you get the same findings before you push.
 
 It reads the diff and a little surrounding code, but only comments on changed
-lines. On GitHub it never checks out or runs the pull request. Generated files
-and binaries are skipped, secrets are redacted, and all PR text is treated as
+lines. It never checks out or runs the change. Generated files and binaries are
+skipped, secrets are redacted, and all author-supplied text is treated as
 untrusted.
 
 It checks for:
@@ -37,8 +37,8 @@ Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
 **`/describe`** writes a structured overview, **`/diagram`** draws
 [the change](how-to/generate-a-change-diagram.md) — a flowchart of what it
 touches, plus a sequence diagram of the flow it alters — and
-**`/ask <question>`** answers in the PR. Run `lgtmaybe diagram` to draw the same
-map locally before you push.
+**`/ask <question>`** answers in the change. Run `lgtmaybe diagram` to draw the
+same map locally before you push.
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ flowchart LR
 <div class="grid cards" markdown>
 
 - **Tutorial** — [Getting started](tutorial/getting-started.md): your first review with ollama, locally and free.
-- **How-to** — task recipes: [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md).
+- **How-to** — task recipes: [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md).
 - **Reference** — [Configuration](reference/config.md): every config field and schema.
 - **Explanation** — [What gets reviewed](explanation/what-gets-reviewed.md), [Architecture](explanation/architecture.md), [Auth model](explanation/auth-model.md), [Data & privacy](explanation/data-and-privacy.md).
 
@@ -79,6 +79,23 @@ flowchart LR
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
 | `ollama` | None — local only, zero cost |
 | `openai-compatible` | `--api-base` to any OpenAI `/v1` endpoint; key optional (placeholder for keyless local servers) |
+
+## Where it posts
+
+The model provider and the code host are independent — any provider above works
+on any host below.
+
+| Host | How it runs | Token | Guide |
+|---|---|---|---|
+| GitHub | GitHub Action | `GITHUB_TOKEN` | [GitHub Action](how-to/use-as-github-action.md) |
+| GitLab | GitLab CI job | `GITLAB_TOKEN` | [Review on GitLab](how-to/review-on-gitlab.md) |
+| Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
+| None | `lgtmaybe review` locally | — | [Install the CLI](how-to/install-the-cli.md) |
+
+The review is identical on all three. What differs is what each host's API can
+do with the result — auto-resolving a fixed finding, reviewing only new commits,
+and keyless cloud auth are not available everywhere. See
+[Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 
 ## For AI agents
 

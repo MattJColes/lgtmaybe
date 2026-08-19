@@ -193,7 +193,14 @@ The token is not sent to any LLM provider. It requires the minimum scopes:
 
 ## Fork pull requests
 
-lgtmaybe uses the `pull_request_target` trigger, which runs in the context of
-the **base branch**. PR code from the fork is never checked out or executed.
-The diff is fetched exclusively through the GitHub API. This prevents a
-malicious PR from gaining access to repository secrets.
+On GitHub, lgtmaybe uses the `pull_request_target` trigger, which runs in the
+context of the **base branch**. PR code from the fork is never checked out or
+executed. The diff is fetched exclusively through the host's API. This prevents
+a malicious PR from gaining access to repository secrets.
+
+GitLab and Gitea have no `pull_request_target` equivalent — their merge- and
+pull-request pipelines run with the project's own secrets. The protection is
+unchanged and holds for the same reason: lgtmaybe never checks out or executes
+change-request code on any host, so there is nothing for an attacker to run. The
+supplied GitLab job even sets `GIT_STRATEGY: none`, so the repository is never
+cloned at all.

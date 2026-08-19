@@ -7,6 +7,12 @@ description: Add lgtmaybe as a GitHub Action to review every pull request automa
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
+!!! tip "Not on GitHub?"
+
+    lgtmaybe runs the same review on GitLab and Gitea — see
+    [Review on GitLab](./review-on-gitlab.md) or
+    [Review on Gitea](./review-on-gitea.md).
+
 Use lgtmaybe from the
 [GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe).
 It is a **GitHub Action**: the reviewer runs in your workflow, and its provider,
@@ -318,3 +324,17 @@ use a full version tag:
 ```yaml
 uses: MattJColes/lgtmaybe@v2.0.0
 ```
+
+## On another code host
+
+The review is identical on GitLab and Gitea; only the wiring and a few
+host-capability differences change:
+
+- [Review on GitLab](./review-on-gitlab.md) — a CI job running
+  `lgtmaybe gitlab-ci` on merge request pipelines.
+- [Review on Gitea](./review-on-gitea.md) — Gitea Actions, running the same
+  container as GitHub.
+
+Keyless cloud auth (Bedrock, Vertex, Azure) relies on GitHub Actions' OIDC
+token, so it is available here only. On the other hosts use an API-key provider
+or `ollama`.

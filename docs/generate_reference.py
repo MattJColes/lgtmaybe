@@ -163,7 +163,7 @@ def generate() -> str:
     sections.append("## ReviewFinding\n")
     sections.append(
         "The structured output the model must return for each inline comment. "
-        "All fields are validated by pydantic before anything is posted to GitHub.\n"
+        "All fields are validated by pydantic before anything is posted.\n"
     )
     sections.append(_render_schema_table(review_finding_schema))
     sections.append("")

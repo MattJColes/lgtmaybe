@@ -117,8 +117,9 @@ They do not. On the recommended `pull_request_target` trigger, the workflow
 checks out the **base** branch — the code already merged — and never the PR
 head. `directory_rules` and the files it names are read from that checkout, the
 same source `.lgtmaybe.yml` and `lens_paths` already come from. lgtmaybe never
-fetches context files through the GitHub API, which would resolve them at the
-(untrusted) PR head.
+fetches context files through the host's API, which would resolve them at the
+(untrusted) PR head. The same holds on GitLab and Gitea: context comes from the
+checked-out workspace, never from the change's head.
 
 The practical rule: a fork PR can change `ARCHITECTURE.md` in its own branch and
 lgtmaybe will still read the base branch's copy. Review changes to your config

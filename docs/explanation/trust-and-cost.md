@@ -113,9 +113,11 @@ Optional, for repos where you want belt-and-braces:
 
 ## Reviews are safe to run for anyone
 
-Whoever triggers a review, a malicious PR can't use it to do harm: lgtmaybe
-triggers on `pull_request_target` (so it has the secrets it needs) but **never
-checks out or executes PR code** — it fetches the diff through the GitHub API and
-treats it as untrusted input. So opening the gate wide is a cost decision, not a
+Whoever triggers a review, a malicious PR can't use it to do harm: on GitHub
+lgtmaybe triggers on `pull_request_target` (so it has the secrets it needs) but
+**never checks out or executes PR code** — it fetches the diff through the
+host's API and treats it as untrusted input. That second half is what actually
+does the work, and it holds identically on GitLab and Gitea, which have no
+`pull_request_target` of their own. So opening the gate wide is a cost decision, not a
 security one. The full boundary — secret redaction, prompt-injection defence, and
 fork safety — is in [Data and Privacy](data-and-privacy.md).
