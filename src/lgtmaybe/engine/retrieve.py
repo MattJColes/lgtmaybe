@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from .astgrep import SymbolResolver
 from .compress import count_tokens
@@ -32,6 +33,33 @@ FileFetcher = Callable[[str], "str | None"]
 # hard stops that keep a deferral from looping or fetching the whole repo.
 MAX_HOPS = 2
 MAX_FETCH_FILES = 5
+
+
+def local_file_fetcher(root: Path) -> FileFetcher:
+    """A ``FileFetcher`` reading files out of the workspace under *root*.
+
+    The lenses that read committed context rather than PR content — directory
+    rules and the spec lens — both need exactly this: read a repository-relative
+    path, return None when it isn't readable. Written once here, beside the
+    resolver that consumes it, because two copies of a containment check are two
+    places for it to drift.
+
+    Config naming these paths is trusted, so the containment check is defence in
+    depth: two cheap lines that keep a stray ``../`` from ever reaching outside
+    the repository being reviewed.
+    """
+    resolved_root = root.resolve()
+
+    def read(path: str) -> str | None:
+        try:
+            target = (resolved_root / path).resolve()
+            if not target.is_relative_to(resolved_root):
+                return None
+            return target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+    return read
 
 
 def resolve_needs(

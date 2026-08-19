@@ -77,26 +77,9 @@ def load_context_files(cfg: ReviewConfig, root: Path) -> dict[str, str]:
     if not wanted:
         return {}
 
-    resolved_root = root.resolve()
-
-    def read(path: str) -> str | None:
-        """Read one workspace file, or None when it isn't readable under *root*.
-
-        Config is trusted, so the containment check is defence in depth: two
-        cheap lines that keep a stray ``../`` from ever reaching outside the
-        repository being reviewed.
-        """
-        try:
-            target = (resolved_root / path).resolve()
-            if not target.is_relative_to(resolved_root):
-                return None
-            return target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None
-
     return retrieve.resolve_needs(
         wanted,
-        read,
+        retrieve.local_file_fetcher(root),
         already=set(),
         budget_tokens=max(1, cfg.max_input_tokens // _CONTEXT_BUDGET_DIVISOR),
         max_files=retrieve.MAX_FETCH_FILES,
