@@ -1038,9 +1038,35 @@ class TestEmptyStructuredOutputFallback:
         # to without-rf — no wasted empty round-trip.
         assert seen_response_format == [True, False, False]
 
-    def test_empty_content_without_response_format_is_not_retried(self) -> None:
-        """A genuinely empty answer with no schema to drop is returned as-is — no
-        infinite retry loop."""
+    def test_empty_content_without_response_format_is_retried_once(self) -> None:
+        """An empty completion is a provider fault rather than an answer, so it
+        is retried even with no schema to drop.
+
+        This case used to be returned as-is, which left it with no recovery
+        anywhere: the engine cannot reformat an empty body and has no schema
+        left to drop, so the lens failed outright. Seen in the field as
+        "1 of 5 review calls failed (security - unparseable model output
+        (empty))" on a run where an earlier call had already disabled structured
+        output for the model.
+        """
+        seen: list[bool] = []
+        replies = iter(["", '{"findings": []}'])
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append("response_format" in kwargs)
+            return _fake_response(next(replies))
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert seen == [False, False], "no schema was in play on either attempt"
+        assert result.text == '{"findings": []}'
+
+    def test_a_second_empty_reply_ends_it(self) -> None:
+        """One retry, never a loop — the bound the previous behaviour existed to
+        guarantee. A model answering empty twice will not answer on a third
+        identical request."""
         calls = 0
 
         def side_effect(*args: Any, **kwargs: Any) -> Any:
@@ -1053,7 +1079,7 @@ class TestEmptyStructuredOutputFallback:
             result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
 
         assert result.text == ""
-        assert calls == 1
+        assert calls == 2, "the original call and exactly one retry"
 
 
 class TestFailFastOnPermanentErrors:

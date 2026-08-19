@@ -471,12 +471,27 @@ class TestOutputCeiling:
         assert ceiling is not None
         assert 2048 <= ceiling <= _OLLAMA_NUM_CTX // 2
 
-    def test_hosted_providers_stay_uncapped(self) -> None:
-        """Every other route keeps the model's own ceiling. A cap here would
-        truncate a long findings payload on a provider that never had the
-        runaway-decode problem — a regression bought for nothing."""
+    def test_every_runaway_prone_route_gets_the_same_ceiling(self) -> None:
+        """ollama is not the only route that decodes without terminating.
+
+        Benchmark evidence: a local model behind `openai-compatible` emitted
+        223,558 tokens on one lens call, and a hosted model on `openrouter`
+        posted 699 false positives off a 393k-token response on a diff with
+        nothing wrong in it. The assumption that a hosted API brings its own sane
+        ceiling does not hold, so all three routes share one number.
+        """
+        capped = {Provider.ollama, Provider.openai_compatible, Provider.openrouter}
+        ceilings = {provider: resolve_max_tokens(provider) for provider in capped}
+        assert all(ceiling is not None and ceiling > 0 for ceiling in ceilings.values())
+        assert len(set(ceilings.values())) == 1, ceilings
+
+    def test_first_party_cloud_routes_stay_uncapped(self) -> None:
+        """A first-party API keeps the model's own ceiling. No runaway decode has
+        been observed on these, and a cap here would truncate a long findings
+        payload for setups that never had the problem."""
+        capped = {Provider.ollama, Provider.openai_compatible, Provider.openrouter}
         for provider in Provider:
-            if provider is not Provider.ollama:
+            if provider not in capped:
                 assert resolve_max_tokens(provider) is None, provider
 
     def test_a_configured_ceiling_wins_everywhere(self) -> None:

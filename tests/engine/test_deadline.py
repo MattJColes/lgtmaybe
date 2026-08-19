@@ -75,6 +75,26 @@ class TestReviewDeadline:
         assert "review calls failed" in summary and "deadline" in summary
         assert "LGTM" not in summary
 
+    def test_reflection_still_runs_when_lens_calls_exhaust_the_deadline(self) -> None:
+        """An overrun must not skip the audit.
+
+        Benchmark evidence: a runaway lens call consumed the whole time budget,
+        which skipped reflection, and 325 unaudited findings posted, 323 of them
+        false positives on a diff with nothing wrong in it. Lens calls now stop
+        early enough to leave the auditor room.
+        """
+        provider = _SlowProvider(delay=1.2)
+        cfg = _cfg(max_review_seconds=1, reflect=True)
+        _, summary = LLMReviewEngine(provider).review(_CTX, cfg)
+        reflect_calls = [
+            call
+            for call in provider.calls
+            if "false positive" in str(call["messages"]).lower()
+            or "confidence" in str(call["messages"]).lower()
+        ]
+        assert reflect_calls, "reflection must still run after the lens deadline"
+        assert "skipping reflection" not in summary
+
     def test_deadline_zero_disables_the_ceiling(self) -> None:
         provider = _SlowProvider(delay=0.0)
         _, summary = LLMReviewEngine(provider).review(_CTX, _cfg(max_review_seconds=0))
@@ -105,7 +125,13 @@ class TestReviewDeadline:
         with pytest.raises(ReviewIncompleteError):
             LLMReviewEngine(_SlowUnparseable()).review(_CTX, _cfg(max_review_seconds=1))
 
-    def test_reflection_skipped_past_deadline_with_an_honest_notice(self) -> None:
+    def test_reflection_runs_even_past_the_deadline(self) -> None:
+        """Passing the ceiling must not skip the audit.
+
+        Reflection used to be gated on the same clock the lens fan-out had just
+        passed, so a runaway removed the stage that prunes its output. Reflection
+        is one bounded call, cheaper than posting the false positives it drops.
+        """
         provider = _SlowProvider(delay=1.2)
         cfg = _cfg(
             categories=[ReviewCategory.security],
@@ -113,7 +139,7 @@ class TestReviewDeadline:
             max_review_seconds=1,
         )
         findings, summary = LLMReviewEngine(provider).review(_CTX, cfg)
-        # One review call (slow), then reflection would start past the ceiling.
-        assert len(provider.calls) == 1
-        assert findings  # kept unaudited rather than dropped
-        assert "self-reflection audit was skipped" in summary
+        # One review call (slow), then reflection despite the blown ceiling.
+        assert len(provider.calls) == 2, "the second call is the audit"
+        assert findings
+        assert "self-reflection audit was skipped" not in summary

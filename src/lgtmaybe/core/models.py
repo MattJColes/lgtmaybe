@@ -1003,6 +1003,21 @@ class ReviewConfig(_Strict):
     # structured `provider call` log lines) — read a real run's total, then set
     # this above it. See docs/how-to/reduce-review-cost.md.
     max_review_tokens: int = Field(default=0, ge=0)
+    # Ceiling on the findings ONE (batch, lens) call may contribute. This is a
+    # backstop against a degenerate response rather than a review budget. A model
+    # under structured output can restate one claim across every line it sees:
+    # measured, a single lens returned 319 of a review's 323 findings on a diff
+    # with nothing wrong in it, each at a distinct (path, line), so the location
+    # dedupe collapsed none of them. `max_tokens` bounds a response that decodes
+    # without terminating; this bounds one that stays within its token budget and
+    # repeats itself.
+    #
+    # When it fires the highest-severity findings are kept, and the summary names
+    # the lens and how many were dropped so the truncation is visible. 50 is far
+    # above any per-lens yield observed (a busy security lens on a large batch
+    # runs to a dozen), so an ordinary review does not reach it; 0 disables the
+    # bound.
+    max_findings_per_lens: int = Field(default=50, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
     # (batch, lens) task shares one pool). None means auto: 6 for hosted cloud
     # providers (wide enough to overlap the fan-out, narrow enough that one API

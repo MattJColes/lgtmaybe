@@ -610,6 +610,12 @@
       "title": "Max Files",
       "type": "integer"
     },
+    "max_findings_per_lens": {
+      "default": 50,
+      "minimum": 0,
+      "title": "Max Findings Per Lens",
+      "type": "integer"
+    },
     "max_input_tokens": {
       "default": 100000,
       "title": "Max Input Tokens",

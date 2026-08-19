@@ -23,6 +23,7 @@ giving up the findings you actually want.
 - [The levers, in order of payoff](#the-levers-in-order-of-payoff)
 - [Put a hard ceiling on it](#put-a-hard-ceiling-on-it)
 - [If a call runs past `max_tokens`](#if-a-call-runs-past-max_tokens)
+- [If one lens floods the review](#if-one-lens-floods-the-review)
 - [What costs more, on purpose](#what-costs-more-on-purpose)
 - [What isn't worth changing](#what-isnt-worth-changing)
 
@@ -43,7 +44,7 @@ tokens: 158,076 billable (154,200 in / 3,876 out) across 12 calls
 Every local review prints that same line to stderr even without `--profile`, so
 the meter is always in view; redirect with `2>/dev/null` if you want it gone.
 
-`in` dwarfing `out` is normal and is the whole story: you are paying to *send*
+`in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
 the diff, over and over, once per lens per batch. The per-call table above it
 shows exactly which lens and which batch each call belongs to, so you can see
 whether the cost is lens count, batch count, or one enormous file.
@@ -209,6 +210,12 @@ ceiling comfortably above it — it is a runaway guard, not a tuning knob.
 `max_tokens` caps what one call may *write*. A lens that hits it comes back cut
 off mid-JSON, and lowering it to save money is the usual way to arrive here.
 
+On `ollama`, `openai-compatible` and `openrouter` a ceiling of **16384 tokens per
+call** applies by default, so you can arrive here without setting anything. It is
+there because a model under structured output can fail to terminate and decode
+until the timeout stops it half an hour later. The first-party APIs send no
+default ceiling.
+
 You do not have to do anything. lgtmaybe treats an over-ceiling call the same
 way it treats one that outruns its wall clock: the batch was more than one call
 could cover, so it is **halved and the pieces reviewed separately**, each with a
@@ -323,6 +330,34 @@ on OpenRouter is one real case: it is in litellm's vocabulary but not in
 OpenRouter's `reasoning.effort` enum (`none`, `minimal`, `low`, `medium`,
 `high`, `xhigh`), so it is reported rather than quietly turned into a nearby
 level.
+
+## If one lens floods the review
+
+A lens can stay within its token budget and still return far too many findings,
+restating one claim against every line it can see. Measured on a benchmark diff
+with nothing wrong in it, a single lens returned 319 of a review's 323 findings,
+each on a different line. Location dedupe does not collapse them, because no two
+findings share a line.
+
+One `(batch, lens)` call therefore contributes at most **50 findings** by
+default. When the bound fires, the highest-severity findings are kept and the
+summary names the lens and how many were dropped:
+
+```
+⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped).
+```
+
+The notice usually indicates a problem with the model rather than a bound set too
+low. A lens returning hundreds of findings is generating badly, and a higher
+bound admits more of the same output. Raise it only when a genuinely large diff
+is losing real findings:
+
+```yaml
+max_findings_per_lens: 100   # 0 disables the bound entirely
+```
+
+An ordinary lens returns a handful of findings and never reaches the bound, so a
+healthy run is unaffected.
 
 ## What costs more, on purpose
 

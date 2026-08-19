@@ -35,6 +35,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
 | `max_files` | integer | No | `50` | Max Files |
+| `max_findings_per_lens` | integer | No | `50` | Max Findings Per Lens |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
 | `max_review_tokens` | integer | No | `0` | Max Review Tokens |
@@ -764,6 +765,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "max_files": {
       "default": 50,
       "title": "Max Files",
+      "type": "integer"
+    },
+    "max_findings_per_lens": {
+      "default": 50,
+      "minimum": 0,
+      "title": "Max Findings Per Lens",
       "type": "integer"
     },
     "max_input_tokens": {

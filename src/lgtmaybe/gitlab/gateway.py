@@ -30,6 +30,8 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.comment import (
+    FINDING_MARKER,
+    IDENTITY_MARKER,
     current_finding_keys,
     finding_keys,
     marker,
@@ -255,16 +257,16 @@ class GitLabGateway:
             keys = finding_keys(body)
             if not keys:
                 continue  # someone else's discussion
-            fingerprints = _marker_values(body, "lgtmaybe-finding")
-            identities = _marker_values(body, "lgtmaybe-identity")
+            fingerprint = FINDING_MARKER.search(body)
+            identity = IDENTITY_MARKER.search(body)
             active.append(
                 ActiveFinding(
                     thread_id=str(discussion.get("id")),
                     comment_id=first.get("id"),
                     path=(first.get("position") or {}).get("new_path") or "",
                     body=body,
-                    fingerprint=fingerprints[0] if fingerprints else None,
-                    identity=identities[0] if identities else None,
+                    fingerprint=fingerprint.group(1) if fingerprint else None,
+                    identity=identity.group(1) if identity else None,
                     # GitLab exposes no "the lines moved" signal, so resolution
                     # here rests entirely on the caller's validated allowlist.
                     outdated=False,
@@ -531,10 +533,3 @@ class GitLabGateway:
             if len(batch) < _PAGE_LIMIT:
                 return items
             page += 1
-
-
-def _marker_values(body: str, family: str) -> list[str]:
-    """Every hidden id of one marker family carried by a comment body."""
-    import re
-
-    return re.findall(rf"<!-- {re.escape(family)}:([0-9a-f]+) -->", body)

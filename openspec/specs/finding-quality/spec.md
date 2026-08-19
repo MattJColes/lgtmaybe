@@ -25,6 +25,29 @@ claim about unshown code like any other. An unparseable audit keeps everything.
 - **WHEN** a finding says the change adds no test and no test file is in front of the auditor
 - **THEN** the carve-out does not protect it — it is judged as a cross-file absence claim
 
+#### Scenario: the lens fan-out overruns a whole-review ceiling
+- **WHEN** lens calls pass `max_review_seconds` or `max_review_tokens`
+- **THEN** the audit still runs, because a review that overran still needs
+  pruning; only a termination signal skips it
+
+### Requirement: One lens cannot flood a review
+
+A single (batch, lens) call SHALL contribute at most `max_findings_per_lens`
+findings, keeping the highest severity first. A model under structured output can
+restate one claim across every line it sees, and location dedupe does not collapse
+those restatements because each carries a distinct line. When the bound fires the
+summary SHALL name the lens and the number dropped; `0` SHALL disable it.
+<!-- anchor: quality.lens-bound -->
+
+#### Scenario: a lens returns far more findings than the bound
+- **WHEN** one lens call returns more than `max_findings_per_lens` findings
+- **THEN** the most severe are kept and the summary names the lens and the count
+  dropped, so the truncation is visible
+
+#### Scenario: an ordinary lens result
+- **WHEN** a lens returns fewer findings than the bound
+- **THEN** every one is kept and no notice is raised
+
 ### Requirement: Verdicts are lenient to read, strict to act on
 
 Each kept verdict SHALL carry a 0-10 confidence score (the auditor tries to
