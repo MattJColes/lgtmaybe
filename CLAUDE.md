@@ -67,6 +67,41 @@ autocrlf before checkout.
   static `AZURE_API_KEY` is accepted but not required). Never accept or require a
   service-account JSON or static AWS key.
 
+### Forges — which code host the review is posted to
+
+A second axis, orthogonal to the LLM provider: **`Forge`** (`core/forge.py`) is
+github / gitlab / gitea, and `Provider` stays the model backend. Never overload
+"provider" for a code host.
+
+- The **engine never sees a gateway.** It takes a `PRContext` and returns
+  findings; `local/` already produces a `PRContext` from `git` with no forge at
+  all. Anything host-neutral therefore belongs in `core/`, not in an adapter
+  package — diff parsing and the skip filter (`core/diff.py`), finding
+  fingerprints (`core/findings.py`), and comment Markdown (`core/comment.py`)
+  are all shared. A new adapter that reimplements any of those is a bug.
+- **`ReviewGateway` (`core/ports.py`) is three methods.** Everything richer is an
+  optional `Supports*` capability protocol the CLI probes for and skips when
+  absent, so an adapter ships useful before it ships complete. Declare only what
+  the host can actually serve — claiming a capability that cannot work is worse
+  than not claiming it.
+- A URL is resolved by `core/forge.parse_pr_url` into a `PRLocator`
+  (forge + host + repo + number); `cli._GATEWAY_BUILDERS` maps forge to adapter.
+  Host is carried because self-hosted GitLab/Gitea is the norm.
+- **GitHub** is the complete adapter. **Gitea** (`gitea/gateway.py`) mirrors it
+  minus incremental review and thread resolution (its API cannot serve either);
+  its summary lives in an editable issue comment because a submitted Gitea review
+  is immutable, and it de-dupes findings by reading the hidden ids already posted.
+  **GitLab** (`gitlab/gateway.py`) is the one whose model really differs: no
+  batched review object, so each finding is its own *discussion* positioned by
+  old/new path + line and the MR's three diff refs; the summary is an upserted
+  note; thread resolution works over plain REST (no GraphQL), gated on the
+  caller's validated allowlist because GitLab exposes no "lines moved" signal.
+  Incremental is unbuilt there — a "not yet", not a "cannot".
+- **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
+  the same env contract; only `GITHUB_SERVER_URL` differs, and
+  `cli._change_url` reads it). GitLab CI has neither an event payload nor
+  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`.
+
 ## Key decisions (do not relitigate)
 
 - **Language:** Python.

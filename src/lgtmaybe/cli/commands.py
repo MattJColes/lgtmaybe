@@ -27,6 +27,7 @@ from lgtmaybe.cli import (
     execute_local_review,
     execute_review,
     main,
+    mr_url_from_ci_env,
     pr_url_from_event,
     resolve_auto_incremental,
     should_auto_describe,
@@ -579,6 +580,28 @@ def action() -> None:
         describe=should_auto_describe(cfg, event_action=event_action),
         diagram=should_auto_diagram(cfg, event_action=event_action),
     )
+
+
+@main.command("gitlab-ci")
+@model_options
+def gitlab_ci(
+    provider: str | None,
+    model: str | None,
+    fallback_model: str | None,
+    api_key: str | None,
+    api_base: str | None,
+    config_path: str | None,
+) -> None:
+    """GitLab CI entrypoint: review the merge request this pipeline is for.
+
+    The counterpart to ``action``. GitLab has no event payload file and no
+    ``INPUT_*`` convention, so the merge request comes from the predefined
+    ``CI_*`` variables and configuration comes from the ordinary flags,
+    environment, and ``.lgtmaybe.yml`` — everything downstream is shared.
+    """
+    cfg = _load_cfg(config_path, provider=provider, model=model)
+    runtime = replace(_runtime(api_key, api_base, fallback_model), pr_url=mr_url_from_ci_env())
+    execute_review(cfg, runtime)
 
 
 @config_cmd.command("path")

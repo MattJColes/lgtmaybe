@@ -24,23 +24,23 @@ github.fingerprint:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^finding_fingerprint$' }
-    files: [src/lgtmaybe/github/**/*.py]
+    files: [src/lgtmaybe/core/findings.py]
   - rule:
       kind: function_definition
       has: { field: name, regex: '^finding_identity$' }
-    files: [src/lgtmaybe/github/**/*.py]
+    files: [src/lgtmaybe/core/findings.py]
 
 github.demote:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^_render_demoted$' }
-  files: [src/lgtmaybe/github/**/*.py]
+    has: { field: name, regex: '^render_demoted$' }
+  files: [src/lgtmaybe/core/comment.py]
 
 github.finding-badge:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^_finding_badge$' }
-  files: [src/lgtmaybe/github/**/*.py]
+    has: { field: name, regex: '^finding_badge$' }
+  files: [src/lgtmaybe/core/comment.py]
 
 github.incremental:
   - rule:
@@ -86,7 +86,7 @@ github.reviewable:
   rule:
     kind: function_definition
     has: { field: name, regex: '^is_reviewable$' }
-  files: [src/lgtmaybe/github/**/*.py]
+  files: [src/lgtmaybe/core/diff.py]
 
 github.labels:
   - rule:

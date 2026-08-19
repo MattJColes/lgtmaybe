@@ -16,8 +16,9 @@ each requirement bound to the code it describes by ast-grep anchors (see
 ## Design in one breath
 
 lgtmaybe is **hexagonal** (ports & adapters). The core defines three ports in
-`core/ports.py`; the outside world (litellm, GitHub, git) plugs in as adapters.
-The engine depends only on the ports, so providers and gateways swap without it
+`core/ports.py`; the outside world (litellm, the code hosts, git) plugs in as
+adapters. The engine depends only on the ports, so **which model reviews** and
+**which host is posted to** are independent choices that swap without it
 noticing — and tests inject fakes instead of patching.
 
 ```
@@ -34,16 +35,20 @@ noticing — and tests inject fakes instead of patching.
    │          cached preamble+diff prefix) → parse  │
    │        → merge/dedupe → reflect → filter       │
    └───────┬───────────────────────────┬───────────┘
-           │ ProviderClient            │ GitHubGateway
+           │ ProviderClient            │ ReviewGateway
            ▼                           ▼
-   providers/ (litellm)        github/ (REST)  ·  local/ (git)
+   providers/ (litellm)        github/ · gitlab/ · gitea/
+           │                    (REST)  ·  local/ (git)
            │                           │
            ▼                           ▼
-   OpenAI · Anthropic ·         GitHub PR: inline
-   OpenRouter · z.ai ·          comments + summary
+   OpenAI · Anthropic ·         inline comments + summary
+   OpenRouter · z.ai ·          on a pull / merge request
    Bedrock · Vertex · Azure ·   (or CLI stdout)
    Ollama · OpenAI-compatible
 ```
+
+Neither column knows about the other, so any of the nine model backends can
+review a change on any of the three hosts.
 
 ## Project layout
 
@@ -53,9 +58,13 @@ lgtmaybe/
 │   ├── __main__.py          # `python -m lgtmaybe` / Docker ENTRYPOINT → Click CLI
 │   │
 │   ├── core/                # the hexagon's centre — no outward dependencies
-│   │   ├── ports.py         #   ProviderClient · GitHubGateway · ReviewEngine (frozen)
+│   │   ├── ports.py         #   ProviderClient · ReviewGateway · Supports* · ReviewEngine
 │   │   ├── models.py        #   pydantic data contracts (ReviewConfig, ReviewFinding, …)
+│   │   ├── forge.py         #   which code host: Forge · PRLocator · URL parsing · tokens
 │   │   ├── diffparse.py     #   unified-diff primitives (file split, hunk headers)
+│   │   ├── diff.py          #   commentable-line index · is_reviewable() skip filter
+│   │   ├── findings.py      #   stable hidden finding ids (fingerprint · identity)
+│   │   ├── comment.py       #   the Markdown every host posts (badges, demoted sections)
 │   │   └── logging.py       #   structured JSON logs with secret redaction
 │   │
 │   ├── engine/              # the review pipeline (adapter-agnostic)
@@ -74,9 +83,11 @@ lgtmaybe/
 │   │   ├── credentials.py   #   chain-of-responsibility credential resolver
 │   │   └── constants.py     #   shared provider defaults (e.g. ollama base URL)
 │   │
-│   ├── github/              # GitHub adapter (the GitHubGateway side)
+│   ├── github/              # GitHub adapter (a ReviewGateway) — the complete one
 │   │   ├── rest_gateway.py  #   fetch PR context · post review · in-thread replies
-│   │   └── diff.py          #   commentable-line index · is_reviewable() skip filter
+│   │   └── checkout.py      #   read-only base-branch clone for symbol resolution
+│   ├── gitlab/              # GitLab adapter — discussions, REST thread resolution
+│   ├── gitea/               # Gitea adapter — immutable reviews, pre-post de-dupe
 │   │
 │   ├── lenses/              # bundled opt-in lens packs (design/robustness/interface/frontend), loaded via pack:<name>
 │   ├── local/               # local-mode adapter: build a PRContext from `git`
@@ -94,7 +105,9 @@ lgtmaybe/
 ├── tests/                   # mirrors src/ ; fakes in tests/fakes/, snapshots, fixtures
 ├── evals/                   # offline scoring harness against fixture diffs
 ├── docs/                    # MkDocs site: tutorial / how-to / reference / explanation
-├── examples/workflows/      # one ready-to-copy GitHub workflow per posting provider
+├── examples/workflows/      # one ready-to-copy GitHub workflow per model provider
+├── examples/gitlab/         # ready-to-copy .gitlab-ci.yml
+├── examples/gitea/          # ready-to-copy Gitea Actions workflow
 │
 ├── action.yml              # composite Action: keyless OIDC/WIF auth → docker run GHCR image
 ├── Dockerfile              # lean runtime image (uv sync --no-dev --frozen)
@@ -124,6 +137,31 @@ backends, each with its own native auth (resolved by the credential chain in
 **The wedge:** first-class **Bedrock + Vertex + Azure with keyless OIDC/WIF**, so cloud
 reviews need no static keys in GitHub secrets. The `LiteLLMProvider` adds retries
 (exponential backoff + jitter, 4 attempts) and an optional `--fallback-model`.
+
+## Code hosts
+
+A second axis, independent of the model provider: which forge the review is
+posted to. `core/forge.py` parses a change-request URL into a `PRLocator`
+(forge + host + repo + number) and names the token variable; `cli` maps the
+resolved forge to its adapter.
+
+| Forge | URL shape | Token | Entrypoint |
+|---|---|---|---|
+| GitHub | `/pull/42` | `GITHUB_TOKEN` | `lgtmaybe action` (GitHub Actions) |
+| GitLab | `/-/merge_requests/42` | `GITLAB_TOKEN` | `lgtmaybe gitlab-ci` (CI_* vars) |
+| Gitea | `/pulls/42` | `GITEA_TOKEN` | `lgtmaybe action` (same runtime as GitHub) |
+
+`ReviewGateway` requires only three methods — fetch context, post a review, post
+a comment. Everything richer (incremental review, thread resolution, labels,
+checks, feedback, file reads) is an optional `Supports*` protocol the CLI probes
+for and skips when absent. That is what lets an adapter be **honest** about what
+its host cannot do rather than failing at run time: Gitea claims neither
+incremental review nor thread resolution, and GitLab claims thread resolution
+but not (yet) incremental.
+
+The engine never sees a gateway at all — it takes a `PRContext` and returns
+findings — which is why `local/` can produce one from `git` with no host
+involved.
 
 ## Components inside the application
 

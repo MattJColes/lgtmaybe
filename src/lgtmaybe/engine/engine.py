@@ -21,6 +21,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -41,7 +42,6 @@ from lgtmaybe.core.ports import (
     ProviderWallTimeout,
 )
 from lgtmaybe.core.version import package_version
-from lgtmaybe.github import is_reviewable
 
 from . import specs
 from .astgrep import SymbolResolver

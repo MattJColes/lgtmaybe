@@ -44,7 +44,7 @@ needs. Tuning knobs earn their visibility when the user signals intent
 
 1. **First-run local dev** — installed via pip/brew, wants findings on their
    branch in under two minutes. Touches: `config init`, `review`.
-2. **CI adopter** — wires the GitHub Action; configures via `action.yml`
+2. **CI adopter** — wires the GitHub Action, a GitLab CI job, or Gitea Actions; configures via `action.yml` or CLI flags
    inputs and `.lgtmaybe.yml`. Mostly out of scope here (the Action surface is
    fine), but benefits from the same key curation in docs.
 3. **Power tuner** — slow local model, custom endpoint, eval-driven. Needs

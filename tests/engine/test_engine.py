@@ -393,7 +393,7 @@ def test_custom_lens_finding_without_failure_scenario_remains_eligible() -> None
 def test_suppressed_finding_skips_reflection_and_output() -> None:
     """A finding whose fingerprint is in ignore_fingerprints is dropped right
     after dedupe — it costs no reflection tokens and is never returned."""
-    from lgtmaybe.github.rest_gateway import finding_fingerprint
+    from lgtmaybe.core.findings import finding_fingerprint
 
     suppressed = ReviewFinding(
         path="a.py", line=1, severity=Severity.high, title="known fine", body="dismissed"
@@ -1487,7 +1487,7 @@ def test_review_logs_a_heartbeat_as_each_lens_runs(engine_logs) -> None:
 def test_suppressed_findings_are_logged_with_a_count(engine_logs) -> None:
     """A suppression silently dropping findings is invisible; log how many went, so
     a team can tell a too-broad fingerprint/pragma from a genuinely clean review."""
-    from lgtmaybe.github.rest_gateway import finding_fingerprint
+    from lgtmaybe.core.findings import finding_fingerprint
 
     provider = _provider_for([_HIGH], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)

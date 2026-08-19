@@ -21,11 +21,15 @@ a model.
 - **THEN** it calls `ProviderClient.complete(messages, model, **opts)` and gets
   a `ProviderResult` back, with no provider-specific branching in the engine
 
-### Requirement: GitHub gateway port
+### Requirement: Review gateway port
 
-`GitHubGateway` SHALL expose PR context retrieval and review posting as the
-only GitHub seam. Implementations fetch the diff via API only — PR code is
-never checked out or executed (fork safety under `pull_request_target`).
+`ReviewGateway` SHALL expose change-request context retrieval and review posting
+as the only code-host seam, for every forge. Implementations fetch the diff via
+API only — change-request code is never checked out or executed (fork safety
+under `pull_request_target`). Richer behaviour an adapter may not have — file
+reads, incremental re-review, thread resolution, labels, checks, feedback — is
+declared by a separate optional `Supports*` capability protocol, and a caller
+SHALL degrade gracefully when a gateway does not offer one.
 <!-- anchor: core.gateway-port -->
 
 #### Scenario: review round-trip through the port

@@ -10,7 +10,6 @@ All network calls carry an explicit timeout.
 
 from __future__ import annotations
 
-import hashlib
 import re
 import threading
 from collections.abc import Iterator
@@ -21,6 +20,22 @@ from urllib.parse import quote
 
 import httpx
 
+from lgtmaybe.core.comment import (
+    FINDING_MARKER,
+    IDENTITY_MARKER,
+    current_finding_keys,
+    finding_keys,
+    marker,
+    render_broad,
+    render_demoted,
+    render_inline_body,
+)
+from lgtmaybe.core.diff import (
+    CommentableLines,
+    build_commentable_lines,
+    is_reviewable,
+    is_scannable_manifest,
+)
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     EFFORT_PREFIX,
@@ -32,12 +47,6 @@ from lgtmaybe.core.models import (
 )
 
 from .checkout import clone_base_tree
-from .diff import (
-    CommentableLines,
-    build_commentable_lines,
-    is_reviewable,
-    is_scannable_manifest,
-)
 
 _log = get_logger(__name__)
 
@@ -68,11 +77,6 @@ _THREADS_QUERY = """
 # name as a required status check in branch protection, so it must not change.
 _CHECK_RUN_NAME = "lgtmaybe"
 
-# Hidden marker stamped into every inline comment so a later run can match an
-# existing review conversation back to the finding that opened it. The capture
-# group is the finding fingerprint.
-_FINDING_MARKER = re.compile(r"<!-- lgtmaybe-finding:([0-9a-f]+) -->")
-
 # When resolve-on-fix collapses a thread, the original comment's marker is
 # rewritten into this disjoint "resolved" family so the active-marker scan
 # (``_existing_finding_keys``) no longer sees it — a finding that
@@ -80,13 +84,8 @@ _FINDING_MARKER = re.compile(r"<!-- lgtmaybe-finding:([0-9a-f]+) -->")
 _ACTIVE_MARKER_PREFIX = "<!-- lgtmaybe-finding:"
 _RESOLVED_MARKER_PREFIX = "<!-- lgtmaybe-resolved-fingerprint:"
 
-# Second hidden marker, stamped alongside the fingerprint: the finding's
-# reword-robust identity (see ``finding_identity``). The fingerprint above hashes
-# the model's *title*, so it changes when the model rephrases the same finding on
-# a re-run — which is exactly when dedupe has to work. This family carries no
-# prose at all. Its own resolved-family prefix, mirroring the fingerprint's, so
-# collapsing a thread hides both of its markers from the active scan.
-_IDENTITY_MARKER = re.compile(r"<!-- lgtmaybe-identity:([0-9a-f]+) -->")
+# The identity family's own resolved-family prefix, mirroring the fingerprint's,
+# so collapsing a thread hides both of a comment's markers from the active scan.
 _ACTIVE_IDENTITY_PREFIX = "<!-- lgtmaybe-identity:"
 _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 
@@ -95,71 +94,6 @@ _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 # since (commit-scoped incremental review). The capture group is the SHA.
 _REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
 _DIAGRAMMED_MARKER = re.compile(r"<!-- lgtmaybe-diagrammed:([0-9a-f]{7,40}) -->")
-
-
-def finding_fingerprint(path: str, title: str) -> str:
-    """Stable short id for a finding's identity (its file and what it flags).
-
-    Used to recognise the same finding across review runs: if a fingerprint that
-    opened a conversation is no longer produced, that conversation is a candidate
-    to auto-resolve. Only the path and title feed the hash (never model prose),
-    so the marker is safe to embed in a comment body verbatim.
-    """
-    digest = hashlib.sha256(f"{path}\n{title.strip().lower()}".encode())
-    return digest.hexdigest()[:12]
-
-
-def finding_identity(finding: ReviewFinding) -> str:
-    """Stable short id for *what* a finding is about, independent of how it reads.
-
-    ``finding_fingerprint`` hashes the title, and the title is model prose: ask a
-    model to review the same diff twice and it flags the same problem in different
-    words, producing a different fingerprint each run. Dedupe keyed on that alone
-    cannot survive a re-run, so this is the key that can — built only from fields
-    the model does not paraphrase:
-
-    - ``path`` — the file.
-    - ``category`` — the lens that raised it (engine-stamped, a fixed vocabulary),
-      so two different concerns about one line stay distinct.
-    - ``anchor`` — the verbatim source line the finding is about. Copied out of the
-      diff rather than composed, so it is code, not prose. It also absorbs line
-      drift: the model miscounts diff line numbers (the reason anchors exist at
-      all), and the same flagged line reported at 428 on one run and 501 on the
-      next is one finding, not two.
-
-    With no anchor there is nothing to key on but the reported line, so identity
-    falls back to it — still prose-free, just less tolerant of a miscount.
-    """
-    # Collapse whitespace runs so re-indentation of the same statement doesn't read
-    # as a different line; keep case, because code is case-sensitive.
-    anchor = " ".join(finding.anchor.split()) if finding.anchor else ""
-    locator = anchor or f"L{finding.line}"
-    digest = hashlib.sha256(f"{finding.path}\n{finding.category or ''}\n{locator}".encode())
-    return digest.hexdigest()[:12]
-
-
-def _finding_keys(body: str) -> set[str]:
-    """Every active hidden id carried by a comment body (fingerprint + identity).
-
-    Two ids of the same finding, pooled into one set so "have we posted this?" is
-    a single intersection. A body predating the identity marker yields just its
-    fingerprint, which still matches whenever the title is unchanged — so old
-    conversations keep deduping exactly as they did.
-    """
-    return set(_FINDING_MARKER.findall(body)) | set(_IDENTITY_MARKER.findall(body))
-
-
-def _current_finding_keys(findings: list[ReviewFinding]) -> set[str]:
-    """Both hidden ids for every finding this run produced.
-
-    The counterpart to ``_finding_keys``: what an existing conversation is matched
-    against to decide whether its finding is still being reported.
-    """
-    keys: set[str] = set()
-    for f in findings:
-        keys.add(finding_fingerprint(f.path, f.title))
-        keys.add(finding_identity(f))
-    return keys
 
 
 # Concurrency for the per-file head-content fetch. The contents are independent
@@ -174,58 +108,6 @@ _RESOLVE_WORKERS = 4
 # Zero-width space, inserted to break up a triple-backtick run so it can't be
 # parsed as a Markdown fence delimiter.
 _ZWSP = "​"
-
-
-def _defang_fences(text: str) -> str:
-    """Neutralise embedded triple-backticks in model-supplied text (title, body,
-    suggestion) so it can't break out of a Markdown fence and inject content
-    (e.g. a phishing link) into the rendered comment.
-
-    The diff is attacker-controlled on a fork PR, so a prompt injection that
-    survives the guard could steer the model into fence-breaking output. We insert
-    zero-width spaces between the backticks: the run no longer reads as a fence,
-    while the text stays visually intact.
-    """
-    return text.replace("```", f"`{_ZWSP}`{_ZWSP}`")
-
-
-def _finding_badge(f: ReviewFinding) -> str:
-    """The provenance suffix for a finding's title line: lens, then confidence.
-
-    Both values are already computed and already shown by the local CLI — the
-    lens the engine stamped (``category``) and the 0-10 score the reflection
-    auditor gave it (``confidence``) — but a GitHub reader could never see them.
-    They answer the two questions a reviewer asks of a bot comment: which pass
-    raised this, and how sure was it. Rendered inside the existing severity
-    brackets (``**[HIGH · security · 80%] Title**``) so the title line gains no
-    new visual furniture, and appended by the caller so it can never displace the
-    hidden fingerprint/identity markers that key re-run dedupe.
-
-    The 0-10 score is shown as a **percentage** — "how likely is this a real
-    issue" reads plainly as ``80%``, where ``8/10`` invites a reader to mistake
-    it for a rating out of ten. The scale is unchanged; only the rendering is.
-
-    Each half is omitted when absent, so nothing renders empty: no category (a
-    legacy finding) means no badge at all — byte-identical to the pre-badge
-    rendering — and no score (``--no-reflect``, or a deterministic
-    static-analysis finding) means just the lens. A ``0`` is a real verdict, not
-    a missing one, so it renders.
-    """
-    if not f.category:
-        return ""
-    badge = f" · {_defang_fences(f.category)}"
-    return badge if f.confidence is None else f"{badge} · {f.confidence * 10}%"
-
-
-def _marker(family: str, key: str | None) -> str:
-    """A hidden idempotency marker for one comment *family*.
-
-    Scoped to *key* (a provider/model) when there is one, so concurrent reviews
-    from different backends update their own comment instead of clobbering each
-    other; an unkeyed gateway keeps the legacy unscoped marker (``_MARKER`` and
-    its describe/diagram siblings).
-    """
-    return f"<!-- {family}:{key} -->" if key else f"<!-- {family} -->"
 
 
 def _head_ref(meta: dict[str, Any]) -> str:
@@ -243,60 +125,6 @@ def _first_comment(node: dict[str, Any]) -> dict[str, Any]:
     """A review thread's opening comment, or ``{}`` when it has none."""
     comments = node.get("comments", {}).get("nodes", [])
     return comments[0] if comments else {}
-
-
-def _finding_bullet(f: ReviewFinding) -> str:
-    """One finding as a Markdown list item — shared by both body sections."""
-    return (
-        f"- **[{f.severity.upper()}{_finding_badge(f)}] {_defang_fences(f.title)}** "
-        f"(`{f.path}`) — {_defang_fences(f.body)}"
-    )
-
-
-def _render_demoted(demoted: list[ReviewFinding]) -> str:
-    """Render findings that couldn't be confidently placed inline as a body section.
-
-    These keep their severity, file, and explanation — only the precise line (and
-    its one-click suggestion) is dropped, because we could not anchor it. Returns
-    "" when there is nothing to demote, so a normal review's body is unchanged.
-    """
-    if not demoted:
-        return ""
-    lines = [
-        "",
-        "",
-        "### Additional findings",
-        "",
-        "_These relate to the changes but aren't tied to a single line:_",
-        "",
-    ]
-    lines += [_finding_bullet(f) for f in demoted]
-    return "\n".join(lines)
-
-
-def _render_broad(broad: list[ReviewFinding]) -> str:
-    """Render broad (redesign / infra / contract / needs-verification) findings.
-
-    These are real findings the reflection pass judged too wide-reaching to action
-    on a single line, so they're collapsed into a ``<details>`` block to keep the
-    must-fix inline list tight without dropping the observation. Returns "" when
-    there is nothing broad, so a normal review's body is unchanged.
-    """
-    if not broad:
-        return ""
-    lines = [
-        "",
-        "",
-        "<details><summary>Broader observations</summary>",
-        "",
-        "_These are wider-reaching — a redesign, an infra/contract change, or one "
-        "needing independent verification — so they're collected here rather than "
-        "pinned to a line:_",
-        "",
-    ]
-    lines += [_finding_bullet(f) for f in broad]
-    lines += ["", "</details>"]
-    return "\n".join(lines)
 
 
 class RestGitHubGateway:
@@ -336,9 +164,9 @@ class RestGitHubGateway:
         # Three disjoint marker families: the review summary, the describe
         # comment, and the change diagram, so an update of one never clobbers
         # another. Each is scoped to the provider/model key when there is one.
-        self._marker = _marker("lgtmaybe", marker_key)
-        self._describe_marker = _marker("lgtmaybe-describe", marker_key)
-        self._diagram_marker = _marker("lgtmaybe-diagram", marker_key)
+        self._marker = marker("lgtmaybe", marker_key)
+        self._describe_marker = marker("lgtmaybe-describe", marker_key)
+        self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
         self._resolve_fixed = resolve_fixed
         # Per-run cache of "does this login have write+ access?" — feedback
         # learning only trusts a 👎 from someone who can push, and a PR's
@@ -484,7 +312,7 @@ class RestGitHubGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
         comments = [comment for comment, _finding in inline]
 
-        body = f"{summary}{_render_demoted(demoted)}{_render_broad(broad)}\n\n{self._marker}"
+        body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
         if self._reviewed_sha:
             # Record how far this review got, so the next run can review only
             # the commits pushed since (incremental review). Only stamped when
@@ -521,8 +349,8 @@ class RestGitHubGateway:
             )
             if rejected:
                 body = (
-                    f"{summary}{_render_demoted([*demoted, *rejected])}"
-                    f"{_render_broad(broad)}\n\n{self._marker}"
+                    f"{summary}{render_demoted([*demoted, *rejected])}"
+                    f"{render_broad(broad)}\n\n{self._marker}"
                 )
                 if self._reviewed_sha:
                     body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
@@ -844,8 +672,8 @@ class RestGitHubGateway:
                 continue
             first = _first_comment(node)
             body = first.get("body", "") or ""
-            fingerprint = _FINDING_MARKER.search(body)
-            identity = _IDENTITY_MARKER.search(body)
+            fingerprint = FINDING_MARKER.search(body)
+            identity = IDENTITY_MARKER.search(body)
             if fingerprint is None and identity is None:
                 continue
             active.append(
@@ -930,7 +758,7 @@ class RestGitHubGateway:
         url = f"{self._pr_api}/comments"
         rejected: list[ReviewFinding] = []
         for comment, finding in inline:
-            keys = _finding_keys(comment.get("body", ""))
+            keys = finding_keys(comment.get("body", ""))
             already = next((i for i, e in enumerate(unmatched) if e & keys), None)
             if already is not None:
                 unmatched.pop(already)  # consumed — it can't absorb a second candidate
@@ -995,7 +823,7 @@ class RestGitHubGateway:
         posted: list[set[str]] = []
         for resp in self._paginate(url):
             for item in resp.json():
-                keys = _finding_keys(item.get("body", "") or "")
+                keys = finding_keys(item.get("body", "") or "")
                 if keys:
                     posted.append(keys)
         return posted
@@ -1161,7 +989,7 @@ class RestGitHubGateway:
         wherever the loop happened to stop.
         """
         try:
-            current = _current_finding_keys(findings)
+            current = current_finding_keys(findings)
             fixed = self._fixed_threads(current)
         except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
             _log.warning("auto-resolve of fixed conversations failed: %s", exc)
@@ -1259,7 +1087,7 @@ class RestGitHubGateway:
             for node in self._walk_review_threads("isResolved comments(first:1){ nodes{ body } }"):
                 if node.get("isResolved"):
                     continue
-                if _FINDING_MARKER.search(_first_comment(node).get("body", "")):
+                if FINDING_MARKER.search(_first_comment(node).get("body", "")):
                     open_threads += 1
         except Exception as exc:  # noqa: BLE001 — disclosure is never worth a failed review
             _log.warning("counting open finding conversations failed: %s", exc)
@@ -1298,7 +1126,7 @@ class RestGitHubGateway:
                     continue
             first = _first_comment(node)
             first_body = first.get("body", "")
-            keys = _finding_keys(first_body)
+            keys = finding_keys(first_body)
             if not keys:
                 continue  # not one of ours
             if self._validated_fixed_thread_ids is None and keys & current:
@@ -1385,7 +1213,7 @@ class RestGitHubGateway:
             "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
         ):
             first = _first_comment(node)
-            match = _FINDING_MARKER.search(first.get("body", "") or "")
+            match = FINDING_MARKER.search(first.get("body", "") or "")
             if match is None:
                 continue  # not one of ours (or a thread with no comments)
             reactors = (first.get("reactions") or {}).get("nodes") or []
@@ -1476,25 +1304,13 @@ class RestGitHubGateway:
             if not f.anchored or (f.path, f.line, f.side) not in commentable:
                 demoted.append(f)
                 continue
+            # Only the position fields are GitHub's; the body is rendered the
+            # same way for every host.
             comment: dict[str, Any] = {
                 "path": f.path,
                 "line": f.line,
                 "side": f.side,
-                "body": f"**[{f.severity.upper()}{_finding_badge(f)}] "
-                f"{_defang_fences(f.title)}**"
-                f"\n\n{_defang_fences(f.body)}",
+                "body": render_inline_body(f),
             }
-            if f.suggestion is not None:
-                comment["body"] += f"\n\n```suggestion\n{_defang_fences(f.suggestion)}\n```"
-            # Stamp two hidden ids so a later run can recognise this conversation
-            # — to skip re-posting the finding, and to auto-resolve the thread
-            # once the finding is gone. The fingerprint keys the user-facing
-            # channels (`ignore_fingerprints`, 👎 feedback) and hashes the title;
-            # the identity is prose-free, so it still matches after the model
-            # rewords the same finding on a re-run. Either one matching means
-            # "already posted".
-            fp = finding_fingerprint(f.path, f.title)
-            comment["body"] += f"\n\n<!-- lgtmaybe-finding:{fp} -->"
-            comment["body"] += f"\n<!-- lgtmaybe-identity:{finding_identity(f)} -->"
             inline.append((comment, f))
         return inline, demoted, broad

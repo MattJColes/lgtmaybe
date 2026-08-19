@@ -96,6 +96,29 @@ chain:
 | ollama | None | `--api-base` pointing to the local or remote server |
 | openai-compatible | Optional key, + endpoint | `--api-base` / `OPENAI_COMPATIBLE_API_BASE` (e.g. `https://api.deepseek.com/v1` or `http://localhost:8000/v1`); key via `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for keyless local servers |
 
+## Code-host auth
+
+Everything above authenticates lgtmaybe to a **model provider**. Reaching the
+change itself — reading the diff, posting the review — is a separate credential,
+resolved from the host in the change-request URL:
+
+| Host | Variable | What it needs |
+|---|---|---|
+| GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is sufficient |
+| GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
+| Gitea | `GITEA_TOKEN` | A token with `read:repository` and `write:issue` |
+
+These are always tokens — there is no keyless path to a code host, and lgtmaybe
+does not attempt one. The token is read from the environment only; like a
+provider key it is never persisted to `.lgtmaybe.yml` or logged.
+
+!!! note "Keyless cloud auth is GitHub-only"
+
+    Bedrock, Vertex, and Azure go keyless by exchanging a **GitHub Actions**
+    OIDC token. GitLab CI and Gitea Actions have no equivalent exchange wired
+    up, so on those hosts use an API-key provider — or `ollama` against a
+    runner-local model, which needs no credential at all.
+
 ## Least-privilege IAM
 
 For Bedrock, the minimum IAM policy is `bedrock:InvokeModel` and (if streaming)
@@ -112,7 +135,8 @@ contributor role is required.
 
 ## API keys in secrets, not config
 
-For openai, anthropic, and openrouter, the key must live in a GitHub Actions
-secret (or an equivalent secret store). It must never be committed to
+For openai, anthropic, and openrouter, the key must live in a secret store —
+a GitHub Actions secret, a GitLab masked CI/CD variable, or a Gitea Actions
+secret. It must never be committed to
 `.lgtmaybe.yml` or any other file in the repository. lgtmaybe does not log or
 display key values.

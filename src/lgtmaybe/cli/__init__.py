@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import signal
 import sys
 from collections import Counter
@@ -29,6 +28,8 @@ import click
 
 from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.core.diffparse import FILE_HEADER_RE
+from lgtmaybe.core.forge import Forge, PRLocator, token_env_var
+from lgtmaybe.core.forge import parse_pr_url as locate_pr
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
@@ -38,7 +39,13 @@ from lgtmaybe.core.models import (
     ReviewPreset,
     Severity,
 )
-from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
+from lgtmaybe.core.ports import (
+    ProviderClient,
+    ReviewEngine,
+    ReviewGateway,
+    SupportsBaseCheckout,
+    SupportsFileContents,
+)
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
     INCOMPLETE_MARKER,
@@ -50,7 +57,9 @@ from lgtmaybe.engine import (
     request_interrupt,
 )
 from lgtmaybe.engine.profiling import profiler
+from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
+from lgtmaybe.gitlab import GitLabGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
@@ -78,8 +87,6 @@ class RuntimeOptions:
 
 _log = get_logger(__name__)
 
-_PR_URL_RE = re.compile(r"github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)")
-
 
 def _should_auto_post(enabled: bool, event_action: str) -> bool:
     """Gate an automatic extra to newly opened or reopened pull requests."""
@@ -97,7 +104,7 @@ def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
 
 
 def _run_upsert(
-    github: GitHubGateway,
+    github: ReviewGateway,
     provider: ProviderClient,
     cfg: ReviewConfig,
     *,
@@ -122,7 +129,7 @@ def _run_upsert(
 
 
 def run_describe(
-    github: GitHubGateway,
+    github: ReviewGateway,
     provider: ProviderClient,
     cfg: ReviewConfig,
     ctx: PRContext | None = None,
@@ -136,7 +143,7 @@ def run_describe(
 
 
 def run_diagram(
-    github: GitHubGateway,
+    github: ReviewGateway,
     provider: ProviderClient,
     cfg: ReviewConfig,
     ctx: PRContext | None = None,
@@ -177,17 +184,49 @@ def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewC
 
 
 def parse_pr_url(pr_url: str) -> tuple[str, int]:
-    """Parse a GitHub PR URL into ("owner/repo", pr_number).
+    """Parse a pull/merge request URL into ("owner/repo", number).
 
-    Raises ValueError with a clear message for anything that is not a PR URL.
+    Thin wrapper over ``core.forge.parse_pr_url`` for the callers that only want
+    the project path and number. Use the locator directly when the forge or host
+    matters. Raises ValueError with a clear message for anything unparseable.
     """
-    match = _PR_URL_RE.search(pr_url)
-    if match is None:
-        raise ValueError(
-            f"Could not parse a GitHub PR URL from {pr_url!r}. "
-            "Expected something like https://github.com/org/repo/pull/42"
-        )
-    return f"{match['owner']}/{match['repo']}", int(match["number"])
+    located = locate_pr(pr_url)
+    return located.repo, located.number
+
+
+# Which forges lgtmaybe can build a gateway for. A forge that parses but is not
+# in here is recognised-but-unimplemented, which earns a different (and much more
+# useful) error than an unparseable URL.
+_GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGateway]] = {
+    Forge.github: lambda located, token, cfg: RestGitHubGateway(
+        repo=located.repo,
+        pr_number=located.number,
+        token=token,
+        marker_key=f"{cfg.provider}/{cfg.model}",
+        resolve_fixed=cfg.resolve_fixed,
+    ),
+    Forge.gitlab: lambda located, token, cfg: GitLabGateway(
+        host=located.host,
+        repo=located.repo,
+        pr_number=located.number,
+        token=token,
+        marker_key=f"{cfg.provider}/{cfg.model}",
+    ),
+    Forge.gitea: lambda located, token, cfg: GiteaGateway(
+        host=located.host,
+        repo=located.repo,
+        pr_number=located.number,
+        token=token,
+        marker_key=f"{cfg.provider}/{cfg.model}",
+    ),
+}
+
+
+def gateway_builder(
+    forge: Forge,
+) -> Callable[[PRLocator, str, ReviewConfig], ReviewGateway] | None:
+    """The gateway factory for ``forge``, or None when it is not implemented yet."""
+    return _GATEWAY_BUILDERS.get(forge)
 
 
 def _bounded_default(cfg: ReviewConfig, concurrency: int) -> int:
@@ -334,32 +373,35 @@ def build_provider_engine(
 
 def build_review_context(
     cfg: ReviewConfig, runtime: RuntimeOptions
-) -> tuple[RestGitHubGateway, LLMReviewEngine, ProviderClient]:
+) -> tuple[ReviewGateway, LLMReviewEngine, ProviderClient]:
     """Construct the gateway, engine, and provider from config + runtime.
 
-    Builds the model side via ``build_provider_engine`` and points a REST gateway
-    at the parsed PR. Raises ValueError with an actionable message when the
-    GitHub token is missing. The provider is returned too so slash commands
-    (/ask, /describe) can use it directly.
+    Builds the model side via ``build_provider_engine`` and points the gateway
+    for the URL's forge at the parsed change request. Raises ValueError with an
+    actionable message when the forge is unsupported or its token is missing.
+    The provider is returned too so slash commands (/ask, /describe) can use it
+    directly.
     """
     if runtime.pr_url is None:
-        raise ValueError("a PR URL is required to build the GitHub review context")
-    repo, pr_number = parse_pr_url(runtime.pr_url)
+        raise ValueError("a PR URL is required to build the review context")
+    located = locate_pr(runtime.pr_url)
 
-    token = os.environ.get("GITHUB_TOKEN")
+    build_gateway = gateway_builder(located.forge)
+    if build_gateway is None:
+        raise ValueError(
+            f"{located.forge} is not supported yet — lgtmaybe can only post reviews to "
+            f"{', '.join(sorted(_GATEWAY_BUILDERS))} so far."
+        )
+
+    token_var = token_env_var(located.forge)
+    token = os.environ.get(token_var)
     if not token:
         raise ValueError(
-            "GITHUB_TOKEN is required to fetch the PR and post the review. "
+            f"{token_var} is required to fetch the change and post the review. "
             "Set it in the environment (the GitHub Action provides it automatically)."
         )
 
-    github = RestGitHubGateway(
-        repo=repo,
-        pr_number=pr_number,
-        token=token,
-        marker_key=f"{cfg.provider}/{cfg.model}",
-        resolve_fixed=cfg.resolve_fixed,
-    )
+    github = build_gateway(located, token, cfg)
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
     # deferred verdict (fetch a referenced file the auditor needs) instead of
     # dropping the finding. Read-only API fetch — never a checkout (fork-safe).
@@ -367,16 +409,21 @@ def build_review_context(
     # ast-grep finds its defining file in a lazily-cloned checkout of the trusted base
     # branch. Read-only (clone + parse, never execute the PR head), and a no-op when
     # ast-grep is absent. The clone happens only on the first symbol deferral.
+    # Both reads are optional capabilities: a forge adapter that cannot serve
+    # file text still reviews the diff, it just cannot resolve a deferral.
     resolve_symbol = (
-        build_symbol_resolver(github.base_checkout_root) if cfg.symbol_resolution else None
+        build_symbol_resolver(github.base_checkout_root)
+        if cfg.symbol_resolution and isinstance(github, SupportsBaseCheckout)
+        else None
     )
+    fetch_file = github.get_file_contents if isinstance(github, SupportsFileContents) else None
     engine, provider = build_provider_engine(
-        cfg, runtime, fetch_file=github.get_file_contents, resolve_symbol=resolve_symbol
+        cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
     )
     return github, engine, provider
 
 
-def _apply_learned_feedback(github: GitHubGateway, ctx: PRContext, cfg: ReviewConfig) -> PRContext:
+def _apply_learned_feedback(github: ReviewGateway, ctx: PRContext, cfg: ReviewConfig) -> PRContext:
     """Attach 👎-downvoted finding fingerprints to ``ctx.feedback_downvotes``.
 
     A human with write access reacting thumbs-down to one of our inline finding
@@ -407,7 +454,7 @@ def _apply_learned_feedback(github: GitHubGateway, ctx: PRContext, cfg: ReviewCo
 
 def run_review(
     *,
-    github: GitHubGateway,
+    github: ReviewGateway,
     engine: ReviewEngine,
     cfg: ReviewConfig,
     dry_run: bool,
@@ -549,7 +596,7 @@ def _fail_on_check(findings: list[ReviewFinding], fail_on: Severity) -> tuple[st
 
 
 def _incremental_context(
-    github: GitHubGateway,
+    github: ReviewGateway,
     ctx: PRContext,
     cfg: ReviewConfig,
     *,
@@ -597,7 +644,7 @@ def _diff_paths(diff: str) -> set[str]:
 
 
 def _validate_prior_findings(
-    github: GitHubGateway,
+    github: ReviewGateway,
     provider: ProviderClient | None,
     cfg: ReviewConfig,
     ctx: PRContext,
@@ -618,9 +665,9 @@ def _validate_prior_findings(
         set_fixed(set())
         return ""
 
+    from lgtmaybe.core.findings import finding_fingerprint, finding_identity
     from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
     from lgtmaybe.engine.validate import validate_findings
-    from lgtmaybe.github.rest_gateway import finding_fingerprint, finding_identity
 
     current_keys = {
         key
@@ -771,7 +818,7 @@ def execute_local_diagram(
 
 
 def _post_extras(
-    github: GitHubGateway,
+    github: ReviewGateway,
     provider: ProviderClient,
     cfg: ReviewConfig,
     ctx: PRContext,
@@ -881,7 +928,7 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         pr_number = issue["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    runtime = replace(runtime, pr_url=f"https://github.com/{repo}/pull/{pr_number}")
+    runtime = replace(runtime, pr_url=_change_url(repo, pr_number))
 
     try:
         github, engine, provider_client = build_review_context(cfg, runtime)
@@ -895,7 +942,7 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         raise click.ClickException(f"/{parsed.name} failed: {exc}") from exc
 
 
-def _post_failure(github: GitHubGateway, exc: Exception) -> None:
+def _post_failure(github: ReviewGateway, exc: Exception) -> None:
     """Post a short failure notice to the PR; never raise from here."""
     # Name the version: unlike the summary line this notice carries no model,
     # so without it a failure report says nothing about what was running.
@@ -925,18 +972,63 @@ def _post_failure(github: GitHubGateway, exc: Exception) -> None:
         pass
 
 
-def pr_url_from_event(event: dict[str, Any]) -> str:
-    """Build the PR URL from a pull_request(_target) event payload.
+def _change_url(repo: str, number: int) -> str:
+    """Build the change-request URL for whichever host is running this job.
 
-    Only github.com is supported end to end — the URL parser and the REST
-    gateway both speak to api.github.com.
+    Gitea Actions reimplements GitHub Actions' env contract — same
+    ``GITHUB_EVENT_NAME``, same ``GITHUB_EVENT_PATH``, same ``INPUT_*`` — so the
+    entrypoint needs no forge switch of its own. The one variable that does
+    differ is ``GITHUB_SERVER_URL``, which points at the Gitea instance; reading
+    it is the whole difference between reviewing the right PR and posting to
+    github.com. Absent (or github.com), the URL is unchanged from before.
+
+    The path segment is what ``core.forge`` discriminates on, so it has to match
+    the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
     """
+    server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
+    if not server or server == "https://github.com":
+        return f"https://github.com/{repo}/pull/{number}"
+    return f"{server}/{repo}/pulls/{number}"
+
+
+def mr_url_from_ci_env() -> str:
+    """Build the merge request URL from GitLab CI's predefined variables.
+
+    GitLab CI has no event payload file and no ``INPUT_*`` convention, so this
+    is the one entrypoint that cannot be shared with the GitHub Actions path.
+    Everything downstream is identical: the URL goes through the same locator
+    and the same gateway registry.
+
+    Raises with the variable's own name when one is missing — the usual cause is
+    a job running on a branch pipeline rather than a merge request one, and
+    naming ``CI_MERGE_REQUEST_IID`` points straight at the ``rules:`` fix.
+    """
+    host = os.environ.get("CI_SERVER_HOST") or ""
+    server = host and f"https://{host}" or os.environ.get("CI_SERVER_URL", "").rstrip("/")
+    if not server:
+        raise click.ClickException(
+            "CI_SERVER_HOST is not set — lgtmaybe cannot tell which GitLab to post to."
+        )
+    project = os.environ.get("CI_MERGE_REQUEST_PROJECT_PATH") or os.environ.get("CI_PROJECT_PATH")
+    if not project:
+        raise click.ClickException("CI_PROJECT_PATH is not set — no project to review.")
+    iid = os.environ.get("CI_MERGE_REQUEST_IID")
+    if not iid:
+        raise click.ClickException(
+            "CI_MERGE_REQUEST_IID is not set — this pipeline is not for a merge request. "
+            'Run the job with `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"`.'
+        )
+    return f"{server}/{project}/-/merge_requests/{iid}"
+
+
+def pr_url_from_event(event: dict[str, Any]) -> str:
+    """Build the change-request URL from a pull_request(_target) event payload."""
     try:
         repo = event["repository"]["full_name"]
         number = event["pull_request"]["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    return f"https://github.com/{repo}/pull/{number}"
+    return _change_url(repo, number)
 
 
 #: Inputs ``action()`` handles itself rather than passing to ``ReviewConfig``:

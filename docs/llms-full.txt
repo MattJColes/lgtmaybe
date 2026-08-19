@@ -17,13 +17,13 @@ Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 </div>
 
 lgtmaybe reviews the code a pull request changes. Pick OpenAI, Claude, Bedrock,
-Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it as a
-GitHub Action or from your terminal. GitHub gets inline comments and one
-summary; locally, you get the same findings before you push.
+Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it on
+**GitHub, GitLab, or Gitea** — or from your terminal. The change gets inline
+comments and one summary; locally, you get the same findings before you push.
 
 It reads the diff and a little surrounding code, but only comments on changed
-lines. On GitHub it never checks out or runs the pull request. Generated files
-and binaries are skipped, secrets are redacted, and all PR text is treated as
+lines. It never checks out or runs the change. Generated files and binaries are
+skipped, secrets are redacted, and all author-supplied text is treated as
 untrusted.
 
 It checks for:
@@ -43,8 +43,8 @@ Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
 **`/describe`** writes a structured overview, **`/diagram`** draws
 [the change](how-to/generate-a-change-diagram.md) — a flowchart of what it
 touches, plus a sequence diagram of the flow it alters — and
-**`/ask <question>`** answers in the PR. Run `lgtmaybe diagram` to draw the same
-map locally before you push.
+**`/ask <question>`** answers in the change. Run `lgtmaybe diagram` to draw the
+same map locally before you push.
 
 ```mermaid
 flowchart LR
@@ -66,7 +66,7 @@ flowchart LR
 <div class="grid cards" markdown>
 
 - **Tutorial** — [Getting started](tutorial/getting-started.md): your first review with ollama, locally and free.
-- **How-to** — task recipes: [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md).
+- **How-to** — task recipes: [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md).
 - **Reference** — [Configuration](reference/config.md): every config field and schema.
 - **Explanation** — [What gets reviewed](explanation/what-gets-reviewed.md), [Architecture](explanation/architecture.md), [Auth model](explanation/auth-model.md), [Data & privacy](explanation/data-and-privacy.md).
 
@@ -85,6 +85,23 @@ flowchart LR
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint |
 | `ollama` | None — local only, zero cost |
 | `openai-compatible` | `--api-base` to any OpenAI `/v1` endpoint; key optional (placeholder for keyless local servers) |
+
+## Where it posts
+
+The model provider and the code host are independent — any provider above works
+on any host below.
+
+| Host | How it runs | Token | Guide |
+|---|---|---|---|
+| GitHub | GitHub Action | `GITHUB_TOKEN` | [GitHub Action](how-to/use-as-github-action.md) |
+| GitLab | GitLab CI job | `GITLAB_TOKEN` | [Review on GitLab](how-to/review-on-gitlab.md) |
+| Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
+| None | `lgtmaybe review` locally | — | [Install the CLI](how-to/install-the-cli.md) |
+
+The review is identical on all three. What differs is what each host's API can
+do with the result — auto-resolving a fixed finding, reviewing only new commits,
+and keyless cloud auth are not available everywhere. See
+[Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 
 ## For AI agents
 
@@ -207,8 +224,15 @@ to see it drawn. See
 ## Step 6 — Post reviews on real pull requests
 
 The CLI reviews local changes. To run lgtmaybe on actual pull requests — inline
-comments and a summary posted back to GitHub — add the GitHub Action to your
-repo. See [Use as a GitHub Action](../how-to/use-as-github-action.md).
+comments and a summary posted back to the change — wire it into your code host.
+The review is the same on all three; only the plumbing differs:
+
+- **GitHub** — add the Action to your repo:
+  [Use as a GitHub Action](../how-to/use-as-github-action.md)
+- **GitLab** — add a CI job:
+  [Review on GitLab](../how-to/review-on-gitlab.md)
+- **Gitea** — add a Gitea Actions workflow:
+  [Review on Gitea](../how-to/review-on-gitea.md)
 
 ## What happened under the hood
 
@@ -705,6 +729,12 @@ The [live benchmark repository][bench] provides:
 Use this guide to add lgtmaybe to a repository as a GitHub Actions workflow
 that reviews pull requests automatically.
 
+!!! tip "Not on GitHub?"
+
+    lgtmaybe runs the same review on GitLab and Gitea — see
+    [Review on GitLab](./review-on-gitlab.md) or
+    [Review on Gitea](./review-on-gitea.md).
+
 Use lgtmaybe from the
 [GitHub Marketplace listing](https://github.com/marketplace/actions/lgtmaybe).
 It is a **GitHub Action**: the reviewer runs in your workflow, and its provider,
@@ -1017,6 +1047,20 @@ use a full version tag:
 uses: MattJColes/lgtmaybe@v2.0.0
 ```
 
+## On another code host
+
+The review is identical on GitLab and Gitea; only the wiring and a few
+host-capability differences change:
+
+- [Review on GitLab](./review-on-gitlab.md) — a CI job running
+  `lgtmaybe gitlab-ci` on merge request pipelines.
+- [Review on Gitea](./review-on-gitea.md) — Gitea Actions, running the same
+  container as GitHub.
+
+Keyless cloud auth (Bedrock, Vertex, Azure) relies on GitHub Actions' OIDC
+token, so it is available here only. On the other hosts use an API-key provider
+or `ollama`.
+
 ---
 
 <!-- Source: https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/ -->
@@ -1136,6 +1180,140 @@ steps:
 
 Do not combine `app_id` / `app_private_key` with
 `github_identity: lgtmaybe`. The Action validates this before minting a token.
+
+---
+
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-on-gitea/ -->
+
+# Review pull requests on Gitea
+
+lgtmaybe posts reviews to Gitea as well as GitHub. The review itself is
+identical — same lenses, same reflection pass, same findings — because none of
+that ever depended on the host. Only the adapter that fetches the diff and posts
+the comments is different.
+
+## Set it up
+
+1. **Create a token.** In Gitea, go to *Settings → Applications → Access Tokens*
+   and create a token with `read:repository` and `write:issue` scopes. Add it to
+   your repository as a secret named `GITEA_TOKEN`.
+
+2. **Add a provider key.** Add the API key for whichever model you want as a
+   second secret — for example `ANTHROPIC_API_KEY`.
+
+3. **Add the workflow.** Copy
+   [`examples/gitea/lgtmaybe.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/gitea/lgtmaybe.yml)
+   into your repository at `.gitea/workflows/lgtmaybe.yml`.
+
+That is the whole setup. Gitea Actions reimplements the GitHub Actions runtime,
+so lgtmaybe's container image runs unchanged, and it reads `GITHUB_SERVER_URL`
+— which Gitea points at your own instance — to know which host to post back to.
+
+## Run it locally instead
+
+The CLI takes a Gitea pull-request URL directly:
+
+```bash
+export GITEA_TOKEN=...
+export ANTHROPIC_API_KEY=...
+lgtmaybe review --provider anthropic --model claude-sonnet-4-6 \
+  --pr-url https://gitea.example.com/team/service/pulls/12
+```
+
+## What works, and what does not
+
+Everything about the *review* works: every lens, the self-reflection pass,
+secret redaction, prompt-injection hardening, static-analysis fusion, path
+filters, finding rules, and the `/review`, `/improve`, `/ask`, `/describe` and
+`/diagram` slash commands.
+
+Three things are unavailable on Gitea, and lgtmaybe skips them rather than
+failing:
+
+| Not available | Why | What happens instead |
+|---|---|---|
+| Incremental review | Gitea's compare endpoint returns commit metadata, not a unified diff | Every run is a full review |
+| Resolve-on-fix | Gitea has no thread-resolution API | Fixed findings' comments stay open |
+| Keyless cloud auth | The OIDC/WIF exchange is a GitHub Actions feature | Use an API key, or `ollama` for a local model |
+
+Because a submitted Gitea review cannot be edited, lgtmaybe reads the hidden
+finding ids already on the pull request and declines to post a finding twice.
+The summary lives in an ordinary comment, which *is* editable, so it updates in
+place on each run.
+
+## Fork safety
+
+Gitea has no `pull_request_target`, so the `pull_request` event runs with the
+repository's secrets. The safety rule is unchanged and holds for the same
+reason: lgtmaybe never checks out or executes pull-request code. It reads the
+diff through the API and treats every byte of it as untrusted input.
+
+---
+
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-on-gitlab/ -->
+
+# Review merge requests on GitLab
+
+lgtmaybe posts reviews to GitLab as well as GitHub. The review itself is
+identical — same lenses, same reflection pass, same findings — because none of
+that ever depended on the host. Only the adapter that fetches the diff and posts
+the comments is different.
+
+## Set it up
+
+1. **Create a token.** In your project, go to *Settings → Access Tokens* and
+   create a project access token with the `api` scope and at least the Developer
+   role. Add it under *Settings → CI/CD → Variables* as `GITLAB_TOKEN`, masked.
+
+2. **Add a provider key.** Add the API key for whichever model you want as a
+   second masked variable — for example `ANTHROPIC_API_KEY`.
+
+3. **Add the job.** Copy
+   [`examples/gitlab/.gitlab-ci.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/gitlab/.gitlab-ci.yml)
+   into your repository, or merge the `lgtmaybe` job into your existing
+   pipeline.
+
+The job must run on merge request pipelines — `rules: - if: $CI_PIPELINE_SOURCE
+== "merge_request_event"`. On a branch pipeline there is no merge request to
+review, and lgtmaybe will tell you so by name rather than guessing.
+
+## Run it locally instead
+
+The CLI takes a merge request URL directly:
+
+```bash
+export GITLAB_TOKEN=...
+export ANTHROPIC_API_KEY=...
+lgtmaybe review --provider anthropic --model claude-sonnet-4-6 \
+  --pr-url https://gitlab.com/group/subgroup/project/-/merge_requests/7
+```
+
+Nested group paths work — everything before `/-/merge_requests/` is the project.
+
+## How it differs from GitHub
+
+GitLab has no batched review object, so **each finding is posted as its own
+discussion**, anchored by the merge request's diff refs and the old or new file
+line. The summary lives in a note, which updates in place on each run.
+
+Resolve-on-fix **does** work here: GitLab discussions resolve over plain REST,
+where GitHub needs GraphQL. A finding is only resolved once the follow-up
+validation pass has confirmed it is actually fixed — never merely because it
+stopped being reported.
+
+One thing is not available yet:
+
+| Not available | Why | What happens instead |
+|---|---|---|
+| Incremental review | Not yet built — GitLab's compare endpoint returns per-file diffs that could be reassembled, so this is a "not yet", not a "cannot" | Every run is a full review |
+| Keyless cloud auth | The OIDC/WIF exchange is a GitHub Actions feature | Use an API key, or `ollama` |
+
+## Fork safety
+
+lgtmaybe never checks out or executes merge request code. It reads the diff
+through the API and treats every byte of it as untrusted input — which is why
+the example job sets `GIT_STRATEGY: none` and does not clone the repository at
+all.
 
 ---
 
@@ -3665,8 +3843,9 @@ They do not. On the recommended `pull_request_target` trigger, the workflow
 checks out the **base** branch — the code already merged — and never the PR
 head. `directory_rules` and the files it names are read from that checkout, the
 same source `.lgtmaybe.yml` and `lens_paths` already come from. lgtmaybe never
-fetches context files through the GitHub API, which would resolve them at the
-(untrusted) PR head.
+fetches context files through the host's API, which would resolve them at the
+(untrusted) PR head. The same holds on GitLab and Gitea: context comes from the
+checked-out workspace, never from the change's head.
 
 The practical rule: a fork PR can change `ARCHITECTURE.md` in its own branch and
 lgtmaybe will still read the base branch's copy. Review changes to your config
@@ -4674,7 +4853,7 @@ Finding severity, ordered low to high. Use `min_severity` in config to suppress 
 
 ## ReviewFinding
 
-The structured output the model must return for each inline comment. All fields are validated by pydantic before anything is posted to GitHub.
+The structured output the model must return for each inline comment. All fields are validated by pydantic before anything is posted.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -5997,14 +6176,14 @@ altering what it means is.
 # What gets reviewed
 
 This page explains what lgtmaybe looks at, how it bounds the work, and what the
-output looks like — on a GitHub PR and on the command line.
+output looks like — on a pull or merge request, and on the command line.
 
 ## What it looks at
 
-lgtmaybe reviews the **diff of a pull request** — the lines the PR adds or
-changes — not the whole repository. It fetches that diff from the GitHub REST
-API and **never checks out or executes your code**, so a malicious PR can't run
-anything in the reviewer's environment. The diff is treated as untrusted input
+lgtmaybe reviews the **diff of a pull request** (or a GitLab merge request) —
+the lines it adds or changes, not the whole repository. It fetches that diff
+from your code host's REST API and **never checks out or executes your code**,
+so a malicious change can't run anything in the reviewer's environment. The diff is treated as untrusted input
 throughout, including against prompt-injection attempts hidden in PR text.
 
 To review changes in context rather than in isolation, lgtmaybe also pads each
@@ -6050,7 +6229,7 @@ hunt the bugs a change introduces and grade them by impact:
 - **Aliasing & mutation** — mutable default arguments, mutating a collection while
   iterating it, sharing a mutable value the caller still owns.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [HIGH] possible None dereference, where get_user can return None but .email is accessed without a guard](../assets/review-correctness.png){ width="660" }
 
@@ -6087,7 +6266,7 @@ vulnerability class in the title. It actively looks for:
 - **Resource / DoS safety** — missing timeouts, unbounded loops or allocations,
   regexes vulnerable to catastrophic backtracking (ReDoS).
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability in a find_user function, explaining the unsafe string concatenation and suggesting a parameterized query](../assets/review-sql-injection.png){ width="660" }
 
@@ -6116,7 +6295,7 @@ code when the diff shows it — these are objective, not stylistic:
 The reviewer only raises these when the diff itself shows the change; it does not
 speculate about code it cannot see.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [MEDIUM] deprecated datetime.utcnow() call and suggesting datetime.now(timezone.utc)](../assets/review-deprecation.png){ width="660" }
 
@@ -6144,7 +6323,7 @@ Two lighter-weight checks round out a review:
 
 A missing test — note the runnable test dropped into the suggestion:
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [LOW] new branch added without a test, with a runnable pytest suggestion](../assets/review-tests.png){ width="660" }
 
@@ -6154,7 +6333,7 @@ A missing test — note the runnable test dropped into the suggestion:
 
 A documentation gap on a new public function:
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging an [INFO] public function missing a docstring, with a suggested docstring](../assets/review-documentation.png){ width="660" }
 
@@ -6186,7 +6365,7 @@ in a hot path):
 It sticks to changes the diff actually shows and avoids micro-optimisations with
 no measurable impact.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [HIGH] N+1 query inside a loop, suggesting a single batched query](../assets/review-performance.png){ width="660" }
 
@@ -6211,7 +6390,7 @@ it needs to be (`info`/`medium`), preferring a concrete simplification in the
 
 Like the documentation lens, it stays quiet on self-evident, already-simple code.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [MEDIUM] deeply nested conditional and suggesting guard clauses](../assets/review-complexity.png){ width="660" }
 
@@ -6431,7 +6610,11 @@ public surface left undocumented — are explicitly exempt and still raised.
 
 ## What the response looks like
 
-### On a GitHub pull request
+### On a pull or merge request
+
+The rendering below is GitHub's. GitLab and Gitea show the same findings with
+the same badges; [how each host posts them](#how-each-host-posts) differs, and
+is covered at the end of this section.
 
 lgtmaybe posts **one review** containing:
 
@@ -6470,8 +6653,9 @@ A comment's title line carries the finding's provenance in its brackets:
 Each half drops away when it isn't there: with `reflect: false` there is no score
 and the badge is just the lens.
 
-One asymmetry worth knowing: GitHub's review API can't edit an inline comment
-once it's posted, so an inline comment's score is **frozen at first post** — a
+One asymmetry worth knowing: neither GitHub's nor Gitea's review API can edit an
+inline comment once it's posted, so an inline comment's score is **frozen at
+first post** — a
 later run that judges the same finding differently won't change it. Findings in
 the summary body (the "Additional findings" and "Broader observations" sections)
 are rewritten on every run, so those badges do track. That's how severity and
@@ -6494,6 +6678,27 @@ Resolving a thread uses GitHub's GraphQL API; the workflow's default
 `GITHUB_TOKEN` (with `pull-requests: write`, already needed to post the review)
 is sufficient. The step is best-effort — if it can't run, the review itself still
 posts normally.
+
+On **GitLab** the same thing happens over plain REST rather than GraphQL. On
+**Gitea** it does not happen at all — Gitea has no thread-resolution API, so
+findings' comments stay open for a human to close.
+
+### How each host posts
+
+The findings are identical everywhere. What each host's API allows is not:
+
+| | GitHub | GitLab | Gitea |
+|---|---|---|---|
+| Inline comments | one batched review | one discussion per finding | one batched review |
+| Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place |
+| Avoiding duplicates on a re-run | edits the review | skips ids already posted | skips ids already posted |
+| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
+| Incremental review of new commits | ✅ | not yet | ✗ no compare diff |
+
+The reason for the differences: a submitted **Gitea** review can't be edited, so
+its summary moves to an ordinary comment and duplicate findings are filtered
+*before* posting. **GitLab** has no batched review object at all, so each
+finding becomes its own positioned discussion.
 
 When a PR is clean (no findings, and every file was within the caps), the summary
 is a simple:
@@ -6569,26 +6774,108 @@ lets tests swap in fakes without patching.
 ```mermaid
 flowchart TB
     subgraph core["core — never imports an adapter"]
-        ports["ports.py<br/>ProviderClient · GitHubGateway · ReviewEngine"]
+        ports["ports.py<br/>ProviderClient · ReviewGateway · ReviewEngine"]
         models["models.py<br/>ReviewConfig · ReviewFinding · ProviderResult · PRContext"]
     end
     providers["providers/<br/>litellm adapter"] -- implements --> ports
-    github["github/<br/>REST adapter"] -- implements --> ports
+    github["github/<br/>GitHub REST adapter"] -- implements --> ports
+    gitlab["gitlab/<br/>GitLab REST adapter"] -- implements --> ports
+    gitea["gitea/<br/>Gitea REST adapter"] -- implements --> ports
 ```
+
+Two independent axes meet at these ports: which **model** reviews the code
+(`ProviderClient`) and which **code host** the review is posted to
+(`ReviewGateway`). Any combination works, because neither side knows about the
+other.
 
 **`core/ports.py`** — the seam. Three abstract base classes:
 
 - `ProviderClient` — one method: `complete(messages, model)` returns a
   `ProviderResult` (text + token usage).
-- `GitHubGateway` — `get_pr_context()` fetches the PR diff and metadata;
+- `ReviewGateway` — `get_pr_context()` fetches the change diff and metadata;
   `post_review()` posts batched inline comments and a summary;
   `post_issue_comment()` posts a standalone comment (used by `/ask` and as the
-  describe/diagram fallback).
+  describe/diagram fallback). These three are the whole required surface, so a
+  new forge adapter can be useful long before it is complete; richer behaviour
+  (file reads, incremental review, thread resolution, labels, checks, feedback)
+  is declared by an optional `Supports*` capability protocol that callers probe
+  for and skip when absent.
 - `ReviewEngine` — `review(ctx, cfg)` returns `(findings, summary)`.
 
 The ports were frozen in the foundation step. Other tracks (providers, github,
 engine, CLI) build against these stable signatures. Changing a port requires
 consensus across all tracks.
+
+## Code hosts (forges)
+
+lgtmaybe calls a code host a **forge** internally, to keep it distinct from a
+model *provider* — the two are separate choices. `core/forge.py` holds
+everything host-specific outside the adapters themselves: a `Forge` enum, a
+`PRLocator` (forge + host + repo + number) parsed from a change-request URL, and
+the environment variable each host's token lives in.
+
+A URL is all lgtmaybe needs to work out the rest:
+
+| URL shape | Forge | Token |
+|---|---|---|
+| `github.com/org/repo/pull/42` | GitHub | `GITHUB_TOKEN` |
+| `gitlab.com/group/sub/project/-/merge_requests/42` | GitLab | `GITLAB_TOKEN` |
+| `gitea.example.com/org/repo/pulls/42` | Gitea | `GITEA_TOKEN` |
+
+The host is carried, not assumed, because self-hosted GitLab and Gitea are the
+normal case. `cli._GATEWAY_BUILDERS` maps the resolved forge to its adapter.
+
+### Required surface vs optional capabilities
+
+`ReviewGateway` is deliberately three methods. Everything richer is an optional
+`Supports*` protocol that a caller probes for and skips when absent, so an
+adapter can be useful long before it is complete — and, more importantly, so it
+can be **honest** about what its host genuinely cannot do rather than failing at
+run time.
+
+| Capability | GitHub | GitLab | Gitea |
+|---|---|---|---|
+| `SupportsFileContents` — read head text for context | ✅ | ✅ | ✅ |
+| `SupportsDescribe` / `SupportsDiagram` — upserted comments | ✅ | ✅ | ✅ |
+| `SupportsLabels` | ✅ | ✅ | ✅ |
+| `SupportsChecks` — check run / commit status | ✅ | ✅ | ✅ |
+| `SupportsThreadResolution` — auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
+| `SupportsIncremental` — review only new commits | ✅ | not yet | ✗ no compare diff |
+| `SupportsBaseCheckout` — clone base for symbol lookup | ✅ | ✗ | ✗ |
+
+A test asserts the GitHub adapter satisfies every declared capability, and that
+the others do **not** claim the ones their host cannot serve — which is what
+stops the list drifting into fiction.
+
+### Where the hosts genuinely differ
+
+Gitea is nearly a copy of GitHub; GitLab is not.
+
+- **GitHub** batches every inline comment into one review object it can later
+  edit, and resolves threads over GraphQL.
+- **Gitea** mirrors GitHub's API, but a submitted review is **immutable**. So
+  the summary lives in an ordinary issue comment (which can be edited) and
+  findings are de-duplicated *before* posting, by reading the hidden ids already
+  on the pull request.
+- **GitLab** has no batched review object at all: each finding is its own
+  **discussion**, positioned by old/new path and line plus the merge request's
+  `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST.
+
+lgtmaybe keeps GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
+it at each adapter's boundary — `new_position`/`old_position` on Gitea,
+`new_line`/`old_line` on GitLab.
+
+### Entrypoints
+
+GitHub and Gitea share one entrypoint: Gitea Actions reimplements the GitHub
+Actions runtime, so the same `action` command and the same container work on
+both. The only variable that differs is `GITHUB_SERVER_URL`, which Gitea points
+at your own instance.
+
+GitLab CI has neither an event payload file nor an `INPUT_*` convention, so it
+gets its own `gitlab-ci` command that reads GitLab's predefined `CI_*`
+variables. Everything downstream — locator, gateway registry, engine — is
+shared.
 
 ## Review pipeline
 
@@ -6619,8 +6906,8 @@ flowchart TD
 on every provider — worker count decides only whether they overlap. The `full`
 preset fans out one call per category, and custom lenses join the same fan-out.)
 
-1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
-   metadata from the GitHub REST API. No PR code is checked out or executed.
+1. **fetch** — `ReviewGateway.get_pr_context()` retrieves the change diff and
+   metadata from the forge's API. No change code is checked out or executed.
    The diff is treated as untrusted input throughout.
 
 2. **compress** — the diff is filtered to remove generated files, lockfiles,
@@ -6976,6 +7263,29 @@ chain:
 | ollama | None | `--api-base` pointing to the local or remote server |
 | openai-compatible | Optional key, + endpoint | `--api-base` / `OPENAI_COMPATIBLE_API_BASE` (e.g. `https://api.deepseek.com/v1` or `http://localhost:8000/v1`); key via `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for keyless local servers |
 
+## Code-host auth
+
+Everything above authenticates lgtmaybe to a **model provider**. Reaching the
+change itself — reading the diff, posting the review — is a separate credential,
+resolved from the host in the change-request URL:
+
+| Host | Variable | What it needs |
+|---|---|---|
+| GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is sufficient |
+| GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
+| Gitea | `GITEA_TOKEN` | A token with `read:repository` and `write:issue` |
+
+These are always tokens — there is no keyless path to a code host, and lgtmaybe
+does not attempt one. The token is read from the environment only; like a
+provider key it is never persisted to `.lgtmaybe.yml` or logged.
+
+!!! note "Keyless cloud auth is GitHub-only"
+
+    Bedrock, Vertex, and Azure go keyless by exchanging a **GitHub Actions**
+    OIDC token. GitLab CI and Gitea Actions have no equivalent exchange wired
+    up, so on those hosts use an API-key provider — or `ollama` against a
+    runner-local model, which needs no credential at all.
+
 ## Least-privilege IAM
 
 For Bedrock, the minimum IAM policy is `bedrock:InvokeModel` and (if streaming)
@@ -6992,8 +7302,9 @@ contributor role is required.
 
 ## API keys in secrets, not config
 
-For openai, anthropic, and openrouter, the key must live in a GitHub Actions
-secret (or an equivalent secret store). It must never be committed to
+For openai, anthropic, and openrouter, the key must live in a secret store —
+a GitHub Actions secret, a GitLab masked CI/CD variable, or a Gitea Actions
+secret. It must never be committed to
 `.lgtmaybe.yml` or any other file in the repository. lgtmaybe does not log or
 display key values.
 
@@ -7192,10 +7503,17 @@ The token is not sent to any LLM provider. It requires the minimum scopes:
 
 ## Fork pull requests
 
-lgtmaybe uses the `pull_request_target` trigger, which runs in the context of
-the **base branch**. PR code from the fork is never checked out or executed.
-The diff is fetched exclusively through the GitHub API. This prevents a
-malicious PR from gaining access to repository secrets.
+On GitHub, lgtmaybe uses the `pull_request_target` trigger, which runs in the
+context of the **base branch**. PR code from the fork is never checked out or
+executed. The diff is fetched exclusively through the host's API. This prevents
+a malicious PR from gaining access to repository secrets.
+
+GitLab and Gitea have no `pull_request_target` equivalent — their merge- and
+pull-request pipelines run with the project's own secrets. The protection is
+unchanged and holds for the same reason: lgtmaybe never checks out or executes
+change-request code on any host, so there is nothing for an attacker to run. The
+supplied GitLab job even sets `GIT_STRATEGY: none`, so the repository is never
+cloned at all.
 
 ---
 
@@ -7312,9 +7630,11 @@ Optional, for repos where you want belt-and-braces:
 
 ## Reviews are safe to run for anyone
 
-Whoever triggers a review, a malicious PR can't use it to do harm: lgtmaybe
-triggers on `pull_request_target` (so it has the secrets it needs) but **never
-checks out or executes PR code** — it fetches the diff through the GitHub API and
-treats it as untrusted input. So opening the gate wide is a cost decision, not a
+Whoever triggers a review, a malicious PR can't use it to do harm: on GitHub
+lgtmaybe triggers on `pull_request_target` (so it has the secrets it needs) but
+**never checks out or executes PR code** — it fetches the diff through the
+host's API and treats it as untrusted input. That second half is what actually
+does the work, and it holds identically on GitLab and Gitea, which have no
+`pull_request_target` of their own. So opening the gate wide is a cost decision, not a
 security one. The full boundary — secret redaction, prompt-injection defence, and
 fork safety — is in [Data and Privacy](data-and-privacy.md).

@@ -144,7 +144,7 @@ engine.scan-manifests:
   rule:
     kind: function_definition
     has: { field: name, regex: '^is_scannable_manifest$' }
-  files: [src/lgtmaybe/github/**/*.py]
+  files: [src/lgtmaybe/core/diff.py]
 
 engine.profile-findings:
   rule:

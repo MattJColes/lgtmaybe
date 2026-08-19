@@ -1,0 +1,49 @@
+# Copy into your Gitea repo at .gitea/workflows/lgtmaybe.yml
+#
+# Gitea Actions reimplements the GitHub Actions runtime, so lgtmaybe's container
+# runs unchanged. Two things differ from the GitHub examples:
+#
+#   * There is no `pull_request_target`. Gitea runs `pull_request` with the
+#     repository's secrets, so the same fork-safety rule applies for the same
+#     reason: lgtmaybe never checks out or executes pull-request code, it only
+#     reads the diff through the API.
+#   * The token variable is GITEA_TOKEN, and lgtmaybe reads GITHUB_SERVER_URL
+#     (which Gitea sets to your own instance) to know which host to post to.
+#
+# Add an API key secret for whichever model provider you use. Cloud providers
+# with keyless OIDC (Bedrock, Vertex, Azure) are GitHub-only for now — on Gitea
+# use an API key, or ollama for a fully local review.
+name: lgtmaybe
+
+on:
+  pull_request:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # The issue_comment arm fires on every comment on every pull request, so
+    # require a slash command in the body before claiming a runner.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram')))
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/mattjcoles/lgtmaybe:v2
+    steps:
+      - name: Review
+        run: python -m lgtmaybe action
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          INPUT_PROVIDER: anthropic
+          INPUT_MODEL: claude-sonnet-4-6
+          INPUT_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

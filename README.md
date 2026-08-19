@@ -4,16 +4,16 @@
 
 # lgtmaybe
 
-Provider-agnostic PR reviewer. Seven hosted providers, local ollama, and any
-OpenAI-compatible endpoint — one flag, no static keys for cloud providers. Posts
-inline review comments and a summary.
+Provider-agnostic code reviewer for **GitHub, GitLab, and Gitea**. Seven hosted
+model providers, local ollama, and any OpenAI-compatible endpoint — one flag, no
+static keys for cloud providers. Posts inline review comments and a summary.
 
 📖 **Full documentation:** <https://lgtmaybe.coles.codes/>
 
 ## What it reviews
 
-lgtmaybe fetches the PR diff from the GitHub API and reviews the lines a pull
-request changes. It never checks out or runs your code. To judge each change in
+lgtmaybe fetches the diff through your code host's API and reviews the lines a
+pull request (or merge request) changes. It never checks out or runs your code. To judge each change in
 context it also reads a few surrounding lines from the file. It only ever
 comments on what the PR actually changed, not the whole repository.
 
@@ -100,8 +100,8 @@ reviewing files whole, with its *worst* run matching the whole-file method's
 title, an explanation, and an optional suggested fix — so it renders the same
 everywhere:
 
-- **On a GitHub PR** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the same comments instead of duplicating them, auto-resolves a conversation once its finding is fixed, and a clean PR gets a 👍 **LGTM!**.
-- **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted to GitHub.
+- **On a pull or merge request** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the summary instead of duplicating it, never repeats a finding it already posted, and a clean change gets a 👍 **LGTM!**. On GitHub and GitLab a conversation auto-resolves once its finding is verified fixed; Gitea has no thread-resolution API, so its comments stay open. See [Where it posts](#where-it-posts).
+- **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted anywhere.
 
 Beyond the review, slash commands on the PR route to the same engine: **`/review`** and **`/improve`** post (or refresh) the review, **`/ask <question>`** answers a question about the change in-thread, **`/describe`** (`auto_describe`) posts a **structured description**, and **`/diagram`** (`auto_diagram`) posts a **compact change diagram** — an automatically laid-out Mermaid flowchart of the components the PR touches, with changes marked on nodes, plus a Mermaid **sequence diagram** of the run-time flow the change alters (omitted when there isn't one), both rendered natively in the comment, with a text fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
 
@@ -143,8 +143,9 @@ pull request. See
 
 `lgtmaybe --help` lists every command with usage examples; `lgtmaybe review --help`
 shows the full option reference. To post reviews on real pull requests, wire up
-the
-[GitHub Action](#use-as-a-github-action). See
+the [GitHub Action](#use-as-a-github-action) — or, on another host,
+[GitLab CI](docs/how-to/review-on-gitlab.md) or
+[Gitea Actions](docs/how-to/review-on-gitea.md). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
 
 > **Picking a model:** compare cloud and local models separately. In the current
@@ -168,6 +169,29 @@ the
 | `azure` | Ambient Azure AD creds — GitHub OIDC, no static key (or `AZURE_API_KEY`) + endpoint | [Azure](docs/how-to/review-with-azure.md) |
 | `ollama` | None — local only, zero cost | [ollama](docs/how-to/run-locally-with-ollama.md) |
 | `openai-compatible` | Any OpenAI `/v1` endpoint via `--api-base` (DeepSeek, llama.cpp, LM Studio, vLLM). Key optional — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for local servers | [Local & OpenAI-compatible](docs/how-to/use-a-custom-openai-compatible-endpoint.md) |
+
+## Where it posts
+
+The model provider and the code host are independent choices — any provider
+above works on any host below.
+
+| Host | How it runs | Token | Guide |
+|---|---|---|---|
+| GitHub | GitHub Action (`MattJColes/lgtmaybe@v2`) | `GITHUB_TOKEN` | [GitHub Action](docs/how-to/use-as-github-action.md) |
+| GitLab | GitLab CI job (`lgtmaybe gitlab-ci`) | `GITLAB_TOKEN` | [Review on GitLab](docs/how-to/review-on-gitlab.md) |
+| Gitea | Gitea Actions (same container) | `GITEA_TOKEN` | [Review on Gitea](docs/how-to/review-on-gitea.md) |
+| None | `lgtmaybe review` on your local diff | — | [Install the CLI](docs/how-to/install-the-cli.md) |
+
+The review is the same everywhere — same lenses, same reflection pass, same
+findings. What differs is what each host's API can do with the result:
+
+| | GitHub | GitLab | Gitea |
+|---|---|---|---|
+| Inline comments + summary | ✅ | ✅ | ✅ |
+| Slash commands | ✅ | ✅ | ✅ |
+| Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API |
+| Incremental re-review | ✅ | not yet | ✗ no compare diff |
+| Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key |
 
 ## Documentation
 
@@ -194,6 +218,8 @@ are published at the docs root.
 - [Run locally with ollama](docs/how-to/run-locally-with-ollama.md)
 - [Local models & other OpenAI providers](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
 - [Use as a GitHub Action](docs/how-to/use-as-github-action.md)
+- [Review on GitLab](docs/how-to/review-on-gitlab.md)
+- [Review on Gitea](docs/how-to/review-on-gitea.md)
 - [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
 
@@ -252,14 +278,29 @@ jobs:
           api_key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Using another platform? Copy-paste workflows for every cloud and API-key
-provider live in
+Using a different **model provider**? Copy-paste workflows for every cloud and
+API-key provider live in
 [`examples/workflows/`](examples/workflows/). Cloud providers (Bedrock, Vertex,
 Azure) are **keyless** — pass `aws_role_arn` / `gcp_wif_provider` /
 `azure_client_id` and the action does the OIDC/WIF exchange for you (needs
 `id-token: write`). See
 [Use as a GitHub Action](docs/how-to/use-as-github-action.md). ollama is local
 only — run it through the [CLI](docs/how-to/run-locally-with-ollama.md) instead.
+
+### Not on GitHub?
+
+lgtmaybe runs the same review on GitLab and Gitea. Only the wiring changes:
+
+- **GitLab** — a CI job running `lgtmaybe gitlab-ci`, gated on merge request
+  pipelines. See [Review on GitLab](docs/how-to/review-on-gitlab.md) and
+  [`examples/gitlab/`](examples/gitlab/).
+- **Gitea** — Gitea Actions runs the same container as GitHub, because it
+  reimplements the same runtime. See
+  [Review on Gitea](docs/how-to/review-on-gitea.md) and
+  [`examples/gitea/`](examples/gitea/).
+
+Keyless cloud auth is a GitHub Actions feature, so on GitLab and Gitea use an
+API-key provider — or `ollama` against a runner-local model for zero cost.
 
 By default, reviews post as `github-actions[bot]`. To post as
 `lgtmaybe[bot]`, install the public

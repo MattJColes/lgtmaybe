@@ -94,7 +94,7 @@ Finding severity, ordered low to high. Use `min_severity` in config to suppress 
 
 ## ReviewFinding
 
-The structured output the model must return for each inline comment. All fields are validated by pydantic before anything is posted to GitHub.
+The structured output the model must return for each inline comment. All fields are validated by pydantic before anything is posted.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|

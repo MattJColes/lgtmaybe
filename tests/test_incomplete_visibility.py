@@ -330,8 +330,9 @@ def test_incomplete_marker_cannot_be_mistaken_for_another_marker_family() -> Non
     """Markers are matched by substring/regex elsewhere; this one must stay disjoint,
     or a summary that discloses incompleteness could be mistaken for the review's
     idempotency marker, a finding fingerprint, or the reviewed-SHA watermark."""
-    from lgtmaybe.github.rest_gateway import _FINDING_MARKER, _REVIEWED_MARKER
+    from lgtmaybe.core.comment import FINDING_MARKER as _FINDING_MARKER
     from lgtmaybe.github.rest_gateway import _MARKER as _SUMMARY_MARKER
+    from lgtmaybe.github.rest_gateway import _REVIEWED_MARKER
 
     assert _SUMMARY_MARKER not in INCOMPLETE_MARKER
     assert _FINDING_MARKER.search(INCOMPLETE_MARKER) is None
