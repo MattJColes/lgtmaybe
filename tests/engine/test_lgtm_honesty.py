@@ -80,7 +80,7 @@ class TestSuppressedFindingsAreDisclosed:
         """learn_feedback drops a 👎'd finding before posting. Reporting the
         resulting zero as LGTM would let a downvote silently convert a real
         finding into a clean bill of health."""
-        from lgtmaybe.github.rest_gateway import finding_fingerprint
+        from lgtmaybe.core.findings import finding_fingerprint
 
         fp = finding_fingerprint("a.py", "Something")
         findings, summary = LLMReviewEngine(_Flags()).review(
@@ -92,7 +92,7 @@ class TestSuppressedFindingsAreDisclosed:
         assert "suppress" in summary.lower()
 
     def test_an_ignored_fingerprint_blocks_lgtm(self) -> None:
-        from lgtmaybe.github.rest_gateway import finding_fingerprint
+        from lgtmaybe.core.findings import finding_fingerprint
 
         fp = finding_fingerprint("a.py", "Something")
         _findings, summary = LLMReviewEngine(_Flags()).review(

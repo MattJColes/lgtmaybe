@@ -23,9 +23,9 @@ import httpx
 import pytest
 import respx
 
+from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
-from lgtmaybe.github.rest_gateway import finding_fingerprint
 
 REPO = "owner/repo"
 PR_NUMBER = 42

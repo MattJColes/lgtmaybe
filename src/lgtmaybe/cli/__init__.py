@@ -57,6 +57,7 @@ from lgtmaybe.engine import (
     request_interrupt,
 )
 from lgtmaybe.engine.profiling import profiler
+from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
@@ -202,6 +203,13 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         token=token,
         marker_key=f"{cfg.provider}/{cfg.model}",
         resolve_fixed=cfg.resolve_fixed,
+    ),
+    Forge.gitea: lambda located, token, cfg: GiteaGateway(
+        host=located.host,
+        repo=located.repo,
+        pr_number=located.number,
+        token=token,
+        marker_key=f"{cfg.provider}/{cfg.model}",
     ),
 }
 
@@ -912,7 +920,7 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         pr_number = issue["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    runtime = replace(runtime, pr_url=f"https://github.com/{repo}/pull/{pr_number}")
+    runtime = replace(runtime, pr_url=_change_url(repo, pr_number))
 
     try:
         github, engine, provider_client = build_review_context(cfg, runtime)
@@ -956,18 +964,33 @@ def _post_failure(github: ReviewGateway, exc: Exception) -> None:
         pass
 
 
-def pr_url_from_event(event: dict[str, Any]) -> str:
-    """Build the PR URL from a pull_request(_target) event payload.
+def _change_url(repo: str, number: int) -> str:
+    """Build the change-request URL for whichever host is running this job.
 
-    Only github.com is supported end to end — the URL parser and the REST
-    gateway both speak to api.github.com.
+    Gitea Actions reimplements GitHub Actions' env contract — same
+    ``GITHUB_EVENT_NAME``, same ``GITHUB_EVENT_PATH``, same ``INPUT_*`` — so the
+    entrypoint needs no forge switch of its own. The one variable that does
+    differ is ``GITHUB_SERVER_URL``, which points at the Gitea instance; reading
+    it is the whole difference between reviewing the right PR and posting to
+    github.com. Absent (or github.com), the URL is unchanged from before.
+
+    The path segment is what ``core.forge`` discriminates on, so it has to match
+    the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
     """
+    server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
+    if not server or server == "https://github.com":
+        return f"https://github.com/{repo}/pull/{number}"
+    return f"{server}/{repo}/pulls/{number}"
+
+
+def pr_url_from_event(event: dict[str, Any]) -> str:
+    """Build the change-request URL from a pull_request(_target) event payload."""
     try:
         repo = event["repository"]["full_name"]
         number = event["pull_request"]["number"]
     except (KeyError, TypeError) as exc:
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
-    return f"https://github.com/{repo}/pull/{number}"
+    return _change_url(repo, number)
 
 
 #: Inputs ``action()`` handles itself rather than passing to ``ReviewConfig``:

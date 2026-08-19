@@ -78,14 +78,27 @@ class TestTokenEnvVar:
 class TestGatewayRegistry:
     """Which forges lgtmaybe can actually build a gateway for."""
 
-    def test_github_is_registered(self) -> None:
+    @pytest.mark.parametrize("forge", [Forge.github, Forge.gitea])
+    def test_implemented_forges_are_registered(self, forge: Forge) -> None:
         from lgtmaybe.cli import gateway_builder
 
-        assert gateway_builder(Forge.github) is not None
+        assert gateway_builder(forge) is not None
 
-    @pytest.mark.parametrize("forge", [Forge.gitlab, Forge.gitea])
+    @pytest.mark.parametrize("forge", [Forge.gitlab])
     def test_an_unimplemented_forge_says_so_by_name(self, forge: Forge) -> None:
         """A recognised-but-unbuilt forge must not read as an unparseable URL."""
         from lgtmaybe.cli import gateway_builder
 
         assert gateway_builder(forge) is None
+
+    def test_the_gitea_builder_carries_the_host_through(self) -> None:
+        """Self-hosted is the norm on Gitea, so the API base cannot be a constant."""
+        from lgtmaybe.cli import gateway_builder
+        from lgtmaybe.core.models import ReviewConfig
+
+        build = gateway_builder(Forge.gitea)
+        assert build is not None
+        located = parse_pr_url("https://git.acme.internal/team/svc/pulls/12")
+        gateway = build(located, "token", ReviewConfig(provider="ollama", model="llama3"))
+        assert "git.acme.internal" in gateway._api
+        assert gateway._pr_number == 12

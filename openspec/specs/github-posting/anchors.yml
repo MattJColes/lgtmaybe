@@ -33,14 +33,14 @@ github.fingerprint:
 github.demote:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^_render_demoted$' }
-  files: [src/lgtmaybe/github/**/*.py]
+    has: { field: name, regex: '^render_demoted$' }
+  files: [src/lgtmaybe/core/comment.py]
 
 github.finding-badge:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^_finding_badge$' }
-  files: [src/lgtmaybe/github/**/*.py]
+    has: { field: name, regex: '^finding_badge$' }
+  files: [src/lgtmaybe/core/comment.py]
 
 github.incremental:
   - rule:

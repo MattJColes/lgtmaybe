@@ -17,9 +17,9 @@ from typing import Any
 import httpx
 import respx
 
+from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
-from lgtmaybe.github.rest_gateway import finding_fingerprint, finding_identity
 
 REPO = "owner/repo"
 PR_NUMBER = 42

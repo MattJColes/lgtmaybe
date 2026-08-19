@@ -8,14 +8,11 @@ import threading
 import httpx
 import respx
 
+from lgtmaybe.core.comment import finding_keys as _finding_keys
+from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
-from lgtmaybe.github.rest_gateway import (
-    _RESOLVE_WORKERS,
-    _finding_keys,
-    finding_fingerprint,
-    finding_identity,
-)
+from lgtmaybe.github.rest_gateway import _RESOLVE_WORKERS
 
 REPO = "owner/repo"
 PR_NUMBER = 42
