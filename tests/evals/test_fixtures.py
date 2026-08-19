@@ -15,6 +15,7 @@ import shutil
 import pytest
 
 from evals import run as run_mod
+from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.models import (
     PRContext,
@@ -29,7 +30,6 @@ from lgtmaybe.engine.astgrep import build_symbol_resolver
 from lgtmaybe.engine.compress import split_patch_into_hunks
 from lgtmaybe.engine.redact import redact
 from lgtmaybe.engine.reflect import reflect_findings
-from lgtmaybe.github import is_reviewable
 from lgtmaybe.local import local_file_reader
 from tests.fakes import FakeProvider
 

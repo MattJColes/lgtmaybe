@@ -9,7 +9,7 @@ and reflection never read.
 
 from __future__ import annotations
 
-from lgtmaybe.github.diff import is_reviewable, is_scannable_manifest
+from lgtmaybe.core.diff import is_reviewable, is_scannable_manifest
 
 
 def test_lockfiles_are_scannable_but_never_reviewable() -> None:

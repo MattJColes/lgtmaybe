@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from lgtmaybe.core.diff import is_scannable_manifest
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     _SCAN_CATEGORY_PREFIX,
@@ -48,7 +49,6 @@ from lgtmaybe.core.models import (
     StaticAnalysisTool,
     ToolMode,
 )
-from lgtmaybe.github.diff import is_scannable_manifest
 
 from .redact import redact
 

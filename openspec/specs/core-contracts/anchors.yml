@@ -10,7 +10,7 @@ core.provider-port:
 core.gateway-port:
   rule:
     kind: class_definition
-    has: { field: name, regex: '^GitHubGateway$' }
+    has: { field: name, regex: '^ReviewGateway$' }
   files: [src/lgtmaybe/**/*.py]
 
 core.engine-port:

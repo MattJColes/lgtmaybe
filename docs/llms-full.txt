@@ -6512,7 +6512,7 @@ lets tests swap in fakes without patching.
 ```mermaid
 flowchart TB
     subgraph core["core — never imports an adapter"]
-        ports["ports.py<br/>ProviderClient · GitHubGateway · ReviewEngine"]
+        ports["ports.py<br/>ProviderClient · ReviewGateway · ReviewEngine"]
         models["models.py<br/>ReviewConfig · ReviewFinding · ProviderResult · PRContext"]
     end
     providers["providers/<br/>litellm adapter"] -- implements --> ports
@@ -6523,10 +6523,14 @@ flowchart TB
 
 - `ProviderClient` — one method: `complete(messages, model)` returns a
   `ProviderResult` (text + token usage).
-- `GitHubGateway` — `get_pr_context()` fetches the PR diff and metadata;
+- `ReviewGateway` — `get_pr_context()` fetches the change diff and metadata;
   `post_review()` posts batched inline comments and a summary;
   `post_issue_comment()` posts a standalone comment (used by `/ask` and as the
-  describe/diagram fallback).
+  describe/diagram fallback). These three are the whole required surface, so a
+  new forge adapter can be useful long before it is complete; richer behaviour
+  (file reads, incremental review, thread resolution, labels, checks, feedback)
+  is declared by an optional `Supports*` capability protocol that callers probe
+  for and skip when absent.
 - `ReviewEngine` — `review(ctx, cfg)` returns `(findings, summary)`.
 
 The ports were frozen in the foundation step. Other tracks (providers, github,
@@ -6562,8 +6566,8 @@ flowchart TD
 on every provider — worker count decides only whether they overlap. The `full`
 preset fans out one call per category, and custom lenses join the same fan-out.)
 
-1. **fetch** — `GitHubGateway.get_pr_context()` retrieves the PR diff and
-   metadata from the GitHub REST API. No PR code is checked out or executed.
+1. **fetch** — `ReviewGateway.get_pr_context()` retrieves the change diff and
+   metadata from the forge's API. No change code is checked out or executed.
    The diff is treated as untrusted input throughout.
 
 2. **compress** — the diff is filtered to remove generated files, lockfiles,
