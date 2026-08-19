@@ -1371,18 +1371,27 @@ This request requires more credits, or fewer max_tokens.
 You requested up to 65536 tokens, but can only afford 25905.
 ```
 
-Top up, or cap what each call may generate so the reservation matches a real
-findings payload:
+OpenRouter reviews send a **default cap of 16384 tokens per call**, so the
+reservation already matches a realistic findings payload rather than the model's
+full ceiling. If a refusal still names a number larger than that, something has
+overridden the default — check the `per-call budget resolved` log line, which
+names the ceiling and where it came from:
+
+```
+per-call budget resolved  timeout_s=1800  max_tokens=16384  max_tokens_source="provider default"
+```
+
+Top up, or lower the cap further so the reservation fits your balance:
 
 ```yaml
 max_tokens: 8192
 ```
 
 `--max-tokens 8192` does the same for one run, and `max_tokens` is a GitHub
-Action input too. Leave it unset and no cap is sent, which is the safe default:
-a cap sized too low truncates the findings JSON mid-object and the call fails to
-parse. Reasoning models spend this budget on thinking tokens as well, so give
-them more headroom than a plain model.
+Action input too. Size it down with care: a cap set too low truncates the
+findings JSON mid-object, and reasoning models spend this same budget on thinking
+tokens, so they need more headroom than a plain model. `max_tokens: 0` removes
+the cap entirely and puts the reservation back to the model's full ceiling.
 
 lgtmaybe treats this refusal as permanent and stops after one attempt — your
 balance cannot grow mid-review, so retrying every lens would only waste runner
@@ -2252,11 +2261,18 @@ keeps decoding. With no ceiling the only thing that ends it is the per-call
 timeout — half an hour of sustained GPU for a single lens on a one-file diff, and
 hours for a whole review.
 
-So an ollama review runs with a **default output ceiling of 8192 tokens per
-call** — a quarter of the default 32768 `num_ctx`. Measured findings payloads are
-hundreds of tokens, so the rest is headroom for a thinking model — reasoning is
-drawn from this same budget. Hosted providers get no default ceiling; they don't
-have this problem, and capping them would truncate long findings for nothing.
+So a review runs with a **default output ceiling of 16384 tokens per call** —
+half the default 32768 `num_ctx`. Measured findings payloads are hundreds of
+tokens, so the rest is headroom for a thinking model — reasoning is drawn from
+this same budget.
+
+The same ceiling applies to `openai-compatible` and `openrouter`, because the
+failure is not a property of running locally. Benchmarking found a model behind
+`openai-compatible` emitting 223,558 tokens on a single lens call, and a *hosted*
+model on `openrouter` returning a 393k-token response that parsed into 699 false
+positives on a diff with nothing wrong in it. The first-party APIs
+(openai, anthropic, bedrock, vertex, azure) get no default ceiling — they have not
+shown this failure, and capping them would truncate long findings for nothing.
 
 The ceiling is a fixed number, not a fraction of your window: raising `num_ctx`
 for a big diff buys room for the **prompt**, not for a longer answer. Use
@@ -2265,13 +2281,13 @@ for a big diff buys room for the **prompt**, not for a longer answer. Use
 Every run says which ceiling it resolved and where it came from:
 
 ```
-per-call budget resolved  timeout_s=3600  max_tokens=8192  max_tokens_source="provider default"
+per-call budget resolved  timeout_s=3600  max_tokens=16384  max_tokens_source="provider default"
 ```
 
 If a lens does hit it you get a **truncation notice**, not a silent clean review:
 
 ```
-response truncated at the 8192-token `max_tokens` ceiling — the batch is
+response truncated at the 16384-token `max_tokens` ceiling — the batch is
 re-reviewed in smaller pieces automatically, so a lens that keeps doing it is
 usually generation instability in the model, which a higher ceiling makes more
 expensive rather than prevents
@@ -2289,13 +2305,13 @@ the cap off entirely with `0`, which puts the run back on the timeout as its onl
 stop:
 
 ```bash
-lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 16384
+lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 32768
 lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 0  # uncapped
 ```
 
 ```yaml
 # or in .lgtmaybe.yml (also how the GitHub Action picks it up):
-max_tokens: 16384
+max_tokens: 32768
 ```
 
 Going the other way is the fastest lever there is on a slow model: a low ceiling
@@ -4011,6 +4027,7 @@ giving up the findings you actually want.
 - [The levers, in order of payoff](#the-levers-in-order-of-payoff)
 - [Put a hard ceiling on it](#put-a-hard-ceiling-on-it)
 - [If a call runs past `max_tokens`](#if-a-call-runs-past-max_tokens)
+- [If one lens floods the review](#if-one-lens-floods-the-review)
 - [What costs more, on purpose](#what-costs-more-on-purpose)
 - [What isn't worth changing](#what-isnt-worth-changing)
 
@@ -4197,6 +4214,12 @@ ceiling comfortably above it — it is a runaway guard, not a tuning knob.
 `max_tokens` caps what one call may *write*. A lens that hits it comes back cut
 off mid-JSON, and lowering it to save money is the usual way to arrive here.
 
+On `ollama`, `openai-compatible` and `openrouter` a ceiling of **16384 tokens per
+call** applies by default, so you can arrive here without setting anything. It is
+there because a model under structured output can fail to terminate and decode
+until the timeout stops it half an hour later. The first-party APIs send no
+default ceiling.
+
 You do not have to do anything. lgtmaybe treats an over-ceiling call the same
 way it treats one that outruns its wall clock: the batch was more than one call
 could cover, so it is **halved and the pieces reviewed separately**, each with a
@@ -4311,6 +4334,33 @@ on OpenRouter is one real case: it is in litellm's vocabulary but not in
 OpenRouter's `reasoning.effort` enum (`none`, `minimal`, `low`, `medium`,
 `high`, `xhigh`), so it is reported rather than quietly turned into a nearby
 level.
+
+## If one lens floods the review
+
+A cut-off call is the loud failure. The quiet one is a lens that stays inside its
+token budget and simply repeats itself — restating one claim against every line
+it can see. Measured on a benchmark diff with nothing wrong in it, a single lens
+returned 319 of a review's 323 findings, each on a different line. Location
+dedupe cannot collapse that, because no two findings share a line.
+
+So one `(batch, lens)` call contributes at most **50 findings** by default. When
+the bound fires, the highest-severity findings are kept and the summary names
+the lens and how many were dropped:
+
+```
+⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped).
+```
+
+That notice is the signal to look at the model, not the number. A lens returning
+hundreds of findings is generating badly, and raising the bound buys more of the
+same output. Raise it only when a genuinely large diff is losing real findings:
+
+```yaml
+max_findings_per_lens: 100   # 0 disables the bound entirely
+```
+
+It costs nothing on a healthy run — an ordinary lens returns a handful, and never
+reaches it.
 
 ## What costs more, on purpose
 
@@ -4565,6 +4615,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `max_concurrency` | integer / null | No | `null` | Max Concurrency |
 | `max_file_diff_lines` | integer | No | `2000` | Max File Diff Lines |
 | `max_files` | integer | No | `50` | Max Files |
+| `max_findings_per_lens` | integer | No | `50` | Max Findings Per Lens |
 | `max_input_tokens` | integer | No | `100000` | Max Input Tokens |
 | `max_review_seconds` | integer | No | `3600` | Max Review Seconds |
 | `max_review_tokens` | integer | No | `0` | Max Review Tokens |
@@ -5294,6 +5345,12 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "max_files": {
       "default": 50,
       "title": "Max Files",
+      "type": "integer"
+    },
+    "max_findings_per_lens": {
+      "default": 50,
+      "minimum": 0,
+      "title": "Max Findings Per Lens",
       "type": "integer"
     },
     "max_input_tokens": {

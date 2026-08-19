@@ -23,6 +23,7 @@ giving up the findings you actually want.
 - [The levers, in order of payoff](#the-levers-in-order-of-payoff)
 - [Put a hard ceiling on it](#put-a-hard-ceiling-on-it)
 - [If a call runs past `max_tokens`](#if-a-call-runs-past-max_tokens)
+- [If one lens floods the review](#if-one-lens-floods-the-review)
 - [What costs more, on purpose](#what-costs-more-on-purpose)
 - [What isn't worth changing](#what-isnt-worth-changing)
 
@@ -209,6 +210,12 @@ ceiling comfortably above it — it is a runaway guard, not a tuning knob.
 `max_tokens` caps what one call may *write*. A lens that hits it comes back cut
 off mid-JSON, and lowering it to save money is the usual way to arrive here.
 
+On `ollama`, `openai-compatible` and `openrouter` a ceiling of **16384 tokens per
+call** applies by default, so you can arrive here without setting anything. It is
+there because a model under structured output can fail to terminate and decode
+until the timeout stops it half an hour later. The first-party APIs send no
+default ceiling.
+
 You do not have to do anything. lgtmaybe treats an over-ceiling call the same
 way it treats one that outruns its wall clock: the batch was more than one call
 could cover, so it is **halved and the pieces reviewed separately**, each with a
@@ -323,6 +330,33 @@ on OpenRouter is one real case: it is in litellm's vocabulary but not in
 OpenRouter's `reasoning.effort` enum (`none`, `minimal`, `low`, `medium`,
 `high`, `xhigh`), so it is reported rather than quietly turned into a nearby
 level.
+
+## If one lens floods the review
+
+A cut-off call is the loud failure. The quiet one is a lens that stays inside its
+token budget and simply repeats itself — restating one claim against every line
+it can see. Measured on a benchmark diff with nothing wrong in it, a single lens
+returned 319 of a review's 323 findings, each on a different line. Location
+dedupe cannot collapse that, because no two findings share a line.
+
+So one `(batch, lens)` call contributes at most **50 findings** by default. When
+the bound fires, the highest-severity findings are kept and the summary names
+the lens and how many were dropped:
+
+```
+⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped).
+```
+
+That notice is the signal to look at the model, not the number. A lens returning
+hundreds of findings is generating badly, and raising the bound buys more of the
+same output. Raise it only when a genuinely large diff is losing real findings:
+
+```yaml
+max_findings_per_lens: 100   # 0 disables the bound entirely
+```
+
+It costs nothing on a healthy run — an ordinary lens returns a handful, and never
+reaches it.
 
 ## What costs more, on purpose
 

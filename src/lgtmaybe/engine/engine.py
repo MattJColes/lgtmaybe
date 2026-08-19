@@ -172,6 +172,12 @@ INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 # apart from the provider failures the generic incomplete notice covers.
 _BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
 
+# Share of `max_review_seconds` / `max_review_tokens` held back from the lens
+# fan-out so the reflection auditor still gets to run on an overrunning review,
+# and the ceiling on the time half of that reserve.
+_REFLECT_RESERVE = 0.1
+_MAX_REFLECT_RESERVE_S = 300.0
+
 # When reasoning accounts for at least this share of the `max_tokens` ceiling a
 # truncation hit, the ceiling was spent on THINKING, not on findings — and the
 # split (see _review_split) cannot help, because a smaller payload does not
@@ -244,6 +250,7 @@ class _NoticeState:
     re_asked: list[str]
     schema_dropped: bool
     reflection_skipped: str | None
+    flooded: dict[str, int]
     suppressed: int
     off_diff: int
     open_finding_threads: int
@@ -340,6 +347,15 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"({listed}). Those findings come from the lower setting — lower "
             "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
             "first attempt rather than the second."
+        )
+    if state.flooded:
+        listed = ", ".join(
+            f"`{lens}` ({dropped} dropped)" for lens, dropped in sorted(state.flooded.items())
+        )
+        notices.append(
+            f"⚠️ Bounded a lens to the top {cfg.max_findings_per_lens} findings by severity: "
+            f"{listed}. A lens returning far more than that is usually restating one claim "
+            f"— raise max_findings_per_lens to keep them all."
         )
     if state.reflection_skipped:
         notices.append(
@@ -774,6 +790,27 @@ class LLMReviewEngine:
         budget_at = (
             profiler.total_tokens() + cfg.max_review_tokens if cfg.max_review_tokens else None
         )
+
+        # Lens calls stop EARLY, leaving the tail of each ceiling for the
+        # auditor. Reflection is the stage that prunes a bad review, so letting
+        # the lens fan-out spend the budget down to zero makes the overrun
+        # disable its own remedy: measured, a runaway lens call ate the whole
+        # deadline and 325 unaudited findings posted, 323 of them false
+        # positives on a diff with nothing wrong in it. A tenth of the budget is
+        # ample for one audit call and cheap to give up when nothing overruns;
+        # the cap keeps the reserve from growing absurd on a long ceiling, and
+        # taking a proportion (rather than a fixed floor) keeps a deliberately
+        # tiny ceiling honest instead of handing most of it to the auditor.
+        lens_deadline_at = (
+            deadline_at - min(cfg.max_review_seconds * _REFLECT_RESERVE, _MAX_REFLECT_RESERVE_S)
+            if deadline_at is not None
+            else None
+        )
+        lens_budget_at = (
+            budget_at - int(cfg.max_review_tokens * _REFLECT_RESERVE)
+            if budget_at is not None
+            else None
+        )
         # Batches an oversized-payload failure (wall timeout or output ceiling)
         # forced us to review in smaller pieces.
         # Per-review state (reset here, not in __init__, so a reused engine starts
@@ -788,6 +825,10 @@ class LLMReviewEngine:
         # second call (see repair.py). Keyed by lens for the same reason as
         # `_stepped_down`: one fact about the review, not one per batch.
         self._repaired: set[str] = set()
+        self._flooded: dict[str, int] = {}
+        # Resolved once per review so every (batch, lens) result reads the same
+        # bound without threading cfg through the fan-out's every hop.
+        self._max_findings_per_lens = cfg.max_findings_per_lens
         # Lenses that only parsed once the provider's JSON schema was taken off
         # the request (see _retry_without_schema). Keyed by lens for the same
         # reason as the two above.
@@ -987,8 +1028,8 @@ class LLMReviewEngine:
             # review call — NOT globally, so the reflection call keeps its own format.
             response_format=ReviewResult if cfg.structured_output else None,
             language=cfg.language,
-            deadline_at=deadline_at,
-            budget_at=budget_at,
+            deadline_at=lens_deadline_at,
+            budget_at=lens_budget_at,
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
             cfg=cfg,
@@ -1170,29 +1211,22 @@ class LLMReviewEngine:
         scanned = [f for f in all_findings if _is_scan_finding(f)]
         all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
+            # Overrunning a ceiling is NOT a reason to skip the audit. The lens
+            # fan-out already stops short of both ceilings (`lens_deadline_at` /
+            # `lens_budget_at`) to leave the auditor room, and a review that
+            # overran anyway is the one that most needs pruning: measured, a
+            # runaway lens call blew the deadline and 325 unaudited findings
+            # posted, 323 of them false positives on a diff with nothing wrong in
+            # it. Reflection is a single bounded call, so running it past the
+            # ceiling costs far less than the noise it removes.
+            #
+            # A termination signal is the exception, and the only one: the
+            # process is being torn down on someone else's clock, so there is no
+            # budget left to reserve. Audit nothing, post what we have, say so.
             if interrupt_requested():
-                # The process is being torn down: audit nothing, post what we
-                # have. Same trade as the deadline below, on someone else's clock.
                 reflection_skipped = "Review interrupted (termination signal)"
                 _log.warning(
                     "review interrupted — skipping reflection",
-                    extra={"findings": len(all_findings)},
-                )
-            elif deadline_at is not None and time.perf_counter() >= deadline_at:
-                # Better unaudited findings with an honest notice than more
-                # minutes past the ceiling — and never a silent quality drop.
-                reflection_skipped = f"Review deadline ({cfg.max_review_seconds}s) reached"
-                _log.warning(
-                    "review deadline reached — skipping reflection",
-                    extra={"findings": len(all_findings)},
-                )
-            elif budget_at is not None and profiler.total_tokens() >= budget_at:
-                # Same trade, spend instead of time.
-                reflection_skipped = (
-                    f"Token budget (max_review_tokens = {cfg.max_review_tokens}) reached"
-                )
-                _log.warning(
-                    "review token budget reached — skipping reflection",
                     extra={"findings": len(all_findings)},
                 )
             else:
@@ -1246,6 +1280,7 @@ class LLMReviewEngine:
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
                 repaired=sorted(self._repaired),
+                flooded=dict(self._flooded),
                 re_asked=sorted(self._re_asked),
                 schema_dropped=self._schema_dropped(),
                 reflection_skipped=reflection_skipped,
@@ -1847,6 +1882,31 @@ class LLMReviewEngine:
         if callable(drop):
             drop(model, "unparseable-output")
 
+    def _stamp_and_bound(self, findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
+        """Stamp the originating lens, then bound what one call may contribute.
+
+        Both halves belong to every (batch, lens) result — the normal path, a
+        repaired reply and a salvaged truncation alike — so they are applied in
+        one place rather than at each return. The bound is a backstop against a
+        degenerate response, not a review budget: see
+        `ReviewConfig.max_findings_per_lens`.
+        """
+        findings = _stamp_categories(findings, lens)
+        cap = self._max_findings_per_lens
+        if not cap or len(findings) <= cap:
+            return findings
+        # Highest severity first, input order preserved within a severity, so
+        # what survives is deterministic and provider-independent — the same
+        # policy `_dedupe` applies when it has to choose.
+        kept = sorted(findings, key=lambda f: -f.severity.rank)[:cap]
+        dropped = len(findings) - len(kept)
+        self._flooded[lens.id] = self._flooded.get(lens.id, 0) + dropped
+        _log.warning(
+            "lens exceeded the per-lens finding bound — dropping the least severe",
+            extra={"lens": lens.id, "returned": len(findings), "kept": cap, "dropped": dropped},
+        )
+        return kept
+
     def _complete_lens(
         self,
         messages: list[Message],
@@ -1992,7 +2052,7 @@ class LLMReviewEngine:
                         # notice instead, like a lens that stepped its reasoning
                         # effort down — successful, but worth saying out loud.
                         self._repaired.add(lens.id)
-                        return _stamp_categories(repaired, lens), None
+                        return self._stamp_and_bound(repaired, lens), None
                     # 2. The reformat could not do it either. If this call sent
                     #    the provider's schema, that enforcement is the remaining
                     #    suspect — re-run the lens once without it.
@@ -2044,8 +2104,8 @@ class LLMReviewEngine:
             # incomplete notice fires and a partial lens is never read as a clean
             # one. Returning the salvage without it would be the silent
             # half-answer this whole path exists to prevent.
-            return _stamp_categories(findings, lens), reason
-        findings = _stamp_categories(findings, lens)
+            return self._stamp_and_bound(findings, lens), reason
+        findings = self._stamp_and_bound(findings, lens)
         profiler.record_result(
             lens.id,
             batch_num,

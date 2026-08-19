@@ -54,6 +54,10 @@ inputs:
     description: "Soft billable-token ceiling for the whole review — input plus output summed across every model call (lens fan-out, triage, reflection). Once it passes, no further model calls are dispatched: in-flight calls finish, their findings post, and the review carries a notice naming this input. Empty or 0 (the default) disables it. There is no safe generous default because token spend scales with diff size and lens count — run once with profile: true, read the total, then set this above it."
     required: false
     default: ""
+  max_findings_per_lens:
+    description: "Ceiling on the findings one (batch, lens) call may contribute — a backstop against a degenerate response, not a review budget. A model can restate one claim across every line it sees; measured, a single lens returned 319 of a review's 323 findings on a diff with nothing wrong in it. When it fires the highest-severity findings are kept and the review names the lens and how many were dropped. Default 50, far above any real per-lens yield; 0 disables it."
+    required: false
+    default: ""
   temperature:
     description: "Sampling temperature (default 0.0 for deterministic reviews)."
     required: false
@@ -292,6 +296,7 @@ runs:
         INPUT_TIMEOUT: ${{ inputs.timeout }}
         INPUT_MAX_REVIEW_SECONDS: ${{ inputs.max_review_seconds }}
         INPUT_MAX_REVIEW_TOKENS: ${{ inputs.max_review_tokens }}
+        INPUT_MAX_FINDINGS_PER_LENS: ${{ inputs.max_findings_per_lens }}
         INPUT_TEMPERATURE: ${{ inputs.temperature }}
         INPUT_NUM_CTX: ${{ inputs.num_ctx }}
         INPUT_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}

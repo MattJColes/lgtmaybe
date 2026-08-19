@@ -90,32 +90,38 @@ _MAY_QUEUE = frozenset({Provider.ollama, Provider.openai_compatible})
 # review could overrun it and get truncated.
 _OLLAMA_NUM_CTX = 32768
 
-# Default ceiling on the tokens ONE ollama call may generate, and the only
-# provider that gets one.
+# Routes that get a default output ceiling, and the ceiling itself.
 #
-# A local model under structured output can fail to terminate: the response
-# keeps decoding, and with no ceiling the only thing that ever stops it is the
-# per-call timeout — 1800s, deliberately generous because a slow local model has
-# to be given time to answer. That makes the timeout the wrong instrument for a
+# A model under structured output can fail to terminate: the response keeps
+# decoding, and with no ceiling the only thing that ever stops it is the
+# per-call timeout — deliberately generous, because a slow endpoint has to be
+# given time to answer. That makes the timeout the wrong instrument for a
 # runaway decode: a single lens spent 18 minutes of sustained GPU on a one-file
 # diff, and a nine-lens review takes hours. A finite ceiling stops it in
 # seconds, and the stop is *reported* — a truncation posts the incomplete
 # notice, where a timeout posts the same notice half an hour later.
 #
-# 8192 is a quarter of the default `_OLLAMA_NUM_CTX`: measured findings payloads
-# are hundreds of tokens, so the rest is headroom for a thinking model (ollama
-# now leaves thinking on for a model that supports it, and reasoning is drawn
-# from this same budget). Derived from that window so the two numbers are
-# related rather than arbitrary — but it is a FIXED ceiling: raising `num_ctx`
-# for a big diff buys room for the prompt, not a longer answer, and `max_tokens`
-# is the knob for that. Deliberately, since a bigger window is asked for to fit
-# the input and should not quietly re-license the runaway decode.
+# This was ollama-only on the theory that openrouter and openai-compatible may
+# equally be a hosted API with its own sane ceiling. Benchmarking disproved it.
+# Behind `openai-compatible` a local model emitted 223,558 tokens on ONE lens
+# call; worse, `openrouter` is not safer for being hosted — one model there
+# returned a 393k-token response that parsed into 699 false positives on a diff
+# with nothing wrong in it, and another turned a 70,344-token response into 323
+# findings on a clean diff. Unbounded decode is a property of the model and the
+# structured-output task, not of who is hosting it. So all three share one
+# number, and only the first-party APIs (which have not shown the failure) are
+# left on the model's own ceiling.
 #
-# Only ollama. openrouter and openai-compatible can also front a slow endpoint,
-# but they can equally be a hosted API with its own sane ceiling, and capping
-# those would truncate long findings payloads for setups that never had this
-# problem.
-_OLLAMA_MAX_TOKENS = _OLLAMA_NUM_CTX // 4
+# Half of `_OLLAMA_NUM_CTX`: measured findings payloads are hundreds of tokens,
+# so the rest is headroom for a thinking model (reasoning is drawn from this
+# same budget). Derived from that window so the two numbers are related rather
+# than arbitrary. Measured against the benchmark corpus, 16384 truncates 2.5% of
+# the calls that parse today while stopping every runaway observed (all of them
+# 70k+); the older, tighter 8192 truncated 7.8% — real findings paid for the
+# fix. It is a FIXED ceiling: raising `num_ctx` for a big diff buys room for the
+# prompt, not a longer answer, and `max_tokens` is the knob for that.
+_CAPPED_BY_DEFAULT = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})
+_DEFAULT_MAX_TOKENS = _OLLAMA_NUM_CTX // 2
 
 
 def resolve_max_tokens(provider: Provider, configured: int | None = None) -> int | None:
@@ -128,7 +134,7 @@ def resolve_max_tokens(provider: Provider, configured: int | None = None) -> int
     """
     if configured is not None:
         return configured or None
-    return _OLLAMA_MAX_TOKENS if provider is Provider.ollama else None
+    return _DEFAULT_MAX_TOKENS if provider in _CAPPED_BY_DEFAULT else None
 
 
 def default_timeout_for(provider: Provider, *, concurrency: int = 1) -> int:

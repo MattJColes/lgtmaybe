@@ -77,18 +77,27 @@ This request requires more credits, or fewer max_tokens.
 You requested up to 65536 tokens, but can only afford 25905.
 ```
 
-Top up, or cap what each call may generate so the reservation matches a real
-findings payload:
+OpenRouter reviews send a **default cap of 16384 tokens per call**, so the
+reservation already matches a realistic findings payload rather than the model's
+full ceiling. If a refusal still names a number larger than that, something has
+overridden the default — check the `per-call budget resolved` log line, which
+names the ceiling and where it came from:
+
+```
+per-call budget resolved  timeout_s=1800  max_tokens=16384  max_tokens_source="provider default"
+```
+
+Top up, or lower the cap further so the reservation fits your balance:
 
 ```yaml
 max_tokens: 8192
 ```
 
 `--max-tokens 8192` does the same for one run, and `max_tokens` is a GitHub
-Action input too. Leave it unset and no cap is sent, which is the safe default:
-a cap sized too low truncates the findings JSON mid-object and the call fails to
-parse. Reasoning models spend this budget on thinking tokens as well, so give
-them more headroom than a plain model.
+Action input too. Size it down with care: a cap set too low truncates the
+findings JSON mid-object, and reasoning models spend this same budget on thinking
+tokens, so they need more headroom than a plain model. `max_tokens: 0` removes
+the cap entirely and puts the reservation back to the model's full ceiling.
 
 lgtmaybe treats this refusal as permanent and stops after one attempt — your
 balance cannot grow mid-review, so retrying every lens would only waste runner

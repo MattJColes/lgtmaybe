@@ -51,3 +51,9 @@ quality.failure-validation:
     kind: function_definition
     has: { field: name, regex: '^reflect_findings$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+quality.lens-bound:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_stamp_and_bound$' }
+  files: [src/lgtmaybe/engine/**/*.py]

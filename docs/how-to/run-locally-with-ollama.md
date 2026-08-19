@@ -238,11 +238,18 @@ keeps decoding. With no ceiling the only thing that ends it is the per-call
 timeout — half an hour of sustained GPU for a single lens on a one-file diff, and
 hours for a whole review.
 
-So an ollama review runs with a **default output ceiling of 8192 tokens per
-call** — a quarter of the default 32768 `num_ctx`. Measured findings payloads are
-hundreds of tokens, so the rest is headroom for a thinking model — reasoning is
-drawn from this same budget. Hosted providers get no default ceiling; they don't
-have this problem, and capping them would truncate long findings for nothing.
+So a review runs with a **default output ceiling of 16384 tokens per call** —
+half the default 32768 `num_ctx`. Measured findings payloads are hundreds of
+tokens, so the rest is headroom for a thinking model — reasoning is drawn from
+this same budget.
+
+The same ceiling applies to `openai-compatible` and `openrouter`, because the
+failure is not a property of running locally. Benchmarking found a model behind
+`openai-compatible` emitting 223,558 tokens on a single lens call, and a *hosted*
+model on `openrouter` returning a 393k-token response that parsed into 699 false
+positives on a diff with nothing wrong in it. The first-party APIs
+(openai, anthropic, bedrock, vertex, azure) get no default ceiling — they have not
+shown this failure, and capping them would truncate long findings for nothing.
 
 The ceiling is a fixed number, not a fraction of your window: raising `num_ctx`
 for a big diff buys room for the **prompt**, not for a longer answer. Use
@@ -251,13 +258,13 @@ for a big diff buys room for the **prompt**, not for a longer answer. Use
 Every run says which ceiling it resolved and where it came from:
 
 ```
-per-call budget resolved  timeout_s=3600  max_tokens=8192  max_tokens_source="provider default"
+per-call budget resolved  timeout_s=3600  max_tokens=16384  max_tokens_source="provider default"
 ```
 
 If a lens does hit it you get a **truncation notice**, not a silent clean review:
 
 ```
-response truncated at the 8192-token `max_tokens` ceiling — the batch is
+response truncated at the 16384-token `max_tokens` ceiling — the batch is
 re-reviewed in smaller pieces automatically, so a lens that keeps doing it is
 usually generation instability in the model, which a higher ceiling makes more
 expensive rather than prevents
@@ -275,13 +282,13 @@ the cap off entirely with `0`, which puts the run back on the timeout as its onl
 stop:
 
 ```bash
-lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 16384
+lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 32768
 lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 0  # uncapped
 ```
 
 ```yaml
 # or in .lgtmaybe.yml (also how the GitHub Action picks it up):
-max_tokens: 16384
+max_tokens: 32768
 ```
 
 Going the other way is the fastest lever there is on a slow model: a low ceiling

@@ -128,7 +128,10 @@ class TestReviewTokenBudget:
         with pytest.raises(ReviewIncompleteError):
             LLMReviewEngine(_CostlyUnparseable()).review(_CTX, _cfg(max_review_tokens=1000))
 
-    def test_reflection_skipped_past_budget_with_an_honest_notice(self) -> None:
+    def test_reflection_runs_even_past_the_budget(self) -> None:
+        """The spend-shaped twin of the deadline case: a blown token ceiling is
+        not a reason to post unaudited findings. The lens fan-out already stops
+        short of the ceiling to leave the auditor its share."""
         provider = _CostlyProvider()
         cfg = _cfg(
             categories=[ReviewCategory.security],
@@ -136,8 +139,6 @@ class TestReviewTokenBudget:
             max_review_tokens=1000,
         )
         findings, summary = LLMReviewEngine(provider).review(_CTX, cfg)
-        # One review call spends the budget; reflection would start past it.
-        assert len(provider.calls) == 1
-        assert findings, "kept unaudited rather than dropped"
-        assert "self-reflection audit was skipped" in summary
-        assert "max_review_tokens" in summary
+        assert len(provider.calls) == 2, "the second call is the audit"
+        assert findings
+        assert "self-reflection audit was skipped" not in summary
