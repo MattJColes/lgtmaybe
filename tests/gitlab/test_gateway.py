@@ -257,7 +257,11 @@ class TestThreadResolution:
             "notes": [
                 {
                     "id": 11,
-                    "body": "a finding\n<!-- lgtmaybe-finding:aaaaaaaaaaaa -->",
+                    "body": (
+                        "a finding\n"
+                        "<!-- lgtmaybe-finding:aaaaaaaaaaaa -->\n"
+                        "<!-- lgtmaybe-identity:bbbbbbbbbbbb -->"
+                    ),
                     "resolved": False,
                     "resolvable": True,
                     "position": {"new_path": "app.py"},
@@ -287,6 +291,7 @@ class TestThreadResolution:
 
         assert [f.thread_id for f in active] == ["thread-1"], "a human's thread is not ours"
         assert active[0].fingerprint == "aaaaaaaaaaaa"
+        assert active[0].identity == "bbbbbbbbbbbb", "both hidden id families are read back"
         assert active[0].path == "app.py"
 
     @respx.mock
