@@ -193,6 +193,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         pr_number=located.number,
         token=token,
         marker_key=f"{cfg.provider}/{cfg.model}",
+        resolve_fixed=cfg.resolve_fixed,
     ),
     Forge.gitea: lambda located, token, cfg: GiteaGateway(
         host=located.host,
