@@ -479,40 +479,27 @@ lens across the board: no model scores above 28.6% on it.
 
 **By model:**
 
-- **`qwen/qwen3.8-max`.** The recommended default. Its F1 is a statistical
-  tie with GLM-5.2's (their three-repeat ranges overlap almost completely),
-  but it posts a quarter as many false positives, stays quiet on 7 of 9
-  clean changes, and has 84.9% precision.
-- **`z-ai/glm-5.2`.** The highest recall. It scores 100% on the correctness,
-  security, performance, and test lenses, which no other model does, but
-  posts 24 false positives and flags something on 8 of 9 clean changes.
-  Pick it only if the team is prepared to triage that noise.
-- **`google/gemini-3.7-flash`.** Mid-table on F1 with 72.7% precision, the
-  only fully adjudicated result in the table, and much faster than the
-  leaders: its long-horizon cases finished in 21–107 seconds where Qwen's
-  took 10–20 minutes. It misses most test and intent findings. A reasonable
-  choice if you review every push or pay per token.
-- **`openai/gpt-5.6-sol`.** The best OpenAI result: third overall on the
-  older 2.1.4 run, with a stable three-repeat range. It has not been re-run
-  on 2.2.0. The OpenAI models that have (`gpt-5.4-nano` and `gpt-5.4-mini`)
-  land mid-table, with the cheaper nano ahead of mini on every metric.
-- **`minimax/minimax-m3` and `kwaipilot/kat-coder-pro-v2.5`.** Mid-table on
-  every metric with no particular weakness. kat-coder-pro also holds up on
+- **`qwen/qwen3.8-max`.** Its F1 is a statistical tie with GLM-5.2's (their
+  three-repeat ranges overlap almost completely); the noise columns break
+  the tie in Qwen's favour.
+- **`z-ai/glm-5.2`.** Scores 100% on the correctness, security, performance,
+  and test lenses, which no other model does. Pick it only if the team is
+  prepared to triage its false positives.
+- **`google/gemini-3.7-flash`.** The only fully adjudicated result in the
+  table, and much faster than the leaders: its long-horizon cases finished
+  in 21–107 seconds where Qwen's took 10–20 minutes. It misses most test and
+  intent findings.
+- **`openai/gpt-5.6-sol`.** Stable across its three repeats, but not yet
+  re-run on 2.2.0. Of the OpenAI models that have been, the cheaper
+  `gpt-5.4-nano` beats `gpt-5.4-mini` on every metric.
+- **`kwaipilot/kat-coder-pro-v2.5`.** Mid-table here, but also holds up on
   large diffs (below).
-- **`x-ai/grok-4.6` and `openai/gpt-5.6-luna`.** Reasonable medians but the
-  widest run-to-run variance in the table: luna's three repeats spanned
-  52–66% F1.
-- **`moonshotai/kimi-k3`, `kimi-k2.7-code`, `mistralai/mistral-small-2603`,
-  and `openai/gpt-oss-120b`.** Reasonable recall, but precision at or below
-  60%, 32–46 false positives each, and clean-pass rates of 0–11%. Real
-  findings will be mixed in with a lot of noise.
-- **`deepseek/deepseek-v4-pro` and `deepseek-v4-flash`.** v4-pro is precise
-  but misses 60% of the plants; v4-flash is mid-table on both recall and
-  noise. Models above them in the table do better on every metric.
-- **`anthropic/claude-sonnet-5` and `claude-opus-5`.** The opposite failure:
-  too few findings. Sonnet 5 has the best precision and clean-pass numbers
-  in the table but misses 5 of every 6 planted bugs; Opus 5 found 2 of 70 on
-  the 2.1.4 run. Not suited to this pipeline.
+- **`x-ai/grok-4.6` and `openai/gpt-5.6-luna`.** The widest run-to-run
+  variance in the table: luna's three repeats spanned 52–66% F1.
+- **`anthropic/claude-sonnet-5` and `claude-opus-5`.** Fail by staying
+  silent rather than by being noisy: Sonnet 5 misses 5 of every 6 planted
+  bugs, and Opus 5 found 2 of 70 on the 2.1.4 run. Not suited to this
+  pipeline.
 
 ### Large diffs (long horizon)
 
@@ -559,20 +546,17 @@ the score itself.
   tokens, zero findings on the large clean change, and no truncated calls.
   It also shows how much the lgtmaybe version matters: the same model on
   2.1.4 scored 0% with 116 false positives; on 2.2.0 it posts 7.
-- **`google/gemini-3.7-flash`.** Ties Qwen's score on the older pipeline with
-  higher recall (81.2%, including 100% on the small case) and far shorter
-  wall-times. It has not been re-run on 2.2.0.
-- **`kwaipilot/kat-coder-pro-v2.5`.** Third, holding 75% recall on every case
-  past the small one with moderate noise. Consistent with its breadth result.
+- **`google/gemini-3.7-flash`.** Far shorter wall-times than Qwen at the
+  same score, with 100% recall on the small case. It has not been re-run on
+  2.2.0.
+- **`kwaipilot/kat-coder-pro-v2.5`.** Holds 75% recall on every case past
+  the small one.
 - **`x-ai/grok-4.6`.** The highest recall that holds up as diffs grow: 87.5%
-  at medium, large, and extra-large. 22 false positives, including three on
-  the clean change, cap its score. Usable if someone will triage its output.
+  at medium, large, and extra-large. Usable if someone will triage its
+  output.
 - **`z-ai/glm-5.2`.** Recall falls from 100% through 87.5% and 75% to 50% as
-  the diff grows, while false positives double. Consistent with its breadth
-  result: strong on small changes, weak at scale.
-- **`deepseek/deepseek-v4-pro`.** 85.7% precision but 37.5% recall, the same
-  pattern as its breadth run. `claude-sonnet-5` has its best relative result
-  here, mid-table. Neither changes the recommendation.
+  the diff grows, while false positives double: strong on small changes,
+  weak at scale.
 - **The 0% rows fail in two ways.** Some found bugs and lost the score to
   noise: kimi-k3 hit 93.8% recall, the highest in the corpus, with 95 false
   positives, and mistral-small posted 699. Others returned almost nothing:
@@ -607,24 +591,21 @@ leaves your machine and reviews cost nothing per call.
 
 **By model:**
 
-- **`nvidia/Qwen3.6-35B-A3B-NVFP4`.** The recommended local model. Its F1
-  sits between gpt-5.4-mini and gpt-5.4-nano in the hosted table, it scores
-  100% on the security lens, and it has the fewest false positives relative
-  to its recall of any local model. Like the rest of the local field, it is
-  weak on the test, documentation, and intent lenses and on overall recall.
+- **`nvidia/Qwen3.6-35B-A3B-NVFP4`.** Its F1 sits between gpt-5.4-mini and
+  gpt-5.4-nano in the hosted table, and it scores 100% on the security lens.
+  Like the rest of the local field, it is weak on the test, documentation,
+  and intent lenses.
 - **`unsloth/Qwen3.8-27B-NVFP4`.** The best local F1, but that run used a
   diagnostic profile (†), and the same model's canonical long-horizon run
   produced 347 false positives. Wait for a canonical breadth run before
   relying on it.
-- **`nvidia/Gemma-4-26B-A4B-NVFP4`.** 72.9% recall matches GLM-5.2, but it
-  flagged something on every clean change and its long-horizon run produced
-  114 false positives. Only usable with a human triaging every finding.
-- **`RedHatAI/gemma-4-12B-it-FP8-Dynamic`.** Worse than the 35B on every
-  metric, but it completes both suites on a 12B footprint. Pick it only when
-  the 35B does not fit in memory.
-- **`Qwen/Qwen3.5-9B`.** High clean pass (77.8%) and precision (76.7%), but
-  it finds only 30% of the plants and returned one finding per case on long
-  horizon. Too small for review work.
+- **`nvidia/Gemma-4-26B-A4B-NVFP4`.** Recall matches GLM-5.2's, but its
+  long-horizon run produced 114 false positives. Only usable with a human
+  triaging every finding.
+- **`RedHatAI/gemma-4-12B-it-FP8-Dynamic`.** Completes both suites on a 12B
+  footprint. Pick it only when the 35B does not fit in memory.
+- **`Qwen/Qwen3.5-9B`.** Returned one finding per case on long horizon. Too
+  small for review work.
 
 ### Large diffs (long horizon)
 
