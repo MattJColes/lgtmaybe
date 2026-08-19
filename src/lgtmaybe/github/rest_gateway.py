@@ -105,10 +105,6 @@ _CONTENT_FETCH_WORKERS = 8
 # is stricter about concurrent mutations than concurrent reads.
 _RESOLVE_WORKERS = 4
 
-# Zero-width space, inserted to break up a triple-backtick run so it can't be
-# parsed as a Markdown fence delimiter.
-_ZWSP = "​"
-
 
 def _head_ref(meta: dict[str, Any]) -> str:
     """The PR's head branch name, or ``""`` when the payload doesn't carry one.
