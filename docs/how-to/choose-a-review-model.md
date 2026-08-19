@@ -24,8 +24,23 @@ results, raw run records, and instructions for reproducing them.
 
 ## How to Read the Numbers
 
-The benchmark plants known bugs in a set of code changes, asks each model to
-review them, and checks what comes back:
+The benchmark plants known bugs in code changes, asks each model to review
+them, and checks what comes back. It has two suites:
+
+- **Breadth** measures everyday review quality: 32 small changes across
+  seven programming languages, GitHub Actions, and Terraform, with 72
+  planted findings spanning ten review lenses, plus nine verified-clean
+  changes.
+- **Long horizon** measures whether the model still finds bugs when the diff
+  is very large: four defect-bearing Python changes that grow from about 3%
+  to 90% of the input budget, plus one large clean change. Each plants the
+  same eight bugs at the same relative positions, so recall differences come
+  from size alone.
+
+The two suites use different scoring formulas, so a breadth score and a
+long-horizon score cannot be compared with each other. Compare breadth
+against breadth and long horizon against long horizon, as the tables below
+do. Each table reports:
 
 - **Recall**: of the planted bugs, how many did the review find? Higher means
   fewer missed issues.
@@ -279,24 +294,12 @@ concurrency all affect local results. See
 [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md)
 for vLLM, llama.cpp, and LM Studio setup.
 
-## The Two Benchmark Suites
+## Before Setting a Default
 
-The scores above come from two suites that measure different things:
-
-- **Breadth** asks: how good is the model at everyday review? It uses 32 small
-  changes across seven programming languages, GitHub Actions, and Terraform,
-  with 72 planted findings spanning ten review lenses plus nine verified-clean
-  changes. Its balanced F1, recall, precision, false-positive count, and
-  clean-pass rate are the headline quality numbers.
-- **Long horizon** asks: does the model still find bugs when the diff is very
-  large? It uses four defect-bearing Python changes that grow from about 3% to
-  90% of the input budget, plus one large clean change, each planting the same
-  eight bugs at the same relative positions, so recall differences come from
-  size alone.
-
-The two suites use different scoring formulas, so a breadth score and a
-long-horizon score cannot be compared with each other. Compare breadth
-against breadth and long horizon against long horizon, as the tables above do.
+The corpus is synthetic. It says nothing about provider price, availability,
+data handling, or how a model performs on your codebase. Shortlist a model or
+two here, then try them on a few recent pull requests before setting a
+team-wide default.
 
 ## Source and Methodology
 
@@ -314,11 +317,6 @@ The [live benchmark repository][bench] provides:
   curves and wall-times the notes above draw on;
 - append-only raw results under `results/raw/`; and
 - commands for running the corpus against another model.
-
-The corpus is synthetic. It says nothing about provider price, availability,
-data handling, or how a model performs on your codebase. Shortlist a model or
-two here, then try them on a few recent pull requests before setting a
-team-wide default.
 
 [bench]: https://github.com/MattJColes/lgtmaybe-benchmarks
 [results]: https://github.com/MattJColes/lgtmaybe-benchmarks/blob/main/RESULTS.md
