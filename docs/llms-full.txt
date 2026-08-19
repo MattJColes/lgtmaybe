@@ -378,24 +378,22 @@ bundles all three and wires up the OIDC/WIF auth for you.
 
 # Choose a Review Model
 
-The calls, up front:
+Recommendations:
 
-- **Default hosted pick: `qwen/qwen3.8-max`.** The only model near the top of
-  both suites — second on everyday review quality with by far the best
-  precision among the leaders, and first outright on very large diffs.
-- **Maximum catches: `z-ai/glm-5.2`.** Finds the most planted bugs of any
-  model, at the cost of three times Qwen's noise — and its recall falls apart
-  as diffs grow, so keep it for repos with small PRs.
-- **Fast and frugal: `google/gemini-3.7-flash`.** Mid-table on score but high
-  precision, strong on large diffs, and an order of magnitude faster than the
-  leaders.
-- **Local pick: `nvidia/Qwen3.6-35B-A3B-NVFP4`.** Not top of either local
-  table, but the only local model that scores respectably on both suites with
-  sane noise levels.
+- **Hosted default: `qwen/qwen3.8-max`.** Second on everyday review quality,
+  the best precision among the leading models, and first on very large diffs —
+  the only model near the top of both suites.
+- **Highest recall: `z-ai/glm-5.2`.** Finds the most planted bugs, with three
+  times Qwen's false positives, and its recall drops as diffs grow. Suits
+  repos with small PRs.
+- **Fastest: `google/gemini-3.7-flash`.** Mid-table on score, high precision,
+  strong on large diffs, and an order of magnitude faster than the leaders.
+- **Local: `nvidia/Qwen3.6-35B-A3B-NVFP4`.** The only local model with
+  reasonable scores on both suites and low noise.
 
-The rest of this page shows every published run and the reasoning, so you can
-weigh the trade-offs yourself. The numbers are a snapshot from 19 August 2026;
-the [lgtmaybe benchmark repository][bench] has the live leaderboard, complete
+The rest of this page shows every published run and the reasoning behind
+these picks. The numbers are a snapshot from 19 August 2026; the
+[lgtmaybe benchmark repository][bench] has the live leaderboard, complete
 results, raw run records, and instructions for reproducing them.
 
 ## How to Read the Numbers
@@ -482,7 +480,7 @@ softer lenses — tests, documentation, complexity, needless code — and by how
 much noise a model produces getting there. (One lens humbles everyone: no
 model scores above 28.6% on spec-delivery findings.)
 
-**The calls:**
+**By model:**
 
 - **`qwen/qwen3.8-max` — the default.** Its headline F1 is a statistical tie
   with GLM's (their three-repeat ranges overlap almost completely), so
@@ -565,7 +563,7 @@ This suite grows the same eight bugs from a small diff to one filling ~90% of
 the input budget, so the interesting question isn't the score — it's the shape
 of each model's recall as the diff grows.
 
-**The calls:**
+**By model:**
 
 - **`qwen/qwen3.8-max` — the big-diff pick.** Dead-flat 75% recall at every
   size up to a million input tokens, zero findings on the large clean change,
@@ -623,7 +621,7 @@ leaves your machine and reviews cost nothing per call.
 | `RedHatAI/gemma-4-12B-it-FP8-Dynamic` | 2.2.0 | 48.5% | 44.3% | 51.6% | 31 | 11.1% |
 | `Qwen/Qwen3.5-9B` | 2.1.4 | 43.5% | 30.0% | 76.7% | 7 | 77.8% |
 
-**The calls:**
+**By model:**
 
 - **`nvidia/Qwen3.6-35B-A3B-NVFP4` — the local pick.** Hosted-midfield
   numbers (its F1 sits between gpt-5.4-mini and gpt-5.4-nano), 100% on the
@@ -661,7 +659,7 @@ leaves your machine and reviews cost nothing per call.
 | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4` | 2.2.0 | 0.0% | 15.6% | 17.9% | 23 |
 | `nvidia/Gemma-4-26B-A4B-NVFP4` | 2.1.4 | 0.0% | 34.4% | 8.8% | 114 |
 
-**The calls:**
+**By model:**
 
 - **`nvidia/Qwen3.6-35B-A3B-NVFP4` confirms the pick** — modest recall, but
   the only local model whose recall *rises* as the diff grows (25% on the
@@ -726,7 +724,7 @@ The [live benchmark repository][bench] provides:
 - the current leaderboard and scoring method in its README;
 - every completed run — including the per-language and per-lens recall, the
   false-positive breakdowns, and the per-case size curves and wall-times the
-  calls above draw on — in [`RESULTS.md`][results];
+  notes above draw on — in [`RESULTS.md`][results];
 - append-only raw results under `results/raw/`; and
 - commands for running the corpus against another model.
 
