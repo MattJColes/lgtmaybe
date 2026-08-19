@@ -281,3 +281,86 @@ class TestCapabilities:
 
         gateway = GiteaGateway.__new__(GiteaGateway)
         assert not isinstance(gateway, ports.SupportsThreadResolution)
+
+
+class TestLabels:
+    @respx.mock
+    def test_resolves_label_names_to_ids_before_applying(self) -> None:
+        """Gitea addresses labels by id, so names have to be looked up first."""
+        respx.route(method="GET", url__startswith=f"{API}/labels").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": 3, "name": "review-effort/2"}, {"id": 4, "name": "other"}]
+            )
+        )
+        applied = respx.post(f"{API}/issues/{PR_NUMBER}/labels").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+        _gateway(httpx.Client()).apply_pr_labels(["review-effort/2"])
+
+        import json as _json
+
+        assert _json.loads(applied.calls[0].request.content)["labels"] == [3]
+
+    @respx.mock
+    def test_a_label_the_repo_does_not_have_is_skipped_not_created(self) -> None:
+        """Creating labels on someone's repo is not this tool's business."""
+        respx.route(method="GET", url__startswith=f"{API}/labels").mock(
+            return_value=httpx.Response(200, json=[{"id": 3, "name": "known"}])
+        )
+        applied = respx.post(f"{API}/issues/{PR_NUMBER}/labels").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+        _gateway(httpx.Client()).apply_pr_labels(["never-heard-of-it"])
+
+        assert not applied.called
+
+    @respx.mock
+    def test_a_label_failure_never_fails_the_review(self) -> None:
+        respx.route(method="GET", url__startswith=f"{API}/labels").mock(
+            return_value=httpx.Response(500)
+        )
+        _gateway(httpx.Client()).apply_pr_labels(["anything"])  # must not raise
+
+    def test_no_labels_makes_no_request(self) -> None:
+        with respx.mock:
+            _gateway(httpx.Client()).apply_pr_labels([])
+            assert not respx.calls
+
+
+class TestCheckRun:
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("conclusion", "state"),
+        [("success", "success"), ("failure", "failure"), ("cancelled", "error")],
+    )
+    def test_maps_a_conclusion_onto_giteas_narrower_state_vocabulary(
+        self, conclusion: str, state: str
+    ) -> None:
+        posted = respx.post(f"{API}/statuses/head456").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        _gateway(httpx.Client()).create_check_run("head456", conclusion, "lgtmaybe", "summary")
+
+        import json as _json
+
+        payload = _json.loads(posted.calls[0].request.content)
+        assert payload["state"] == state
+        assert payload["context"] == "lgtmaybe"
+
+    @respx.mock
+    def test_an_unknown_conclusion_does_not_fail_the_review(self) -> None:
+        posted = respx.post(f"{API}/statuses/head456").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        _gateway(httpx.Client()).create_check_run("head456", "brand-new", "lgtmaybe", "summary")
+
+        import json as _json
+
+        assert _json.loads(posted.calls[0].request.content)["state"] == "success"
+
+    @respx.mock
+    def test_a_status_failure_never_fails_the_review(self) -> None:
+        respx.post(f"{API}/statuses/head456").mock(return_value=httpx.Response(500))
+        _gateway(httpx.Client()).create_check_run("head456", "success", "t", "s")  # must not raise

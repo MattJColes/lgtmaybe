@@ -754,7 +754,7 @@ class RestGitHubGateway:
         """
         if not inline:
             return []
-        unmatched = self._existingfinding_keys()
+        unmatched = self._existing_finding_keys()
         url = f"{self._pr_api}/comments"
         rejected: list[ReviewFinding] = []
         for comment, finding in inline:
@@ -809,7 +809,7 @@ class RestGitHubGateway:
             resp.raise_for_status()
         return rejected
 
-    def _existingfinding_keys(self) -> list[set[str]]:
+    def _existing_finding_keys(self) -> list[set[str]]:
         """Hidden ids of the lgtmaybe findings already posted inline on the PR.
 
         One entry **per posted comment** (its fingerprint and identity together),
