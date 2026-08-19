@@ -30,6 +30,7 @@ from .scorer import (
     Fixture,
     FixtureScore,
     _add_review_args,
+    _add_sampling_args,
     _eval_ctx,
     _sampling_extra,
     score_fixture,
@@ -327,6 +328,7 @@ def pooled_metrics(scores: list[FixtureScore]) -> dict[str, float]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run lgtmaybe review evals against a model.")
     _add_review_args(ap)
+    _add_sampling_args(ap)
     ap.add_argument(
         "--api-key",
         default=None,
