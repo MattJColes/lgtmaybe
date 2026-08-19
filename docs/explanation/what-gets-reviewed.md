@@ -5,14 +5,14 @@ description: What lgtmaybe reviews and how it bounds the work — only changed l
 # What gets reviewed
 
 This page explains what lgtmaybe looks at, how it bounds the work, and what the
-output looks like — on a GitHub PR and on the command line.
+output looks like — on a pull or merge request, and on the command line.
 
 ## What it looks at
 
-lgtmaybe reviews the **diff of a pull request** — the lines the PR adds or
-changes — not the whole repository. It fetches that diff from the GitHub REST
-API and **never checks out or executes your code**, so a malicious PR can't run
-anything in the reviewer's environment. The diff is treated as untrusted input
+lgtmaybe reviews the **diff of a pull request** (or a GitLab merge request) —
+the lines it adds or changes, not the whole repository. It fetches that diff
+from your code host's REST API and **never checks out or executes your code**,
+so a malicious change can't run anything in the reviewer's environment. The diff is treated as untrusted input
 throughout, including against prompt-injection attempts hidden in PR text.
 
 To review changes in context rather than in isolation, lgtmaybe also pads each
@@ -58,7 +58,7 @@ hunt the bugs a change introduces and grade them by impact:
 - **Aliasing & mutation** — mutable default arguments, mutating a collection while
   iterating it, sharing a mutable value the caller still owns.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [HIGH] possible None dereference, where get_user can return None but .email is accessed without a guard](../assets/review-correctness.png){ width="660" }
 
@@ -95,7 +95,7 @@ vulnerability class in the title. It actively looks for:
 - **Resource / DoS safety** — missing timeouts, unbounded loops or allocations,
   regexes vulnerable to catastrophic backtracking (ReDoS).
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability in a find_user function, explaining the unsafe string concatenation and suggesting a parameterized query](../assets/review-sql-injection.png){ width="660" }
 
@@ -124,7 +124,7 @@ code when the diff shows it — these are objective, not stylistic:
 The reviewer only raises these when the diff itself shows the change; it does not
 speculate about code it cannot see.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [MEDIUM] deprecated datetime.utcnow() call and suggesting datetime.now(timezone.utc)](../assets/review-deprecation.png){ width="660" }
 
@@ -152,7 +152,7 @@ Two lighter-weight checks round out a review:
 
 A missing test — note the runnable test dropped into the suggestion:
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [LOW] new branch added without a test, with a runnable pytest suggestion](../assets/review-tests.png){ width="660" }
 
@@ -162,7 +162,7 @@ A missing test — note the runnable test dropped into the suggestion:
 
 A documentation gap on a new public function:
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging an [INFO] public function missing a docstring, with a suggested docstring](../assets/review-documentation.png){ width="660" }
 
@@ -194,7 +194,7 @@ in a hot path):
 It sticks to changes the diff actually shows and avoids micro-optimisations with
 no measurable impact.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [HIGH] N+1 query inside a loop, suggesting a single batched query](../assets/review-performance.png){ width="660" }
 
@@ -219,7 +219,7 @@ it needs to be (`info`/`medium`), preferring a concrete simplification in the
 
 Like the documentation lens, it stays quiet on self-evident, already-simple code.
 
-=== "On a GitHub PR"
+=== "On a pull request"
 
     ![An inline lgtmaybe review comment flagging a [MEDIUM] deeply nested conditional and suggesting guard clauses](../assets/review-complexity.png){ width="660" }
 
@@ -439,7 +439,11 @@ public surface left undocumented — are explicitly exempt and still raised.
 
 ## What the response looks like
 
-### On a GitHub pull request
+### On a pull or merge request
+
+The rendering below is GitHub's. GitLab and Gitea show the same findings with
+the same badges; [how each host posts them](#how-each-host-posts) differs, and
+is covered at the end of this section.
 
 lgtmaybe posts **one review** containing:
 
@@ -478,8 +482,9 @@ A comment's title line carries the finding's provenance in its brackets:
 Each half drops away when it isn't there: with `reflect: false` there is no score
 and the badge is just the lens.
 
-One asymmetry worth knowing: GitHub's review API can't edit an inline comment
-once it's posted, so an inline comment's score is **frozen at first post** — a
+One asymmetry worth knowing: neither GitHub's nor Gitea's review API can edit an
+inline comment once it's posted, so an inline comment's score is **frozen at
+first post** — a
 later run that judges the same finding differently won't change it. Findings in
 the summary body (the "Additional findings" and "Broader observations" sections)
 are rewritten on every run, so those badges do track. That's how severity and
@@ -502,6 +507,27 @@ Resolving a thread uses GitHub's GraphQL API; the workflow's default
 `GITHUB_TOKEN` (with `pull-requests: write`, already needed to post the review)
 is sufficient. The step is best-effort — if it can't run, the review itself still
 posts normally.
+
+On **GitLab** the same thing happens over plain REST rather than GraphQL. On
+**Gitea** it does not happen at all — Gitea has no thread-resolution API, so
+findings' comments stay open for a human to close.
+
+### How each host posts
+
+The findings are identical everywhere. What each host's API allows is not:
+
+| | GitHub | GitLab | Gitea |
+|---|---|---|---|
+| Inline comments | one batched review | one discussion per finding | one batched review |
+| Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place |
+| Avoiding duplicates on a re-run | edits the review | skips ids already posted | skips ids already posted |
+| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
+| Incremental review of new commits | ✅ | not yet | ✗ no compare diff |
+
+The reason for the differences: a submitted **Gitea** review can't be edited, so
+its summary moves to an ordinary comment and duplicate findings are filtered
+*before* posting. **GitLab** has no batched review object at all, so each
+finding becomes its own positioned discussion.
 
 When a PR is clean (no findings, and every file was within the caps), the summary
 is a simple:

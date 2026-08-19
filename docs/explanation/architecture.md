@@ -18,8 +18,15 @@ flowchart TB
         models["models.py<br/>ReviewConfig · ReviewFinding · ProviderResult · PRContext"]
     end
     providers["providers/<br/>litellm adapter"] -- implements --> ports
-    github["github/<br/>REST adapter"] -- implements --> ports
+    github["github/<br/>GitHub REST adapter"] -- implements --> ports
+    gitlab["gitlab/<br/>GitLab REST adapter"] -- implements --> ports
+    gitea["gitea/<br/>Gitea REST adapter"] -- implements --> ports
 ```
+
+Two independent axes meet at these ports: which **model** reviews the code
+(`ProviderClient`) and which **code host** the review is posted to
+(`ReviewGateway`). Any combination works, because neither side knows about the
+other.
 
 **`core/ports.py`** — the seam. Three abstract base classes:
 
@@ -38,6 +45,77 @@ flowchart TB
 The ports were frozen in the foundation step. Other tracks (providers, github,
 engine, CLI) build against these stable signatures. Changing a port requires
 consensus across all tracks.
+
+## Code hosts (forges)
+
+lgtmaybe calls a code host a **forge** internally, to keep it distinct from a
+model *provider* — the two are separate choices. `core/forge.py` holds
+everything host-specific outside the adapters themselves: a `Forge` enum, a
+`PRLocator` (forge + host + repo + number) parsed from a change-request URL, and
+the environment variable each host's token lives in.
+
+A URL is all lgtmaybe needs to work out the rest:
+
+| URL shape | Forge | Token |
+|---|---|---|
+| `github.com/org/repo/pull/42` | GitHub | `GITHUB_TOKEN` |
+| `gitlab.com/group/sub/project/-/merge_requests/42` | GitLab | `GITLAB_TOKEN` |
+| `gitea.example.com/org/repo/pulls/42` | Gitea | `GITEA_TOKEN` |
+
+The host is carried, not assumed, because self-hosted GitLab and Gitea are the
+normal case. `cli._GATEWAY_BUILDERS` maps the resolved forge to its adapter.
+
+### Required surface vs optional capabilities
+
+`ReviewGateway` is deliberately three methods. Everything richer is an optional
+`Supports*` protocol that a caller probes for and skips when absent, so an
+adapter can be useful long before it is complete — and, more importantly, so it
+can be **honest** about what its host genuinely cannot do rather than failing at
+run time.
+
+| Capability | GitHub | GitLab | Gitea |
+|---|---|---|---|
+| `SupportsFileContents` — read head text for context | ✅ | ✅ | ✅ |
+| `SupportsDescribe` / `SupportsDiagram` — upserted comments | ✅ | ✅ | ✅ |
+| `SupportsLabels` | ✅ | ✅ | ✅ |
+| `SupportsChecks` — check run / commit status | ✅ | ✅ | ✅ |
+| `SupportsThreadResolution` — auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
+| `SupportsIncremental` — review only new commits | ✅ | not yet | ✗ no compare diff |
+| `SupportsBaseCheckout` — clone base for symbol lookup | ✅ | ✗ | ✗ |
+
+A test asserts the GitHub adapter satisfies every declared capability, and that
+the others do **not** claim the ones their host cannot serve — which is what
+stops the list drifting into fiction.
+
+### Where the hosts genuinely differ
+
+Gitea is nearly a copy of GitHub; GitLab is not.
+
+- **GitHub** batches every inline comment into one review object it can later
+  edit, and resolves threads over GraphQL.
+- **Gitea** mirrors GitHub's API, but a submitted review is **immutable**. So
+  the summary lives in an ordinary issue comment (which can be edited) and
+  findings are de-duplicated *before* posting, by reading the hidden ids already
+  on the pull request.
+- **GitLab** has no batched review object at all: each finding is its own
+  **discussion**, positioned by old/new path and line plus the merge request's
+  `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST.
+
+lgtmaybe keeps GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
+it at each adapter's boundary — `new_position`/`old_position` on Gitea,
+`new_line`/`old_line` on GitLab.
+
+### Entrypoints
+
+GitHub and Gitea share one entrypoint: Gitea Actions reimplements the GitHub
+Actions runtime, so the same `action` command and the same container work on
+both. The only variable that differs is `GITHUB_SERVER_URL`, which Gitea points
+at your own instance.
+
+GitLab CI has neither an event payload file nor an `INPUT_*` convention, so it
+gets its own `gitlab-ci` command that reads GitLab's predefined `CI_*`
+variables. Everything downstream — locator, gateway registry, engine — is
+shared.
 
 ## Review pipeline
 

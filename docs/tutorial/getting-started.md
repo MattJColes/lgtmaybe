@@ -113,8 +113,15 @@ to see it drawn. See
 ## Step 6 — Post reviews on real pull requests
 
 The CLI reviews local changes. To run lgtmaybe on actual pull requests — inline
-comments and a summary posted back to GitHub — add the GitHub Action to your
-repo. See [Use as a GitHub Action](../how-to/use-as-github-action.md).
+comments and a summary posted back to the change — wire it into your code host.
+The review is the same on all three; only the plumbing differs:
+
+- **GitHub** — add the Action to your repo:
+  [Use as a GitHub Action](../how-to/use-as-github-action.md)
+- **GitLab** — add a CI job:
+  [Review on GitLab](../how-to/review-on-gitlab.md)
+- **Gitea** — add a Gitea Actions workflow:
+  [Review on Gitea](../how-to/review-on-gitea.md)
 
 ## What happened under the hood
 
