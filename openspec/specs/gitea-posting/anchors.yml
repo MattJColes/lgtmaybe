@@ -1,0 +1,29 @@
+gitea.context:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^get_pr_context$' }
+  files: [src/lgtmaybe/gitea/**/*.py]
+
+gitea.upsert:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_upsert_comment$' }
+  files: [src/lgtmaybe/gitea/**/*.py]
+
+gitea.dedupe:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_existing_finding_keys$' }
+  files: [src/lgtmaybe/gitea/**/*.py]
+
+gitea.positions:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_partition_findings$' }
+  files: [src/lgtmaybe/gitea/**/*.py]
+
+gitea.capabilities:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^GiteaGateway$' }
+  files: [src/lgtmaybe/gitea/**/*.py]

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import Provider, ReviewConfig, ReviewFinding, Severity
 from lgtmaybe.engine.suppress import apply_suppressions
-from lgtmaybe.github.rest_gateway import finding_fingerprint
 
 _CFG = ReviewConfig(provider=Provider.ollama, model="llama3")
 
