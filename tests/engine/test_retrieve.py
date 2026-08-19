@@ -7,6 +7,7 @@ from lgtmaybe.engine.parse import coerce_needs, parse_needs
 from lgtmaybe.engine.retrieve import (
     MAX_FETCH_FILES,
     MAX_HOPS,
+    local_file_fetcher,
     resolve_needs,
 )
 
@@ -356,3 +357,38 @@ def test_symbol_candidates_keep_trying_past_an_unfetchable_one() -> None:
     )
 
     assert list(out) == ["real.py"]
+
+
+class TestLocalFileFetcher:
+    """The one containment-checked workspace reader both lenses read through."""
+
+    def test_reads_a_file_under_the_root(self, tmp_path) -> None:
+        (tmp_path / "ARCHITECTURE.md").write_text("the shape of it", encoding="utf-8")
+
+        assert local_file_fetcher(tmp_path)("ARCHITECTURE.md") == "the shape of it"
+
+    def test_a_path_escaping_the_root_reads_as_missing(self, tmp_path) -> None:
+        """Config is trusted, so this is defence in depth — but a stray `../`
+        must never reach outside the repository being reviewed."""
+        outside = tmp_path.parent / "outside.md"
+        outside.write_text("secret", encoding="utf-8")
+        root = tmp_path / "repo"
+        root.mkdir()
+
+        assert local_file_fetcher(root)("../outside.md") is None
+
+    def test_a_missing_file_reads_as_none_rather_than_raising(self, tmp_path) -> None:
+        assert local_file_fetcher(tmp_path)("nope.md") is None
+
+    def test_a_directory_reads_as_none_rather_than_raising(self, tmp_path) -> None:
+        (tmp_path / "docs").mkdir()
+
+        assert local_file_fetcher(tmp_path)("docs") is None
+
+    def test_undecodable_bytes_are_replaced_rather_than_failing_the_review(self, tmp_path) -> None:
+        (tmp_path / "weird.md").write_bytes(b"ok \xff\xfe end")
+
+        text = local_file_fetcher(tmp_path)("weird.md")
+
+        assert text is not None
+        assert text.startswith("ok ")

@@ -401,19 +401,11 @@ def _reader(root: Path, head_texts: Mapping[str, str]) -> Callable[[str], str | 
     the lens the version *before* the requirements it is meant to check. It is
     untrusted, which is why the rendered block is wrapped as untrusted data.
     """
-    resolved_root = root.resolve()
+    from_workspace = retrieve.local_file_fetcher(root)
 
     def read(path: str) -> str | None:
         head = head_texts.get(path)
-        if head is not None:
-            return head
-        try:
-            target = (resolved_root / path).resolve()
-            if not target.is_relative_to(resolved_root):
-                return None
-            return target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None
+        return head if head is not None else from_workspace(path)
 
     return read
 
