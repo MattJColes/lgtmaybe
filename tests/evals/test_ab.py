@@ -168,7 +168,10 @@ class TestSharedReviewArgs:
         from evals.ab import main
 
         with pytest.raises(SystemExit) as excinfo:
-            main(["--provider", "ollama", "--model", "x", "--baseline-ref", "main", "--preset", "fasst"])
+            main(
+                ["--provider", "ollama", "--model", "x", "--baseline-ref", "main"]
+                + ["--preset", "fasst"]
+            )
 
         assert excinfo.value.code == 2
         assert "invalid choice" in capsys.readouterr().err
