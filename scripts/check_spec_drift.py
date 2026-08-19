@@ -144,24 +144,27 @@ def parse_scan_output(json_text: str) -> dict[str, list[Match]]:
 
 
 def run_scan(binary: str, inline_rules: str, cwd: Path) -> dict[str, list[Match]]:
-    """Run ast-grep from *cwd* so each rule's files glob resolves consistently."""
+    """Run ast-grep from *cwd* so each rule's files glob resolves consistently.
+
+    Rules go over the command line as ``--inline-rules``, the same way
+    ``engine/astgrep.py`` runs them — the rule text is already in hand, so
+    writing it back out to a temp file just to hand ast-grep a path was a round
+    trip through the disk for nothing.
+    """
     matches: dict[str, list[Match]] = {}
-    with tempfile.TemporaryDirectory(prefix="lgtmaybe-anchor-rules-") as temp_dir:
-        for index, rule_text in enumerate(inline_rules.split("\n---\n")):
-            rule_path = Path(temp_dir) / f"{index}.yml"
-            rule_path.write_text(rule_text, encoding="utf-8", newline="\n")
-            result = subprocess.run(
-                [binary, "scan", "--rule", str(rule_path), "--json=compact", *SCAN_TARGETS],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=True,
-                timeout=120,
-            )
-            for rule_id, rule_matches in parse_scan_output(result.stdout).items():
-                matches.setdefault(rule_id, []).extend(rule_matches)
+    for rule_text in inline_rules.split("\n---\n"):
+        result = subprocess.run(
+            [binary, "scan", "--inline-rules", rule_text, "--json=compact", *SCAN_TARGETS],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+            timeout=120,
+        )
+        for rule_id, rule_matches in parse_scan_output(result.stdout).items():
+            matches.setdefault(rule_id, []).extend(rule_matches)
     return matches
 
 

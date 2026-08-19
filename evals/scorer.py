@@ -291,20 +291,13 @@ def _sampling_extra(
     return extra
 
 
-def _add_review_args(ap: argparse.ArgumentParser) -> None:
-    """The review-driver CLI flags used by evals.run.
+def _add_sampling_args(ap: argparse.ArgumentParser) -> None:
+    """The model-sampling flags, for runners that let the caller set them.
 
-    Runners add their own output and gating flags around these shared options.
+    Separate from the review flags below because ``evals.ab`` pins sampling to
+    temperature 0 on both legs — a benchmark that let its two legs sample
+    differently would not be measuring the change under test.
     """
-    ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--api-base", default=None)
-    ap.add_argument(
-        "--timeout",
-        type=int,
-        default=None,
-        help="per-request timeout (seconds); raise for slow local models on big diffs",
-    )
     ap.add_argument(
         "--temperature",
         type=float,
@@ -322,6 +315,24 @@ def _add_review_args(ap: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="top_k forwarded to the model (ollama/qwen3.x recommend 20 with thinking off)",
+    )
+
+
+def _add_review_args(ap: argparse.ArgumentParser) -> None:
+    """The review-driver CLI flags shared by evals.run and evals.ab.
+
+    Runners add their own output and gating flags around these shared options.
+    Declared once so the two entry points cannot drift — ``evals.ab`` used to
+    re-declare them and lost ``--preset``'s validation in the copy.
+    """
+    ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--api-base", default=None)
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="per-request timeout (seconds); raise for slow local models on big diffs",
     )
     ap.add_argument(
         "--categories",

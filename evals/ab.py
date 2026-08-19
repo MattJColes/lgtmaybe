@@ -33,10 +33,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lgtmaybe.core.models import Provider
-
 from .run import pooled_metrics
-from .scorer import FixtureScore
+from .scorer import FixtureScore, _add_review_args
 
 # ---------------------------------------------------------------------------
 # Pure aggregation — no model, no git, no I/O; unit-tested.
@@ -247,20 +245,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--provider", required=True, choices=[p.value for p in Provider])
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--api-base", default=None)
+    # Provider, model, api-base, timeout, categories, preset and fixture are the
+    # same flags evals.run takes, so they are declared once, there. Sampling is
+    # deliberately not among them: both legs are pinned to temperature 0.
+    _add_review_args(ap)
     ap.add_argument("--api-key", default=None)
-    ap.add_argument("--timeout", type=int, default=None)
     ap.add_argument("--max-input-tokens", type=int, default=None)
-    ap.add_argument("--categories", default=None, help="comma-separated review lenses")
-    ap.add_argument(
-        "--fixture",
-        action="append",
-        dest="fixtures",
-        metavar="NAME",
-        help="fixture(s) to benchmark; repeatable. Default: all.",
-    )
     ap.add_argument(
         "--baseline-ref",
         default=None,
@@ -272,13 +262,6 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="NAME=VALUE,VALUE",
         help="sweep one evals.run option on the current tree; first value is baseline",
-    )
-    ap.add_argument(
-        "--preset",
-        default=None,
-        help="review preset applied to both legs of a --baseline-ref "
-        "comparison (the baseline ref must already know the flag, i.e. >= 0.10.0; "
-        "for older refs omit it and compare via --categories instead).",
     )
     args = ap.parse_args(argv)
 

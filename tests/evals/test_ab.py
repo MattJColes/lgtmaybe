@@ -155,3 +155,27 @@ class TestSweepAxis:
         assert len(calls) == 2  # baseline + current
         for _label, extra in calls:
             assert "--preset" in extra and extra[extra.index("--preset") + 1] == "full"
+
+
+class TestSharedReviewArgs:
+    """`ab` and `run` take the same review-driver flags, declared once."""
+
+    def test_a_typoed_preset_is_rejected_at_the_ab_boundary(self, capsys) -> None:
+        """Without the shared declaration this was forwarded to the subprocess,
+        where it surfaced layers down as a generic 'eval leg broke'."""
+        import pytest
+
+        from evals.ab import main
+
+        with pytest.raises(SystemExit) as excinfo:
+            main(["--provider", "ollama", "--model", "x", "--baseline-ref", "main", "--preset", "fasst"])
+
+        assert excinfo.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err
+
+    def test_a_valid_preset_still_reaches_both_legs(self, monkeypatch) -> None:
+        calls = TestSweepAxis()._run(
+            monkeypatch,
+            ["--provider", "ollama", "--model", "x", "--baseline-ref", "main", "--preset", "full"],
+        )
+        assert all(["--preset", "full"] == extra[-2:] for _, extra in calls)
