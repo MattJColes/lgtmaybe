@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from lgtmaybe.core.logging import get_logger
@@ -17,6 +16,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import ProviderClient
 
 from .injection import wrap_validation
+from .parse import parse_structured
 from .profiling import timed_complete
 from .redact import redact
 
@@ -96,7 +96,18 @@ def validate_findings(
             label="validate",
             **opts,
         )
-        parsed = FindingValidationResult.model_validate(json.loads(result.text))
+        # Through the shared lenient parser, like every other structured-output
+        # consumer: a bare json.loads made this the one call that refused a
+        # fenced, reasoning-wrapped or prose-wrapped reply — the exact shapes
+        # ollama and openai-compatible gateways produce, where the same run's
+        # review and reflect calls parse fine.
+        parsed = parse_structured(
+            result.text,
+            FindingValidationResult,
+            lambda data: isinstance(data.get("verdicts"), list),
+        )
+        if parsed is None:
+            raise ValueError("no verdicts object in the reply")
     except Exception as exc:  # noqa: BLE001 - validation fails closed
         _log.warning("follow-up finding validation failed: %s", exc)
         return _uncertain(findings, "validation output was unavailable or invalid")

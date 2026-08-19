@@ -151,3 +151,44 @@ def test_validate_findings_neutralises_forged_markers() -> None:
     assert prompt.count("===VALIDATION_END===") == 1
     assert "VALIDATION-END" in prompt
     assert verdicts[0].status is FindingValidationStatus.uncertain
+
+
+def test_a_fenced_verdict_is_parsed_like_every_other_structured_reply() -> None:
+    """Bare json.loads made this path the one structured-output consumer without
+    the lenient extraction the review, reflect and triage calls all get — so on
+    the very routes that tolerance exists for (ollama, openai-compatible), every
+    previously-posted finding silently collapsed to `uncertain`."""
+    payload = json.dumps(
+        {"verdicts": [{"thread_id": "T1", "status": "fixed", "reason": "call removed"}]}
+    )
+    provider = FakeProvider(
+        result=ProviderResult(
+            text=f"Here is my assessment:\n\n```json\n{payload}\n```\n",
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+
+    verdicts = validate_findings(provider, make_cfg(), [_finding()], CTX)
+
+    assert verdicts[0].status is FindingValidationStatus.fixed
+    assert verdicts[0].reason == "call removed"
+
+
+def test_a_reply_wrapped_in_a_reasoning_block_is_parsed_too() -> None:
+    """The other shape parse.py's tolerance exists for: qwen-style local models
+    that emit their thinking before the JSON."""
+    payload = json.dumps(
+        {"verdicts": [{"thread_id": "T1", "status": "still_open", "reason": "still there"}]}
+    )
+    provider = FakeProvider(
+        result=ProviderResult(
+            text=f"<think>the call is still present</think>{payload}",
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+
+    verdicts = validate_findings(provider, make_cfg(), [_finding()], CTX)
+
+    assert verdicts[0].status is FindingValidationStatus.still_open

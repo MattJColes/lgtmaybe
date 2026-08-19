@@ -56,6 +56,20 @@ _ASK_SYSTEM = (
 _ASK_FALLBACK = "I couldn't produce a valid answer. Please try again."
 
 
+def _unfence(text: str) -> str:
+    """*text* with one wrapping ``` code fence removed, if it has one.
+
+    Only a fence that opens the response and closes it — an inner fence quoting
+    an example is part of the prose around it, not a wrapper.
+    """
+    if not (text.startswith("```") and text.endswith("```")):
+        return text
+    body = text.removeprefix("```")
+    # The opening fence may carry a language tag ("```json"); drop that line.
+    _tag, _, rest = body.partition("\n")
+    return rest.removesuffix("```").strip()
+
+
 def _is_json_envelope(text: str) -> bool:
     """Is the WHOLE response a JSON object/array rather than an answer?
 
@@ -67,8 +81,13 @@ def _is_json_envelope(text: str) -> bool:
     and a fenced JSON example in an otherwise good answer — eating the answers the
     guard exists to protect. An envelope is the entire response, or it is prose
     that happens to quote one. Arrays count: `[]` is as much an envelope as `{}`.
+
+    One wrapping code fence is stripped first: a model told "return ONLY a JSON
+    object" commonly fences it anyway, and the fenced envelope is the same
+    machine payload wearing a backtick. That stays whole-response — a fence
+    around prose leaves prose behind, which is relayed as it always was.
     """
-    stripped = text.strip()
+    stripped = _unfence(text.strip())
     if not stripped.startswith(("{", "[")):
         return False
     try:
