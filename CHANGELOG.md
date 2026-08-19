@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.4.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.3.0...lgtmaybe-v2.4.0) (2026-08-19)
+
+
+### Features
+
+* review merge requests on GitLab ([#482](https://github.com/MattJColes/lgtmaybe/issues/482)) ([adb87b9](https://github.com/MattJColes/lgtmaybe/commit/adb87b9c3bd6936467d3a21841a74842b167d61a))
+* review pull requests on Gitea ([#481](https://github.com/MattJColes/lgtmaybe/issues/481)) ([b46d34a](https://github.com/MattJColes/lgtmaybe/commit/b46d34a7d2762beac567a00cf114796ca5df040d))
+
+
+### Bug Fixes
+
+* bound runaway model output that floods a review ([#484](https://github.com/MattJColes/lgtmaybe/issues/484)) ([90f1511](https://github.com/MattJColes/lgtmaybe/commit/90f1511773e1c366190b284bfcafcb48f53cbf0b))
+
+
+### Documentation
+
+* add benchmark model selection guide ([#472](https://github.com/MattJColes/lgtmaybe/issues/472)) ([9a47534](https://github.com/MattJColes/lgtmaybe/commit/9a475349edcfcfaf20bdb3bac114355f83463c3f))
+* cover GitLab and Gitea across the documentation ([#483](https://github.com/MattJColes/lgtmaybe/issues/483)) ([baf0660](https://github.com/MattJColes/lgtmaybe/commit/baf0660a07d1964d6a28d35fb9b0a97299d05ff0))
+* cut table-restating detail from the review-model notes ([#478](https://github.com/MattJColes/lgtmaybe/issues/478)) ([adfb0a9](https://github.com/MattJColes/lgtmaybe/commit/adfb0a923c7cf16592a34bb287cf9dbc34a674eb))
+* define the benchmark suites before the tables that use them ([#479](https://github.com/MattJColes/lgtmaybe/issues/479)) ([4d30161](https://github.com/MattJColes/lgtmaybe/commit/4d3016111faef896a50bbe3d8b54c0331ef71a46))
+* make the review-model guide read more naturally ([#475](https://github.com/MattJColes/lgtmaybe/issues/475)) ([0bf32a7](https://github.com/MattJColes/lgtmaybe/commit/0bf32a772214461998258e4e54981ea079dcc668))
+* plainer opening for the choose-a-review-model page ([#476](https://github.com/MattJColes/lgtmaybe/issues/476)) ([364f1a6](https://github.com/MattJColes/lgtmaybe/commit/364f1a6628e82da44f861637176df0f48ea9ab30))
+* remove marketing phrasing from the review-model guide ([#477](https://github.com/MattJColes/lgtmaybe/issues/477)) ([2b45195](https://github.com/MattJColes/lgtmaybe/commit/2b45195f6352242af57281233e9d1678ce5bd3d1))
+
 ## [2.3.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.2.0...lgtmaybe-v2.3.0) (2026-08-18)
 
 
