@@ -894,7 +894,11 @@ class RestGitHubGateway:
         Deleted/renamed-away files (404) and any other fetch error degrade to
         None so the engine simply reviews the bare diff for that file.
         """
-        url = f"{self._api}/contents/{path}?ref={ref}"
+        # quote() the path, keeping `/` as a real separator: `#` in a filename
+        # would otherwise open a client-side URL fragment, truncating the request
+        # path and swallowing the `?ref=` query — a request that 404s and reads
+        # exactly like a deleted file.
+        url = f"{self._api}/contents/{quote(path)}?ref={ref}"
         try:
             resp = self._client.get(
                 url,

@@ -435,3 +435,26 @@ def test_content_fetches_keep_full_concurrency_while_the_count_runs() -> None:
         f"content fetches peaked at {peak} concurrent while the count ran; "
         f"the count is taking a worker from them (expected {_CONTENT_FETCH_WORKERS})"
     )
+
+
+@respx.mock
+def test_a_path_with_a_fragment_character_still_reaches_the_server() -> None:
+    """`#` in a path starts a client-side URL fragment, so an unescaped path
+    truncates the request to `.../contents/src/C` and drops the `?ref=` with it —
+    a silent 404 that reads exactly like a deleted file."""
+    captured: list[httpx.Request] = []
+
+    def _record(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, text="class Foo {}")
+
+    respx.route(method="GET", url__startswith=f"{BASE_URL}/repos/{REPO}/contents/").mock(
+        side_effect=_record
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+    assert gw._get_file_content("src/C#/Foo.cs", "deadbeef") == "class Foo {}"
+    # `.path` decodes; the wire form is what the `#` breaks.
+    assert captured[0].url.raw_path.endswith(b"/contents/src/C%23/Foo.cs?ref=deadbeef")
+    assert captured[0].url.params["ref"] == "deadbeef"
