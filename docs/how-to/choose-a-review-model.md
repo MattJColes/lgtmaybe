@@ -7,8 +7,8 @@ description: Choose a cloud or local lgtmaybe review model using measured breadt
 Recommendations:
 
 - **Hosted default: `qwen/qwen3.8-max`.** Second on everyday review quality,
-  the best precision among the leading models, and first on very large diffs —
-  the only model near the top of both suites.
+  the best precision among the leading models, and first on very large diffs.
+  It is the only model near the top of both suites.
 - **Highest recall: `z-ai/glm-5.2`.** Finds the most planted bugs, with three
   times Qwen's false positives, and its recall drops as diffs grow. Suits
   repos with small PRs.
@@ -27,40 +27,38 @@ results, raw run records, and instructions for reproducing them.
 The benchmark plants known bugs in a set of code changes, asks each model to
 review them, and checks what comes back:
 
-- **Recall** — of the planted bugs, how many did the review find? Higher means
+- **Recall**: of the planted bugs, how many did the review find? Higher means
   fewer missed issues.
-- **Precision** — of everything the model flagged, how much was a real planted
+- **Precision**: of everything the model flagged, how much was a real planted
   bug? Higher means less noise.
-- **Breadth score (balanced F1)** — a single score that combines recall and
-  precision, so models can be ranked without favouring loud ones or quiet
-  ones. Breadth runs are the median of three repeats; the run-to-run ranges
-  are in the repository.
-- **Long-horizon score** — starts from recall and subtracts two points for
-  every false positive, floored at zero. That penalty is why a noisy run can
-  score 0% while still finding most of the bugs: the noise cancelled out the
-  catches. Long-horizon runs are single passes.
-- **False positives** — findings that didn't match any planted bug. The
+- **Breadth score (balanced F1)**: a single score combining recall and
+  precision, used to rank the models. Breadth runs are the median of three
+  repeats; the run-to-run ranges are in the repository.
+- **Long-horizon score**: starts from recall and subtracts two points for
+  every false positive, floored at zero. A noisy run can therefore score 0%
+  even when it found most of the bugs. Long-horizon runs are single passes.
+- **False positives**: findings that didn't match any planted bug. The
   benchmark deliberately assumes it knows about every real issue, so a
   plausible-looking finding outside the planted catalogue counts as false
-  until a human reviews ("adjudicates") it. In practice the leaders' false
-  positives are mostly noise on clean changes, near-miss findings, and
-  duplicates — no leading model fell for the benchmark's planted cross-file
+  until a human reviews ("adjudicates") it. In practice the leading models'
+  false positives are mostly noise on clean changes, near-miss findings, and
+  duplicates; no leading model fell for the benchmark's planted cross-file
   traps.
-- **Clean pass** — the breadth suite includes changes verified to contain
+- **Clean pass**: the breadth suite includes changes verified to contain
   nothing worth flagging. Clean pass is how often the model correctly stayed
   quiet on them.
 
 Most breadth scores are **provisional**: a small share of borderline findings
 (typically under 2%) is still waiting on human adjudication, so the numbers
-can shift slightly. None of the runs has an immutable audit trace yet — the
+can shift slightly. None of the runs has an immutable audit trace yet; the
 live leaderboard reports that separately as `audit: no`.
 
 The tables below compare all published breadth runs with each other, and all
 published long-horizon runs with each other, across lgtmaybe versions. Each
 row names the lgtmaybe version it ran on, because changes to the prompt,
-parsing, or review pipeline can move a score on their own — where a model has
+parsing, or review pipeline can move a score on their own. Where a model has
 runs on both versions (Gemini 3.7 Flash, Claude Sonnet 5), the gap between
-them gives a feel for how much. Runs marked **†** used a diagnostic
+them shows how much. Runs marked **†** used a diagnostic
 (non-standard) profile, so their settings differ from the rest; runs that
 failed to produce a scoreable result are omitted here but kept in the
 repository.
@@ -100,61 +98,53 @@ Ranked by balanced F1, best first:
 | `anthropic/claude-opus-5` | 2.2.0 | 18.2% | 11.4% | 57.4% | 10 | 55.6% |
 | `anthropic/claude-opus-5` | 2.1.4 | 5.5% | 2.9% | 71.4% | 1 | 100.0% |
 
-Start with what the whole table agrees on: every serious model catches the
-security and correctness plants at or near 100%. The ranking is decided by the
-softer lenses — tests, documentation, complexity, needless code — and by how
-much noise a model produces getting there. (One lens humbles everyone: no
-model scores above 28.6% on spec-delivery findings.)
+Most models find the security and correctness plants at or near 100%, so the
+ranking is decided by the other lenses (tests, documentation, complexity,
+needless code) and by false-positive counts. Spec-delivery is the weakest
+lens across the board: no model scores above 28.6% on it.
 
 **By model:**
 
-- **`qwen/qwen3.8-max` — the default.** Its headline F1 is a statistical tie
-  with GLM's (their three-repeat ranges overlap almost completely), so
-  behaviour decides — and the behaviours could not be more different. Qwen
-  posts a quarter as many false positives, stays quiet on 7 of 9 clean
-  changes, and is right about 85% of the time when it speaks. A reviewer the
-  team stops trusting is worse than one that occasionally misses, which is
-  why the tie breaks to Qwen.
-- **`z-ai/glm-5.2` — when catches matter most.** A perfect 100% on the
-  correctness, security, performance, *and* test lenses — no other model
-  manages that. The price: 24 false positives and something flagged on 8 of 9
-  clean changes. Pick it if your team will happily dismiss noise to miss
-  nothing; skip it if a chatty bot will get muted.
-- **`google/gemini-3.7-flash` — the value pick.** Mid-table on F1, but with
-  leader-grade precision, the only fully adjudicated result in the table, and
-  wall-times an order of magnitude faster than the leaders (its long-horizon
-  cases finished in 21–107 seconds; Qwen's took 10–20 minutes). If you review
-  every push, or pay per token, this is the sweet spot. Its blind spots are
-  the softer lenses — tests and intent findings in particular.
-- **`openai/gpt-5.6-sol` — the best OpenAI showing**, third overall on the
-  older 2.1.4 run with a tight, stable range. It hasn't been re-run on 2.2.0
-  yet; the OpenAI models that have — `gpt-5.4-nano` and `gpt-5.4-mini` — land
-  midfield, and the cheaper nano oddly beats mini on every metric.
-- **`minimax/minimax-m3` and `kwaipilot/kat-coder-pro-v2.5` — solid
-  midfielders.** Nothing spectacular, no glaring vice; kat-coder-pro in
-  particular backs it up with a strong large-diff result (below), which makes
-  it the sleeper pick of the mid-table.
-- **`x-ai/grok-4.6` and `openai/gpt-5.6-luna` — inconsistent.** Decent
-  medians, but the widest run-to-run swings in the table (luna's three
-  repeats spanned 52–66%). You may not get the review quality you sampled.
-- **The noisy tier — avoid.** `moonshotai/kimi-k3` and `kimi-k2.7-code`,
-  `mistralai/mistral-small-2603`, and `openai/gpt-oss-120b`: respectable
-  recall, but precision at or below 60%, 32–46 false positives, and clean
-  passes of 0–11%. These will bury their catches in noise.
-- **The DeepSeek pair — no reason to pick either.** `deepseek-v4-pro` is
-  precise but misses 60% of the plants; `deepseek-v4-flash` is midfield with
-  midfield noise. Both are dominated by something above them.
-- **The Claude models — wrong tool for this job.** The opposite failure mode
-  to the noisy tier: nearly silent. Sonnet 5 has the best precision-and-clean
-  discipline in the table and misses 5 of every 6 planted bugs; Opus 5 found
-  2 of 70 on the 2.1.4 run. Whatever these models are optimising for, it is
-  not exhaustive diff review through this pipeline.
+- **`qwen/qwen3.8-max`.** The recommended default. Its F1 is a statistical
+  tie with GLM-5.2's (their three-repeat ranges overlap almost completely),
+  but it posts a quarter as many false positives, stays quiet on 7 of 9
+  clean changes, and has 84.9% precision.
+- **`z-ai/glm-5.2`.** The highest recall. It scores 100% on the correctness,
+  security, performance, and test lenses, which no other model does, but
+  posts 24 false positives and flags something on 8 of 9 clean changes.
+  Pick it only if the team is prepared to triage that noise.
+- **`google/gemini-3.7-flash`.** Mid-table on F1 with 72.7% precision, the
+  only fully adjudicated result in the table, and much faster than the
+  leaders: its long-horizon cases finished in 21–107 seconds where Qwen's
+  took 10–20 minutes. It misses most test and intent findings. A reasonable
+  choice if you review every push or pay per token.
+- **`openai/gpt-5.6-sol`.** The best OpenAI result: third overall on the
+  older 2.1.4 run, with a stable three-repeat range. It has not been re-run
+  on 2.2.0. The OpenAI models that have (`gpt-5.4-nano` and `gpt-5.4-mini`)
+  land mid-table, with the cheaper nano ahead of mini on every metric.
+- **`minimax/minimax-m3` and `kwaipilot/kat-coder-pro-v2.5`.** Mid-table on
+  every metric with no particular weakness. kat-coder-pro also holds up on
+  large diffs (below).
+- **`x-ai/grok-4.6` and `openai/gpt-5.6-luna`.** Reasonable medians but the
+  widest run-to-run variance in the table: luna's three repeats spanned
+  52–66% F1.
+- **`moonshotai/kimi-k3`, `kimi-k2.7-code`, `mistralai/mistral-small-2603`,
+  and `openai/gpt-oss-120b`.** Reasonable recall, but precision at or below
+  60%, 32–46 false positives each, and clean-pass rates of 0–11%. Real
+  findings will be mixed in with a lot of noise.
+- **`deepseek/deepseek-v4-pro` and `deepseek-v4-flash`.** v4-pro is precise
+  but misses 60% of the plants; v4-flash is mid-table on both recall and
+  noise. Models above them in the table do better on every metric.
+- **`anthropic/claude-sonnet-5` and `claude-opus-5`.** The opposite failure:
+  too few findings. Sonnet 5 has the best precision and clean-pass numbers
+  in the table but misses 5 of every 6 planted bugs; Opus 5 found 2 of 70 on
+  the 2.1.4 run. Not suited to this pipeline.
 
 ### Large diffs (long horizon)
 
-Ranked by the long-horizon score, best first. Remember the score subtracts two
-points per false positive — the 0% rows mostly found plenty of bugs and then
-buried them in noise:
+Ranked by the long-horizon score, best first. The score subtracts two points
+per false positive, so most of the 0% rows found bugs but lost the points to
+noise:
 
 | Model through OpenRouter | lgtmaybe | Score | Recall | Precision | False positives |
 |---|---|---:|---:|---:|---:|
@@ -185,49 +175,43 @@ buried them in noise:
 | `mistralai/mistral-small-2603` | 2.1.4 | 0.0% | 28.1% | 1.3% | 699 |
 | `anthropic/claude-opus-5` | 2.1.4 | 0.0% | 0.0% | 100.0% | 0 |
 
-This suite grows the same eight bugs from a small diff to one filling ~90% of
-the input budget, so the interesting question isn't the score — it's the shape
-of each model's recall as the diff grows.
+This suite plants the same eight bugs in diffs that grow to ~90% of the input
+budget, so how each model's recall changes with diff size matters as much as
+the score itself.
 
 **By model:**
 
-- **`qwen/qwen3.8-max` — the big-diff pick.** Dead-flat 75% recall at every
-  size up to a million input tokens, zero findings on the large clean change,
-  no truncated calls. It is also the poster child for why lgtmaybe versions
-  matter: the same model on 2.1.4 scored 0% with 116 false positives; the
-  2.2.0 pipeline run posts 7. If your PRs run large, this plus the current
-  lgtmaybe is the proven combination.
-- **`google/gemini-3.7-flash` — the co-leader, and much faster.** Ties Qwen's
-  score with higher recall (81.2%, including 100% on the small case) on the
-  older pipeline, at a tiny fraction of the wall-time. It hasn't been re-run
-  on 2.2.0 yet — given what that pipeline did for Qwen, it may well lead when
-  it is.
-- **`kwaipilot/kat-coder-pro-v2.5` — a legitimate third**, holding 75% recall
-  once past the small case with modest noise. Consistent with its solid
-  breadth showing: the most underrated model in the corpus.
-- **`x-ai/grok-4.6` — maximum recall, if you can stand it.** The best
-  bug-finding that *survives* size — 87.5% recall at medium, large, and
-  extra-large — but 22 false positives, including three on the clean change,
-  cap its score. The choice for "miss nothing on big diffs, we'll triage".
-- **`z-ai/glm-5.2` — small diffs only.** Its recall slides 100% → 87.5% →
-  75% → 50% as the diff grows while the noise doubles. Combined with its
-  breadth win, the picture is consistent: brilliant reviewer of small
-  changes, unravels at scale.
-- **`deepseek/deepseek-v4-pro` — precise but half-blind here too**, and
-  `claude-sonnet-5` puts in its best relative showing mid-table; neither
-  changes the recommendation.
-- **The 0% club is two different failures.** One group found the bugs and
-  drowned them: kimi-k3 hit 93.8% recall — the highest in the entire corpus —
-  with 95 false positives; mistral-small posted 699. The other group went
-  silent: Opus 5 returned literally nothing across all five cases, and
+- **`qwen/qwen3.8-max`.** 75% recall at every size up to a million input
+  tokens, zero findings on the large clean change, and no truncated calls.
+  It also shows how much the lgtmaybe version matters: the same model on
+  2.1.4 scored 0% with 116 false positives; on 2.2.0 it posts 7.
+- **`google/gemini-3.7-flash`.** Ties Qwen's score on the older pipeline with
+  higher recall (81.2%, including 100% on the small case) and far shorter
+  wall-times. It has not been re-run on 2.2.0.
+- **`kwaipilot/kat-coder-pro-v2.5`.** Third, holding 75% recall on every case
+  past the small one with moderate noise. Consistent with its breadth result.
+- **`x-ai/grok-4.6`.** The highest recall that holds up as diffs grow: 87.5%
+  at medium, large, and extra-large. 22 false positives, including three on
+  the clean change, cap its score. Usable if someone will triage its output.
+- **`z-ai/glm-5.2`.** Recall falls from 100% through 87.5% and 75% to 50% as
+  the diff grows, while false positives double. Consistent with its breadth
+  result: strong on small changes, weak at scale.
+- **`deepseek/deepseek-v4-pro`.** 85.7% precision but 37.5% recall, the same
+  pattern as its breadth run. `claude-sonnet-5` has its best relative result
+  here, mid-table. Neither changes the recommendation.
+- **The 0% rows fail in two ways.** Some found bugs and lost the score to
+  noise: kimi-k3 hit 93.8% recall, the highest in the corpus, with 95 false
+  positives, and mistral-small posted 699. Others returned almost nothing:
+  Opus 5 produced zero findings across all five cases, and
   `qwen3-coder-next` returned exactly one finding per case regardless of
-  size. Don't read 100% precision on those rows as quality — it's absence.
+  size. 100% precision on those rows reflects the absence of findings, not
+  quality.
 
 ```bash
 lgtmaybe review --provider openrouter --model qwen/qwen3.8-max
 ```
 
-Swapping in any other hosted model is just a model-ID change — the provider
+Swapping in another hosted model only changes the model ID; the provider
 setup stays the same. See [Review with OpenRouter](review-with-openrouter.md)
 for authentication and GitHub Action examples.
 
@@ -249,26 +233,24 @@ leaves your machine and reviews cost nothing per call.
 
 **By model:**
 
-- **`nvidia/Qwen3.6-35B-A3B-NVFP4` — the local pick.** Hosted-midfield
-  numbers (its F1 sits between gpt-5.4-mini and gpt-5.4-nano), 100% on the
-  security lens, and the best noise discipline of any local model. Its
-  weaknesses mirror the local field's generally: the softer lenses, and
-  overall recall.
-- **`unsloth/Qwen3.8-27B-NVFP4` — promising, unproven.** The best local F1 on
-  paper, but that run used a diagnostic profile (†), and the same model's
-  canonical long-horizon run collapsed to 347 false positives. Until a clean
-  canonical breadth run lands, don't build on it.
-- **`nvidia/Gemma-4-26B-A4B-NVFP4` — recall without judgement.** 72.9% recall
-  matches GLM-5.2, but it flagged something on **every** clean change and its
-  long-horizon run drowned (114 false positives). Only usable if a human
-  triages everything it says.
-- **`RedHatAI/gemma-4-12B-it-FP8-Dynamic` — the small-hardware option.**
-  Clearly worse than the 35B on every axis, but it completes both suites on a
-  12B footprint. Pick it only when the 35B doesn't fit.
-- **`Qwen/Qwen3.5-9B` — too small for the job.** Good discipline (77.8% clean
-  pass, 76.7% precision) but it catches 30% of the plants and went
-  one-finding-per-case on long horizon. At this size the review is mostly
-  reassurance.
+- **`nvidia/Qwen3.6-35B-A3B-NVFP4`.** The recommended local model. Its F1
+  sits between gpt-5.4-mini and gpt-5.4-nano in the hosted table, it scores
+  100% on the security lens, and it has the fewest false positives relative
+  to its recall of any local model. Like the rest of the local field, it is
+  weak on the test, documentation, and intent lenses and on overall recall.
+- **`unsloth/Qwen3.8-27B-NVFP4`.** The best local F1, but that run used a
+  diagnostic profile (†), and the same model's canonical long-horizon run
+  produced 347 false positives. Wait for a canonical breadth run before
+  relying on it.
+- **`nvidia/Gemma-4-26B-A4B-NVFP4`.** 72.9% recall matches GLM-5.2, but it
+  flagged something on every clean change and its long-horizon run produced
+  114 false positives. Only usable with a human triaging every finding.
+- **`RedHatAI/gemma-4-12B-it-FP8-Dynamic`.** Worse than the 35B on every
+  metric, but it completes both suites on a 12B footprint. Pick it only when
+  the 35B does not fit in memory.
+- **`Qwen/Qwen3.5-9B`.** High clean pass (77.8%) and precision (76.7%), but
+  it finds only 30% of the plants and returned one finding per case on long
+  horizon. Too small for review work.
 
 ### Large diffs (long horizon)
 
@@ -287,22 +269,20 @@ leaves your machine and reviews cost nothing per call.
 
 **By model:**
 
-- **`nvidia/Qwen3.6-35B-A3B-NVFP4` confirms the pick** — modest recall, but
-  the only local model whose recall *rises* as the diff grows (25% on the
-  small case up to 50% on the largest), with near-zero noise and a clean run
-  on the clean case. Budget real time, though: its big cases took over an
-  hour each on the benchmark rig.
-- **`unsloth/Qwen3.8-27B-NVFP4` is the cautionary tale.** Three runs, three
-  personalities: 54.5% on a diagnostic profile, a 347-false-positive collapse
-  on the canonical one, and a 57-false-positive rerun on 2.2.0. Whatever the
-  right serving settings are, they haven't been pinned down publicly yet.
-- **`poolside/Laguna-XS-2.1-NVFP4` and the Nemotron — not ready.** Both
-  truncated on effectively every case and the Nemotron burned over a million
-  output tokens per case reasoning its way to 0%. Avoid.
-- **The honest summary: no local model handles huge diffs well yet.** If your
-  PRs regularly run large and must stay local, expect to lean on the smallest
-  capable model that fits, keep diffs small, and treat the review as a first
-  pass rather than a safety net.
+- **`nvidia/Qwen3.6-35B-A3B-NVFP4`.** Modest recall, but the only local
+  model whose recall rises as the diff grows (25% on the small case, 50% on
+  the largest), with near-zero noise and nothing flagged on the clean case.
+  It is slow: the large cases took over an hour each on the benchmark rig.
+- **`unsloth/Qwen3.8-27B-NVFP4`.** Three runs with three very different
+  results: 54.5% on a diagnostic profile, 347 false positives on the
+  canonical run, and 57 false positives on a 2.2.0 rerun. The serving
+  settings behind the good result have not been published.
+- **`poolside/Laguna-XS-2.1-NVFP4` and the Nemotron.** Both truncated on
+  nearly every case, and the Nemotron used over a million output tokens per
+  case while scoring 0%. Not usable.
+- **No local model handles very large diffs well.** If your PRs run large
+  and must stay local, keep diffs small where you can and treat the review
+  as a first pass rather than relying on it to catch everything.
 
 ```bash
 lgtmaybe review \
@@ -311,7 +291,7 @@ lgtmaybe review \
   --api-base http://127.0.0.1:8000/v1
 ```
 
-Budget more memory than the model weights alone — the context window and KV
+Budget more memory than the model weights alone: the context window and KV
 cache need room too, and the serving engine, quantisation, context size, and
 concurrency all affect local results. See
 [Run locally with ollama](run-locally-with-ollama.md) for hardware guidance, or
@@ -327,14 +307,14 @@ The scores above come from two suites that measure different things:
   with 72 planted findings spanning ten review lenses plus nine verified-clean
   changes. Its balanced F1, recall, precision, false-positive count, and
   clean-pass rate are the headline quality numbers.
-- **Long horizon** asks: does the model still catch bugs when the diff gets
-  huge? It uses four defect-bearing Python changes that grow from about 3% to
+- **Long horizon** asks: does the model still find bugs when the diff is very
+  large? It uses four defect-bearing Python changes that grow from about 3% to
   90% of the input budget, plus one large clean change, each planting the same
-  eight bugs at the same relative positions — so recall differences come from
+  eight bugs at the same relative positions, so recall differences come from
   size alone.
 
-The two suites are scored by different formulas, so a breadth score and a
-long-horizon score can't be compared with each other — always compare breadth
+The two suites use different scoring formulas, so a breadth score and a
+long-horizon score cannot be compared with each other. Compare breadth
 against breadth and long horizon against long horizon, as the tables above do.
 
 ## Source and Methodology
@@ -348,16 +328,16 @@ investigation, since their settings differ from the canonical ones).
 The [live benchmark repository][bench] provides:
 
 - the current leaderboard and scoring method in its README;
-- every completed run — including the per-language and per-lens recall, the
-  false-positive breakdowns, and the per-case size curves and wall-times the
-  notes above draw on — in [`RESULTS.md`][results];
+- every completed run in [`RESULTS.md`][results], including the per-language
+  and per-lens recall, the false-positive breakdowns, and the per-case size
+  curves and wall-times the notes above draw on;
 - append-only raw results under `results/raw/`; and
 - commands for running the corpus against another model.
 
-One caveat before you commit: the corpus is synthetic. It says nothing about
-provider price, availability, data handling, or how a model performs on your
-codebase. Shortlist a model or two here, then try them on a few recent pull
-requests before setting a team-wide default.
+The corpus is synthetic. It says nothing about provider price, availability,
+data handling, or how a model performs on your codebase. Shortlist a model or
+two here, then try them on a few recent pull requests before setting a
+team-wide default.
 
 [bench]: https://github.com/MattJColes/lgtmaybe-benchmarks
 [results]: https://github.com/MattJColes/lgtmaybe-benchmarks/blob/main/RESULTS.md
