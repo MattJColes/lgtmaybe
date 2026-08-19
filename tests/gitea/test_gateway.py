@@ -406,3 +406,24 @@ class TestCheckRun:
     def test_a_status_failure_never_fails_the_review(self) -> None:
         respx.post(f"{API}/statuses/head456").mock(return_value=httpx.Response(500))
         _gateway(httpx.Client()).create_check_run("head456", "success", "t", "s")  # must not raise
+
+
+class TestFileContentEscaping:
+    @respx.mock
+    def test_a_path_with_a_fragment_character_still_reaches_the_server(self) -> None:
+        """An unescaped `#` opens a URL fragment: the path truncates and the
+        `ref` query is swallowed into the discarded remainder."""
+        captured: list[httpx.Request] = []
+
+        def _record(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(200, json={"content": "aW1wb3J0IG9z", "encoding": "base64"})
+
+        respx.route(method="GET", url__startswith=f"{API}/contents/").mock(side_effect=_record)
+
+        assert (
+            _gateway(httpx.Client())._get_file_content("src/C#/Foo.cs", "deadbeef") == "import os"
+        )
+        # `.path` decodes; the wire form is what the `#` breaks.
+        assert captured[0].url.raw_path.endswith(b"/contents/src/C%23/Foo.cs?ref=deadbeef")
+        assert captured[0].url.params["ref"] == "deadbeef"

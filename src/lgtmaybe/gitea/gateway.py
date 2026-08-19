@@ -30,6 +30,7 @@ from __future__ import annotations
 import base64
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -398,7 +399,10 @@ class GiteaGateway:
         """One file's text at ``ref``, or None when absent or undecodable."""
         try:
             resp = self._client.get(
-                f"{self._api}/contents/{path}",
+                # quote() the path, keeping `/` as a real separator — an
+                # unescaped `#` opens a URL fragment, truncating the path and
+                # discarding the `ref` query with the rest of the filename.
+                f"{self._api}/contents/{quote(path)}",
                 headers=self._headers,
                 params={"ref": ref},
                 timeout=_TIMEOUT,
