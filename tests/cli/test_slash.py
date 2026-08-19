@@ -515,3 +515,17 @@ class TestAskRelaysProseThatMerelyQuotesJson:
 
         assert self._ask("[]") == _ASK_FALLBACK
         assert self._ask('[{"path": "a.py"}]') == _ASK_FALLBACK
+
+    def test_a_fenced_whole_response_envelope_is_refused(self) -> None:
+        """A model told "return ONLY a JSON object" commonly fences it anyway.
+        The trimmed text then starts with a backtick, not `{`, so the envelope
+        check missed it and the raw fenced JSON was posted into a human thread."""
+        from lgtmaybe.cli.slash import _ASK_FALLBACK
+
+        assert self._ask('```json\n{"findings": []}\n```') == _ASK_FALLBACK
+        assert self._ask("```\n[]\n```") == _ASK_FALLBACK
+
+    def test_a_fence_wrapping_prose_is_still_relayed(self) -> None:
+        """Stripping the fence must not turn a fenced *answer* into a refusal."""
+        answer = "```\nNo — it dereferences before the None check.\n```"
+        assert self._ask(answer) == answer
