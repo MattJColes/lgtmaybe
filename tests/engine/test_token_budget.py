@@ -129,9 +129,9 @@ class TestReviewTokenBudget:
             LLMReviewEngine(_CostlyUnparseable()).review(_CTX, _cfg(max_review_tokens=1000))
 
     def test_reflection_runs_even_past_the_budget(self) -> None:
-        """The spend-shaped twin of the deadline case: a blown token ceiling is
-        not a reason to post unaudited findings. The lens fan-out already stops
-        short of the ceiling to leave the auditor its share."""
+        """The token-budget equivalent of the deadline case. Passing the token
+        ceiling is not a reason to post unaudited findings: the lens fan-out
+        already stops short of it to leave the auditor its share."""
         provider = _CostlyProvider()
         cfg = _cfg(
             categories=[ReviewCategory.security],

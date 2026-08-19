@@ -10,7 +10,7 @@ hosted APIs like [DeepSeek][deepseek] and many proxies. The `openai-compatible`
 provider points lgtmaybe at any of them — you supply the base URL, and (if the
 server wants one) a key.
 
-This is the answer to "I don't want to be limited to the built-in provider list":
+Use this provider when the model you want is not in the built-in provider list:
 anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag.
 
 > Some endpoints that *could* run through here have a first-class provider

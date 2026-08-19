@@ -173,8 +173,8 @@ INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 _BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
 
 # Share of `max_review_seconds` / `max_review_tokens` held back from the lens
-# fan-out so the reflection auditor still gets to run on an overrunning review,
-# and the ceiling on the time half of that reserve.
+# fan-out so the reflection auditor still runs on a review that overruns, and the
+# ceiling on the time half of that reserve.
 _REFLECT_RESERVE = 0.1
 _MAX_REFLECT_RESERVE_S = 300.0
 
@@ -354,8 +354,8 @@ def _build_notices(state: _NoticeState) -> list[str]:
         )
         notices.append(
             f"⚠️ Bounded a lens to the top {cfg.max_findings_per_lens} findings by severity: "
-            f"{listed}. A lens returning far more than that is usually restating one claim "
-            f"— raise max_findings_per_lens to keep them all."
+            f"{listed}. A lens returning many more findings than this is usually restating "
+            f"one claim across many lines. Raise max_findings_per_lens to keep them all."
         )
     if state.reflection_skipped:
         notices.append(
@@ -792,15 +792,15 @@ class LLMReviewEngine:
         )
 
         # Lens calls stop EARLY, leaving the tail of each ceiling for the
-        # auditor. Reflection is the stage that prunes a bad review, so letting
-        # the lens fan-out spend the budget down to zero makes the overrun
-        # disable its own remedy: measured, a runaway lens call ate the whole
-        # deadline and 325 unaudited findings posted, 323 of them false
-        # positives on a diff with nothing wrong in it. A tenth of the budget is
-        # ample for one audit call and cheap to give up when nothing overruns;
-        # the cap keeps the reserve from growing absurd on a long ceiling, and
-        # taking a proportion (rather than a fixed floor) keeps a deliberately
-        # tiny ceiling honest instead of handing most of it to the auditor.
+        # auditor. Reflection prunes a bad review, so if the lens fan-out spends
+        # the budget down to zero the audit is skipped exactly when it is most
+        # needed: measured, a runaway lens call consumed the whole deadline and
+        # 325 unaudited findings posted, 323 of them false positives on a diff
+        # with nothing wrong in it. A tenth of the budget covers one audit call
+        # and is a small amount to forgo when nothing overruns. The cap bounds
+        # the reserve on a long ceiling, and reserving a proportion rather than a
+        # fixed number of seconds means a deliberately small ceiling does not
+        # hand most of its budget to the auditor.
         lens_deadline_at = (
             deadline_at - min(cfg.max_review_seconds * _REFLECT_RESERVE, _MAX_REFLECT_RESERVE_S)
             if deadline_at is not None
@@ -1214,15 +1214,15 @@ class LLMReviewEngine:
             # Overrunning a ceiling is NOT a reason to skip the audit. The lens
             # fan-out already stops short of both ceilings (`lens_deadline_at` /
             # `lens_budget_at`) to leave the auditor room, and a review that
-            # overran anyway is the one that most needs pruning: measured, a
-            # runaway lens call blew the deadline and 325 unaudited findings
-            # posted, 323 of them false positives on a diff with nothing wrong in
-            # it. Reflection is a single bounded call, so running it past the
-            # ceiling costs far less than the noise it removes.
+            # overran still needs pruning: measured, a runaway lens call passed
+            # the deadline and 325 unaudited findings posted, 323 of them false
+            # positives on a diff with nothing wrong in it. Reflection is a
+            # single bounded call, so running it past the ceiling is cheaper than
+            # posting that many unaudited findings.
             #
-            # A termination signal is the exception, and the only one: the
-            # process is being torn down on someone else's clock, so there is no
-            # budget left to reserve. Audit nothing, post what we have, say so.
+            # A termination signal is the only exception: the process is being
+            # torn down on someone else's clock, so there is no budget to reserve.
+            # Skip the audit, post what we have, and record why in the summary.
             if interrupt_requested():
                 reflection_skipped = "Review interrupted (termination signal)"
                 _log.warning(
@@ -1885,10 +1885,10 @@ class LLMReviewEngine:
     def _stamp_and_bound(self, findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
         """Stamp the originating lens, then bound what one call may contribute.
 
-        Both halves belong to every (batch, lens) result — the normal path, a
-        repaired reply and a salvaged truncation alike — so they are applied in
-        one place rather than at each return. The bound is a backstop against a
-        degenerate response, not a review budget: see
+        Both apply to every (batch, lens) result: the normal path, a repaired
+        reply and a salvaged truncation. They are applied here rather than at
+        each return so the three paths cannot diverge. The bound is a backstop
+        against a degenerate response rather than a review budget; see
         `ReviewConfig.max_findings_per_lens`.
         """
         findings = _stamp_categories(findings, lens)
@@ -1896,8 +1896,8 @@ class LLMReviewEngine:
         if not cap or len(findings) <= cap:
             return findings
         # Highest severity first, input order preserved within a severity, so
-        # what survives is deterministic and provider-independent — the same
-        # policy `_dedupe` applies when it has to choose.
+        # what survives is deterministic and provider-independent. This is the
+        # same selection policy `_dedupe` uses.
         kept = sorted(findings, key=lambda f: -f.severity.rank)[:cap]
         dropped = len(findings) - len(kept)
         self._flooded[lens.id] = self._flooded.get(lens.id, 0) + dropped

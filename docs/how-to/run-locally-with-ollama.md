@@ -243,16 +243,16 @@ half the default 32768 `num_ctx`. Measured findings payloads are hundreds of
 tokens, so the rest is headroom for a thinking model — reasoning is drawn from
 this same budget.
 
-The same ceiling applies to `openai-compatible` and `openrouter`, because the
-failure is not a property of running locally. Benchmarking found a model behind
-`openai-compatible` emitting 223,558 tokens on a single lens call, and a *hosted*
+The same ceiling applies to `openai-compatible` and `openrouter`. The failure is
+not specific to local models: benchmarking found a model behind
+`openai-compatible` emitting 223,558 tokens on a single lens call, and a hosted
 model on `openrouter` returning a 393k-token response that parsed into 699 false
-positives on a diff with nothing wrong in it. The first-party APIs
-(openai, anthropic, bedrock, vertex, azure) get no default ceiling — they have not
-shown this failure, and capping them would truncate long findings for nothing.
+positives on a diff with nothing wrong in it. The first-party APIs (openai,
+anthropic, bedrock, vertex, azure) get no default ceiling, because they have not
+shown this failure and a cap would risk truncating long findings payloads.
 
 The ceiling is a fixed number, not a fraction of your window: raising `num_ctx`
-for a big diff buys room for the **prompt**, not for a longer answer. Use
+for a big diff adds room for the **prompt**, not for a longer answer. Use
 `max_tokens` when you want a longer answer.
 
 Every run says which ceiling it resolved and where it came from:
@@ -273,8 +273,8 @@ expensive rather than prevents
 **One truncation is not a reason to raise the cap.** The batch is re-reviewed in
 smaller pieces on its own, so a lens that trips it occasionally has still been
 reviewed. A model that runs away repeatedly is generating past the ceiling rather
-than being cut short by it — a bigger ceiling just buys a longer wasted call, and
-a different model is the lever that moves it.
+than being cut short by it. A bigger ceiling only produces a longer wasted call;
+changing the model is what fixes it.
 
 Where a raise *is* right is a genuinely long answer being cut off — a large diff
 with many real findings, salvaging most of them each time. Then raise it, or turn
@@ -291,9 +291,9 @@ lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 0  # uncapped
 max_tokens: 32768
 ```
 
-Going the other way is the fastest lever there is on a slow model: a low ceiling
-(`--max-tokens 512`) turns a stuck review into one that finishes in minutes and
-tells you what it truncated.
+Lowering the ceiling is the quickest way to get a result out of a slow model:
+`--max-tokens 512` turns a stuck review into one that finishes in minutes and
+reports what it truncated.
 
 ## Slow models and timeouts
 

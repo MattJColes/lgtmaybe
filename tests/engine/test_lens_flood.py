@@ -27,8 +27,9 @@ _CTX = PRContext(
 def _flood(count: int) -> str:
     """One lens response carrying *count* distinct findings.
 
-    Distinct (path, line) on purpose: that is what the real flood looked like,
-    and it is why `_dedupe` — which keys on location — collapsed none of it.
+    The (path, line) pairs are distinct on purpose. That is what the observed
+    flood looked like, and why `_dedupe`, which keys on location, collapsed none
+    of it.
     """
     return json.dumps(
         [
@@ -71,9 +72,9 @@ class TestPerLensFindingBound:
     """One lens must not be able to flood a review.
 
     Measured: a single lens returned 319 of a review's 323 findings on a diff
-    with nothing wrong in it, every one at a distinct (path, line) so location
-    dedupe collapsed none of them. A bound makes that shape impossible whatever
-    the provider or token budget does.
+    with nothing wrong in it, every one at a distinct (path, line), so location
+    dedupe collapsed none of them. The bound applies whatever the provider or
+    token budget does.
     """
 
     def test_a_flooding_lens_is_bounded_with_a_notice(self) -> None:
@@ -83,7 +84,7 @@ class TestPerLensFindingBound:
         assert "security" in summary and "175" in summary
 
     def test_an_ordinary_lens_is_untouched(self) -> None:
-        """The bound is a backstop, not a budget: a normal review never sees it."""
+        """A normal review stays well under the bound and is unaffected."""
         provider = _FloodingProvider(count=3)
         findings, summary = LLMReviewEngine(provider).review(_CTX, _cfg(max_findings_per_lens=25))
         assert len(findings) == 3
@@ -97,7 +98,7 @@ class TestPerLensFindingBound:
         assert len(findings) == 60
 
     def test_the_bound_keeps_the_most_severe(self) -> None:
-        """When it fires it must not throw away the findings that matter."""
+        """When the bound fires, the highest-severity findings are the ones kept."""
         payload = json.dumps(
             [
                 {

@@ -1566,7 +1566,7 @@ max_tokens: 8192
 ```
 
 `--max-tokens 8192` does the same for one run, and `max_tokens` is a GitHub
-Action input too. Size it down with care: a cap set too low truncates the
+Action input too. Set it lower with care: a cap set too low truncates the
 findings JSON mid-object, and reasoning models spend this same budget on thinking
 tokens, so they need more headroom than a plain model. `max_tokens: 0` removes
 the cap entirely and puts the reservation back to the model's full ceiling.
@@ -2444,16 +2444,16 @@ half the default 32768 `num_ctx`. Measured findings payloads are hundreds of
 tokens, so the rest is headroom for a thinking model — reasoning is drawn from
 this same budget.
 
-The same ceiling applies to `openai-compatible` and `openrouter`, because the
-failure is not a property of running locally. Benchmarking found a model behind
-`openai-compatible` emitting 223,558 tokens on a single lens call, and a *hosted*
+The same ceiling applies to `openai-compatible` and `openrouter`. The failure is
+not specific to local models: benchmarking found a model behind
+`openai-compatible` emitting 223,558 tokens on a single lens call, and a hosted
 model on `openrouter` returning a 393k-token response that parsed into 699 false
-positives on a diff with nothing wrong in it. The first-party APIs
-(openai, anthropic, bedrock, vertex, azure) get no default ceiling — they have not
-shown this failure, and capping them would truncate long findings for nothing.
+positives on a diff with nothing wrong in it. The first-party APIs (openai,
+anthropic, bedrock, vertex, azure) get no default ceiling, because they have not
+shown this failure and a cap would risk truncating long findings payloads.
 
 The ceiling is a fixed number, not a fraction of your window: raising `num_ctx`
-for a big diff buys room for the **prompt**, not for a longer answer. Use
+for a big diff adds room for the **prompt**, not for a longer answer. Use
 `max_tokens` when you want a longer answer.
 
 Every run says which ceiling it resolved and where it came from:
@@ -2474,8 +2474,8 @@ expensive rather than prevents
 **One truncation is not a reason to raise the cap.** The batch is re-reviewed in
 smaller pieces on its own, so a lens that trips it occasionally has still been
 reviewed. A model that runs away repeatedly is generating past the ceiling rather
-than being cut short by it — a bigger ceiling just buys a longer wasted call, and
-a different model is the lever that moves it.
+than being cut short by it. A bigger ceiling only produces a longer wasted call;
+changing the model is what fixes it.
 
 Where a raise *is* right is a genuinely long answer being cut off — a large diff
 with many real findings, salvaging most of them each time. Then raise it, or turn
@@ -2492,9 +2492,9 @@ lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 0  # uncapped
 max_tokens: 32768
 ```
 
-Going the other way is the fastest lever there is on a slow model: a low ceiling
-(`--max-tokens 512`) turns a stuck review into one that finishes in minutes and
-tells you what it truncated.
+Lowering the ceiling is the quickest way to get a result out of a slow model:
+`--max-tokens 512` turns a stuck review into one that finishes in minutes and
+reports what it truncated.
 
 ## Slow models and timeouts
 
@@ -2623,7 +2623,7 @@ hosted APIs like [DeepSeek][deepseek] and many proxies. The `openai-compatible`
 provider points lgtmaybe at any of them — you supply the base URL, and (if the
 server wants one) a key.
 
-This is the answer to "I don't want to be limited to the built-in provider list":
+Use this provider when the model you want is not in the built-in provider list:
 anything that exposes an OpenAI-compatible `/v1` endpoint works through one flag.
 
 > Some endpoints that *could* run through here have a first-class provider
@@ -4227,7 +4227,7 @@ tokens: 158,076 billable (154,200 in / 3,876 out) across 12 calls
 Every local review prints that same line to stderr even without `--profile`, so
 the meter is always in view; redirect with `2>/dev/null` if you want it gone.
 
-`in` dwarfing `out` is normal and is the whole story: you are paying to *send*
+`in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
 the diff, over and over, once per lens per batch. The per-call table above it
 shows exactly which lens and which batch each call belongs to, so you can see
 whether the cost is lens count, batch count, or one enormous file.
@@ -4516,30 +4516,31 @@ level.
 
 ## If one lens floods the review
 
-A cut-off call is the loud failure. The quiet one is a lens that stays inside its
-token budget and simply repeats itself — restating one claim against every line
-it can see. Measured on a benchmark diff with nothing wrong in it, a single lens
-returned 319 of a review's 323 findings, each on a different line. Location
-dedupe cannot collapse that, because no two findings share a line.
+A lens can stay within its token budget and still return far too many findings,
+restating one claim against every line it can see. Measured on a benchmark diff
+with nothing wrong in it, a single lens returned 319 of a review's 323 findings,
+each on a different line. Location dedupe does not collapse them, because no two
+findings share a line.
 
-So one `(batch, lens)` call contributes at most **50 findings** by default. When
-the bound fires, the highest-severity findings are kept and the summary names
-the lens and how many were dropped:
+One `(batch, lens)` call therefore contributes at most **50 findings** by
+default. When the bound fires, the highest-severity findings are kept and the
+summary names the lens and how many were dropped:
 
 ```
 ⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped).
 ```
 
-That notice is the signal to look at the model, not the number. A lens returning
-hundreds of findings is generating badly, and raising the bound buys more of the
-same output. Raise it only when a genuinely large diff is losing real findings:
+The notice usually indicates a problem with the model rather than a bound set too
+low. A lens returning hundreds of findings is generating badly, and a higher
+bound admits more of the same output. Raise it only when a genuinely large diff
+is losing real findings:
 
 ```yaml
 max_findings_per_lens: 100   # 0 disables the bound entirely
 ```
 
-It costs nothing on a healthy run — an ordinary lens returns a handful, and never
-reaches it.
+An ordinary lens returns a handful of findings and never reaches the bound, so a
+healthy run is unaffected.
 
 ## What costs more, on purpose
 

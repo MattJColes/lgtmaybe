@@ -76,12 +76,12 @@ class TestReviewDeadline:
         assert "LGTM" not in summary
 
     def test_reflection_still_runs_when_lens_calls_exhaust_the_deadline(self) -> None:
-        """The auditor must not be the thing the overrun switches off.
+        """An overrun must not skip the audit.
 
-        Benchmark evidence: a runaway lens call ate the whole time budget, which
-        then skipped reflection — and 325 unaudited findings posted, 323 of them
-        false positives on a diff with nothing wrong in it. The failure disabled
-        its own remedy. Lens calls stop early enough to leave the auditor room.
+        Benchmark evidence: a runaway lens call consumed the whole time budget,
+        which skipped reflection, and 325 unaudited findings posted, 323 of them
+        false positives on a diff with nothing wrong in it. Lens calls now stop
+        early enough to leave the auditor room.
         """
         provider = _SlowProvider(delay=1.2)
         cfg = _cfg(max_review_seconds=1, reflect=True)
@@ -126,12 +126,11 @@ class TestReviewDeadline:
             LLMReviewEngine(_SlowUnparseable()).review(_CTX, _cfg(max_review_seconds=1))
 
     def test_reflection_runs_even_past_the_deadline(self) -> None:
-        """Overrunning the ceiling must not switch the auditor off.
+        """Passing the ceiling must not skip the audit.
 
-        It used to: reflection was gated on the same clock the lens fan-out had
-        just blown, so the runaway that produced the noise also removed the
-        stage that prunes it. Reflection is one bounded call — cheaper than the
-        false positives it drops.
+        Reflection used to be gated on the same clock the lens fan-out had just
+        passed, so a runaway removed the stage that prunes its output. Reflection
+        is one bounded call, cheaper than posting the false positives it drops.
         """
         provider = _SlowProvider(delay=1.2)
         cfg = _cfg(

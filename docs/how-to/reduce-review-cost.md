@@ -44,7 +44,7 @@ tokens: 158,076 billable (154,200 in / 3,876 out) across 12 calls
 Every local review prints that same line to stderr even without `--profile`, so
 the meter is always in view; redirect with `2>/dev/null` if you want it gone.
 
-`in` dwarfing `out` is normal and is the whole story: you are paying to *send*
+`in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
 the diff, over and over, once per lens per batch. The per-call table above it
 shows exactly which lens and which batch each call belongs to, so you can see
 whether the cost is lens count, batch count, or one enormous file.
@@ -333,30 +333,31 @@ level.
 
 ## If one lens floods the review
 
-A cut-off call is the loud failure. The quiet one is a lens that stays inside its
-token budget and simply repeats itself — restating one claim against every line
-it can see. Measured on a benchmark diff with nothing wrong in it, a single lens
-returned 319 of a review's 323 findings, each on a different line. Location
-dedupe cannot collapse that, because no two findings share a line.
+A lens can stay within its token budget and still return far too many findings,
+restating one claim against every line it can see. Measured on a benchmark diff
+with nothing wrong in it, a single lens returned 319 of a review's 323 findings,
+each on a different line. Location dedupe does not collapse them, because no two
+findings share a line.
 
-So one `(batch, lens)` call contributes at most **50 findings** by default. When
-the bound fires, the highest-severity findings are kept and the summary names
-the lens and how many were dropped:
+One `(batch, lens)` call therefore contributes at most **50 findings** by
+default. When the bound fires, the highest-severity findings are kept and the
+summary names the lens and how many were dropped:
 
 ```
 ⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped).
 ```
 
-That notice is the signal to look at the model, not the number. A lens returning
-hundreds of findings is generating badly, and raising the bound buys more of the
-same output. Raise it only when a genuinely large diff is losing real findings:
+The notice usually indicates a problem with the model rather than a bound set too
+low. A lens returning hundreds of findings is generating badly, and a higher
+bound admits more of the same output. Raise it only when a genuinely large diff
+is losing real findings:
 
 ```yaml
 max_findings_per_lens: 100   # 0 disables the bound entirely
 ```
 
-It costs nothing on a healthy run — an ordinary lens returns a handful, and never
-reaches it.
+An ordinary lens returns a handful of findings and never reaches the bound, so a
+healthy run is unaffected.
 
 ## What costs more, on purpose
 

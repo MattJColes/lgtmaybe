@@ -27,22 +27,22 @@ claim about unshown code like any other. An unparseable audit keeps everything.
 
 #### Scenario: the lens fan-out overruns a whole-review ceiling
 - **WHEN** lens calls pass `max_review_seconds` or `max_review_tokens`
-- **THEN** the audit still runs — the run that overran is the one most in need of
-  pruning, and only a termination signal skips it
+- **THEN** the audit still runs, because a review that overran still needs
+  pruning; only a termination signal skips it
 
 ### Requirement: One lens cannot flood a review
 
 A single (batch, lens) call SHALL contribute at most `max_findings_per_lens`
-findings, keeping the highest severity first, because a model under structured
-output can restate one claim across every line it sees — a shape location dedupe
-cannot see, since each restatement carries a distinct line. When the bound fires
-the summary SHALL name the lens and the number dropped; `0` SHALL disable it.
+findings, keeping the highest severity first. A model under structured output can
+restate one claim across every line it sees, and location dedupe does not collapse
+those restatements because each carries a distinct line. When the bound fires the
+summary SHALL name the lens and the number dropped; `0` SHALL disable it.
 <!-- anchor: quality.lens-bound -->
 
 #### Scenario: a lens returns far more findings than the bound
 - **WHEN** one lens call returns more than `max_findings_per_lens` findings
 - **THEN** the most severe are kept and the summary names the lens and the count
-  dropped — never a silent truncation
+  dropped, so the truncation is visible
 
 #### Scenario: an ordinary lens result
 - **WHEN** a lens returns fewer findings than the bound

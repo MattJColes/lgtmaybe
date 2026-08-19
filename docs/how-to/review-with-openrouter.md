@@ -94,7 +94,7 @@ max_tokens: 8192
 ```
 
 `--max-tokens 8192` does the same for one run, and `max_tokens` is a GitHub
-Action input too. Size it down with care: a cap set too low truncates the
+Action input too. Set it lower with care: a cap set too low truncates the
 findings JSON mid-object, and reasoning models spend this same budget on thinking
 tokens, so they need more headroom than a plain model. `max_tokens: 0` removes
 the cap entirely and puts the reservation back to the model's full ceiling.

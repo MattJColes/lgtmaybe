@@ -101,25 +101,25 @@ _OLLAMA_NUM_CTX = 32768
 # seconds, and the stop is *reported* — a truncation posts the incomplete
 # notice, where a timeout posts the same notice half an hour later.
 #
-# This was ollama-only on the theory that openrouter and openai-compatible may
-# equally be a hosted API with its own sane ceiling. Benchmarking disproved it.
+# This was ollama-only, on the theory that openrouter and openai-compatible may
+# equally be a hosted API with its own sane ceiling. Benchmarking disproved that.
 # Behind `openai-compatible` a local model emitted 223,558 tokens on ONE lens
-# call; worse, `openrouter` is not safer for being hosted — one model there
-# returned a 393k-token response that parsed into 699 false positives on a diff
-# with nothing wrong in it, and another turned a 70,344-token response into 323
-# findings on a clean diff. Unbounded decode is a property of the model and the
-# structured-output task, not of who is hosting it. So all three share one
-# number, and only the first-party APIs (which have not shown the failure) are
-# left on the model's own ceiling.
+# call. A hosted route was no safer: one openrouter model returned a 393k-token
+# response that parsed into 699 false positives on a diff with nothing wrong in
+# it, and another turned a 70,344-token response into 323 findings on a clean
+# diff. The failure follows from the model and the structured-output task rather
+# than from where the model runs, so all three routes share one number. Only the
+# first-party APIs, which have not shown the failure, are left on the model's own
+# ceiling.
 #
 # Half of `_OLLAMA_NUM_CTX`: measured findings payloads are hundreds of tokens,
-# so the rest is headroom for a thinking model (reasoning is drawn from this
-# same budget). Derived from that window so the two numbers are related rather
-# than arbitrary. Measured against the benchmark corpus, 16384 truncates 2.5% of
-# the calls that parse today while stopping every runaway observed (all of them
-# 70k+); the older, tighter 8192 truncated 7.8% — real findings paid for the
-# fix. It is a FIXED ceiling: raising `num_ctx` for a big diff buys room for the
-# prompt, not a longer answer, and `max_tokens` is the knob for that.
+# so the rest is headroom for a thinking model (reasoning is drawn from this same
+# budget). Derived from that window so the two numbers stay related rather than
+# arbitrary. Measured against the benchmark corpus, 16384 truncates 2.5% of the
+# calls that parse today while stopping every runaway observed (all of them 70k+);
+# the older 8192 truncated 7.8%, which cost real findings. It is a FIXED ceiling:
+# raising `num_ctx` for a big diff adds room for the prompt, not for a longer
+# answer, and `max_tokens` is the setting for that.
 _CAPPED_BY_DEFAULT = frozenset({Provider.ollama, Provider.openai_compatible, Provider.openrouter})
 _DEFAULT_MAX_TOKENS = _OLLAMA_NUM_CTX // 2
 

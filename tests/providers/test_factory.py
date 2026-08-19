@@ -472,13 +472,13 @@ class TestOutputCeiling:
         assert 2048 <= ceiling <= _OLLAMA_NUM_CTX // 2
 
     def test_every_runaway_prone_route_gets_the_same_ceiling(self) -> None:
-        """ollama is not the only route that runs away.
+        """ollama is not the only route that decodes without terminating.
 
         Benchmark evidence: a local model behind `openai-compatible` emitted
-        223,558 tokens on one lens call, and `openrouter` is no safer — a hosted
-        model there posted 699 false positives off a 393k-token response on a
-        diff with nothing wrong in it. The assumption that a hosted API brings
-        its own sane ceiling does not hold, so all three share one number.
+        223,558 tokens on one lens call, and a hosted model on `openrouter`
+        posted 699 false positives off a 393k-token response on a diff with
+        nothing wrong in it. The assumption that a hosted API brings its own sane
+        ceiling does not hold, so all three routes share one number.
         """
         capped = {Provider.ollama, Provider.openai_compatible, Provider.openrouter}
         ceilings = {provider: resolve_max_tokens(provider) for provider in capped}

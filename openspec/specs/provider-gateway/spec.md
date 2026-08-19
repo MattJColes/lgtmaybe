@@ -318,9 +318,9 @@ provider so users give bare model ids.
 openai-compatible and openrouter, and to none for the first-party APIs, because a
 model under structured output can decode without terminating and the only thing
 that would otherwise stop it is the deliberately generous per-call timeout.
-Unbounded decode is a property of the model and the task, not of who hosts it —
-measured, a hosted route returned a 393k-token response that parsed into 699
-false positives on a diff with nothing wrong in it. A configured value SHALL win,
+The failure follows from the model and the structured-output task rather than
+from where the model runs: measured, a hosted route returned a 393k-token
+response that parsed into 699 false positives on a diff with nothing wrong in it. A configured value SHALL win,
 `0` SHALL mean explicitly uncapped, and the resolved ceiling and its source SHALL
 be announced before the first call so a truncation is not read as a number the
 user chose.
