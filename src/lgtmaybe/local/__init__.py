@@ -12,8 +12,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from lgtmaybe.core.diff import is_reviewable, is_scannable_manifest
 from lgtmaybe.core.models import PRContext
-from lgtmaybe.github.diff import is_reviewable, is_scannable_manifest
 
 # `git diff` over a large working tree (or a repo whose objects are cold) can
 # take a while; the timeout only caps a hung git, never a slow one.

@@ -516,7 +516,7 @@ class TestParsePrUrl:
     def test_rejects_non_pr_url(self):
         from lgtmaybe.cli import parse_pr_url
 
-        with pytest.raises(ValueError, match="PR URL"):
+        with pytest.raises(ValueError, match="Could not parse"):
             parse_pr_url("https://github.com/org/my-repo/issues/42")
 
 

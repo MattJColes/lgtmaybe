@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from lgtmaybe.github import build_commentable_lines, is_reviewable
-from lgtmaybe.github.diff import is_scannable_manifest
+from lgtmaybe.core.diff import build_commentable_lines, is_reviewable, is_scannable_manifest
 
 # ---------------------------------------------------------------------------
 # Commentable-line index

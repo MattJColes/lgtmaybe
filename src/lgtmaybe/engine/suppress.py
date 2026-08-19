@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import re
 
+from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import ReviewCategory, ReviewConfig, ReviewFinding, Severity
-from lgtmaybe.github.rest_gateway import finding_fingerprint
 
 # A `# lgtmaybe: ignore` pragma anywhere in a line (after a `#` comment marker).
 # Case-insensitive so `# LGTMAYBE: IGNORE` works too.

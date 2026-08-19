@@ -1,6 +1,11 @@
 """Diff utilities: commentable-line index and skip filter.
 
-Commentable-line index: GitHub anchors a review comment with `line` + `side`
+Host-neutral, and in ``core`` for that reason: every forge lgtmaybe posts to
+anchors a comment to a line of a unified diff, and every one of them wants the
+same files skipped. A forge adapter translates these tuples into its own
+position vocabulary; none of them owns the parsing.
+
+Commentable-line index: a review comment is anchored with `line` + `side`
 (`side="RIGHT"` → the new-file line number, `side="LEFT"` → the old-file line
 number) rather than the deprecated, fragile `position` count. We build the set
 of (filename, line, side) tuples a comment can legally attach to — every added,
@@ -32,7 +37,7 @@ CommentableLines = set[tuple[str, int, str]]
 def build_commentable_lines(diff: str) -> CommentableLines:
     """Parse a unified diff into the set of commentable (file, line, side) tuples.
 
-    GitHub anchors a review comment by file line and side, not by a running
+    A review comment is anchored by file line and side, not by a running
     position count, so this avoids the off-by-N drift the `position` count
     suffered across multiple hunks. A line is commentable when it appears in the
     diff:
