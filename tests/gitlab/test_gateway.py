@@ -134,6 +134,24 @@ class TestGetPRContext:
             _gateway().get_pr_context()
 
 
+class TestDiscussionFetching:
+    """The discussion list is read three times a run — over one fetch."""
+
+    @respx.mock
+    def test_the_discussion_list_is_fetched_once_across_context_and_post(self) -> None:
+        _stub_context_routes()
+        _stub_post_routes()
+        listed = respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        gateway = _gateway()
+
+        gateway.get_pr_context()  # counts open finding threads
+        gateway.post_review([FINDING], "summary")  # reads them again to de-dupe
+
+        assert listed.call_count == 1
+
+
 class TestPostReview:
     @respx.mock
     def test_each_finding_becomes_its_own_positioned_discussion(self) -> None:
@@ -408,7 +426,7 @@ class TestCheckRun:
     @respx.mock
     @pytest.mark.parametrize(
         ("conclusion", "state"),
-        [("success", "success"), ("failure", "failed"), ("cancelled", "canceled")],
+        [("success", "success"), ("failure", "failed"), ("brand-new", "success")],
     )
     def test_maps_a_conclusion_onto_gitlabs_state_vocabulary(
         self, conclusion: str, state: str

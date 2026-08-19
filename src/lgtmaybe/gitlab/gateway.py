@@ -47,6 +47,7 @@ from lgtmaybe.core.diff import (
 )
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
+from lgtmaybe.core.paginate import paginate_pages
 
 _log = get_logger(__name__)
 
@@ -59,18 +60,6 @@ _PAGE_LIMIT = 100
 # Written into a resolved thread before it is closed, so the trail explains
 # itself to whoever reads the merge request later.
 _RESOLVED_REPLY = "✅ Looks resolved."
-
-# GitLab commit statuses are its check-run equivalent; its state vocabulary is
-# narrower than GitHub's conclusions, so map rather than pass through.
-_STATUS_STATES = {
-    "success": "success",
-    "neutral": "success",
-    "skipped": "success",
-    "failure": "failed",
-    "action_required": "failed",
-    "cancelled": "canceled",
-    "timed_out": "failed",
-}
 
 
 class GitLabGateway:
@@ -114,6 +103,9 @@ class GitLabGateway:
         self._scan_manifests = False
         self._active_findings: list[ActiveFinding] | None = None
         self._validated_fixed_thread_ids: set[str] | None = None
+        # The MR's discussion list, read by three callers per run and never
+        # mutated between them (see `_discussions`).
+        self._discussions_cache: list[dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -327,7 +319,13 @@ class GitLabGateway:
                 f"{self._api}/statuses/{head_sha}",
                 headers=self._headers,
                 json={
-                    "state": _STATUS_STATES.get(conclusion, "success"),
+                    # GitLab's state vocabulary is narrower than GitHub's
+                    # conclusions, but the one producer of `conclusion`
+                    # (`cli._fail_on_check`) emits only "success"/"failure" —
+                    # so a full mapping table is entries for inputs that never
+                    # arrive. Only "failure" reds the commit; anything else
+                    # keeps the fail-open default a best-effort status wants.
+                    "state": "failed" if conclusion == "failure" else "success",
                     "name": "lgtmaybe",
                     "description": title[:255],
                 },
@@ -437,7 +435,17 @@ class GitLabGateway:
         return keys
 
     def _discussions(self) -> list[dict[str, Any]]:
-        return self._paginate(f"{self._mr_api}/discussions")
+        """Every discussion on the merge request, fetched once per run.
+
+        Three callers read this list — `count_open_finding_threads` (via
+        `get_pr_context`), `list_active_findings`, and `_existing_finding_keys`
+        (via `post_review`) — and nothing between them writes a discussion:
+        `post_review` only posts after `_existing_finding_keys` has read. So the
+        second and third walks were re-fetching bytes this run already had.
+        """
+        if self._discussions_cache is None:
+            self._discussions_cache = self._paginate(f"{self._mr_api}/discussions")
+        return self._discussions_cache
 
     def _upsert_note(self, body: str, family: str) -> None:
         """Edit our previous note in this marker family, or post a new one."""
@@ -511,25 +519,12 @@ class GitLabGateway:
         return resp.json()
 
     def _paginate(self, url: str) -> list[dict[str, Any]]:
-        """Every page of a GitLab list endpoint, flattened.
-
-        Stops on the first short page rather than reading ``X-Next-Page``, so a
-        response without pagination headers (and a mocked one) behaves the same.
-        """
-        items: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            resp = self._client.get(
-                url,
-                headers=self._headers,
-                params={"page": page, "per_page": _PAGE_LIMIT},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-            batch = resp.json()
-            if not isinstance(batch, list) or not batch:
-                return items
-            items.extend(batch)
-            if len(batch) < _PAGE_LIMIT:
-                return items
-            page += 1
+        """Every page of a GitLab list endpoint, flattened."""
+        return paginate_pages(
+            self._client,
+            url,
+            self._headers,
+            page_param="per_page",
+            limit=_PAGE_LIMIT,
+            timeout=_TIMEOUT,
+        )
