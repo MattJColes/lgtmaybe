@@ -71,6 +71,10 @@ def test_winget_workflow_updates_the_portable_package() -> None:
     assert "gh api" in package_check["run"]
     assert "$LASTEXITCODE" in package_check["run"]
     assert package_check["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    # Only a 404 means "not published yet" — a 401/403/5xx/timeout must fail the
+    # job, not silently skip the submission by reading as a missing package.
+    assert "HTTP 404" in package_check["run"]
+    assert "throw" in package_check["run"]
     for name in ("Install wingetcreate", "Submit winget update"):
         assert steps[name]["if"] == "steps.package.outputs.exists == 'true'"
 

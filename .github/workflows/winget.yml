@@ -62,12 +62,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api repos/microsoft/winget-pkgs/contents/manifests/m/MattJColes/lgtmaybe --silent
+          $failure = gh api repos/microsoft/winget-pkgs/contents/manifests/m/MattJColes/lgtmaybe --silent 2>&1
           if ($LASTEXITCODE -eq 0) {
             "exists=true" >> $env:GITHUB_OUTPUT
-          } else {
+          } elseif ("$failure" -match "HTTP 404") {
             "exists=false" >> $env:GITHUB_OUTPUT
             Write-Warning "MattJColes.lgtmaybe is not published in winget yet. Submit and moderate the first manifest manually; automatic updates will start with the next release."
+          } else {
+            # Only a 404 means "not published yet". A 401/403/5xx/timeout must
+            # fail the job rather than silently skip the winget submission.
+            throw "gh api could not reach the winget manifest path: $failure"
           }
 
       - name: Install wingetcreate
