@@ -5,6 +5,8 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import threading
+import time
 
 import pytest
 
@@ -2747,3 +2749,116 @@ def test_a_repair_that_finds_nothing_still_counts_as_complete() -> None:
     assert findings == []
     assert "results may be incomplete" not in summary
     assert "reformatted by a second call" in summary
+
+
+class TestFloodedAccountingUnderConcurrency:
+    """`_stamp_and_bound` runs inside the fan-out's worker threads, so its
+    per-lens drop counter is written concurrently. A plain
+    `d[k] = d.get(k, 0) + n` is a read-modify-write, not an atomic op like the
+    `set.add()` the engine's other per-run state uses: two batches whose primer
+    (always the first lens) floods at the same instant can lose one update, and
+    the summary notice then under-reports how many findings were dropped.
+    """
+
+    class _SlowStoreDict(dict):
+        """A dict that yields the GIL between the read and the store, so the
+        read-modify-write window interleaves reliably rather than by luck.
+        Unguarded, this loses most of the updates; guarded, none."""
+
+        def __setitem__(self, key, value) -> None:
+            time.sleep(0.002)
+            super().__setitem__(key, value)
+
+    def test_concurrent_bounds_on_one_lens_do_not_lose_counts(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from lgtmaybe.engine.engine import _Lens
+
+        engine = LLMReviewEngine(FakeProvider())
+        engine._flooded = self._SlowStoreDict()
+        engine._flooded_lock = threading.Lock()
+        engine._max_findings_per_lens = 1
+        lens = _Lens(id="security", user_block="")
+        # 4 findings in, cap of 1 out ⇒ 3 dropped per call.
+        findings = [
+            ReviewFinding(
+                path="a.py",
+                line=index + 1,
+                side="RIGHT",
+                severity=Severity.low,
+                title=f"f{index}",
+                body="b",
+            )
+            for index in range(4)
+        ]
+        calls = 24
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda _: engine._stamp_and_bound(list(findings), lens), range(calls)))
+
+        assert engine._flooded["security"] == 3 * calls
+
+
+class TestBoundaryScansOverlap:
+    """`function_context` is on by default and each file costs its own temp dir
+    plus ast-grep subprocess, so scanning them serially put ~one spawn per
+    changed file in front of every review. They are independent."""
+
+    def _spans(self, monkeypatch, paths: list[str], *, function_context: bool = True):
+        from lgtmaybe.engine import engine as engine_mod
+
+        live = 0
+        peak = 0
+        guard = threading.Lock()
+
+        def fake_definition_spans(text: str, path: str) -> list[tuple[int, int]]:
+            nonlocal live, peak
+            with guard:
+                live += 1
+                peak = max(peak, live)
+            time.sleep(0.02)
+            with guard:
+                live -= 1
+            return [(1, len(text))]
+
+        monkeypatch.setattr(engine_mod, "definition_spans", fake_definition_spans)
+        contents = {path: f"# {path}" for path in paths}
+        result = engine_mod._definition_spans_by_path(
+            contents,
+            [(path, "@@ -1 +1 @@") for path in paths],
+            make_cfg(function_context=function_context),
+        )
+        return result, peak
+
+    def test_every_file_gets_its_own_spans(self, monkeypatch) -> None:
+        result, _peak = self._spans(monkeypatch, ["a.py", "b.py", "c.py"])
+
+        assert set(result) == {"a.py", "b.py", "c.py"}
+        assert result["a.py"] == [(1, len("# a.py"))]
+
+    def test_the_scans_run_concurrently(self, monkeypatch) -> None:
+        _result, peak = self._spans(monkeypatch, [f"f{i}.py" for i in range(6)])
+
+        assert peak > 1, "the per-file scans ran one after another"
+
+    def test_nothing_is_scanned_when_function_context_is_off(self, monkeypatch) -> None:
+        result, peak = self._spans(monkeypatch, ["a.py"], function_context=False)
+
+        assert result == {}
+        assert peak == 0
+
+    def test_a_file_without_fetched_head_text_is_absent_not_empty(self, monkeypatch) -> None:
+        """`.get(path)` must yield None for it — the same "no boundaries" value
+        expand_hunks took before."""
+        from lgtmaybe.engine import engine as engine_mod
+
+        monkeypatch.setattr(engine_mod, "definition_spans", lambda text, path: [(1, 2)])
+
+        result = engine_mod._definition_spans_by_path(
+            {"a.py": "code"},
+            [("a.py", "patch"), ("b.py", "patch")],
+            make_cfg(),
+        )
+
+        assert result.get("b.py") is None
+        assert result["a.py"] == [(1, 2)]

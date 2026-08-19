@@ -825,7 +825,12 @@ class LLMReviewEngine:
         # second call (see repair.py). Keyed by lens for the same reason as
         # `_stepped_down`: one fact about the review, not one per batch.
         self._repaired: set[str] = set()
+        # Written from the fan-out's worker threads, and unlike the sets above
+        # a dict counter's `read, add, store` is not one atomic operation — two
+        # batches' primers flooding at once would otherwise lose an update and
+        # under-report the drop in the summary notice.
         self._flooded: dict[str, int] = {}
+        self._flooded_lock = threading.Lock()
         # Resolved once per review so every (batch, lens) result reads the same
         # bound without threading cfg through the fan-out's every hop.
         self._max_findings_per_lens = cfg.max_findings_per_lens
@@ -959,6 +964,13 @@ class LLMReviewEngine:
             ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
             if ctx_lines > 0 and ctx.file_contents:
                 after = trailing_context_lines(ctx_lines)
+                # Enclosing function/class boundaries (ast-grep; [] on any
+                # failure) so the leading pad reaches the signature. Each file
+                # costs its own temp dir + subprocess, and function_context is
+                # on by default — run serially a max-sized PR pays ~max_files
+                # spawn/teardown cycles before batching even starts. They are
+                # independent, so they overlap, like static analysis's tools.
+                boundaries = _definition_spans_by_path(ctx.file_contents, file_patches, cfg)
                 file_patches = [
                     (
                         path,
@@ -967,13 +979,7 @@ class LLMReviewEngine:
                             redact(ctx.file_contents.get(path, "")),
                             ctx_lines,
                             after=after,
-                            # Enclosing function/class boundaries (ast-grep; [] on
-                            # any failure) so the leading pad reaches the signature.
-                            boundaries=(
-                                definition_spans(ctx.file_contents.get(path, ""), path)
-                                if cfg.function_context and ctx.file_contents.get(path)
-                                else None
-                            ),
+                            boundaries=boundaries.get(path),
                         ),
                     )
                     for path, patch in file_patches
@@ -1894,7 +1900,8 @@ class LLMReviewEngine:
         # same selection policy `_dedupe` uses.
         kept = sorted(findings, key=lambda f: -f.severity.rank)[:cap]
         dropped = len(findings) - len(kept)
-        self._flooded[lens.id] = self._flooded.get(lens.id, 0) + dropped
+        with self._flooded_lock:
+            self._flooded[lens.id] = self._flooded.get(lens.id, 0) + dropped
         _log.warning(
             "lens exceeded the per-lens finding bound — dropping the least severe",
             extra={"lens": lens.id, "returned": len(findings), "kept": cap, "dropped": dropped},
@@ -2472,6 +2479,30 @@ def _scanner_covers(cfg: ReviewConfig, tool: StaticAnalysisTool) -> bool:
     """
     sa = cfg.static_analysis
     return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
+
+
+_BOUNDARY_SCAN_WORKERS = 8
+
+
+def _definition_spans_by_path(
+    file_contents: dict[str, str],
+    file_patches: Sequence[tuple[str, str]],
+    cfg: ReviewConfig,
+) -> dict[str, list[tuple[int, int]]]:
+    """Enclosing definition spans per path, scanned concurrently.
+
+    Empty when ``function_context`` is off, and a path with no fetched head text
+    is absent — so a caller reads ``.get(path)`` and gets ``None``, exactly the
+    "no boundaries" value ``expand_hunks`` took before.
+    """
+    if not cfg.function_context:
+        return {}
+    paths = [path for path, _ in file_patches if file_contents.get(path)]
+    if not paths:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(_BOUNDARY_SCAN_WORKERS, len(paths))) as pool:
+        spans = pool.map(lambda path: definition_spans(file_contents[path], path), paths)
+        return dict(zip(paths, spans, strict=True))
 
 
 def _is_droppable_scan(finding: ReviewFinding) -> bool:
