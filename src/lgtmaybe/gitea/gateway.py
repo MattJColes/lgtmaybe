@@ -49,6 +49,7 @@ from lgtmaybe.core.diff import (
 )
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, ReviewFinding
+from lgtmaybe.core.paginate import paginate_pages
 
 _log = get_logger(__name__)
 
@@ -62,18 +63,6 @@ _CONTENT_FETCH_WORKERS = 8
 
 # Gitea pages most list endpoints at 50 by default; ask for the maximum.
 _PAGE_LIMIT = 50
-
-# Commit statuses are Gitea's equivalent of a check run. Its state vocabulary is
-# narrower than GitHub's conclusions, so map rather than pass through.
-_STATUS_STATES = {
-    "success": "success",
-    "neutral": "success",
-    "skipped": "success",
-    "failure": "failure",
-    "action_required": "failure",
-    "cancelled": "error",
-    "timed_out": "error",
-}
 
 
 class GiteaGateway:
@@ -277,7 +266,13 @@ class GiteaGateway:
                 f"{self._api}/statuses/{head_sha}",
                 headers=self._headers,
                 json={
-                    "state": _STATUS_STATES.get(conclusion, "success"),
+                    # Gitea's state vocabulary is narrower than GitHub's
+                    # conclusions, but the one producer of `conclusion`
+                    # (`cli._fail_on_check`) emits only "success"/"failure" —
+                    # so a full mapping table is entries for inputs that never
+                    # arrive. Only "failure" reds the commit; anything else
+                    # keeps the fail-open default a best-effort status wants.
+                    "state": "failure" if conclusion == "failure" else "success",
                     "context": "lgtmaybe",
                     "description": title[:255],
                 },
@@ -333,12 +328,23 @@ class GiteaGateway:
         """
         keys: set[str] = set()
         try:
-            for review in self._paginate(f"{self._pr_api}/reviews"):
-                review_id = review.get("id")
-                if review_id is None:
-                    continue
-                for comment in self._paginate(f"{self._pr_api}/reviews/{review_id}/comments"):
-                    keys |= finding_keys(comment.get("body") or "")
+            # Gitea reviews are immutable, so every past lgtmaybe run left its
+            # own review object and there is no flat "all review comments for
+            # this PR" endpoint to read them back through. That makes the
+            # per-review fetch a genuine API constraint — but the fetches are
+            # independent, so they need not be serial: an active PR accumulates
+            # enough review cycles for one round trip each to dominate.
+            review_ids = [
+                review["id"]
+                for review in self._paginate(f"{self._pr_api}/reviews")
+                if review.get("id") is not None
+            ]
+            with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
+                for comments in pool.map(
+                    lambda rid: self._paginate(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
+                ):
+                    for comment in comments:
+                        keys |= finding_keys(comment.get("body") or "")
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing review comments failed: %s", exc)
         return keys
@@ -416,25 +422,12 @@ class GiteaGateway:
         return resp.json()
 
     def _paginate(self, url: str) -> list[dict[str, Any]]:
-        """Every page of a Gitea list endpoint, flattened.
-
-        Gitea signals the end of a listing with a short page rather than a Link
-        header, so this stops on the first page below the limit.
-        """
-        items: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            resp = self._client.get(
-                url,
-                headers=self._headers,
-                params={"page": page, "limit": _PAGE_LIMIT},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-            batch = resp.json()
-            if not isinstance(batch, list) or not batch:
-                return items
-            items.extend(batch)
-            if len(batch) < _PAGE_LIMIT:
-                return items
-            page += 1
+        """Every page of a Gitea list endpoint, flattened."""
+        return paginate_pages(
+            self._client,
+            url,
+            self._headers,
+            page_param="limit",
+            limit=_PAGE_LIMIT,
+            timeout=_TIMEOUT,
+        )

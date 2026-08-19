@@ -227,6 +227,48 @@ class TestPostReview:
         assert not reviews.called, "the only finding was already on the PR"
 
     @respx.mock
+    def test_dedupe_reads_every_past_review_not_just_the_first(self) -> None:
+        """Each run leaves its own immutable review, so all of them must be read."""
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        finding = ReviewFinding(
+            path="app.py",
+            line=2,
+            side="RIGHT",
+            severity=Severity.high,
+            title="Hardcoded password",
+            body="Move it to the environment.",
+            anchor='password = "hunter2"',
+            anchored=True,
+        )
+        already = finding_fingerprint("app.py", "Hardcoded password")
+        respx.route(method="GET", url=f"{PR_URL}/reviews").mock(
+            return_value=httpx.Response(200, json=[{"id": 5}, {"id": 6}, {"id": 7}])
+        )
+        for review_id in (5, 6):
+            respx.get(f"{PR_URL}/reviews/{review_id}/comments").mock(
+                return_value=httpx.Response(200, json=[{"body": "unrelated"}])
+            )
+        # Only the LAST review carries the finding — a walk that stopped early,
+        # or lost a concurrent result, would re-post it.
+        respx.get(f"{PR_URL}/reviews/7/comments").mock(
+            return_value=httpx.Response(
+                200, json=[{"body": f"old text\n<!-- lgtmaybe-finding:{already} -->"}]
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={"id": 1})
+        )
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+
+        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
+
+        assert not reviews.called, "the only finding was already on the PR"
+
+    @respx.mock
     def test_an_unanchorable_finding_is_demoted_into_the_summary(self) -> None:
         """A comment on a line we cannot stand behind is worse than no line at all."""
         respx.route(method="GET", url__startswith=f"{PR_URL}/reviews").mock(
@@ -333,7 +375,7 @@ class TestCheckRun:
     @respx.mock
     @pytest.mark.parametrize(
         ("conclusion", "state"),
-        [("success", "success"), ("failure", "failure"), ("cancelled", "error")],
+        [("success", "success"), ("failure", "failure")],
     )
     def test_maps_a_conclusion_onto_giteas_narrower_state_vocabulary(
         self, conclusion: str, state: str
