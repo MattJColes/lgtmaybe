@@ -103,43 +103,28 @@ def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
     return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
 
 
-def _run_upsert(
-    github: ReviewGateway,
-    provider: ProviderClient,
-    cfg: ReviewConfig,
-    *,
-    build: Callable[[PRContext, ReviewConfig, ProviderClient], str],
-    post_method: str,
-    ctx: PRContext | None,
-) -> None:
-    """Build a describe/diagram body and post it idempotently.
-
-    Pure function over injected ports, like ``run_review``. Prefers the
-    gateway's upsert method; falls back to a plain issue comment. A prefetched
-    ``ctx`` avoids repeating the expensive PR-context fetch.
-    """
-    body = build(github.get_pr_context() if ctx is None else ctx, cfg, provider)
-    post = getattr(github, post_method, None)
-    if post is not None:
-        post(body)
-        return
-    post_comment = getattr(github, "post_issue_comment", None)
-    if post_comment is not None:
-        post_comment(body)
-
-
 def run_describe(
     github: ReviewGateway,
     provider: ProviderClient,
     cfg: ReviewConfig,
     ctx: PRContext | None = None,
 ) -> None:
-    """Build the structured description and post it idempotently."""
+    """Build the structured description and post it idempotently.
+
+    Pure function over injected ports, like ``run_review``. Prefers the
+    gateway's upsert method; falls back to a plain issue comment. A prefetched
+    ``ctx`` avoids repeating the expensive PR-context fetch.
+    """
     from lgtmaybe.engine.describe import build_description
 
-    _run_upsert(
-        github, provider, cfg, build=build_description, post_method="post_describe_comment", ctx=ctx
-    )
+    body = build_description(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    post = getattr(github, "post_describe_comment", None)
+    if post is not None:
+        post(body)
+        return
+    post_comment = getattr(github, "post_issue_comment", None)
+    if post_comment is not None:
+        post_comment(body)
 
 
 def run_diagram(
@@ -156,10 +141,7 @@ def run_diagram(
     body = build_diagram(github.get_pr_context() if ctx is None else ctx, cfg, provider)
     post = getattr(github, "post_diagram_comment", None)
     if post is not None:
-        if completed_sha is None:
-            post(body)
-        else:
-            post(body, completed_sha=completed_sha)
+        post(body, completed_sha=completed_sha)
         return
     if completed_sha is not None:
         raise RuntimeError("the GitHub gateway cannot persist a diagram completion marker")
@@ -817,6 +799,21 @@ def execute_local_diagram(
     click.echo(flatten_details(body))
 
 
+def _build_context_or_fail(
+    cfg: ReviewConfig, runtime: RuntimeOptions
+) -> tuple[ReviewGateway, ReviewEngine, ProviderClient]:
+    """Build the adapter set, surfacing construction failures as a CLI error.
+
+    Adapter construction can fail before we have any way to post (bad URL,
+    missing token/credentials), so it is the one failure that cannot be
+    reported back to the PR — it becomes a clean ``ClickException`` instead.
+    """
+    try:
+        return build_review_context(cfg, runtime)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 def _post_extras(
     github: ReviewGateway,
     provider: ProviderClient,
@@ -824,23 +821,17 @@ def _post_extras(
     ctx: PRContext,
     *,
     describe: bool,
-    diagram: bool,
 ) -> None:
-    """Post best-effort extras over a prefetched context.
+    """Post the best-effort automatic description over a prefetched context.
 
     Automatic descriptions remain best-effort. Required automatic diagrams are
-    posted by ``run_review`` and never enter this helper; the ``diagram`` option
-    remains only for callers that explicitly request a best-effort diagram.
+    posted by ``run_review`` and never enter this helper.
     """
-    for enabled, run, name in (
-        (describe, run_describe, "describe"),
-        (diagram, run_diagram, "diagram"),
-    ):
-        if enabled:
-            try:
-                run(github, provider, cfg, ctx=ctx)
-            except Exception:
-                _log.warning("auto-%s failed — continuing without it", name, exc_info=True)
+    if describe:
+        try:
+            run_describe(github, provider, cfg, ctx=ctx)
+        except Exception:
+            _log.warning("auto-describe failed — continuing without it", exc_info=True)
 
 
 def execute_review(
@@ -858,12 +849,7 @@ def execute_review(
     and the prefetched O(files) PR context.
     """
     profiler.reset()
-    # Adapter construction can fail before we have any way to post (bad URL,
-    # missing token/credentials). Surface those as a clean CLI error.
-    try:
-        github, engine, provider = build_review_context(cfg, runtime)
-    except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
+    github, engine, provider = _build_context_or_fail(cfg, runtime)
 
     ctx: PRContext | None = None
     if describe or diagram:
@@ -899,7 +885,7 @@ def execute_review(
         # harmless. In a `finally` so a failed review still gets its extras,
         # exactly as when they ran first.
         if ctx is not None:
-            _post_extras(github, provider, cfg, ctx, describe=describe, diagram=False)
+            _post_extras(github, provider, cfg, ctx, describe=describe)
 
     if runtime.profile:
         click.echo(profiler.render())
@@ -930,13 +916,10 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
         raise click.ClickException(f"event payload missing required field: {exc}") from exc
     runtime = replace(runtime, pr_url=_change_url(repo, pr_number))
 
-    try:
-        github, engine, provider_client = build_review_context(cfg, runtime)
-    except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
+    github, engine, provider = _build_context_or_fail(cfg, runtime)
 
     try:
-        dispatch(parsed, github=github, engine=engine, provider=provider_client, cfg=cfg)
+        dispatch(parsed, github=github, engine=engine, provider=provider, cfg=cfg)
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"/{parsed.name} failed: {exc}") from exc
