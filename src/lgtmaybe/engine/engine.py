@@ -458,11 +458,11 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False
     # Config-derived on purpose: keying this on whether the binary happens to be
     # installed would make the prompt — and the shared prefix cache — vary by
     # machine. A configured-but-missing finding-mode tool warns instead.
-    deps = not _scanner_covers_dependency_health(cfg)
+    deps = not _scanner_covers(cfg, StaticAnalysisTool.osv_scanner)
     # Likewise for committed secrets: redaction has already rewritten every
     # secret it matched to `[REDACTED]` before the diff leaves, so a scanner
     # reading the unredacted text answers this far better than the lens can.
-    secrets = not _scanner_covers_secrets(cfg)
+    secrets = not _scanner_covers(cfg, StaticAnalysisTool.gitleaks)
     fast = cfg.preset is ReviewPreset.fast and list(cfg.categories) == list(ReviewCategory)
     if fast:
         lenses = [
@@ -1065,19 +1065,13 @@ class LLMReviewEngine:
             # The intent block is built PER BATCH, not once, because it has to
             # name the files this particular call cannot see.
             intent_block = (
-                wrap_intent(clean_intent, files_not_visible(ctx.changed_files, batch_paths))
-                if clean_intent is not None
-                else None
+                wrap_intent(clean_intent, not_visible) if clean_intent is not None else None
             )
             # Same for the spec block, and the correction matters more here: a
             # requirement is delivered by CODE, so a spec call that does not know
             # which files it was denied reports every requirement implemented in
             # another batch as undelivered.
-            spec_block = (
-                wrap_spec(clean_spec, files_not_visible(ctx.changed_files, batch_paths))
-                if clean_spec is not None
-                else None
-            )
+            spec_block = wrap_spec(clean_spec, not_visible) if clean_spec is not None else None
             # Warm the prompt cache for this batch: a fully concurrent first
             # wave defeats it (every call misses, and on explicit-breakpoint
             # routes each also pays the cache write), so one lens is dispatched
@@ -2464,28 +2458,19 @@ def _error_reason(exc: BaseException) -> str:
     return reason[:200]
 
 
-def _scanner_covers_dependency_health(cfg: ReviewConfig) -> bool:
-    """Whether a deterministic scanner will report dependency advisories itself.
+def _scanner_covers(cfg: ReviewConfig, tool: StaticAnalysisTool) -> bool:
+    """Whether *tool* will report its own findings on this run.
 
-    When one will, the lens stops being asked for them: a model's knowledge
-    cutoff cannot answer "does this version have a published advisory?", so
-    asking anyway only puts a confident guess beside an accurate answer.
+    When one will, the lens stops being asked for what it covers. For
+    ``osv_scanner`` that is dependency advisories: a model's knowledge cutoff
+    cannot answer "does this version have a published advisory?", so asking
+    anyway only puts a confident guess beside an accurate answer. For
+    ``gitleaks`` it is committed secrets: redaction rewrites every secret it
+    matches to ``[REDACTED]`` before the diff is sent, so the model is largely
+    being asked to find what it has been prevented from seeing — while gitleaks
+    reads the unredacted head text and answers it exactly.
     """
     sa = cfg.static_analysis
-    tool = StaticAnalysisTool.osv_scanner
-    return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
-
-
-def _scanner_covers_secrets(cfg: ReviewConfig) -> bool:
-    """Whether a deterministic scanner will report committed secrets itself.
-
-    When one will, the lens stops being asked for them. Redaction rewrites every
-    secret it matches to ``[REDACTED]`` before the diff is sent, so the model is
-    largely being asked to find what it has been prevented from seeing — while
-    gitleaks reads the unredacted head text and answers it exactly.
-    """
-    sa = cfg.static_analysis
-    tool = StaticAnalysisTool.gitleaks
     return sa.enabled and tool in sa.tools and mode_for(tool, cfg) is ToolMode.finding
 
 
