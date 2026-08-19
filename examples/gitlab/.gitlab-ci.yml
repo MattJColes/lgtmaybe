@@ -1,0 +1,32 @@
+# Copy into your GitLab repo at .gitlab-ci.yml (or include it from one).
+#
+# GitLab CI has no event payload file and no INPUT_* convention, so lgtmaybe
+# reads the merge request from GitLab's own predefined variables and takes its
+# configuration from ordinary flags, environment, and .lgtmaybe.yml.
+#
+# Two CI/CD variables to add under Settings -> CI/CD -> Variables:
+#
+#   GITLAB_TOKEN      a project access token with `api` scope, so lgtmaybe can
+#                     read the merge request and post the review. Mark it
+#                     Masked; it does not need to be Protected unless your
+#                     merge request pipelines only run on protected branches.
+#   ANTHROPIC_API_KEY (or whichever provider you use) — Masked.
+#
+# Keyless cloud auth (Bedrock, Vertex, Azure) is a GitHub Actions feature; on
+# GitLab use an API key, or `ollama` against a runner-local model.
+
+lgtmaybe:
+  stage: test
+  image: ghcr.io/mattjcoles/lgtmaybe:v2
+  # Merge request pipelines only. Without this the job also runs on branch
+  # pipelines, where there is no merge request to review — lgtmaybe says so and
+  # exits non-zero, which reads as a broken pipeline rather than a misconfigured
+  # rule.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - python -m lgtmaybe gitlab-ci --provider anthropic --model claude-sonnet-4-6
+  variables:
+    # lgtmaybe never checks out or executes merge request code — it reads the
+    # diff through the API — so the job does not need the repository at all.
+    GIT_STRATEGY: none

@@ -59,6 +59,7 @@ from lgtmaybe.engine import (
 from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
+from lgtmaybe.gitlab import GitLabGateway
 from lgtmaybe.local import local_file_reader, local_pr_context
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
@@ -203,6 +204,13 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         token=token,
         marker_key=f"{cfg.provider}/{cfg.model}",
         resolve_fixed=cfg.resolve_fixed,
+    ),
+    Forge.gitlab: lambda located, token, cfg: GitLabGateway(
+        host=located.host,
+        repo=located.repo,
+        pr_number=located.number,
+        token=token,
+        marker_key=f"{cfg.provider}/{cfg.model}",
     ),
     Forge.gitea: lambda located, token, cfg: GiteaGateway(
         host=located.host,
@@ -981,6 +989,36 @@ def _change_url(repo: str, number: int) -> str:
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
     return f"{server}/{repo}/pulls/{number}"
+
+
+def mr_url_from_ci_env() -> str:
+    """Build the merge request URL from GitLab CI's predefined variables.
+
+    GitLab CI has no event payload file and no ``INPUT_*`` convention, so this
+    is the one entrypoint that cannot be shared with the GitHub Actions path.
+    Everything downstream is identical: the URL goes through the same locator
+    and the same gateway registry.
+
+    Raises with the variable's own name when one is missing — the usual cause is
+    a job running on a branch pipeline rather than a merge request one, and
+    naming ``CI_MERGE_REQUEST_IID`` points straight at the ``rules:`` fix.
+    """
+    host = os.environ.get("CI_SERVER_HOST") or ""
+    server = host and f"https://{host}" or os.environ.get("CI_SERVER_URL", "").rstrip("/")
+    if not server:
+        raise click.ClickException(
+            "CI_SERVER_HOST is not set — lgtmaybe cannot tell which GitLab to post to."
+        )
+    project = os.environ.get("CI_MERGE_REQUEST_PROJECT_PATH") or os.environ.get("CI_PROJECT_PATH")
+    if not project:
+        raise click.ClickException("CI_PROJECT_PATH is not set — no project to review.")
+    iid = os.environ.get("CI_MERGE_REQUEST_IID")
+    if not iid:
+        raise click.ClickException(
+            "CI_MERGE_REQUEST_IID is not set — this pipeline is not for a merge request. "
+            'Run the job with `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"`.'
+        )
+    return f"{server}/{project}/-/merge_requests/{iid}"
 
 
 def pr_url_from_event(event: dict[str, Any]) -> str:

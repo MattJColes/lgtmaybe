@@ -91,6 +91,16 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
   minus incremental review and thread resolution (its API cannot serve either);
   its summary lives in an editable issue comment because a submitted Gitea review
   is immutable, and it de-dupes findings by reading the hidden ids already posted.
+  **GitLab** (`gitlab/gateway.py`) is the one whose model really differs: no
+  batched review object, so each finding is its own *discussion* positioned by
+  old/new path + line and the MR's three diff refs; the summary is an upserted
+  note; thread resolution works over plain REST (no GraphQL), gated on the
+  caller's validated allowlist because GitLab exposes no "lines moved" signal.
+  Incremental is unbuilt there — a "not yet", not a "cannot".
+- **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
+  the same env contract; only `GITHUB_SERVER_URL` differs, and
+  `cli._change_url` reads it). GitLab CI has neither an event payload nor
+  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`.
 
 ## Key decisions (do not relitigate)
 

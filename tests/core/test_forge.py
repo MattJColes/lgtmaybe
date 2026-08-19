@@ -78,18 +78,24 @@ class TestTokenEnvVar:
 class TestGatewayRegistry:
     """Which forges lgtmaybe can actually build a gateway for."""
 
-    @pytest.mark.parametrize("forge", [Forge.github, Forge.gitea])
-    def test_implemented_forges_are_registered(self, forge: Forge) -> None:
+    @pytest.mark.parametrize("forge", list(Forge))
+    def test_every_forge_the_parser_knows_can_be_built(self, forge: Forge) -> None:
+        """A URL lgtmaybe parses but cannot act on would be a dead end."""
         from lgtmaybe.cli import gateway_builder
 
         assert gateway_builder(forge) is not None
 
-    @pytest.mark.parametrize("forge", [Forge.gitlab])
-    def test_an_unimplemented_forge_says_so_by_name(self, forge: Forge) -> None:
-        """A recognised-but-unbuilt forge must not read as an unparseable URL."""
+    def test_the_gitlab_builder_carries_the_nested_project_path(self) -> None:
+        """GitLab groups nest, and the whole path addresses the project."""
         from lgtmaybe.cli import gateway_builder
+        from lgtmaybe.core.models import ReviewConfig
 
-        assert gateway_builder(forge) is None
+        build = gateway_builder(Forge.gitlab)
+        assert build is not None
+        located = parse_pr_url("https://gl.internal/grp/sub/proj/-/merge_requests/9")
+        gateway = build(located, "token", ReviewConfig(provider="ollama", model="llama3"))
+        assert gateway._project == "grp%2Fsub%2Fproj"
+        assert "gl.internal" in gateway._api
 
     def test_the_gitea_builder_carries_the_host_through(self) -> None:
         """Self-hosted is the norm on Gitea, so the API base cannot be a constant."""

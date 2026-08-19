@@ -1,0 +1,29 @@
+gitlab.project:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^GitLabGateway$' }
+  files: [src/lgtmaybe/gitlab/**/*.py]
+
+gitlab.context:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^get_pr_context$' }
+  files: [src/lgtmaybe/gitlab/**/*.py]
+
+gitlab.positions:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_partition_findings$' }
+  files: [src/lgtmaybe/gitlab/**/*.py]
+
+gitlab.upsert:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_upsert_note$' }
+  files: [src/lgtmaybe/gitlab/**/*.py]
+
+gitlab.resolve:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_resolve_fixed_threads$' }
+  files: [src/lgtmaybe/gitlab/**/*.py]
