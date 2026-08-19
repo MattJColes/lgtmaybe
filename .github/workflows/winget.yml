@@ -53,24 +53,21 @@ jobs:
             }
           }
 
+      # `gh` is preinstalled on windows-latest and already drives this pipeline's
+      # release steps (windows-exe.yml), so the "does this path exist" question
+      # is one call with the auth and API headers handled for us.
       - name: Check whether the winget package exists
         id: package
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $manifestUrl = "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/m/MattJColes/lgtmaybe"
-          try {
-            Invoke-WebRequest -Uri $manifestUrl -Method Get -TimeoutSec 30 -Headers @{
-              Accept = "application/vnd.github+json"
-              "X-GitHub-Api-Version" = "2022-11-28"
-            } | Out-Null
+          gh api repos/microsoft/winget-pkgs/contents/manifests/m/MattJColes/lgtmaybe --silent
+          if ($LASTEXITCODE -eq 0) {
             "exists=true" >> $env:GITHUB_OUTPUT
-          } catch {
-            if ([int]$_.Exception.Response.StatusCode -eq 404) {
-              "exists=false" >> $env:GITHUB_OUTPUT
-              Write-Warning "MattJColes.lgtmaybe is not published in winget yet. Submit and moderate the first manifest manually; automatic updates will start with the next release."
-              exit 0
-            }
-            throw
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+            Write-Warning "MattJColes.lgtmaybe is not published in winget yet. Submit and moderate the first manifest manually; automatic updates will start with the next release."
           }
 
       - name: Install wingetcreate

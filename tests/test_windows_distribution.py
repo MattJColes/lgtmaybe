@@ -65,7 +65,12 @@ def test_winget_workflow_updates_the_portable_package() -> None:
     package_check = steps["Check whether the winget package exists"]
     assert package_check["id"] == "package"
     assert "microsoft/winget-pkgs/contents/manifests/m/MattJColes/lgtmaybe" in package_check["run"]
-    assert "StatusCode -eq 404" in package_check["run"]
+    # `gh` is preinstalled on windows runners and already drives the release
+    # steps in windows-exe.yml — the existence check reuses it rather than
+    # hand-rolling the request, so it needs the same token in scope.
+    assert "gh api" in package_check["run"]
+    assert "$LASTEXITCODE" in package_check["run"]
+    assert package_check["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
     for name in ("Install wingetcreate", "Submit winget update"):
         assert steps[name]["if"] == "steps.package.outputs.exists == 'true'"
 

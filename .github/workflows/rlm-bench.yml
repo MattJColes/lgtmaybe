@@ -44,28 +44,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Bring up ollama
+        uses: ./.github/actions/ollama-bringup
         with:
-          python-version: "3.12"
-          enable-cache: true
-
-      - name: Sync (with dev deps)
-        run: uv sync --dev
-
-      - name: Install ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-
-      - name: Cache ollama model
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.OLLAMA_MODELS }}
-          key: ollama-${{ runner.os }}-${{ env.LGTMAYBE_E2E_OLLAMA_MODEL }}
-
-      # The same script a developer runs locally (DEVELOPMENT.md) — serve,
-      # readiness wait, pull — so the bring-up can't drift from local either.
-      - name: Start ollama and pull the model
-        run: scripts/e2e-up.sh ollama
+          model: ${{ env.LGTMAYBE_E2E_OLLAMA_MODEL }}
+          models-path: ${{ env.OLLAMA_MODELS }}
 
       # The generic sweep owns both legs, keeping this workflow and the local
       # command aligned. --max-input-tokens forces the over-budget split.

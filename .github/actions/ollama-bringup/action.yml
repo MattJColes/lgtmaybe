@@ -1,0 +1,55 @@
+name: Ollama bring-up
+description: >-
+  Install uv + dev deps, install ollama, restore the model cache, and serve the
+  model. Shared by the two workflows that need a live local model
+  (e2e-local, rlm-bench) so their bring-up cannot drift from each other — or,
+  since the last step is the same script DEVELOPMENT.md tells a developer to
+  run, from a local run.
+
+inputs:
+  model:
+    description: "ollama model tag to serve"
+    required: true
+  models-path:
+    description: "where ollama keeps its models (the path the cache restores)"
+    required: false
+    default: /home/runner/.ollama/models
+  python-version:
+    description: "python version for the uv toolchain"
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  # No checkout here: a `uses: ./.github/actions/...` step can only resolve once
+  # the repository is already in the workspace, so the calling job checks out
+  # first and this picks up from there.
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+
+    - name: Sync (with dev deps)
+      shell: bash
+      run: uv sync --dev
+
+    - name: Install ollama
+      shell: bash
+      run: curl -fsSL https://ollama.com/install.sh | sh
+
+    - name: Cache ollama model
+      uses: actions/cache@v6
+      with:
+        path: ${{ inputs.models-path }}
+        key: ollama-${{ runner.os }}-${{ inputs.model }}
+
+    # The same script a developer runs locally (DEVELOPMENT.md) — serve,
+    # readiness wait, pull — so the bring-up can't drift from local either.
+    - name: Start ollama and pull the model
+      shell: bash
+      env:
+        LGTMAYBE_E2E_OLLAMA_MODEL: ${{ inputs.model }}
+        OLLAMA_MODELS: ${{ inputs.models-path }}
+      run: scripts/e2e-up.sh ollama
