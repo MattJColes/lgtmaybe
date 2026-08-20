@@ -471,3 +471,56 @@ class TestResilience:
 
         assert not created.called
         assert "Hardcoded password" in json.loads(note.calls[0].request.content)["body"]
+
+
+class TestResolveFixedIsHonoured:
+    """`resolve_fixed` is one setting across forges: GitHub threaded it through
+    and GitLab did not, so turning it off left GitLab resolving anyway."""
+
+    def _post_with(self, resolve_fixed: bool):
+        _stub_context_routes()
+        _stub_post_routes()
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "thread-1",
+                        "notes": [
+                            {
+                                "id": 11,
+                                "body": "old finding\n<!-- lgtmaybe-finding:abc -->",
+                                "resolved": False,
+                                "position": {"new_path": "app.py"},
+                            }
+                        ],
+                    }
+                ],
+            )
+        )
+        respx.post(f"{MR_URL}/discussions/thread-1/notes").mock(
+            return_value=httpx.Response(201, json={"id": 12})
+        )
+        resolve = respx.put(f"{MR_URL}/discussions/thread-1").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        gateway = GitLabGateway(
+            host=HOST,
+            repo=REPO,
+            pr_number=MR_IID,
+            token=TOKEN,
+            client=httpx.Client(),
+            resolve_fixed=resolve_fixed,
+        )
+        gateway.list_active_findings()
+        gateway.set_validated_fixed_threads({"thread-1"})
+        gateway.post_review([], "👍 LGTM!")
+        return resolve
+
+    @respx.mock
+    def test_a_validated_thread_resolves_when_the_setting_is_on(self) -> None:
+        assert self._post_with(True).called
+
+    @respx.mock
+    def test_nothing_resolves_when_the_setting_is_off(self) -> None:
+        assert not self._post_with(False).called

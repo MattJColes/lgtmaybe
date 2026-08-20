@@ -71,6 +71,7 @@ class GitLabGateway:
         pr_number: Merge request *iid* (the per-project number in the URL).
         token:     GitLab access token (project, group, or personal).
         client:    Injected httpx.Client; a default is created if omitted.
+        resolve_fixed: Whether to resolve threads the caller validated as fixed.
     """
 
     def __init__(
@@ -82,6 +83,7 @@ class GitLabGateway:
         client: httpx.Client | None = None,
         marker_key: str | None = None,
         scheme: str = "https",
+        resolve_fixed: bool = True,
     ) -> None:
         self._repo = repo
         self._pr_number = pr_number
@@ -92,6 +94,9 @@ class GitLabGateway:
         self._mr_api = f"{self._api}/merge_requests/{pr_number}"
         self._headers = {"PRIVATE-TOKEN": token, "Accept": "application/json"}
         self._client = client if client is not None else httpx.Client(timeout=_TIMEOUT)
+        # One setting across forges: without this GitLab resolved regardless of
+        # what the user configured, while GitHub honoured it.
+        self._resolve_fixed = resolve_fixed
         self._marker = marker("lgtmaybe", marker_key)
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
         self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
@@ -200,7 +205,8 @@ class GitLabGateway:
 
         body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
         self._upsert_note(body, self._marker)
-        self._resolve_fixed_threads()
+        if self._resolve_fixed:
+            self._resolve_fixed_threads()
 
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone note to the merge request conversation."""
