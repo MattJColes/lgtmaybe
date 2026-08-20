@@ -34,7 +34,9 @@ _log = get_logger(__name__)
 # which spans capped and uncapped concerns — clamping a whole group would
 # downgrade real bugs. A custom lens is likewise absent: it sets its own rules,
 # and the engine has no rubric for it.
-CATEGORY_SEVERITY_CEILING: dict[ReviewCategory, Severity] = {
+# Keyed by the category STRING a finding carries (ReviewCategory is a StrEnum,
+# so its members are valid keys and compare equal to the stamped value).
+CATEGORY_SEVERITY_CEILING: dict[str, Severity] = {
     ReviewCategory.complexity: Severity.medium,
     ReviewCategory.ponytail: Severity.medium,
     ReviewCategory.documentation: Severity.medium,
@@ -46,7 +48,7 @@ def clamp_to_category_ceiling(findings: list[ReviewFinding]) -> list[ReviewFindi
     """Lower any advisory finding graded above its category's ceiling."""
     out: list[ReviewFinding] = []
     for finding in findings:
-        ceiling = CATEGORY_SEVERITY_CEILING.get(finding.category)  # type: ignore[arg-type]
+        ceiling = CATEGORY_SEVERITY_CEILING.get(finding.category or "")
         if ceiling is None or finding.severity.rank <= ceiling.rank:
             out.append(finding)
             continue
