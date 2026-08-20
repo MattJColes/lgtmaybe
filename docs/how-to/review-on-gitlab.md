@@ -23,18 +23,21 @@ The job must run on merge request pipelines — `rules: - if: $CI_PIPELINE_SOURC
 == "merge_request_event"`. On a branch pipeline there is no merge request to
 review, and lgtmaybe will tell you so by name rather than guessing.
 
-## Run it locally instead
+## Try it locally first
 
-The CLI takes a merge request URL directly:
+Reviewing a merge request by URL happens in CI — that is where the token and the
+MR context live. Locally, `lgtmaybe review` reviews the branch you have checked
+out, against the remote primary branch, and prints the findings instead of
+posting them:
 
 ```bash
-export GITLAB_TOKEN=...
+git switch my-feature-branch
 export ANTHROPIC_API_KEY=...
-lgtmaybe review --provider anthropic --model claude-sonnet-4-6 \
-  --pr-url https://gitlab.com/group/subgroup/project/-/merge_requests/7
+lgtmaybe review --provider anthropic --model claude-sonnet-4-6
 ```
 
-Nested group paths work — everything before `/-/merge_requests/` is the project.
+Same lenses, same reflection pass, same findings — so it is the quick way to see
+what a model will say about your change before you wire up the pipeline.
 
 ## How it differs from GitHub
 
