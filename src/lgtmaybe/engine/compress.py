@@ -7,13 +7,15 @@ Provides a dynamic context-line calculator for the remaining budget.
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from operator import itemgetter
-from typing import Any
 
 from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header
+from lgtmaybe.core.logging import get_logger
+
+_log = get_logger(__name__)
 
 _MAX_CONTEXT_LINES = 20
 
@@ -23,35 +25,103 @@ _MAX_CONTEXT_LINES = 20
 _SCALE = 5_000
 
 
-@lru_cache(maxsize=1)
-def _token_encoder() -> Any | None:
-    """Return a cached tiktoken encoder, or None if tiktoken is unavailable.
+# Characters per token when no tokenizer is available at all. Deliberately
+# below the ~4 an English-prose rule of thumb gives: a diff is code, which
+# tokenizes denser, and this estimate decides how much goes in a batch.
+# Over-counting costs a smaller batch; under-counting silently ships a prompt
+# past the configured budget, which is the failure that collapses recall.
+_FALLBACK_CHARS_PER_TOKEN = 3
 
-    Building the encoder is slow, and ``count_tokens`` runs once per file during
-    batching — so resolve it once and reuse it rather than re-importing and
-    re-loading the encoding on every call.
+# The model whose tokenizer the budget is measured in. Set once per review by
+# the engine; None means "no model in hand", which is the CLI-less/library case
+# and keeps the previous OpenAI-tokenizer behaviour.
+_counting_model: str | None = None
+
+
+def set_counting_model(model: str | None) -> None:
+    """Measure token budgets in the tokenizer of the model that will read them.
+
+    ``cl100k_base`` is OpenAI's; applied to an anthropic or vertex run it can be
+    off by well over 10% in either direction, and every batching decision is
+    made against it. The engine calls this once per review.
+
+    Clears the memo when the model changes: the cache is keyed on text alone,
+    since one review counts against one model.
     """
-    try:
-        import tiktoken
+    global _counting_model
+    if model == _counting_model:
+        return
+    _counting_model = model
+    count_tokens.cache_clear()
 
-        return tiktoken.get_encoding("cl100k_base")
-    except Exception:
+
+def _load_model_counter(model: str) -> Callable[[str], int] | None:
+    """A counter using *model*'s own tokenizer, via litellm's registry.
+
+    Imported lazily: litellm is a heavy import and the engine must not pay it
+    to count characters. litellm caches the tokenizer it selects, so the cost
+    lands on the first call only. Returns None when litellm has no opinion.
+    """
+    import litellm
+
+    litellm.encode(model=model, text="probe")  # resolve + cache the tokenizer
+    return lambda text: len(litellm.encode(model=model, text=text))
+
+
+def _load_tiktoken_counter() -> Callable[[str], int] | None:
+    """A counter using ``cl100k_base``, the model-agnostic fallback."""
+    import tiktoken
+
+    encoder = tiktoken.get_encoding("cl100k_base")
+    return lambda text: len(encoder.encode(text))
+
+
+@lru_cache(maxsize=8)
+def _counter_for(model: str | None) -> Callable[[str], int] | None:
+    """The best available token counter for *model*, or None for the estimate.
+
+    Resolved once per model: building an encoder is slow and ``count_tokens``
+    runs per file — and, inside ``take_lines``, per line.
+    """
+    if model is not None:
+        try:
+            counter = _load_model_counter(model)
+            if counter is not None:
+                return counter
+        except Exception as exc:  # noqa: BLE001 — counting must never fail a review
+            _log.warning(
+                "no tokenizer for this model; falling back to a generic one — "
+                "token budgets are approximate for %s: %s",
+                model,
+                exc,
+            )
+    try:
+        return _load_tiktoken_counter()
+    except Exception as exc:  # noqa: BLE001 — counting must never fail a review
+        # Loading cl100k_base fetches its BPE file on first use, so an
+        # egress-restricted runner lands here. Said out loud, because silently
+        # degrading to a character estimate makes every batch size a guess.
+        _log.warning(
+            "token counting fell back to a character estimate (~%d chars/token): %s",
+            _FALLBACK_CHARS_PER_TOKEN,
+            exc,
+        )
         return None
 
 
 @lru_cache(maxsize=256)
 def count_tokens(text: str) -> int:
-    """Return the token count for *text* using tiktoken, with a len/4 fallback.
+    """Return the token count for *text*, in the counting model's tokenizer.
 
     Memoized: the same text is counted repeatedly across a review — each
     over-budget patch twice during recursive batching, the whole diff once per
     reflection deferral hop — and encoding is O(len) each time. Bounded so the
     cache can't retain an unbounded number of large diff strings.
     """
-    enc = _token_encoder()
-    if enc is not None:
-        return len(enc.encode(text))
-    return max(1, len(text) // 4)
+    counter = _counter_for(_counting_model)
+    if counter is not None:
+        return counter(text)
+    return max(1, len(text) // _FALLBACK_CHARS_PER_TOKEN)
 
 
 def take_lines(lines: Iterable[str], budget: int) -> list[str]:

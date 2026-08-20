@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header
+from lgtmaybe.engine import compress
 from lgtmaybe.engine.compress import (
+    _counter_for,
     _enclosing_boundary,
-    _token_encoder,
     batch_files,
     count_tokens,
     expand_hunks,
@@ -23,10 +26,11 @@ _SMALL_DIFF = "@@ -1,3 +1,4 @@\n context\n+added line\n context\n"
 _FILE_BLOCK = "diff --git a/{name} b/{name}\n{diff}"
 
 
-def test_token_encoder_is_cached() -> None:
-    """The tiktoken encoder is built once and reused across count_tokens calls
-    (it is loaded once per file during batching — building it each time is slow)."""
-    assert _token_encoder() is _token_encoder()
+def test_the_token_counter_is_cached() -> None:
+    """The encoder is built once and reused across count_tokens calls — it is
+    resolved once per file during batching, and per LINE inside take_lines, so
+    building it each time is slow."""
+    assert _counter_for(None) is _counter_for(None)
 
 
 def test_count_tokens_is_stable_and_positive() -> None:
@@ -688,3 +692,96 @@ def test_a_definition_far_above_the_hunk_is_out_of_reach() -> None:
     )
 
     assert "def long_one" not in expanded
+
+
+class TestTokenCountingIsVisibleAndProviderAware:
+    """Batching decisions are only as good as the count behind them.
+
+    Two silent failures made the budget meaningless: `tiktoken.get_encoding`
+    needs a network fetch on first use, and any failure was swallowed into a
+    `len // 4` character estimate with nothing logged; and `cl100k_base` is
+    OpenAI's tokenizer, applied to every provider, so a non-OpenAI run measured
+    its budget in the wrong model's tokens.
+    """
+
+    def setup_method(self) -> None:
+        compress.set_counting_model(None)
+
+    def teardown_method(self) -> None:
+        compress.set_counting_model(None)
+
+    @staticmethod
+    def _warnings_while(action) -> list[str]:
+        """Run *action*, returning what compress logged at WARNING.
+
+        Through a handler on the module's own logger: lgtmaybe's loggers carry
+        their own handler and do not propagate, so caplog does not see them.
+        """
+        captured: list[logging.LogRecord] = []
+        handler = logging.Handler(level=logging.WARNING)
+        handler.emit = captured.append  # type: ignore[method-assign]
+        compress._log.addHandler(handler)
+        try:
+            action()
+        finally:
+            compress._log.removeHandler(handler)
+        return [record.getMessage() for record in captured]
+
+    def test_the_character_fallback_says_so_instead_of_failing_silently(self, monkeypatch) -> None:
+        compress._counter_for.cache_clear()
+        compress.count_tokens.cache_clear()
+        monkeypatch.setattr(
+            compress, "_load_tiktoken_counter", lambda: (_ for _ in ()).throw(OSError("403"))
+        )
+
+        messages = self._warnings_while(lambda: compress.count_tokens("some diff text"))
+
+        assert any("character estimate" in message for message in messages), (
+            "a degraded token count must be visible — every batching decision rests on it"
+        )
+
+    def test_the_character_fallback_does_not_under_count_code(self, monkeypatch) -> None:
+        """Under-counting is the dangerous direction: it produces batches larger
+        than the configured budget, which is what collapsed recall."""
+        compress._counter_for.cache_clear()
+        compress.count_tokens.cache_clear()
+        monkeypatch.setattr(compress, "_load_tiktoken_counter", lambda: None)
+        code = 'def handler(request):\n    return {"ok": True, "id": request.id}\n' * 20
+
+        estimate = compress.count_tokens(code)
+
+        assert estimate >= len(code) / 4, "a 4-chars-per-token estimate under-counts code"
+
+    def test_the_counter_follows_the_configured_model(self, monkeypatch) -> None:
+        """Same text, different tokenizer ⇒ a different count. The cache must not
+        keep serving the previous model's answer."""
+        compress._counter_for.cache_clear()
+        compress.count_tokens.cache_clear()
+        monkeypatch.setattr(
+            compress,
+            "_load_model_counter",
+            lambda model: lambda text: 7 if model == "a-model" else 11,
+        )
+
+        compress.set_counting_model("a-model")
+        first = compress.count_tokens("identical text")
+        compress.set_counting_model("b-model")
+        second = compress.count_tokens("identical text")
+
+        assert (first, second) == (7, 11)
+
+    def test_an_unusable_model_tokenizer_falls_back_rather_than_raising(self, monkeypatch) -> None:
+        compress._counter_for.cache_clear()
+        compress.count_tokens.cache_clear()
+        monkeypatch.setattr(
+            compress,
+            "_load_model_counter",
+            lambda model: (_ for _ in ()).throw(RuntimeError("no tokenizer")),
+        )
+        compress.set_counting_model("mystery-model")
+
+        counted: list[int] = []
+        messages = self._warnings_while(lambda: counted.append(compress.count_tokens("text")))
+
+        assert counted[0] > 0, "counting must never fail a review"
+        assert any("tokenizer" in message for message in messages)

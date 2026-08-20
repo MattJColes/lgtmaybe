@@ -51,6 +51,7 @@ from .compress import (
     context_lines_for_budget,
     count_tokens,
     expand_hunks,
+    set_counting_model,
     split_patch_into_hunks,
     trailing_context_lines,
 )
@@ -776,6 +777,10 @@ class LLMReviewEngine:
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
+        # Measure the budget in the tokenizer of the model that will read it.
+        # cl100k_base is OpenAI's; every batching decision on an anthropic or
+        # vertex run was being made against the wrong model's token counts.
+        set_counting_model(cfg.model)
         # Soft whole-review deadline: model calls reaching execution after this
         # instant are skipped (in-flight ones finish), so a pathological run
         # degrades to partial-with-a-notice instead of grinding on. Measured
@@ -987,7 +992,7 @@ class LLMReviewEngine:
 
         with profiler.stage("batch"):
             batches = batch_files(
-                file_patches, max_tokens=cfg.max_input_tokens, recursive=cfg.recursive
+                file_patches, max_tokens=_batch_budget(lenses, cfg), recursive=cfg.recursive
             )
 
         # 4b. Directory-scoped context files, read ONCE for the whole review from
@@ -2503,6 +2508,40 @@ def _definition_spans_by_path(
     with ThreadPoolExecutor(max_workers=min(_BOUNDARY_SCAN_WORKERS, len(paths))) as pool:
         spans = pool.map(lambda path: definition_spans(file_contents[path], path), paths)
         return dict(zip(paths, spans, strict=True))
+
+
+# What a call carries besides the diff: the wrapper delimiters and their
+# preamble, the hint/hidden blocks when present, and the model's own message
+# scaffolding. Measured once here rather than guessed per call.
+_WRAPPER_OVERHEAD_TOKENS = 400
+
+
+def _prompt_overhead_tokens(lenses: Sequence[_Lens], cfg: ReviewConfig) -> int:
+    """Tokens every lens call spends on prompt rather than diff.
+
+    `max_input_tokens` is the budget for the REQUEST, but only the diff was
+    measured against it — so a batch packed to exactly fill the budget produced
+    a request over it by the preamble plus a lens block. The reserve covers the
+    widest lens, because each call carries exactly one and the batch has to fit
+    whichever it is.
+    """
+    preamble = count_tokens(build_shared_preamble(cfg.language, cfg.mid_review_retrieval))
+    widest_lens = max((count_tokens(lens.user_block) for lens in lenses), default=0)
+    return preamble + widest_lens + _WRAPPER_OVERHEAD_TOKENS
+
+
+def _batch_budget(lenses: Sequence[_Lens], cfg: ReviewConfig) -> int:
+    """The diff budget per batch: the input budget less the prompt overhead.
+
+    The reserve is skipped when it would take half the budget or more. A
+    `max_input_tokens` that small cannot fit the prompt whatever we do, and
+    reserving anyway would shrink the diff share to nothing and split every file
+    into single hunks — making a misconfiguration worse rather than safer.
+    """
+    overhead = _prompt_overhead_tokens(lenses, cfg)
+    if overhead * 2 >= cfg.max_input_tokens:
+        return max(1, cfg.max_input_tokens)
+    return cfg.max_input_tokens - overhead
 
 
 def _is_droppable_scan(finding: ReviewFinding) -> bool:
