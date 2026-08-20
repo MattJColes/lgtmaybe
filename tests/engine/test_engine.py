@@ -18,6 +18,7 @@ from lgtmaybe.core.models import (
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
+    ReviewPreset,
     ReviewResult,
     Severity,
 )
@@ -2862,3 +2863,51 @@ class TestBoundaryScansOverlap:
 
         assert result.get("b.py") is None
         assert result["a.py"] == [(1, 2)]
+
+
+class TestBatchBudgetCoversTheWholePrompt:
+    """`max_input_tokens` is the budget for the request, but only the diff was
+    ever measured against it. The system preamble, the lens checklist and the
+    wrapper delimiters ride every call too, so a batch sized to exactly fill the
+    budget produced a request over it."""
+
+    def test_the_batch_budget_reserves_the_per_call_prompt_overhead(self) -> None:
+        from lgtmaybe.engine.engine import _build_lenses, _prompt_overhead_tokens
+
+        cfg = make_cfg(max_input_tokens=100_000)
+        lenses = _build_lenses(cfg, has_intent=False)
+
+        overhead = _prompt_overhead_tokens(lenses, cfg)
+
+        assert overhead > 0, "the preamble and lens block are not free"
+        assert overhead < cfg.max_input_tokens // 2, "the reserve must not eat the budget"
+
+    def test_the_reserve_covers_the_largest_lens_not_the_smallest(self) -> None:
+        """Lenses are sized differently and each call carries exactly one, so the
+        reserve has to hold for the widest of them."""
+        from lgtmaybe.engine.compress import count_tokens
+        from lgtmaybe.engine.engine import _build_lenses, _prompt_overhead_tokens
+
+        cfg = make_cfg(preset=ReviewPreset.full)
+        lenses = _build_lenses(cfg, has_intent=False)
+        widest = max(count_tokens(lens.user_block) for lens in lenses)
+
+        assert _prompt_overhead_tokens(lenses, cfg) >= widest
+
+    def test_a_budget_too_small_for_the_prompt_is_left_alone(self) -> None:
+        """Reserving out of a budget that cannot fit the prompt anyway would
+        shrink the diff share to nothing and split every file into single hunks —
+        making a misconfiguration worse instead of safer."""
+        from lgtmaybe.engine.engine import _batch_budget, _build_lenses
+
+        cfg = make_cfg(max_input_tokens=60)
+
+        assert _batch_budget(_build_lenses(cfg, has_intent=False), cfg) == 60
+
+    def test_a_realistic_budget_is_reduced_by_the_overhead(self) -> None:
+        from lgtmaybe.engine.engine import _batch_budget, _build_lenses, _prompt_overhead_tokens
+
+        cfg = make_cfg(max_input_tokens=100_000)
+        lenses = _build_lenses(cfg, has_intent=False)
+
+        assert _batch_budget(lenses, cfg) == 100_000 - _prompt_overhead_tokens(lenses, cfg)
