@@ -78,6 +78,7 @@ from .redact import redact
 from .reflect import reflect_findings
 from .repair import repair_findings
 from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
+from .severity import clamp_to_category_ceiling
 from .static_analysis import (
     SCAN_CATEGORY_PREFIX,
     UNANCHORABLE_SCAN_CATEGORIES,
@@ -2203,7 +2204,7 @@ def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[Review
     like any other.
     """
     allowed = lens.allowed_categories
-    return [
+    stamped = [
         f.model_copy(
             update={
                 "category": (
@@ -2213,6 +2214,11 @@ def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[Review
         )
         for f in findings
     ]
+    # Now that each finding knows which lens it came from, hold the advisory
+    # ones to the grade the prompt asked them for. Before the per-lens bound
+    # below, which drops the least severe first: an over-graded nit would
+    # otherwise survive at the expense of a real finding.
+    return clamp_to_category_ceiling(stamped)
 
 
 def _summary_line(count: int, cfg: ReviewConfig) -> str:
