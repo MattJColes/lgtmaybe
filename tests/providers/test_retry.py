@@ -2279,3 +2279,69 @@ class TestTheFloorRespectsRouteCapability:
         )
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "medium"}
+
+
+class TestOpenAICompatibleToolRejectionWording:
+    """The tool-config fallback is matched off the backend's own error prose, and
+    every existing test uses Bedrock's wording. vLLM refuses a tool call with
+    "requires --enable-auto-tool-choice and --tool-call-parser to be set", which
+    carries none of the phrases the matcher looked for — so the BadRequestError
+    read as permanent and killed the review instead of degrading to
+    prompt-instructed JSON, the exact failure this machinery exists to prevent.
+    """
+
+    # vLLM's own wording, as served by an instance started without the tool
+    # flags; the JSON envelope around it is litellm's.
+    VLLM_400 = (
+        "litellm.BadRequestError: OpenAIException - "
+        "'auto' tool choice requires --enable-auto-tool-choice "
+        "and --tool-call-parser to be set"
+    )
+    MODEL = "openai/local-model"
+
+    def test_vllms_missing_flags_error_reads_as_a_tool_rejection(self) -> None:
+        from lgtmaybe.providers.litellm_provider import _rejects_tool_config
+
+        assert _rejects_tool_config(
+            litellm.BadRequestError(message=self.VLLM_400, model=self.MODEL, llm_provider="openai")
+        )
+
+    def test_an_unrelated_bad_request_is_still_not_a_tool_rejection(self) -> None:
+        """The matcher must stay narrow: a genuine 400 has to keep failing."""
+        from lgtmaybe.providers.litellm_provider import _rejects_tool_config
+
+        assert not _rejects_tool_config(
+            litellm.BadRequestError(
+                message="litellm.BadRequestError: context length exceeded",
+                model=self.MODEL,
+                llm_provider="openai",
+            )
+        )
+
+    def test_a_route_refusing_both_shapes_falls_back_to_prompted_json(self) -> None:
+        """End to end: response_format refused, then the forced tool call
+        refused with vLLM's wording — the review still gets its findings."""
+        seen: list[dict[str, Any]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message="response_format is not supported by this model",
+                    model=kwargs["model"],
+                    llm_provider="openai",
+                )
+            if "tools" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.VLLM_400, model=kwargs["model"], llm_provider="openai"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert "tools" not in seen[-1] and "response_format" not in seen[-1]

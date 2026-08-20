@@ -360,6 +360,12 @@ def _retry_wait(retry_state: RetryCallState) -> float:
 # loosely because the wording is the backend's, not litellm's.
 _REJECTION_PHRASES = ("not permitted", "not supported", "unsupported", "unknown", "unexpected")
 
+# A self-hosted OpenAI-compatible server refuses a tool call by naming the
+# start-up flag it is missing, not by calling the field unsupported — so these
+# stand on their own rather than needing a phrase from the tuple above. Specific
+# enough that a genuine 400 (context length, bad model) cannot match.
+_TOOL_PARSER_PHRASES = ("--enable-auto-tool-choice", "tool-call-parser")
+
 
 def _rejects_field(exc: Exception, *names: str) -> bool:
     """True when *exc* reads as "this route does not take <one of names>"."""
@@ -396,7 +402,16 @@ def _rejects_tool_config(exc: Exception) -> bool:
     instead, and a route that refuses *that* has genuinely no structured-output
     mechanism left. Bedrock names the Converse field (``toolConfig``); the
     OpenAI-shaped routes name ``tools`` / ``tool_choice``.
+
+    A self-hosted OpenAI-compatible server refuses differently: it names the
+    server flag it was started without rather than calling the field
+    unsupported. vLLM answers ``"auto" tool choice requires
+    --enable-auto-tool-choice and --tool-call-parser to be set``, which carries
+    none of ``_REJECTION_PHRASES`` — so without these the 400 read as permanent
+    and killed the review rather than degrading to prompt-instructed JSON.
     """
+    if any(phrase in str(exc).lower() for phrase in _TOOL_PARSER_PHRASES):
+        return True
     return _rejects_field(exc, "toolconfig", "tool_choice", "toolchoice", "tools")
 
 
