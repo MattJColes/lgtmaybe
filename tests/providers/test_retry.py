@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -966,6 +967,106 @@ class TestSchemaAsToolFallback:
             )
 
         assert seen == ["plain"]
+
+
+class TestBedrockSchemaSubset:
+    """Bedrock's structured-output validator accepts only a subset of JSON
+    Schema: the numeric-bound keywords pydantic emits for ``Field(ge=…, le=…)``
+    — ``ReviewFinding.line``'s ``minimum``, ``confidence``'s ``minimum`` and
+    ``maximum`` — are "Extra inputs" that 400 the whole request before the model
+    ever runs (issue #531). The bounds are re-checked by pydantic when the reply
+    is parsed, so on the bedrock route the schema goes out without them."""
+
+    MODEL = "bedrock/us.anthropic.claude-opus-5"
+    BOUND_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf")
+
+    def test_the_bedrock_schema_carries_no_numeric_bounds(self) -> None:
+        with patch(
+            "litellm.completion", return_value=_fake_response('{"findings": []}')
+        ) as mock_completion:
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        sent = mock_completion.call_args.kwargs["response_format"]
+        # Still the same enforced shape litellm would derive itself — only the
+        # keywords Bedrock's validator refuses are gone.
+        assert sent["json_schema"]["schema"]["properties"]["findings"]
+        assert sent["json_schema"]["strict"] is True
+        schema_text = json.dumps(sent)
+        for key in self.BOUND_KEYS:
+            assert f'"{key}"' not in schema_text
+
+    def test_the_tool_mode_fallback_schema_is_clean_too(self) -> None:
+        """A model whose route refuses ``response_format`` re-sends the schema
+        as a forced tool call — the same validator reads that schema, so the
+        bounds must not ride back in through it."""
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=TestRejectedStructuredOutputParam.BEDROCK_400,
+                    model=kwargs["model"],
+                    llm_provider="bedrock",
+                )
+            return _tool_call_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect) as mock_completion:
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        parameters = mock_completion.call_args.kwargs["tools"][0]["function"]["parameters"]
+        schema_text = json.dumps(parameters)
+        for key in self.BOUND_KEYS:
+            assert f'"{key}"' not in schema_text
+
+    def test_other_routes_send_the_pydantic_class_unchanged(self) -> None:
+        """Each route's litellm transformation knows its own schema dialect —
+        vertex deliberately derives a compact ``$ref`` schema from the class,
+        which a pre-converted dict would deny it. Only bedrock needs the strip."""
+        with patch(
+            "litellm.completion", return_value=_fake_response('{"findings": []}')
+        ) as mock_completion:
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "vertex_ai/gemini-2.5-pro",
+                response_format=ReviewResult,
+            )
+
+        assert mock_completion.call_args.kwargs["response_format"] is ReviewResult
+
+    def test_a_property_named_like_a_bound_keyword_survives(self) -> None:
+        """The strip removes schema keywords, not fields: a caller's schema with
+        a property literally named ``minimum`` keeps it."""
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "Range",
+                "schema": {
+                    "type": "object",
+                    "properties": {"minimum": {"type": "integer", "minimum": 0}},
+                },
+                "strict": True,
+            },
+        }
+        with patch("litellm.completion", return_value=_fake_response("{}")) as mock_completion:
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=response_format
+            )
+
+        sent = mock_completion.call_args.kwargs["response_format"]
+        prop = sent["json_schema"]["schema"]["properties"]["minimum"]
+        assert prop == {"type": "integer"}
+        # The caller's dict was not mutated in place.
+        assert response_format["json_schema"]["schema"]["properties"]["minimum"] == {
+            "type": "integer",
+            "minimum": 0,
+        }
 
 
 class TestEmptyStructuredOutputFallback:
