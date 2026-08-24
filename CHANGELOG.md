@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.5.0...lgtmaybe-v2.5.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **provider:** send bedrock a schema subset its validator accepts ([#533](https://github.com/MattJColes/lgtmaybe/issues/533)) ([91a8cfc](https://github.com/MattJColes/lgtmaybe/commit/91a8cfcd8c92741b8ba04a3b26680260c90053ca)), closes [#531](https://github.com/MattJColes/lgtmaybe/issues/531)
+
+
+### Dependencies
+
+* bump the python-dependencies group with 9 updates ([#530](https://github.com/MattJColes/lgtmaybe/issues/530)) ([dfe686c](https://github.com/MattJColes/lgtmaybe/commit/dfe686c2f605c0f8e4131091a3213bf357631a98))
+
 ## [2.5.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.4.0...lgtmaybe-v2.5.0) (2026-08-20)
 
 
