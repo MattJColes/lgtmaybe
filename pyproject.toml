@@ -14,7 +14,7 @@ dependencies = [
     # pyo3 0.23 (max Python 3.13), so 3.14 installs fail. Cap it there until
     # upstream publishes cp314 wheels or a pyo3 with 3.14 support.
     "litellm>=1.87.1; python_version < '3.14'",
-    "litellm>=1.87.1,<1.97; python_version >= '3.14'",
+    "litellm>=1.87.1,<1.98; python_version >= '3.14'",
     "pydantic>=2.7",
     "pyyaml>=6.0.3",
     "tenacity>=9.1.4",
