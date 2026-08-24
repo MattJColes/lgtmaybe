@@ -188,6 +188,32 @@ reply that arrives well-formed and turns out not to be findings.
 - **WHEN** litellm maps a provider error while `--format json` is in force
 - **THEN** nothing is printed to stdout, so the findings array stays parseable
 
+### Requirement: The bedrock schema is narrowed to the subset its validator takes
+
+On the bedrock route the structured-output schema SHALL go out without the
+numeric-bound keywords pydantic derives from field constraints (`minimum`,
+`maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`): Bedrock's
+structured-output validator treats them as extra inputs and 400s the whole
+request before the model ever runs. The request SHALL otherwise carry the exact
+dict litellm would derive from the pydantic class itself, applied per effective
+model — a non-bedrock fallback keeps the class, whose own route derives its own
+schema dialect from it — and the strip SHALL remove only keywords, never a
+property that happens to share a keyword's name. Nothing is enforced less: the
+same pydantic model re-checks the bounds when the reply is parsed.
+<!-- anchor: provider.schema-subset -->
+
+#### Scenario: a bedrock model is asked for structured output
+- **WHEN** a review call goes out to a bedrock model with a pydantic
+  `response_format` whose fields carry `ge`/`le` bounds
+- **THEN** the request carries the schema litellm would derive minus the bound
+  keywords, and the reply is still validated against the full model on parse
+
+#### Scenario: the tool-mode fallback re-sends the schema
+- **WHEN** the route refuses `response_format` and the schema is re-sent as a
+  forced tool call
+- **THEN** the tool's parameters carry the stripped schema too, so the same
+  validator cannot reject the recovery
+
 ### Requirement: A configured param is never discarded in silence
 
 The factory SHALL name at startup every param the user configured that litellm's

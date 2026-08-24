@@ -6,11 +6,12 @@ optional fallback model.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import math
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from datetime import UTC, datetime
@@ -29,6 +30,11 @@ from litellm.exceptions import (
     PermissionDeniedError,
     RateLimitError,
 )
+
+# litellm.utils re-exports this without listing it in __all__, so mypy rejects
+# the re-export — import it from the module that defines it, like the
+# exceptions above.
+from litellm.llms.base_llm.base_utils import type_to_response_format_param
 from litellm.utils import supports_prompt_caching
 from pydantic import BaseModel
 from tenacity import (
@@ -440,6 +446,67 @@ def _json_schema_of(response_format: Any) -> dict[str, Any] | None:
     return None
 
 
+_BEDROCK_PREFIX = "bedrock/"
+
+# Bedrock's structured-output validator accepts only a subset of JSON Schema:
+# the numeric-bound keywords pydantic emits for ``Field(ge=…, le=…)`` —
+# ``ReviewFinding.line``'s ``minimum``, ``confidence``'s ``minimum``/``maximum``
+# — are "Extra inputs" that 400 the whole request before the model ever runs
+# (issue #531). The bounds are re-checked by the same pydantic model when the
+# reply is parsed, so nothing is enforced less by not sending them.
+_SCHEMA_BOUND_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf")
+
+# Keys whose value maps property NAMES to schemas. The strip descends into
+# their values but never pops keys off the map itself: a field literally named
+# "minimum" is a field, not a keyword.
+_SCHEMA_NAME_MAPS = ("properties", "$defs", "definitions", "patternProperties")
+
+
+def _strip_numeric_bounds(schema: dict[str, Any]) -> None:
+    """Remove the numeric-bound keywords from *schema*, in place, recursively."""
+    for key in _SCHEMA_BOUND_KEYS:
+        schema.pop(key, None)
+    for key, value in schema.items():
+        if key in _SCHEMA_NAME_MAPS and isinstance(value, dict):
+            children: Iterable[Any] = value.values()
+        elif isinstance(value, list):
+            children = value
+        else:
+            children = (value,)
+        for child in children:
+            if isinstance(child, dict):
+                _strip_numeric_bounds(child)
+
+
+def _bedrock_wire_response_format(response_format: Any) -> Any:
+    """*response_format* as Bedrock's validator will take it, or unchanged.
+
+    A pydantic model is converted through litellm's own
+    ``type_to_response_format_param`` — the exact dict litellm would derive from
+    the class one layer down, so the request differs only by the stripped
+    keywords — and a dict shape is deep-copied before the strip, since the
+    caller's ``response_format`` is reused across the lens fan-out. Applied per
+    effective model on the bedrock route ONLY: every other route keeps the
+    class, because each litellm transformation knows its own schema dialect
+    (vertex deliberately derives a compact ``$ref`` schema from the class that a
+    pre-converted strict dict would deny it). A shape carrying no schema —
+    ``{"type": "json_object"}``, say — has nothing to strip and goes out as it
+    came.
+    """
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        converted: Any = type_to_response_format_param(response_format)
+    elif isinstance(response_format, Mapping):
+        converted = copy.deepcopy(dict(response_format))
+    else:
+        return response_format
+    nested = converted.get("json_schema") if isinstance(converted, Mapping) else None
+    schema = nested.get("schema") if isinstance(nested, Mapping) else None
+    if not isinstance(schema, dict):
+        return response_format
+    _strip_numeric_bounds(schema)
+    return converted
+
+
 def _schema_tool_kwargs(response_format: Any) -> dict[str, Any] | None:
     """The same schema expressed as a forced tool call, or None if it can't be.
 
@@ -804,6 +871,11 @@ class LiteLLMProvider:
         # in cache support), and to a copy — the caller's messages are not ours
         # to mutate.
         messages = self._with_cache_control(messages, model)
+        # Same per-model scope: only a bedrock model needs the schema stripped
+        # to the subset its validator takes, and a non-bedrock fallback must
+        # keep the class for its own route's conversion.
+        if model.startswith(_BEDROCK_PREFIX) and kwargs.get("response_format") is not None:
+            kwargs["response_format"] = _bedrock_wire_response_format(kwargs["response_format"])
         # Counted here (not read from tenacity's statistics) so the number lands
         # on the result even when the mocked/fake retry layer changes shape — and
         # counted per REQUEST, not per tenacity attempt: one attempt can issue a
