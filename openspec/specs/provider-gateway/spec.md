@@ -97,6 +97,41 @@ cause, since a ceiling-hitting call offers no healthy call to compare against.
 - **WHEN** retries on the primary model are exhausted and a fallback is set
 - **THEN** the call completes on the fallback model instead of failing the review
 
+### Requirement: A caller may own a truncation and name the model
+
+The adapter SHALL let a caller that holds a better remedy for a truncation ask
+for that one failure back rather than switching model beneath it, and SHALL let
+one call name the model it runs on. Both exist for the engine, which holds the
+payload and the token counts a truncation carries and so can shrink the payload
+or lower the thinking budget on the model the user chose — remedies this adapter
+cannot reach. The resolved fallback SHALL be readable, so the caller can spend
+the escalation itself instead of re-billing the primary to reach it; a call that
+already names its model SHALL NOT fall back again, and every failure the caller
+did not claim SHALL still fall back here. Whichever model answered SHALL land on
+`ProviderResult`: it is unknowable outside this adapter, and it is the only
+thing separating a rescued review from an ordinary one.
+<!-- anchor: provider.escalation -->
+
+#### Scenario: the caller owns the truncation remedy
+- **WHEN** a call asking to defer truncation runs out of output tokens
+- **THEN** the failure is raised to the caller unswitched
+
+#### Scenario: another failure under the same request
+- **WHEN** that call fails for any other reason
+- **THEN** the fallback model is tried as it always was
+
+#### Scenario: the escalation itself fails
+- **WHEN** a call naming the model to run on fails
+- **THEN** nothing is fallen back to — that call already is the fallback
+
+#### Scenario: neither option is used
+- **WHEN** a caller asks for neither
+- **THEN** the request is byte-identical to one made before either existed
+
+#### Scenario: a fallback answered
+- **WHEN** any call completes on a model other than the one asked for
+- **THEN** the result names the model that answered it
+
 ### Requirement: The reasoning spend is reported against what it was drawn from
 
 A response's reasoning-token count SHALL be reported as **unknown** when the

@@ -22,6 +22,18 @@
       "title": "Input Tokens",
       "type": "integer"
     },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
     "output_ceiling": {
       "anyOf": [
         {

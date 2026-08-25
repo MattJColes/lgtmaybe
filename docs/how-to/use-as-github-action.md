@@ -217,7 +217,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 |---|---|---|
 | `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
 | `model` | — | Model identifier for the chosen provider |
-| `fallback_model` | — | Model to retry with if the primary model fails |
+| `fallback_model` | — | Model to re-run a call on when `model` cannot answer it. For a truncation it is the *last* remedy, tried only after a smaller payload and a lower `reasoning_effort` have been tried on `model` itself; for any other failure the adapter switches straight to it. Also settable as `fallback_model` in `.lgtmaybe.yml`, which this input overrides |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
 | `timeout` | provider default (ollama/openai-compatible/openrouter 1800s, cloud 600s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, connection blips, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) and a call that blows this whole timeout fail fast — re-sending the identical request against the identical budget can only burn it twice |

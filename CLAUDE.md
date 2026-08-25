@@ -306,6 +306,25 @@ pattern, event bus, plugin framework.
      both triage and incremental scoping. All model slots (`triage_model`,
      `model`, `reflect_model`) share one provider/credentials. CLI
      `--triage-model`, Action input `triage_model`.
+   - **Truncation ladder (escalation is LAST):** a truncated lens is first given
+     the remedy its token counts named, on the model the user chose —
+     `_review_split` (smaller pieces) when the answer outgrew the ceiling,
+     `_retry_lower_effort` when the *thinking* did. Only if that fails does
+     `engine._escalate_model` re-run the lens once on `fallback_model`. Switching
+     model says nothing about the failure — it re-sends the same request at the
+     same ceiling — so it is the last rung, spent by the whole batch and never by
+     each split piece. Lens calls carry `defer_truncation` so the adapter hands a
+     truncation back instead of falling back beneath the engine (every other
+     failure it still rescues itself, unchanged). `fallback_model` is now a
+     `ReviewConfig` field too — `--fallback-model` / the Action input still win.
+     Which model answered rides home on `ProviderResult.model`, which is what
+     makes both paths disclosable: `engine._note_answering_model` compares it
+     against the provider's own model and the summary names the lens and the
+     rescuer, and `--profile` prints a `models:` line whenever a run used more
+     than one. **Do not route on diff size instead**: truncation does not track
+     size (measured — a fifteen-line diff truncates at the same ceiling as a
+     large multi-file one, because the ceiling goes on reasoning), so a size
+     threshold spends the strong model on the diffs that were already fine.
    - **Error surfacing:** any failure posts a short "review failed" comment and
      the CLI exits non-zero (`ClickException`) — never fails silently.
    - **Per-lens fan-out (preset-shaped):** the prompt is composed per lens

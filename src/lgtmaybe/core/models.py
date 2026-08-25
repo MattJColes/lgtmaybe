@@ -609,6 +609,15 @@ class ProviderResult(_Strict):
     # Feeds the timing instrumentation so a call that burned its retry budget is
     # distinguishable from one that was merely slow.
     attempts: int = Field(default=1, ge=1)
+    # The model that actually produced this text, as the adapter resolved it —
+    # NOT the one the caller asked for. The two differ whenever a fallback
+    # answered, and only the adapter knows: it owns both the switch and the
+    # litellm model string, neither of which leaves that module. Without this a
+    # review rescued by a second model is indistinguishable from one the primary
+    # answered, which is the measurement any comparison of routing rules needs.
+    # None, not the requested model, for back-compat: a fake or an older adapter
+    # that does not stamp it must not be read as asserting the primary answered.
+    model: str | None = None
 
 
 # A FAILED call has no ProviderResult to carry `attempts` home on, so the adapter
@@ -849,6 +858,23 @@ class ReviewConfig(_Strict):
     # get audited by a better judge. Same provider/credentials as `model` — only
     # the model id changes (the provider client is built once).
     reflect_model: str | None = None
+    # Model to re-run a call on when `model` cannot answer it. The last rung of
+    # the truncation ladder — tried only after the remedy the token counts
+    # actually named has been tried on `model` itself (a smaller payload, or a
+    # lower `reasoning_effort`) — and the adapter's own rescue for any other
+    # failure. Same provider/credentials as `model`; only the model id changes.
+    #
+    # Here rather than only on the CLI/Action because it describes the review,
+    # not one invocation of it: "this model, that one when it fails" is a policy
+    # a repo holds. `--fallback-model` still wins, like `--api-base` does.
+    #
+    # This is the routing rule worth reaching for before one keyed on diff size.
+    # Truncation does not track size — measured on this repo, a fifteen-line diff
+    # truncates at the same ceiling as a large multi-file one, because the ceiling
+    # goes on THINKING (see `reasoning_effort` above) — so a size threshold sends
+    # the strong model to the diffs that were already fine. A fallback is keyed on
+    # the failure itself, and costs the second model nothing until one happens.
+    fallback_model: str | None = None
     # Human language for the reviewer's prose. When set, finding `title`/`body`
     # (and the describe/diagram prose) are written in this language, while the
     # structural fields (`path`, `line`, `side`, `severity`, `anchor`) and the

@@ -831,7 +831,27 @@ class LiteLLMProvider:
             return None
         return {"reasoning_effort": _EFFORT_FLOOR}
 
+    def escalate_model(self) -> str | None:
+        """The resolved fallback model, for a caller that owns the escalation.
+
+        Feature-detected from the engine exactly as ``lower_reasoning_effort`` is,
+        and off the frozen :class:`ProviderClient` port for the same reason: which
+        litellm model string a configured fallback resolves to is adapter
+        knowledge, and a provider that has no second model should simply not
+        answer rather than every fake in the suite growing a no-op.
+
+        Pairs with the ``model_override`` option on :meth:`complete`. The engine
+        asks whether an escalation is on offer, then spends it — rather than
+        re-billing the primary to reach the adapter's own fallback branch.
+        """
+        return self.fallback_model
+
     def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        # Adapter-owned options, popped BEFORE the merge so neither can reach
+        # litellm as a request param. Both exist for one caller — the engine —
+        # which owns the recovery ordering for a lens call; see `escalate_model`.
+        defer_truncation = bool(opts.pop("defer_truncation", False))
+        model_override: str | None = opts.pop("model_override", None)
         merged = {**self.default_opts, **opts}
         merged.setdefault("timeout", CLOUD_TIMEOUT)
         # We own retries (tenacity, below). Disable litellm's own retry loop so a
@@ -847,11 +867,29 @@ class LiteLLMProvider:
         merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
-        effective_model = self.model or model
+        # An explicit override outranks both: it is the caller naming a model
+        # this adapter resolved for it, which is the escalation below run early.
+        effective_model = model_override or self.model or model
         try:
             return self._complete_with_retry(messages, effective_model, **merged)
         except Exception as exc:
             if self.fallback_model is None:
+                raise
+            if model_override is not None:
+                # This call IS the escalation. Falling back from it would send the
+                # request to the model that just failed it — a second full-price
+                # answer to a question already answered wrong.
+                raise
+            if defer_truncation and isinstance(exc, ProviderTruncated):
+                # The caller asked to own this one. A truncation is the only
+                # failure where somebody upstream has a *better* remedy than
+                # switching model: the engine holds the batch and the token
+                # counts, so it can shrink the payload or lower the thinking
+                # budget — cheap, aimed at the cause the counts named, and still
+                # on the model the user chose. All this adapter could do is
+                # re-send the identical oversized request to a second model.
+                # It still gets to, from `escalate_model`, once the cheap remedy
+                # has had its go. Every other failure falls back here as before.
                 raise
             # The primary's requests were still issued and still billed, so they
             # stay in the total: a fallback rescue that reported one request would
@@ -1172,6 +1210,11 @@ class LiteLLMProvider:
             # provider's, and a share against the wrong ceiling is worse than no
             # share at all.
             output_ceiling=ceiling,
+            # Which model answered, resolved. Stamped on every result, not only a
+            # fallback's: "the primary answered" is a claim worth being able to
+            # make, and a field that appeared only on rescues would leave the
+            # common case unreadable rather than uninteresting.
+            model=model,
         )
 
 

@@ -25,6 +25,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
+| `fallback_model` | string / null | No | `null` | Fallback Model |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
@@ -122,6 +123,7 @@ The normalised return value of one LLM completion, including token usage.
 | `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
 | `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
+| `model` | string / null | No | `null` | Model |
 | `output_ceiling` | integer / null | No | `null` | Output Ceiling |
 | `output_tokens` | integer | Yes | — | Output Tokens |
 | `reasoning_tokens` | integer / null | No | `null` | Reasoning Tokens |
@@ -688,6 +690,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null
     },
+    "fallback_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Model"
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"
@@ -1164,6 +1178,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "input_tokens": {
       "title": "Input Tokens",
       "type": "integer"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
     },
     "output_ceiling": {
       "anyOf": [

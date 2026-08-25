@@ -342,7 +342,9 @@ def build_provider_engine(
         api_key=auth.api_key,
         api_base=auth.api_base,
         azure_ad_token=auth.azure_ad_token,
-        fallback_model=runtime.fallback_model,
+        # Same precedence as `api_base` above: the invocation (CLI flag / Action
+        # input) overrides what the repo's config asked for.
+        fallback_model=runtime.fallback_model or cfg.fallback_model,
         # The resolved value, not cfg.timeout — the widening and its bound are
         # decided above, and passing the raw setting would have the factory
         # resolve a second, unbounded number that the log above then misreports.

@@ -60,6 +60,10 @@ class CallRecord:
     # Parsed review findings. None for non-review calls and failures; zero is a
     # successful lens that explicitly returned an empty findings payload.
     findings: int | None = None
+    # Which model actually answered, as the adapter resolved it. None when the
+    # adapter does not report one — silence, never the configured model, because
+    # a run's whole point in reading this is to see where the two DIFFER.
+    model: str | None = None
 
     @property
     def reasoning_share(self) -> float | None:
@@ -110,6 +114,7 @@ class Profiler:
         output_ceiling: int | None = None,
         findings: int | None = None,
         error: str | None = None,
+        model: str | None = None,
     ) -> None:
         """Record one provider call and log it as a structured line."""
         record = CallRecord(
@@ -125,6 +130,7 @@ class Profiler:
             output_ceiling=output_ceiling,
             findings=findings,
             error=error,
+            model=model,
         )
         with self._lock:
             self.calls.append(record)
@@ -140,6 +146,8 @@ class Profiler:
             del extra["findings"]
         if not error:
             del extra["error"]
+        if model is None:
+            del extra["model"]
         _log.info("provider call", extra=extra)
 
     def record_result(
@@ -166,6 +174,7 @@ class Profiler:
             output_ceiling=result.output_ceiling,
             findings=findings,
             error=error,
+            model=result.model,
         )
 
     def record_returned_findings(self, count: int) -> None:
@@ -317,11 +326,41 @@ class Profiler:
         if parsed or returned_findings is not None:
             returned = "-" if returned_findings is None else str(returned_findings)
             lines.append(f"findings: {sum(parsed)} parsed / {returned} returned")
-        for extra_line in (self._render_reasoning(calls), self._render_headroom(calls)):
+        for extra_line in (
+            self._render_models(calls),
+            self._render_reasoning(calls),
+            self._render_headroom(calls),
+        ):
             if extra_line:
                 lines.append(extra_line)
         lines.append(self.render_total())
         return "\n".join(lines)
+
+    @staticmethod
+    def _render_models(calls: list[CallRecord]) -> str:
+        """Which models answered, and how many calls each — "" when only one did.
+
+        A per-call column would repeat one string down the whole table, so this
+        is a summary line instead, and it renders only when the run actually used
+        more than one model. That is the case worth reading: a review the primary
+        could not finish and a second model did looks, from every other part of
+        this output, exactly like an ordinary one.
+
+        Calls reporting no model are ignored rather than bucketed. Counting them
+        as a second entry would show a rescue on every run made against a fake or
+        an adapter that does not stamp it.
+        """
+        counts: dict[str, int] = {}
+        for call in calls:
+            if call.model:
+                counts[call.model] = counts.get(call.model, 0) + 1
+        if len(counts) < 2:
+            return ""
+        listed = ", ".join(
+            f"{model} ({count} call{'' if count == 1 else 's'})"
+            for model, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+        return f"models: {listed}"
 
     @staticmethod
     def _render_reasoning(calls: list[CallRecord]) -> str:

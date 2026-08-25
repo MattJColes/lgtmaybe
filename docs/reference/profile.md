@@ -40,6 +40,21 @@ review that produced findings is not lost to a diagnostic file.
 | `findings` | findings parsed from this call |
 | `error` | the failure reason, when the call failed |
 
+### The `models:` line
+
+A run whose calls were all answered by the same model says nothing. When a
+second model answered any of them — `fallback_model`, whether the engine
+escalated a truncation to it or the adapter switched on its own — a summary line
+under the table names each model and how many calls it took:
+
+```
+models: luna (7 calls), sonnet (1 call)
+```
+
+There is no per-call `model` column: it would repeat one string down the whole
+table. The per-call value is in the JSON payload and in the structured
+`provider call` log line, omitted where the adapter reports no model.
+
 ### What `-` means
 
 A dash is **unknown**, never zero.

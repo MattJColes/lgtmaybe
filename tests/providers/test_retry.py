@@ -2446,3 +2446,174 @@ class TestOpenAICompatibleToolRejectionWording:
 
         assert result.text == '{"findings": []}'
         assert "tools" not in seen[-1] and "response_format" not in seen[-1]
+
+
+def _truncated_response() -> Any:
+    """A reply the route cut off at the output ceiling."""
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"findings": [{"path": "a.py"'),
+                finish_reason="length",
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=6281, completion_tokens=32768),
+    )
+
+
+class TestTruncationDeferredToTheCaller:
+    """A truncation is the one failure the ENGINE has a better answer for than
+    the adapter does. It holds the batch and the token counts, so it can pick the
+    remedy the diagnosis names — a smaller payload, or a lower reasoning effort —
+    both of which run on the model the user chose. The adapter can only re-send
+    the identical oversized request to a second model, which is the expensive
+    guess. `defer_truncation` hands the failure back so the cheap remedy goes
+    first; every other failure still falls back where it always did."""
+
+    MESSAGES = [{"role": "user", "content": "hi"}]
+
+    def test_a_deferred_truncation_is_handed_back_instead_of_fallen_back_on(self) -> None:
+        called: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            called.append(kwargs["model"])
+            return _truncated_response()
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(fallback_model="openrouter/backup")
+            with pytest.raises(ProviderTruncated):
+                provider.complete(self.MESSAGES, "openrouter/deepseek", defer_truncation=True)
+
+        assert called == ["openrouter/deepseek"]
+
+    def test_deferring_leaves_every_other_failure_falling_back(self) -> None:
+        """Narrow on purpose: only the truncation has a caller-side remedy, so
+        only the truncation is deferred. A 5xx under the same flag is still the
+        adapter's to rescue."""
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["model"] == "openrouter/deepseek":
+                raise litellm.InternalServerError(
+                    message="upstream exploded", model=kwargs["model"], llm_provider="openrouter"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(fallback_model="openrouter/backup")
+            result = provider.complete(self.MESSAGES, "openrouter/deepseek", defer_truncation=True)
+
+        assert result.text == '{"findings": []}'
+
+    def test_the_default_is_unchanged(self) -> None:
+        """Every caller that has no remedy of its own — describe, diagram, triage,
+        reflect, repair — keeps today's automatic fallback by saying nothing."""
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["model"] == "openrouter/deepseek":
+                return _truncated_response()
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(fallback_model="openrouter/backup")
+            result = provider.complete(self.MESSAGES, "openrouter/deepseek")
+
+        assert result.text == '{"findings": []}'
+
+    def test_the_flag_never_reaches_the_wire(self) -> None:
+        seen: dict[str, Any] = {}
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return _fake_response()
+
+        with patch("litellm.completion", side_effect=side_effect):
+            LiteLLMProvider().complete(self.MESSAGES, "openai/gpt-4o", defer_truncation=True)
+
+        assert "defer_truncation" not in seen
+
+
+class TestExplicitModelOverride:
+    """The escalation itself. A caller that owns the ordering needs to be able to
+    say "run this one on the fallback" without re-billing the primary first, and
+    the model string is the adapter's to resolve — the engine only ever sees the
+    raw name from config."""
+
+    MESSAGES = [{"role": "user", "content": "hi"}]
+
+    def test_escalate_model_reports_the_resolved_fallback(self) -> None:
+        provider = LiteLLMProvider(model="openrouter/deepseek", fallback_model="openrouter/backup")
+        assert provider.escalate_model() == "openrouter/backup"
+
+    def test_escalate_model_is_none_without_one_configured(self) -> None:
+        assert LiteLLMProvider(model="openrouter/deepseek").escalate_model() is None
+
+    def test_an_override_routes_the_call(self) -> None:
+        called: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            called.append(kwargs["model"])
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(model="openrouter/deepseek", fallback_model="x/backup")
+            provider.complete(self.MESSAGES, "openrouter/deepseek", model_override="x/backup")
+
+        assert called == ["x/backup"]
+
+    def test_an_override_never_falls_back_again(self) -> None:
+        """The override IS the fallback. Falling back from it would re-send the
+        request to the model that just failed it."""
+        called: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            called.append(kwargs["model"])
+            return _truncated_response()
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(model="openrouter/deepseek", fallback_model="x/backup")
+            with pytest.raises(ProviderTruncated):
+                provider.complete(self.MESSAGES, "openrouter/deepseek", model_override="x/backup")
+
+        assert called == ["x/backup"]
+
+    def test_the_option_never_reaches_the_wire(self) -> None:
+        seen: dict[str, Any] = {}
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return _fake_response()
+
+        with patch("litellm.completion", side_effect=side_effect):
+            LiteLLMProvider(model="a/b").complete(self.MESSAGES, "a/b", model_override="a/c")
+
+        assert "model_override" not in seen
+
+
+class TestTheAnsweringModelRidesTheResult:
+    """Which model produced a result is not knowable downstream: the adapter can
+    switch to the fallback on its own, and the resolved litellm string never
+    leaves this module. Without it on the result, a review rescued by a second
+    model is indistinguishable from one the primary answered — which is exactly
+    the measurement anyone comparing routing rules needs."""
+
+    MESSAGES = [{"role": "user", "content": "hi"}]
+
+    def test_a_successful_call_names_the_model_that_answered(self) -> None:
+        with patch("litellm.completion", return_value=_fake_response()):
+            result = LiteLLMProvider(model="openai/gpt-5.5").complete(self.MESSAGES, "ignored")
+
+        assert result.model == "openai/gpt-5.5"
+
+    def test_a_fallback_rescue_names_the_fallback(self) -> None:
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["model"] == "openrouter/deepseek":
+                return _truncated_response()
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(
+                model="openrouter/deepseek", fallback_model="openrouter/backup"
+            )
+            result = provider.complete(self.MESSAGES, "openrouter/deepseek")
+
+        assert result.model == "openrouter/backup"

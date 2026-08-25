@@ -531,6 +531,18 @@
       ],
       "default": null
     },
+    "fallback_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Model"
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"
