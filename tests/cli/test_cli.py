@@ -565,6 +565,30 @@ class TestBuildReviewContext:
 
         assert provider.fallback_model == "ollama/llama2"
 
+    def test_a_configured_fallback_model_threads_to_provider(self, monkeypatch):
+        """It belongs in `.lgtmaybe.yml` beside `model`, `triage_model` and
+        `reflect_model`: a team standardising "this model, that one when it
+        fails" is describing the review, not one invocation of it."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+        cfg = _default_cfg(provider="ollama", model="llama3", fallback_model="llama2")
+        runtime = RuntimeOptions(pr_url="https://github.com/org/repo/pull/7")
+
+        _github, _engine, provider = build_review_context(cfg, runtime)
+
+        assert provider.fallback_model == "ollama/llama2"
+
+    def test_the_flag_wins_over_the_configured_fallback_model(self, monkeypatch):
+        """Same precedence as `api_base`: the invocation overrides the repo."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+        cfg = _default_cfg(provider="ollama", model="llama3", fallback_model="from-config")
+        runtime = RuntimeOptions(
+            pr_url="https://github.com/org/repo/pull/7", fallback_model="from-flag"
+        )
+
+        _github, _engine, provider = build_review_context(cfg, runtime)
+
+        assert provider.fallback_model == "ollama/from-flag"
+
     def test_azure_keyless_ad_token_threads_to_provider(self, monkeypatch):
         """Keyless azure resolves an ambient AD token and threads it to litellm."""
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")

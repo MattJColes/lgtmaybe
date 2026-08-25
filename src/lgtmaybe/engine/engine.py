@@ -26,6 +26,7 @@ from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
+    ProviderResult,
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
@@ -248,6 +249,7 @@ class _NoticeState:
     failed_lenses: list[str]
     split_batches: int
     stepped_down: list[str]
+    escalated: dict[str, str]
     repaired: list[str]
     re_asked: list[str]
     schema_dropped: bool
@@ -349,6 +351,17 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"({listed}). Those findings come from the lower setting — lower "
             "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
             "first attempt rather than the second."
+        )
+    if state.escalated:
+        count = len(state.escalated)
+        listed = ", ".join(f"`{lens}`" for lens in sorted(state.escalated))
+        models = ", ".join(f"`{model}`" for model in sorted(set(state.escalated.values())))
+        notices.append(
+            f"\u2934\ufe0f {count} lens{_plural(count, many='es')} could not be answered by "
+            f"`{cfg.model}` and {_plural(count, 'was', 'were')} re-run on the fallback model "
+            f"{models} ({listed}). Those findings are complete — but the review only finished "
+            "because a second model paid for it, and a lens that keeps needing the fallback is "
+            "saying it should be the primary."
         )
     if state.flooded:
         listed = ", ".join(
@@ -827,6 +840,15 @@ class LLMReviewEngine:
         # not calls — the same lens stepping down in two batches is one fact
         # about the review, not two.
         self._stepped_down: set[str] = set()
+        # Lenses a SECOND model answered, keyed to the model that answered them.
+        # Two paths land here and the reader cannot tell them apart, which is the
+        # point: the engine escalating a truncation itself (see _escalate_model),
+        # and the adapter switching model on its own for any other failure. Both
+        # are read off the answering model on the result rather than recorded at
+        # the call site, so neither can be disclosed and the other not. A plain
+        # store needs no lock — unlike `_flooded`'s read-add-store, it is one
+        # operation, and two batches racing here agree on the value anyway.
+        self._escalated: dict[str, str] = {}
         # Lenses whose unparseable reply was reformatted into findings by a
         # second call (see repair.py). Keyed by lens for the same reason as
         # `_stepped_down`: one fact about the review, not one per batch.
@@ -1285,6 +1307,7 @@ class LLMReviewEngine:
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
+                escalated=dict(self._escalated),
                 repaired=sorted(self._repaired),
                 flooded=dict(self._flooded),
                 re_asked=sorted(self._re_asked),
@@ -1795,6 +1818,102 @@ class LLMReviewEngine:
             self._stepped_down.add(lens.id)
         return findings, error
 
+    def _escalate_model(
+        self,
+        messages: list[Message],
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        lens: _Lens,
+        reason: str,
+        run: _Run | None,
+    ) -> _LensOutcome:
+        """Re-run one lens once on the configured fallback model.
+
+        The last rung of the truncation ladder, and the only one that changes the
+        MODEL. Its siblings — :meth:`_review_split` for a payload-bound
+        truncation, :meth:`_retry_lower_effort` for a reasoning-bound one — both
+        act on what the token counts actually said went wrong, and both stay on
+        the model the user chose. This one says nothing about the failure at all:
+        it re-sends the same request at the same ceiling and hopes a second model
+        finishes it.
+
+        So it goes LAST. The adapter used to take it first — its own fallback
+        fired the moment the primary truncated, which meant the two aimed
+        remedies never ran and every truncation cost a second model's full
+        ceiling. Lens calls now carry ``defer_truncation``, which hands the
+        failure back here instead (see ``LiteLLMProvider.complete``).
+
+        Bounded exactly like the retries beside it:
+
+        - **One attempt, and no ladder of its own.** The call goes out with
+          ``on_oversized``/``on_needs`` None — the same condition that stops a
+          split piece recursing — and with the step-down and the unparseable
+          recoveries off. Every one of those re-runs would go out on the PRIMARY,
+          which is the model that just failed this lens.
+        - **The batch's to spend, not a piece's.** Only a call still holding an
+          ``on_oversized`` reaches here, so a split whose pieces all failed buys
+          ONE fallback call for the batch rather than one per piece.
+        - **Nothing when no fallback is configured.** ``escalate_model`` answering
+          None returns the reason unchanged, so a run without a second model
+          sends byte-identical requests and pays exactly what it paid before.
+        - **Every whole-review ceiling still applies.** ``_skip_reason`` is
+          re-checked first: a run already past its deadline, token budget or a
+          termination signal reports the truncation it has rather than spending
+          past a stop.
+
+        Nothing is recorded here. The disclosure is read off the answering model
+        on the result (:meth:`_note_answering_model`), which also catches the
+        adapter switching model on its own for a failure that never reaches this.
+        """
+        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+            return [], reason
+        # Adapter-only, like `lower_reasoning_effort`: which litellm model string
+        # a configured fallback resolves to is the adapter's knowledge, and a
+        # provider without a second model simply never answers.
+        probe = getattr(self._provider, "escalate_model", None)
+        target = probe() if callable(probe) else None
+        if not target:
+            return [], reason
+        _log.warning(
+            "re-running the lens once on the fallback model",
+            extra={"lens": lens.id, "batch": batch_num, "fallback_model": target},
+        )
+        return self._complete_lens(
+            messages,
+            model,
+            response_format,
+            batch_num,
+            lens,
+            None,
+            None,
+            escalate_to=target,
+            # No unparseable recovery either: both re-runs it could start
+            # (`repair_findings`, `_retry_without_schema`) go out on the primary,
+            # which is the model that just failed this lens.
+            recover=False,
+            run=run,
+        )
+
+    def _note_answering_model(self, result: ProviderResult, lens: _Lens) -> None:
+        """Record that a model other than the primary produced this result.
+
+        Read off the result rather than stamped at the call site because the
+        engine is not the only thing that switches model: the adapter still falls
+        back on its own for every failure that is not a truncation, and from up
+        here that call is indistinguishable from an ordinary success. Recording
+        only the escalations the engine drove would disclose half the rescues and
+        leave the other half silent — which is the state this replaces.
+
+        Fail-closed on both sides: an adapter or fake that reports neither model
+        notes nothing, because "a second model answered" is a claim, and one that
+        cannot be proved should not be made.
+        """
+        answered = result.model
+        asked = getattr(self._provider, "model", None)
+        if answered and asked and answered != asked:
+            self._escalated[lens.id] = answered
+
     def _retry_without_schema(
         self,
         messages: list[Message],
@@ -1926,6 +2045,7 @@ class LLMReviewEngine:
         *,
         effort: dict[str, Any] | None = None,
         recover: bool = True,
+        escalate_to: str | None = None,
         run: _Run | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
@@ -1952,10 +2072,22 @@ class LLMReviewEngine:
         ``recover`` is the same idea for the unparseable path: False marks a call
         that IS a recovery, so it may not start another. Set only by
         :meth:`_retry_without_schema`, which is the second and last level.
+
+        ``escalate_to`` names the fallback model this one call should run on. Set
+        only by :meth:`_escalate_model`; it reaches the adapter as
+        ``model_override``, which also stops the adapter falling back from a call
+        that already is the fallback.
         """
         opts: dict[str, Any] = {"response_format": response_format} if response_format else {}
         if effort is not None:
             opts.update(effort)
+        if escalate_to is not None:
+            opts["model_override"] = escalate_to
+        # A lens call owns its own truncation remedy — the payload and the token
+        # counts are up here — so the adapter is told to hand one back rather
+        # than spend its fallback on the identical oversized request first. Every
+        # other failure it still rescues itself, exactly as before.
+        opts["defer_truncation"] = True
         # Heartbeat: log the call going out and coming back so the Action shows
         # steady per-lens progress while the model runs, not a silent gap.
         _log.info("reviewing lens", extra={"lens": lens.id})
@@ -2003,25 +2135,46 @@ class LLMReviewEngine:
                         "truncation was reasoning-bound — not splitting",
                         extra={"lens": lens.id, "batch": batch_num},
                     )
-                    if effort is not None:
-                        # This IS the step-down retry, and it went the same way.
-                        # One attempt, not a cascade: the lower level did not fit
-                        # either, and grinding down the ladder spends the whole
-                        # review proving it.
+                    if effort is not None or escalate_to is not None:
+                        # Either this IS the step-down retry and it went the same
+                        # way — one attempt, not a cascade: the lower level did
+                        # not fit either, and grinding down the ladder spends the
+                        # whole review proving it — or this is the escalation,
+                        # which is the last rung and takes no remedy of its own.
+                        # Stepping THAT down would re-run the primary at an effort
+                        # the primary has already failed at. The caller that
+                        # offered the step-down decides what follows it.
                         return completed, exhausted
                     retried, retry_reason = self._retry_lower_effort(
                         messages, model, response_format, batch_num, lens, exhausted, run
                     )
-                    return completed + retried, retry_reason
+                    if retry_reason is None or on_oversized is None:
+                        # Answered, or this is a piece/retry — see _escalate_model
+                        # for why only the whole batch may buy a fallback call.
+                        return completed + retried, retry_reason
+                    escalated, escalate_reason = self._escalate_model(
+                        messages, model, response_format, batch_num, lens, retry_reason, run
+                    )
+                    return completed + retried + escalated, escalate_reason
                 if on_oversized is None:
                     # Already a piece: nothing smaller to try. Report the reason
                     # rather than recurse — an unbounded cascade would spend the
                     # whole review on a model that cannot answer at any size.
                     return completed, reason
                 findings, split_reason = on_oversized(reason)
-                return completed + findings, split_reason
+                if split_reason is None:
+                    return completed + findings, None
+                # The pieces did not cover the batch either, so the payload was
+                # never the whole story. Last rung: the same request, a different
+                # model. Any findings the pieces did manage ride along, and the
+                # overlap with the escalation's collapses in `_dedupe`.
+                escalated, escalate_reason = self._escalate_model(
+                    messages, model, response_format, batch_num, lens, split_reason, run
+                )
+                return completed + findings + escalated, escalate_reason
             return [], reason
         elapsed = time.perf_counter() - started
+        self._note_answering_model(result, lens)
         salvaged = 0
         try:
             findings = parse_findings(result.text)

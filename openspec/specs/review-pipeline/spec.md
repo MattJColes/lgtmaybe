@@ -261,7 +261,8 @@ kept, and the lens SHALL still count as failed.
 
 #### Scenario: a piece exhausts its budget as well
 - **WHEN** a piece of an already-split batch times out or truncates again
-- **THEN** it fails as an ordinary failed call naming `max_tokens` — no recursion
+- **THEN** it fails as an ordinary failed call naming `max_tokens` — no recursion,
+  and no escalation of its own: that is the whole batch's to spend
 
 #### Scenario: one piece answers and another fails
 - **WHEN** part of a split batch is reviewed and part fails
@@ -343,6 +344,46 @@ SHALL be named in the summary.
 #### Scenario: a ceiling was reached while the first call was finishing
 - **WHEN** the deadline, token budget or a termination signal lands first
 - **THEN** the retry is not issued and the truncation is reported as it stands
+
+### Requirement: A truncation escalates to a second model only as a last resort
+
+A truncated lens SHALL be re-run once on `fallback_model` only after the remedy
+its token counts named has been tried on the primary and failed — a smaller
+payload for a payload-bound truncation, a lower `reasoning_effort` for a
+reasoning-bound one. Switching model says nothing about the failure: it re-sends
+the same request at the same ceiling, so it is last. Exactly one attempt, spent
+by the whole batch and never by each piece, skipped with no fallback configured,
+and re-checking the deadline, token budget and interrupt first. Lens calls SHALL
+therefore hand a truncation back rather than let the adapter switch model
+beneath them. A lens a second model answered SHALL be named in the summary
+alongside that model, however the switch happened.
+<!-- anchor: engine.model-escalation -->
+
+#### Scenario: the aimed remedy runs first
+- **WHEN** a lens truncates and a fallback model is configured
+- **THEN** the split or the step-down is attempted on the primary, and the
+  fallback is reached only if that attempt failed as well
+
+#### Scenario: the fallback answers
+- **WHEN** the escalated call parses
+- **THEN** its findings join the review, merged with the cut call's salvage, and
+  the summary names the lens and the model that answered it
+
+#### Scenario: the fallback truncates too
+- **WHEN** the second model runs out of output tokens as well
+- **THEN** it reports and stops — one second model, never a walk down a roster
+
+#### Scenario: a split's pieces all failed
+- **WHEN** every piece of a shrunk batch failed
+- **THEN** the batch buys ONE escalation, not one per piece
+
+#### Scenario: no fallback is configured
+- **WHEN** the run names no second model
+- **THEN** nothing is escalated and the requests are byte-identical to before
+
+#### Scenario: the adapter switched model by itself
+- **WHEN** a non-truncation failure was rescued by the adapter's own fallback
+- **THEN** the summary discloses it too, read off the model that answered
 
 ### Requirement: A lens may defer once for bounded read-only context
 

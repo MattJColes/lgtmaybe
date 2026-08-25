@@ -833,3 +833,64 @@ class TestProfileAsData:
             "error",
         ):
             assert field in call, f"{field} is in the table but not the payload"
+
+
+class TestTheAnsweringModelIsLegibleFromTheProfile:
+    """Which model answered is invisible from a review's output, and it stops
+    being a detail the moment a run has two of them: a review rescued by the
+    fallback reads exactly like one the primary answered. That is the difference
+    between "the fallback earned its keep" and "the fallback never fired", which
+    is the whole question when comparing one routing rule against another.
+
+    A per-call column would be 99% one repeated string, so it is a summary line
+    instead — and it stays silent on the ordinary run where one model answered
+    everything."""
+
+    @staticmethod
+    def _call(p: Profiler, label: str, model: str | None) -> None:
+        p.record_call(
+            label=label,
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            model=model,
+        )
+
+    def test_a_single_model_run_says_nothing(self) -> None:
+        p = Profiler()
+        self._call(p, "security", "luna")
+        self._call(p, "correctness", "luna")
+
+        assert "models:" not in p.render()
+
+    def test_a_rescued_run_names_both_and_counts_them(self) -> None:
+        p = Profiler()
+        self._call(p, "security", "luna")
+        self._call(p, "correctness", "luna")
+        self._call(p, "spec", "sonnet")
+
+        assert "models: luna (2 calls), sonnet (1 call)" in p.render()
+
+    def test_calls_that_report_no_model_are_not_counted_as_one(self) -> None:
+        """A fake or an older adapter reports nothing. Rendering that as a second
+        model would invent a rescue that never happened."""
+        p = Profiler()
+        self._call(p, "security", "luna")
+        self._call(p, "correctness", None)
+
+        assert "models:" not in p.render()
+
+    def test_the_model_lands_on_the_record_from_the_result(self) -> None:
+        p = Profiler()
+        p.record_result(
+            "security",
+            1,
+            1.0,
+            ProviderResult(text="{}", input_tokens=1, output_tokens=1, model="sonnet"),
+        )
+
+        assert p.calls[0].model == "sonnet"

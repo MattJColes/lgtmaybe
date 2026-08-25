@@ -28,6 +28,12 @@ provider.complete:
       stopBy: end
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.escalation:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^escalate_model$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.backoff:
   rule:
     kind: function_definition

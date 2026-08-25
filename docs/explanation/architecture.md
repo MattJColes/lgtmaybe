@@ -301,6 +301,25 @@ network recovers but a dead-end failure surfaces fast:
   to be shrunk — a silent split would hide that every run is at the edge of what
   the model finishes in time.
 
+- **A second model is the last remedy for a truncation, not the first.** A
+  truncated lens has two remedies that stay on the model you chose: shrink the
+  payload (the split above) when the *answer* outgrew the ceiling, and lower
+  `reasoning_effort` when the *thinking* did. Both are cheap and both act on
+  what the token counts actually said went wrong. Switching to `fallback_model`
+  says nothing about the failure — it re-sends the same request at the same
+  ceiling and hopes a second model finishes it — so it runs only after the aimed
+  remedy has been tried and failed, once, for the whole batch rather than once
+  per split piece. Every other failure the adapter still rescues by itself, and
+  either way the summary names the lens and the model that answered it: a review
+  the primary could not finish must not read like one it did.
+
+  This is also the routing rule to reach for before one keyed on diff size.
+  Truncation does not track size — measured here, a fifteen-line diff truncates
+  at the same ceiling as a large multi-file one, because the ceiling goes on
+  thinking — so a size threshold spends the strong model on the diffs that were
+  already fine. A fallback is keyed on the failure itself and costs the second
+  model nothing until one happens.
+
 - **A rate limit waits on its own, much slower ladder.** The general ladder
   starts at a tenth of a second, which is right for a blip — a connection reset,
   an ollama server warming up — because the condition is gone by the time the

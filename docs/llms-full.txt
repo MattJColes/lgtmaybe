@@ -963,7 +963,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 |---|---|---|
 | `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
 | `model` | — | Model identifier for the chosen provider |
-| `fallback_model` | — | Model to retry with if the primary model fails |
+| `fallback_model` | — | Model to re-run a call on when `model` cannot answer it. For a truncation it is the *last* remedy, tried only after a smaller payload and a lower `reasoning_effort` have been tried on `model` itself; for any other failure the adapter switches straight to it. Also settable as `fallback_model` in `.lgtmaybe.yml`, which this input overrides |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
 | `timeout` | provider default (ollama/openai-compatible/openrouter 1800s, cloud 600s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, connection blips, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) and a call that blows this whole timeout fail fast — re-sending the identical request against the identical budget can only burn it twice |
@@ -4824,6 +4824,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
 | `extra_lenses` | list[CustomLens] | No | `[]` | Extra Lenses |
 | `fail_on` | `critical` / `high` / `info` / `low` / `medium` / null | No | `null` |  |
+| `fallback_model` | string / null | No | `null` | Fallback Model |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
@@ -4921,6 +4922,7 @@ The normalised return value of one LLM completion, including token usage.
 | `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
 | `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
 | `input_tokens` | integer | Yes | — | Input Tokens |
+| `model` | string / null | No | `null` | Model |
 | `output_ceiling` | integer / null | No | `null` | Output Ceiling |
 | `output_tokens` | integer | Yes | — | Output Tokens |
 | `reasoning_tokens` | integer / null | No | `null` | Reasoning Tokens |
@@ -5487,6 +5489,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null
     },
+    "fallback_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Model"
+    },
     "finding_rules": {
       "items": {
         "$ref": "#/$defs/FindingRule"
@@ -5964,6 +5978,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Input Tokens",
       "type": "integer"
     },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
     "output_ceiling": {
       "anyOf": [
         {
@@ -6147,6 +6173,21 @@ review that produced findings is not lost to a diagnostic file.
 | `cache_wr` | prompt-cache tokens written |
 | `findings` | findings parsed from this call |
 | `error` | the failure reason, when the call failed |
+
+### The `models:` line
+
+A run whose calls were all answered by the same model says nothing. When a
+second model answered any of them — `fallback_model`, whether the engine
+escalated a truncation to it or the adapter switched on its own — a summary line
+under the table names each model and how many calls it took:
+
+```
+models: luna (7 calls), sonnet (1 call)
+```
+
+There is no per-call `model` column: it would repeat one string down the whole
+table. The per-call value is in the JSON payload and in the structured
+`provider call` log line, omitted where the adapter reports no model.
 
 ### What `-` means
 
@@ -7100,6 +7141,25 @@ network recovers but a dead-end failure surfaces fast:
   size can't cascade through the review budget. The summary says when a batch had
   to be shrunk — a silent split would hide that every run is at the edge of what
   the model finishes in time.
+
+- **A second model is the last remedy for a truncation, not the first.** A
+  truncated lens has two remedies that stay on the model you chose: shrink the
+  payload (the split above) when the *answer* outgrew the ceiling, and lower
+  `reasoning_effort` when the *thinking* did. Both are cheap and both act on
+  what the token counts actually said went wrong. Switching to `fallback_model`
+  says nothing about the failure — it re-sends the same request at the same
+  ceiling and hopes a second model finishes it — so it runs only after the aimed
+  remedy has been tried and failed, once, for the whole batch rather than once
+  per split piece. Every other failure the adapter still rescues by itself, and
+  either way the summary names the lens and the model that answered it: a review
+  the primary could not finish must not read like one it did.
+
+  This is also the routing rule to reach for before one keyed on diff size.
+  Truncation does not track size — measured here, a fifteen-line diff truncates
+  at the same ceiling as a large multi-file one, because the ceiling goes on
+  thinking — so a size threshold spends the strong model on the diffs that were
+  already fine. A fallback is keyed on the failure itself and costs the second
+  model nothing until one happens.
 
 - **A rate limit waits on its own, much slower ladder.** The general ladder
   starts at a tenth of a second, which is right for a blip — a connection reset,

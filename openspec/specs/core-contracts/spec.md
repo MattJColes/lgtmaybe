@@ -72,8 +72,11 @@ are rejected — prose is never parsed.
 filters, caps, toggles like `learn_feedback`); `Severity` SHALL order `info <
 low < medium < high < critical` so floors like `min_severity` and `fail_on`
 compare with `>=`. `fail_on` is an optional `Severity` (default `None` = off)
-driving the merge-gate Check Run. Removed fields such as `answer_replies` SHALL
-be rejected by strict configuration validation rather than accepted as no-ops.
+driving the merge-gate Check Run. Every model slot a review can name — the
+reviewer, the triage skim, the reflection auditor and the fallback — SHALL be
+configurable here, because which model does what is a property of the review and
+not of one invocation of it. Removed fields such as `answer_replies` SHALL be
+rejected by strict configuration validation rather than accepted as no-ops.
 <!-- anchor: core.config -->
 
 #### Scenario: severity floor filters findings
@@ -88,6 +91,10 @@ be rejected by strict configuration validation rather than accepted as no-ops.
 - **WHEN** configuration contains `answer_replies`
 - **THEN** validation rejects it with the same unknown-field behavior as any
   unsupported option
+
+#### Scenario: a repo pins the model to fall back to
+- **WHEN** `fallback_model` is set in configuration and no flag overrides it
+- **THEN** the review is built with it, exactly as an invocation-level flag would
 
 #### Scenario: an unknown reasoning effort is rejected at load
 - **WHEN** `reasoning_effort` is set to a value outside the normalised set
