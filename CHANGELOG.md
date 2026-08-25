@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.5.1...lgtmaybe-v2.6.0) (2026-08-25)
+
+
+### Features
+
+* escalate a truncated lens to the fallback model last, not first ([#534](https://github.com/MattJColes/lgtmaybe/issues/534)) ([8bdfebb](https://github.com/MattJColes/lgtmaybe/commit/8bdfebb05387626f806069991e2d790299982f8b))
+
 ## [2.5.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.5.0...lgtmaybe-v2.5.1) (2026-08-24)
 
 
