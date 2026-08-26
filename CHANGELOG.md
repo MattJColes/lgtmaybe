@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.6.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.6.1...lgtmaybe-v2.6.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **diff:** preserve paths containing header delimiters ([#545](https://github.com/MattJColes/lgtmaybe/issues/545)) ([9adfc7e](https://github.com/MattJColes/lgtmaybe/commit/9adfc7eb6ce372e995471381803a9debdfe2a5f3))
+* **forge:** preserve self-hosted URL schemes ([#544](https://github.com/MattJColes/lgtmaybe/issues/544)) ([02a18fd](https://github.com/MattJColes/lgtmaybe/commit/02a18fd90a3b9e4851a44e6b51037e876540639d))
+* **gitlab:** allow resolved findings to return ([#542](https://github.com/MattJColes/lgtmaybe/issues/542)) ([2caf5e7](https://github.com/MattJColes/lgtmaybe/commit/2caf5e7d2bb233f8a91bdeeb3e6c58577dadb42d))
+* **gitlab:** preserve CI server port ([#543](https://github.com/MattJColes/lgtmaybe/issues/543)) ([ea42610](https://github.com/MattJColes/lgtmaybe/commit/ea42610715654c99857a49930228333d1e0aa1a0))
+* **gitlab:** preserve rejected inline findings ([#541](https://github.com/MattJColes/lgtmaybe/issues/541)) ([f9d439c](https://github.com/MattJColes/lgtmaybe/commit/f9d439cd29cb1c9fc28205af79e946a8d6b6bd87))
+
+
+### Documentation
+
+* explain fallback model behavior ([#539](https://github.com/MattJColes/lgtmaybe/issues/539)) ([438b7ae](https://github.com/MattJColes/lgtmaybe/commit/438b7aebeef60067fca506915b3ff9a594edced2))
+
 ## [2.6.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.6.0...lgtmaybe-v2.6.1) (2026-08-26)
 
 
