@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.6.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.6.0...lgtmaybe-v2.6.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* fall back to full review after merge ([#538](https://github.com/MattJColes/lgtmaybe/issues/538)) ([f4858ac](https://github.com/MattJColes/lgtmaybe/commit/f4858ac36be2be4d1ba7dfe6efd0ea5573a53241))
+* **provider:** read bedrock's Converse-level structured-output refusals ([#536](https://github.com/MattJColes/lgtmaybe/issues/536)) ([071282b](https://github.com/MattJColes/lgtmaybe/commit/071282b5df2b5685429bde52b92d2a4079c5be6b))
+
 ## [2.6.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.5.1...lgtmaybe-v2.6.0) (2026-08-25)
 
 
