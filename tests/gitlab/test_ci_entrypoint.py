@@ -46,6 +46,19 @@ class TestMRUrlFromCIEnv:
         _set(monkeypatch, CI_SERVER_HOST=None, CI_SERVER_URL="https://gl.internal")
         assert mr_url_from_ci_env() == "https://gl.internal/group/sub/project/-/merge_requests/7"
 
+    def test_preserves_the_server_urls_nonstandard_port(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set(
+            monkeypatch,
+            CI_SERVER_HOST="gl.internal",
+            CI_SERVER_URL="https://gl.internal:8443",
+        )
+
+        assert (
+            mr_url_from_ci_env() == "https://gl.internal:8443/group/sub/project/-/merge_requests/7"
+        )
+
     def test_a_pipeline_that_is_not_for_a_merge_request_says_so(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

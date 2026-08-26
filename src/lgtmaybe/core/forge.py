@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 
 class Forge(StrEnum):
@@ -32,14 +33,16 @@ class PRLocator:
     """Everything needed to address one change request, host included.
 
     ``repo`` is the forge's project path ("owner/repo", or a nested
-    "group/subgroup/project" on GitLab). ``host`` is kept because self-hosted
-    GitLab and Gitea are the common case, so the API base cannot be a constant.
+    "group/subgroup/project" on GitLab). ``host`` and ``scheme`` are kept because
+    self-hosted GitLab and Gitea are the common case, so the API base cannot be
+    a constant.
     """
 
     forge: Forge
     host: str
     repo: str
     number: int
+    scheme: str = "https"
 
 
 # One pattern per forge, discriminated by the segment before the number. GitHub
@@ -75,7 +78,10 @@ def parse_pr_url(pr_url: str) -> PRLocator:
     user could be on any of three hosts, so a GitHub-only example would send
     two thirds of them looking for a mistake they did not make.
     """
-    stripped = pr_url.split("://", 1)[-1]
+    parsed = urlsplit(pr_url if "://" in pr_url else f"https://{pr_url}")
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"Unsupported pull/merge request URL scheme: {parsed.scheme!r}")
+    stripped = f"{parsed.netloc}{parsed.path}"
     for forge, pattern in _URL_PATTERNS:
         match = pattern.search(stripped)
         if match is not None:
@@ -84,6 +90,7 @@ def parse_pr_url(pr_url: str) -> PRLocator:
                 host=match["host"],
                 repo=match["repo"],
                 number=int(match["number"]),
+                scheme=parsed.scheme,
             )
     raise ValueError(
         f"Could not parse a pull/merge request URL from {pr_url!r}. Expected one of "
