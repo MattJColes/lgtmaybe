@@ -494,6 +494,8 @@ class TestResilience:
         gateway.post_review([FINDING], "1 finding", diff=DIFF)  # must not raise
 
         assert note.called, "the summary still posts"
+        body = json.loads(note.calls[0].request.content)["body"]
+        assert FINDING.title in body, "the rejected inline finding is preserved in the summary"
 
     @respx.mock
     def test_findings_are_demoted_when_the_diff_refs_are_unknown(self) -> None:
