@@ -49,6 +49,18 @@ class TestSplitByFile:
         parts = split_by_file("just text", [])
         assert parts == [("unknown", "just text")]
 
+    def test_preserves_a_new_path_containing_the_header_delimiter(self):
+        diff = (
+            "diff --git a/dir b/file.py b/dir b/file.py\n"
+            "--- a/dir b/file.py\t\n"
+            "+++ b/dir b/file.py\t\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+
+        assert split_by_file(diff, ["dir b/file.py"])[0][0] == "dir b/file.py"
+
 
 class TestParseHunkHeader:
     def test_parses_full_header_with_lengths_and_section(self):
@@ -144,6 +156,18 @@ class TestWalkDiff:
             ("f.txt", "-", 1, 1, "old line"),
             ("f.txt", "+", 2, 1, "new line"),
         ]
+
+    def test_preserves_a_walked_path_containing_the_header_delimiter(self):
+        diff = (
+            "diff --git a/dir b/file.py b/dir b/file.py\n"
+            "--- a/dir b/file.py\t\n"
+            "+++ b/dir b/file.py\t\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+
+        assert {path for path, *_ in walk_diff(diff)} == {"dir b/file.py"}
 
 
 class TestChangedLineIndex:
