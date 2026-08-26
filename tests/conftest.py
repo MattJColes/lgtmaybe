@@ -78,3 +78,9 @@ def _isolate_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Start every test from a clean, credential-free environment."""
     for var in _PROVIDER_CRED_ENV:
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep tests independent of files in the developer's checkout."""
+    monkeypatch.chdir(tmp_path)

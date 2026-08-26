@@ -1,9 +1,11 @@
 import re
 from pathlib import Path
 
+_ROOT = Path(__file__).parents[2]
+
 
 def test_homepage_shows_change_diagram_example() -> None:
-    homepage = Path("docs/index.md").read_text(encoding="utf-8")
+    homepage = (_ROOT / "docs/index.md").read_text(encoding="utf-8")
 
     assert "```mermaid\nflowchart LR" in homepage
     assert "(changed)" in homepage
@@ -15,7 +17,7 @@ def test_homepage_shows_change_diagram_example() -> None:
 
 
 def test_homepage_overview_is_concise_without_hiding_features() -> None:
-    homepage = Path("docs/index.md").read_text(encoding="utf-8")
+    homepage = (_ROOT / "docs/index.md").read_text(encoding="utf-8")
     overview = homepage.split("## Start here", 1)[0].casefold()
 
     assert len(re.findall(r"\b[\w'-]+\b", overview)) <= 400
@@ -35,9 +37,9 @@ def test_homepage_overview_is_concise_without_hiding_features() -> None:
 
 def test_model_selection_guide_is_linked_from_readme_and_docs_nav() -> None:
     guide = "how-to/choose-a-review-model.md"
-    guide_text = Path("docs", guide).read_text(encoding="utf-8")
-    readme = Path("README.md").read_text(encoding="utf-8")
-    mkdocs = Path("mkdocs.yml").read_text(encoding="utf-8")
+    guide_text = (_ROOT / "docs" / guide).read_text(encoding="utf-8")
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    mkdocs = (_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
 
     assert "## Choose a Cloud Model" in guide_text
     assert "## Choose a Local Model" in guide_text

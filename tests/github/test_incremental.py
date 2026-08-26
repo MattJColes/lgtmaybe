@@ -300,11 +300,13 @@ def test_automatic_diagram_uses_only_the_trusted_completion_sha() -> None:
 COMPARE_URL = f"{BASE_URL}/repos/{REPO}/compare/cafe1234...headsha123"
 
 
-def _mock_compare(status: str, diff: str = SAMPLE_DIFF) -> None:
+def _mock_compare(
+    status: str, diff: str = SAMPLE_DIFF, *, commits: list[dict[str, object]] | None = None
+) -> None:
     def respond(request: httpx.Request) -> httpx.Response:
         if "diff" in request.headers.get("Accept", ""):
             return httpx.Response(200, text=diff)
-        return httpx.Response(200, json={"status": status})
+        return httpx.Response(200, json={"status": status, "commits": commits or []})
 
     respx.route(method="GET", url=COMPARE_URL).mock(side_effect=respond)
 
@@ -314,6 +316,16 @@ def test_compare_diff_returns_increment_when_ahead() -> None:
     _mock_compare("ahead")
 
     assert _gateway().compare_diff("cafe1234", "headsha123") == SAMPLE_DIFF
+
+
+@respx.mock
+def test_compare_diff_none_when_comparison_contains_merge() -> None:
+    _mock_compare(
+        "ahead",
+        commits=[{"sha": "merge123", "parents": [{"sha": "pr123"}, {"sha": "base123"}]}],
+    )
+
+    assert _gateway().compare_diff("cafe1234", "headsha123") is None
 
 
 @respx.mock

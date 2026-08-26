@@ -613,20 +613,26 @@ class RestGitHubGateway:
         """Unified diff of the commits between *base_sha* and *head_sha*, or None.
 
         Uses the compare API (read-only — never a checkout). Returns the diff
-        only when head is strictly **ahead** of the last-reviewed SHA (a normal
-        push). A force-push/rebase (``diverged``/``behind``), an ``identical``
-        compare, and any API failure (e.g. a GC'd SHA 404ing after a
-        force-push) all return None — the caller falls back to a full review
-        rather than trusting a meaningless increment.
+        only when head is strictly **ahead** of the last-reviewed SHA through
+        linear commits (a normal push). A merge, force-push/rebase
+        (``diverged``/``behind``), an ``identical`` compare, and any API failure
+        (e.g. a GC'd SHA 404ing after a force-push) all return None — the caller
+        falls back to a full review rather than trusting a meaningless increment.
         """
         url = f"{self._api}/compare/{base_sha}...{head_sha}"
         try:
-            status = self._get_json(url).get("status")
+            comparison = self._get_json(url)
+            status = comparison.get("status")
             if status != "ahead":
                 _log.info(
                     "incremental compare not usable — falling back to full review",
                     extra={"status": status},
                 )
+                return None
+            if any(
+                len(commit.get("parents") or []) > 1 for commit in comparison.get("commits") or []
+            ):
+                _log.info("incremental compare contains a merge — falling back to full review")
                 return None
             resp = self._client.get(
                 url,
