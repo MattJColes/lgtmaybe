@@ -248,6 +248,43 @@ class TestPostReview:
         assert not created.called
 
     @respx.mock
+    def test_a_resolved_finding_may_be_posted_again(self) -> None:
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        already = finding_fingerprint("app.py", "Hardcoded password")
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "d1",
+                        "notes": [
+                            {
+                                "id": 9,
+                                "body": f"old\n<!-- lgtmaybe-finding:{already} -->",
+                                "resolved": True,
+                                "position": {"new_path": "app.py"},
+                            }
+                        ],
+                    }
+                ],
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={})
+        )
+
+        gateway = _gateway()
+        gateway._diff_refs = MR_DETAIL["diff_refs"]
+        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+
+        assert created.called
+
+    @respx.mock
     def test_an_unanchorable_finding_is_demoted_into_the_summary(self) -> None:
         _stub_post_routes()
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
@@ -457,6 +494,8 @@ class TestResilience:
         gateway.post_review([FINDING], "1 finding", diff=DIFF)  # must not raise
 
         assert note.called, "the summary still posts"
+        body = json.loads(note.calls[0].request.content)["body"]
+        assert FINDING.title in body, "the rejected inline finding is preserved in the summary"
 
     @respx.mock
     def test_findings_are_demoted_when_the_diff_refs_are_unknown(self) -> None:
