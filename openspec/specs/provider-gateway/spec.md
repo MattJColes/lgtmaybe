@@ -186,25 +186,25 @@ slept past it.
 ### Requirement: A rejected request param degrades, it does not fail the review
 
 The adapter SHALL degrade a request param the model refuses and re-send once
-rather than fail — `temperature` when only the default value is accepted, and
-the structured-output `response_format` when the route rejects the field it
-becomes (Bedrock Converse answers `output_config.format: Extra inputs are not
-permitted`). `drop_params` cannot cover these: the capability map reports the
-param supported, and the refusal is only visible in the error. A rejected
-`response_format` SHALL first be re-sent as the SAME schema in the mechanism the
-route does implement — a forced tool call, read back from its arguments — and
-only a route refusing that too SHALL fall back to prompt-instructed JSON. Each
-outcome SHALL be remembered for THAT MODEL's later calls, never for every model
-the provider serves, and losing the schema SHALL be announced once: silently, it
-is indistinguishable from a model that stopped honouring it. litellm's stdout
-banner SHALL be suppressed, since stdout carries machine-readable output. The
-engine MAY ask for the same drop, on the one trigger the adapter cannot see: a
-reply that arrives well-formed and turns out not to be findings.
+rather than fail — `temperature` when only the default value is accepted,
+`reasoning_effort` when the route refuses the effort field it becomes (judged
+before the schema, whose matcher would otherwise claim `output_config.effort`
+and drop the wrong param), and the structured-output `response_format` under
+either spelling of the field it becomes: the Anthropic layer's
+`output_config.format` or the Converse-level `outputConfig`. `drop_params`
+cannot cover these — the capability map says the param is supported, so the
+refusal is only visible in the error. A rejected `response_format` SHALL first
+be re-sent as the SAME schema as a forced tool call; only a route refusing
+that too falls back to prompt-instructed JSON. Each outcome SHALL be
+remembered for THAT MODEL's later calls only, and losing the schema SHALL be
+announced once — silently, it reads as a model that stopped honouring it.
+litellm's stdout banner SHALL be suppressed, and the engine MAY ask for the
+same drop on the one trigger the adapter cannot see: a well-formed reply that
+is not findings.
 <!-- anchor: provider.param-drop -->
 
 #### Scenario: the route rejects the structured-output field
-- **WHEN** a Bedrock model 400s on the `output_config.format` field litellm
-  derived from `response_format`
+- **WHEN** a Bedrock model 400s on the field `response_format` became
 - **THEN** the same schema is re-sent as a forced tool call and the rest of the
   fan-out uses that shape up front, keeping enforcement instead of losing it
 
