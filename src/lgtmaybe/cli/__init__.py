@@ -27,7 +27,7 @@ from typing import Any
 import click
 
 from lgtmaybe.cli.render import flatten_details, render_findings
-from lgtmaybe.core.diffparse import FILE_HEADER_RE
+from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import Forge, PRLocator, token_env_var
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
 from lgtmaybe.core.logging import get_logger
@@ -625,7 +625,7 @@ def _incremental_context(
 
 def _diff_paths(diff: str) -> set[str]:
     """The file paths named by a unified diff's ``diff --git`` headers."""
-    return set(FILE_HEADER_RE.findall(diff))
+    return {path for path, _patch in split_by_file(diff, []) if path != "unknown"}
 
 
 def _validate_prior_findings(
