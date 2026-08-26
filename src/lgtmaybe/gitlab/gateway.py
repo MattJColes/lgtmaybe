@@ -434,7 +434,10 @@ class GitLabGateway:
         keys: set[str] = set()
         try:
             for discussion in self._discussions():
-                for note in discussion.get("notes") or []:
+                notes = discussion.get("notes") or []
+                if notes and notes[0].get("resolved"):
+                    continue
+                for note in notes:
                     keys |= finding_keys(note.get("body") or "")
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing discussions failed: %s", exc)
