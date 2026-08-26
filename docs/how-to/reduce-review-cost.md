@@ -179,9 +179,22 @@ lgtmaybe review --uncommitted    # working-tree edits vs HEAD
 
 ### 7. Right-size the model
 
-A smaller model on the common path with a stronger `--fallback-model` behind it
-is often indistinguishable in output and much cheaper. And if cost is the
-binding constraint rather than latency, ollama is free:
+A smaller model on the common path with a stronger fallback cuts expected cost
+when the primary usually finishes its calls. A healthy call never reaches the
+fallback. A failed call still spends the primary model's attempts before adding
+the second model, so this does not reduce worst-case cost.
+
+```yaml
+provider: openrouter
+model: google/gemini-3.7-flash
+fallback_model: qwen/qwen3.8-max
+```
+
+Both models use the same configured provider and credentials. See
+[`fallback_model`](configure-lgtmaybe-yml.md#fallback_model) for the recovery
+order, failure behavior, and reporting.
+
+If cost is the binding constraint rather than latency, ollama runs locally:
 
 ```bash
 lgtmaybe review --provider ollama --model qwen2.5-coder:14b

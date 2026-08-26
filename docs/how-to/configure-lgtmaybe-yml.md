@@ -21,6 +21,7 @@ automatic where the provider supports it.
 - [Field reference](#field-reference)
   - [provider](#provider)
   - [model](#model)
+  - [fallback_model](#fallback_model)
   - [min_severity](#min_severity)
   - [include_paths / exclude_paths](#include_paths-exclude_paths)
   - [max_files](#max_files)
@@ -96,6 +97,58 @@ The model identifier for the chosen provider. Format varies by provider:
 | azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
 | ollama | `qwen3.6:27b`, `gemma4:e4b` |
 | openai-compatible | the served model name, e.g. `deepseek-chat` or `meta-llama/Llama-3.1-8B-Instruct` (requires `api_base` — see [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md)) |
+
+### fallback_model
+
+`fallback_model` names one second model for a review call that the primary
+model cannot finish. It is off by default and adds no calls to a healthy
+review.
+
+Both model names go through the configured `provider`, `api_base`, and
+credentials. This means an OpenRouter review can fall back from a Google model
+to a Qwen model because OpenRouter serves both. An `openai` review cannot fall
+back to an Anthropic account. Cross-provider failover needs a separate review
+run.
+
+```yaml
+provider: openrouter
+model: google/gemini-3.7-flash
+fallback_model: qwen/qwen3.8-max
+```
+
+The fallback runs at different points depending on the failure:
+
+| Primary model result | What lgtmaybe does |
+|---|---|
+| Transient provider failure, such as a connection error, capacity rate limit, or 5xx | Exhausts the primary model's bounded retry policy, then tries the fallback model. |
+| Permanent provider failure, such as an unknown model, rejected request, or exhausted quota | Skips repeated primary attempts and tries the fallback model. A shared credential, quota, or endpoint failure will usually reject both. |
+| Output reaches the `max_tokens` ceiling | First retries a smaller payload or lowers `reasoning_effort` on the primary, based on the reported token counts. It tries the fallback only if that remedy also fails. |
+
+The fallback does not judge the primary answer. A clean review, a low-quality
+finding, or zero findings will not trigger it. Output parsing has its own
+bounded repair path.
+
+The fallback gets a fresh request and retry budget, so it adds to the primary
+model's spent time and tokens. The profile keeps both models' calls and the
+review summary names every lens answered by the fallback. Use `--profile` for
+the human-readable `models:` line or `--profile-json` for the model attached to
+each call. Its usage contributes to `max_review_tokens` after the call returns.
+See [Profile Reference](../reference/profile.md#the-models-line).
+
+If the fallback fails, lgtmaybe marks the lens incomplete and stops that
+recovery path. A review with no usable results fails instead of posting a clean
+result. lgtmaybe does not walk a list of models or fall back to the primary
+again. A lens that repeatedly needs the second model is a signal to make that
+model the primary.
+
+Set the same value for one run with `--fallback-model`. The CLI flag and the
+GitHub Action's `fallback_model` input override `.lgtmaybe.yml`.
+
+```bash
+lgtmaybe review --fallback-model qwen/qwen3.8-max
+```
+
+See [Choose a Review Model](choose-a-review-model.md) for current model results.
 
 ### min_severity
 
