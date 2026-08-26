@@ -2448,6 +2448,147 @@ class TestOpenAICompatibleToolRejectionWording:
         assert "tools" not in seen[-1] and "response_format" not in seen[-1]
 
 
+class TestBedrockConverseOutputConfigWording:
+    """litellm's bedrock route sends Claude structured output as the
+    Converse-level ``outputConfig`` field (camelCase), so the endpoint's
+    refusals name THAT spelling — ``extraneous key [outputConfig] is not
+    permitted`` from a region or model without the feature, or AWS's "This
+    model doesn't support …" prose. The matcher only knew the snake_case
+    ``output_config`` the Anthropic model layer uses, so these 400s read as
+    permanent and killed every lens at once instead of degrading to the forced
+    tool call — the exact failure the recovery ladder exists to prevent."""
+
+    MODEL = "bedrock/us.anthropic.claude-sonnet-4-6"
+
+    CONVERSE_400 = (
+        "litellm.BadRequestError: BedrockException - "
+        '{"message":"Malformed input request: #: extraneous key [outputConfig] '
+        'is not permitted, please reformat your input and try again."}'
+    )
+    UNSUPPORTED_400 = (
+        "litellm.BadRequestError: BedrockException - "
+        '{"message":"This model doesn\'t support the outputConfig field."}'
+    )
+
+    def test_converse_extraneous_key_reads_as_a_schema_rejection(self) -> None:
+        from lgtmaybe.providers.litellm_provider import _rejects_response_format
+
+        assert _rejects_response_format(
+            litellm.BadRequestError(
+                message=self.CONVERSE_400, model=self.MODEL, llm_provider="bedrock"
+            )
+        )
+
+    def test_aws_doesnt_support_prose_reads_as_a_schema_rejection(self) -> None:
+        from lgtmaybe.providers.litellm_provider import _rejects_response_format
+
+        assert _rejects_response_format(
+            litellm.BadRequestError(
+                message=self.UNSUPPORTED_400, model=self.MODEL, llm_provider="bedrock"
+            )
+        )
+
+    def test_an_unrelated_bedrock_400_is_still_not_a_schema_rejection(self) -> None:
+        """The matcher must stay narrow: a genuine 400 has to keep failing."""
+        from lgtmaybe.providers.litellm_provider import _rejects_response_format
+
+        assert not _rejects_response_format(
+            litellm.BadRequestError(
+                message=(
+                    "litellm.BadRequestError: BedrockException - "
+                    '{"message":"Input is too long for requested model."}'
+                ),
+                model=self.MODEL,
+                llm_provider="bedrock",
+            )
+        )
+
+    def test_converse_rejection_recovers_into_tool_mode(self) -> None:
+        """End to end: the camelCase refusal swaps the schema for the forced
+        tool call, exactly as the snake_case one always did."""
+        seen: list[dict[str, Any]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.CONVERSE_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert "tools" in seen[-1] and "response_format" not in seen[-1]
+
+
+class TestBedrockRejectedReasoningEffort:
+    """litellm maps a configured ``reasoning_effort`` for adaptive Claude models
+    into Anthropic's ``output_config.effort``, and some Bedrock models/regions
+    reject that field. The refusal names ``output_config`` — which without a
+    guard reads as a STRUCTURED-OUTPUT rejection: the schema (the wrong param)
+    is dropped, the re-send still carries the effort and fails identically, and
+    the review dies having also disabled structured output for the run."""
+
+    MODEL = "bedrock/us.anthropic.claude-sonnet-4-6"
+
+    EFFORT_400 = (
+        "litellm.BadRequestError: BedrockException - "
+        '{"message":"The model returned the following errors: '
+        'output_config.effort: Extra inputs are not permitted"}'
+    )
+
+    def test_the_effort_is_dropped_and_the_schema_is_kept(self) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            if "reasoning_effort" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.EFFORT_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                self.MODEL,
+                response_format=ReviewResult,
+                reasoning_effort="medium",
+            )
+
+        assert result.text == '{"findings": []}'
+        assert "reasoning_effort" not in seen[-1]
+        assert "response_format" in seen[-1], "the schema was blamed for the effort's refusal"
+
+    def test_without_an_effort_in_flight_the_schema_recovery_still_runs(self) -> None:
+        """The guard is scoped to a request that actually carried the effort:
+        the same wording on an effort-less request keeps the schema recovery."""
+        seen: list[dict[str, Any]] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs)
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=self.EFFORT_400, model=kwargs["model"], llm_provider="bedrock"
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert "response_format" not in seen[-1]
+
+
 def _truncated_response() -> Any:
     """A reply the route cut off at the output ceiling."""
     return SimpleNamespace(

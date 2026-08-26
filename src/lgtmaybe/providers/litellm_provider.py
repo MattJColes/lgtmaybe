@@ -363,8 +363,19 @@ def _retry_wait(retry_state: RetryCallState) -> float:
 
 
 # Phrases a backend uses to say "I do not know this request field". Matched
-# loosely because the wording is the backend's, not litellm's.
-_REJECTION_PHRASES = ("not permitted", "not supported", "unsupported", "unknown", "unexpected")
+# loosely because the wording is the backend's, not litellm's. The two
+# "support" spellings are AWS's: Bedrock refuses a Converse feature a model
+# lacks with "This model doesn't support …" prose rather than naming the field
+# an extra input.
+_REJECTION_PHRASES = (
+    "not permitted",
+    "not supported",
+    "unsupported",
+    "unknown",
+    "unexpected",
+    "doesn't support",
+    "does not support",
+)
 
 # A self-hosted OpenAI-compatible server refuses a tool call by naming the
 # start-up flag it is missing, not by calling the field unsupported — so these
@@ -396,8 +407,38 @@ def _rejects_response_format(exc: Exception) -> bool:
     So the rejection is read off the error instead: the field name plus a
     rejection phrase. A false positive costs one re-send in tool mode (see
     :func:`_schema_tool_kwargs`); a false negative costs the whole review.
+
+    The field goes by TWO spellings, and both matter. ``output_config`` (snake
+    case) is the Anthropic model layer's name, reported when the schema reaches
+    the model's own validator. ``outputConfig`` (camelCase) is the
+    Converse-level field litellm now sends for Claude models it believes
+    support native structured output — a belief keyed on the model id alone, so
+    a region or endpoint without the feature refuses the request at the
+    Converse layer instead (``extraneous key [outputConfig] is not permitted``,
+    or "This model doesn't support …" prose). Matching only the snake case made
+    exactly those refusals read as permanent, and one unsupported field killed
+    every lens of the review at once.
     """
-    return _rejects_field(exc, "response_format", "output_config", "responseformat")
+    return _rejects_field(exc, "response_format", "output_config", "outputconfig", "responseformat")
+
+
+def _rejects_reasoning_effort(exc: Exception) -> bool:
+    """True when an API error means the route refused the reasoning effort.
+
+    litellm maps a configured ``reasoning_effort`` for adaptive Claude models
+    into Anthropic's ``output_config.effort`` (bedrock also knows a Converse
+    ``reasoningConfig`` for other families), and a Bedrock model or region
+    without the field 400s on it. The message names ``output_config`` — the
+    same word :func:`_rejects_response_format` matches — so without this the
+    refusal was blamed on the SCHEMA: structured output was downgraded for the
+    run, the re-send still carried the effort, and the call failed identically.
+    Checked first in :func:`LiteLLMProvider._drop_rejected_param`, and only
+    when the request actually carried the effort, so the schema recovery keeps
+    running for everything else.
+    """
+    return _rejects_field(
+        exc, "output_config.effort", "reasoning_effort", "reasoningconfig", "maxreasoningeffort"
+    )
 
 
 def _rejects_tool_config(exc: Exception) -> bool:
@@ -1027,12 +1068,15 @@ class LiteLLMProvider:
     def _drop_rejected_param(self, exc: Exception, model: str, kwargs: dict[str, Any]) -> bool:
         """Strip the one request param *exc* says this model won't take.
 
-        Two params are sent for review quality rather than necessity —
-        ``temperature`` (determinism) and ``response_format`` (structured output)
-        — and a model that refuses either would otherwise fail the whole review
-        over a preference. Both refusals are permanent 400s, so the recovery is
-        to drop the param and re-send; ``kwargs`` is the dict every later retry
-        of this call reuses, so the drop sticks for them too.
+        Three params are sent for review quality rather than necessity —
+        ``temperature`` (determinism), ``reasoning_effort`` (a thinking budget)
+        and ``response_format`` (structured output) — and a model that refuses
+        any of them would otherwise fail the whole review over a preference.
+        The refusals are permanent 400s, so the recovery is to drop the param
+        and re-send; ``kwargs`` is the dict every later retry of this call
+        reuses, so the drop sticks for them too. The effort is judged before
+        the schema because its refusal names ``output_config``, the schema
+        matcher's own word (see :func:`_rejects_reasoning_effort`).
 
         Structured output gets two recoveries rather than one, in order of how
         much they keep: a rejected ``response_format`` becomes the same schema as
@@ -1045,6 +1089,13 @@ class LiteLLMProvider:
             # The param is accepted, only our value isn't — let the model use its
             # own default.
             kwargs.pop("temperature")
+            return True
+        # Before the schema branch, deliberately: a refused reasoning effort
+        # arrives naming `output_config.effort`, which the schema matcher below
+        # would claim — dropping the wrong param and re-sending a request that
+        # fails identically, with structured output disabled as collateral.
+        if "reasoning_effort" in kwargs and _rejects_reasoning_effort(exc):
+            kwargs.pop("reasoning_effort")
             return True
         # Both branches remember the outcome for this model's later calls, not
         # just this one: the lens fan-out sends the same shape N times, and
