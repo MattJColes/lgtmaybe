@@ -201,7 +201,8 @@ class GitLabGateway:
                 (position, f) for position, f in inline if not (current_finding_keys([f]) & already)
             ]
         for position, finding in inline:
-            self._post_discussion(position, render_inline_body(finding))
+            if not self._post_discussion(position, render_inline_body(finding)):
+                demoted.append(finding)
 
         body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
         self._upsert_note(body, self._marker)
@@ -389,7 +390,7 @@ class GitLabGateway:
             inline.append((position, f))
         return inline, demoted, broad
 
-    def _post_discussion(self, position: dict[str, Any], body: str) -> None:
+    def _post_discussion(self, position: dict[str, Any], body: str) -> bool:
         """Open one positioned discussion.
 
         Best-effort per finding: GitLab rejects a position whose line no longer
@@ -404,8 +405,10 @@ class GitLabGateway:
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
+            return True
         except Exception as exc:  # noqa: BLE001 — one rejected position is not fatal
             _log.warning("posting discussion at %s failed: %s", position.get("new_path"), exc)
+            return False
 
     def _resolve_fixed_threads(self) -> None:
         """Reply in, then resolve, every thread the caller validated as fixed.
@@ -434,7 +437,10 @@ class GitLabGateway:
         keys: set[str] = set()
         try:
             for discussion in self._discussions():
-                for note in discussion.get("notes") or []:
+                notes = discussion.get("notes") or []
+                if notes and notes[0].get("resolved"):
+                    continue
+                for note in notes:
                     keys |= finding_keys(note.get("body") or "")
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing discussions failed: %s", exc)
