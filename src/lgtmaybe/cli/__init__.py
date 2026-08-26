@@ -990,7 +990,7 @@ def mr_url_from_ci_env() -> str:
     naming ``CI_MERGE_REQUEST_IID`` points straight at the ``rules:`` fix.
     """
     host = os.environ.get("CI_SERVER_HOST") or ""
-    server = host and f"https://{host}" or os.environ.get("CI_SERVER_URL", "").rstrip("/")
+    server = os.environ.get("CI_SERVER_URL", "").rstrip("/") or (host and f"https://{host}")
     if not server:
         raise click.ClickException(
             "CI_SERVER_HOST is not set — lgtmaybe cannot tell which GitLab to post to."
