@@ -348,7 +348,7 @@ class GiteaGateway:
             ]
             with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
                 for comments in pool.map(
-                    lambda rid: self._paginate(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
+                    lambda rid: self._list(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
                 ):
                     for comment in comments:
                         if found := finding_keys(comment.get("body") or ""):
@@ -378,7 +378,7 @@ class GiteaGateway:
 
     def _find_comment(self, family: str) -> int | None:
         """The id of our existing comment in ``family``, or None."""
-        for comment in self._paginate(f"{self._issue_api}/comments"):
+        for comment in self._list(f"{self._issue_api}/comments"):
             if family in (comment.get("body") or ""):
                 comment_id = comment.get("id")
                 return int(comment_id) if comment_id is not None else None
@@ -431,6 +431,11 @@ class GiteaGateway:
         resp = self._client.get(url, headers=self._headers, timeout=_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
+
+    def _list(self, url: str) -> list[dict[str, Any]]:
+        """One unpaginated Gitea list response."""
+        payload = self._get_json(url)
+        return payload if isinstance(payload, list) else []
 
     def _paginate(self, url: str) -> list[dict[str, Any]]:
         """Every page of a Gitea list endpoint, flattened."""
