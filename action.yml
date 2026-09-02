@@ -177,7 +177,7 @@ inputs:
   config_path:
     description: "Path to the .lgtmaybe.yml config file, relative to the repo root."
     required: false
-    default: ".lgtmaybe.yml"
+    default: ""
   image:
     description: "Override the container image (advanced; defaults to the released GHCR image)."
     required: false

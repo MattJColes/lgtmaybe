@@ -155,6 +155,10 @@ def test_quoted_password_literal_redacted() -> None:
     assert "password" in result
 
 
+def test_password_value_overlapping_key_name_is_redacted() -> None:
+    assert redact('password: "sword"') == 'password: "[REDACTED]"'
+
+
 def test_password_prose_not_redacted() -> None:
     """Plain English mentioning a password must not trip the redactor."""
     result = redact("+# Send the user a password reset email when requested\n")
@@ -178,6 +182,12 @@ def test_connection_string_password_redacted() -> None:
     # Host stays visible — only the password segment is scrubbed.
     assert "db.internal" in result
     assert "admin" in result
+
+
+def test_connection_password_matching_username_is_redacted() -> None:
+    result = redact('url = "postgres://alice:alice@db.example.com/app"')
+
+    assert result == 'url = "postgres://alice:[REDACTED]@db.example.com/app"'
 
 
 def test_value_pattern_preserves_key_name() -> None:

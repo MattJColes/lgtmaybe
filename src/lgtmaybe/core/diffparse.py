@@ -72,21 +72,22 @@ def walk_diff(diff: str) -> Iterator[tuple[str, str, int, int, str]]:
     old_line = 0
     in_hunk = False
 
-    for raw_line in diff.splitlines():
+    for raw_line in diff.removesuffix("\n").split("\n"):
         file_match = FILE_HEADER_RE.match(raw_line)
         if file_match:
             fallback = _FALLBACK_FILE_HEADER_RE.match(raw_line)
             current_file = fallback.group(1) if fallback is not None else None
             in_hunk = False
             continue
-        old_file_match = OLD_FILE_HEADER_RE.match(raw_line)
-        if old_file_match:
-            current_file = old_file_match.group(1)
-            continue
-        new_file_match = NEW_FILE_HEADER_RE.match(raw_line)
-        if new_file_match:
-            current_file = new_file_match.group(1)
-            continue
+        if not in_hunk:
+            old_file_match = OLD_FILE_HEADER_RE.match(raw_line)
+            if old_file_match:
+                current_file = old_file_match.group(1)
+                continue
+            new_file_match = NEW_FILE_HEADER_RE.match(raw_line)
+            if new_file_match:
+                current_file = new_file_match.group(1)
+                continue
         if current_file is None:
             continue
         hunk = parse_hunk_header(raw_line)
@@ -151,7 +152,7 @@ def changed_line_count(diff: str) -> int:
     """
     count = 0
     in_hunk = False
-    for line in diff.splitlines():
+    for line in diff.removesuffix("\n").split("\n"):
         if HUNK_HEADER_RE.match(line):
             in_hunk = True
         elif FILE_HEADER_RE.match(line):
@@ -177,7 +178,7 @@ def hunk_for_line(diff: str, path: str, line: int, side: str = "RIGHT") -> str |
     for patch_path, patch in split_by_file(diff, [path]):
         if patch_path != path:
             continue
-        lines = patch.splitlines()
+        lines = patch.removesuffix("\n").split("\n")
         hunk_starts = [i for i, raw in enumerate(lines) if parse_hunk_header(raw) is not None]
         if not hunk_starts:
             return None

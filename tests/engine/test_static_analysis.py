@@ -224,6 +224,7 @@ def test_ruff_findings_parsed_and_relativised(monkeypatch) -> None:  # type: ign
 
     findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.ruff]))
 
+    assert "--isolated" in run.calls[0]["argv"]
     assert findings == [
         ToolFinding(
             tool="ruff",
@@ -288,10 +289,27 @@ def test_mypy_runs_isolated_from_the_wider_codebase(monkeypatch) -> None:  # typ
     run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.mypy]))
 
     argv = [str(a) for a in run.calls[0]["argv"]]  # type: ignore[union-attr]
+    config = Path(argv[argv.index("--config-file") + 1])
+    assert config.name == "mypy.ini"
+    assert config.parent != Path(str(run.calls[0]["cwd"]))
     assert "--ignore-missing-imports" in argv
     assert "--follow-imports=skip" in argv
     # Never reuse or write a cache keyed to another run's corpus.
     assert "--no-incremental" in argv
+
+
+@pytest.mark.skipif(shutil.which("mypy") is None, reason="mypy not installed")
+def test_mypy_does_not_execute_a_corpus_plugin(tmp_path: Path) -> None:
+    marker = tmp_path / "plugin-ran"
+    files = {
+        "mypy.ini": "[mypy]\nplugins = evil.py\n",
+        "evil.py": f'from pathlib import Path\nPath({str(marker)!r}).write_text("ran")\n',
+        "app.py": "answer: int = 42\n",
+    }
+
+    run_static_analysis(files, _cfg(tools=[StaticAnalysisTool.mypy]))
+
+    assert not marker.exists()
 
 
 @pytest.mark.skipif(shutil.which("mypy") is None, reason="mypy not installed")

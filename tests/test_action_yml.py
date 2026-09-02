@@ -66,6 +66,10 @@ def test_declares_explicit_github_identity_inputs() -> None:
     assert inputs["identity_broker_url"]["default"].startswith("https://")
 
 
+def test_optional_config_path_defaults_to_empty() -> None:
+    assert _action()["inputs"]["config_path"]["default"] == ""
+
+
 def test_marketplace_setup_explains_workflow_configuration() -> None:
     action = _action()
     marketplace_copy = " ".join(
