@@ -258,6 +258,23 @@ def test_an_unsplittable_batch_reports_the_ceiling_with_its_salvage() -> None:
     assert "`max_tokens`" in summary
 
 
+def test_parser_detected_truncation_does_not_claim_a_split() -> None:
+    provider = FakeProvider(
+        result=ProviderResult(
+            text=_cut_off_json("one.py", "first_change = os.getcwd()", "cwd is never validated"),
+            input_tokens=10,
+            output_tokens=16_384,
+        )
+    )
+
+    _findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
+    )
+
+    assert "no automatic split was attempted" in summary
+    assert "re-reviewed in smaller pieces automatically" not in summary
+
+
 class _TruncatesOnReasoning(FakeProvider):
     """Every call spends the whole ceiling thinking, whatever the payload is.
 
