@@ -86,6 +86,12 @@ def test_focused_diff_gets_no_splitting_hint() -> None:
     assert "consider-splitting" not in labels
 
 
+def test_root_files_do_not_count_as_top_level_directories() -> None:
+    files = [f"config{i}.yml" for i in range(10)]
+    labels = compute_labels([], _ctx(_SMALL_DIFF, files))
+    assert "consider-splitting" not in labels
+
+
 def test_a_leaked_secret_earns_the_security_label() -> None:
     """The most label-worthy finding lgtmaybe can produce must not be missed.
 
