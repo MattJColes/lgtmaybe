@@ -285,9 +285,14 @@ def _audit(
     # AFTER the audit, from this very verdict), so serializing them is token
     # noise — and a `"confidence": null` is actively confusing when the auditor
     # is the party asked to produce the confidence score.
-    findings_json = json.dumps(
-        [f.model_dump(mode="json", exclude={"anchored", "broad", "confidence"}) for f in findings],
-        indent=2,
+    findings_json = neutralise(
+        json.dumps(
+            [
+                f.model_dump(mode="json", exclude={"anchored", "broad", "confidence"})
+                for f in findings
+            ],
+            indent=2,
+        )
     )
 
     # Asymmetric grounding: the reviews ran per-batch on slices; here the auditor
@@ -305,9 +310,8 @@ def _audit(
     # The diff is attacker-controlled on a fork PR, exactly as it is on the
     # review calls, so it gets the same delimiter-forgery defense: a planted
     # ``===DIFF_END===`` (or any other sentinel family) must not read as one of
-    # our own markers to the auditor either. The grounding block neutralises its
-    # own file text; the findings JSON is our own prose about the diff, and
-    # json.dumps already escapes it into a value the model reads as data.
+    # our own markers to the auditor either. The grounding block and findings
+    # JSON neutralise their own attacker-derived text.
     diff_part = f"Diff:\n{neutralise(ctx.diff)}"
     rest_part = (
         f"{grounding}"
