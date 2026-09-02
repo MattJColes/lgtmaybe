@@ -2248,9 +2248,8 @@ class LLMReviewEngine:
             # is usually a value the user set, not the model's own limit.
             reason = (
                 f"response truncated at the {result.output_tokens}-token `max_tokens` "
-                "ceiling — the batch is re-reviewed in smaller pieces automatically, so a "
-                "lens that keeps doing it is usually generation instability in the model, "
-                f"which a higher ceiling makes more expensive rather than prevents"
+                "ceiling — truncation was detected from the incomplete response body, so no "
+                "automatic split was attempted; raise `max_tokens` if it repeats"
                 f"{recovered_note}"
             )
             _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
