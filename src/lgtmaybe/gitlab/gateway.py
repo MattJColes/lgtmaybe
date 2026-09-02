@@ -111,6 +111,7 @@ class GitLabGateway:
         # The MR's discussion list, read by three callers per run and never
         # mutated between them (see `_discussions`).
         self._discussions_cache: list[dict[str, Any]] | None = None
+        self._notes_cache: list[dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -480,7 +481,9 @@ class GitLabGateway:
 
     def _find_note(self, family: str) -> int | None:
         """The id of our existing note in ``family``, or None."""
-        for note in self._paginate(f"{self._mr_api}/notes"):
+        if self._notes_cache is None:
+            self._notes_cache = self._paginate(f"{self._mr_api}/notes")
+        for note in self._notes_cache:
             if family in (note.get("body") or ""):
                 note_id = note.get("id")
                 return int(note_id) if note_id is not None else None
