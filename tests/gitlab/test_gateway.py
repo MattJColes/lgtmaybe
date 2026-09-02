@@ -154,6 +154,20 @@ class TestDiscussionFetching:
 
 class TestPostReview:
     @respx.mock
+    def test_note_families_share_one_notes_fetch(self) -> None:
+        _stub_post_routes()
+        listed = respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        gateway = _gateway()
+
+        gateway.post_review([], "summary", diff=DIFF)
+        gateway.post_describe_comment("description")
+        gateway.post_diagram_comment("diagram")
+
+        assert listed.call_count == 1
+
+    @respx.mock
     def test_each_finding_becomes_its_own_positioned_discussion(self) -> None:
         """GitLab has no batched review object — a discussion per finding."""
         _stub_post_routes()
