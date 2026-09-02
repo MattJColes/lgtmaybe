@@ -8,6 +8,8 @@ upserted issue comment; inline comments are positioned by ``new_position`` /
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -236,6 +238,46 @@ class TestPostReview:
         _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
 
         assert not reviews.called, "the only finding was already on the PR"
+
+    @respx.mock
+    def test_dedupe_consumes_each_existing_finding_once(self) -> None:
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        already = finding_fingerprint("app.py", "Hardcoded password")
+        respx.get(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json=[{"id": 5}]))
+        respx.get(f"{PR_URL}/reviews/5/comments").mock(
+            return_value=httpx.Response(
+                200, json=[{"body": f"old\n<!-- lgtmaybe-finding:{already} -->"}]
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+        duplicate_diff = DIFF.replace(
+            '+password = "hunter2"', '+password = "hunter2"\n+password = "hunter2"'
+        )
+        findings = [
+            ReviewFinding(
+                path="app.py",
+                line=line,
+                side="RIGHT",
+                severity=Severity.high,
+                title="Hardcoded password",
+                body="Move it to the environment.",
+                anchor='password = "hunter2"',
+                anchored=True,
+            )
+            for line in (2, 3)
+        ]
+
+        _gateway(httpx.Client()).post_review(findings, "2 findings", diff=duplicate_diff)
+
+        assert reviews.call_count == 1
+        assert len(json.loads(reviews.calls[0].request.content)["comments"]) == 1
 
     @respx.mock
     def test_dedupe_reads_every_past_review_not_just_the_first(self) -> None:

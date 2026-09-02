@@ -180,10 +180,16 @@ class GiteaGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
 
         if inline:
-            already = self._existing_finding_keys()
-            inline = [
-                (comment, f) for comment, f in inline if not (current_finding_keys([f]) & already)
-            ]
+            unmatched = self._existing_finding_keys()
+            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
+            for comment, finding in inline:
+                keys = current_finding_keys([finding])
+                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
+                if already is None:
+                    new_inline.append((comment, finding))
+                else:
+                    unmatched.pop(already)
+            inline = new_inline
 
         if inline:
             resp = self._client.post(
@@ -321,13 +327,13 @@ class GiteaGateway:
             inline.append((comment, f))
         return inline, demoted, broad
 
-    def _existing_finding_keys(self) -> set[str]:
+    def _existing_finding_keys(self) -> list[set[str]]:
         """Every hidden finding id already posted on this PR by us.
 
         Best-effort: a failure here means a duplicate comment, which is far
         better than failing the whole review.
         """
-        keys: set[str] = set()
+        keys: list[set[str]] = []
         try:
             # Gitea reviews are immutable, so every past lgtmaybe run left its
             # own review object and there is no flat "all review comments for
@@ -345,7 +351,8 @@ class GiteaGateway:
                     lambda rid: self._paginate(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
                 ):
                     for comment in comments:
-                        keys |= finding_keys(comment.get("body") or "")
+                        if found := finding_keys(comment.get("body") or ""):
+                            keys.append(found)
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing review comments failed: %s", exc)
         return keys
