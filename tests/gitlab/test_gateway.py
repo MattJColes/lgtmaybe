@@ -154,6 +154,29 @@ class TestDiscussionFetching:
 
 class TestPostReview:
     @respx.mock
+    def test_renamed_file_uses_its_real_old_path(self) -> None:
+        renamed_diff = DIFF.replace("a/app.py b/app.py", "a/old.py b/app.py").replace(
+            "--- a/app.py", "--- a/old.py"
+        )
+        _stub_context_routes()
+        _stub_post_routes()
+        respx.get(f"{MR_URL}/raw_diffs").mock(return_value=httpx.Response(200, text=renamed_diff))
+        respx.route(method="GET", url__startswith=f"{MR_URL}/diffs").mock(
+            return_value=httpx.Response(200, json=[{"new_path": "app.py", "old_path": "old.py"}])
+        )
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={"id": "abc"})
+        )
+        gateway = _gateway()
+
+        ctx = gateway.get_pr_context()
+        gateway.post_review([FINDING], "1 finding", diff=ctx.diff)
+
+        position = json.loads(created.calls[0].request.content)["position"]
+        assert position["old_path"] == "old.py"
+        assert position["new_path"] == "app.py"
+
+    @respx.mock
     def test_note_families_share_one_notes_fetch(self) -> None:
         _stub_post_routes()
         listed = respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
