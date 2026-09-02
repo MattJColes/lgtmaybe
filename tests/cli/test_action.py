@@ -136,10 +136,44 @@ class TestActionRouting:
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="false")
         assert called == []
 
-    def test_auto_extras_share_one_gateway_and_context_fetch(self, tmp_path, monkeypatch):
-        """With auto_describe + auto_diagram on, the action builds the adapters
-        once and fetches the (expensive, O(files)) PR context once — describe,
-        diagram, and the review all reuse them."""
+    def test_nothing_auto_posts_when_the_overview_is_off(self, tmp_path, monkeypatch):
+        """auto_diagram off is the one switch: with no overview there is no
+        automatic description either, since it rides that comment."""
+        import lgtmaybe.cli as cli_module
+
+        github = FakeGitHub()
+        provider = FakeProvider()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(provider), provider),
+        )
+
+        event = _write_event(
+            tmp_path,
+            {
+                "action": "opened",
+                "repository": {"full_name": "org/repo"},
+                "pull_request": {"number": 3},
+            },
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        monkeypatch.setenv("INPUT_AUTO_DIAGRAM", "false")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert len(github.posted) == 1
+        assert github.diagrams == []
+        assert github.described == []
+
+    def test_the_overview_shares_one_gateway_and_context_fetch(self, tmp_path, monkeypatch):
+        """The action builds the adapters once and fetches the (expensive,
+        O(files)) PR context once — the review and the whole change overview
+        reuse them."""
         import lgtmaybe.cli as cli_module
 
         class _CountingGitHub(FakeGitHub):
@@ -173,7 +207,6 @@ class TestActionRouting:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
         monkeypatch.setenv("INPUT_PROVIDER", "ollama")
         monkeypatch.setenv("INPUT_MODEL", "llama3")
-        monkeypatch.setenv("INPUT_AUTO_DESCRIBE", "true")
         monkeypatch.setenv("INPUT_AUTO_DIAGRAM", "true")
 
         result = CliRunner().invoke(main, ["action"])
@@ -181,11 +214,14 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert builds == [1]
         assert github.context_fetches == 1
-        assert len(github.described) == 1
-        assert len(github.diagrams) == 1
         assert len(github.posted) == 1
+        # One comment carries every section — the standalone description
+        # comment belongs to /describe alone now.
+        assert github.described == []
+        assert len(github.diagrams) == 1
+        assert "### **High Impact Areas**" in github.diagrams[0]
 
-    def test_auto_extras_post_after_the_review(self, tmp_path, monkeypatch):
+    def test_the_overview_posts_after_the_review(self, tmp_path, monkeypatch):
         """The comments lgtmaybe posts itself go out after the review, never before.
 
         Posting a comment fires an ``issue_comment`` workflow run. A consumer whose
@@ -233,13 +269,12 @@ class TestActionRouting:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
         monkeypatch.setenv("INPUT_PROVIDER", "ollama")
         monkeypatch.setenv("INPUT_MODEL", "llama3")
-        monkeypatch.setenv("INPUT_AUTO_DESCRIBE", "true")
         monkeypatch.setenv("INPUT_AUTO_DIAGRAM", "true")
 
         result = CliRunner().invoke(main, ["action"])
 
         assert result.exit_code == 0, result.output
-        assert github.writes == ["review", "diagram", "describe"]
+        assert github.writes == ["review", "diagram"]
         marker = f"<!-- lgtmaybe-diagrammed:{github.get_pr_context().head_sha} -->"
         assert marker in github.diagrams[0]
 

@@ -30,7 +30,7 @@ from typing import Any, NamedTuple
 from lgtmaybe.core.models import DiagramResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
 
-from .describe import structured_comment
+from .describe import markdown_text, single_line, structured_call, structured_comment
 from .prompt import language_directive
 
 _DIAGRAM_SYSTEM = """\
@@ -113,9 +113,9 @@ def _fullscreen_url(mermaid: str) -> str:
     return "https://mermaid.live/view#pako:" + base64.urlsafe_b64encode(packed).decode("ascii")
 
 
-def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
-    """Make one provider call and render its typed graph as a Markdown comment."""
-    system = _DIAGRAM_SYSTEM + language_directive(
+def _diagram_system(cfg: ReviewConfig) -> str:
+    """The diagram system prompt, with the output-language directive appended."""
+    return _DIAGRAM_SYSTEM + language_directive(
         cfg.language,
         translate=(
             '"title", "summary", node "label", "technology", "description", edge "label", '
@@ -123,11 +123,15 @@ def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -
         ),
         keep='Keep node ids and "change" enum values unchanged.',
     )
+
+
+def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
+    """Make one provider call and render its typed graph as a Markdown comment."""
     return structured_comment(
         ctx,
         cfg,
         provider,
-        system=system,
+        system=_diagram_system(cfg),
         diff_preamble=_DIFF_PREAMBLE,
         task_suffix=_TASK_SUFFIX,
         result_model=DiagramResult,
@@ -138,22 +142,32 @@ def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -
     )
 
 
+def diagram_result(
+    ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient
+) -> DiagramResult | None:
+    """The parsed change graph, or None when the model returned none.
+
+    The typed half of ``build_diagram``, for the change overview: it renders
+    the views itself, under the description and the high-impact section.
+    """
+    parsed, _raw, _has_intent = structured_call(
+        ctx,
+        cfg,
+        provider,
+        system=_diagram_system(cfg),
+        diff_preamble=_DIFF_PREAMBLE,
+        task_suffix=_TASK_SUFFIX,
+        result_model=DiagramResult,
+        wanted=_has_diagram,
+        label="diagram",
+    )
+    return parsed
+
+
 def _has_diagram(data: dict[str, Any]) -> bool:
     """Whether a parsed object carries graph nodes to render."""
     nodes = data.get("nodes")
     return isinstance(nodes, list) and bool(nodes)
-
-
-def _single_line(value: str) -> str:
-    return " ".join(value.split())
-
-
-_MARKDOWN_ESCAPES = str.maketrans({char: f"\\{char}" for char in "\\`*_{}[]<>()#+-!|>&:"})
-
-
-def _markdown_text(value: str) -> str:
-    """Render model-authored prose as inert, single-line Markdown text."""
-    return _single_line(value).translate(_MARKDOWN_ESCAPES)
 
 
 class _Node(NamedTuple):
@@ -171,13 +185,13 @@ def _prepare_nodes(diagram: DiagramResult) -> tuple[list[_Node], dict[str, str]]
     node_ids: dict[str, str] = {}
     for node in diagram.nodes:
         source_id = node.id.strip()
-        label = _single_line(node.label)
+        label = single_line(node.label)
         if not source_id or source_id in node_ids or not label:
             continue
 
         rendered_id = f"n{len(nodes)}"
         marker = "" if node.change == "unchanged" else f"({node.change})"
-        technology = _single_line(node.technology)
+        technology = single_line(node.technology)
         node_ids[source_id] = rendered_id
         nodes.append(
             _Node(
@@ -185,7 +199,7 @@ def _prepare_nodes(diagram: DiagramResult) -> tuple[list[_Node], dict[str, str]]
                 plain=" ".join(part for part in (label, technology, marker) if part),
                 card="<br/>".join(
                     html.escape(part, quote=True)
-                    for part in (label, technology, _single_line(node.description), marker)
+                    for part in (label, technology, single_line(node.description), marker)
                     if part
                 ),
                 short=" ".join(part for part in (label, marker) if part),
@@ -215,7 +229,7 @@ def _graph_views(
         if source is None or target is None:
             continue
 
-        label = _single_line(edge.label)
+        label = single_line(edge.label)
         if label:
             safe_label = html.escape(label, quote=True).replace("|", "&#124;")
             mermaid_lines.append(f'    {source} -->|"{safe_label}"| {target}')
@@ -239,7 +253,7 @@ _SEQUENCE_ESCAPES = str.maketrans(
 
 def _sequence_label(value: str) -> str:
     """Make one line of model prose safe to sit in a sequence-diagram line."""
-    return _single_line(value).translate(_SEQUENCE_ESCAPES)
+    return single_line(value).translate(_SEQUENCE_ESCAPES)
 
 
 def _sequence_views(
@@ -255,7 +269,7 @@ def _sequence_views(
         if source is None or target is None:
             continue
 
-        steps.append((source, target, _single_line(step.label), step.reply))
+        steps.append((source, target, single_line(step.label), step.reply))
         participants.extend(node for node in (source, target) if node not in participants)
         if len(steps) == _MAX_STEPS:
             break
@@ -292,32 +306,60 @@ def _view(mermaid: str, text: str) -> list[str]:
     return lines
 
 
-def _render(diagram: DiagramResult) -> str:
-    """Render a validated graph; the invalid-diagram notice when there is none."""
-    title = _markdown_text(diagram.title) or "Architecture of this change"
-    lines = [f"## {title}", ""]
-    summary = _markdown_text(diagram.summary)
-    if summary:
-        lines += [summary, ""]
+def render_diagram_views(diagram: DiagramResult, *, headed: bool) -> str | None:
+    """The rendered diagrams and notes, without the title/summary header.
+
+    None when the graph carries nothing renderable, which is what makes an
+    invalid diagram distinguishable from a valid one. *headed* forces the
+    ``Structure``/``Sequence`` headings on: standalone, they only earn their
+    space when there are two views to tell apart, but inside the change
+    overview the views follow other sections and must announce themselves.
+    """
     nodes, node_ids = _prepare_nodes(diagram)
     mermaid, ascii_art = _graph_views(diagram, nodes, node_ids)
+    if not mermaid:
+        return None
     sequence, sequence_text = _sequence_views(diagram, nodes, node_ids)
 
-    if mermaid:
-        # Headings only earn their space when there are two views to tell apart.
-        if sequence:
-            lines += ["### Structure", ""]
-        lines += _view(mermaid, ascii_art)
-        if sequence:
-            lines += ["", "### Sequence", "", *_view(sequence, sequence_text)]
-    else:
-        return _invalid_diagram("")
+    lines: list[str] = []
+    if sequence or headed:
+        lines += ["### Structure", ""]
+    lines += _view(mermaid, ascii_art)
+    if sequence:
+        lines += ["", "### Sequence", "", *_view(sequence, sequence_text)]
 
-    notes = _markdown_text(diagram.notes)
+    notes = markdown_text(diagram.notes)
     if notes:
         lines += ["", notes]
     return "\n".join(lines)
 
 
+def render_diagram_comment(diagram: DiagramResult | None) -> str:
+    """The standalone diagram body: title, summary, views — or the notice.
+
+    What ``build_diagram`` posts, and what the change overview falls back to
+    when neither of its added sections is enabled.
+    """
+    if diagram is None:
+        return _invalid_diagram("")
+    return _render(diagram)
+
+
+def _render(diagram: DiagramResult) -> str:
+    """Render a validated graph; the invalid-diagram notice when there is none."""
+    views = render_diagram_views(diagram, headed=False)
+    if views is None:
+        return _invalid_diagram("")
+    title = markdown_text(diagram.title) or "Architecture of this change"
+    lines = [f"## {title}", ""]
+    summary = markdown_text(diagram.summary)
+    if summary:
+        lines += [summary, ""]
+    return "\n".join([*lines, views])
+
+
+DIAGRAM_INVALID_NOTICE = "I couldn't produce a valid change diagram."
+
+
 def _invalid_diagram(_raw: str) -> str:
-    return "## Architecture of this change\n\nI couldn't produce a valid change diagram."
+    return f"## Architecture of this change\n\n{DIAGRAM_INVALID_NOTICE}"

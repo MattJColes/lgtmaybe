@@ -284,17 +284,50 @@ class TestDiagramCommand:
                 "notes": "",
             }
         )
-        result = ProviderResult(text=payload, input_tokens=1, output_tokens=1)
-        provider = FakeProvider(result=result)
+        from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+
+        provider = FakeProvider(
+            results_by_schema={
+                DiagramResult: ProviderResult(text=payload, input_tokens=1, output_tokens=1),
+                DescribeResult: ProviderResult(
+                    text=json.dumps({"title": "Cache user lookups", "change_type": "feature"}),
+                    input_tokens=1,
+                    output_tokens=1,
+                ),
+                HighImpactResult: ProviderResult(
+                    text=json.dumps(
+                        {
+                            "areas": [
+                                {
+                                    "area": "availability",
+                                    "title": "Cache on the read path",
+                                    "files": [],
+                                    "why": "",
+                                    "check": "",
+                                }
+                            ],
+                            "notes": "",
+                        }
+                    ),
+                    input_tokens=1,
+                    output_tokens=1,
+                ),
+            }
+        )
         monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: provider)
         monkeypatch.setattr(cli_module, "local_pr_context", lambda **kwargs: _LOCAL_CTX)
 
-    def test_diagram_prints_mermaid_and_ascii(self, monkeypatch):
+    def test_diagram_prints_the_overview(self, monkeypatch):
+        """The local command prints the same body the comment carries:
+        description, high impact areas, then the diagrams."""
         self._patch_diagram_provider(monkeypatch)
 
         result = CliRunner().invoke(main, ["diagram", "--provider", "ollama", "--model", "llama3"])
 
         assert result.exit_code == 0, result.output
+        assert "## Cache user lookups" in result.output
+        assert "### **High Impact Areas**" in result.output
+        assert "Cache on the read path" in result.output
         assert "```mermaid" in result.output
         assert "flowchart LR" in result.output
         assert "[Client] --calls--> [App (changed)]" in result.output
@@ -372,7 +405,7 @@ class TestGitHubReviewErrorSurfacing:
         cli_module.execute_review(
             _default_cfg(static_analysis={"enabled": True}),
             RuntimeOptions(pr_url="x"),
-            describe=True,
+            diagram=True,
         )
 
     def test_engine_failure_posts_comment_and_raises(self, monkeypatch):

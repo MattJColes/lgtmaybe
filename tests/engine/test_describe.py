@@ -163,3 +163,37 @@ def test_language_directive_added_when_set() -> None:
     build_description(_CTX, cfg, provider)
     system = provider.calls[0]["messages"][0]["content"]
     assert "Japanese" in system
+
+
+def test_markdown_text_escapes_and_flattens_model_prose() -> None:
+    """The escapers live here, beside the shared scaffold, because every
+    overview section renders model-authored prose the same inert way."""
+    from lgtmaybe.engine.describe import markdown_text, single_line
+
+    assert single_line("two  lines\nof text") == "two lines of text"
+    assert markdown_text("[x](http://e)") == r"\[x\]\(http\://e\)"
+
+
+def test_describe_result_returns_the_typed_object_and_intent_flag() -> None:
+    """The overview lays out the sections itself, so it needs the parsed
+    object rather than describe's own rendered Markdown."""
+    from lgtmaybe.engine.describe import describe_result
+
+    desc, has_intent = describe_result(_CTX, _CFG, _structured_provider())
+
+    assert desc is not None
+    assert desc.title == "Add retry logic to the HTTP client"
+    assert has_intent is True
+
+
+def test_describe_result_is_none_when_nothing_parses() -> None:
+    from lgtmaybe.engine.describe import describe_result
+
+    provider = FakeProvider(
+        result=ProviderResult(text="Just prose.", input_tokens=1, output_tokens=1)
+    )
+
+    desc, has_intent = describe_result(_NO_INTENT_CTX, _CFG, provider)
+
+    assert desc is None
+    assert has_intent is False

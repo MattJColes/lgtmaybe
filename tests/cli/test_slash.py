@@ -230,8 +230,9 @@ class TestDispatch:
         assert "**Change type:** feature" in body
         assert "| `a.py` |" in body
 
-    def test_diagram_upserts_the_diagram_comment(self):
-        """/diagram goes through the idempotent diagram upsert with a mermaid block."""
+    def test_diagram_upserts_the_whole_change_overview(self):
+        """/diagram posts the overview — description, high impact areas, and the
+        diagrams — through the idempotent diagram upsert, never the describe one."""
         github = FakeGitHub()
         structured = json.dumps(
             {
@@ -249,8 +250,20 @@ class TestDispatch:
                 "notes": "",
             }
         )
+        from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+
         provider = FakeProvider(
-            result=ProviderResult(text=structured, input_tokens=1, output_tokens=1)
+            results_by_schema={
+                DiagramResult: ProviderResult(text=structured, input_tokens=1, output_tokens=1),
+                DescribeResult: ProviderResult(
+                    text=json.dumps({"title": "Add a thing", "change_type": "feature"}),
+                    input_tokens=1,
+                    output_tokens=1,
+                ),
+                HighImpactResult: ProviderResult(
+                    text=json.dumps({"areas": [], "notes": ""}), input_tokens=1, output_tokens=1
+                ),
+            }
         )
 
         dispatch(
@@ -263,7 +276,10 @@ class TestDispatch:
 
         assert github.described == []
         assert len(github.diagrams) == 1
-        assert "```mermaid" in github.diagrams[0]
+        body = github.diagrams[0]
+        assert body.startswith("## Add a thing")
+        assert "### **High Impact Areas**" in body
+        assert "```mermaid" in body
 
 
 def _write_event(tmp_path: Path, body: str) -> Path:

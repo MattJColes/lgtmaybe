@@ -551,6 +551,51 @@ class DiagramResult(_Strict):
     notes: str = ""
 
 
+#: The closed taxonomy of the change overview's High Impact Areas section: the
+#: kinds of change a reviewer must not miss. Ordered as they render, worst-blast-
+#: radius first. A closed Literal on purpose — an invented area would render an
+#: unknown heading, so drifted output is rejected at the boundary instead.
+HighImpactKind = Literal[
+    "infrastructure",
+    "security",
+    "availability",
+    "data_migration",
+    "backup_and_recovery",
+    "compatibility",
+    "observability",
+    "dependencies",
+    "cost",
+    "compliance",
+]
+
+
+class HighImpactArea(_Strict):
+    """One call-out in the High Impact Areas section.
+
+    ``files`` are paths from the diff (any path the PR did not change is
+    dropped before rendering), ``why`` is the blast radius and ``check`` the
+    one thing a reviewer should verify.
+    """
+
+    area: HighImpactKind
+    title: str
+    files: list[str] = Field(default_factory=list)
+    why: str = ""
+    check: str = ""
+    severity: Literal["medium", "high", "critical"] = "high"
+
+
+class HighImpactResult(_Strict):
+    """Structured-output envelope for the high-impact pass.
+
+    An empty ``areas`` list is a real answer — "nothing here qualifies" — and
+    renders as the checked-and-clear line, never as a missing section.
+    """
+
+    areas: list[HighImpactArea] = Field(default_factory=list)
+    notes: str = ""
+
+
 class AnswerResult(_Strict):
     """Task-specific structured envelope for a slash-command answer."""
 
@@ -922,21 +967,29 @@ class ReviewConfig(_Strict):
     # from data the review already computes — no extra model calls.
     # Best-effort (a label failure never fails the review). Default off.
     pr_labels: bool = False
-    # Auto-describe: when the GitHub Action is triggered by a PR being opened
-    # (or reopened), post a structured description comment — title, change
-    # type, summary, per-file walkthrough, intent check — before the review
-    # runs. Idempotently updated in place on later /describe runs. A separate
-    # concern from the review (either can be enabled independently), and a
-    # describe failure never blocks the review. Default off.
-    auto_describe: bool = False
-    # Auto-diagram: like auto_describe, but posts a compact change diagram —
-    # a Mermaid flowchart of the components the PR touches (with an ASCII
-    # fallback), rendered natively in the comment — when a PR is opened,
-    # reopened, or updated. Its own comment, updated in place on later pushes
-    # and /diagram runs.
-    # Best-effort; a diagram failure never blocks the review. Default on —
-    # no yaml needed; set false to opt out.
+    # Description section of the change overview: title, change type, summary,
+    # per-file walkthrough, and (when the PR states an intent) an intent check,
+    # from its own model call. Heads the overview comment `auto_diagram` posts,
+    # so it refreshes on every push rather than only on open. Best-effort — a
+    # describe failure renders an "unavailable" line and never blocks the rest.
+    # Default on. `/describe` posts its own standalone comment regardless.
+    auto_describe: bool = True
+    # Auto-diagram: posts the change overview — description, High Impact Areas,
+    # a Mermaid flowchart of the components the PR touches and a sequence
+    # diagram of the run-time flow it alters (each with a text rendering) — when
+    # a PR is opened, reopened, or updated. One comment, updated in place on
+    # later pushes and /diagram runs. A required completion step: its diagram
+    # call failing leaves the head incomplete, so a re-run redoes it. Default on
+    # — no yaml needed; set false to opt out of the whole overview.
     auto_diagram: bool = True
+    # High Impact Areas section of the change overview: the changes a reviewer
+    # must not miss — infrastructure, security posture, production-outage risk,
+    # data migrations, backups and recovery, compatibility, observability,
+    # dependencies, cost, compliance. Its own model call, grounded by
+    # deterministic path signals which also floor the output, so a sensitive
+    # file is named even when the model says nothing about it. Best-effort.
+    # Default on; set false to drop the section and its call.
+    high_impact: bool = True
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the
