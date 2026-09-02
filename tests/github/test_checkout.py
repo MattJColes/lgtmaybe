@@ -36,29 +36,24 @@ def test_clone_builds_shallow_single_branch_command() -> None:
     assert captured["kwargs"]["timeout"] > 0
 
 
-def test_clone_authenticates_via_extraheader_not_url() -> None:
-    """The token rides in a one-shot ``git -c http.<url>.extraheader`` basic-auth
-    header (the actions/checkout approach), never embedded in the clone URL —
-    a URL-embedded token is visible in /proc/*/cmdline in the clear and gets
-    persisted as the remote URL in the temp clone's .git/config."""
+def test_clone_authenticates_via_environment_not_argv() -> None:
     captured: dict[str, Any] = {}
 
     def runner(cmd: list[str], **kwargs: Any) -> Any:
         captured["cmd"] = cmd
+        captured["env"] = kwargs["env"]
         return subprocess.CompletedProcess(cmd, 0)
 
     dest = clone_base_tree("owner/repo", "main", "tok-123", runner=runner)
 
     assert dest is not None
     cmd = captured["cmd"]
-    # The raw token appears nowhere in argv.
     assert all("tok-123" not in arg for arg in cmd)
     b64 = base64.b64encode(b"x-access-token:tok-123").decode()
-    header = f"http.https://github.com/.extraheader=Authorization: basic {b64}"
-    assert "-c" in cmd and cmd[cmd.index("-c") + 1] == header
-    # ``-c`` precedes the clone subcommand: a per-invocation config that is never
-    # written into the new clone's .git/config (unlike ``git clone --config``).
-    assert cmd.index("-c") < cmd.index("clone")
+    assert b64 not in " ".join(cmd)
+    assert captured["env"]["GIT_CONFIG_COUNT"] == "1"
+    assert captured["env"]["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert captured["env"]["GIT_CONFIG_VALUE_0"] == f"Authorization: basic {b64}"
 
 
 def test_clone_failure_returns_none_and_cleans_up(tmp_path: Path) -> None:
