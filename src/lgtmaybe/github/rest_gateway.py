@@ -405,6 +405,18 @@ class RestGitHubGateway:
                 json=payload,
                 timeout=_TIMEOUT,
             )
+            if resp.status_code == 422 and inline:
+                rejected = self._post_new_inline_comments(
+                    inline, self._reviewed_sha or self._anchor_sha()
+                )
+                payload["body"] = build_body([*demoted, *rejected])
+                payload["comments"] = []
+                resp = self._post(
+                    reviews_url,
+                    headers=self._json_headers,
+                    json=payload,
+                    timeout=_TIMEOUT,
+                )
             resp.raise_for_status()
 
     def get_file_contents(self, path: str) -> str | None:
