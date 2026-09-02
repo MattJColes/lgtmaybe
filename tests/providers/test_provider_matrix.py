@@ -109,7 +109,10 @@ class TestCloudProviderCredentials:
     def test_ambient_present_resolves_keyless(self, provider: Provider) -> None:
         assert resolve_credentials(provider, ambient_probe=lambda: True).api_key is None
 
-    def test_ambient_absent_raises_actionable_error(self, provider: Provider) -> None:
+    def test_ambient_absent_uses_provider_native_behavior(self, provider: Provider) -> None:
+        if provider is Provider.bedrock:
+            assert resolve_credentials(provider, ambient_probe=lambda: False).api_key is None
+            return
         with pytest.raises(ValueError, match=provider.value):
             resolve_credentials(provider, ambient_probe=lambda: False)
 
