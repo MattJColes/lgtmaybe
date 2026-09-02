@@ -14,6 +14,7 @@ restatement, which would contradict this call's output contract).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
@@ -230,6 +231,26 @@ def markdown_text(value: str) -> str:
     return single_line(value).translate(_MARKDOWN_ESCAPES)
 
 
+# A line starting with one of these opens a Markdown block — a heading, quote,
+# table row, list item, or fence — so prose beginning with one would restructure
+# the comment around it rather than sit inside it.
+_BLOCK_OPENER_RE = re.compile(r"^([#>|=`~*+-]|\d+[.)])")
+
+
+def prose_text(value: str) -> str:
+    """Model prose that stays readable but cannot restructure the comment.
+
+    Deliberately lighter than ``markdown_text``: these are the description's own
+    sentences, the headline prose of every overview, and escaping every hyphen,
+    colon and bracket in a paragraph reads worse than the injection it prevents.
+    Three things are enough, because a block construct needs a line of its own:
+    collapse to one line (so the model cannot start a second), defuse ``<`` (so
+    no raw HTML), and escape a leading marker.
+    """
+    text = single_line(value).replace("<", "&lt;")
+    return _BLOCK_OPENER_RE.sub(r"\\\1", text)
+
+
 def render_description(desc: DescribeResult, *, has_intent: bool) -> str:
     """Render the structured description as the Markdown comment body."""
     head = render_description_head(desc)
@@ -244,11 +265,11 @@ def render_description_head(desc: DescribeResult) -> str:
     Areas section between the two: a reader meets what the change is, then what
     is risky about it, before the per-file detail.
     """
-    lines = [f"## {desc.title}"]
+    lines = [f"## {prose_text(desc.title)}"]
     if desc.change_type:
-        lines += ["", f"**Change type:** {desc.change_type}"]
+        lines += ["", f"**Change type:** {prose_text(desc.change_type)}"]
     if desc.summary:
-        lines += ["", desc.summary]
+        lines += ["", prose_text(desc.summary)]
     return "\n".join(lines)
 
 
@@ -258,10 +279,13 @@ def render_description_detail(desc: DescribeResult, *, has_intent: bool) -> str:
     if desc.walkthrough:
         lines += ["### Walkthrough", "", "| File | Change |", "|---|---|"]
         for entry in desc.walkthrough:
-            summary = " ".join(entry.summary.split())  # keep the table row on one line
-            lines.append(f"| `{entry.path}` | {summary} |")
+            # A bare pipe in either cell ends the column early and mangles the
+            # rest of the row, so it is escaped along with the block openers.
+            path = entry.path.replace("`", "")
+            summary = prose_text(entry.summary).replace("|", r"\|")
+            lines.append(f"| `{path}` | {summary} |")
     if has_intent and desc.intent_check:
         if lines:
             lines.append("")
-        lines += ["### Does it do what it says?", "", desc.intent_check]
+        lines += ["### Does it do what it says?", "", prose_text(desc.intent_check)]
     return "\n".join(lines)

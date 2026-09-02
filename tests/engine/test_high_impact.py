@@ -336,3 +336,87 @@ class TestRendering:
         )
 
         assert body.index("Security thing") < body.index("Cost thing")
+
+
+class TestFloorCompleteness:
+    """The floor's promise is per FILE, not per area: an area the model
+    mentioned must not swallow the signalled files it never named."""
+
+    def test_a_signalled_file_the_model_did_not_name_is_still_listed(self) -> None:
+        ctx = _CTX.model_copy(update={"changed_files": ["infra/a.tf", "infra/b.tf"]})
+
+        body = build_high_impact(
+            ctx,
+            _CFG,
+            _provider(
+                areas=[
+                    {
+                        "area": "infrastructure",
+                        "title": "One cluster resized",
+                        "files": ["infra/a.tf"],
+                        "why": "",
+                        "check": "",
+                    }
+                ]
+            ),
+        )
+
+        assert "`infra/a.tf`" in body
+        assert "`infra/b.tf`" in body
+        assert "not assessed by the model" in body
+
+    def test_no_floor_line_when_the_model_covered_every_signalled_file(self) -> None:
+        ctx = _CTX.model_copy(update={"changed_files": ["infra/a.tf"]})
+
+        body = build_high_impact(
+            ctx,
+            _CFG,
+            _provider(
+                areas=[
+                    {
+                        "area": "infrastructure",
+                        "title": "Cluster resized",
+                        "files": ["infra/a.tf"],
+                        "why": "",
+                        "check": "",
+                    }
+                ]
+            ),
+        )
+
+        assert "not assessed by the model" not in body
+
+
+class TestAmbiguousPathTokens:
+    """The floor cannot be vetoed by the model, so a substring match becomes a
+    Security call-out on every overview of an ordinary repository."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "AUTHORS.md",
+            "docs/authoring.md",
+            "src/classloader.py",
+            "web/subtitles.ts",
+            "docs/records.md",
+        ],
+    )
+    def test_ordinary_paths_are_not_security_signals(self, path: str) -> None:
+        assert "security" not in path_signals([path])
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "src/auth/session.py",
+            "api/authn.py",
+            "api/authz_policy.py",
+            "src/authentication.py",
+            "src/authorization.py",
+            "config/oauth.py",
+            "infra/tls.tf",
+            "config/openssl.cnf",
+            "api/cors.py",
+        ],
+    )
+    def test_real_security_paths_still_signal(self, path: str) -> None:
+        assert path in path_signals([path]).get("security", [])

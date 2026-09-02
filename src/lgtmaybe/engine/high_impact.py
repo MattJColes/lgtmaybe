@@ -78,9 +78,15 @@ _PATH_RES: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "security": re.compile(
-        r"auth|login|password|passwd|credential|secret|crypto|permission|oauth|saml"
-        r"|firewall|security[_-]?group|\.pem$|cors|csrf|tls|ssl"
-        r"|(?<![a-z0-9])(?:token|session|acl|iam|sso|jwt|rbac)(?![a-z0-9])",
+        # `auth` only where it is the auth* family: bare, or authn/authz/
+        # authentication/authorization. Unbounded it matches AUTHORS.md and
+        # docs/authoring.md, and the floor cannot be vetoed by the model — so a
+        # substring hit becomes a Security call-out on every ordinary overview.
+        r"(?<![a-z0-9])auth(?:n|z|entication|orization|orize|orisation)?(?![a-z0-9])"
+        r"|login|password|passwd|credential|secret|crypto|permission|oauth|saml"
+        r"|firewall|security[_-]?group|\.pem$|csrf|openssl"
+        # `ssl` inside classloader, `tls` inside subtitles, `cors` inside records.
+        r"|(?<![a-z0-9])(?:token|session|acl|iam|sso|jwt|rbac|tls|ssl|cors)(?![a-z0-9])",
         re.IGNORECASE,
     ),
     "data_migration": re.compile(
@@ -248,12 +254,18 @@ def render_high_impact(
     """Render the section from the model's areas, floored by the path signals."""
     changed = set(changed_files)
     reported = _reported_lines(result, changed) if result is not None else []
-    covered = {area.area for area in result.areas} if result is not None else set()
-    floored = [
-        f"- **{AREA_LABELS[area]}** — touched: {_paths(paths, changed)} (not assessed by the model)"
-        for area, paths in signals.items()
-        if area not in covered
-    ]
+    # Covered per PATH, not per area: the floor's promise is about files. An
+    # area-level check let a model that named one of two changed Terraform files
+    # suppress the other entirely — the exact disappearance the floor prevents.
+    covered = _covered_paths(result)
+    floored = []
+    for area, paths in signals.items():
+        missed = [path for path in paths if path not in covered.get(area, set())]
+        if missed:
+            floored.append(
+                f"- **{AREA_LABELS[area]}** — touched: {_paths(missed, changed)} "
+                "(not assessed by the model)"
+            )
 
     lines = [HIGH_IMPACT_HEADING, "", *reported, *floored]
     if result is None:
@@ -263,6 +275,16 @@ def render_high_impact(
     elif result.notes:
         lines += ["", f"_{markdown_text(result.notes)}_"]
     return "\n".join(lines)
+
+
+def _covered_paths(result: HighImpactResult | None) -> dict[str, set[str]]:
+    """Which signalled paths the model actually spoke to, per area."""
+    if result is None:
+        return {}
+    covered: dict[str, set[str]] = {}
+    for area in result.areas:
+        covered.setdefault(area.area, set()).update(area.files)
+    return covered
 
 
 def _reported_lines(result: HighImpactResult, changed: set[str]) -> list[str]:
