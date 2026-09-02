@@ -185,10 +185,15 @@ class TestPostReview:
         respx.route(method="GET", url__startswith=f"{PR_URL}/reviews").mock(
             return_value=httpx.Response(200, json=[])
         )
-        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+        listed = respx.route(
+            method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments"
+        ).mock(
             return_value=httpx.Response(
                 200,
-                json=[{"id": 99, "body": "old summary\n\n<!-- lgtmaybe -->"}],
+                json=[
+                    *[{"id": i, "body": "human comment"} for i in range(49)],
+                    {"id": 99, "body": "old summary\n\n<!-- lgtmaybe -->"},
+                ],
             )
         )
         edit = respx.patch(f"{API}/issues/comments/99").mock(
@@ -202,6 +207,7 @@ class TestPostReview:
 
         assert edit.called, "an existing summary must be edited"
         assert not create.called, "and not duplicated"
+        assert listed.call_count == 1
 
     @respx.mock
     def test_a_finding_already_posted_is_not_posted_twice(self) -> None:
@@ -222,9 +228,13 @@ class TestPostReview:
         respx.route(method="GET", url=f"{PR_URL}/reviews").mock(
             return_value=httpx.Response(200, json=[{"id": 5}])
         )
-        respx.get(f"{PR_URL}/reviews/5/comments").mock(
+        listed = respx.get(f"{PR_URL}/reviews/5/comments").mock(
             return_value=httpx.Response(
-                200, json=[{"body": f"old text\n<!-- lgtmaybe-finding:{already} -->"}]
+                200,
+                json=[
+                    *[{"body": "human comment"} for _ in range(49)],
+                    {"body": f"old text\n<!-- lgtmaybe-finding:{already} -->"},
+                ],
             )
         )
         respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
@@ -238,6 +248,7 @@ class TestPostReview:
         _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
 
         assert not reviews.called, "the only finding was already on the PR"
+        assert listed.call_count == 1
 
     @respx.mock
     def test_dedupe_consumes_each_existing_finding_once(self) -> None:
