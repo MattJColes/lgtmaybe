@@ -1277,7 +1277,7 @@ wheels = [
 
 [[package]]
 name = "lgtmaybe"
-version = "2.6.2"
+version = "2.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "ast-grep-cli" },
