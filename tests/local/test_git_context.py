@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lgtmaybe.local import local_file_reader, local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -448,6 +448,15 @@ def test_default_file_reader_resolves_against_the_repo_root(
     assert read("../outside.py") is None
 
 
+def test_default_repo_root_resolves_from_a_subdirectory(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "pkg").mkdir()
+    monkeypatch.chdir(repo / "pkg")
+
+    assert local_repo_root() == repo
+
+
 def test_explicit_file_reader_root_is_used_verbatim(tmp_path: Path) -> None:
     """An explicit root is a root, not a hint — the eval harness points this at a
     fixture corpus that is not a git repo of its own."""
@@ -461,7 +470,7 @@ def test_explicit_file_reader_root_is_used_verbatim(tmp_path: Path) -> None:
 
 
 def test_repo_name_falls_back_to_the_directory_name_outside_a_repo(tmp_path: Path) -> None:
-    """`_repo_name` reuses `_repo_root`, whose fallback makes it answer for a
+    """`_repo_name` reuses `local_repo_root`, whose fallback makes it answer for a
     directory git knows nothing about instead of raising."""
     from lgtmaybe.local import _repo_name
 

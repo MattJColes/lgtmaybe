@@ -60,7 +60,7 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import local_file_reader, local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -724,9 +724,7 @@ def execute_local_review(
         fetch_file = local_file_reader()
         # And let ast-grep resolve a deferred symbol to its defining file by searching
         # that same worktree — the corpus is already on disk, so no clone is needed.
-        resolve_symbol = (
-            build_symbol_resolver(lambda: Path.cwd()) if cfg.symbol_resolution else None
-        )
+        resolve_symbol = build_symbol_resolver(local_repo_root) if cfg.symbol_resolution else None
         engine, _provider = build_provider_engine(
             cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
         )
