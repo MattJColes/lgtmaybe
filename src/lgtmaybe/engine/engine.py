@@ -934,11 +934,8 @@ class LLMReviewEngine:
                     oversized.append(path)
             file_patches = kept
 
-            # 3. File cap: review only the first N reviewable files, note the rest.
             total_files = len(file_patches)
-            capped_files = total_files > cfg.max_files
-            if capped_files:
-                file_patches = file_patches[: cfg.max_files]
+            capped_files = False
 
         # 3b. Static-analysis grounding (default off): deterministic tool
         #     findings over the reviewed files' head texts, fed to each batch's
@@ -977,6 +974,12 @@ class LLMReviewEngine:
                 file_patches, skipped_by_triage = triage_files(
                     file_patches, sa_hints, cfg, self._provider
                 )
+
+        # 3d. File cap: after triage so it drops the lowest-risk survivors,
+        # rather than whichever paths happened to appear last in the diff.
+        capped_files = len(file_patches) > cfg.max_files
+        if capped_files:
+            file_patches = file_patches[: cfg.max_files]
 
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
