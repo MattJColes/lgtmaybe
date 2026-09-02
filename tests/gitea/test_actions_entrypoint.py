@@ -35,6 +35,7 @@ class TestPRUrlFromEvent:
     ) -> None:
         """Gitea pluralises the segment, which is also how the forge is told apart."""
         monkeypatch.setenv("GITHUB_SERVER_URL", "https://gitea.example.com")
+        monkeypatch.setenv("GITHUB_API_URL", "https://gitea.example.com/api/v1")
         url = pr_url_from_event(EVENT)
 
         assert url == "https://gitea.example.com/team/service/pulls/12"
@@ -43,6 +44,15 @@ class TestPRUrlFromEvent:
         assert located.host == "gitea.example.com"
         assert located.repo == "team/service"
         assert located.number == 12
+
+    def test_github_enterprise_is_rejected_instead_of_misclassified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.example.com")
+        monkeypatch.setenv("GITHUB_API_URL", "https://github.example.com/api/v3")
+
+        with pytest.raises(Exception, match="GitHub Enterprise Server is not supported"):
+            pr_url_from_event(EVENT)
 
     def test_a_trailing_slash_on_the_server_url_does_not_break_the_path(
         self, monkeypatch: pytest.MonkeyPatch
