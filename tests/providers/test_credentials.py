@@ -7,7 +7,6 @@ import pytest
 import lgtmaybe.providers.credentials as credentials
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.credentials import (
-    _default_aws_probe,
     _default_gcp_probe,
     resolve_credentials,
 )
@@ -31,22 +30,9 @@ class TestBedrock:
         )
         assert config.api_key is None
 
-    def test_bedrock_without_ambient_creds_raises_helpful_error(self) -> None:
-        with pytest.raises(ValueError, match="bedrock") as exc_info:
-            resolve_credentials(
-                Provider.bedrock,
-                ambient_probe=_ambient_absent,
-            )
-        # Error must name a concrete remediation
-        assert (
-            "AWS" in str(exc_info.value)
-            or "OIDC" in str(exc_info.value)
-            or "aws" in str(exc_info.value).lower()
-        )
-
-    def test_bedrock_error_message_names_the_provider(self) -> None:
-        with pytest.raises(ValueError, match="bedrock"):
-            resolve_credentials(Provider.bedrock, ambient_probe=_ambient_absent)
+    def test_bedrock_defers_ambient_credentials_to_the_aws_sdk(self) -> None:
+        config = resolve_credentials(Provider.bedrock, ambient_probe=_ambient_absent)
+        assert config.api_key is None
 
     def test_bedrock_threads_api_base_through(self) -> None:
         """A custom endpoint (e.g. a gateway) passes through untouched."""
@@ -316,15 +302,6 @@ _GCP_ENV_VARS = (
     "CLOUDSDK_CONFIG",
 )
 
-_AWS_ENV_VARS = (
-    "AWS_ACCESS_KEY_ID",
-    "AWS_PROFILE",
-    "AWS_ROLE_ARN",
-    "AWS_WEB_IDENTITY_TOKEN_FILE",
-    "AWS_SHARED_CREDENTIALS_FILE",
-    "AWS_CONFIG_FILE",
-)
-
 
 def _clear(monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], home: str) -> None:
     for name in names:
@@ -402,20 +379,3 @@ class TestDefaultGcpProbe:
         monkeypatch.setenv("VERTEXAI_PROJECT", "my-project")
         config = resolve_credentials(Provider.vertex)
         assert config.api_key is None
-
-
-class TestDefaultAwsProbe:
-    """The real ambient-AWS probe must recognise a shared-credentials file (`~/.aws`)."""
-
-    def test_shared_credentials_file_is_detected(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
-        _clear(monkeypatch, _AWS_ENV_VARS, str(tmp_path))
-        creds = tmp_path / "credentials"
-        creds.write_text("[default]\naws_access_key_id = AKIA\n")
-        monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(creds))
-        assert _default_aws_probe() is True
-
-    def test_no_creds_anywhere_is_absent(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-        _clear(monkeypatch, _AWS_ENV_VARS, str(tmp_path))
-        assert _default_aws_probe() is False
