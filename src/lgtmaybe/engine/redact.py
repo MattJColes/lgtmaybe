@@ -34,10 +34,10 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
     # base64url JSON header, so the three-part JWT pattern below never matches a
     # JWE; without this it would egress whole. Listed first so the 5-segment form
     # is consumed before the 3-segment pattern can claim a prefix of it.
-    re.compile(r"eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){4}"),
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){4}"),
     # JSON Web Tokens: header.payload.signature, each base64url. The payload
     # carries claims/PII, so the whole token must go — not just up to a dot.
-    re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
     # npm automation/auth tokens: npm_ followed by 36 base62 chars.
     re.compile(r"npm_[A-Za-z0-9]{36,}"),
     # PyPI API tokens: pypi- followed by a long base64 macaroon.

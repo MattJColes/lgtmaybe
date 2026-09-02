@@ -290,6 +290,16 @@ def test_connection_string_pattern_is_not_quadratic() -> None:
     assert time.perf_counter() - start < 2.0
 
 
+def test_web_token_patterns_are_not_quadratic() -> None:
+    """Repeated token prefixes must not start a full backtracking scan at every offset."""
+    import time
+
+    pathological = "eyJ" * 20_000
+    start = time.perf_counter()
+    redact(pathological)
+    assert time.perf_counter() - start < 2.0
+
+
 def test_redact_memoizes_repeated_text() -> None:
     """The same file head text is redacted at several pipeline stages (hunk
     expansion, reflection grounding, every deferral hop) — repeats must hit a
