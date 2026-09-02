@@ -212,7 +212,7 @@ class TestPostReview:
         assert "Hardcoded password" in payload["body"]
 
     @respx.mock
-    def test_a_left_side_finding_positions_on_the_old_line(self) -> None:
+    def test_a_context_finding_positions_on_both_lines(self) -> None:
         _stub_post_routes()
         created = respx.post(f"{MR_URL}/discussions").mock(
             return_value=httpx.Response(201, json={"id": "abc"})
@@ -227,7 +227,7 @@ class TestPostReview:
 
         position = json.loads(created.calls[0].request.content)["position"]
         assert position["old_line"] == 1
-        assert "new_line" not in position
+        assert position["new_line"] == 1
 
     @respx.mock
     def test_the_summary_note_is_upserted_so_a_rerun_edits_it(self) -> None:

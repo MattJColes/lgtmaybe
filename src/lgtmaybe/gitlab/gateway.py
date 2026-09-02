@@ -45,6 +45,7 @@ from lgtmaybe.core.diff import (
     is_reviewable,
     is_scannable_manifest,
 )
+from lgtmaybe.core.diffparse import walk_diff
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
 from lgtmaybe.core.paginate import paginate_pages
@@ -198,7 +199,7 @@ class GitLabGateway:
             diff = self._fetch_mr_diff()
 
         commentable: CommentableLines = build_commentable_lines(diff or "")
-        inline, demoted, broad = self._partition_findings(findings, commentable)
+        inline, demoted, broad = self._partition_findings(findings, commentable, diff or "")
 
         if inline:
             unmatched = self._existing_finding_keys()
@@ -361,6 +362,7 @@ class GitLabGateway:
         self,
         findings: list[ReviewFinding],
         commentable: CommentableLines,
+        diff: str,
     ) -> tuple[
         list[tuple[dict[str, Any], ReviewFinding]],
         list[ReviewFinding],
@@ -374,6 +376,12 @@ class GitLabGateway:
         demoted when the diff refs are unknown, since a position without them is
         rejected by the API.
         """
+        context_lines: dict[tuple[str, int, str], tuple[int, int]] = {}
+        for path, kind, old_line, new_line, _text in walk_diff(diff):
+            if kind == " ":
+                context_lines[path, old_line, "LEFT"] = old_line, new_line
+                context_lines[path, new_line, "RIGHT"] = old_line, new_line
+
         inline: list[tuple[dict[str, Any], ReviewFinding]] = []
         demoted: list[ReviewFinding] = []
         broad: list[ReviewFinding] = []
@@ -393,8 +401,9 @@ class GitLabGateway:
                 "old_path": self._old_paths.get(f.path, f.path),
                 "new_path": f.path,
             }
-            # RIGHT is a line in the new file, LEFT a line in the old one.
-            if f.side == "LEFT":
+            if context := context_lines.get((f.path, f.line, f.side)):
+                position["old_line"], position["new_line"] = context
+            elif f.side == "LEFT":
                 position["old_line"] = f.line
             else:
                 position["new_line"] = f.line
