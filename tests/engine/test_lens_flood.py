@@ -11,6 +11,7 @@ from lgtmaybe.core.models import (
     ReviewCategory,
     ReviewConfig,
 )
+from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine
 from tests.fakes import FakeProvider
 
@@ -56,6 +57,14 @@ class _FloodingProvider(FakeProvider):
         return ProviderResult(text=_flood(self._count), input_tokens=1, output_tokens=1)
 
 
+class _TruncatedFloodProvider(FakeProvider):
+    def complete(self, messages, model, **opts):  # type: ignore[override]
+        self.calls.append({"messages": messages, "model": model, "opts": opts})
+        if len(self.calls) == 1:
+            raise ProviderTruncated("ceiling", text=_flood(200))
+        return ProviderResult(text="[]", input_tokens=1, output_tokens=1)
+
+
 def _cfg(**overrides: object) -> ReviewConfig:
     defaults: dict[str, object] = {
         "provider": Provider.openai,
@@ -80,6 +89,13 @@ class TestPerLensFindingBound:
     def test_a_flooding_lens_is_bounded_with_a_notice(self) -> None:
         provider = _FloodingProvider(count=200)
         findings, summary = LLMReviewEngine(provider).review(_CTX, _cfg(max_findings_per_lens=25))
+        assert len(findings) == 25
+        assert "security" in summary and "175" in summary
+
+    def test_a_truncated_flood_is_bounded_with_a_notice(self) -> None:
+        findings, summary = LLMReviewEngine(_TruncatedFloodProvider()).review(
+            _CTX, _cfg(max_findings_per_lens=25)
+        )
         assert len(findings) == 25
         assert "security" in summary and "175" in summary
 

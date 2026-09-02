@@ -2131,7 +2131,7 @@ class LLMReviewEngine:
                 # Whatever the model finished before the ceiling cut it off is real,
                 # schema-valid work — kept, exactly as the parse path keeps it, so
                 # the exception path is not the one place a partial answer is binned.
-                completed = _salvage_truncated(exc, lens)
+                completed = self._stamp_and_bound(_salvage_truncated(exc, lens), lens)
                 exhausted = _reasoning_exhausted_reason(exc)
                 if exhausted is not None:
                     # The ceiling went on thinking, not on findings: shrinking the
@@ -2350,7 +2350,7 @@ def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:
         findings = parse_exc.recovered
     if findings:
         _log.info("salvaged findings from truncated response", extra={"lens": lens.id})
-    return _stamp_categories(findings, lens)
+    return findings
 
 
 def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
