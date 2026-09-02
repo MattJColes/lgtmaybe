@@ -138,24 +138,31 @@ def _outside_strings(text: str, start: int = 0) -> Iterator[tuple[int, str]]:
             yield i, ch
 
 
-def _balanced_span(text: str, start: int) -> str | None:
-    """Return the balanced ``{...}`` / ``[...]`` span beginning at *start*.
+def _balanced_spans(text: str) -> Iterator[str]:
+    """Yield balanced container spans in opening order with one text walk."""
+    starts: list[int] = []
+    stacks: dict[str, list[int]] = {opener: [] for opener in _CLOSER}
+    ends: dict[int, int] = {}
+    open_for = {closer: opener for opener, closer in _CLOSER.items()}
+    for i, ch in _outside_strings(text):
+        if ch in stacks:
+            starts.append(i)
+            stacks[ch].append(i)
+        elif opener := open_for.get(ch):
+            if stacks[opener]:
+                ends[stacks[opener].pop()] = i + 1
+    for start in starts:
+        if end := ends.get(start):
+            yield text[start:end]
 
-    Walks forward tracking string state (so quotes, escapes, and brackets inside
-    string values don't affect nesting) and brace/bracket depth, returning the
-    substring once depth returns to zero. ``None`` if the delimiter never closes.
-    """
-    opener = text[start]
-    closer = _CLOSER[opener]
-    depth = 0
-    for i, ch in _outside_strings(text, start):
-        if ch == opener:
-            depth += 1
-        elif ch == closer:
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
+
+def _strip_trailing_commas(text: str) -> str:
+    """Remove trailing commas outside JSON string literals."""
+    outside_commas = {i for i, ch in _outside_strings(text) if ch == ","}
+    return _TRAILING_COMMA_RE.sub(
+        lambda match: match.group(1) if match.start() in outside_commas else match.group(0),
+        text,
+    )
 
 
 def iter_json_values(raw: str) -> Iterator[Any]:
@@ -174,21 +181,26 @@ def iter_json_values(raw: str) -> Iterator[Any]:
     seen: set[str] = set()
 
     def _try(candidate: str) -> Iterator[Any]:
-        repaired = _TRAILING_COMMA_RE.sub(r"\1", candidate)
-        if repaired in seen:
+        if candidate in seen:
             return
-        seen.add(repaired)
+        seen.add(candidate)
         try:
-            yield json.loads(repaired)
+            yield json.loads(candidate)
         except json.JSONDecodeError:
-            return
+            if _TRAILING_COMMA_RE.search(candidate) is None:
+                return
+            repaired = _strip_trailing_commas(candidate)
+            if repaired == candidate or repaired in seen:
+                return
+            seen.add(repaired)
+            try:
+                yield json.loads(repaired)
+            except json.JSONDecodeError:
+                return
 
     yield from _try(text)
-    for i, ch in enumerate(text):
-        if ch in _CLOSER:
-            span = _balanced_span(text, i)
-            if span is not None:
-                yield from _try(span)
+    for span in _balanced_spans(text):
+        yield from _try(span)
 
 
 def _classify(raw: str) -> ParseFailure:
@@ -225,16 +237,12 @@ def _classify(raw: str) -> ParseFailure:
         pass
     else:
         return ParseFailure.not_findings
-    spans = [
-        span
-        for i, ch in enumerate(text)
-        if ch in _CLOSER and (span := _balanced_span(text, i)) is not None and '"' in span
-    ]
+    spans = [span for span in _balanced_spans(text) if '"' in span]
     if not spans:
         return ParseFailure.prose
     for span in spans:
         try:
-            json.loads(_TRAILING_COMMA_RE.sub(r"\1", span))
+            json.loads(_strip_trailing_commas(span))
         except json.JSONDecodeError:
             continue
         # Something decoded, so the syntax was fine and the shape was not — the

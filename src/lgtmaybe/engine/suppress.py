@@ -19,7 +19,9 @@ from __future__ import annotations
 import re
 
 from lgtmaybe.core.findings import finding_fingerprint
-from lgtmaybe.core.models import ReviewCategory, ReviewConfig, ReviewFinding, Severity
+from lgtmaybe.core.models import ReviewConfig, ReviewFinding, Severity
+
+from .labels import is_security_finding
 
 # A `# lgtmaybe: ignore` pragma anywhere in a line (after a `#` comment marker).
 # Case-insensitive so `# LGTMAYBE: IGNORE` works too.
@@ -34,7 +36,7 @@ def _is_protected_security(finding: ReviewFinding) -> bool:
     config ``ignore_fingerprints`` dismissal is a deliberate maintainer decision
     and still applies — this carve-out is for the feedback channel only.
     """
-    return finding.category == ReviewCategory.security.value and finding.severity >= Severity.high
+    return is_security_finding(finding) and finding.severity >= Severity.high
 
 
 def _is_suppressed(

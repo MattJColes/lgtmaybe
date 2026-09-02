@@ -62,9 +62,9 @@ autocrlf before checkout.
 - **Fork safety.** Trigger on `pull_request_target` so the review has secrets,
   but **never check out or execute PR code** — fetch the diff via API only.
   Treat all diff content as untrusted input.
-- **No static cloud keys.** Bedrock uses ambient AWS creds; Vertex uses ambient
-  GCP creds; Azure prefers ambient Entra (Azure AD) creds via GitHub OIDC (a
-  static `AZURE_API_KEY` is accepted but not required). Never accept or require a
+- **No required static cloud keys.** Bedrock uses ambient AWS creds; Vertex uses
+  ambient GCP creds; Azure uses a supplied `AZURE_API_KEY` first and otherwise
+  falls back to ambient Entra (Azure AD) creds via GitHub OIDC. Never require a
   service-account JSON or static AWS key.
 
 ### Forges — which code host the review is posted to
@@ -138,13 +138,14 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
 | zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route. Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
 | bedrock                | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
 | vertex                 | ambient GCP creds (WIF, or local ADC)                            |
-| azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) → else `AZURE_API_KEY` / `--api-key` |
+| azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); `AZURE_API_KEY` / `--api-key` when supplied → else ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) |
 | ollama                 | none — just an `api_base` (localhost, host.docker.internal, tailscale host); fully local, zero cost |
 | openai-compatible      | requires the endpoint (`--api-base` / `OPENAI_COMPATIBLE_API_BASE`); key **optional** — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, else a placeholder for keyless local servers (llama.cpp / LM Studio / vLLM). litellm `openai/` route to a custom base |
 
-Resolver order: chosen provider → try ambient cloud creds if that's its native
-mode → else API key → ollama needs neither → openai-compatible needs an
-`api_base` (key optional, placeholder when absent) → else **fail with a clear
+Resolver order: chosen provider → use its API key when supported and supplied →
+else try ambient cloud creds if that's its native mode → ollama needs neither →
+openai-compatible needs an `api_base` (key optional, placeholder when absent) →
+else **fail with a clear
 "how to auth this provider" message**.
 
 ## Architecture — ports & adapters (hexagonal)
@@ -338,8 +339,8 @@ pattern, event bus, plugin framework.
      four run on **every** provider: worker count decides only whether they
      overlap, never how many there are. **`full`** runs one call per category.
      An explicit `categories` list overrides the grouping. Every (batch, lens) call runs through **one global
-     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
-     cloud, 1 ollama/openai-compatible), then the findings are **merged and
+     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 6
+     for every provider), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
      A soft whole-review deadline (`max_review_seconds`, default 3600s, 0 = off)
      skips still-queued calls once passed — partial results with a notice,

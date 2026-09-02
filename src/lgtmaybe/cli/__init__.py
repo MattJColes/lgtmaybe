@@ -60,7 +60,7 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import local_file_reader, local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -163,17 +163,6 @@ def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewC
     if cfg.incremental is not None:
         return cfg
     return cfg.model_copy(update={"incremental": event_action == "synchronize"})
-
-
-def parse_pr_url(pr_url: str) -> tuple[str, int]:
-    """Parse a pull/merge request URL into ("owner/repo", number).
-
-    Thin wrapper over ``core.forge.parse_pr_url`` for the callers that only want
-    the project path and number. Use the locator directly when the forge or host
-    matters. Raises ValueError with a clear message for anything unparseable.
-    """
-    located = locate_pr(pr_url)
-    return located.repo, located.number
 
 
 # Which forges lgtmaybe can build a gateway for. A forge that parses but is not
@@ -735,9 +724,7 @@ def execute_local_review(
         fetch_file = local_file_reader()
         # And let ast-grep resolve a deferred symbol to its defining file by searching
         # that same worktree — the corpus is already on disk, so no clone is needed.
-        resolve_symbol = (
-            build_symbol_resolver(lambda: Path.cwd()) if cfg.symbol_resolution else None
-        )
+        resolve_symbol = build_symbol_resolver(local_repo_root) if cfg.symbol_resolution else None
         engine, _provider = build_provider_engine(
             cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
         )
@@ -746,6 +733,8 @@ def execute_local_review(
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
+    if fmt == "json" and INCOMPLETE_MARKER in summary:
+        click.echo(summary.replace(INCOMPLETE_MARKER, "").strip(), err=True)
     click.echo(render_findings(findings, summary, fmt=fmt))
     _write_profile_json(runtime)
     if runtime.profile:
@@ -858,6 +847,9 @@ def execute_review(
 
     ctx: PRContext | None = None
     if describe or diagram:
+        want_manifests = getattr(github, "set_scan_manifests", None)
+        if callable(want_manifests):
+            want_manifests(cfg.static_analysis.enabled)
         # A failed prefetch means run_review fetches and surfaces the failure
         # itself. Fetching here lets the review, required diagram, and optional
         # description share one current-head context.
@@ -966,9 +958,9 @@ def _change_url(repo: str, number: int) -> str:
     Gitea Actions reimplements GitHub Actions' env contract — same
     ``GITHUB_EVENT_NAME``, same ``GITHUB_EVENT_PATH``, same ``INPUT_*`` — so the
     entrypoint needs no forge switch of its own. The one variable that does
-    differ is ``GITHUB_SERVER_URL``, which points at the Gitea instance; reading
-    it is the whole difference between reviewing the right PR and posting to
-    github.com. Absent (or github.com), the URL is unchanged from before.
+    differ are ``GITHUB_SERVER_URL`` and ``GITHUB_API_URL``. Together they
+    distinguish Gitea from unsupported GitHub Enterprise Server. Absent (or
+    github.com), the URL is unchanged from before.
 
     The path segment is what ``core.forge`` discriminates on, so it has to match
     the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
@@ -976,6 +968,11 @@ def _change_url(repo: str, number: int) -> str:
     server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
+    if os.environ.get("GITHUB_API_URL", "").rstrip("/").endswith("/api/v3"):
+        raise click.ClickException(
+            "GitHub Enterprise Server is not supported; run lgtmaybe on GitHub.com, "
+            "GitLab, or Gitea."
+        )
     return f"{server}/{repo}/pulls/{number}"
 
 
@@ -1197,7 +1194,6 @@ __all__ = [
     "execute_review",
     "graceful_interrupt",
     "main",
-    "parse_pr_url",
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",

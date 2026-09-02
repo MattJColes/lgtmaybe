@@ -8,7 +8,7 @@ resolution, the litellm wire format, structured-output parsing, and rendering.
 
 The three backends split across exactly two adapters:
 
-  - ollama            → litellm's native ``ollama/`` route (api_base + ``num_ctx``)
+  - ollama            → litellm's native ``ollama_chat/`` route (api_base + ``num_ctx``)
   - llama.cpp / vLLM  → the ``openai-compatible`` route (``openai/`` + custom base)
 
 so running all three covers both code paths plus each server's quirks (vLLM is

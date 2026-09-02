@@ -168,10 +168,7 @@ class _Tree:
         for match in self._root.glob(pattern):
             if not match.is_dir():
                 continue
-            try:
-                found.add(match.relative_to(self._root).as_posix())
-            except ValueError:  # a pattern that climbed out of the workspace
-                continue
+            found.add(match.relative_to(self._root).as_posix())
         return sorted(found)
 
 

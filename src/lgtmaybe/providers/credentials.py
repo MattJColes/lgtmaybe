@@ -45,32 +45,6 @@ _ENV_VAR: dict[Provider, str] = {
 }
 
 
-def _default_aws_probe() -> bool:
-    """Detect ambient AWS credentials.
-
-    Covers the CI/OIDC env vars and exported keys, plus a local shared-config
-    file (`~/.aws/credentials` / `~/.aws/config`, or the path given by
-    ``AWS_SHARED_CREDENTIALS_FILE`` / ``AWS_CONFIG_FILE``) so the documented
-    "credentials via ~/.aws" local flow is recognised even without
-    ``AWS_PROFILE`` exported.
-    """
-
-    if (
-        os.environ.get("AWS_ACCESS_KEY_ID")
-        or os.environ.get("AWS_PROFILE")
-        or os.environ.get("AWS_ROLE_ARN")
-        or os.environ.get("AWS_WEB_IDENTITY_TOKEN_FILE")
-    ):
-        return True
-
-    aws_home = Path.home() / ".aws"
-    candidates = (
-        os.environ.get("AWS_SHARED_CREDENTIALS_FILE") or str(aws_home / "credentials"),
-        os.environ.get("AWS_CONFIG_FILE") or str(aws_home / "config"),
-    )
-    return any(Path(path).is_file() for path in candidates)
-
-
 def _default_gcp_probe() -> bool:
     """Detect ambient GCP credentials.
 
@@ -113,7 +87,7 @@ def _default_azure_token() -> str | None:
     clear error.
     """
     try:
-        from azure.identity import DefaultAzureCredential
+        from azure.identity import CredentialUnavailableError, DefaultAzureCredential
     except ImportError as exc:
         raise ValueError(
             "keyless azure needs the azure-identity package. "
@@ -125,7 +99,7 @@ def _default_azure_token() -> str | None:
         credential = DefaultAzureCredential()
         token: str = credential.get_token(_AZURE_OPENAI_SCOPE).token
         return token
-    except Exception:
+    except CredentialUnavailableError:
         return None
 
 
@@ -143,16 +117,8 @@ def resolve_credentials(
     can be found.
     """
     if provider is Provider.bedrock:
-        probe = ambient_probe if ambient_probe is not None else _default_aws_probe
-        if not probe():
-            raise ValueError(
-                "bedrock requires ambient AWS credentials. "
-                "Configure an OIDC role (AWS_ROLE_ARN + AWS_WEB_IDENTITY_TOKEN_FILE), "
-                "a named profile (AWS_PROFILE), or set AWS_ACCESS_KEY_ID / "
-                "AWS_SECRET_ACCESS_KEY in the environment."
-            )
-        # Ambient creds carry the auth; an explicit base (e.g. a gateway)
-        # still passes through.
+        # The AWS SDK owns this chain: unlike a local probe it can resolve ECS,
+        # EKS Pod Identity and EC2 instance-profile credentials as well as env/files.
         return AuthConfig(api_base=api_base)
 
     if provider is Provider.vertex:

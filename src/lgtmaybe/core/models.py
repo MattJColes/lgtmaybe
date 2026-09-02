@@ -1045,13 +1045,8 @@ class ReviewConfig(_Strict):
     # bound.
     max_findings_per_lens: int = Field(default=50, ge=0)
     # Ceiling on concurrent review calls across the WHOLE fan-out (every
-    # (batch, lens) task shares one pool). None means auto: 6 for hosted cloud
-    # providers (wide enough to overlap the fan-out, narrow enough that one API
-    # key does not rate-limit itself against a per-minute-metered gateway —
-    # raise it if your rate tier is generous), 1 for ollama (a single instance
-    # serves a model serially — concurrent calls just queue and time out), and
-    # 1 for openai-compatible (a llama.cpp/LM Studio single-slot server wants
-    # 1; a vLLM server batches happily — raise it explicitly for those).
+    # (batch, lens) task shares one pool). None means 6 for every provider.
+    # Local throughput is set on the server; use 1 here for a serial local run.
     max_concurrency: int | None = Field(default=None, ge=1)
     # Constrain model output to the findings JSON schema via litellm
     # response_format (provider-native JSON mode). Keeps models from returning

@@ -8,6 +8,8 @@ upserted issue comment; inline comments are positioned by ``new_position`` /
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -81,6 +83,17 @@ class TestGetPRContext:
         assert ctx.description == "This adds the thing."
         assert ctx.commit_messages == ["add a thing"], "only the subject line, not the body"
         assert ctx.head_branch == "feature-branch"
+
+    @respx.mock
+    def test_strips_leading_whitespace_from_commit_subjects(self) -> None:
+        _stub_context_routes()
+        respx.route(method="GET", url__startswith=f"{PR_URL}/commits").mock(
+            return_value=httpx.Response(200, json=[{"commit": {"message": "\nfix things"}}])
+        )
+
+        ctx = _gateway(httpx.Client()).get_pr_context()
+
+        assert ctx.commit_messages == ["fix things"]
 
     @respx.mock
     def test_decodes_base64_file_contents_for_hunk_expansion(self) -> None:
@@ -172,10 +185,15 @@ class TestPostReview:
         respx.route(method="GET", url__startswith=f"{PR_URL}/reviews").mock(
             return_value=httpx.Response(200, json=[])
         )
-        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+        listed = respx.route(
+            method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments"
+        ).mock(
             return_value=httpx.Response(
                 200,
-                json=[{"id": 99, "body": "old summary\n\n<!-- lgtmaybe -->"}],
+                json=[
+                    *[{"id": i, "body": "human comment"} for i in range(49)],
+                    {"id": 99, "body": "old summary\n\n<!-- lgtmaybe -->"},
+                ],
             )
         )
         edit = respx.patch(f"{API}/issues/comments/99").mock(
@@ -189,6 +207,7 @@ class TestPostReview:
 
         assert edit.called, "an existing summary must be edited"
         assert not create.called, "and not duplicated"
+        assert listed.call_count == 1
 
     @respx.mock
     def test_a_finding_already_posted_is_not_posted_twice(self) -> None:
@@ -209,9 +228,13 @@ class TestPostReview:
         respx.route(method="GET", url=f"{PR_URL}/reviews").mock(
             return_value=httpx.Response(200, json=[{"id": 5}])
         )
-        respx.get(f"{PR_URL}/reviews/5/comments").mock(
+        listed = respx.get(f"{PR_URL}/reviews/5/comments").mock(
             return_value=httpx.Response(
-                200, json=[{"body": f"old text\n<!-- lgtmaybe-finding:{already} -->"}]
+                200,
+                json=[
+                    *[{"body": "human comment"} for _ in range(49)],
+                    {"body": f"old text\n<!-- lgtmaybe-finding:{already} -->"},
+                ],
             )
         )
         respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
@@ -225,6 +248,47 @@ class TestPostReview:
         _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
 
         assert not reviews.called, "the only finding was already on the PR"
+        assert listed.call_count == 1
+
+    @respx.mock
+    def test_dedupe_consumes_each_existing_finding_once(self) -> None:
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        already = finding_fingerprint("app.py", "Hardcoded password")
+        respx.get(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json=[{"id": 5}]))
+        respx.get(f"{PR_URL}/reviews/5/comments").mock(
+            return_value=httpx.Response(
+                200, json=[{"body": f"old\n<!-- lgtmaybe-finding:{already} -->"}]
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+        duplicate_diff = DIFF.replace(
+            '+password = "hunter2"', '+password = "hunter2"\n+password = "hunter2"'
+        )
+        findings = [
+            ReviewFinding(
+                path="app.py",
+                line=line,
+                side="RIGHT",
+                severity=Severity.high,
+                title="Hardcoded password",
+                body="Move it to the environment.",
+                anchor='password = "hunter2"',
+                anchored=True,
+            )
+            for line in (2, 3)
+        ]
+
+        _gateway(httpx.Client()).post_review(findings, "2 findings", diff=duplicate_diff)
+
+        assert reviews.call_count == 1
+        assert len(json.loads(reviews.calls[0].request.content)["comments"]) == 1
 
     @respx.mock
     def test_dedupe_reads_every_past_review_not_just_the_first(self) -> None:

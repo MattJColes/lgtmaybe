@@ -25,6 +25,14 @@ _SELF_TRIGGERED_EVENTS = {
 }
 
 
+def test_repository_workflows_pin_external_actions_to_commits() -> None:
+    for workflow in (_REPO_ROOT / ".github" / "workflows").glob("*.yml"):
+        for ref in re.findall(
+            r"^\s*uses:\s+[^./\s]+/[^@\s]+@(\S+)", workflow.read_text(), re.MULTILINE
+        ):
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{workflow.name} uses mutable ref {ref}"
+
+
 def _workflows() -> list[Path]:
     return [_DOGFOOD_WORKFLOW, *sorted(_STARTER_WORKFLOWS.glob("*.yml"))]
 

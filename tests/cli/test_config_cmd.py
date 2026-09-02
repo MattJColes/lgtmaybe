@@ -52,6 +52,12 @@ def test_set_unknown_key_is_refused(cfg_home: Path) -> None:
     assert "unknown config key" in result.output
 
 
+def test_get_unknown_key_is_refused(cfg_home: Path) -> None:
+    result = CliRunner().invoke(main, ["config", "get", "nope"])
+    assert result.exit_code != 0
+    assert "valid keys:" in result.output
+
+
 def test_init_wizard_writes_file(cfg_home: Path) -> None:
     result = CliRunner().invoke(
         main, ["config", "init"], input="ollama\nqwen3:27b\nhttp://localhost:11434\n"

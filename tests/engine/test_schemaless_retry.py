@@ -35,6 +35,7 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
+from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.engine.engine import LLMReviewEngine, ReviewIncompleteError, _response_digest
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
@@ -169,6 +170,20 @@ def test_a_failed_retry_reports_and_stops() -> None:
     # reformat again, or every recovery level doubles the one below it.
     assert len(_lens_calls(provider)) == 2
     assert len(_repair_calls(provider)) == 1
+
+
+def test_a_truncated_retry_keeps_its_completed_findings() -> None:
+    class _TruncatesWithoutSchema(_NeverComplies):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if not _is_repair(messages) and "response_format" not in opts:
+                raise ProviderTruncated("ceiling", text=_FINDINGS_JSON[:-2])
+            return ProviderResult(text="prose", input_tokens=50, output_tokens=20)
+
+    findings, summary = LLMReviewEngine(_TruncatesWithoutSchema()).review(_CTX, _cfg())
+
+    assert [finding.title for finding in findings] == ["SQL injection"]
+    assert "unparseable" in summary
 
 
 def test_the_cheap_repair_runs_first() -> None:

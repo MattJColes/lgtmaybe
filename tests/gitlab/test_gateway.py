@@ -154,6 +154,43 @@ class TestDiscussionFetching:
 
 class TestPostReview:
     @respx.mock
+    def test_renamed_file_uses_its_real_old_path(self) -> None:
+        renamed_diff = DIFF.replace("a/app.py b/app.py", "a/old.py b/app.py").replace(
+            "--- a/app.py", "--- a/old.py"
+        )
+        _stub_context_routes()
+        _stub_post_routes()
+        respx.get(f"{MR_URL}/raw_diffs").mock(return_value=httpx.Response(200, text=renamed_diff))
+        respx.route(method="GET", url__startswith=f"{MR_URL}/diffs").mock(
+            return_value=httpx.Response(200, json=[{"new_path": "app.py", "old_path": "old.py"}])
+        )
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={"id": "abc"})
+        )
+        gateway = _gateway()
+
+        ctx = gateway.get_pr_context()
+        gateway.post_review([FINDING], "1 finding", diff=ctx.diff)
+
+        position = json.loads(created.calls[0].request.content)["position"]
+        assert position["old_path"] == "old.py"
+        assert position["new_path"] == "app.py"
+
+    @respx.mock
+    def test_note_families_share_one_notes_fetch(self) -> None:
+        _stub_post_routes()
+        listed = respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        gateway = _gateway()
+
+        gateway.post_review([], "summary", diff=DIFF)
+        gateway.post_describe_comment("description")
+        gateway.post_diagram_comment("diagram")
+
+        assert listed.call_count == 1
+
+    @respx.mock
     def test_each_finding_becomes_its_own_positioned_discussion(self) -> None:
         """GitLab has no batched review object — a discussion per finding."""
         _stub_post_routes()
@@ -175,7 +212,7 @@ class TestPostReview:
         assert "Hardcoded password" in payload["body"]
 
     @respx.mock
-    def test_a_left_side_finding_positions_on_the_old_line(self) -> None:
+    def test_a_context_finding_positions_on_both_lines(self) -> None:
         _stub_post_routes()
         created = respx.post(f"{MR_URL}/discussions").mock(
             return_value=httpx.Response(201, json={"id": "abc"})
@@ -190,7 +227,7 @@ class TestPostReview:
 
         position = json.loads(created.calls[0].request.content)["position"]
         assert position["old_line"] == 1
-        assert "new_line" not in position
+        assert position["new_line"] == 1
 
     @respx.mock
     def test_the_summary_note_is_upserted_so_a_rerun_edits_it(self) -> None:
@@ -246,6 +283,44 @@ class TestPostReview:
         gateway.post_review([FINDING], "1 finding", diff=DIFF)
 
         assert not created.called
+
+    @respx.mock
+    def test_dedupe_consumes_each_existing_finding_once(self) -> None:
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        already = finding_fingerprint("app.py", "Hardcoded password")
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "notes": [
+                            {
+                                "body": f"old\n<!-- lgtmaybe-finding:{already} -->",
+                                "resolved": False,
+                            }
+                        ]
+                    }
+                ],
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        duplicate_diff = DIFF.replace(
+            '+password = "hunter2"', '+password = "hunter2"\n+password = "hunter2"'
+        )
+        findings = [FINDING, FINDING.model_copy(update={"line": 3})]
+        gateway = _gateway()
+        gateway._diff_refs = MR_DETAIL["diff_refs"]
+
+        gateway.post_review(findings, "2 findings", diff=duplicate_diff)
+
+        assert created.call_count == 1
 
     @respx.mock
     def test_a_resolved_finding_may_be_posted_again(self) -> None:

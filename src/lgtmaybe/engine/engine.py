@@ -934,11 +934,8 @@ class LLMReviewEngine:
                     oversized.append(path)
             file_patches = kept
 
-            # 3. File cap: review only the first N reviewable files, note the rest.
             total_files = len(file_patches)
-            capped_files = total_files > cfg.max_files
-            if capped_files:
-                file_patches = file_patches[: cfg.max_files]
+            capped_files = False
 
         # 3b. Static-analysis grounding (default off): deterministic tool
         #     findings over the reviewed files' head texts, fed to each batch's
@@ -978,6 +975,12 @@ class LLMReviewEngine:
                     file_patches, sa_hints, cfg, self._provider
                 )
 
+        # 3d. File cap: after triage so it drops the lowest-risk survivors,
+        # rather than whichever paths happened to appear last in the diff.
+        capped_files = len(file_patches) > cfg.max_files
+        if capped_files:
+            file_patches = file_patches[: cfg.max_files]
+
         # 4. Pad each hunk with surrounding lines so the model sees the function
         #    and definitions around a change. The amount is budget-scaled and
         #    capped by cfg.context_lines; the pad is asymmetric — the code
@@ -987,7 +990,7 @@ class LLMReviewEngine:
         #    understanding only — inline-comment positions are always built
         #    from the real diff.
         with profiler.stage("expand"):
-            used_tokens = count_tokens(clean_diff)
+            used_tokens = sum(count_tokens(patch) for _, patch in file_patches)
             remaining = max(0, cfg.max_input_tokens - used_tokens)
             ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
             if ctx_lines > 0 and ctx.file_contents:
@@ -1161,7 +1164,12 @@ class LLMReviewEngine:
         #     raise "every review call failed" would lose a genuine finding. The
         #     failure still reaches the summary through the incomplete-results
         #     notice, so nothing is hidden either way.
-        if total_calls > 0 and failed_calls == total_calls and not all_findings:
+        if (
+            total_calls > 0
+            and failed_calls == total_calls
+            and not all_findings
+            and not scan_findings
+        ):
             # The most common error, not the last — see _build_notices.
             detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
             hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
@@ -2123,7 +2131,7 @@ class LLMReviewEngine:
                 # Whatever the model finished before the ceiling cut it off is real,
                 # schema-valid work — kept, exactly as the parse path keeps it, so
                 # the exception path is not the one place a partial answer is binned.
-                completed = _salvage_truncated(exc, lens)
+                completed = self._stamp_and_bound(_salvage_truncated(exc, lens), lens)
                 exhausted = _reasoning_exhausted_reason(exc)
                 if exhausted is not None:
                     # The ceiling went on thinking, not on findings: shrinking the
@@ -2226,6 +2234,7 @@ class LLMReviewEngine:
                         )
                         if retry_error is None:
                             return retried, None
+                        return retried, reason
                 return [], reason
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a
@@ -2245,9 +2254,8 @@ class LLMReviewEngine:
             # is usually a value the user set, not the model's own limit.
             reason = (
                 f"response truncated at the {result.output_tokens}-token `max_tokens` "
-                "ceiling — the batch is re-reviewed in smaller pieces automatically, so a "
-                "lens that keeps doing it is usually generation instability in the model, "
-                f"which a higher ceiling makes more expensive rather than prevents"
+                "ceiling — truncation was detected from the incomplete response body, so no "
+                "automatic split was attempted; raise `max_tokens` if it repeats"
                 f"{recovered_note}"
             )
             _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
@@ -2342,7 +2350,7 @@ def _salvage_truncated(exc: BaseException, lens: _Lens) -> list[ReviewFinding]:
         findings = parse_exc.recovered
     if findings:
         _log.info("salvaged findings from truncated response", extra={"lens": lens.id})
-    return _stamp_categories(findings, lens)
+    return findings
 
 
 def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:

@@ -173,7 +173,7 @@ inputs:
   config_path:
     description: "Path to the .lgtmaybe.yml config file, relative to the repo root."
     required: false
-    default: ".lgtmaybe.yml"
+    default: ""
   image:
     description: "Override the container image (advanced; defaults to the released GHCR image)."
     required: false
@@ -330,7 +330,7 @@ runs:
         # newlines survive because the file holds names, never values.
         # The cloud-auth steps export the AWS_/GOOGLE_/CLOUDSDK_/AZURE_ vars.
         compgen -e \
-          | grep -E '^(GITHUB_TOKEN|GITHUB_EVENT_NAME|GITHUB_EVENT_PATH)$|^(INPUT|AWS|GOOGLE|CLOUDSDK|AZURE)_' \
+          | grep -E '^(GITHUB_TOKEN|GITHUB_EVENT_NAME|GITHUB_EVENT_PATH|GITHUB_SERVER_URL|GITHUB_API_URL)$|^(INPUT|AWS|GOOGLE|CLOUDSDK|AZURE)_' \
           > "${RUNNER_TEMP}/lgtmaybe.env"
         # host-gateway mapping: lets api_base reach a model server on the
         # runner host (ollama / openai-compatible) at host.docker.internal,

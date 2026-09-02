@@ -633,6 +633,34 @@ def test_context_lines_zero_disables_expansion() -> None:
     assert "\n e\n" in sent
 
 
+def test_excluded_files_do_not_consume_context_budget() -> None:
+    kept = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
+    excluded = (
+        "diff --git a/vendor/data.py b/vendor/data.py\n@@ -1,1 +1,1 @@\n+" + "x" * 50_000 + "\n"
+    )
+    ctx = PRContext(
+        diff=kept + excluded,
+        changed_files=["f.py", "vendor/data.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=10,
+        file_contents={"f.py": _FILE_TEXT},
+    )
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        exclude_paths=["vendor/**"],
+        max_input_tokens=10_000,
+        context_lines=1,
+    )
+
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    assert "\n d\n" in _first_user_diff(provider)
+
+
 def test_prompt_injection_in_diff_produces_normal_review() -> None:
     malicious_ctx = PRContext(
         diff=(
@@ -1934,6 +1962,26 @@ def test_exclude_paths_wins_over_include_paths() -> None:
     assert "+y = 2" not in sent
 
 
+def test_file_cap_applies_after_triage_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
+    def rank_tail_first(file_patches, *_args):  # type: ignore[no-untyped-def]
+        return list(reversed(file_patches)), []
+
+    monkeypatch.setattr("lgtmaybe.engine.engine.triage_files", rank_tail_first)
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        triage_model="tiny",
+        max_files=1,
+    )
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "+y = 2" in sent
+    assert "+x = 1" not in sent
+
+
 def test_empty_path_filters_review_everything() -> None:
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
@@ -2102,6 +2150,19 @@ def test_finding_mode_posts_without_the_model_reporting_it(monkeypatch) -> None:
     assert [(f.category, f.line, f.severity) for f in findings] == [
         ("scan:gitleaks", 2, Severity.high)
     ]
+
+
+def test_scan_finding_survives_total_model_failure(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+    )
+    engine = LLMReviewEngine(_TimeoutProvider())
+    cfg = _sa_cfg().model_copy(update={"reflect": False})
+
+    findings, summary = engine.review(_HINT_CTX, cfg)
+
+    assert [finding.category for finding in findings] == ["scan:gitleaks"]
+    assert "review calls failed" in summary
 
 
 def test_finding_mode_output_never_becomes_a_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]

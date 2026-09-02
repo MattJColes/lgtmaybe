@@ -7,11 +7,12 @@ import threading
 
 import httpx
 import respx
+from pytest import MonkeyPatch
 
 from lgtmaybe.core.comment import finding_keys as _finding_keys
 from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
-from lgtmaybe.github import RestGitHubGateway
+from lgtmaybe.github import RestGitHubGateway, rest_gateway
 from lgtmaybe.github.rest_gateway import _RESOLVE_WORKERS
 
 REPO = "owner/repo"
@@ -89,6 +90,31 @@ def test_post_review_creates_review_with_marker_and_batched_comments() -> None:
     assert comments[0]["line"] == 2
     assert comments[0]["side"] == "RIGHT"
     assert "position" not in comments[0]
+
+
+@respx.mock
+def test_initial_review_salvages_a_comment_rejected_by_github() -> None:
+    respx.get(REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    reviews = respx.post(REVIEWS_URL).mock(
+        side_effect=[
+            httpx.Response(422, json={"message": "invalid review comment"}),
+            httpx.Response(200, json={"id": 99}),
+        ]
+    )
+    respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
+    comments = respx.post(REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(422, json={"message": "line is not in the diff"})
+    )
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gateway.mark_reviewed("def")
+
+    gateway.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+
+    assert reviews.call_count == 2
+    retry = json.loads(reviews.calls[1].request.content)
+    assert retry["comments"] == []
+    assert "Import order" in retry["body"]
+    assert comments.call_count == 1
 
 
 @respx.mock
@@ -1104,6 +1130,7 @@ def test_reviews_list_fetched_once_per_run() -> None:
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert len(reviews_calls) == 1, "the unchanged reviews list must not be re-paginated"
+    assert reviews_calls[0].url.params["per_page"] == "100"
 
 
 @respx.mock
@@ -1393,6 +1420,26 @@ def test_open_finding_threads_counts_only_our_unresolved_conversations() -> None
 
 
 @respx.mock
+def test_graphql_write_retries_once_after_github_rate_limit(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(rest_gateway.time, "sleep", sleeps.append)
+    route = respx.route(method="POST", url=GRAPHQL_URL).mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "2"}),
+            _count_threads_page([]),
+        ]
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+    assert gw.count_open_finding_threads() == 0
+    assert route.call_count == 2
+    assert sleeps == [2.0]
+
+
+@respx.mock
 def test_open_finding_thread_count_failure_never_blocks_the_review() -> None:
     """A disclosure nicety must never be the thing that fails a review."""
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=httpx.ConnectError("boom"))
@@ -1442,6 +1489,21 @@ def test_open_finding_threads_follows_pagination() -> None:
 
     assert gw.count_open_finding_threads() == 3  # 2 on page one, 1 on page two
     assert seen_cursors == [None, "page-2"], "the endCursor was not carried into page two"
+
+
+@respx.mock
+def test_review_thread_walk_is_shared_across_consumers() -> None:
+    ours = f"x <!-- lgtmaybe-finding:{finding_fingerprint('a.py', 'Old')} -->"
+    thread = {**_open_thread(ours), "id": "T1", "path": "a.py", "isOutdated": False}
+    graphql = respx.route(method="POST", url=GRAPHQL_URL).mock(
+        return_value=_count_threads_page([thread])
+    )
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+    assert gw.count_open_finding_threads() == 1
+    assert len(gw.list_active_findings()) == 1
+
+    assert graphql.call_count == 1
 
 
 # ---------------------------------------------------------------------------

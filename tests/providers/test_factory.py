@@ -39,7 +39,7 @@ class TestLiteLLMModelString:
         )
 
     def test_ollama_prefix(self) -> None:
-        assert litellm_model_string(Provider.ollama, "llama2") == "ollama/llama2"
+        assert litellm_model_string(Provider.ollama, "llama2") == "ollama_chat/llama2"
 
     def test_azure_prefix(self) -> None:
         assert litellm_model_string(Provider.azure, "gpt-4o") == "azure/gpt-4o"
@@ -143,7 +143,7 @@ class TestBuildProvider:
 
     def test_build_provider_resolves_fallback_model(self) -> None:
         provider = build_provider(Provider.ollama, "qwen3:27b", fallback_model="llama2")
-        assert provider.fallback_model == "ollama/llama2"
+        assert provider.fallback_model == "ollama_chat/llama2"
 
     def test_build_provider_threads_timeout_into_default_opts(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", timeout=600)
@@ -251,7 +251,7 @@ class TestDefaultTimeout:
         with patch("litellm.completion", return_value=response) as mock_completion:
             provider.complete([{"role": "user", "content": "hi"}], model="qwen3:27b")
 
-        assert mock_completion.call_args.kwargs["model"] == "ollama/qwen3:27b"
+        assert mock_completion.call_args.kwargs["model"] == "ollama_chat/qwen3:27b"
 
 
 class TestParamSupport:

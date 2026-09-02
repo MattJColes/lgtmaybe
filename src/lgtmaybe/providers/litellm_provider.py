@@ -687,6 +687,7 @@ class LiteLLMProvider:
         # enforcement preserved by another mechanism, that one is enforcement
         # given up. Keyed by MODEL for the same reason.
         self._schema_tool: set[str] = set()
+        self._rejected_params: dict[str, set[str]] = {}
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
         # pure function of it. Instance-scoped (not lru_cache) so tests that
@@ -905,7 +906,8 @@ class LiteLLMProvider:
         # a cache hit — too late for a fan-out that dispatches its lenses at
         # once. OpenAI uses the same field as a hint for prefix-sharing
         # requests, so one param serves both; drop_params strips it elsewhere.
-        merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
+        if "prompt_cache_key" not in merged:
+            merged["prompt_cache_key"] = _prefix_cache_key(messages)
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
         # An explicit override outranks both: it is the caller naming a model
@@ -988,6 +990,8 @@ class LiteLLMProvider:
         def _call() -> ProviderResult:
             # A prior call already settled how this model takes (or refuses) the
             # schema, so don't pay the wasted round-trip again — apply it up front.
+            for param in self._rejected_params.get(model, ()):
+                kwargs.pop(param, None)
             if model in self._schema_dropped:
                 self._strip_schema(kwargs)
             elif model in self._schema_tool:
@@ -1089,6 +1093,7 @@ class LiteLLMProvider:
             # The param is accepted, only our value isn't — let the model use its
             # own default.
             kwargs.pop("temperature")
+            self._rejected_params.setdefault(model, set()).add("temperature")
             return True
         # Before the schema branch, deliberately: a refused reasoning effort
         # arrives naming `output_config.effort`, which the schema matcher below
@@ -1096,6 +1101,7 @@ class LiteLLMProvider:
         # fails identically, with structured output disabled as collateral.
         if "reasoning_effort" in kwargs and _rejects_reasoning_effort(exc):
             kwargs.pop("reasoning_effort")
+            self._rejected_params.setdefault(model, set()).add("reasoning_effort")
             return True
         # Both branches remember the outcome for this model's later calls, not
         # just this one: the lens fan-out sends the same shape N times, and

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from tenacity import Retrying, retry_if_result, stop_after_attempt
 
 from lgtmaybe.core.comment import (
     FINDING_MARKER,
@@ -57,9 +59,14 @@ _TIMEOUT = httpx.Timeout(60.0)
 _MARKER = "<!-- lgtmaybe -->"
 _GRAPHQL_URL = "https://api.github.com/graphql"
 
-# The PR's review-thread connection, paginated. Every caller wants the same
-# connection and differs only in the ``nodes{…}`` selection it asks for, which
-# is what the ``%s`` takes — see ``_walk_review_threads``.
+# The superset of review-thread fields used across one run. Fetching them once
+# is cheaper than paging the same connection separately for each consumer.
+_THREAD_NODE_FIELDS = """
+id isResolved isOutdated path
+comments(first:1){ nodes{ body databaseId
+  reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } }
+} }
+"""
 _THREADS_QUERY = """
         query($owner:String!,$name:String!,$number:Int!,$cursor:String){
           repository(owner:$owner,name:$name){
@@ -185,6 +192,7 @@ class RestGitHubGateway:
         self._incremental_paths: set[str] | None = None
         self._validated_fixed_thread_ids: set[str] | None = None
         self._active_findings: list[ActiveFinding] | None = None
+        self._review_threads_cache: list[dict[str, Any]] | None = None
         # Whether to fetch dependency manifests for the vulnerability scanner
         # (set via set_scan_manifests). Off by default so the overwhelming
         # majority of runs — static analysis is opt-in — pay no extra API calls.
@@ -203,6 +211,33 @@ class RestGitHubGateway:
         # one-shot, since None is a valid "no marker review" result.
         self._existing_review_entry: tuple[int, str] | None = None
         self._existing_review_done = False
+
+    def _post(self, url: str, **kwargs: Any) -> httpx.Response:
+        """POST once more when GitHub explicitly tells us how long to wait."""
+
+        def retry_after(response: httpx.Response) -> bool:
+            return response.status_code in {403, 429} and "Retry-After" in response.headers
+
+        def wait(retry_state: Any) -> float:
+            response = retry_state.outcome.result()
+            try:
+                return max(0.0, float(response.headers["Retry-After"]))
+            except (KeyError, ValueError):
+                return 0.0
+
+        def final_response(retry_state: Any) -> httpx.Response:
+            response = retry_state.outcome.result()
+            assert isinstance(response, httpx.Response)
+            return response
+
+        retrying = Retrying(
+            stop=stop_after_attempt(2),
+            retry=retry_if_result(retry_after),
+            wait=wait,
+            sleep=time.sleep,
+            retry_error_callback=final_response,
+        )
+        return retrying(self._client.post, url, **kwargs)
 
     # ------------------------------------------------------------------
     # GitHubGateway implementation
@@ -308,15 +343,16 @@ class RestGitHubGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
         comments = [comment for comment, _finding in inline]
 
-        body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
-        if self._reviewed_sha:
-            # Record how far this review got, so the next run can review only
-            # the commits pushed since (incremental review). Only stamped when
-            # the orchestrator marked this run as a completed review — a
-            # failure notice must not move the incremental watermark (and by
-            # replacing the body it clears any stale stamp, so the next run
-            # safely falls back to a full review).
-            body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+        def build_body(demoted_findings: list[ReviewFinding]) -> str:
+            body = (
+                f"{summary}{render_demoted(demoted_findings)}"
+                f"{render_broad(broad)}\n\n{self._marker}"
+            )
+            if self._reviewed_sha:
+                body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+            return body
+
+        body = build_body(demoted)
         existing = self._find_existing_review_entry()
 
         reviews_url = f"{self._pr_api}/reviews"
@@ -344,12 +380,7 @@ class RestGitHubGateway:
                 inline, self._reviewed_sha or self._anchor_sha()
             )
             if rejected:
-                body = (
-                    f"{summary}{render_demoted([*demoted, *rejected])}"
-                    f"{render_broad(broad)}\n\n{self._marker}"
-                )
-                if self._reviewed_sha:
-                    body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+                body = build_body([*demoted, *rejected])
                 resp = self._client.put(
                     update_url,
                     headers=self._json_headers,
@@ -368,12 +399,24 @@ class RestGitHubGateway:
                 "event": "COMMENT",
                 "comments": comments,
             }
-            resp = self._client.post(
+            resp = self._post(
                 reviews_url,
                 headers=self._json_headers,
                 json=payload,
                 timeout=_TIMEOUT,
             )
+            if resp.status_code == 422 and inline:
+                rejected = self._post_new_inline_comments(
+                    inline, self._reviewed_sha or self._anchor_sha()
+                )
+                payload["body"] = build_body([*demoted, *rejected])
+                payload["comments"] = []
+                resp = self._post(
+                    reviews_url,
+                    headers=self._json_headers,
+                    json=payload,
+                    timeout=_TIMEOUT,
+                )
             resp.raise_for_status()
 
     def get_file_contents(self, path: str) -> str | None:
@@ -438,7 +481,7 @@ class RestGitHubGateway:
         port, which only models reviews.
         """
         url = f"{self._issue_api}/comments"
-        resp = self._client.post(
+        resp = self._post(
             url,
             headers=self._json_headers,
             json={"body": body},
@@ -489,7 +532,7 @@ class RestGitHubGateway:
                     )
                     patched.raise_for_status()
                     return
-        created = self._client.post(
+        created = self._post(
             url,
             headers=self._json_headers,
             json={"body": stamped},
@@ -529,7 +572,7 @@ class RestGitHubGateway:
                 resp.raise_for_status()
             to_add = sorted(set(labels) - current)
             if to_add:
-                resp = self._client.post(
+                resp = self._post(
                     f"{base}/labels",
                     headers=self._json_headers,
                     json={"labels": to_add},
@@ -548,7 +591,7 @@ class RestGitHubGateway:
         never sets approval state). Adapter-only, beyond the frozen port.
         """
         url = f"{self._api}/check-runs"
-        resp = self._client.post(
+        resp = self._post(
             url,
             headers=self._json_headers,
             json={
@@ -629,9 +672,13 @@ class RestGitHubGateway:
                     extra={"status": status},
                 )
                 return None
-            if any(
-                len(commit.get("parents") or []) > 1 for commit in comparison.get("commits") or []
-            ):
+            commits = comparison.get("commits") or []
+            if comparison.get("total_commits") != len(commits):
+                _log.info(
+                    "incremental compare commit list is incomplete — falling back to full review"
+                )
+                return None
+            if any(len(commit.get("parents") or []) > 1 for commit in commits):
                 _log.info("incremental compare contains a merge — falling back to full review")
                 return None
             resp = self._client.get(
@@ -775,7 +822,7 @@ class RestGitHubGateway:
                 )
                 rejected.append(finding)
                 continue
-            resp = self._client.post(
+            resp = self._post(
                 url,
                 headers=self._json_headers,
                 json={**comment, "commit_id": head_sha},
@@ -857,23 +904,30 @@ class RestGitHubGateway:
     def _walk_review_threads(self, node_fields: str) -> Iterator[dict[str, Any]]:
         """Yield every review thread on the PR, following GraphQL pagination.
 
-        *node_fields* is the ``nodes{…}`` selection the caller needs; everything
-        else — the query skeleton, the four variables, the connection unwrap and
-        the cursor advance — is the same for every caller. Read-only.
+        ``node_fields`` remains for call-site readability; the first walk fetches
+        the union of every caller's fields and later walks reuse it.
         """
+        del node_fields
+        if self._review_threads_cache is not None:
+            yield from self._review_threads_cache
+            return
+
         owner, _, name = self._repo.partition("/")
         cursor: str | None = None
+        threads: list[dict[str, Any]] = []
         while True:
             data = self._graphql(
-                _THREADS_QUERY % node_fields,
+                _THREADS_QUERY % _THREAD_NODE_FIELDS,
                 {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
             )
             conn = data["repository"]["pullRequest"]["reviewThreads"]
-            yield from conn["nodes"]
+            threads.extend(conn["nodes"])
             page = conn.get("pageInfo", {})
             if not page.get("hasNextPage"):
-                return
+                break
             cursor = page.get("endCursor")
+        self._review_threads_cache = threads
+        yield from threads
 
     def _get_json(self, url: str) -> Any:
         resp = self._client.get(
@@ -959,7 +1013,7 @@ class RestGitHubGateway:
         """
         if self._existing_review_done:
             return self._existing_review_entry
-        for resp in self._paginate(f"{self._pr_api}/reviews"):
+        for resp in self._paginate(f"{self._pr_api}/reviews?per_page=100"):
             for review in resp.json():
                 body: str = review.get("body", "") or ""
                 if self._marker in body:
@@ -1264,7 +1318,7 @@ class RestGitHubGateway:
 
     def _graphql(self, query: str, variables: dict[str, Any]) -> Any:
         """Run one GraphQL operation and return its ``data`` (raising on errors)."""
-        resp = self._client.post(
+        resp = self._post(
             _GRAPHQL_URL,
             headers=self._json_headers,
             json={"query": query, "variables": variables},
