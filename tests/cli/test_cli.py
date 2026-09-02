@@ -346,6 +346,35 @@ class TestModuleEntrypoint:
 class TestGitHubReviewErrorSurfacing:
     """The GitHub path (execute_review, used by the action) posts a failure notice."""
 
+    def test_prefetch_enables_dependency_manifests(self, monkeypatch):
+        import lgtmaybe.cli as cli_module
+
+        class ManifestAwareGitHub(FakeGitHub):
+            def __init__(self):
+                super().__init__()
+                self.scan_manifests = False
+
+            def set_scan_manifests(self, enabled):
+                self.scan_manifests = enabled
+
+            def get_pr_context(self):
+                assert self.scan_manifests
+                return super().get_pr_context()
+
+        github = ManifestAwareGitHub()
+        provider = FakeProvider()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(provider), provider),
+        )
+
+        cli_module.execute_review(
+            _default_cfg(static_analysis={"enabled": True}),
+            RuntimeOptions(pr_url="x"),
+            describe=True,
+        )
+
     def test_engine_failure_posts_comment_and_raises(self, monkeypatch):
         import click
 
