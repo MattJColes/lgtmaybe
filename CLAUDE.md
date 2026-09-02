@@ -338,8 +338,8 @@ pattern, event bus, plugin framework.
      four run on **every** provider: worker count decides only whether they
      overlap, never how many there are. **`full`** runs one call per category.
      An explicit `categories` list overrides the grouping. Every (batch, lens) call runs through **one global
-     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
-     cloud, 1 ollama/openai-compatible), then the findings are **merged and
+     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 6
+     for every provider), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
      A soft whole-review deadline (`max_review_seconds`, default 3600s, 0 = off)
      skips still-queued calls once passed — partial results with a notice,
