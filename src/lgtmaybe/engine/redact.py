@@ -96,8 +96,9 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
 def _replace_value(m: re.Match[str]) -> str:
     """Replace only the captured ``secret`` group, preserving the key name / scheme."""
     full = m.group(0)
-    value = m.group("secret")
-    return full.replace(value, REDACTED_PLACEHOLDER, 1)
+    start = m.start("secret") - m.start()
+    end = m.end("secret") - m.start()
+    return full[:start] + REDACTED_PLACEHOLDER + full[end:]
 
 
 @lru_cache(maxsize=128)
