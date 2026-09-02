@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType
+
 import pytest
 
 import lgtmaybe.providers.credentials as credentials
@@ -21,6 +24,20 @@ def _ambient_present() -> bool:
 
 def _ambient_absent() -> bool:
     return False
+
+
+def _stub_azure_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    credential: type[object],
+    unavailable_error: type[Exception],
+) -> None:
+    azure = ModuleType("azure")
+    identity = ModuleType("azure.identity")
+    identity.CredentialUnavailableError = unavailable_error  # type: ignore[attr-defined]
+    identity.DefaultAzureCredential = credential  # type: ignore[attr-defined]
+    azure.identity = identity  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "azure", azure)
+    monkeypatch.setitem(sys.modules, "azure.identity", identity)
 
 
 class TestBedrock:
@@ -181,6 +198,38 @@ class TestZai:
 
 
 class TestAzure:
+    def test_default_token_returns_none_when_azure_credentials_are_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class CredentialUnavailableError(Exception):
+            pass
+
+        class UnavailableCredential:
+            def get_token(self, scope: str) -> None:
+                raise CredentialUnavailableError("no ambient credential")
+
+        _stub_azure_identity(monkeypatch, UnavailableCredential, CredentialUnavailableError)
+
+        assert credentials._default_azure_token() is None
+
+    def test_default_token_preserves_azure_authentication_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class CredentialUnavailableError(Exception):
+            pass
+
+        class ClientAuthenticationError(Exception):
+            pass
+
+        class MisconfiguredCredential:
+            def get_token(self, scope: str) -> None:
+                raise ClientAuthenticationError("AADSTS700213: no matching federated identity")
+
+        _stub_azure_identity(monkeypatch, MisconfiguredCredential, CredentialUnavailableError)
+
+        with pytest.raises(ClientAuthenticationError, match="AADSTS700213"):
+            credentials._default_azure_token()
+
     def test_azure_with_api_key_and_base_resolves(self) -> None:
         config = resolve_credentials(
             Provider.azure,
