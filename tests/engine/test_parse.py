@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 
 import pytest
 
 from lgtmaybe.core.models import ReviewFinding, Severity
-from lgtmaybe.engine.parse import ParseError, ParseFailure, parse_findings
+from lgtmaybe.engine import parse
+from lgtmaybe.engine.parse import ParseError, ParseFailure, iter_json_values, parse_findings
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -241,6 +243,22 @@ def test_bracket_bearing_prose_is_still_prose() -> None:
     with pytest.raises(ParseError) as exc_info:
         parse_findings("I reviewed 3 files [a.py, b.py, c.py] and found nothing.")
     assert exc_info.value.shape is ParseFailure.prose
+
+
+def test_unclosed_brackets_are_scanned_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = "prose " + "[" * 5_000
+    visited = 0
+    outside_strings = parse._outside_strings
+
+    def counting_outside_strings(text: str, start: int = 0) -> Iterator[tuple[int, str]]:
+        nonlocal visited
+        for item in outside_strings(text, start):
+            visited += 1
+            yield item
+
+    monkeypatch.setattr(parse, "_outside_strings", counting_outside_strings)
+    assert list(iter_json_values(raw)) == []
+    assert visited == len(raw)
 
 
 def test_broken_json_is_reported_as_malformed() -> None:

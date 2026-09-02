@@ -138,24 +138,22 @@ def _outside_strings(text: str, start: int = 0) -> Iterator[tuple[int, str]]:
             yield i, ch
 
 
-def _balanced_span(text: str, start: int) -> str | None:
-    """Return the balanced ``{...}`` / ``[...]`` span beginning at *start*.
-
-    Walks forward tracking string state (so quotes, escapes, and brackets inside
-    string values don't affect nesting) and brace/bracket depth, returning the
-    substring once depth returns to zero. ``None`` if the delimiter never closes.
-    """
-    opener = text[start]
-    closer = _CLOSER[opener]
-    depth = 0
-    for i, ch in _outside_strings(text, start):
-        if ch == opener:
-            depth += 1
-        elif ch == closer:
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-    return None
+def _balanced_spans(text: str) -> Iterator[str]:
+    """Yield balanced container spans in opening order with one text walk."""
+    starts: list[int] = []
+    stacks: dict[str, list[int]] = {opener: [] for opener in _CLOSER}
+    ends: dict[int, int] = {}
+    open_for = {closer: opener for opener, closer in _CLOSER.items()}
+    for i, ch in _outside_strings(text):
+        if ch in stacks:
+            starts.append(i)
+            stacks[ch].append(i)
+        elif opener := open_for.get(ch):
+            if stacks[opener]:
+                ends[stacks[opener].pop()] = i + 1
+    for start in starts:
+        if end := ends.get(start):
+            yield text[start:end]
 
 
 def iter_json_values(raw: str) -> Iterator[Any]:
@@ -184,11 +182,8 @@ def iter_json_values(raw: str) -> Iterator[Any]:
             return
 
     yield from _try(text)
-    for i, ch in enumerate(text):
-        if ch in _CLOSER:
-            span = _balanced_span(text, i)
-            if span is not None:
-                yield from _try(span)
+    for span in _balanced_spans(text):
+        yield from _try(span)
 
 
 def _classify(raw: str) -> ParseFailure:
@@ -225,11 +220,7 @@ def _classify(raw: str) -> ParseFailure:
         pass
     else:
         return ParseFailure.not_findings
-    spans = [
-        span
-        for i, ch in enumerate(text)
-        if ch in _CLOSER and (span := _balanced_span(text, i)) is not None and '"' in span
-    ]
+    spans = [span for span in _balanced_spans(text) if '"' in span]
     if not spans:
         return ParseFailure.prose
     for span in spans:
