@@ -47,7 +47,7 @@ _MIN_SPRAWL_DIRS = 4
 _MIN_SPRAWL_FILES = 10
 
 
-def _is_security(finding: ReviewFinding) -> bool:
+def is_security_finding(finding: ReviewFinding) -> bool:
     """Whether *finding* is a security finding, from the lens or from a scanner.
 
     A secret scanner's finding is the most label-worthy thing this reviewer
@@ -61,7 +61,7 @@ def _is_security(finding: ReviewFinding) -> bool:
 def compute_labels(findings: list[ReviewFinding], ctx: PRContext) -> list[str]:
     """The labels this review's outcome earns for the PR."""
     labels = [f"{EFFORT_PREFIX}{_effort_score(ctx.diff)}"]
-    if any(_is_security(f) and f.severity >= Severity.high for f in findings):
+    if any(is_security_finding(f) and f.severity >= Severity.high for f in findings):
         labels.append(SECURITY_LABEL)
     if _sprawls(ctx.changed_files):
         labels.append(SPLITTING_LABEL)
