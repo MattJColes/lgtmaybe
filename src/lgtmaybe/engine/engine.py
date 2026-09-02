@@ -2226,6 +2226,7 @@ class LLMReviewEngine:
                         )
                         if retry_error is None:
                             return retried, None
+                        return retried, reason
                 return [], reason
             # A response cut off at the output ceiling is not a badly-behaved
             # model, and saying "unparseable" sends the reader looking for a
