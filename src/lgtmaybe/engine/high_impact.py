@@ -276,9 +276,13 @@ def _reported_lines(result: HighImpactResult, changed: set[str]) -> list[str]:
         parts = [f"- **{AREA_LABELS[area.area]}**"]
         if area.severity != "high":
             parts.append(f" · {area.severity}")
-        parts.append(f" — {markdown_text(area.title)}")
+        # The headline is a fragment, so it needs a stop before the prose that
+        # follows it — otherwise the two run together into one long sentence.
+        parts.append(f" — {markdown_text(area.title).rstrip('.')}")
         if paths:
             parts.append(f" ({_paths(paths, changed)})")
+        if area.why or area.check:
+            parts.append(".")
         if area.why:
             parts.append(f" {markdown_text(area.why)}")
         if area.check:

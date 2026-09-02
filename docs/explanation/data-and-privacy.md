@@ -46,10 +46,13 @@ Nothing else is sent. lgtmaybe does not send:
 - Committer identity or email addresses
 - Any other data from the repository's git history
 
-The optional **description** (`/describe`, `auto_describe`) and **change
-diagram** (`/diagram`, `auto_diagram`) features send exactly the same inputs —
-the redacted diff and, when present, the redacted stated intent. They add no new
-data flows; they only ask the model for a different output. The diagram comment
+The **change overview** (`/diagram`, `auto_diagram`) makes up to three calls —
+description, High Impact Areas, diagrams — and each sends exactly the same
+inputs as a review call: the redacted diff and, when present, the redacted
+stated intent. The High Impact Areas call additionally sends the **paths** of
+changed files matching its risk patterns, which are already part of the diff it
+sends. No new data flows; the calls only ask the model for a different output.
+The standalone `/describe` comment sends the same inputs again. The diagram comment
 does include an "Open full screen" [mermaid.live](https://mermaid.live) link per
 diagram, whose URL fragment embeds that diagram's source — but that source is the
 already-public, post-redaction comment body, the fragment is decoded
