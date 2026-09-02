@@ -584,13 +584,12 @@ class TestConfigPathOption:
         assert result.exit_code != 0
         assert f"Error: could not parse YAML file {cfg_file}" in result.output
 
-    def test_missing_default_config_is_fine(self, monkeypatch):
+    def test_missing_default_config_is_fine(self, monkeypatch, tmp_path):
         """No --config given and no ./.lgtmaybe.yml present still reviews."""
         _patch_local(monkeypatch)
+        monkeypatch.chdir(tmp_path)
 
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
+        result = CliRunner().invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
 
         assert result.exit_code == 0, result.output
 
