@@ -466,7 +466,16 @@ def _run_tool(
     report = report_dir / f"{tool.value}.json"
 
     if tool is StaticAnalysisTool.ruff:
-        argv = [binary, "check", "--output-format", "json", "--exit-zero", "--no-cache", "."]
+        argv = [
+            binary,
+            "check",
+            "--isolated",
+            "--output-format",
+            "json",
+            "--exit-zero",
+            "--no-cache",
+            ".",
+        ]
     elif tool is StaticAnalysisTool.bandit:
         argv = [binary, "-f", "json", "-q", "-r", "."]
     elif tool is StaticAnalysisTool.mypy:
@@ -477,8 +486,12 @@ def _run_tool(
         # it chasing sibling modules that were never fetched. What survives is
         # exactly what it can prove from a single file's own text — which is where
         # the unguarded-Optional bugs live.
+        mypy_config = report_dir / "mypy.ini"
+        mypy_config.write_text("[mypy]\n", encoding="utf-8")
         argv = [
             binary,
+            "--config-file",
+            str(mypy_config),
             "--output",
             "json",
             "--ignore-missing-imports",
