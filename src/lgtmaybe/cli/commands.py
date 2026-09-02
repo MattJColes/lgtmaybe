@@ -621,7 +621,10 @@ def config_show() -> None:
 @click.argument("key")
 def config_get(key: str) -> None:
     """Print one config value."""
-    value = store.get_key(key)
+    try:
+        value = store.get_key(key)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     if value is not None:
         click.echo(str(value))
 
