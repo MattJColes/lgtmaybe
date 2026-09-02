@@ -512,6 +512,16 @@ class TestConfigPathOption:
         assert result.exit_code != 0
         assert "mapping" in result.output
 
+    def test_malformed_config_errors_without_a_traceback(self, monkeypatch, tmp_path):
+        cfg_file = tmp_path / "broken.yml"
+        cfg_file.write_text("provider: [unclosed")
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(main, ["review", "--config", str(cfg_file)])
+
+        assert result.exit_code != 0
+        assert f"Error: could not parse YAML file {cfg_file}" in result.output
+
     def test_missing_default_config_is_fine(self, monkeypatch):
         """No --config given and no ./.lgtmaybe.yml present still reviews."""
         _patch_local(monkeypatch)
