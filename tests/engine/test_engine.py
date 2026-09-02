@@ -1962,6 +1962,26 @@ def test_exclude_paths_wins_over_include_paths() -> None:
     assert "+y = 2" not in sent
 
 
+def test_file_cap_applies_after_triage_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
+    def rank_tail_first(file_patches, *_args):  # type: ignore[no-untyped-def]
+        return list(reversed(file_patches)), []
+
+    monkeypatch.setattr("lgtmaybe.engine.engine.triage_files", rank_tail_first)
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        triage_model="tiny",
+        max_files=1,
+    )
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    sent = _first_user_diff(provider)
+    assert "+y = 2" in sent
+    assert "+x = 1" not in sent
+
+
 def test_empty_path_filters_review_everything() -> None:
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
