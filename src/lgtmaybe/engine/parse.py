@@ -156,6 +156,15 @@ def _balanced_spans(text: str) -> Iterator[str]:
             yield text[start:end]
 
 
+def _strip_trailing_commas(text: str) -> str:
+    """Remove trailing commas outside JSON string literals."""
+    outside_commas = {i for i, ch in _outside_strings(text) if ch == ","}
+    return _TRAILING_COMMA_RE.sub(
+        lambda match: match.group(1) if match.start() in outside_commas else match.group(0),
+        text,
+    )
+
+
 def iter_json_values(raw: str) -> Iterator[Any]:
     """Yield every JSON value recoverable from *raw*, most-likely first.
 
@@ -172,14 +181,22 @@ def iter_json_values(raw: str) -> Iterator[Any]:
     seen: set[str] = set()
 
     def _try(candidate: str) -> Iterator[Any]:
-        repaired = _TRAILING_COMMA_RE.sub(r"\1", candidate)
-        if repaired in seen:
+        if candidate in seen:
             return
-        seen.add(repaired)
+        seen.add(candidate)
         try:
-            yield json.loads(repaired)
+            yield json.loads(candidate)
         except json.JSONDecodeError:
-            return
+            if _TRAILING_COMMA_RE.search(candidate) is None:
+                return
+            repaired = _strip_trailing_commas(candidate)
+            if repaired == candidate or repaired in seen:
+                return
+            seen.add(repaired)
+            try:
+                yield json.loads(repaired)
+            except json.JSONDecodeError:
+                return
 
     yield from _try(text)
     for span in _balanced_spans(text):
@@ -225,7 +242,7 @@ def _classify(raw: str) -> ParseFailure:
         return ParseFailure.prose
     for span in spans:
         try:
-            json.loads(_TRAILING_COMMA_RE.sub(r"\1", span))
+            json.loads(_strip_trailing_commas(span))
         except json.JSONDecodeError:
             continue
         # Something decoded, so the syntax was fine and the shape was not — the
