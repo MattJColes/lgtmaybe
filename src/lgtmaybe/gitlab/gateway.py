@@ -201,10 +201,16 @@ class GitLabGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
 
         if inline:
-            already = self._existing_finding_keys()
-            inline = [
-                (position, f) for position, f in inline if not (current_finding_keys([f]) & already)
-            ]
+            unmatched = self._existing_finding_keys()
+            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
+            for position, finding in inline:
+                keys = current_finding_keys([finding])
+                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
+                if already is None:
+                    new_inline.append((position, finding))
+                else:
+                    unmatched.pop(already)
+            inline = new_inline
         for position, finding in inline:
             if not self._post_discussion(position, render_inline_body(finding)):
                 demoted.append(finding)
@@ -437,16 +443,17 @@ class GitLabGateway:
             except Exception as exc:  # noqa: BLE001 — resolving never fails a review
                 _log.warning("resolving thread %s failed: %s", thread_id, exc)
 
-    def _existing_finding_keys(self) -> set[str]:
-        """Every hidden finding id already posted on this MR by us."""
-        keys: set[str] = set()
+    def _existing_finding_keys(self) -> list[set[str]]:
+        """Hidden finding ids grouped by posted comment for one-for-one dedupe."""
+        keys: list[set[str]] = []
         try:
             for discussion in self._discussions():
                 notes = discussion.get("notes") or []
                 if notes and notes[0].get("resolved"):
                     continue
                 for note in notes:
-                    keys |= finding_keys(note.get("body") or "")
+                    if found := finding_keys(note.get("body") or ""):
+                        keys.append(found)
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing discussions failed: %s", exc)
         return keys

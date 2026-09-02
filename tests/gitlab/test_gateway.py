@@ -285,6 +285,44 @@ class TestPostReview:
         assert not created.called
 
     @respx.mock
+    def test_dedupe_consumes_each_existing_finding_once(self) -> None:
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        already = finding_fingerprint("app.py", "Hardcoded password")
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "notes": [
+                            {
+                                "body": f"old\n<!-- lgtmaybe-finding:{already} -->",
+                                "resolved": False,
+                            }
+                        ]
+                    }
+                ],
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        duplicate_diff = DIFF.replace(
+            '+password = "hunter2"', '+password = "hunter2"\n+password = "hunter2"'
+        )
+        findings = [FINDING, FINDING.model_copy(update={"line": 3})]
+        gateway = _gateway()
+        gateway._diff_refs = MR_DETAIL["diff_refs"]
+
+        gateway.post_review(findings, "2 findings", diff=duplicate_diff)
+
+        assert created.call_count == 1
+
+    @respx.mock
     def test_a_resolved_finding_may_be_posted_again(self) -> None:
         from lgtmaybe.core.findings import finding_fingerprint
 
