@@ -57,9 +57,14 @@ _TIMEOUT = httpx.Timeout(60.0)
 _MARKER = "<!-- lgtmaybe -->"
 _GRAPHQL_URL = "https://api.github.com/graphql"
 
-# The PR's review-thread connection, paginated. Every caller wants the same
-# connection and differs only in the ``nodes{…}`` selection it asks for, which
-# is what the ``%s`` takes — see ``_walk_review_threads``.
+# The superset of review-thread fields used across one run. Fetching them once
+# is cheaper than paging the same connection separately for each consumer.
+_THREAD_NODE_FIELDS = """
+id isResolved isOutdated path
+comments(first:1){ nodes{ body databaseId
+  reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } }
+} }
+"""
 _THREADS_QUERY = """
         query($owner:String!,$name:String!,$number:Int!,$cursor:String){
           repository(owner:$owner,name:$name){
@@ -185,6 +190,7 @@ class RestGitHubGateway:
         self._incremental_paths: set[str] | None = None
         self._validated_fixed_thread_ids: set[str] | None = None
         self._active_findings: list[ActiveFinding] | None = None
+        self._review_threads_cache: list[dict[str, Any]] | None = None
         # Whether to fetch dependency manifests for the vulnerability scanner
         # (set via set_scan_manifests). Off by default so the overwhelming
         # majority of runs — static analysis is opt-in — pay no extra API calls.
@@ -853,23 +859,30 @@ class RestGitHubGateway:
     def _walk_review_threads(self, node_fields: str) -> Iterator[dict[str, Any]]:
         """Yield every review thread on the PR, following GraphQL pagination.
 
-        *node_fields* is the ``nodes{…}`` selection the caller needs; everything
-        else — the query skeleton, the four variables, the connection unwrap and
-        the cursor advance — is the same for every caller. Read-only.
+        ``node_fields`` remains for call-site readability; the first walk fetches
+        the union of every caller's fields and later walks reuse it.
         """
+        del node_fields
+        if self._review_threads_cache is not None:
+            yield from self._review_threads_cache
+            return
+
         owner, _, name = self._repo.partition("/")
         cursor: str | None = None
+        threads: list[dict[str, Any]] = []
         while True:
             data = self._graphql(
-                _THREADS_QUERY % node_fields,
+                _THREADS_QUERY % _THREAD_NODE_FIELDS,
                 {"owner": owner, "name": name, "number": self._pr_number, "cursor": cursor},
             )
             conn = data["repository"]["pullRequest"]["reviewThreads"]
-            yield from conn["nodes"]
+            threads.extend(conn["nodes"])
             page = conn.get("pageInfo", {})
             if not page.get("hasNextPage"):
-                return
+                break
             cursor = page.get("endCursor")
+        self._review_threads_cache = threads
+        yield from threads
 
     def _get_json(self, url: str) -> Any:
         resp = self._client.get(
