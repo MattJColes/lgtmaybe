@@ -231,4 +231,6 @@ def test_docker_run_forwards_the_step_environment_by_env_file() -> None:
 
     assert "compgen -e" in run
     assert '--env-file "${RUNNER_TEMP}/lgtmaybe.env"' in run
+    assert "GITHUB_SERVER_URL" in run
+    assert "GITHUB_API_URL" in run
     assert not re.search(r"-e\s+INPUT_[A-Z0-9_]+", run)

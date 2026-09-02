@@ -955,9 +955,9 @@ def _change_url(repo: str, number: int) -> str:
     Gitea Actions reimplements GitHub Actions' env contract — same
     ``GITHUB_EVENT_NAME``, same ``GITHUB_EVENT_PATH``, same ``INPUT_*`` — so the
     entrypoint needs no forge switch of its own. The one variable that does
-    differ is ``GITHUB_SERVER_URL``, which points at the Gitea instance; reading
-    it is the whole difference between reviewing the right PR and posting to
-    github.com. Absent (or github.com), the URL is unchanged from before.
+    differ are ``GITHUB_SERVER_URL`` and ``GITHUB_API_URL``. Together they
+    distinguish Gitea from unsupported GitHub Enterprise Server. Absent (or
+    github.com), the URL is unchanged from before.
 
     The path segment is what ``core.forge`` discriminates on, so it has to match
     the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
@@ -965,6 +965,11 @@ def _change_url(repo: str, number: int) -> str:
     server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
+    if os.environ.get("GITHUB_API_URL", "").rstrip("/").endswith("/api/v3"):
+        raise click.ClickException(
+            "GitHub Enterprise Server is not supported; run lgtmaybe on GitHub.com, "
+            "GitLab, or Gitea."
+        )
     return f"{server}/{repo}/pulls/{number}"
 
 
