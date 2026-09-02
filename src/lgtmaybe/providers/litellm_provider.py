@@ -905,7 +905,8 @@ class LiteLLMProvider:
         # a cache hit — too late for a fan-out that dispatches its lenses at
         # once. OpenAI uses the same field as a hint for prefix-sharing
         # requests, so one param serves both; drop_params strips it elsewhere.
-        merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
+        if "prompt_cache_key" not in merged:
+            merged["prompt_cache_key"] = _prefix_cache_key(messages)
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
         # An explicit override outranks both: it is the caller naming a model
