@@ -32,6 +32,15 @@ def test_downvoted_fingerprint_fed_in_is_suppressed() -> None:
     assert apply_suppressions([f], cfg, {}) == []
 
 
+def test_downvote_cannot_suppress_high_severity_scanner_finding() -> None:
+    finding = _finding(title="Leaked secret").model_copy(
+        update={"severity": Severity.high, "category": "scan:gitleaks"}
+    )
+    downvoted = frozenset({finding_fingerprint(finding.path, finding.title)})
+
+    assert apply_suppressions([finding], _CFG, {}, downvoted) == [finding]
+
+
 def test_inline_pragma_on_the_line_suppresses() -> None:
     f = _finding(line=2)
     contents = {"a.py": "import os\nx = eval(data)  # lgtmaybe: ignore\ny = 1\n"}
