@@ -631,9 +631,13 @@ class RestGitHubGateway:
                     extra={"status": status},
                 )
                 return None
-            if any(
-                len(commit.get("parents") or []) > 1 for commit in comparison.get("commits") or []
-            ):
+            commits = comparison.get("commits") or []
+            if comparison.get("total_commits") != len(commits):
+                _log.info(
+                    "incremental compare commit list is incomplete — falling back to full review"
+                )
+                return None
+            if any(len(commit.get("parents") or []) > 1 for commit in commits):
                 _log.info("incremental compare contains a merge — falling back to full review")
                 return None
             resp = self._client.get(
