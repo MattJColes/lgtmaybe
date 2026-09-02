@@ -1164,7 +1164,12 @@ class LLMReviewEngine:
         #     raise "every review call failed" would lose a genuine finding. The
         #     failure still reaches the summary through the incomplete-results
         #     notice, so nothing is hidden either way.
-        if total_calls > 0 and failed_calls == total_calls and not all_findings:
+        if (
+            total_calls > 0
+            and failed_calls == total_calls
+            and not all_findings
+            and not scan_findings
+        ):
             # The most common error, not the last — see _build_notices.
             detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
             hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""

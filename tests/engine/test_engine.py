@@ -2152,6 +2152,19 @@ def test_finding_mode_posts_without_the_model_reporting_it(monkeypatch) -> None:
     ]
 
 
+def test_scan_finding_survives_total_model_failure(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+    )
+    engine = LLMReviewEngine(_TimeoutProvider())
+    cfg = _sa_cfg().model_copy(update={"reflect": False})
+
+    findings, summary = engine.review(_HINT_CTX, cfg)
+
+    assert [finding.category for finding in findings] == ["scan:gitleaks"]
+    assert "review calls failed" in summary
+
+
 def test_finding_mode_output_never_becomes_a_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """A tool posts or it grounds — never both, or the model re-reports it."""
     monkeypatch.setattr(
