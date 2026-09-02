@@ -72,7 +72,6 @@ RUN set -eux; \
 
 WORKDIR /app
 COPY pyproject.toml README.md uv.lock ./
-COPY src ./src
 
 # Bundle every keyless-cloud extra so Bedrock (boto3), Vertex (google-auth) and
 # Azure (azure-identity via OIDC) all work out of the box — litellm doesn't pull
@@ -82,6 +81,10 @@ COPY src ./src
 # on PATH, every tool is "skipped silently", and the `static_analysis` input is a
 # no-op on the Action — the feature was container-invisible until this extra was
 # added here.
+RUN uv sync --no-dev --frozen --extra azure --extra bedrock --extra vertex \
+    --extra static-analysis --no-install-project
+
+COPY src ./src
 RUN uv sync --no-dev --frozen --extra azure --extra bedrock --extra vertex \
     --extra static-analysis
 
