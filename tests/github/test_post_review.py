@@ -1104,6 +1104,7 @@ def test_reviews_list_fetched_once_per_run() -> None:
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert len(reviews_calls) == 1, "the unchanged reviews list must not be re-paginated"
+    assert reviews_calls[0].url.params["per_page"] == "100"
 
 
 @respx.mock
