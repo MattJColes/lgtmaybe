@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from tenacity import Retrying, retry_if_result, stop_after_attempt
 
 from lgtmaybe.core.comment import (
     FINDING_MARKER,
@@ -210,6 +212,33 @@ class RestGitHubGateway:
         self._existing_review_entry: tuple[int, str] | None = None
         self._existing_review_done = False
 
+    def _post(self, url: str, **kwargs: Any) -> httpx.Response:
+        """POST once more when GitHub explicitly tells us how long to wait."""
+
+        def retry_after(response: httpx.Response) -> bool:
+            return response.status_code in {403, 429} and "Retry-After" in response.headers
+
+        def wait(retry_state: Any) -> float:
+            response = retry_state.outcome.result()
+            try:
+                return max(0.0, float(response.headers["Retry-After"]))
+            except (KeyError, ValueError):
+                return 0.0
+
+        def final_response(retry_state: Any) -> httpx.Response:
+            response = retry_state.outcome.result()
+            assert isinstance(response, httpx.Response)
+            return response
+
+        retrying = Retrying(
+            stop=stop_after_attempt(2),
+            retry=retry_if_result(retry_after),
+            wait=wait,
+            sleep=time.sleep,
+            retry_error_callback=final_response,
+        )
+        return retrying(self._client.post, url, **kwargs)
+
     # ------------------------------------------------------------------
     # GitHubGateway implementation
     # ------------------------------------------------------------------
@@ -370,7 +399,7 @@ class RestGitHubGateway:
                 "event": "COMMENT",
                 "comments": comments,
             }
-            resp = self._client.post(
+            resp = self._post(
                 reviews_url,
                 headers=self._json_headers,
                 json=payload,
@@ -440,7 +469,7 @@ class RestGitHubGateway:
         port, which only models reviews.
         """
         url = f"{self._issue_api}/comments"
-        resp = self._client.post(
+        resp = self._post(
             url,
             headers=self._json_headers,
             json={"body": body},
@@ -491,7 +520,7 @@ class RestGitHubGateway:
                     )
                     patched.raise_for_status()
                     return
-        created = self._client.post(
+        created = self._post(
             url,
             headers=self._json_headers,
             json={"body": stamped},
@@ -531,7 +560,7 @@ class RestGitHubGateway:
                 resp.raise_for_status()
             to_add = sorted(set(labels) - current)
             if to_add:
-                resp = self._client.post(
+                resp = self._post(
                     f"{base}/labels",
                     headers=self._json_headers,
                     json={"labels": to_add},
@@ -550,7 +579,7 @@ class RestGitHubGateway:
         never sets approval state). Adapter-only, beyond the frozen port.
         """
         url = f"{self._api}/check-runs"
-        resp = self._client.post(
+        resp = self._post(
             url,
             headers=self._json_headers,
             json={
@@ -777,7 +806,7 @@ class RestGitHubGateway:
                 )
                 rejected.append(finding)
                 continue
-            resp = self._client.post(
+            resp = self._post(
                 url,
                 headers=self._json_headers,
                 json={**comment, "commit_id": head_sha},
@@ -1273,7 +1302,7 @@ class RestGitHubGateway:
 
     def _graphql(self, query: str, variables: dict[str, Any]) -> Any:
         """Run one GraphQL operation and return its ``data`` (raising on errors)."""
-        resp = self._client.post(
+        resp = self._post(
             _GRAPHQL_URL,
             headers=self._json_headers,
             json={"query": query, "variables": variables},

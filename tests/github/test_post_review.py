@@ -7,11 +7,12 @@ import threading
 
 import httpx
 import respx
+from pytest import MonkeyPatch
 
 from lgtmaybe.core.comment import finding_keys as _finding_keys
 from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
-from lgtmaybe.github import RestGitHubGateway
+from lgtmaybe.github import RestGitHubGateway, rest_gateway
 from lgtmaybe.github.rest_gateway import _RESOLVE_WORKERS
 
 REPO = "owner/repo"
@@ -1391,6 +1392,26 @@ def test_open_finding_threads_counts_only_our_unresolved_conversations() -> None
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     assert gw.count_open_finding_threads() == 2
+
+
+@respx.mock
+def test_graphql_write_retries_once_after_github_rate_limit(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(rest_gateway.time, "sleep", sleeps.append)
+    route = respx.route(method="POST", url=GRAPHQL_URL).mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "2"}),
+            _count_threads_page([]),
+        ]
+    )
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+    assert gw.count_open_finding_threads() == 0
+    assert route.call_count == 2
+    assert sleeps == [2.0]
 
 
 @respx.mock
