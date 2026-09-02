@@ -87,7 +87,7 @@ def _default_azure_token() -> str | None:
     clear error.
     """
     try:
-        from azure.identity import DefaultAzureCredential
+        from azure.identity import CredentialUnavailableError, DefaultAzureCredential
     except ImportError as exc:
         raise ValueError(
             "keyless azure needs the azure-identity package. "
@@ -99,7 +99,7 @@ def _default_azure_token() -> str | None:
         credential = DefaultAzureCredential()
         token: str = credential.get_token(_AZURE_OPENAI_SCOPE).token
         return token
-    except Exception:
+    except CredentialUnavailableError:
         return None
 
 
