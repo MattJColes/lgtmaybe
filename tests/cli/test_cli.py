@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from lgtmaybe.cli import RuntimeOptions, build_review_context, main, run_review
 from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
+from lgtmaybe.engine import INCOMPLETE_MARKER
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 
 
@@ -17,6 +18,12 @@ class _BoomEngine:
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         raise RuntimeError("provider exploded")
+
+
+class _IncompleteEngine(FakeEngine):
+    def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
+        findings, _summary = super().review(ctx, cfg)
+        return findings, f"results may be incomplete\n{INCOMPLETE_MARKER}"
 
 
 def _default_cfg(**overrides: object) -> ReviewConfig:
@@ -125,6 +132,17 @@ class TestReviewCommandLocal:
         parsed = json.loads(json_line)
         assert isinstance(parsed, list)
         assert parsed[0]["severity"] == "low"
+
+    def test_json_flag_reports_incomplete_review_on_stderr(self, monkeypatch):
+        _patch_local(monkeypatch, _IncompleteEngine(FakeProvider()))
+
+        result = CliRunner().invoke(
+            main, ["review", "--provider", "ollama", "--model", "llama3", "--json"]
+        )
+
+        assert result.exit_code == 0, result.output
+        json.loads(result.stdout)
+        assert "results may be incomplete" in result.stderr
 
     def test_format_agent_outputs_correction_instructions(self, monkeypatch):
         """`review --format agent` emits directive instructions for an AI to apply."""
