@@ -12,7 +12,11 @@ _ROOT = Path(__file__).parent.parent
 def test_main_ci_runs_only_minimum_python_on_linux_and_windows() -> None:
     _text, workflow = read_workflow("ci.yml")
     job = workflow["jobs"]["test"]
-    setup_uv = next(step for step in job["steps"] if step.get("uses") == "astral-sh/setup-uv@v7")
+    setup_uv = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
+    )
 
     assert job["strategy"]["matrix"] == {
         "os": ["ubuntu-latest", "windows-latest"],
