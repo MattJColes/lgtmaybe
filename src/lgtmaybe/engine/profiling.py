@@ -64,6 +64,12 @@ class CallRecord:
     # adapter does not report one — silence, never the configured model, because
     # a run's whole point in reading this is to see where the two DIFFER.
     model: str | None = None
+    # The adapter's estimate of what this call cost (its pricing map's price for
+    # this model's usage), or None when it declines to price — a model the map
+    # doesn't know, or a genuinely free one. Never 0: a reported zero would
+    # assert "this call was free", which the map is nowhere near reliable enough
+    # to claim.
+    cost_usd: float | None = None
 
     @property
     def reasoning_share(self) -> float | None:
@@ -115,6 +121,7 @@ class Profiler:
         findings: int | None = None,
         error: str | None = None,
         model: str | None = None,
+        cost_usd: float | None = None,
     ) -> None:
         """Record one provider call and log it as a structured line."""
         record = CallRecord(
@@ -131,6 +138,7 @@ class Profiler:
             findings=findings,
             error=error,
             model=model,
+            cost_usd=cost_usd,
         )
         with self._lock:
             self.calls.append(record)
@@ -148,6 +156,8 @@ class Profiler:
             del extra["error"]
         if model is None:
             del extra["model"]
+        if cost_usd is None:
+            del extra["cost_usd"]
         _log.info("provider call", extra=extra)
 
     def record_result(
@@ -175,6 +185,7 @@ class Profiler:
             findings=findings,
             error=error,
             model=result.model,
+            cost_usd=result.cost_usd,
         )
 
     def record_returned_findings(self, count: int) -> None:
@@ -212,6 +223,11 @@ class Profiler:
             # way to it — so the share it reports is 100% by construction, which
             # is exactly the diagnosis.
             output_ceiling=getattr(exc, "output_tokens", None),
+            # A truncation's price rides the exception exactly like its token
+            # counts: the costliest call of a run usually fails, and a cost
+            # line that can't see it understates precisely the run worth
+            # reading about.
+            cost_usd=getattr(exc, "cost_usd", None),
             # A truncation is billed as ordinary input; the route reports no cache
             # breakdown alongside the ceiling error, so claiming one would be
             # invention rather than accounting.
@@ -269,10 +285,12 @@ class Profiler:
             calls, stages = list(self.calls), list(self.stages)
             returned = self.returned_findings
             wall = time.perf_counter() - self._started
+        prices = [c.cost_usd for c in calls if c.cost_usd is not None]
         return {
             "schema_version": _PROFILE_SCHEMA_VERSION,
             "wall_seconds": wall,
             "total_tokens": sum(c.input_tokens + c.output_tokens for c in calls),
+            "total_cost_usd": round(sum(prices), 6) if prices else None,
             "returned_findings": returned,
             "stages": [{"name": s.name, "elapsed": s.elapsed} for s in stages],
             "calls": [{**asdict(call), "reasoning_share": call.reasoning_share} for call in calls],
@@ -418,20 +436,39 @@ class Profiler:
         )
 
     def render_total(self) -> str:
-        """One line: what this run spent, formatted for a human.
+        """What this run spent, formatted for a human.
 
         Shared by the ``--profile`` table and the local CLI's footer so the two
-        can never drift into quoting different numbers for the same run.
+        can never drift into quoting different numbers for the same run. One
+        line when litellm's map priced nothing, two when it priced something:
+        the token meter, then the price those tokens worked out to.
+
+        The partial-pricing count is stated because a total over SOME calls is
+        a floor, not a sum — the same honesty rule the reasoning line applies
+        when only some calls report a breakdown.
         """
         with self._lock:
             calls = list(self.calls)
         billed_in = sum(c.input_tokens for c in calls)
         billed_out = sum(c.output_tokens for c in calls)
         plural = "" if len(calls) == 1 else "s"
-        return (
+        lines = [
             f"tokens: {billed_in + billed_out:,} billable "
             f"({billed_in:,} in / {billed_out:,} out) across {len(calls)} call{plural}"
-        )
+        ]
+        prices = [c.cost_usd for c in calls if c.cost_usd is not None]
+        if prices:
+            count = (
+                f"; {len(prices)} of {len(calls)} calls priced" if len(prices) != len(calls) else ""
+            )
+            total = sum(prices)
+            rendered = f"${total:.4f}"
+            if rendered == "$0.0000":
+                # A real price that rounds away would render as "free" — the
+                # exact misreading the silence-not-zero rule exists to prevent.
+                rendered = f"${total:.6f}"
+            lines.append(f"estimated cost: {rendered} (litellm pricing map{count})")
+        return "\n".join(lines)
 
 
 # The process-wide collection point. One review runs per CLI invocation, so a
