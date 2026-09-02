@@ -7,7 +7,7 @@ litellm model-string conventions:
   bedrock    → bedrock/<model>
   vertex     → vertex_ai/<model>
   azure      → azure/<model>   (+ api_base = resource endpoint)
-  ollama     → ollama/<model>  (+ api_base)
+  ollama     → ollama_chat/<model>  (+ api_base)
   openai-compatible → openai/<model>  (+ api_base = custom endpoint)
   zai        → zai/<model>     (GLM / Zhipu AI; optional api_base override)
 """
@@ -36,7 +36,7 @@ _PREFIXES: dict[Provider, str] = {
     Provider.bedrock: "bedrock",
     Provider.vertex: "vertex_ai",
     Provider.azure: "azure",
-    Provider.ollama: "ollama",
+    Provider.ollama: "ollama_chat",
     # OpenAI-compatible servers (DeepSeek, llama.cpp, LM Studio, vLLM) ride the
     # openai route; the custom endpoint comes through api_base.
     Provider.openai_compatible: "openai",

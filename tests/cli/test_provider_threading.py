@@ -108,7 +108,7 @@ CASES = [
         "azure/gpt-4o",
         True,
     ),
-    ("ollama", "ollama", "llama3", [], {}, "ollama/llama3", False),
+    ("ollama", "ollama", "llama3", [], {}, "ollama_chat/llama3", False),
     (
         "openai-compatible",
         "openai-compatible",
