@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -278,3 +279,67 @@ class TestCostEstimation:
                 )
 
         assert excinfo.value.cost_usd == pytest.approx(0.005)
+
+    def test_an_empty_response_retry_keeps_the_first_call_s_price(self) -> None:
+        """The empty body was generated and billed before the re-send; a call
+        recovered here must report the whole bill, not just the retry's part."""
+        empty = _fake_response(content="", prompt_tokens=1000, completion_tokens=200)
+        good = _fake_response(
+            content=json.dumps({"findings": []}), prompt_tokens=1000, completion_tokens=200
+        )
+        with (
+            patch("litellm.completion", side_effect=[empty, good]),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                side_effect=[(0.003, 0.002), (0.001, 0.001)],
+            ),
+        ):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "anthropic/claude-sonnet-4-5"
+            )
+
+        assert result.cost_usd == pytest.approx(0.007)
+
+    def test_a_fallback_run_carries_the_primary_s_tab(self) -> None:
+        """The primary's requests were issued and billed before the rescue, so
+        the rescue's result reports the whole bill — the cost rule mirrors the
+        attempts rule it sits beside."""
+        truncated = _fake_response(
+            prompt_tokens=1000, completion_tokens=4096, finish_reason="length"
+        )
+        good = _fake_response(prompt_tokens=1000, completion_tokens=200)
+        with (
+            patch("litellm.completion", side_effect=[truncated, good]),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                side_effect=[(0.050, 0.000), (0.001, 0.001)],
+            ),
+        ):
+            provider = LiteLLMProvider(fallback_model="openai/gpt-4o")
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "anthropic/claude-sonnet-4-5"
+            )
+
+        assert result.cost_usd == pytest.approx(0.052)
+        assert result.attempts >= 2
+
+    def test_a_double_failure_merges_both_costs(self) -> None:
+        """Primary truncated, fallback truncated: the error the profiler reads
+        must charge for both, or the costliest run shape underreports itself."""
+        first = _fake_response(prompt_tokens=1000, completion_tokens=4096, finish_reason="length")
+        second = _fake_response(prompt_tokens=1000, completion_tokens=4096, finish_reason="length")
+        with (
+            patch("litellm.completion", side_effect=[first, second]),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                side_effect=[(0.050, 0.000), (0.010, 0.010)],
+            ),
+        ):
+            provider = LiteLLMProvider(fallback_model="openai/gpt-4o")
+            with pytest.raises(ProviderTruncated) as excinfo:
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "anthropic/claude-sonnet-4-5"
+                )
+
+        assert excinfo.value.cost_usd == pytest.approx(0.070)

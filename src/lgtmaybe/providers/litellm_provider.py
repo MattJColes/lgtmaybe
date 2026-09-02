@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import suppress
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -166,6 +167,11 @@ _EXPIRED_CREDENTIAL_MARKERS = (
     "expired credential",
     "the credential provided is expired",
 )
+
+
+# The attribute a failed call's price rides home on — the same channel as the
+# attempt count (models._ATTEMPTS_ATTR), read back by profiling.record_error.
+_COST_ATTR = "cost_usd"
 
 
 def _mentions(exc: BaseException, markers: tuple[str, ...]) -> bool:
@@ -937,14 +943,36 @@ class LiteLLMProvider:
                 raise
             # The primary's requests were still issued and still billed, so they
             # stay in the total: a fallback rescue that reported one request would
-            # hide the fact that the primary burned its budget first.
+            # hide the fact that the primary burned its budget first. The price
+            # travels with the attempt count — where the primary ran up a tab
+            # (a truncation priced before it raised) the rescue reports the whole
+            # bill, not just its own part of it.
             spent = attempts_of(exc)
+            spent_cost = getattr(exc, "cost_usd", None)
             try:
                 result = self._complete_with_retry(messages, self.fallback_model, **merged)
             except BaseException as fallback_exc:
                 stamp_attempts(fallback_exc, spent + attempts_of(fallback_exc))
+                fallback_cost = getattr(fallback_exc, "cost_usd", None)
+                if spent_cost is not None or fallback_cost is not None:
+                    # setattr via a named constant, not an attribute assignment:
+                    # the target is typed BaseException (the same reason
+                    # models.stamp_attempts sets rather than assigns).
+                    with suppress(Exception):
+                        setattr(
+                            fallback_exc,
+                            _COST_ATTR,
+                            sum(cost for cost in (spent_cost, fallback_cost) if cost is not None),
+                        )
                 raise
-            return result.model_copy(update={"attempts": result.attempts + spent})
+            merged_cost: float | None = None
+            if spent_cost is not None or result.cost_usd is not None:
+                merged_cost = sum(
+                    cost for cost in (spent_cost, result.cost_usd) if cost is not None
+                )
+            return result.model_copy(
+                update={"attempts": result.attempts + spent, "cost_usd": merged_cost}
+            )
 
     def _complete_with_retry(
         self, messages: list[Message], model: str, **kwargs: Any
@@ -1023,12 +1051,21 @@ class LiteLLMProvider:
             # here, so a model answering empty twice reports empty rather than
             # spending a third call.
             if not result.text.strip():
+                # The empty body was still generated and still billed, so its
+                # price rides onto the re-sent attempt's — a call recovered
+                # here must not report only the recovery's cost (the same
+                # rule `attempts` follows for the extra request).
+                spent_cost = result.cost_usd
                 if kwargs.get("response_format") is not None or _is_schema_tool(
                     kwargs.get("tools")
                 ):
                     self._disable_response_format(model, "empty-response")
                     self._strip_schema(kwargs)
                 result = self._raw_completion(model, messages, kwargs, count_request)
+                if spent_cost is not None:
+                    result = result.model_copy(
+                        update={"cost_usd": spent_cost + (result.cost_usd or 0.0)}
+                    )
             return result
 
         try:

@@ -973,6 +973,15 @@ class TestCostReporting:
         assert payload["calls"][0]["cost_usd"] == pytest.approx(0.005)
         assert payload["total_cost_usd"] == pytest.approx(0.0125)
 
+    def test_a_tiny_real_price_does_not_render_as_free(self) -> None:
+        """A total under a tenth of a cent rounds to $0.0000 at four decimals —
+        indistinguishable on the page from "free", the one thing a priced run
+        must never be mistaken for."""
+        p = Profiler()
+        self._price(p, 0.00003)
+
+        assert "estimated cost: $0.000030 (litellm pricing map)" in p.render_total()
+
     def test_as_dict_total_is_null_when_nothing_was_priced(self) -> None:
         p = Profiler()
         self._price(p, None)

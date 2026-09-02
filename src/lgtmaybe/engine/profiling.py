@@ -461,7 +461,13 @@ class Profiler:
             count = (
                 f"; {len(prices)} of {len(calls)} calls priced" if len(prices) != len(calls) else ""
             )
-            lines.append(f"estimated cost: ${sum(prices):.4f} (litellm pricing map{count})")
+            total = sum(prices)
+            rendered = f"${total:.4f}"
+            if rendered == "$0.0000":
+                # A real price that rounds away would render as "free" — the
+                # exact misreading the silence-not-zero rule exists to prevent.
+                rendered = f"${total:.6f}"
+            lines.append(f"estimated cost: {rendered} (litellm pricing map{count})")
         return "\n".join(lines)
 
 
