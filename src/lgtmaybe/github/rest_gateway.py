@@ -955,7 +955,7 @@ class RestGitHubGateway:
         """
         if self._existing_review_done:
             return self._existing_review_entry
-        for resp in self._paginate(f"{self._pr_api}/reviews"):
+        for resp in self._paginate(f"{self._pr_api}/reviews?per_page=100"):
             for review in resp.json():
                 body: str = review.get("body", "") or ""
                 if self._marker in body:
