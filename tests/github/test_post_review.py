@@ -1445,6 +1445,21 @@ def test_open_finding_threads_follows_pagination() -> None:
     assert seen_cursors == [None, "page-2"], "the endCursor was not carried into page two"
 
 
+@respx.mock
+def test_review_thread_walk_is_shared_across_consumers() -> None:
+    ours = f"x <!-- lgtmaybe-finding:{finding_fingerprint('a.py', 'Old')} -->"
+    thread = {**_open_thread(ours), "id": "T1", "path": "a.py", "isOutdated": False}
+    graphql = respx.route(method="POST", url=GRAPHQL_URL).mock(
+        return_value=_count_threads_page([thread])
+    )
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+    assert gw.count_open_finding_threads() == 1
+    assert len(gw.list_active_findings()) == 1
+
+    assert graphql.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Finding badge: the originating lens + the auditor's confidence
 # ---------------------------------------------------------------------------
