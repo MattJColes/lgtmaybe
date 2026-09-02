@@ -273,6 +273,18 @@ def test_expand_hunks_asymmetric_pads_fewer_after() -> None:
     assert "@@ -2,5 +2,6 @@" in expanded
 
 
+def test_expand_hunks_handles_zero_length_sides() -> None:
+    content = "\n".join(f"line {n}" for n in range(1, 9))
+
+    insertion = expand_hunks("@@ -4,0 +5,2 @@\n+line 5\n+line 6\n", content, 3, after=1)
+    deletion = expand_hunks("@@ -5,3 +4,0 @@\n-old 5\n-old 6\n-old 7\n", content, 3, after=1)
+
+    assert insertion == ("@@ -2,4 +2,6 @@\n line 2\n line 3\n line 4\n+line 5\n+line 6\n line 7\n")
+    assert deletion == (
+        "@@ -2,7 +2,4 @@\n line 2\n line 3\n line 4\n-old 5\n-old 6\n-old 7\n line 5\n"
+    )
+
+
 def test_trailing_context_lines_ratio() -> None:
     # PR-Agent-style asymmetry: roughly a quarter of the leading budget,
     # floored at one line so the model still sees what follows the change.
