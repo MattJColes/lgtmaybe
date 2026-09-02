@@ -93,6 +93,31 @@ def test_post_review_creates_review_with_marker_and_batched_comments() -> None:
 
 
 @respx.mock
+def test_initial_review_salvages_a_comment_rejected_by_github() -> None:
+    respx.get(REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    reviews = respx.post(REVIEWS_URL).mock(
+        side_effect=[
+            httpx.Response(422, json={"message": "invalid review comment"}),
+            httpx.Response(200, json={"id": 99}),
+        ]
+    )
+    respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
+    comments = respx.post(REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(422, json={"message": "line is not in the diff"})
+    )
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gateway.mark_reviewed("def")
+
+    gateway.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+
+    assert reviews.call_count == 2
+    retry = json.loads(reviews.calls[1].request.content)
+    assert retry["comments"] == []
+    assert "Import order" in retry["body"]
+    assert comments.call_count == 1
+
+
+@respx.mock
 def test_post_review_updates_existing_review_on_second_call() -> None:
     """Second post_review call updates the existing review rather than creating another."""
     existing_review_id = 99
