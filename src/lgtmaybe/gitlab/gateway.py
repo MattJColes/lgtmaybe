@@ -105,6 +105,7 @@ class GitLabGateway:
         # MR payload, because posting a finding needs them and post_review is
         # reachable without a preceding get_pr_context (a failure notice).
         self._diff_refs: dict[str, str] | None = None
+        self._old_paths: dict[str, str] = {}
         self._scan_manifests = False
         self._active_findings: list[ActiveFinding] | None = None
         self._validated_fixed_thread_ids: set[str] | None = None
@@ -138,11 +139,14 @@ class GitLabGateway:
         }
 
         diff = self._fetch_mr_diff()
-        changed_files = [
-            item.get("new_path") or item.get("old_path") or ""
-            for item in self._paginate(f"{self._mr_api}/diffs")
-        ]
+        diff_items = list(self._paginate(f"{self._mr_api}/diffs"))
+        changed_files = [item.get("new_path") or item.get("old_path") or "" for item in diff_items]
         changed_files = [path for path in changed_files if path]
+        self._old_paths = {
+            item["new_path"]: item["old_path"]
+            for item in diff_items
+            if item.get("new_path") and item.get("old_path")
+        }
 
         reviewable = [path for path in changed_files if is_reviewable(path)]
         scannable = (
@@ -380,7 +384,7 @@ class GitLabGateway:
             position: dict[str, Any] = {
                 **self._diff_refs,
                 "position_type": "text",
-                "old_path": f.path,
+                "old_path": self._old_paths.get(f.path, f.path),
                 "new_path": f.path,
             }
             # RIGHT is a line in the new file, LEFT a line in the old one.
