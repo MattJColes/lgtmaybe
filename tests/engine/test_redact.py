@@ -18,6 +18,20 @@ def test_aws_key_redacted() -> None:
     assert REDACTED_PLACEHOLDER in result
 
 
+def test_aws_secret_access_key_redacted() -> None:
+    secret = "wJalrXUtnFEMI" + "/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    result = redact(f'+AWS_SECRET_ACCESS_KEY = "{secret}"\n')
+    assert secret not in result
+    assert "AWS_SECRET_ACCESS_KEY" in result
+
+
+def test_aws_session_token_redacted() -> None:
+    token = "AQoDYXdzEJr" + "//////////wEaEXAMPLETEMPORARYTOKEN"
+    result = redact(f'+AWS_SESSION_TOKEN = "{token}"\n')
+    assert token not in result
+    assert "AWS_SESSION_TOKEN" in result
+
+
 def test_openai_key_redacted() -> None:
     diff = f"+OPENAI_API_KEY={_OPENAI_KEY}\n"
     result = redact(diff)

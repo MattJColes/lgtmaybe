@@ -66,7 +66,8 @@ def _replace_pem(m: re.Match[str]) -> str:
 _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # Generic high-entropy assignments: api_key = "..." or token = "..." (value ≥ 16 chars)
     re.compile(
-        r"(?i)(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|secret[_\-]?key|token)"
+        r"(?i)(?:api[_\-]?key|api[_\-]?secret|secret[_\-]?access[_\-]?key|"
+        r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|token)"
         r'\s*[=:]\s*["\']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})["\']?'
     ),
     # Quoted password / passphrase literals: password = "hunter2" (value ≥ 4 chars).
