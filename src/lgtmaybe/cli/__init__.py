@@ -847,6 +847,9 @@ def execute_review(
 
     ctx: PRContext | None = None
     if describe or diagram:
+        want_manifests = getattr(github, "set_scan_manifests", None)
+        if callable(want_manifests):
+            want_manifests(cfg.static_analysis.enabled)
         # A failed prefetch means run_review fetches and surfaces the failure
         # itself. Fetching here lets the review, required diagram, and optional
         # description share one current-head context.
