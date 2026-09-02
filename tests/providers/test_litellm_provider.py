@@ -16,6 +16,7 @@ import litellm
 import pytest
 
 from lgtmaybe.core.models import ProviderResult
+from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
 
@@ -23,14 +24,20 @@ def _fake_response(
     content: str = "hello",
     prompt_tokens: int = 10,
     completion_tokens: int = 20,
+    finish_reason: str | None = None,
+    usage_extra: dict[str, Any] | None = None,
 ) -> Any:
     """Build a minimal litellm ModelResponse lookalike."""
+    usage = SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        **(usage_extra or {}),
+    )
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-        usage=SimpleNamespace(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        ),
+        choices=[
+            SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=finish_reason)
+        ],
+        usage=usage,
     )
 
 
@@ -162,3 +169,112 @@ class TestLiteLLMProvider:
             litellm.completion(model="no-such-provider/x", messages=[{"role": "user", "x": "hi"}])
 
         assert captured.getvalue() == ""
+
+
+class TestCostEstimation:
+    """The adapter prices each call with litellm's own pricing map.
+
+    A profile that reports tokens but not money answers only half the question
+    a metered run asks. The map is authoritative where it knows a model and
+    raises where it does not — but a few ids it half-knows price silently at
+    zero, and ollama is genuinely free, so a zero is never reported as a price:
+    silence, not $0.00, because those are different claims.
+    """
+
+    def test_complete_stamps_the_priced_cost(self) -> None:
+        response = _fake_response(prompt_tokens=1000, completion_tokens=200)
+        with (
+            patch("litellm.completion", return_value=response),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                return_value=(0.003, 0.002),
+            ) as price,
+        ):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "anthropic/claude-sonnet-4-5"
+            )
+
+        assert result.cost_usd == pytest.approx(0.005)
+        assert price.call_args.kwargs["model"] == "anthropic/claude-sonnet-4-5"
+        assert price.call_args.kwargs["prompt_tokens"] == 1000
+        assert price.call_args.kwargs["completion_tokens"] == 200
+
+    def test_pricing_sees_the_cache_breakdown(self) -> None:
+        """Cache reads bill at a discount, so a cache-aware call priced without
+        its cache numbers overstates the cost on every cached lens."""
+        response = _fake_response(
+            prompt_tokens=1000,
+            completion_tokens=200,
+            usage_extra={"cache_read_input_tokens": 900, "cache_creation_input_tokens": 100},
+        )
+        with (
+            patch("litellm.completion", return_value=response),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                return_value=(0.001, 0.002),
+            ) as price,
+        ):
+            provider = LiteLLMProvider()
+            provider.complete([{"role": "user", "content": "hi"}], "anthropic/claude-sonnet-4-5")
+
+        assert price.call_args.kwargs["cache_read_input_tokens"] == 900
+        assert price.call_args.kwargs["cache_creation_input_tokens"] == 100
+
+    def test_unmapped_pricing_reports_no_cost(self) -> None:
+        """A model the pricing map has never heard of raises; an estimate must
+        never fail the call that produced it."""
+        response = _fake_response(prompt_tokens=1000, completion_tokens=200)
+        with (
+            patch("litellm.completion", return_value=response),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                side_effect=Exception("This model isn't mapped yet."),
+            ),
+        ):
+            provider = LiteLLMProvider()
+            result = provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-5.5")
+
+        assert result.cost_usd is None
+
+    def test_a_silent_zero_price_reports_no_cost(self) -> None:
+        """The map prices some half-known ids (an unversioned bedrock id) at a
+        silent $0.00. A price of zero is indistinguishable from that bug and
+        from genuinely-free ollama — neither is a price, so neither is reported."""
+        response = _fake_response(prompt_tokens=1000, completion_tokens=200)
+        with (
+            patch("litellm.completion", return_value=response),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                return_value=(0.0, 0.0),
+            ),
+        ):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "bedrock/anthropic.claude-sonnet-4-5"
+            )
+
+        assert result.cost_usd is None
+
+    def test_a_truncation_carries_its_cost(self) -> None:
+        """A ceiling hit is routinely the costliest call in a run, and it fails —
+        so its price rides on the exception, where the failure is recorded."""
+        response = _fake_response(
+            prompt_tokens=1000,
+            completion_tokens=4096,
+            finish_reason="length",
+        )
+        with (
+            patch("litellm.completion", return_value=response),
+            patch(
+                "lgtmaybe.providers.litellm_provider.cost_per_token",
+                return_value=(0.003, 0.002),
+            ),
+        ):
+            provider = LiteLLMProvider()
+            with pytest.raises(ProviderTruncated) as excinfo:
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "anthropic/claude-sonnet-4-5"
+                )
+
+        assert excinfo.value.cost_usd == pytest.approx(0.005)

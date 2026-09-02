@@ -18,6 +18,18 @@
       "title": "Cache Read Tokens",
       "type": "integer"
     },
+    "cost_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost Usd"
+    },
     "input_tokens": {
       "title": "Input Tokens",
       "type": "integer"

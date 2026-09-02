@@ -123,6 +123,7 @@ The normalised return value of one LLM completion, including token usage.
 | `attempts` | integer | No | `1` | Attempts |
 | `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
 | `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
+| `cost_usd` | number / null | No | `null` | Cost Usd |
 | `input_tokens` | integer | Yes | — | Input Tokens |
 | `model` | string / null | No | `null` | Model |
 | `output_ceiling` | integer / null | No | `null` | Output Ceiling |
@@ -1180,6 +1181,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": 0,
       "title": "Cache Read Tokens",
       "type": "integer"
+    },
+    "cost_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost Usd"
     },
     "input_tokens": {
       "title": "Input Tokens",

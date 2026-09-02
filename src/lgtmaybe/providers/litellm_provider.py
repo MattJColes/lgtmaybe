@@ -20,6 +20,11 @@ from typing import Any
 
 import litellm
 
+# litellm.utils re-exports these without listing them in __all__, so mypy
+# rejects the re-exports — import each from the module that defines it, like
+# the exceptions above.
+from litellm.cost_calculator import cost_per_token
+
 # litellm re-exports the openai exception types but doesn't list them in __all__,
 # so mypy rejects litellm.AuthenticationError etc. as un-exported — import them
 # from litellm.exceptions, where they're defined directly.
@@ -30,10 +35,6 @@ from litellm.exceptions import (
     PermissionDeniedError,
     RateLimitError,
 )
-
-# litellm.utils re-exports this without listing it in __all__, so mypy rejects
-# the re-export — import it from the module that defines it, like the
-# exceptions above.
 from litellm.llms.base_llm.base_utils import type_to_response_format_param
 from litellm.utils import supports_prompt_caching
 from pydantic import BaseModel
@@ -1186,6 +1187,10 @@ class LiteLLMProvider:
         usage = response.usage
         input_tokens: int = usage.prompt_tokens
         output_tokens: int = usage.completion_tokens
+        # Priced here, before the truncation check, so a ceiling hit — routinely
+        # the costliest call of a run — carries its price on the exception just
+        # like it carries its token counts.
+        cost_usd = _estimated_cost_usd(model, usage)
         # A generation that stopped because it ran out of output tokens is cut off
         # mid-token: it can never parse, and passing it on gets it reported as
         # "unparseable model output", which points at the prompt rather than at
@@ -1238,6 +1243,7 @@ class LiteLLMProvider:
                 # Not diagnosis but accounting: the prompt was sent and billed,
                 # so the spend ceiling must see it (see profiling.record_error).
                 input_tokens=input_tokens,
+                cost_usd=cost_usd,
             )
         cache_read, cache_creation = _cache_usage(usage)
         if cache_read or cache_creation:
@@ -1272,6 +1278,8 @@ class LiteLLMProvider:
             # make, and a field that appeared only on rescues would leave the
             # common case unreadable rather than uninteresting.
             model=model,
+            # The price litellm's map puts on this call, or None when it declines.
+            cost_usd=cost_usd,
         )
 
 
@@ -1518,3 +1526,44 @@ def _cache_usage(usage: Any) -> tuple[int, int]:
         "cache_creation_tokens", "cache_write_tokens"
     )
     return int(cache_read or 0), int(cache_creation or 0)
+
+
+def _estimated_cost_usd(model: str, usage: Any) -> float | None:
+    """What litellm's pricing map says this call cost, or None to decline.
+
+    Money is the unit every token count in the profile is a proxy for, and this
+    is the one place that holds both the resolved model string the map keys on
+    and the usage the price is computed from. The cache counts ride along
+    because reads bill at a discount on every route that reports them — pricing
+    the same call without them overstates every cached lens.
+
+    Three shapes of "no price", all answered None because they are the same
+    claim — "no estimate available" — and a profile that renders a number for
+    any of them is lying with more precision than silence:
+
+    - the map has never heard of the model (a brand-new id) and raises;
+    - the map half-knows the id and prices it silently at zero (an unversioned
+      bedrock id does exactly this — indistinguishable by output from the
+      genuinely free routes, so a zero can never be reported as a price);
+    - the call reported no usage at all, so there is nothing to price.
+
+    A price is instrumentation, exactly like the capability lookups above: any
+    failure in here degrades to None, never to a failed review.
+    """
+    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    if not prompt_tokens and not completion_tokens:
+        return None
+    cache_read, cache_creation = _cache_usage(usage)
+    try:
+        prompt_cost, completion_cost = cost_per_token(
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_creation,
+        )
+    except Exception:  # noqa: BLE001 — an unpriced model is not a failed review
+        return None
+    total = float(prompt_cost) + float(completion_cost)
+    return total if total > 0 else None

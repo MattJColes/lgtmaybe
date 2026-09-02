@@ -663,6 +663,12 @@ class ProviderResult(_Strict):
     # None, not the requested model, for back-compat: a fake or an older adapter
     # that does not stamp it must not be read as asserting the primary answered.
     model: str | None = None
+    # The adapter's estimate of what this call cost, from its own pricing map —
+    # None when it declines to price (a model it doesn't know, or a genuinely
+    # free one). Money is the unit the token counts are a proxy for, and the
+    # adapter is the one place that holds both the resolved model string and the
+    # usage the price is computed from.
+    cost_usd: float | None = None
 
 
 # A FAILED call has no ProviderResult to carry `attempts` home on, so the adapter

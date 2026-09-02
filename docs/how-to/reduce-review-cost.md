@@ -44,6 +44,18 @@ tokens: 158,076 billable (154,200 in / 3,876 out) across 12 calls
 Every local review prints that same line to stderr even without `--profile`, so
 the meter is always in view; redirect with `2>/dev/null` if you want it gone.
 
+When litellm's pricing map knows the model, the meter gains a second line:
+
+```
+estimated cost: $0.5207 (litellm pricing map)
+```
+
+It is an estimate off a price list that can lag a brand-new model, so its
+absence means "unpriced", not "free" — and when only some calls could be
+priced, the line says how many rather than passing a partial total off as the
+sum. Cache reads are billed at their discount, so a run with a warm prefix
+shows it.
+
 `in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
 the diff, over and over, once per lens per batch. The per-call table above it
 shows exactly which lens and which batch each call belongs to, so you can see
