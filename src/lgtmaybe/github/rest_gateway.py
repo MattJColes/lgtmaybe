@@ -308,15 +308,16 @@ class RestGitHubGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
         comments = [comment for comment, _finding in inline]
 
-        body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
-        if self._reviewed_sha:
-            # Record how far this review got, so the next run can review only
-            # the commits pushed since (incremental review). Only stamped when
-            # the orchestrator marked this run as a completed review — a
-            # failure notice must not move the incremental watermark (and by
-            # replacing the body it clears any stale stamp, so the next run
-            # safely falls back to a full review).
-            body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+        def build_body(demoted_findings: list[ReviewFinding]) -> str:
+            body = (
+                f"{summary}{render_demoted(demoted_findings)}"
+                f"{render_broad(broad)}\n\n{self._marker}"
+            )
+            if self._reviewed_sha:
+                body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+            return body
+
+        body = build_body(demoted)
         existing = self._find_existing_review_entry()
 
         reviews_url = f"{self._pr_api}/reviews"
@@ -344,12 +345,7 @@ class RestGitHubGateway:
                 inline, self._reviewed_sha or self._anchor_sha()
             )
             if rejected:
-                body = (
-                    f"{summary}{render_demoted([*demoted, *rejected])}"
-                    f"{render_broad(broad)}\n\n{self._marker}"
-                )
-                if self._reviewed_sha:
-                    body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+                body = build_body([*demoted, *rejected])
                 resp = self._client.put(
                     update_url,
                     headers=self._json_headers,

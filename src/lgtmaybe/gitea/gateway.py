@@ -387,9 +387,9 @@ class GiteaGateway:
         """Commit subject lines, feeding the intent lens. Never fails the review."""
         try:
             return [
-                (item.get("commit", {}).get("message") or "").splitlines()[0]
+                message.splitlines()[0]
                 for item in self._paginate(f"{self._pr_api}/commits")
-                if (item.get("commit", {}).get("message") or "").strip()
+                if (message := (item.get("commit", {}).get("message") or "").strip())
             ]
         except Exception as exc:  # noqa: BLE001 — intent is a nice-to-have
             _log.warning("fetching commit subjects failed: %s", exc)
