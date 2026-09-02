@@ -79,14 +79,15 @@ def walk_diff(diff: str) -> Iterator[tuple[str, str, int, int, str]]:
             current_file = fallback.group(1) if fallback is not None else None
             in_hunk = False
             continue
-        old_file_match = OLD_FILE_HEADER_RE.match(raw_line)
-        if old_file_match:
-            current_file = old_file_match.group(1)
-            continue
-        new_file_match = NEW_FILE_HEADER_RE.match(raw_line)
-        if new_file_match:
-            current_file = new_file_match.group(1)
-            continue
+        if not in_hunk:
+            old_file_match = OLD_FILE_HEADER_RE.match(raw_line)
+            if old_file_match:
+                current_file = old_file_match.group(1)
+                continue
+            new_file_match = NEW_FILE_HEADER_RE.match(raw_line)
+            if new_file_match:
+                current_file = new_file_match.group(1)
+                continue
         if current_file is None:
             continue
         hunk = parse_hunk_header(raw_line)

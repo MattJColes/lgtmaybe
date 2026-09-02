@@ -169,6 +169,25 @@ class TestWalkDiff:
 
         assert {path for path, *_ in walk_diff(diff)} == {"dir b/file.py"}
 
+    def test_in_hunk_content_that_looks_like_file_headers_is_walked(self):
+        diff = (
+            "diff --git a/query.sql b/query.sql\n"
+            "--- a/query.sql\n"
+            "+++ b/query.sql\n"
+            "@@ -1,2 +1,2 @@\n"
+            "--- a/deceptive-path.sql\n"
+            "+++ b/deceptive-path.sql\n"
+            "-old tail\n"
+            "+new tail\n"
+        )
+
+        assert list(walk_diff(diff)) == [
+            ("query.sql", "-", 1, 1, "-- a/deceptive-path.sql"),
+            ("query.sql", "+", 2, 1, "++ b/deceptive-path.sql"),
+            ("query.sql", "-", 2, 2, "old tail"),
+            ("query.sql", "+", 3, 2, "new tail"),
+        ]
+
 
 class TestChangedLineIndex:
     def test_indexes_added_line_on_right_at_new_line(self):
