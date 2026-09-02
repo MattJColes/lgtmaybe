@@ -30,8 +30,6 @@ def _markers(family: str) -> tuple[str, str]:
 # Public names: other modules (describe, diagram) build their own diff blocks
 # with these so a marker rename here can never desync from `neutralise`.
 DIFF_START, DIFF_END = _markers("DIFF")
-# Private aliases kept for existing references.
-_START, _END = DIFF_START, DIFF_END
 
 # The remaining blocks are all attacker-controlled on a fork PR exactly like the
 # diff, so they get the same untrusted-data posture: the stated intent (PR

@@ -505,21 +505,6 @@ class TestConfigPathOption:
         assert result.exit_code == 0, result.output
 
 
-class TestParsePrUrl:
-    def test_parses_owner_repo_and_number(self):
-        from lgtmaybe.cli import parse_pr_url
-
-        repo, number = parse_pr_url("https://github.com/org/my-repo/pull/42")
-        assert repo == "org/my-repo"
-        assert number == 42
-
-    def test_rejects_non_pr_url(self):
-        from lgtmaybe.cli import parse_pr_url
-
-        with pytest.raises(ValueError, match="Could not parse"):
-            parse_pr_url("https://github.com/org/my-repo/issues/42")
-
-
 class TestBuildReviewContext:
     def test_builds_real_adapters_for_ollama(self, monkeypatch):
         """build_review_context returns a RestGitHubGateway + LLMReviewEngine wired from config."""

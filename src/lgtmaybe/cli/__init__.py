@@ -165,17 +165,6 @@ def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewC
     return cfg.model_copy(update={"incremental": event_action == "synchronize"})
 
 
-def parse_pr_url(pr_url: str) -> tuple[str, int]:
-    """Parse a pull/merge request URL into ("owner/repo", number).
-
-    Thin wrapper over ``core.forge.parse_pr_url`` for the callers that only want
-    the project path and number. Use the locator directly when the forge or host
-    matters. Raises ValueError with a clear message for anything unparseable.
-    """
-    located = locate_pr(pr_url)
-    return located.repo, located.number
-
-
 # Which forges lgtmaybe can build a gateway for. A forge that parses but is not
 # in here is recognised-but-unimplemented, which earns a different (and much more
 # useful) error than an unparseable URL.
@@ -1197,7 +1186,6 @@ __all__ = [
     "execute_review",
     "graceful_interrupt",
     "main",
-    "parse_pr_url",
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",

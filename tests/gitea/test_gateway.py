@@ -83,6 +83,17 @@ class TestGetPRContext:
         assert ctx.head_branch == "feature-branch"
 
     @respx.mock
+    def test_strips_leading_whitespace_from_commit_subjects(self) -> None:
+        _stub_context_routes()
+        respx.route(method="GET", url__startswith=f"{PR_URL}/commits").mock(
+            return_value=httpx.Response(200, json=[{"commit": {"message": "\nfix things"}}])
+        )
+
+        ctx = _gateway(httpx.Client()).get_pr_context()
+
+        assert ctx.commit_messages == ["fix things"]
+
+    @respx.mock
     def test_decodes_base64_file_contents_for_hunk_expansion(self) -> None:
         _stub_context_routes()
         ctx = _gateway(httpx.Client()).get_pr_context()
