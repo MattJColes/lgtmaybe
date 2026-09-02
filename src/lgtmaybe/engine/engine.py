@@ -987,7 +987,7 @@ class LLMReviewEngine:
         #    understanding only — inline-comment positions are always built
         #    from the real diff.
         with profiler.stage("expand"):
-            used_tokens = count_tokens(clean_diff)
+            used_tokens = sum(count_tokens(patch) for _, patch in file_patches)
             remaining = max(0, cfg.max_input_tokens - used_tokens)
             ctx_lines = min(cfg.context_lines, context_lines_for_budget(remaining))
             if ctx_lines > 0 and ctx.file_contents:

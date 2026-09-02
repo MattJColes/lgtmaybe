@@ -633,6 +633,34 @@ def test_context_lines_zero_disables_expansion() -> None:
     assert "\n e\n" in sent
 
 
+def test_excluded_files_do_not_consume_context_budget() -> None:
+    kept = "diff --git a/f.py b/f.py\n@@ -5,2 +5,2 @@\n e\n+E2\n"
+    excluded = (
+        "diff --git a/vendor/data.py b/vendor/data.py\n@@ -1,1 +1,1 @@\n+" + "x" * 50_000 + "\n"
+    )
+    ctx = PRContext(
+        diff=kept + excluded,
+        changed_files=["f.py", "vendor/data.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=10,
+        file_contents={"f.py": _FILE_TEXT},
+    )
+    provider = _provider_for([_HIGH], reflection_keeps_all=True)
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        exclude_paths=["vendor/**"],
+        max_input_tokens=10_000,
+        context_lines=1,
+    )
+
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    assert "\n d\n" in _first_user_diff(provider)
+
+
 def test_prompt_injection_in_diff_produces_normal_review() -> None:
     malicious_ctx = PRContext(
         diff=(
