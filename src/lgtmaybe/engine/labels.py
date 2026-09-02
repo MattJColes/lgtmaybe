@@ -82,5 +82,5 @@ def _sprawls(changed_files: list[str]) -> bool:
     """Whether the change set spans enough unrelated areas to suggest splitting."""
     if len(changed_files) < _MIN_SPRAWL_FILES:
         return False
-    top_level = {path.split("/", 1)[0] for path in changed_files}
+    top_level = {path.split("/", 1)[0] for path in changed_files if "/" in path}
     return len(top_level) >= _MIN_SPRAWL_DIRS
