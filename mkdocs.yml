@@ -96,7 +96,7 @@ nav:
           - Configure .lgtmaybe.yml: how-to/configure-lgtmaybe-yml.md
           - Add a custom review lens: how-to/add-a-custom-lens.md
           - Scope instructions to a directory: how-to/scope-review-instructions-to-a-directory.md
-          - Generate a change diagram: how-to/generate-a-change-diagram.md
+          - Generate a change overview: how-to/generate-a-change-diagram.md
           - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
           - Reduce review cost: how-to/reduce-review-cost.md
       - Maintainers:

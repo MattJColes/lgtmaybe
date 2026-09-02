@@ -57,10 +57,10 @@ signal, and restores the previous handler as it fires.
 
 `issue_comment` events SHALL parse into commands — `/review` (with `full`
 forcing a full re-review), `/improve`, `/ask <q>` replying in-thread from a
-task-specific answer object, `/describe` upserting a structured description,
-and `/diagram` upserting a compact Mermaid change diagram rendered locally
-from structured graph data — all dispatched to the same engine and provider
-stack.
+task-specific answer object, `/describe` upserting a standalone structured
+description, and `/diagram` upserting the change overview (description, high
+impact areas, and Mermaid diagrams rendered locally from structured graph
+data) — all dispatched to the same engine and provider stack.
 <!-- anchor: cli.slash -->
 
 #### Scenario: reviewer comments /review full
@@ -77,8 +77,9 @@ stack.
 
 #### Scenario: reviewer comments /diagram
 - **WHEN** the comment body is `/diagram`
-- **THEN** typed nodes and edges are rendered into Mermaid and text views with
-  stable ids, escaped labels, compact cards, and change markers on nodes
+- **THEN** the change overview upserts under the diagram marker family, its
+  typed nodes and edges rendered into Mermaid and text views with stable ids,
+  escaped labels, compact cards, and change markers on nodes
 
 #### Scenario: provider returns diagram syntax instead of graph data
 - **WHEN** the diagram provider ignores the graph contract and returns diagram
@@ -88,16 +89,15 @@ stack.
 
 ### Requirement: Change diagrams show structure and sequence
 
-The change diagram SHALL summarize what the pull request changes and render two
-complementary views from the same structured call: a Mermaid flowchart of the
-components the change touches, and a Mermaid sequence diagram of the ordered
-run-time interactions it alters. The concise summary SHALL appear above the
-diagrams in the same comment, lead with the highest-impact change, keep one
-change per sentence, and omit preamble, process recap, filler, and tangents.
-Steps referencing unknown components SHALL be dropped, the
-step count SHALL be bounded, participant and message text SHALL be escaped with
-Mermaid entity codes, and the sequence view SHALL be omitted — section headings
-included — when the model reports no run-time flow.
+The change overview's diagram call SHALL render two complementary views: a
+Mermaid flowchart of the components the change touches, and a Mermaid sequence
+diagram of the ordered run-time interactions it alters. A summary SHALL head the
+comment — the description when one is enabled, otherwise the diagram's own —
+leading with the highest-impact change, keeping one change per sentence, and
+omitting preamble, process recap, filler, and tangents. Steps referencing
+unknown components SHALL be dropped, the step count SHALL be bounded,
+participant and message text SHALL be escaped with Mermaid entity codes, and the
+sequence view SHALL be omitted when the model reports no run-time flow.
 <!-- anchor: cli.diagram-sequence -->
 
 #### Scenario: change alters a run-time flow
@@ -110,13 +110,40 @@ included — when the model reports no run-time flow.
 #### Scenario: change has no run-time flow
 - **WHEN** the provider returns a change summary and no steps
 - **THEN** the comment carries the summary and flowchart, with no sequence
-  section and no diagram headings
+  section
 
-#### Scenario: the same diagram printed in a terminal
+#### Scenario: the same overview printed in a terminal
 - **WHEN** `lgtmaybe diagram` prints the body locally
 - **THEN** the summary remains above the diagrams, each collapsible text version
   becomes a labelled section with its HTML wrapper removed, and the Mermaid
   source stays intact to paste elsewhere
+
+### Requirement: The change overview calls out high impact areas
+
+The change overview SHALL carry a High Impact Areas section from its own
+structured call, naming the changes whose blast radius reaches beyond the diff —
+infrastructure, security posture, availability, data migrations, backups and
+recovery, compatibility, observability, dependencies, cost, and compliance.
+Deterministic path signals SHALL ground that call as untrusted data and SHALL
+floor its result, so an area implicated by a changed path is named even when the
+model reports nothing for it. A failed or unparseable call SHALL still render
+those signals rather than dropping the section, an empty result SHALL name what
+was checked, model-reported paths absent from the change SHALL be dropped, and
+the section SHALL never fail the run.
+<!-- anchor: cli.overview-high-impact -->
+
+#### Scenario: model reports nothing for a changed sensitive path
+- **WHEN** the change edits an infrastructure path and the model returns no area for it
+- **THEN** the section still names that area and path, marked as not assessed
+
+#### Scenario: high-impact call fails
+- **WHEN** the provider raises or returns output that cannot be parsed
+- **THEN** the section renders the path signals with a notice that the model
+  assessment is unavailable, and the rest of the overview still posts
+
+#### Scenario: nothing qualifies
+- **WHEN** the model returns no areas and no path signals matched
+- **THEN** the section states that none were detected and lists the areas checked
 
 ### Requirement: Stale review-comment events are inert
 
@@ -271,30 +298,30 @@ uses a legacy Windows encoding.
 - **WHEN** `café.py` changes and git would C-quote it as `"caf\303\251.py"`
 - **THEN** the path arrives as `café.py`, so the file is reviewed like any other
 
-### Requirement: Starter workflows enable automatic diagrams
+### Requirement: Starter workflows enable the automatic change overview
 
-The supplied GitHub Actions starter workflows SHALL opt in to automatic change diagrams and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, automatic diagrams SHALL refresh on `opened`, `reopened`, and `synchronize` events from the full current PR context, post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
+The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events from the full current PR context, post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
 <!-- anchor: cli.starter-workflow-diagrams -->
 
 #### Scenario: New repository adopts a supplied workflow
 - **WHEN** a maintainer copies a supplied provider workflow into a repository
-- **THEN** the workflow passes `auto_diagram: true` to the lgtmaybe Action
+- **THEN** the workflow sets no `auto_diagram` input, since the default enables it
 
 #### Scenario: Faster default is adopted
 - **WHEN** the supplied workflow runs a default review
-- **THEN** automatic C4 diagram generation remains enabled
+- **THEN** the automatic change overview remains enabled
 
 #### Scenario: New push replaces an opened review
 - **WHEN** a `synchronize` event replaces or follows the pull request's `opened`
-  review while automatic diagrams are enabled
-- **THEN** the surviving run posts or updates the change diagram
+  review while the automatic overview is enabled
+- **THEN** the surviving run posts or updates the change overview
 
 #### Scenario: A new head completes
 - **WHEN** a non-partial review and required diagram both post for the current head
 - **THEN** later synchronize runs may use that head as their hybrid-review base
 
 #### Scenario: Diagram generation fails
-- **WHEN** automatic diagrams are enabled and the current-head diagram cannot be generated or posted
+- **WHEN** the automatic overview is enabled and the current-head diagram cannot be generated or posted
 - **THEN** the run fails without advancing completion, even if its review result already posted
 
 ### Requirement: Homepage demonstrates change diagrams

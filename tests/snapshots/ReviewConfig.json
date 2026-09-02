@@ -466,7 +466,7 @@
       "title": "Api Base"
     },
     "auto_describe": {
-      "default": false,
+      "default": true,
       "title": "Auto Describe",
       "type": "boolean"
     },
@@ -553,6 +553,11 @@
     "function_context": {
       "default": true,
       "title": "Function Context",
+      "type": "boolean"
+    },
+    "high_impact": {
+      "default": true,
+      "title": "High Impact",
       "type": "boolean"
     },
     "ignore_fingerprints": {

@@ -89,11 +89,14 @@ lgtmaybe review --provider ollama --model qwen3.6:27b \
 coding agent can read and apply, for a local review-and-fix loop — see
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-## Step 5 — Diagram what you touched
+## Step 5 — See the whole change
 
-`lgtmaybe diagram` runs the same local diff through one model call and prints a
-picture of the components your change touches — plus, when your change alters a
-run-time flow, a sequence diagram of that flow:
+`lgtmaybe diagram` runs the same local diff through three concurrent model calls
+and prints the **change overview**: a description of what you changed, a **High
+Impact Areas** section calling out anything that could bite (infrastructure,
+security posture, outage risk, migrations, backups and more), and a picture of
+the components your change touches — plus, when it alters a run-time flow, a
+sequence diagram of that flow:
 
 ```bash
 lgtmaybe diagram \
@@ -104,11 +107,11 @@ lgtmaybe diagram \
 
 It takes the same `--base` / `--working` / `--uncommitted` flags as `review`, so
 `review` then `diagram` is a natural pair before you open a pull request: what's
-wrong with the change, then what the change reaches and what it does. The output
-is Mermaid source plus a text rendering — the text is what reads in a terminal;
-paste the Mermaid into a GitHub comment or [mermaid.live](https://mermaid.live)
-to see it drawn. See
-[Generate a change diagram](../how-to/generate-a-change-diagram.md).
+wrong with the change, then what the change is and what it could break. The
+diagrams print as Mermaid source plus a text rendering — the text is what reads
+in a terminal; paste the Mermaid into a GitHub comment or
+[mermaid.live](https://mermaid.live) to see it drawn. See
+[Generate a change overview](../how-to/generate-a-change-diagram.md).
 
 ## Step 6 — Post reviews on real pull requests
 

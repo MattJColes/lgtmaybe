@@ -103,7 +103,7 @@ everywhere:
 - **On a pull or merge request** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the summary instead of duplicating it, never repeats a finding it already posted, and a clean change gets a 👍 **LGTM!**. On GitHub and GitLab a conversation auto-resolves once its finding is verified fixed; Gitea has no thread-resolution API, so its comments stay open. See [Where it posts](#where-it-posts).
 - **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted anywhere.
 
-Beyond the review, slash commands on the PR route to the same engine: **`/review`** and **`/improve`** post (or refresh) the review, **`/ask <question>`** answers a question about the change in-thread, **`/describe`** (`auto_describe`) posts a **structured description**, and **`/diagram`** (`auto_diagram`) posts a **compact change diagram** — an automatically laid-out Mermaid flowchart of the components the PR touches, with changes marked on nodes, plus a Mermaid **sequence diagram** of the run-time flow the change alters (omitted when there isn't one), both rendered natively in the comment, with a text fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
+Beyond the review, slash commands on the PR route to the same engine: **`/review`** and **`/improve`** post (or refresh) the review, **`/ask <question>`** answers a question about the change in-thread, **`/describe`** posts a standalone **structured description**, and **`/diagram`** (`auto_diagram`) posts the **change overview** — one comment carrying a description of the change, a bold **High Impact Areas** section calling out what could bite (infrastructure, security posture, production-outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, compliance), and an automatically laid-out Mermaid flowchart of the components the PR touches plus a Mermaid **sequence diagram** of the run-time flow it alters (omitted when there isn't one), both rendered natively in the comment, with a text fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change overview](docs/how-to/generate-a-change-diagram.md).
 
 On re-runs and big PRs the review stays cheap: a `synchronize` push triggers an **incremental review** of just the new commits, an optional cheap **triage model** (`triage_model`) skips plainly-non-substantive files before the strong model runs, and optional **static-analysis fusion** (`static_analysis`) runs deterministic tools over the changed files — ruff/bandit/mypy/semgrep feed the review as untrusted hints, while gitleaks (secrets), zizmor (GitHub Actions workflow security), ast-grep (your own structural rules) and osv-scanner (known dependency vulnerabilities) post findings directly with no model call. semgrep ships with a small MIT rule pack, so it works without configuration.
 
@@ -136,10 +136,10 @@ lgtmaybe review \
 
 No GitHub token and no pull request needed — `lgtmaybe review` reads your local
 `git` diff and prints the findings. Its companion, `lgtmaybe diagram`, takes the
-same flags and prints a picture of the components your change touches and the
-flow it alters — `review` then `diagram` is the pair to run before opening a
-pull request. See
-[Generate a change diagram](docs/how-to/generate-a-change-diagram.md).
+same flags and prints the change overview — what your change is, its high impact
+areas, and a picture of the components it touches and the flow it alters.
+`review` then `diagram` is the pair to run before opening a pull request. See
+[Generate a change overview](docs/how-to/generate-a-change-diagram.md).
 
 `lgtmaybe --help` lists every command with usage examples; `lgtmaybe review --help`
 shows the full option reference. To post reviews on real pull requests, wire up

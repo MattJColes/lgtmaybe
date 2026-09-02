@@ -88,18 +88,13 @@ class RuntimeOptions:
 _log = get_logger(__name__)
 
 
-def _should_auto_post(enabled: bool, event_action: str) -> bool:
-    """Gate an automatic extra to newly opened or reopened pull requests."""
-    return enabled and event_action in ("opened", "reopened")
-
-
-def should_auto_describe(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the structured description first."""
-    return _should_auto_post(cfg.auto_describe, event_action)
-
-
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post or refresh the change diagram."""
+    """Whether the action run should post or refresh the change overview.
+
+    The overview's own sections (description, High Impact Areas) are config
+    toggles inside it, not separate events: they ride this one comment, so a
+    push refreshes all of them together or none of them.
+    """
     return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
 
 
@@ -135,10 +130,15 @@ def run_diagram(
     *,
     completed_sha: str | None = None,
 ) -> None:
-    """Build the change diagram and post it idempotently."""
-    from lgtmaybe.engine.diagram import build_diagram
+    """Build the change overview and post it idempotently.
 
-    body = build_diagram(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    The comment carries the description, the High Impact Areas section and the
+    diagrams — each gated by its own config flag, all in one upsert under the
+    diagram marker family.
+    """
+    from lgtmaybe.engine.overview import build_overview
+
+    body = build_overview(github.get_pr_context() if ctx is None else ctx, cfg, provider)
     post = getattr(github, "post_diagram_comment", None)
     if post is not None:
         post(body, completed_sha=completed_sha)
@@ -773,20 +773,21 @@ def execute_local_diagram(
     working: bool,
     uncommitted: bool = False,
 ) -> None:
-    """Print a compact Mermaid diagram of local changes — no GitHub involvement.
+    """Print the change overview of local changes — no GitHub involvement.
 
     Builds the provider straight from config/runtime (no token, no gateway) and
-    echoes the same Markdown body the ``/diagram`` comment would carry: the
-    Mermaid source (paste it into GitHub to render) plus the text rendering,
-    which is what actually shows in a terminal — with the comment's collapsible
-    wrappers flattened, since a terminal renders no HTML.
+    echoes the same Markdown body the ``/diagram`` comment would carry —
+    description, High Impact Areas, and the Mermaid source (paste it into
+    GitHub to render) plus the text rendering, which is what actually shows in
+    a terminal — with the comment's collapsible wrappers flattened, since a
+    terminal renders no HTML.
     """
-    from lgtmaybe.engine.diagram import build_diagram
+    from lgtmaybe.engine.overview import build_overview
 
     try:
         _engine, provider = build_provider_engine(cfg, runtime)
         ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
-        body = build_diagram(ctx, cfg, provider)
+        body = build_overview(ctx, cfg, provider)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -808,55 +809,33 @@ def _build_context_or_fail(
         raise click.ClickException(str(exc)) from exc
 
 
-def _post_extras(
-    github: ReviewGateway,
-    provider: ProviderClient,
-    cfg: ReviewConfig,
-    ctx: PRContext,
-    *,
-    describe: bool,
-) -> None:
-    """Post the best-effort automatic description over a prefetched context.
-
-    Automatic descriptions remain best-effort. Required automatic diagrams are
-    posted by ``run_review`` and never enter this helper.
-    """
-    if describe:
-        try:
-            run_describe(github, provider, cfg, ctx=ctx)
-        except Exception:
-            _log.warning("auto-describe failed — continuing without it", exc_info=True)
-
-
 def execute_review(
     cfg: ReviewConfig,
     runtime: RuntimeOptions,
     *,
-    describe: bool = False,
     diagram: bool = False,
 ) -> None:
     """Build adapters, run the review, and surface failures back to the PR.
 
-    Shared by the ``review`` command and Action entrypoint. Automatic
-    descriptions are best-effort after review; an automatic diagram is a
-    required completion step inside ``run_review``. Both reuse one adapter set
-    and the prefetched O(files) PR context.
+    Shared by the ``review`` command and Action entrypoint. An automatic change
+    overview is a required completion step inside ``run_review``, and reuses
+    this run's adapter set and prefetched O(files) PR context.
     """
     profiler.reset()
     github, engine, provider = _build_context_or_fail(cfg, runtime)
 
     ctx: PRContext | None = None
-    if describe or diagram:
+    if diagram:
         want_manifests = getattr(github, "set_scan_manifests", None)
         if callable(want_manifests):
             want_manifests(cfg.static_analysis.enabled)
         # A failed prefetch means run_review fetches and surfaces the failure
-        # itself. Fetching here lets the review, required diagram, and optional
-        # description share one current-head context.
+        # itself. Fetching here lets the review and the change overview share
+        # one current-head context.
         try:
             ctx = github.get_pr_context()
         except Exception:
-            _log.warning("PR context prefetch failed — extras skipped", exc_info=True)
+            _log.warning("PR context prefetch failed — overview skipped", exc_info=True)
 
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
@@ -873,16 +852,6 @@ def execute_review(
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
-    finally:
-        # Deferred deliberately: posting a comment fires an issue_comment
-        # workflow run, and a consumer whose concurrency group isn't
-        # discriminated by event name puts that run in the same group as this
-        # review — cancel-in-progress then kills the review that posted the
-        # comment. With the review already on the PR, such a cancellation is
-        # harmless. In a `finally` so a failed review still gets its extras,
-        # exactly as when they ran first.
-        if ctx is not None:
-            _post_extras(github, provider, cfg, ctx, describe=describe)
 
     if runtime.profile:
         click.echo(profiler.render())
@@ -1199,5 +1168,4 @@ __all__ = [
     "resolve_auto_incremental",
     "run_describe",
     "run_review",
-    "should_auto_describe",
 ]

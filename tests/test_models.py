@@ -454,3 +454,33 @@ def test_review_finding_line_must_be_positive() -> None:
     # The first valid line is accepted.
     f = ReviewFinding(path="a.py", line=1, severity=Severity.low, title="t", body="b")
     assert f.line == 1
+
+
+def test_overview_sections_are_on_by_default() -> None:
+    """The change overview posts in full with zero config: description,
+    High Impact Areas, and the diagrams."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    assert cfg.auto_diagram is True
+    assert cfg.auto_describe is True
+    assert cfg.high_impact is True
+
+
+def test_high_impact_area_rejects_an_unknown_area() -> None:
+    """The taxonomy is a closed set — a model inventing an area is drifted
+    output, and _Strict rejects it rather than rendering an unknown heading."""
+    from lgtmaybe.core.models import HighImpactArea
+
+    with pytest.raises(ValidationError):
+        HighImpactArea(area="vibes", title="t")
+
+    area = HighImpactArea(area="backup_and_recovery", title="Retention halved")
+    assert area.severity == "high"
+    assert area.files == []
+
+
+def test_high_impact_result_defaults_to_no_areas() -> None:
+    """An empty answer must be expressible: "nothing qualifies" is a result."""
+    from lgtmaybe.core.models import HighImpactResult
+
+    assert HighImpactResult.model_validate({"areas": []}).areas == []

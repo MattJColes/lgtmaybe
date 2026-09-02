@@ -39,12 +39,13 @@ line. A clean change just gets a 👍 **LGTM!**.
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
-Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
-**`/describe`** writes a structured overview, **`/diagram`** draws
-[the change](how-to/generate-a-change-diagram.md) — a flowchart of what it
-touches, plus a sequence diagram of the flow it alters — and
-**`/ask <question>`** answers in the change. Run `lgtmaybe diagram` to draw the
-same map locally before you push.
+Reviews aren't all it does. **`/review`** and **`/improve`** run the review, and
+**`/diagram`** posts [the change overview](how-to/generate-a-change-diagram.md) —
+a description, a bold **High Impact Areas** call-out (infrastructure, security
+posture, outage risk, migrations, backups, compatibility, cost and more), a
+flowchart of what the change touches and a sequence diagram of the flow it
+alters. **`/ask`** answers questions in the change. Run `lgtmaybe diagram` to
+print the same overview locally.
 
 ```mermaid
 flowchart LR
@@ -200,11 +201,14 @@ lgtmaybe review --provider ollama --model qwen3.6:27b \
 coding agent can read and apply, for a local review-and-fix loop — see
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-## Step 5 — Diagram what you touched
+## Step 5 — See the whole change
 
-`lgtmaybe diagram` runs the same local diff through one model call and prints a
-picture of the components your change touches — plus, when your change alters a
-run-time flow, a sequence diagram of that flow:
+`lgtmaybe diagram` runs the same local diff through three concurrent model calls
+and prints the **change overview**: a description of what you changed, a **High
+Impact Areas** section calling out anything that could bite (infrastructure,
+security posture, outage risk, migrations, backups and more), and a picture of
+the components your change touches — plus, when it alters a run-time flow, a
+sequence diagram of that flow:
 
 ```bash
 lgtmaybe diagram \
@@ -215,11 +219,11 @@ lgtmaybe diagram \
 
 It takes the same `--base` / `--working` / `--uncommitted` flags as `review`, so
 `review` then `diagram` is a natural pair before you open a pull request: what's
-wrong with the change, then what the change reaches and what it does. The output
-is Mermaid source plus a text rendering — the text is what reads in a terminal;
-paste the Mermaid into a GitHub comment or [mermaid.live](https://mermaid.live)
-to see it drawn. See
-[Generate a change diagram](../how-to/generate-a-change-diagram.md).
+wrong with the change, then what the change is and what it could break. The
+diagrams print as Mermaid source plus a text rendering — the text is what reads
+in a terminal; paste the Mermaid into a GitHub comment or
+[mermaid.live](https://mermaid.live) to see it drawn. See
+[Generate a change overview](../how-to/generate-a-change-diagram.md).
 
 ## Step 6 — Post reviews on real pull requests
 
@@ -773,11 +777,11 @@ default shape.
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
 `auto_diagram` is on by default, so opened and reopened pull requests receive a
-concise change summary and compact Mermaid flowchart automatically. Later
-`synchronize` pushes refresh it and, when the change alters a run-time flow, a
-sequence diagram appears beside it.
-Set it to `false` if you do
-not want the extra model call.
+change overview automatically — a description, a **High Impact Areas** section,
+and a compact Mermaid flowchart. Later `synchronize` pushes refresh it and, when
+the change alters a run-time flow, a sequence diagram appears beside it. Set it
+to `false` for no overview at all, or drop a single section with
+`auto_describe: false` / `high_impact: false`.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -981,8 +985,9 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks, zizmor, ast-grep and osv-scanner post directly with no model call. The image bundles these tools and an offline vulnerability database |
-| `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `true` | After each opened, reopened, or synchronized (push) PR review, post or refresh a concise change summary with a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out |
+| `auto_describe` | `true` | Head the change overview with a structured description (title, change type, summary, per-file walkthrough, intent check); set `false` to drop the section |
+| `auto_diagram` | `true` | After each opened, reopened, or synchronized (push) PR review, post or refresh the change overview: description, High Impact Areas, a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out of the whole comment |
+| `high_impact` | `true` | Include the High Impact Areas section in the change overview — infrastructure, security posture, outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, compliance; set `false` to drop the section |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
@@ -2930,7 +2935,9 @@ automatic where the provider supports it.
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
   - [triage_model](#triage_model)
+  - [auto_diagram](#auto_diagram)
   - [auto_describe](#auto_describe)
+  - [high_impact](#high_impact)
   - [pr_labels](#pr_labels)
   - [finding_rules](#finding_rules)
   - [summary_template](#summary_template)
@@ -3456,21 +3463,62 @@ triage_model: claude-haiku-4-5   # cheap gatekeeper; unset = no triage
 Default: unset (no triage — every file gets the full review, exactly as
 before).
 
-### auto_describe
+### auto_diagram
 
-Post a **structured PR description** as a comment when a PR is opened (or
-reopened), before the review runs: a suggested title, the change type, a short
-summary, a per-file walkthrough table, and — when the PR states an intent — a
-"does it do what it says" check. The comment is updated **in place** by later
-`/describe` runs, never duplicated, and a describe failure never blocks the
-review. `/describe` posts the same structured description on demand whether or
-not auto-describe is enabled.
+Post the **change overview** as a comment after the review, and refresh it on
+every push: a description of the change, a **High Impact Areas** section, a
+Mermaid flowchart of the components the PR touches, and — when the change alters
+a run-time flow — a Mermaid sequence diagram of it. One comment, updated **in
+place**, never duplicated. `/diagram` posts the same overview on demand.
+
+This is the switch for the whole comment: with it off, nothing auto-posts
+besides the review itself.
 
 ```yaml
-auto_describe: true
+auto_diagram: false
 ```
 
-Default: `false`.
+Default: `true`. See [Generate a change
+overview](generate-a-change-diagram.md).
+
+### auto_describe
+
+Head the change overview with a **structured description**: a suggested title,
+the change type, a short summary, a per-file walkthrough table, and — when the
+PR states an intent — a "does it do what it says" check. Its own model call,
+best-effort: a failure leaves a short note in that slot and never blocks the
+rest of the comment.
+
+Because it rides the overview comment, it refreshes on every push rather than
+only on open. `/describe` still posts a description as its own separate comment,
+whether or not this is enabled.
+
+```yaml
+auto_describe: false
+```
+
+Default: `true`.
+
+### high_impact
+
+Include the **High Impact Areas** section in the change overview — the changes a
+reviewer must not miss, in ten areas: infrastructure, security posture,
+availability (anything that could cause a production outage), data migrations,
+backups and recovery, compatibility, observability, dependencies, cost, and
+compliance.
+
+Deterministic path patterns ground the model call as untrusted hints *and* floor
+its output, so a sensitive file (a `*.tf`, a workflow, a migration, a backup
+policy, a lockfile) is named even when the model says nothing about it. A failed
+call degrades to that floor rather than dropping the section, and an empty
+result says what was checked.
+
+```yaml
+high_impact: false
+```
+
+Default: `true`. See [Generate a change
+overview](generate-a-change-diagram.md).
 
 ### pr_labels
 
@@ -3953,16 +4001,18 @@ and context files the way you review any other change to CI.
 
 <!-- Source: https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/ -->
 
-# Generate a change diagram
+# Generate a change overview
 
-lgtmaybe can post a **compact picture of what a pull request changes** — the
-components the PR touches and the run-time flow it alters — so a reviewer gets a
-visual overview before they read the diff. It's a separate concern from the
-review and the description: enable any of them independently.
+lgtmaybe can post a **change overview** on a pull request: what the change is,
+what is risky about it, and what it touches. It is one comment, updated in
+place, that a reviewer reads before the diff. A separate concern from the
+review — the review finds bugs in the lines it reads, the overview describes the
+change as a whole.
 
 ## Contents
 
 - [What you get](#what-you-get)
+- [High Impact Areas](#high-impact-areas)
 - [Structure and sequence](#structure-and-sequence)
 - [On GitHub: `/diagram` and `auto_diagram`](#on-github-diagram-and-auto_diagram)
 - [Locally: `lgtmaybe diagram`](#locally-lgtmaybe-diagram)
@@ -3971,15 +4021,26 @@ review and the description: enable any of them independently.
 
 ## What you get
 
-One model call returns a concise summary of what changed and up to two diagrams,
-each in two renderings:
+Three focused model calls, run concurrently, compose one comment in reading
+order:
 
-- a **Mermaid flowchart** of the structure — what the change touches and how
-  those pieces connect;
-- a **Mermaid sequence diagram** of the flow — what happens at run time, and in
-  what order — included only when the change actually alters a flow;
-- a **plain-text rendering** of each, which is what shows in a terminal and
-  serves as the fallback if the Mermaid can't be rendered.
+1. a **description** — a suggested title, the change type, a short summary, a
+   per-file walkthrough, and a "does it do what it says" check when the PR
+   states an intent (`auto_describe`);
+2. **[High Impact Areas](#high-impact-areas)** — the changes a reviewer must not
+   miss, in a bold-titled section (`high_impact`);
+3. up to two **diagrams**, each in two renderings — a **Mermaid flowchart** of
+   the structure, a **Mermaid sequence diagram** of the run-time flow when the
+   change alters one, and a **plain-text rendering** of each, which is what
+   shows in a terminal and serves as the fallback if the Mermaid can't be
+   rendered.
+
+Three calls rather than one because a single prompt doing three jobs does all
+three worse. They run at the same time, so the overview costs about as much
+wall-clock as its slowest call rather than the sum of the three. Each section
+has its own switch, and the description and High Impact Areas sections are
+best-effort: if one of those calls fails, its slot says so and the rest of the
+comment still posts.
 
 GitHub renders both Mermaid diagrams natively inside the comment — no image, no
 external hosting.
@@ -4000,10 +4061,23 @@ Here is what the posted comment looks like for a PR that puts a Redis cache in
 front of a user service — the Mermaid renders in place, with the ASCII tucked
 in a collapsible "Text version" underneath:
 
-> **Cache user lookups in Redis**
+> ## Cache user lookups in Redis
+
+> **Change type:** feature
 
 > User reads now check Redis before PostgreSQL, and successful database reads
 > populate the cache for later requests.
+
+> ### **High Impact Areas**
+>
+> - **Infrastructure** — New ElastiCache cluster (`infra/redis.tf`). Adds a
+>   managed dependency to the production VPC. _Check:_ security group and
+>   failover settings.
+> - **Availability** — Cache on the user read path (`api/users.py`). User reads
+>   now depend on Redis, so a Redis outage takes reads down with it. _Check:_
+>   confirm a Redis error falls back to the database.
+> - **Backup and recovery** — touched: `ops/backup_retention.tf` (not assessed
+>   by the model)
 
 > ### Structure
 
@@ -4064,6 +4138,69 @@ sequenceDiagram
 
 > *The User DB link is inferred from an import, not shown in the diff.*
 
+## High Impact Areas
+
+A review reads the changed lines and tells you what is wrong in them. It cannot
+tell you that halving a node count removes your peak headroom, or that the PR
+quietly shortened a backup retention policy. **High Impact Areas** asks the
+other question — *what could this change break beyond itself?* — and answers it
+in one bold-titled section at the top of the overview.
+
+Ten areas are checked:
+
+| Area | What it covers |
+|---|---|
+| **Infrastructure** | IaC, Kubernetes/Helm, container images, CI/CD pipelines, deploy scripts, networking, DNS, load balancers, resource sizing |
+| **Security** | Authentication, authorisation, IAM or permission scope, cryptography, secret handling, removed input validation, CORS/CSP/TLS, CI workflow permissions |
+| **Availability** | Anything that could cause a production outage: startup and config defaults, timeouts, retries, circuit breakers, connection pools, rate limits, health checks, removed error handling, concurrency and locking, runtime or major dependency upgrades, hot-path performance, rollback and deploy ordering |
+| **Data migration** | Schema or data migrations, destructive or irreversible data operations, backfills |
+| **Backup and recovery** | Backup jobs, retention and lifecycle policies, snapshots, restore paths, disaster recovery, failover, replication |
+| **Compatibility** | Breaking an external contract: HTTP APIs, event or message schemas, CLI flags, SDK surface, wire formats, feature-flag removal |
+| **Observability** | Logs, metrics, alerts, dashboards, tracing, audit trails or runbooks being removed, silenced or changed |
+| **Dependencies** | Supply chain: new dependencies, major bumps, loosened pins, lockfiles, base images, build toolchain |
+| **Cost** | Autoscaling limits, instance types, provisioned capacity, storage classes, quotas |
+| **Compliance** | PII or privacy handling, audit trails, data residency, licence changes |
+
+Each call-out names the area, a short headline, the files it comes from, the
+blast radius, and the one thing a reviewer should verify.
+
+### The path floor
+
+The model is not the only source. Before the call, lgtmaybe matches the PR's
+changed **paths** against deterministic patterns per area — `*.tf`,
+`.github/workflows/`, `alembic/`, anything named for backups or retention,
+lockfiles, and so on. Those matches do two jobs:
+
+- they are sent to the model as untrusted hints, saying *where* to look (never
+  that anything is wrong);
+- they **floor** the output. An area whose files the model said nothing about is
+  still listed, marked `(not assessed by the model)`, so a weak model cannot
+  make your Terraform change invisible.
+
+The floor is also the fallback: if the call fails or returns nothing usable, the
+section renders the path signals alone under a "model assessment unavailable"
+note. It degrades — it never disappears.
+
+When nothing qualifies, the section says so and names what it checked, rather
+than silently vanishing:
+
+> ### **High Impact Areas**
+>
+> None detected — checked: infrastructure, security posture, availability, data
+> migrations, backups and recovery, compatibility, observability, dependencies,
+> cost, compliance.
+
+### Turning it off
+
+The section is on by default. To drop it and its model call:
+
+```yaml
+high_impact: false
+```
+
+The description section has its own switch, `auto_describe: false`. With both
+off, the comment is just the diagrams, and costs one call.
+
 ## Structure and sequence
 
 The two diagrams answer different questions, which is why lgtmaybe draws both:
@@ -4082,20 +4219,20 @@ the flow shows how a request now reaches it.
 
 The sequence view is **omitted entirely** when the change has no meaningful
 run-time flow — documentation, configuration, formatting — rather than inventing
-one. When only the flowchart renders, the `Structure` / `Sequence` headings drop
-away too, so a small change stays a small comment. Both diagrams share one model
-call, one PR comment, and the same six-component budget; the sequence view adds
-at most eight ordered steps.
+one. Both diagrams share one model call, one PR comment, and the same
+six-component budget; the sequence view adds at most eight ordered steps.
 
 ## On GitHub: `/diagram` and `auto_diagram`
 
 Comment **`/diagram`** on a pull request to post (or update in place) the change
-diagram. Like `/describe`, it's an idempotent upsert — re-running edits the same
-comment instead of stacking new ones.
+overview. It's an idempotent upsert — re-running edits the same comment instead
+of stacking new ones. (`/describe` still posts a description as its own separate
+comment, for when that is all you want.)
 
 `auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
-needed — so a diagram posts automatically when a PR is opened or reopened and
-refreshes after later pushes. To opt out, set it in your workflow:
+needed — so the overview posts automatically when a PR is opened or reopened and
+refreshes after later pushes, keeping every section current with the head
+commit. To opt out of the whole comment, set it in your workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v2
@@ -4113,11 +4250,15 @@ or in `.lgtmaybe.yml`:
 auto_diagram: false
 ```
 
-The diagram is best-effort — a failure is logged and never blocks the review.
+The description and High Impact Areas sections are best-effort: a failure there
+is logged, leaves a visible note in its slot, and never blocks the rest. The
+diagram itself is a required completion step, so a failed diagram leaves the
+commit un-finished and the next run redoes it rather than silently skipping it.
 
 ## Locally: `lgtmaybe diagram`
 
-`lgtmaybe diagram` prints a diagram of your local changes — no GitHub involved:
+`lgtmaybe diagram` prints the change overview of your local changes — no GitHub
+involved:
 
 ```console
 $ lgtmaybe diagram --provider ollama --model llama3
@@ -4126,9 +4267,10 @@ $ lgtmaybe diagram --provider ollama --model llama3
 It diffs your branch against the base (the same base resolution as `lgtmaybe
 review`; `--base` overrides, `--working` includes uncommitted edits,
 `--uncommitted` reviews only the working-tree edits). The output is the same
-body the `/diagram` comment carries — each diagram's Mermaid source first, then
-its text rendering — with one adaptation: a terminal renders no HTML, so the
-collapsible "Text version" wrapper is flattened into a plain labelled section:
+body the `/diagram` comment carries — description, High Impact Areas, then each
+diagram's Mermaid source and its text rendering — with one adaptation: a
+terminal renders no HTML, so the collapsible "Text version" wrapper is flattened
+into a plain labelled section:
 
 ````console
 $ lgtmaybe diagram --provider ollama --model llama3
@@ -4355,7 +4497,11 @@ input tokens  ≈  batches × lenses × (diff + context padding + hints)
 - **batches** — a diff larger than `max_input_tokens` (default 100k) is split,
   and *each* batch pays the full lens fan-out again.
 - **reflection** — one more pass over the findings, on top.
-- **triage / describe / diagram** — extra calls when enabled.
+- **triage** — an extra cheap call when enabled.
+- **the change overview** (`auto_diagram`, on by default) — up to three extra
+  calls per push: the description (`auto_describe`), High Impact Areas
+  (`high_impact`), and the diagrams. Each opts out on its own; `auto_diagram:
+  false` drops all three.
 - **mid-review retrieval** — off by default; on, it adds up to one more call per
   (batch, lens). See [What costs more, on purpose](#what-costs-more-on-purpose).
 
@@ -4882,7 +5028,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `api_base` | string / null | No | `null` | Api Base |
-| `auto_describe` | boolean | No | `False` | Auto Describe |
+| `auto_describe` | boolean | No | `True` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'spec']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
@@ -4893,6 +5039,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `fallback_model` | string / null | No | `null` | Fallback Model |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
+| `high_impact` | boolean | No | `True` | High Impact |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
@@ -5490,7 +5637,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Api Base"
     },
     "auto_describe": {
-      "default": false,
+      "default": true,
       "title": "Auto Describe",
       "type": "boolean"
     },
@@ -5577,6 +5724,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "function_context": {
       "default": true,
       "title": "Function Context",
+      "type": "boolean"
+    },
+    "high_impact": {
+      "default": true,
+      "title": "High Impact",
       "type": "boolean"
     },
     "ignore_fingerprints": {
@@ -7522,10 +7674,13 @@ Nothing else is sent. lgtmaybe does not send:
 - Committer identity or email addresses
 - Any other data from the repository's git history
 
-The optional **description** (`/describe`, `auto_describe`) and **change
-diagram** (`/diagram`, `auto_diagram`) features send exactly the same inputs —
-the redacted diff and, when present, the redacted stated intent. They add no new
-data flows; they only ask the model for a different output. The diagram comment
+The **change overview** (`/diagram`, `auto_diagram`) makes up to three calls —
+description, High Impact Areas, diagrams — and each sends exactly the same
+inputs as a review call: the redacted diff and, when present, the redacted
+stated intent. The High Impact Areas call additionally sends the **paths** of
+changed files matching its risk patterns, which are already part of the diff it
+sends. No new data flows; the calls only ask the model for a different output.
+The standalone `/describe` comment sends the same inputs again. The diagram comment
 does include an "Open full screen" [mermaid.live](https://mermaid.live) link per
 diagram, whose URL fragment embeds that diagram's source — but that source is the
 already-public, post-redaction comment body, the fragment is decoded

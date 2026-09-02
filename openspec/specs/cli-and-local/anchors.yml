@@ -34,6 +34,16 @@ cli.diagram-sequence:
     has: { field: name, regex: '^_sequence_views$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
+cli.overview-high-impact:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^build_overview$' }
+    files: [src/lgtmaybe/engine/overview.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^path_signals$' }
+    files: [src/lgtmaybe/engine/high_impact.py]
+
 cli.review-comment-noop:
   rule:
     kind: function_definition

@@ -80,7 +80,11 @@ input tokens  ≈  batches × lenses × (diff + context padding + hints)
 - **batches** — a diff larger than `max_input_tokens` (default 100k) is split,
   and *each* batch pays the full lens fan-out again.
 - **reflection** — one more pass over the findings, on top.
-- **triage / describe / diagram** — extra calls when enabled.
+- **triage** — an extra cheap call when enabled.
+- **the change overview** (`auto_diagram`, on by default) — up to three extra
+  calls per push: the description (`auto_describe`), High Impact Areas
+  (`high_impact`), and the diagrams. Each opts out on its own; `auto_diagram:
+  false` drops all three.
 - **mid-review retrieval** — off by default; on, it adds up to one more call per
   (batch, lens). See [What costs more, on purpose](#what-costs-more-on-purpose).
 

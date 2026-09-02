@@ -220,28 +220,53 @@ pattern, event bus, plugin framework.
    - **`comment` command** — handles the `issue_comment` event and routes slash
      commands to the same engine/provider: `/review` + `/improve` post a review,
      `/ask <q>` replies in-thread (`post_issue_comment`, an adapter-only method
-     beyond the frozen port), and `/describe` posts a **structured description**
-     (`engine/describe.py`: title, change type, summary, per-file walkthrough
-     table, intent check when the PR states one; structured output with a
-     raw-text fallback) via `post_describe_comment` — an idempotent upsert that
-     edits our previous description in place. `ReviewConfig.auto_describe`
-     (default off; Action input `auto_describe`) posts it automatically on a
-     freshly opened/reopened PR, best-effort, before the review. `/diagram`
-     posts a **change diagram** (`engine/diagram.py`: from one structured call
-     returning typed nodes/edges/steps, lgtmaybe renders a Mermaid **flowchart**
-     of the components the PR touches *and* a Mermaid **sequence diagram** of the
-     run-time flow it alters — structure answers "what does this touch", sequence
-     answers "what happens, in what order"; the sequence view is omitted when the
-     model returns no steps, which is also when the `Structure`/`Sequence`
-     headings drop away. Both render natively on GitHub, each with a text
-     rendering that is the terminal view and the fallback; model-authored Mermaid
-     never reaches a fence, and sequence labels are escaped with Mermaid entity
-     codes) via `post_diagram_comment` — its own idempotent
-     upsert with a disjoint marker family. `ReviewConfig.auto_diagram` (default
-     **on**; Action input `auto_diagram`, set false to opt out) posts it
-     automatically on freshly opened/reopened PRs. The local `lgtmaybe diagram` command prints the same body
-     (no GitHub) — a terminal can't render Mermaid, which is what the text
-     rendering is for. **No D2:** GitHub doesn't render it in Markdown.
+     beyond the frozen port), and `/describe` posts a **standalone structured
+     description** (`engine/describe.py`: title, change type, summary, per-file
+     walkthrough table, intent check when the PR states one; structured output
+     with a raw-text fallback) via `post_describe_comment` — an idempotent upsert
+     that edits our previous description in place.
+   - **The change overview (`/diagram`, `auto_diagram`)** — ONE comment via
+     `post_diagram_comment` (its own idempotent upsert + disjoint marker family),
+     composed by `engine/overview.py` from **three concurrent structured calls**
+     on one `ThreadPoolExecutor`, in reading order:
+     1. the **description** (the same `engine/describe.py` call, `describe_result`
+        for the typed object; `ReviewConfig.auto_describe`, default **on** — it
+        rides this comment, so it refreshes on every push);
+     2. **High Impact Areas** (`engine/high_impact.py`, `ReviewConfig.high_impact`,
+        default **on**) — a bold `### **High Impact Areas**` section answering
+        "what could this break beyond itself" over ten areas (infrastructure,
+        security, availability/outage, data_migration, backup_and_recovery,
+        compatibility, observability, dependencies, cost, compliance). Two
+        sources: the model, plus **deterministic path signals** (`path_signals`,
+        per-area regexes) that ground the call as untrusted hints
+        (`injection.wrap_path_signals`, its own neutralised `SIGNALS` family —
+        filenames are attacker-chosen on a fork PR) **and floor the output**: an
+        area with signals the model ignored is still listed "(not assessed by the
+        model)", and a failed/unparseable call renders the floor alone. An empty
+        result names what was checked rather than vanishing. Model-chosen paths
+        not in `changed_files` are dropped;
+     3. the **diagrams** (`engine/diagram.py`: from one structured call returning
+        typed nodes/edges/steps, a Mermaid **flowchart** of what the PR touches
+        *and* a Mermaid **sequence diagram** of the run-time flow it alters —
+        structure answers "what does this touch", sequence "what happens, in what
+        order"; the sequence view is omitted when the model returns no steps.
+        Both render natively on GitHub, each with a text rendering that is the
+        terminal view and the fallback; model-authored Mermaid never reaches a
+        fence, and sequence labels are escaped with Mermaid entity codes).
+     The description heads the comment (the diagram's own title is suppressed);
+     with `auto_describe` off the diagram header returns. Sections 1 and 2 are
+     **best-effort** — a failure renders a visible "unavailable" line, never a
+     silent gap — while the diagram call keeps propagating, because the automatic
+     overview is a **required completion step** (a failure must not stamp the head
+     complete). With both sections off, the body is byte-identical to
+     `build_diagram` and costs one call. `auto_diagram` (Action input, default
+     **on**) is the one switch for the whole comment; `should_auto_diagram` gates
+     it to opened/reopened/synchronize. The local `lgtmaybe diagram` command prints
+     the same body (no GitHub) — a terminal can't render Mermaid, which is what the
+     text rendering is for. **No D2:** GitHub doesn't render it in Markdown.
+     The shared one-call scaffold is `describe.structured_call` (typed result) /
+     `structured_comment` (rendered Markdown); `describe.markdown_text` escapes
+     every section's model prose.
    - **Guards (in the engine):** generated/binary files skipped via
      `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
      denylist globs applied right after it (`engine.passes_path_filters`;

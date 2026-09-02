@@ -30,7 +30,6 @@ from lgtmaybe.cli import (
     mr_url_from_ci_env,
     pr_url_from_event,
     resolve_auto_incremental,
-    should_auto_describe,
     should_auto_diagram,
 )
 from lgtmaybe.config import store
@@ -493,11 +492,11 @@ def diagram(
     num_ctx: int | None,
     config_path: str | None,
 ) -> None:
-    """Print a compact Mermaid diagram of your local changes — no GitHub needed.
+    """Print the change overview of your local changes — no GitHub needed.
 
-    Emits the ASCII rendering (which shows in a terminal) plus the Mermaid
-    source — paste that into a GitHub comment, mermaid.live, or a Markdown file
-    to render it.
+    A description of the change, its High Impact Areas, and the diagrams: the
+    text rendering (which shows in a terminal) plus the Mermaid source — paste
+    that into a GitHub comment, mermaid.live, or a Markdown file to render it.
     """
     _check_diff_mode(working, uncommitted)
     cfg = _load_cfg(
@@ -570,16 +569,10 @@ def action() -> None:
     event_action = str(event.get("action") or "")
     cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
-    # Auto-description stays open/reopen-only; auto-diagram also refreshes on a
-    # synchronize push so a replacement run cannot lose it. Both are best-effort
-    # and post after the review. execute_review shares one gateway and one PR-context
-    # fetch across the extras and the review itself.
-    execute_review(
-        cfg,
-        runtime,
-        describe=should_auto_describe(cfg, event_action=event_action),
-        diagram=should_auto_diagram(cfg, event_action=event_action),
-    )
+    # The change overview refreshes on a synchronize push too, so a replacement
+    # run cannot lose it. It posts after the review, and execute_review shares
+    # one gateway and one PR-context fetch across the two.
+    execute_review(cfg, runtime, diagram=should_auto_diagram(cfg, event_action=event_action))
 
 
 @main.command("gitlab-ci")
