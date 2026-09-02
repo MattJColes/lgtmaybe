@@ -1,5 +1,76 @@
 # Changelog
 
+## [2.7.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.6.2...lgtmaybe-v2.7.0) (2026-09-02)
+
+
+### Features
+
+* report High Impact Areas in a unified change overview comment ([#644](https://github.com/MattJColes/lgtmaybe/issues/644)) ([b1a13cb](https://github.com/MattJColes/lgtmaybe/commit/b1a13cbd74a53ae11b75a5449ae62e240f4b801b))
+
+
+### Bug Fixes
+
+* **action:** keep config file optional ([#637](https://github.com/MattJColes/lgtmaybe/issues/637)) ([07a1eeb](https://github.com/MattJColes/lgtmaybe/commit/07a1eeb54d55f7c9897b59c40d9c4275cc1ff9fb))
+* **action:** reject unsupported GHES hosts ([#625](https://github.com/MattJColes/lgtmaybe/issues/625)) ([60a7857](https://github.com/MattJColes/lgtmaybe/commit/60a78575d082a127d491370e4facc91b5dfa0e6b))
+* **aws:** defer credentials to sdk ([#622](https://github.com/MattJColes/lgtmaybe/issues/622)) ([7ba588c](https://github.com/MattJColes/lgtmaybe/commit/7ba588c1ebe12d6dd0dc20833aaaabeb78da5a16))
+* bound truncated finding salvage ([#629](https://github.com/MattJColes/lgtmaybe/issues/629)) ([a89bd5b](https://github.com/MattJColes/lgtmaybe/commit/a89bd5ba41fd740786eafb2f7236a123cfeb114f))
+* bound unpaginated Gitea reads ([#638](https://github.com/MattJColes/lgtmaybe/issues/638)) ([df479f8](https://github.com/MattJColes/lgtmaybe/commit/df479f8b9f977ff851d0bd8df54f16537e626351))
+* budget context for reviewed files ([#603](https://github.com/MattJColes/lgtmaybe/issues/603)) ([8e53d1c](https://github.com/MattJColes/lgtmaybe/commit/8e53d1c6230c0a05c0fdff265cea4cab4d2bb527))
+* cache Docker dependency layer ([#595](https://github.com/MattJColes/lgtmaybe/issues/595)) ([ed3e0d1](https://github.com/MattJColes/lgtmaybe/commit/ed3e0d1e5aa04c8aadb1c6b0f578b2dbfcb6f6aa))
+* cap files after triage ranking ([#609](https://github.com/MattJColes/lgtmaybe/issues/609)) ([7e043af](https://github.com/MattJColes/lgtmaybe/commit/7e043af7687910bf9c24423d6fbb1b849c3fde3c))
+* **cli:** disclose incomplete JSON reviews ([#610](https://github.com/MattJColes/lgtmaybe/issues/610)) ([7dee13b](https://github.com/MattJColes/lgtmaybe/commit/7dee13bd0312562f03002291ef7d37285bebd7af))
+* **compress:** expand zero-length hunks correctly ([#612](https://github.com/MattJColes/lgtmaybe/issues/612)) ([437f956](https://github.com/MattJColes/lgtmaybe/commit/437f956438be1560a090b9064528b88f2b8cb51c))
+* distinguish finding identity sides ([#617](https://github.com/MattJColes/lgtmaybe/issues/617)) ([d9a05dd](https://github.com/MattJColes/lgtmaybe/commit/d9a05dd955a34e96e1bf31847dc8cbd94bff89fa))
+* enable manifest scan before prefetch ([#626](https://github.com/MattJColes/lgtmaybe/issues/626)) ([3496e13](https://github.com/MattJColes/lgtmaybe/commit/3496e130387d3c9ea863ae70d108f4c18feffe3e))
+* **engine:** preserve scanner findings on model failure ([#615](https://github.com/MattJColes/lgtmaybe/issues/615)) ([97904bb](https://github.com/MattJColes/lgtmaybe/commit/97904bbc0b1972459c67571e4ef1b376a5f8cdc2))
+* **gitlab:** preserve renamed file paths ([#619](https://github.com/MattJColes/lgtmaybe/issues/619)) ([beda46e](https://github.com/MattJColes/lgtmaybe/commit/beda46ed5a524d640a966a53cbddecfb65175435))
+* ignore root files in split heuristic ([#611](https://github.com/MattJColes/lgtmaybe/issues/611)) ([0981b51](https://github.com/MattJColes/lgtmaybe/commit/0981b51d56b8180e3306ada2f189362d1ad1c585))
+* neutralise findings before reflection ([#633](https://github.com/MattJColes/lgtmaybe/issues/633)) ([77100b2](https://github.com/MattJColes/lgtmaybe/commit/77100b2fe446d5b1653351abd5109560f2f5c86d))
+* **ollama:** preserve chat message roles ([#631](https://github.com/MattJColes/lgtmaybe/issues/631)) ([46f70fd](https://github.com/MattJColes/lgtmaybe/commit/46f70fd01e6127ba1ba27df3b97b711000708d43))
+* pair GitLab context line positions ([#632](https://github.com/MattJColes/lgtmaybe/issues/632)) ([e42f842](https://github.com/MattJColes/lgtmaybe/commit/e42f8421379aef7529068781727331344469f957))
+* preserve Azure authentication errors ([#623](https://github.com/MattJColes/lgtmaybe/issues/623)) ([e7459a1](https://github.com/MattJColes/lgtmaybe/commit/e7459a1ad998bbf8c6419c0fb1199af0517f93c2))
+* preserve duplicate forge findings ([#621](https://github.com/MattJColes/lgtmaybe/issues/621)) ([61de578](https://github.com/MattJColes/lgtmaybe/commit/61de57863ba3567d1ed8a9623e562c6d05d86cb0))
+* preserve header-like diff content ([#639](https://github.com/MattJColes/lgtmaybe/issues/639)) ([c6cfd5e](https://github.com/MattJColes/lgtmaybe/commit/c6cfd5eb291ad8b6553ef7d0eb17263ce4a379bf))
+* preserve JSON string content during repair ([#642](https://github.com/MattJColes/lgtmaybe/issues/642)) ([2fa7e52](https://github.com/MattJColes/lgtmaybe/commit/2fa7e52fe629d7cf09a19975c023ddef34eaa574))
+* prevent quadratic token redaction ([#636](https://github.com/MattJColes/lgtmaybe/issues/636)) ([cc6100f](https://github.com/MattJColes/lgtmaybe/commit/cc6100f5e3e59fe7db3a916ff32b5130465fd8f0))
+* protect scanner findings from feedback ([#635](https://github.com/MattJColes/lgtmaybe/issues/635)) ([27725d6](https://github.com/MattJColes/lgtmaybe/commit/27725d652fd7c8e6706b4b5990e5f5574cada8b6))
+* redact exact captured secret span ([#643](https://github.com/MattJColes/lgtmaybe/issues/643)) ([06afc05](https://github.com/MattJColes/lgtmaybe/commit/06afc05167af32f1cde0679704f5cadb6c649e94))
+* reject truncated GitHub comparisons ([#616](https://github.com/MattJColes/lgtmaybe/issues/616)) ([6a511c8](https://github.com/MattJColes/lgtmaybe/commit/6a511c8810b5dac1f12b976c122cc98fb18190df))
+* reject unknown config get keys ([#608](https://github.com/MattJColes/lgtmaybe/issues/608)) ([7e5516f](https://github.com/MattJColes/lgtmaybe/commit/7e5516fbbeff2a3f3fd22886c73d40899a2d217b))
+* remember rejected model parameters ([#602](https://github.com/MattJColes/lgtmaybe/issues/602)) ([3d0ae9f](https://github.com/MattJColes/lgtmaybe/commit/3d0ae9f4ea15e0cb9620ae18cd3692f75e01a087))
+* remove needless review code ([#597](https://github.com/MattJColes/lgtmaybe/issues/597)) ([c1396b0](https://github.com/MattJColes/lgtmaybe/commit/c1396b070a5279d7d6321888e822edb16587f7c5))
+* report unsplit parser truncation ([#614](https://github.com/MattJColes/lgtmaybe/issues/614)) ([96d7a8b](https://github.com/MattJColes/lgtmaybe/commit/96d7a8b782207d0a39f752fae4af2048f04772fc))
+* retain schema retry salvage ([#613](https://github.com/MattJColes/lgtmaybe/issues/613)) ([7fd5b26](https://github.com/MattJColes/lgtmaybe/commit/7fd5b26b419bd4fc652e43513e6eb56540196639))
+* retry GitHub writes after rate limits ([#618](https://github.com/MattJColes/lgtmaybe/issues/618)) ([9d64134](https://github.com/MattJColes/lgtmaybe/commit/9d641349a428831e505dadf1a88cc80ebdd32c26))
+* root local symbols at repository ([#606](https://github.com/MattJColes/lgtmaybe/issues/606)) ([583e5eb](https://github.com/MattJColes/lgtmaybe/commit/583e5eb5dc7fe692587f3cc8f61629293bc6cd1a))
+* salvage rejected initial review comments ([#630](https://github.com/MattJColes/lgtmaybe/issues/630)) ([7e813b5](https://github.com/MattJColes/lgtmaybe/commit/7e813b5a1d289cb34d6700e8984683d071ffaf10))
+* **security:** isolate static analysis config ([#640](https://github.com/MattJColes/lgtmaybe/issues/640)) ([66aa950](https://github.com/MattJColes/lgtmaybe/commit/66aa950c7fb9e9e450b93c9fb059dd0f178899a5))
+* **security:** keep clone token out of argv ([#628](https://github.com/MattJColes/lgtmaybe/issues/628)) ([d94a7f6](https://github.com/MattJColes/lgtmaybe/commit/d94a7f60f812b4d22fdb0db5594f7d3d915f2226))
+* **security:** redact AWS secret credentials ([#634](https://github.com/MattJColes/lgtmaybe/issues/634)) ([38a354d](https://github.com/MattJColes/lgtmaybe/commit/38a354d1d49e2ceb39e775d9daaf8aa5b453a300))
+* split diffs only on newline bytes ([#641](https://github.com/MattJColes/lgtmaybe/issues/641)) ([6cfe9dd](https://github.com/MattJColes/lgtmaybe/commit/6cfe9dd02f51ad65e7d20f79d35ab4bc82f2ff48))
+* surface config file errors cleanly ([#627](https://github.com/MattJColes/lgtmaybe/issues/627)) ([7db160f](https://github.com/MattJColes/lgtmaybe/commit/7db160f1c1a1c0f0aa021c5597cd7489e8eab4f5))
+
+
+### Performance Improvements
+
+* **github:** cache review thread walk ([#607](https://github.com/MattJColes/lgtmaybe/issues/607)) ([796dbbd](https://github.com/MattJColes/lgtmaybe/commit/796dbbd258cc1db02d78916539efe27f5d4ee383))
+* **github:** request larger review pages ([#604](https://github.com/MattJColes/lgtmaybe/issues/604)) ([c9c13b8](https://github.com/MattJColes/lgtmaybe/commit/c9c13b8d32c8b32a13a81397a1317f624636977d))
+* **gitlab:** cache merge request notes ([#600](https://github.com/MattJColes/lgtmaybe/issues/600)) ([6512ae7](https://github.com/MattJColes/lgtmaybe/commit/6512ae793a7cc2c801babb8b726ee13024ec3f7f))
+* **local:** remove redundant git subprocesses ([#596](https://github.com/MattJColes/lgtmaybe/issues/596)) ([21f9369](https://github.com/MattJColes/lgtmaybe/commit/21f9369db409350cf433854224aec595307e86cc))
+* scan JSON delimiters once ([#599](https://github.com/MattJColes/lgtmaybe/issues/599)) ([3b1f256](https://github.com/MattJColes/lgtmaybe/commit/3b1f256a7f0aa7a3506f16a838998e6ff431ccc6))
+* skip supplied cache key derivation ([#601](https://github.com/MattJColes/lgtmaybe/issues/601)) ([deea912](https://github.com/MattJColes/lgtmaybe/commit/deea912051f6a0fcef33e8c32ff16dff1dca263d))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 7 updates ([#546](https://github.com/MattJColes/lgtmaybe/issues/546)) ([712ec3e](https://github.com/MattJColes/lgtmaybe/commit/712ec3e97d456d441d24c8f9b13d0df5ee8083e9))
+
+
+### Documentation
+
+* clarify Azure credential precedence ([#624](https://github.com/MattJColes/lgtmaybe/issues/624)) ([3748f3f](https://github.com/MattJColes/lgtmaybe/commit/3748f3fd673b5aa4eb1b4de3094f8ae54c8180a8))
+* correct automatic concurrency defaults ([#605](https://github.com/MattJColes/lgtmaybe/issues/605)) ([77489c7](https://github.com/MattJColes/lgtmaybe/commit/77489c78e6a8116a0216e0949fd584142c1e3863))
+
 ## [2.6.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.6.1...lgtmaybe-v2.6.2) (2026-08-26)
 
 
