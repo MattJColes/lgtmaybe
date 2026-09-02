@@ -282,13 +282,14 @@ def test_finding_identity_ignores_prose() -> None:
 
 
 def test_finding_identity_separates_distinct_findings() -> None:
-    """Different file, different lens, or different flagged code — different id."""
+    """Different file, lens, side, or flagged code — different id."""
     base = RUN_1[0]
     assert finding_identity(base) != finding_identity(RUN_1[1])
     assert finding_identity(base) != finding_identity(base.model_copy(update={"path": "b.py"}))
     assert finding_identity(base) != finding_identity(
         base.model_copy(update={"category": "security"})
     )
+    assert finding_identity(base) != finding_identity(base.model_copy(update={"side": "LEFT"}))
     assert finding_identity(base) != finding_identity(
         base.model_copy(update={"anchor": "import json"})
     )

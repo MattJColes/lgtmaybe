@@ -37,6 +37,7 @@ def finding_identity(finding: ReviewFinding) -> str:
     - ``path`` — the file.
     - ``category`` — the lens that raised it (engine-stamped, a fixed vocabulary),
       so two different concerns about one line stay distinct.
+    - ``side`` — whether the finding is on the old or new side of the diff.
     - ``anchor`` — the verbatim source line the finding is about. Copied out of the
       diff rather than composed, so it is code, not prose. It also absorbs line
       drift: the model miscounts diff line numbers (the reason anchors exist at
@@ -50,5 +51,7 @@ def finding_identity(finding: ReviewFinding) -> str:
     # as a different line; keep case, because code is case-sensitive.
     anchor = " ".join(finding.anchor.split()) if finding.anchor else ""
     locator = anchor or f"L{finding.line}"
-    digest = hashlib.sha256(f"{finding.path}\n{finding.category or ''}\n{locator}".encode())
+    digest = hashlib.sha256(
+        f"{finding.path}\n{finding.category or ''}\n{finding.side}\n{locator}".encode()
+    )
     return digest.hexdigest()[:12]
