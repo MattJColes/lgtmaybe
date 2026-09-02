@@ -140,7 +140,7 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     process's directory: the paths handed to the reader are repo-relative,
     because that is what git reports wherever it runs.
     """
-    root = (Path(cwd) if cwd is not None else _repo_root(None)).resolve()
+    root = (Path(cwd) if cwd is not None else local_repo_root()).resolve()
 
     def read(path: str) -> str | None:
         try:
@@ -153,7 +153,7 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     return read
 
 
-def _repo_root(cwd: Path | None) -> Path:
+def local_repo_root(cwd: Path | None = None) -> Path:
     """The worktree's top level, or *cwd* itself when git can't say.
 
     Falling back rather than raising keeps a non-repo caller (the file reader's
@@ -296,4 +296,4 @@ def _repo_name(cwd: Path | None) -> str:
     if url:
         parts = re.split(r"[:/]", url.removesuffix(".git"))
         return "/".join(parts[-2:])
-    return _repo_root(cwd).name
+    return local_repo_root(cwd).name
