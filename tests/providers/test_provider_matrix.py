@@ -29,7 +29,7 @@ EXPECTED_PREFIX: dict[Provider, str] = {
     Provider.bedrock: "bedrock/",
     Provider.vertex: "vertex_ai/",
     Provider.azure: "azure/",
-    Provider.ollama: "ollama/",
+    Provider.ollama: "ollama_chat/",
     # OpenAI-compatible servers ride the openai route with a custom api_base.
     Provider.openai_compatible: "openai/",
     # GLM / Zhipu AI rides litellm's native zai/ route.

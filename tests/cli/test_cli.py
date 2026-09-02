@@ -605,7 +605,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.fallback_model == "ollama/llama2"
+        assert provider.fallback_model == "ollama_chat/llama2"
 
     def test_a_configured_fallback_model_threads_to_provider(self, monkeypatch):
         """It belongs in `.lgtmaybe.yml` beside `model`, `triage_model` and
@@ -617,7 +617,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.fallback_model == "ollama/llama2"
+        assert provider.fallback_model == "ollama_chat/llama2"
 
     def test_the_flag_wins_over_the_configured_fallback_model(self, monkeypatch):
         """Same precedence as `api_base`: the invocation overrides the repo."""
@@ -629,7 +629,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.fallback_model == "ollama/from-flag"
+        assert provider.fallback_model == "ollama_chat/from-flag"
 
     def test_azure_keyless_ad_token_threads_to_provider(self, monkeypatch):
         """Keyless azure resolves an ambient AD token and threads it to litellm."""
