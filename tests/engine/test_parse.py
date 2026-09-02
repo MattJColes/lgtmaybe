@@ -127,6 +127,26 @@ def test_suggestion_code_fence_survives_verbatim() -> None:
     assert result[0].suggestion == suggestion
 
 
+def test_valid_json_commas_before_brackets_survive_verbatim() -> None:
+    suggestion = 'parts = re.findall(r"[^,]+", value)'
+    body = "must exclude commas, } included"
+    raw = json.dumps([dict(_VALID_FINDING, suggestion=suggestion, body=body)])
+
+    result = parse_findings(raw)
+
+    assert result[0].suggestion == suggestion
+    assert result[0].body == body
+
+
+def test_trailing_comma_repair_does_not_rewrite_string_values() -> None:
+    body = "must exclude commas, } included"
+    raw = json.dumps([dict(_VALID_FINDING, body=body)])[:-1] + ",]"
+
+    result = parse_findings(raw)
+
+    assert result[0].body == body
+
+
 def test_trailing_comma_tolerated() -> None:
     raw = '[{"path":"a.py","line":1,"severity":"low","title":"t","body":"b","suggestion":null,}]'
     result = parse_findings(raw)
