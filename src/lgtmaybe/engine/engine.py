@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
@@ -39,6 +39,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import (
     Message,
     ProviderClient,
+    ProviderInputTooLarge,
     ProviderTruncated,
     ProviderWallTimeout,
 )
@@ -52,7 +53,7 @@ from .compress import (
     context_lines_for_budget,
     count_tokens,
     expand_hunks,
-    set_counting_model,
+    split_hunk_by_budget,
     split_patch_into_hunks,
     trailing_context_lines,
 )
@@ -648,7 +649,19 @@ class _Run:
     changed_files: tuple[str, ...] = ()
 
 
-def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+class _OnOversized(Protocol):
+    """The split a lens call may fall back to: ``(reason, slice_hunks=...)``.
+
+    A Protocol rather than a ``Callable`` alias because the second argument is
+    keyword-only, which ``Callable[...]`` cannot express.
+    """
+
+    def __call__(self, reason: str, *, slice_hunks: bool = ...) -> _LensOutcome: ...
+
+
+def _split_batch(
+    batch: list[tuple[str, str]], *, slice_hunks: bool = False
+) -> list[list[tuple[str, str]]]:
     """Split a timed-out batch into smaller review units.
 
     Multi-file: halve the file list — the coarsest cut that halves the payload,
@@ -656,6 +669,13 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
     hunks, the same unit the recursive walk uses, so an oversized lone file still
     shrinks. Returns fewer than two pieces when there is nothing smaller to try
     (an empty batch, or one file with a single hunk).
+
+    ``slice_hunks`` lets a lone hunk be cut *inside*, at half its own size, with
+    the same slicer the recursive walk uses. Only for a prompt the model's
+    context window refused: that failure is purely about input size, so a
+    smaller slice is guaranteed to help, where a timeout or a truncation on a
+    single hunk may be about the answer or the thinking, and slicing there is
+    the speculative recursion this split deliberately refuses.
     """
     if len(batch) > 1:
         middle = len(batch) // 2
@@ -665,7 +685,10 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
     path, patch = batch[0]
     hunks = split_patch_into_hunks(patch)
     if len(hunks) < 2:
-        return []
+        if not slice_hunks or not hunks:
+            return []
+        slices = split_hunk_by_budget(hunks[0], max(1, count_tokens(hunks[0]) // 2))
+        return [[(path, piece)] for piece in slices] if len(slices) >= 2 else []
     middle = len(hunks) // 2
     return [
         [(path, hunk) for hunk in hunks[:middle]],
@@ -789,12 +812,45 @@ class LLMReviewEngine:
         # fetcher above can pull it. None keeps the prior path-only behaviour.
         self._resolve_symbol = resolve_symbol
 
+    def _fit_input_budget(self, cfg: ReviewConfig) -> ReviewConfig:
+        """Shrink the default batching budget to what the model can actually take.
+
+        `max_input_tokens` defaults to a flat number that knows nothing about the
+        model: a 100k batch to a 65k-window model is refused outright, and to an
+        ollama server it is silently cut to `num_ctx` — the review reads a
+        fraction of the diff and reports on the rest as if it had. A provider
+        that can say how much prompt fits (feature-detected: the litellm adapter
+        reads litellm's model map, or ollama's `num_ctx`, less the output
+        ceiling it will send) is asked, and the default is capped at its answer.
+
+        A value the user configured is left alone — they may know something the
+        map does not, and the split on a refused prompt still covers them. A
+        provider with no method, or no opinion, changes nothing. Only ever
+        down, never up: the default is also a spend ceiling.
+        """
+        if "max_input_tokens" in cfg.model_fields_set:
+            return cfg
+        probe = getattr(self._provider, "input_budget", None)
+        if probe is None:
+            return cfg
+        try:
+            budget = probe()
+        except Exception:  # noqa: BLE001 — a capability lookup must never fail a review
+            _log.warning("could not read the model's input budget", exc_info=True)
+            return cfg
+        if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+            return cfg
+        if budget >= cfg.max_input_tokens:
+            return cfg
+        _log.info(
+            "max_input_tokens fitted to the model's context window",
+            extra={"default": cfg.max_input_tokens, "fitted": budget},
+        )
+        return cfg.model_copy(update={"max_input_tokens": budget})
+
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
-        # Measure the budget in the tokenizer of the model that will read it.
-        # cl100k_base is OpenAI's; every batching decision on an anthropic or
-        # vertex run was being made against the wrong model's token counts.
-        set_counting_model(cfg.model)
+        cfg = self._fit_input_budget(cfg)
         # Soft whole-review deadline: model calls reaching execution after this
         # instant are skipped (in-flight ones finish), so a pathological run
         # degrades to partial-with-a-notice instead of grinding on. Measured
@@ -1623,6 +1679,7 @@ class LLMReviewEngine:
         lens: _Lens,
         spec_block: str | None = None,
         hidden_block: str | None = None,
+        slice_hunks: bool = False,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
 
@@ -1652,7 +1709,7 @@ class LLMReviewEngine:
         Not attempted at all when the truncation was reasoning-bound; see
         :func:`_reasoning_exhausted_reason`, which decides that before we get here.
         """
-        pieces = _split_batch(batch)
+        pieces = _split_batch(batch, slice_hunks=slice_hunks)
         if len(pieces) < 2:
             # Nothing smaller to try, so nothing has retried this call at all —
             # the reason travels on unchanged, retryable flag and all, and a
@@ -2048,7 +2105,7 @@ class LLMReviewEngine:
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
-        on_oversized: Callable[[str], _LensOutcome] | None = None,
+        on_oversized: _OnOversized | None = None,
         on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
         *,
         effort: dict[str, Any] | None = None,
@@ -2116,7 +2173,9 @@ class LLMReviewEngine:
             #   re-deriving it here from the message text would be a second copy
             #   of the rule, drifting from the first.
             reason: str = _error_reason(exc)
-            if not isinstance(exc, ProviderTruncated) and not is_unrecoverable(exc):
+            if not isinstance(
+                exc, ProviderTruncated | ProviderInputTooLarge
+            ) and not is_unrecoverable(exc):
                 # A wall timeout is retryable, but it is also the signal the split
                 # acts on, so it is marked as such — see _PayloadReason.
                 mark = _PayloadReason if isinstance(exc, ProviderWallTimeout) else _RetryableReason
@@ -2127,7 +2186,13 @@ class LLMReviewEngine:
                 extra={"lens": lens.id, "reason": reason},
                 exc_info=True,
             )
-            if isinstance(exc, ProviderWallTimeout | ProviderTruncated):
+            if isinstance(exc, ProviderWallTimeout | ProviderTruncated | ProviderInputTooLarge):
+                # Three payload-sized failures, one remedy: ran out of time, ran
+                # out of room to answer, ran out of room to ask. A refused prompt
+                # (the model's context window) has no partial answer and no
+                # reasoning breakdown, so the salvage and the exhaustion check
+                # below are no-ops for it and it goes straight to the split.
+                #
                 # Whatever the model finished before the ceiling cut it off is real,
                 # schema-valid work — kept, exactly as the parse path keeps it, so
                 # the exception path is not the one place a partial answer is binned.
@@ -2169,7 +2234,12 @@ class LLMReviewEngine:
                     # rather than recurse — an unbounded cascade would spend the
                     # whole review on a model that cannot answer at any size.
                     return completed, reason
-                findings, split_reason = on_oversized(reason)
+                # A refused prompt may cut inside a lone hunk (see _split_batch):
+                # input size is the whole of that failure, so a smaller slice is
+                # guaranteed to help where for the other two it is a guess.
+                findings, split_reason = on_oversized(
+                    reason, slice_hunks=isinstance(exc, ProviderInputTooLarge)
+                )
                 if split_reason is None:
                     return completed + findings, None
                 # The pieces did not cover the batch either, so the payload was

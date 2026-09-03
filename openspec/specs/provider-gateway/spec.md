@@ -223,6 +223,67 @@ is not findings.
 - **WHEN** litellm maps a provider error while `--format json` is in force
 - **THEN** nothing is printed to stdout, so the findings array stays parseable
 
+### Requirement: The schema mechanism is chosen for the route before the first call
+
+The adapter SHALL consult the same supported-params list litellm's `drop_params`
+consults, once per model, before the first request that carries a schema: a
+route that omits `response_format` but takes `tools` gets the schema as the
+forced tool call up front, a route with neither drops it up front and announces
+the downgrade, and a lookup failure leaves the schema on so the request-level
+recoveries still apply. Without this a route litellm strips the field from (zai)
+reviewed with no schema while the adapter reported enforcement was on — no 400,
+no empty body, nothing for the existing recoveries to see.
+<!-- anchor: provider.schema-route -->
+
+#### Scenario: the route lists tools but not response_format
+- **WHEN** the first schema-carrying call for a zai model is made
+- **THEN** it goes out as a forced tool call, `sends_response_format` stays true,
+  and no round-trip is spent learning it
+
+#### Scenario: the route lists neither
+- **WHEN** a route takes no structured-output mechanism at all
+- **THEN** the schema is dropped before the first call and the drop is announced
+
+### Requirement: A Claude request that turns thinking on carries no temperature
+
+The factory SHALL withhold `temperature` from a request whose `reasoning_effort`
+turns extended thinking on for a Claude model on the anthropic, bedrock or
+vertex route, and SHALL say so: Anthropic refuses a temperature beside
+thinking (`temperature` may only be set to 1 when thinking is enabled) and
+litellm forwards both. An effort that switches thinking off (`none`,
+`default`), no effort, or a non-Claude model keeps the temperature. The
+adapter's temperature-rejection matcher SHALL recognise Anthropic's wording as
+the backstop for a gateway route the factory does not recognise.
+<!-- anchor: provider.thinking-sampling -->
+
+#### Scenario: an effort is configured on the anthropic route
+- **WHEN** `reasoning_effort: medium` and the default `temperature: 0.0` are set
+- **THEN** the request carries the effort and no temperature, and the omission
+  is logged
+
+#### Scenario: the effort is `none`
+- **WHEN** `reasoning_effort: none` is set on a Claude model
+- **THEN** the temperature is sent, because thinking is off
+
+### Requirement: The adapter reports how much prompt its model can take
+
+The adapter SHALL expose `input_budget()`: ollama's `num_ctx` when it sends
+one, else the `max_input_tokens` litellm's model map records for the resolved
+model string, less the output ceiling the adapter will send; None when the map
+has no entry or no window, so an unknown model never shrinks a budget. A
+prompt the backend refuses for its window SHALL be raised as
+`ProviderInputTooLarge` — never retried in place, never stamped unrecoverable,
+and handed to a caller that owns the remedy exactly as a truncation is.
+<!-- anchor: provider.input-budget -->
+
+#### Scenario: an ollama model
+- **WHEN** the factory sent `num_ctx` and a finite `max_tokens`
+- **THEN** the budget is their difference, whatever the map says of the model
+
+#### Scenario: the backend refuses the prompt
+- **WHEN** litellm raises `ContextWindowExceededError`
+- **THEN** the call fails once as `ProviderInputTooLarge`, and the engine splits
+
 ### Requirement: The bedrock schema is narrowed to the subset its validator takes
 
 On the bedrock route the structured-output schema SHALL go out without the

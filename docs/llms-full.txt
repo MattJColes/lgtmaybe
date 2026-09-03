@@ -4506,8 +4506,11 @@ input tokens  ≈  batches × lenses × (diff + context padding + hints)
 - **lenses** — the `fast` preset (the default) makes **four** calls per batch;
   `full` makes one per category, up to nine. This is the biggest multiplier in
   the formula.
-- **batches** — a diff larger than `max_input_tokens` (default 100k) is split,
-  and *each* batch pays the full lens fan-out again.
+- **batches** — a diff larger than `max_input_tokens` is split, and *each*
+  batch pays the full lens fan-out again. The default is 100k, fitted down to
+  what the model's context window can take when that is known (litellm's model
+  map for hosted models, `num_ctx` for ollama, less the output ceiling); a value
+  you set is used as-is.
 - **reflection** — one more pass over the findings, on top.
 - **triage** — an extra cheap call when enabled.
 - **the change overview** (`auto_diagram`, on by default) — up to three extra

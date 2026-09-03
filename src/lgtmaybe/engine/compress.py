@@ -32,69 +32,31 @@ _SCALE = 5_000
 # past the configured budget, which is the failure that collapses recall.
 _FALLBACK_CHARS_PER_TOKEN = 3
 
-# The model whose tokenizer the budget is measured in. Set once per review by
-# the engine; None means "no model in hand", which is the CLI-less/library case
-# and keeps the previous OpenAI-tokenizer behaviour.
-_counting_model: str | None = None
-
-
-def set_counting_model(model: str | None) -> None:
-    """Measure token budgets in the tokenizer of the model that will read them.
-
-    ``cl100k_base`` is OpenAI's; applied to an anthropic or vertex run it can be
-    off by well over 10% in either direction, and every batching decision is
-    made against it. The engine calls this once per review.
-
-    Clears the memo when the model changes: the cache is keyed on text alone,
-    since one review counts against one model.
-    """
-    global _counting_model
-    if model == _counting_model:
-        return
-    _counting_model = model
-    count_tokens.cache_clear()
-
-
-def _load_model_counter(model: str) -> Callable[[str], int] | None:
-    """A counter using *model*'s own tokenizer, via litellm's registry.
-
-    Imported lazily: litellm is a heavy import and the engine must not pay it
-    to count characters. litellm caches the tokenizer it selects, so the cost
-    lands on the first call only. Returns None when litellm has no opinion.
-    """
-    import litellm
-
-    litellm.encode(model=model, text="probe")  # resolve + cache the tokenizer
-    return lambda text: len(litellm.encode(model=model, text=text))
-
 
 def _load_tiktoken_counter() -> Callable[[str], int] | None:
-    """A counter using ``cl100k_base``, the model-agnostic fallback."""
+    """A counter using ``cl100k_base``, for every model.
+
+    Deliberately one encoding rather than "the model's own": litellm's tokenizer
+    registry was tried here and resolves to this same OpenAI encoding for every
+    provider it knows — anthropic, vertex, bedrock and ollama alike — so a
+    per-model lookup bought a multi-second import and byte-identical counts.
+    The budget is approximate for a non-OpenAI model either way; the file cap and
+    the recursive walk are what keep an under-count from shipping an oversized
+    batch.
+    """
     import tiktoken
 
     encoder = tiktoken.get_encoding("cl100k_base")
     return lambda text: len(encoder.encode(text))
 
 
-@lru_cache(maxsize=8)
-def _counter_for(model: str | None) -> Callable[[str], int] | None:
-    """The best available token counter for *model*, or None for the estimate.
+@lru_cache(maxsize=1)
+def _counter_for() -> Callable[[str], int] | None:
+    """The token counter, or None for the character estimate.
 
-    Resolved once per model: building an encoder is slow and ``count_tokens``
-    runs per file — and, inside ``take_lines``, per line.
+    Resolved once: building an encoder is slow and ``count_tokens`` runs per
+    file — and, inside ``take_lines``, per line.
     """
-    if model is not None:
-        try:
-            counter = _load_model_counter(model)
-            if counter is not None:
-                return counter
-        except Exception as exc:  # noqa: BLE001 — counting must never fail a review
-            _log.warning(
-                "no tokenizer for this model; falling back to a generic one — "
-                "token budgets are approximate for %s: %s",
-                model,
-                exc,
-            )
     try:
         return _load_tiktoken_counter()
     except Exception as exc:  # noqa: BLE001 — counting must never fail a review
@@ -111,14 +73,14 @@ def _counter_for(model: str | None) -> Callable[[str], int] | None:
 
 @lru_cache(maxsize=256)
 def count_tokens(text: str) -> int:
-    """Return the token count for *text*, in the counting model's tokenizer.
+    """Return the token count for *text*.
 
     Memoized: the same text is counted repeatedly across a review — each
     over-budget patch twice during recursive batching, the whole diff once per
     reflection deferral hop — and encoding is O(len) each time. Bounded so the
     cache can't retain an unbounded number of large diff strings.
     """
-    counter = _counter_for(_counting_model)
+    counter = _counter_for()
     if counter is not None:
         return counter(text)
     return max(1, len(text) // _FALLBACK_CHARS_PER_TOKEN)

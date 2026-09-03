@@ -46,6 +46,28 @@ provider.param-drop:
     has: { field: name, regex: '^_drop_rejected_param$' }
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.schema-route:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_honour_route_schema_support$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
+provider.thinking-sampling:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_withhold_temperature_under_thinking$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
+provider.input-budget:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^input_budget$' }
+    inside:
+      kind: class_definition
+      has: { field: name, regex: '^LiteLLMProvider$' }
+      stopBy: end
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.schema-subset:
   rule:
     kind: function_definition

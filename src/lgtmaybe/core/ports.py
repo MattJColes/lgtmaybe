@@ -84,6 +84,23 @@ class ProviderTruncated(Exception):
         self.cost_usd = cost_usd
 
 
+class ProviderInputTooLarge(Exception):
+    """Part of the provider contract: the prompt outgrew the model's context window.
+
+    The third payload-sized failure, beside :class:`ProviderWallTimeout` (ran out
+    of time) and :class:`ProviderTruncated` (ran out of room to answer): this
+    one ran out of room to *ask*. The backend refuses the request outright — a
+    400 naming the window — so there is no partial answer to salvage, and
+    re-sending the identical prompt can only fail identically. But a smaller
+    prompt succeeds, and only the engine holds the batch, so the engine reacts
+    exactly as it does to the other two: split the batch and review the pieces.
+
+    Named here rather than left as the adapter's generic bad request because the
+    engine must tell it apart from a failure no later call can fix (a dead key,
+    a spent quota): those end the lens, this one earns the split.
+    """
+
+
 class ProviderClient(Protocol):
     """Port: an LLM backend that returns a normalised completion."""
 
