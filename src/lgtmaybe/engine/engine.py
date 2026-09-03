@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
@@ -53,6 +53,7 @@ from .compress import (
     context_lines_for_budget,
     count_tokens,
     expand_hunks,
+    split_hunk_by_budget,
     split_patch_into_hunks,
     trailing_context_lines,
 )
@@ -648,7 +649,19 @@ class _Run:
     changed_files: tuple[str, ...] = ()
 
 
-def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+class _OnOversized(Protocol):
+    """The split a lens call may fall back to: ``(reason, slice_hunks=...)``.
+
+    A Protocol rather than a ``Callable`` alias because the second argument is
+    keyword-only, which ``Callable[...]`` cannot express.
+    """
+
+    def __call__(self, reason: str, *, slice_hunks: bool = ...) -> _LensOutcome: ...
+
+
+def _split_batch(
+    batch: list[tuple[str, str]], *, slice_hunks: bool = False
+) -> list[list[tuple[str, str]]]:
     """Split a timed-out batch into smaller review units.
 
     Multi-file: halve the file list — the coarsest cut that halves the payload,
@@ -656,6 +669,13 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
     hunks, the same unit the recursive walk uses, so an oversized lone file still
     shrinks. Returns fewer than two pieces when there is nothing smaller to try
     (an empty batch, or one file with a single hunk).
+
+    ``slice_hunks`` lets a lone hunk be cut *inside*, at half its own size, with
+    the same slicer the recursive walk uses. Only for a prompt the model's
+    context window refused: that failure is purely about input size, so a
+    smaller slice is guaranteed to help, where a timeout or a truncation on a
+    single hunk may be about the answer or the thinking, and slicing there is
+    the speculative recursion this split deliberately refuses.
     """
     if len(batch) > 1:
         middle = len(batch) // 2
@@ -665,7 +685,10 @@ def _split_batch(batch: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
     path, patch = batch[0]
     hunks = split_patch_into_hunks(patch)
     if len(hunks) < 2:
-        return []
+        if not slice_hunks or not hunks:
+            return []
+        slices = split_hunk_by_budget(hunks[0], max(1, count_tokens(hunks[0]) // 2))
+        return [[(path, piece)] for piece in slices] if len(slices) >= 2 else []
     middle = len(hunks) // 2
     return [
         [(path, hunk) for hunk in hunks[:middle]],
@@ -1656,6 +1679,7 @@ class LLMReviewEngine:
         lens: _Lens,
         spec_block: str | None = None,
         hidden_block: str | None = None,
+        slice_hunks: bool = False,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
 
@@ -1685,7 +1709,7 @@ class LLMReviewEngine:
         Not attempted at all when the truncation was reasoning-bound; see
         :func:`_reasoning_exhausted_reason`, which decides that before we get here.
         """
-        pieces = _split_batch(batch)
+        pieces = _split_batch(batch, slice_hunks=slice_hunks)
         if len(pieces) < 2:
             # Nothing smaller to try, so nothing has retried this call at all —
             # the reason travels on unchanged, retryable flag and all, and a
@@ -2081,7 +2105,7 @@ class LLMReviewEngine:
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
-        on_oversized: Callable[[str], _LensOutcome] | None = None,
+        on_oversized: _OnOversized | None = None,
         on_needs: Callable[[list[str], list[ReviewFinding]], _LensOutcome] | None = None,
         *,
         effort: dict[str, Any] | None = None,
@@ -2210,7 +2234,12 @@ class LLMReviewEngine:
                     # rather than recurse — an unbounded cascade would spend the
                     # whole review on a model that cannot answer at any size.
                     return completed, reason
-                findings, split_reason = on_oversized(reason)
+                # A refused prompt may cut inside a lone hunk (see _split_batch):
+                # input size is the whole of that failure, so a smaller slice is
+                # guaranteed to help where for the other two it is a guess.
+                findings, split_reason = on_oversized(
+                    reason, slice_hunks=isinstance(exc, ProviderInputTooLarge)
+                )
                 if split_reason is None:
                     return completed + findings, None
                 # The pieces did not cover the batch either, so the payload was

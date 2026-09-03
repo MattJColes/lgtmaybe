@@ -140,3 +140,52 @@ def test_a_piece_that_is_still_too_long_is_reported_not_recursed() -> None:
     # The whole batch, then one attempt per half. No third level.
     assert provider.calls == 3
     assert "too long" in str(exc_info.value)
+
+
+# One file, ONE hunk — every brand-new file looks like this. A truncation on it
+# has nothing smaller to try (see test_truncation_split); a refused prompt does.
+_ONE_BIG_HUNK = (
+    """diff --git a/new.py b/new.py
+--- /dev/null
++++ b/new.py
+@@ -0,0 +1,12 @@
++first_change = 1
+"""
+    + "".join(f"+padding_line_{i} = {i}\n" for i in range(10))
+    + "+last_change = 12\n"
+)
+
+
+class _RefusesTheWholeHunk(FakeProvider):
+    """Refuses the prompt while the whole hunk is in it; answers any slice."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.diffs: list[str] = []
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        diff = "\n".join(str(m.get("content", "")) for m in messages)
+        self.diffs.append(diff)
+        if "first_change = 1" in diff and "last_change = 12" in diff:
+            raise ProviderInputTooLarge("prompt is too long: 214000 tokens > 200000 maximum")
+        return ProviderResult(text='{"findings": []}', input_tokens=5, output_tokens=5)
+
+
+def test_a_refused_lone_hunk_is_sliced_inside() -> None:
+    """A context-window refusal is purely about input size, so cutting inside the
+    one hunk is guaranteed to help — the truncation path's "nothing smaller to
+    try" would leave a new file entirely unreviewed here."""
+    provider = _RefusesTheWholeHunk()
+    ctx = PRContext(
+        diff=_ONE_BIG_HUNK,
+        changed_files=["new.py"],
+        base_sha="b",
+        head_sha="h",
+        repo="o/r",
+        pr_number=1,
+    )
+    _findings, summary = LLMReviewEngine(provider).review(ctx, _cfg())
+
+    assert len(provider.diffs) >= 3  # the whole hunk, then at least two slices
+    assert sum("first_change = 1" in d and "last_change = 12" in d for d in provider.diffs) == 1
+    assert "incomplete" not in summary.lower()

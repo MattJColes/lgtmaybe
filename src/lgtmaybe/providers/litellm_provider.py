@@ -711,10 +711,13 @@ class LiteLLMProvider:
         # enforcement preserved by another mechanism, that one is enforcement
         # given up. Keyed by MODEL for the same reason.
         self._schema_tool: set[str] = set()
-        # Models whose route was already asked whether it takes `response_format`
-        # at all (see `_honour_route_schema_support`). One lookup per model, for
-        # the same reason the two sets above are keyed per model.
-        self._schema_probed: set[str] = set()
+        # What each model's route takes, as litellm's per-route list answers it
+        # (see `_honour_route_schema_support`): None for a route the lookup
+        # could not name. A memo of the LOOKUP only — the decision it feeds is
+        # re-derived on every call, so a lens that arrives while a sibling's
+        # first call is still being shaped derives the same answer for itself
+        # instead of reading a marker the sibling set before it finished.
+        self._route_params: dict[str, frozenset[str] | None] = {}
         self._rejected_params: dict[str, set[str]] = {}
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
@@ -740,12 +743,21 @@ class LiteLLMProvider:
         as the 400 path does). A lookup failure — an unknown route — leaves the
         schema on: the request-level recoveries still cover it, and a capability
         lookup must never cost enforcement on a route that would have taken it.
-        Once per model: the fan-out sends the same shape N times.
+
+        The lookup is memoised per model; the decision is not. The lens fan-out
+        calls this concurrently on one instance, and a "probed" marker set
+        before the outcome was recorded let a second lens skip the probe, find
+        neither set populated yet, and send the schema litellm then dropped. Each
+        call deriving its own answer from the same list cannot race: the sets
+        the outcome lands in are idempotent, and the announcements fire once.
+        A model that has since given the schema up entirely keeps that: the
+        route's list must not re-enable a tool the route already refused.
         """
-        if model in self._schema_probed or kwargs.get("response_format") is None:
+        if kwargs.get("response_format") is None or model in self._schema_dropped:
             return
-        self._schema_probed.add(model)
-        supported = _supported_params(model)
+        if model not in self._route_params:
+            self._route_params[model] = _supported_params(model)
+        supported = self._route_params[model]
         if supported is None or "response_format" in supported:
             return
         if "tools" in supported and self._use_schema_tool(model, kwargs):

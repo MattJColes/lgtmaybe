@@ -533,3 +533,80 @@ class TestContextWindowExceeded:
                 )
 
         assert completion.call_count == 1
+
+
+class TestRouteSchemaSupportUnderConcurrency:
+    def test_every_concurrent_first_call_gets_the_tool(self) -> None:
+        """The lens fan-out hits one instance at once. A lens arriving while a
+        sibling's first call is still being shaped must reach the same shape,
+        not find a half-recorded state and send the schema litellm then drops."""
+        import threading
+        import time
+
+        sent: list[dict[str, Any]] = []
+        lock = threading.Lock()
+
+        def slow_lookup(**kwargs: Any) -> Any:
+            time.sleep(0.05)  # long enough for every thread to be inside complete()
+            return ["max_tokens", "temperature", "tools", "tool_choice"]
+
+        def capture(**kwargs: Any) -> Any:
+            with lock:
+                sent.append(kwargs)
+            return _tool_call_response('{"findings": []}')
+
+        provider = LiteLLMProvider()
+        errors: list[BaseException] = []
+
+        def one_lens() -> None:
+            try:
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "zai/glm-4.6", response_format=_Schema
+                )
+            except BaseException as exc:  # noqa: BLE001 — surfaced below
+                errors.append(exc)
+
+        with (
+            patch("litellm.get_supported_openai_params", side_effect=slow_lookup),
+            patch("litellm.completion", side_effect=capture),
+        ):
+            threads = [threading.Thread(target=one_lens) for _ in range(6)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        assert not errors
+        assert len(sent) == 6
+        assert all("response_format" not in kwargs and "tools" in kwargs for kwargs in sent)
+
+    def test_a_route_that_gave_the_schema_up_is_not_re_armed_by_the_list(self) -> None:
+        """Once the tool itself was refused, the route's list saying "tools" must
+        not put the tool back on the next call."""
+        sent: list[dict[str, Any]] = []
+
+        def capture(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            if "tools" in kwargs:
+                raise RuntimeError("BadRequestError: toolConfig is not supported for this model")
+            return _fake_response('{"findings": []}')
+
+        with (
+            patch(
+                "litellm.get_supported_openai_params",
+                return_value=["max_tokens", "tools", "tool_choice"],
+            ),
+            patch("litellm.completion", side_effect=capture),
+        ):
+            provider = LiteLLMProvider()
+            for _ in range(2):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "some/route", response_format=_Schema
+                )
+
+        # Tool, refused; bare re-send; then the second call goes bare up front.
+        assert [("tools" in k, "response_format" in k) for k in sent] == [
+            (True, False),
+            (False, False),
+            (False, False),
+        ]

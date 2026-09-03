@@ -275,7 +275,7 @@ salvage). Findings completed before a truncation SHALL be kept; the lens fails.
 
 #### Scenario: a call runs past its output ceiling, or its context window
 - **WHEN** a lens call's answer stops at the `max_tokens` ceiling, or its prompt
-  is refused for the window
+  is refused for the window (which alone may also slice inside a lone hunk)
 - **THEN** the batch is split the same way; findings finished before a cut are kept
 
 #### Scenario: a piece exhausts its budget as well
