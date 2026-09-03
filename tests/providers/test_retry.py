@@ -2761,3 +2761,37 @@ class TestTheAnsweringModelRidesTheResult:
             result = provider.complete(self.MESSAGES, "openrouter/deepseek")
 
         assert result.model == "openrouter/backup"
+
+
+class TestThinkingTemperatureRejection:
+    def test_anthropics_thinking_wording_is_recognised(self) -> None:
+        """Anthropic phrases the refusal differently from OpenAI: the value is not
+        "unsupported", it "may only be set to 1 when thinking is enabled". The
+        factory withholds the temperature up front on the Claude routes, and
+        this is the backstop for a route it did not recognise."""
+        good = _fake_response("ok without temperature")
+        seen: list[Any] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs.get("temperature", "absent"))
+            if "temperature" in kwargs:
+                raise RuntimeError(
+                    'litellm.BadRequestError: AnthropicException - {"type":"error",'
+                    '"error":{"type":"invalid_request_error","message":"`temperature` '
+                    "may only be set to 1 when thinking is enabled. Please consult our "
+                    "documentation at https://docs.claude.com/en/docs/build-with-claude/"
+                    'extended-thinking#important-considerations-when-using-extended-thinking"}}'
+                )
+            return good
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}],
+                "openrouter/anthropic/claude-sonnet-4-5",
+                temperature=0.0,
+                reasoning_effort="medium",
+            )
+
+        assert result.text == "ok without temperature"
+        assert seen == [0.0, "absent"]

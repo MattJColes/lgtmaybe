@@ -135,7 +135,7 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
 | Provider               | Auth                                                              |
 |------------------------|------------------------------------------------------------------|
 | openai / openrouter / anthropic | API key from `secrets.*` / env / `--api-key`            |
-| zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route. Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
+| zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route (its param list omits `response_format`, so the schema goes as a forced tool call — `_honour_route_schema_support` reads litellm's per-route list before the first call). Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
 | bedrock                | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
 | vertex                 | ambient GCP creds (WIF, or local ADC)                            |
 | azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); `AZURE_API_KEY` / `--api-key` when supplied → else ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) |
@@ -291,7 +291,13 @@ pattern, event bus, plugin framework.
      each call's context stays small — better recall on big files, especially for
      smaller models. Files within budget are reviewed whole (context preserved).
      `ReviewConfig.recursive` (default **on**; CLI `--recursive/--no-recursive`,
-     Action input `recursive`); the on-demand A/B benchmark `python -m evals.ab
+     Action input `recursive`). A defaulted `max_input_tokens` is first
+     **fitted to the model's window** (`engine._fit_input_budget`, off the
+     adapter's feature-detected `input_budget()`: litellm's model map, or
+     ollama's `num_ctx`, less the output ceiling) — a configured value is left
+     alone. Token counts are one `cl100k_base` encoder for every model: litellm's
+     tokenizer registry resolves to the same encoding for every provider, so a
+     per-model lookup bought nothing; the on-demand A/B benchmark `python -m evals.ab
      --sweep recursive=false,true`
      measures recall + token cost of the walk vs sending whole against a live model.
    - **Incremental review (commit-scoped):** on a re-run, `run_review` reads a
@@ -333,7 +339,10 @@ pattern, event bus, plugin framework.
      `model`, `reflect_model`) share one provider/credentials. CLI
      `--triage-model`, Action input `triage_model`.
    - **Truncation ladder (escalation is LAST):** a truncated lens is first given
-     the remedy its token counts named, on the model the user chose —
+     the remedy its token counts named, on the model the user chose (a prompt the
+     model's context window refuses — litellm's `ContextWindowExceededError`,
+     surfaced as `ProviderInputTooLarge` — takes the same split, with nothing to
+     salvage) —
      `_review_split` (smaller pieces) when the answer outgrew the ceiling,
      `_retry_lower_effort` when the *thinking* did. Only if that fails does
      `engine._escalate_model` re-run the lens once on `fallback_model`. Switching

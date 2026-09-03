@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import litellm
 import pytest
+from pydantic import BaseModel
 
 from lgtmaybe.core.models import ProviderResult
 from lgtmaybe.core.ports import ProviderTruncated
@@ -343,3 +344,192 @@ class TestCostEstimation:
                 )
 
         assert excinfo.value.cost_usd == pytest.approx(0.070)
+
+
+def _tool_call_response(arguments: str, name: str = "lgtmaybe_structured_output") -> Any:
+    """A reply that answered through the forced schema tool, content empty."""
+    call = SimpleNamespace(function=SimpleNamespace(name=name, arguments=arguments))
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="", tool_calls=[call]), finish_reason="tool_calls"
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+
+
+class _Schema(BaseModel):
+    findings: list[str]
+
+
+class TestRouteSchemaSupport:
+    """The schema is chosen for the ROUTE before the first call, not learned from
+    a 400 that never comes.
+
+    litellm runs with `drop_params`, which strips every OpenAI-vocabulary param
+    a route's capability list omits — silently. The zai route lists `tools`
+    but not `response_format`, so the schema vanished on the way out, the model
+    answered prose, and the adapter still reported that structured output was
+    on. Neither of the two existing recoveries (a 400 naming the field, an
+    empty body) can see a param litellm removed before the request left.
+    """
+
+    _WITH_TOOLS = ["max_tokens", "temperature", "tools", "tool_choice"]
+    _BARE = ["max_tokens", "temperature"]
+
+    def test_a_route_that_drops_response_format_gets_the_schema_as_a_tool(self) -> None:
+        sent: list[dict[str, Any]] = []
+
+        def capture(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            return _tool_call_response('{"findings": ["x"]}')
+
+        with (
+            patch("litellm.get_supported_openai_params", return_value=self._WITH_TOOLS),
+            patch("litellm.completion", side_effect=capture),
+        ):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], "zai/glm-4.6", response_format=_Schema
+            )
+
+        assert result.text == '{"findings": ["x"]}'
+        assert len(sent) == 1, "decided up front — no wasted round-trip first"
+        assert "response_format" not in sent[0]
+        assert sent[0]["tools"][0]["function"]["name"] == "lgtmaybe_structured_output"
+        assert sent[0]["tool_choice"]["function"]["name"] == "lgtmaybe_structured_output"
+        # Enforcement was kept, by another mechanism — not given up.
+        assert provider.sends_response_format("zai/glm-4.6")
+        assert not provider.schema_dropped()
+
+    def test_a_route_with_no_structured_output_mechanism_drops_the_schema_up_front(self) -> None:
+        sent: list[dict[str, Any]] = []
+
+        def capture(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            return _fake_response('{"findings": []}')
+
+        with (
+            patch("litellm.get_supported_openai_params", return_value=self._BARE),
+            patch("litellm.completion", side_effect=capture),
+        ):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], "some/route", response_format=_Schema
+            )
+
+        assert len(sent) == 1
+        assert "response_format" not in sent[0] and "tools" not in sent[0]
+        # Given up, and said so: the engine reads this to name the downgrade.
+        assert provider.schema_dropped()
+        assert not provider.sends_response_format("some/route")
+
+    def test_a_route_that_takes_the_schema_sends_it_unchanged(self) -> None:
+        sent: list[dict[str, Any]] = []
+
+        def capture(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            return _fake_response('{"findings": []}')
+
+        with (
+            patch(
+                "litellm.get_supported_openai_params",
+                return_value=[*self._WITH_TOOLS, "response_format"],
+            ),
+            patch("litellm.completion", side_effect=capture),
+        ):
+            LiteLLMProvider().complete(
+                [{"role": "user", "content": "hi"}], "openai/gpt-5", response_format=_Schema
+            )
+
+        assert sent[0]["response_format"] is _Schema
+        assert "tools" not in sent[0]
+
+    def test_a_capability_lookup_failure_leaves_the_schema_on(self) -> None:
+        """Unknown route ⇒ trial by request, exactly as before: the 400 path
+        still recovers, and a lookup error must never cost enforcement."""
+        sent: list[dict[str, Any]] = []
+
+        def capture(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            return _fake_response('{"findings": []}')
+
+        def unknown(**kwargs: Any) -> Any:
+            raise ValueError("unknown provider")
+
+        with (
+            patch("litellm.get_supported_openai_params", side_effect=unknown),
+            patch("litellm.completion", side_effect=capture),
+        ):
+            LiteLLMProvider().complete(
+                [{"role": "user", "content": "hi"}], "mystery/model", response_format=_Schema
+            )
+
+        assert sent[0]["response_format"] is _Schema
+
+    def test_the_lookup_is_made_once_per_model(self) -> None:
+        calls: list[str] = []
+
+        def lookup(**kwargs: Any) -> Any:
+            calls.append(kwargs["model"])
+            return self._WITH_TOOLS
+
+        with (
+            patch("litellm.get_supported_openai_params", side_effect=lookup),
+            patch("litellm.completion", return_value=_tool_call_response('{"findings": []}')),
+        ):
+            provider = LiteLLMProvider()
+            for _ in range(3):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "zai/glm-4.6", response_format=_Schema
+                )
+
+        assert calls == ["zai/glm-4.6"]
+
+
+class TestContextWindowExceeded:
+    """A prompt the model's window cannot hold is a payload problem, not a
+    permanent one: the identical request can never succeed, but a smaller one
+    can, and the engine owns the split. litellm names the case with its own
+    exception type; the adapter hands it up under the port's name rather than
+    letting it fall through as a generic bad request the engine would give up on.
+    """
+
+    @staticmethod
+    def _too_long() -> Exception:
+        from litellm.exceptions import ContextWindowExceededError
+
+        return ContextWindowExceededError(
+            message="prompt is too long: 214000 tokens > 200000 maximum",
+            model="claude-sonnet-4-5",
+            llm_provider="anthropic",
+        )
+
+    def test_surfaces_as_input_too_large_after_one_request(self) -> None:
+        from lgtmaybe.core.models import is_unrecoverable
+        from lgtmaybe.core.ports import ProviderInputTooLarge
+
+        with patch("litellm.completion", side_effect=self._too_long()) as completion:
+            with pytest.raises(ProviderInputTooLarge, match="too long") as info:
+                LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "anthropic/x")
+
+        # Never retried in place: the same prompt is the same size.
+        assert completion.call_count == 1
+        # But not unrecoverable either — a smaller request is the remedy, and
+        # the engine must not be told this call's failure is beyond saving.
+        assert not is_unrecoverable(info.value)
+
+    def test_is_handed_to_the_caller_when_it_owns_the_remedy(self) -> None:
+        """With `defer_truncation` the engine holds the batch, so the adapter
+        must not spend the fallback model on the identical oversized prompt."""
+        from lgtmaybe.core.ports import ProviderInputTooLarge
+
+        with patch("litellm.completion", side_effect=self._too_long()) as completion:
+            provider = LiteLLMProvider(fallback_model="anthropic/bigger")
+            with pytest.raises(ProviderInputTooLarge):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}], "anthropic/x", defer_truncation=True
+                )
+
+        assert completion.call_count == 1
