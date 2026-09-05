@@ -424,7 +424,7 @@ Recommendations:
   before it can be recommended.
 
 The rest of this page shows every published run and the reasoning behind
-these picks. The numbers are a snapshot from 19 August 2026; the
+these picks. The numbers are a snapshot from 5 September 2026; the
 [lgtmaybe benchmark repository][bench] has the live leaderboard, complete
 results, raw run records, and instructions for reproducing them.
 
@@ -508,6 +508,7 @@ Ranked by score, best first:
 | `openai/gpt-5.6-terra` | 2.1.4 | 50.9% | 80.8% | 48.6% | 67.9% | 17 | 33.3% |
 | `moonshotai/kimi-k3` | 2.1.4 | 49.9% | 80.8% | 65.7% | 60.5% | 32 | 0.0% |
 | `google/gemini-3.1-pro-preview` | 2.1.4 | 49.9% | 80.8% | 55.7% | 63.5% | 24 | 22.2% |
+| `z-ai/glm-5.3-flash` | 2.7.0 | 49.4% | 76.6% | 58.6% | 66.7% | 21 | 0.0% |
 | `deepseek/deepseek-v4-pro-0813` | 2.2.0 | 48.2% | 76.0% | 40.0% | 72.7% | 12 | 44.4% |
 | `kwaipilot/kat-coder-pro-v2.5` | 2.1.4 | 46.6% | 76.3% | 55.7% | 66.1% | 21 | 22.2% |
 | `openai/gpt-5.4-mini` | 2.2.0 | 44.5% | 80.8% | 42.9% | 61.7% | 18 | 33.3% |
@@ -546,6 +547,9 @@ lens across the board: no model scores above 28.6% on it.
   `gpt-5.4-nano` beats `gpt-5.4-mini` on every metric.
 - **`kwaipilot/kat-coder-pro-v2.5`.** Mid-table here, but also holds up on
   large diffs (below).
+- **`z-ai/glm-5.3-flash`.** Cheapest model in the table by an order of
+  magnitude, with mid-pack recall and precision — but it flagged something on
+  all nine clean changes (0.0% clean pass), so expect noise on green PRs.
 - **`x-ai/grok-4.6` and `openai/gpt-5.6-luna`.** The widest run-to-run
   variance in the table: luna's three repeats spanned 52–66% F1.
 - **`anthropic/claude-sonnet-5` and `claude-opus-5`.** Fail by staying
@@ -579,6 +583,7 @@ of false positives scores far below its recall alone would suggest.
 | `moonshotai/kimi-k2.7-code` | 2.1.4 | 33.1% | 88.0% | 78.1% | 33.3% | 50 |
 | `openai/gpt-5.6-sol` | 2.1.4 | 31.9% | 90.0% | 59.4% | 32.2% | 40 |
 | `anthropic/claude-haiku-4.5` | 2.1.4 | 29.9% | 95.7% | 9.4% | 75.0% | 1 |
+| `z-ai/glm-5.3-flash` | 2.7.0 | 27.5% | 43.2% | 87.5% | 59.6% | 19 |
 | `moonshotai/kimi-k3` | 2.1.4 | 25.4% | 90.0% | 93.8% | 24.0% | 95 |
 | `qwen/qwen3.8-max` | 2.1.4 | 16.7% | 85.5% | 71.9% | 16.5% | 116 |
 | `z-ai/glm-4.7-flash` | 2.1.4 | 13.1% | 26.2% | 43.8% | 51.9% | 13 |
@@ -606,6 +611,10 @@ of false positives scores far below its recall alone would suggest.
 - **`z-ai/glm-5.2`.** Recall falls from 100% through 87.5% and 75% to 50% as
   the diff grows, while false positives double: strong on small changes,
   weak at scale.
+- **`z-ai/glm-5.3-flash`.** Recall holds up (87.5%), but 43.2% completeness —
+  over half its lens calls returned nothing parseable at 100k-token inputs —
+  sinks the completeness-scaled score. Like its breadth run, it is far and
+  away the cheapest row in the table.
 - **The bottom of the table holds three different failures.** Some found
   bugs and lost the ranking to noise: kimi-k3 hit 93.8% recall, the highest
   in the corpus, with 95 false positives, and mistral-small posted 699. Some
@@ -725,9 +734,10 @@ team-wide default.
 
 ## Source and Methodology
 
-The figures above come from benchmark commit [`f122ec2`][snapshot], and cover
+The figures above come from benchmark commit [`d50d98c`][snapshot], and cover
 every scoreable published run: the `canonical-breadth` and
-`canonical-long-horizon` profiles across lgtmaybe 2.1.4, 2.2.0 and 2.3.0, plus the
+`canonical-long-horizon` profiles across lgtmaybe 2.1.4, 2.2.0, 2.3.0 and
+2.7.0, plus the
 diagnostic-profile runs marked **†** (the benchmark publishes those for
 investigation, since their settings differ from the canonical ones).
 
@@ -742,7 +752,7 @@ The [live benchmark repository][bench] provides:
 
 [bench]: https://github.com/MattJColes/lgtmaybe-benchmarks
 [results]: https://github.com/MattJColes/lgtmaybe-benchmarks/blob/main/RESULTS.md
-[snapshot]: https://github.com/MattJColes/lgtmaybe-benchmarks/tree/f122ec2a01701772a76b89e274932307b9218f36
+[snapshot]: https://github.com/MattJColes/lgtmaybe-benchmarks/commit/d50d98c813683582050f323140e1dfca004114e8
 
 ---
 
@@ -1575,6 +1585,13 @@ quality bar, for example:
 
 Browse the full catalogue and per-model pricing at
 <https://openrouter.ai/models>.
+
+One catalogue quirk: a model can accept JSON-schema mode through OpenRouter yet
+return replies that parse as empty, so a review comes back with zero findings
+and no error (seen with `anthropic/claude-fable-5.1`). If a model is silent on
+everything, try one diff with `--no-structured-output` — see
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md#structured_output) — before
+writing the model off.
 
 ## Credit reservations
 
@@ -3149,13 +3166,25 @@ Default: auto (ollama/openai-compatible/openrouter 1800 s, cloud 600 s). See
 
 Constrain the model to emit the findings JSON schema using the provider's native
 JSON mode (litellm `response_format`). This keeps models — especially local ones —
-from returning prose or reasoning instead of findings. Leave it on unless a
-particular model/provider **rejects** `response_format` (some `openai-compatible`
-gateways return a `400`), in which case turn it off; the lenient parser still
-strips fences and pulls JSON out of any surrounding prose. CLI: `--no-structured-output`.
+from returning prose or reasoning instead of findings. Leave it on unless the
+combination in front of you fails in one of two ways:
+
+1. A gateway **rejects** `response_format` outright (some `openai-compatible`
+   gateways return a `400`). The review fails loudly; turn this off.
+2. A gateway **accepts** JSON-schema mode but returns replies the parser reads
+   as empty. This fails *silently*: every lens logs
+   `findings: 0 parsed / 0 returned`, the run exits clean, and a capable model
+   looks like one that finds nothing. Seen with
+   `anthropic/claude-fable-5.1` behind OpenRouter on lgtmaybe 2.3.0 and 2.7.0 —
+   the same diff with the same flags returned 11 parsed findings once this was
+   off. If a model is unexpectedly silent, re-run one diff with
+   `--no-structured-output` before concluding the model finds nothing.
+
+In both cases the lenient parser still strips fences and pulls JSON out of any
+surrounding prose. CLI: `--no-structured-output`.
 
 ```yaml
-structured_output: false   # only if your gateway rejects JSON-schema mode
+structured_output: false   # if your gateway rejects JSON-schema mode, or a model returns zero findings under it
 ```
 
 Default: `true`. See
