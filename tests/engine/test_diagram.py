@@ -499,3 +499,48 @@ def test_diff_block_uses_injections_delimiter_constants() -> None:
     sent = provider.calls[0]["messages"][1]["content"]
     assert f"{DIFF_START}\n" in sent
     assert f"\n{DIFF_END}" in sent
+
+
+def test_diagram_result_returns_the_typed_graph() -> None:
+    """The change overview lays out its own sections, so it takes the parsed
+    graph rather than the diagram's standalone Markdown body."""
+    from lgtmaybe.engine.diagram import diagram_result
+
+    diagram = diagram_result(_CTX, _CFG, _sequence_provider())
+
+    assert diagram is not None
+    assert [node.id for node in diagram.nodes] == ["client", "app"]
+
+
+def test_diagram_result_is_none_when_nothing_parses() -> None:
+    from lgtmaybe.engine.diagram import diagram_result
+
+    provider = FakeProvider(
+        result=ProviderResult(text="Just prose, no JSON.", input_tokens=1, output_tokens=1)
+    )
+
+    assert diagram_result(_CTX, _CFG, provider) is None
+
+
+def test_rendered_views_carry_no_title_and_can_be_force_headed() -> None:
+    """Inside the overview the description heads the comment and other
+    sections sit above the diagrams, so the views always announce themselves —
+    even when there is only a flowchart to show."""
+    from lgtmaybe.engine.diagram import diagram_result, render_diagram_views
+
+    diagram = diagram_result(_CTX, _CFG, _graph_provider())
+    assert diagram is not None
+
+    views = render_diagram_views(diagram, headed=True)
+
+    assert views is not None
+    assert views.startswith("### Structure")
+    assert "## " not in views.replace("### ", "")
+    assert "```mermaid" in views
+
+
+def test_rendered_views_are_none_without_a_graph() -> None:
+    from lgtmaybe.core.models import DiagramResult as _DR
+    from lgtmaybe.engine.diagram import render_diagram_views
+
+    assert render_diagram_views(_DR(title="t", nodes=[]), headed=True) is None

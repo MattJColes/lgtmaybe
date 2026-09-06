@@ -420,7 +420,11 @@ class TestStickyCacheKey:
 
     def test_caller_supplied_key_wins(self) -> None:
         model = "openrouter/anthropic/claude-sonnet-4.5"
-        with patch("litellm.completion", return_value=_fake_response()) as mock:
+        with (
+            patch("litellm.completion", return_value=_fake_response()) as mock,
+            patch("lgtmaybe.providers.litellm_provider._prefix_cache_key") as derive,
+        ):
             provider = LiteLLMProvider(model=model)
             provider.complete(_split_messages(), model, prompt_cache_key="mine")
         assert mock.call_args.kwargs["prompt_cache_key"] == "mine"
+        derive.assert_not_called()

@@ -27,7 +27,7 @@ from typing import Any
 import click
 
 from lgtmaybe.cli.render import flatten_details, render_findings
-from lgtmaybe.core.diffparse import FILE_HEADER_RE
+from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import Forge, PRLocator, token_env_var
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
 from lgtmaybe.core.logging import get_logger
@@ -60,7 +60,7 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import local_file_reader, local_pr_context
+from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -88,18 +88,13 @@ class RuntimeOptions:
 _log = get_logger(__name__)
 
 
-def _should_auto_post(enabled: bool, event_action: str) -> bool:
-    """Gate an automatic extra to newly opened or reopened pull requests."""
-    return enabled and event_action in ("opened", "reopened")
-
-
-def should_auto_describe(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post the structured description first."""
-    return _should_auto_post(cfg.auto_describe, event_action)
-
-
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
-    """Whether the action run should post or refresh the change diagram."""
+    """Whether the action run should post or refresh the change overview.
+
+    The overview's own sections (description, High Impact Areas) are config
+    toggles inside it, not separate events: they ride this one comment, so a
+    push refreshes all of them together or none of them.
+    """
     return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
 
 
@@ -135,10 +130,15 @@ def run_diagram(
     *,
     completed_sha: str | None = None,
 ) -> None:
-    """Build the change diagram and post it idempotently."""
-    from lgtmaybe.engine.diagram import build_diagram
+    """Build the change overview and post it idempotently.
 
-    body = build_diagram(github.get_pr_context() if ctx is None else ctx, cfg, provider)
+    The comment carries the description, the High Impact Areas section and the
+    diagrams — each gated by its own config flag, all in one upsert under the
+    diagram marker family.
+    """
+    from lgtmaybe.engine.overview import build_overview
+
+    body = build_overview(github.get_pr_context() if ctx is None else ctx, cfg, provider)
     post = getattr(github, "post_diagram_comment", None)
     if post is not None:
         post(body, completed_sha=completed_sha)
@@ -165,17 +165,6 @@ def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewC
     return cfg.model_copy(update={"incremental": event_action == "synchronize"})
 
 
-def parse_pr_url(pr_url: str) -> tuple[str, int]:
-    """Parse a pull/merge request URL into ("owner/repo", number).
-
-    Thin wrapper over ``core.forge.parse_pr_url`` for the callers that only want
-    the project path and number. Use the locator directly when the forge or host
-    matters. Raises ValueError with a clear message for anything unparseable.
-    """
-    located = locate_pr(pr_url)
-    return located.repo, located.number
-
-
 # Which forges lgtmaybe can build a gateway for. A forge that parses but is not
 # in here is recognised-but-unimplemented, which earns a different (and much more
 # useful) error than an unparseable URL.
@@ -194,6 +183,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         token=token,
         marker_key=f"{cfg.provider}/{cfg.model}",
         resolve_fixed=cfg.resolve_fixed,
+        scheme=located.scheme,
     ),
     Forge.gitea: lambda located, token, cfg: GiteaGateway(
         host=located.host,
@@ -201,6 +191,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         pr_number=located.number,
         token=token,
         marker_key=f"{cfg.provider}/{cfg.model}",
+        scheme=located.scheme,
     ),
 }
 
@@ -625,7 +616,7 @@ def _incremental_context(
 
 def _diff_paths(diff: str) -> set[str]:
     """The file paths named by a unified diff's ``diff --git`` headers."""
-    return set(FILE_HEADER_RE.findall(diff))
+    return {path for path, _patch in split_by_file(diff, []) if path != "unknown"}
 
 
 def _validate_prior_findings(
@@ -733,9 +724,7 @@ def execute_local_review(
         fetch_file = local_file_reader()
         # And let ast-grep resolve a deferred symbol to its defining file by searching
         # that same worktree — the corpus is already on disk, so no clone is needed.
-        resolve_symbol = (
-            build_symbol_resolver(lambda: Path.cwd()) if cfg.symbol_resolution else None
-        )
+        resolve_symbol = build_symbol_resolver(local_repo_root) if cfg.symbol_resolution else None
         engine, _provider = build_provider_engine(
             cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
         )
@@ -744,6 +733,8 @@ def execute_local_review(
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
+    if fmt == "json" and INCOMPLETE_MARKER in summary:
+        click.echo(summary.replace(INCOMPLETE_MARKER, "").strip(), err=True)
     click.echo(render_findings(findings, summary, fmt=fmt))
     _write_profile_json(runtime)
     if runtime.profile:
@@ -782,20 +773,21 @@ def execute_local_diagram(
     working: bool,
     uncommitted: bool = False,
 ) -> None:
-    """Print a compact Mermaid diagram of local changes — no GitHub involvement.
+    """Print the change overview of local changes — no GitHub involvement.
 
     Builds the provider straight from config/runtime (no token, no gateway) and
-    echoes the same Markdown body the ``/diagram`` comment would carry: the
-    Mermaid source (paste it into GitHub to render) plus the text rendering,
-    which is what actually shows in a terminal — with the comment's collapsible
-    wrappers flattened, since a terminal renders no HTML.
+    echoes the same Markdown body the ``/diagram`` comment would carry —
+    description, High Impact Areas, and the Mermaid source (paste it into
+    GitHub to render) plus the text rendering, which is what actually shows in
+    a terminal — with the comment's collapsible wrappers flattened, since a
+    terminal renders no HTML.
     """
-    from lgtmaybe.engine.diagram import build_diagram
+    from lgtmaybe.engine.overview import build_overview
 
     try:
         _engine, provider = build_provider_engine(cfg, runtime)
         ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
-        body = build_diagram(ctx, cfg, provider)
+        body = build_overview(ctx, cfg, provider)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -817,52 +809,33 @@ def _build_context_or_fail(
         raise click.ClickException(str(exc)) from exc
 
 
-def _post_extras(
-    github: ReviewGateway,
-    provider: ProviderClient,
-    cfg: ReviewConfig,
-    ctx: PRContext,
-    *,
-    describe: bool,
-) -> None:
-    """Post the best-effort automatic description over a prefetched context.
-
-    Automatic descriptions remain best-effort. Required automatic diagrams are
-    posted by ``run_review`` and never enter this helper.
-    """
-    if describe:
-        try:
-            run_describe(github, provider, cfg, ctx=ctx)
-        except Exception:
-            _log.warning("auto-describe failed — continuing without it", exc_info=True)
-
-
 def execute_review(
     cfg: ReviewConfig,
     runtime: RuntimeOptions,
     *,
-    describe: bool = False,
     diagram: bool = False,
 ) -> None:
     """Build adapters, run the review, and surface failures back to the PR.
 
-    Shared by the ``review`` command and Action entrypoint. Automatic
-    descriptions are best-effort after review; an automatic diagram is a
-    required completion step inside ``run_review``. Both reuse one adapter set
-    and the prefetched O(files) PR context.
+    Shared by the ``review`` command and Action entrypoint. An automatic change
+    overview is a required completion step inside ``run_review``, and reuses
+    this run's adapter set and prefetched O(files) PR context.
     """
     profiler.reset()
     github, engine, provider = _build_context_or_fail(cfg, runtime)
 
     ctx: PRContext | None = None
-    if describe or diagram:
+    if diagram:
+        want_manifests = getattr(github, "set_scan_manifests", None)
+        if callable(want_manifests):
+            want_manifests(cfg.static_analysis.enabled)
         # A failed prefetch means run_review fetches and surfaces the failure
-        # itself. Fetching here lets the review, required diagram, and optional
-        # description share one current-head context.
+        # itself. Fetching here lets the review and the change overview share
+        # one current-head context.
         try:
             ctx = github.get_pr_context()
         except Exception:
-            _log.warning("PR context prefetch failed — extras skipped", exc_info=True)
+            _log.warning("PR context prefetch failed — overview skipped", exc_info=True)
 
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
@@ -879,16 +852,6 @@ def execute_review(
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
-    finally:
-        # Deferred deliberately: posting a comment fires an issue_comment
-        # workflow run, and a consumer whose concurrency group isn't
-        # discriminated by event name puts that run in the same group as this
-        # review — cancel-in-progress then kills the review that posted the
-        # comment. With the review already on the PR, such a cancellation is
-        # harmless. In a `finally` so a failed review still gets its extras,
-        # exactly as when they ran first.
-        if ctx is not None:
-            _post_extras(github, provider, cfg, ctx, describe=describe)
 
     if runtime.profile:
         click.echo(profiler.render())
@@ -964,9 +927,9 @@ def _change_url(repo: str, number: int) -> str:
     Gitea Actions reimplements GitHub Actions' env contract — same
     ``GITHUB_EVENT_NAME``, same ``GITHUB_EVENT_PATH``, same ``INPUT_*`` — so the
     entrypoint needs no forge switch of its own. The one variable that does
-    differ is ``GITHUB_SERVER_URL``, which points at the Gitea instance; reading
-    it is the whole difference between reviewing the right PR and posting to
-    github.com. Absent (or github.com), the URL is unchanged from before.
+    differ are ``GITHUB_SERVER_URL`` and ``GITHUB_API_URL``. Together they
+    distinguish Gitea from unsupported GitHub Enterprise Server. Absent (or
+    github.com), the URL is unchanged from before.
 
     The path segment is what ``core.forge`` discriminates on, so it has to match
     the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
@@ -974,6 +937,11 @@ def _change_url(repo: str, number: int) -> str:
     server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
+    if os.environ.get("GITHUB_API_URL", "").rstrip("/").endswith("/api/v3"):
+        raise click.ClickException(
+            "GitHub Enterprise Server is not supported; run lgtmaybe on GitHub.com, "
+            "GitLab, or Gitea."
+        )
     return f"{server}/{repo}/pulls/{number}"
 
 
@@ -990,7 +958,7 @@ def mr_url_from_ci_env() -> str:
     naming ``CI_MERGE_REQUEST_IID`` points straight at the ``rules:`` fix.
     """
     host = os.environ.get("CI_SERVER_HOST") or ""
-    server = host and f"https://{host}" or os.environ.get("CI_SERVER_URL", "").rstrip("/")
+    server = os.environ.get("CI_SERVER_URL", "").rstrip("/") or (host and f"https://{host}")
     if not server:
         raise click.ClickException(
             "CI_SERVER_HOST is not set — lgtmaybe cannot tell which GitLab to post to."
@@ -1195,11 +1163,9 @@ __all__ = [
     "execute_review",
     "graceful_interrupt",
     "main",
-    "parse_pr_url",
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",
     "run_describe",
     "run_review",
-    "should_auto_describe",
 ]

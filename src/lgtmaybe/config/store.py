@@ -52,6 +52,7 @@ def as_yaml(path: Path | None = None) -> str:
 
 def get_key(key: str, path: Path | None = None) -> Any:
     """Return one stored value, or None when unset."""
+    _validate_key(key)
     return load(path).get(key)
 
 

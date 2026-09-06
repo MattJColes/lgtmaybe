@@ -7,7 +7,7 @@ litellm model-string conventions:
   bedrock    → bedrock/<model>
   vertex     → vertex_ai/<model>
   azure      → azure/<model>   (+ api_base = resource endpoint)
-  ollama     → ollama/<model>  (+ api_base)
+  ollama     → ollama_chat/<model>  (+ api_base)
   openai-compatible → openai/<model>  (+ api_base = custom endpoint)
   zai        → zai/<model>     (GLM / Zhipu AI; optional api_base override)
 """
@@ -36,7 +36,7 @@ _PREFIXES: dict[Provider, str] = {
     Provider.bedrock: "bedrock",
     Provider.vertex: "vertex_ai",
     Provider.azure: "azure",
-    Provider.ollama: "ollama",
+    Provider.ollama: "ollama_chat",
     # OpenAI-compatible servers (DeepSeek, llama.cpp, LM Studio, vLLM) ride the
     # openai route; the custom endpoint comes through api_base.
     Provider.openai_compatible: "openai",
@@ -263,6 +263,51 @@ def _honour_param_support(provider: Provider, model: str, opts: dict[str, Any]) 
         )
 
 
+# Efforts that switch a Claude model's extended thinking OFF rather than on.
+# `none` is the literal off switch; `default` names no budget at all, so
+# litellm sends no thinking block for it either.
+_THINKING_OFF_EFFORTS = frozenset({"none", "default"})
+
+
+def _is_claude_route(provider: Provider, model: str) -> bool:
+    """Whether (*provider*, *model*) reaches a Claude model on one of its
+    direct routes — the ones whose reasoning effort litellm turns into
+    Anthropic's `thinking` block."""
+    if provider is Provider.anthropic:
+        return True
+    if provider in (Provider.bedrock, Provider.vertex):
+        return "claude" in model.lower()
+    return False
+
+
+def _withhold_temperature_under_thinking(
+    provider: Provider, model: str, opts: dict[str, Any]
+) -> None:
+    """Drop `temperature` from a Claude request that turns thinking on.
+
+    litellm maps a `reasoning_effort` on the anthropic, bedrock and vertex
+    Claude routes into Anthropic's extended-thinking block, and Anthropic
+    refuses a temperature beside it (`temperature` may only be set to 1 when
+    thinking is enabled) — a 400, permanent, on every lens at once. litellm
+    forwards both regardless: it strips sampling params only for the models
+    that reject them outright. So the one the user did not ask for is withheld
+    here: the effort was configured; the temperature is our determinism
+    default, and thinking is not deterministic anyway. Said out loud, like
+    every other param this factory declines to send.
+    """
+    effort = opts.get("reasoning_effort")
+    if "temperature" not in opts or not isinstance(effort, str):
+        return
+    if effort in _THINKING_OFF_EFFORTS or not _is_claude_route(provider, model):
+        return
+    del opts["temperature"]
+    _log.info(
+        "temperature not sent: extended thinking is on for this Claude model, and "
+        "Anthropic rejects a temperature beside it",
+        extra={"provider": provider.value, "model": litellm_model_string(provider, model)},
+    )
+
+
 def build_provider(
     provider: Provider,
     model: str,
@@ -296,6 +341,7 @@ def build_provider(
     # judged here because this is where the litellm model string the capability
     # map keys on comes into existence.
     _honour_param_support(provider, model, opts)
+    _withhold_temperature_under_thinking(provider, model, opts)
 
     opts["timeout"] = (
         timeout if timeout is not None else default_timeout_for(provider, concurrency=concurrency)

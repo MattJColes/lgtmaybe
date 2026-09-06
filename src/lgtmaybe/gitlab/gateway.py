@@ -45,6 +45,7 @@ from lgtmaybe.core.diff import (
     is_reviewable,
     is_scannable_manifest,
 )
+from lgtmaybe.core.diffparse import walk_diff
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
 from lgtmaybe.core.paginate import paginate_pages
@@ -105,12 +106,14 @@ class GitLabGateway:
         # MR payload, because posting a finding needs them and post_review is
         # reachable without a preceding get_pr_context (a failure notice).
         self._diff_refs: dict[str, str] | None = None
+        self._old_paths: dict[str, str] = {}
         self._scan_manifests = False
         self._active_findings: list[ActiveFinding] | None = None
         self._validated_fixed_thread_ids: set[str] | None = None
         # The MR's discussion list, read by three callers per run and never
         # mutated between them (see `_discussions`).
         self._discussions_cache: list[dict[str, Any]] | None = None
+        self._notes_cache: list[dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -137,11 +140,14 @@ class GitLabGateway:
         }
 
         diff = self._fetch_mr_diff()
-        changed_files = [
-            item.get("new_path") or item.get("old_path") or ""
-            for item in self._paginate(f"{self._mr_api}/diffs")
-        ]
+        diff_items = list(self._paginate(f"{self._mr_api}/diffs"))
+        changed_files = [item.get("new_path") or item.get("old_path") or "" for item in diff_items]
         changed_files = [path for path in changed_files if path]
+        self._old_paths = {
+            item["new_path"]: item["old_path"]
+            for item in diff_items
+            if item.get("new_path") and item.get("old_path")
+        }
 
         reviewable = [path for path in changed_files if is_reviewable(path)]
         scannable = (
@@ -193,15 +199,22 @@ class GitLabGateway:
             diff = self._fetch_mr_diff()
 
         commentable: CommentableLines = build_commentable_lines(diff or "")
-        inline, demoted, broad = self._partition_findings(findings, commentable)
+        inline, demoted, broad = self._partition_findings(findings, commentable, diff or "")
 
         if inline:
-            already = self._existing_finding_keys()
-            inline = [
-                (position, f) for position, f in inline if not (current_finding_keys([f]) & already)
-            ]
+            unmatched = self._existing_finding_keys()
+            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
+            for position, finding in inline:
+                keys = current_finding_keys([finding])
+                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
+                if already is None:
+                    new_inline.append((position, finding))
+                else:
+                    unmatched.pop(already)
+            inline = new_inline
         for position, finding in inline:
-            self._post_discussion(position, render_inline_body(finding))
+            if not self._post_discussion(position, render_inline_body(finding)):
+                demoted.append(finding)
 
         body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
         self._upsert_note(body, self._marker)
@@ -349,6 +362,7 @@ class GitLabGateway:
         self,
         findings: list[ReviewFinding],
         commentable: CommentableLines,
+        diff: str,
     ) -> tuple[
         list[tuple[dict[str, Any], ReviewFinding]],
         list[ReviewFinding],
@@ -362,6 +376,12 @@ class GitLabGateway:
         demoted when the diff refs are unknown, since a position without them is
         rejected by the API.
         """
+        context_lines: dict[tuple[str, int, str], tuple[int, int]] = {}
+        for path, kind, old_line, new_line, _text in walk_diff(diff):
+            if kind == " ":
+                context_lines[path, old_line, "LEFT"] = old_line, new_line
+                context_lines[path, new_line, "RIGHT"] = old_line, new_line
+
         inline: list[tuple[dict[str, Any], ReviewFinding]] = []
         demoted: list[ReviewFinding] = []
         broad: list[ReviewFinding] = []
@@ -378,18 +398,19 @@ class GitLabGateway:
             position: dict[str, Any] = {
                 **self._diff_refs,
                 "position_type": "text",
-                "old_path": f.path,
+                "old_path": self._old_paths.get(f.path, f.path),
                 "new_path": f.path,
             }
-            # RIGHT is a line in the new file, LEFT a line in the old one.
-            if f.side == "LEFT":
+            if context := context_lines.get((f.path, f.line, f.side)):
+                position["old_line"], position["new_line"] = context
+            elif f.side == "LEFT":
                 position["old_line"] = f.line
             else:
                 position["new_line"] = f.line
             inline.append((position, f))
         return inline, demoted, broad
 
-    def _post_discussion(self, position: dict[str, Any], body: str) -> None:
+    def _post_discussion(self, position: dict[str, Any], body: str) -> bool:
         """Open one positioned discussion.
 
         Best-effort per finding: GitLab rejects a position whose line no longer
@@ -404,8 +425,10 @@ class GitLabGateway:
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
+            return True
         except Exception as exc:  # noqa: BLE001 — one rejected position is not fatal
             _log.warning("posting discussion at %s failed: %s", position.get("new_path"), exc)
+            return False
 
     def _resolve_fixed_threads(self) -> None:
         """Reply in, then resolve, every thread the caller validated as fixed.
@@ -429,13 +452,17 @@ class GitLabGateway:
             except Exception as exc:  # noqa: BLE001 — resolving never fails a review
                 _log.warning("resolving thread %s failed: %s", thread_id, exc)
 
-    def _existing_finding_keys(self) -> set[str]:
-        """Every hidden finding id already posted on this MR by us."""
-        keys: set[str] = set()
+    def _existing_finding_keys(self) -> list[set[str]]:
+        """Hidden finding ids grouped by posted comment for one-for-one dedupe."""
+        keys: list[set[str]] = []
         try:
             for discussion in self._discussions():
-                for note in discussion.get("notes") or []:
-                    keys |= finding_keys(note.get("body") or "")
+                notes = discussion.get("notes") or []
+                if notes and notes[0].get("resolved"):
+                    continue
+                for note in notes:
+                    if found := finding_keys(note.get("body") or ""):
+                        keys.append(found)
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing discussions failed: %s", exc)
         return keys
@@ -474,7 +501,9 @@ class GitLabGateway:
 
     def _find_note(self, family: str) -> int | None:
         """The id of our existing note in ``family``, or None."""
-        for note in self._paginate(f"{self._mr_api}/notes"):
+        if self._notes_cache is None:
+            self._notes_cache = self._paginate(f"{self._mr_api}/notes")
+        for note in self._notes_cache:
             if family in (note.get("body") or ""):
                 note_id = note.get("id")
                 return int(note_id) if note_id is not None else None

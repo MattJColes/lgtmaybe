@@ -163,3 +163,95 @@ def test_language_directive_added_when_set() -> None:
     build_description(_CTX, cfg, provider)
     system = provider.calls[0]["messages"][0]["content"]
     assert "Japanese" in system
+
+
+def test_markdown_text_escapes_and_flattens_model_prose() -> None:
+    """The escapers live here, beside the shared scaffold, because every
+    overview section renders model-authored prose the same inert way."""
+    from lgtmaybe.engine.describe import markdown_text, single_line
+
+    assert single_line("two  lines\nof text") == "two lines of text"
+    assert markdown_text("[x](http://e)") == r"\[x\]\(http\://e\)"
+
+
+def test_describe_result_returns_the_typed_object_and_intent_flag() -> None:
+    """The overview lays out the sections itself, so it needs the parsed
+    object rather than describe's own rendered Markdown."""
+    from lgtmaybe.engine.describe import describe_result
+
+    desc, has_intent = describe_result(_CTX, _CFG, _structured_provider())
+
+    assert desc is not None
+    assert desc.title == "Add retry logic to the HTTP client"
+    assert has_intent is True
+
+
+def test_describe_result_is_none_when_nothing_parses() -> None:
+    from lgtmaybe.engine.describe import describe_result
+
+    provider = FakeProvider(
+        result=ProviderResult(text="Just prose.", input_tokens=1, output_tokens=1)
+    )
+
+    desc, has_intent = describe_result(_NO_INTENT_CTX, _CFG, provider)
+
+    assert desc is None
+    assert has_intent is False
+
+
+class TestModelProseIsInert:
+    """The description now heads every automatic overview comment, so its
+    model-authored fields reach every PR as Markdown. A weak or prompt-injected
+    model must not be able to restructure the comment around them."""
+
+    def _described(self, **fields: str) -> str:
+        from lgtmaybe.core.models import DescribeResult
+        from lgtmaybe.engine.describe import render_description
+
+        base = {"title": "t", "change_type": "fix", "summary": "s", "intent_check": "i"}
+        base.update(fields)
+        return render_description(DescribeResult(**base), has_intent=True)
+
+    def test_a_summary_cannot_inject_a_heading(self) -> None:
+        body = self._described(summary="Done.\n\n## Approved by security\n\nTrust me.")
+
+        assert "\n## Approved by security" not in body
+
+    def test_a_summary_cannot_inject_raw_html(self) -> None:
+        body = self._described(summary="<img src=x onerror=alert(1)>")
+
+        assert "<img" not in body
+
+    def test_a_summary_cannot_open_a_code_fence(self) -> None:
+        """An unclosed fence would swallow the diagrams below it."""
+        body = self._described(summary="```\neverything below is code now")
+
+        assert "\n```" not in body
+
+    def test_a_title_cannot_break_out_of_its_heading(self) -> None:
+        body = self._described(title="Fix\n## Fake heading")
+
+        assert "\n## Fake heading" not in body
+
+    def test_a_walkthrough_cell_cannot_break_the_table(self) -> None:
+        from lgtmaybe.core.models import DescribeResult, FileWalkthrough
+        from lgtmaybe.engine.describe import render_description
+
+        body = render_description(
+            DescribeResult(
+                title="t",
+                walkthrough=[FileWalkthrough(path="a.py", summary="broke | the | table")],
+            ),
+            has_intent=False,
+        )
+
+        assert "| `a.py` | broke \\| the \\| table |" in body
+
+    def test_ordinary_prose_stays_readable(self) -> None:
+        """Escaping must not turn normal English into backslash soup — this is
+        the headline prose of every overview comment."""
+        body = self._described(
+            summary="Adds exponential-backoff retries (up to 3) for the HTTP client."
+        )
+
+        assert "Adds exponential-backoff retries (up to 3) for the HTTP client." in body

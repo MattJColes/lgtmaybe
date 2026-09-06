@@ -44,6 +44,18 @@ tokens: 158,076 billable (154,200 in / 3,876 out) across 12 calls
 Every local review prints that same line to stderr even without `--profile`, so
 the meter is always in view; redirect with `2>/dev/null` if you want it gone.
 
+When litellm's pricing map knows the model, the meter gains a second line:
+
+```
+estimated cost: $0.5207 (litellm pricing map)
+```
+
+It is an estimate off a price list that can lag a brand-new model, so its
+absence means "unpriced", not "free" — and when only some calls could be
+priced, the line says how many rather than passing a partial total off as the
+sum. Cache reads are billed at their discount, so a run with a warm prefix
+shows it.
+
 `in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
 the diff, over and over, once per lens per batch. The per-call table above it
 shows exactly which lens and which batch each call belongs to, so you can see
@@ -77,10 +89,17 @@ input tokens  ≈  batches × lenses × (diff + context padding + hints)
 - **lenses** — the `fast` preset (the default) makes **four** calls per batch;
   `full` makes one per category, up to nine. This is the biggest multiplier in
   the formula.
-- **batches** — a diff larger than `max_input_tokens` (default 100k) is split,
-  and *each* batch pays the full lens fan-out again.
+- **batches** — a diff larger than `max_input_tokens` is split, and *each*
+  batch pays the full lens fan-out again. The default is 100k, fitted down to
+  what the model's context window can take when that is known (litellm's model
+  map for hosted models, `num_ctx` for ollama, less the output ceiling); a value
+  you set is used as-is.
 - **reflection** — one more pass over the findings, on top.
-- **triage / describe / diagram** — extra calls when enabled.
+- **triage** — an extra cheap call when enabled.
+- **the change overview** (`auto_diagram`, on by default) — up to three extra
+  calls per push: the description (`auto_describe`), High Impact Areas
+  (`high_impact`), and the diagrams. Each opts out on its own; `auto_diagram:
+  false` drops all three.
 - **mid-review retrieval** — off by default; on, it adds up to one more call per
   (batch, lens). See [What costs more, on purpose](#what-costs-more-on-purpose).
 
@@ -179,9 +198,22 @@ lgtmaybe review --uncommitted    # working-tree edits vs HEAD
 
 ### 7. Right-size the model
 
-A smaller model on the common path with a stronger `--fallback-model` behind it
-is often indistinguishable in output and much cheaper. And if cost is the
-binding constraint rather than latency, ollama is free:
+A smaller model on the common path with a stronger fallback cuts expected cost
+when the primary usually finishes its calls. A healthy call never reaches the
+fallback. A failed call still spends the primary model's attempts before adding
+the second model, so this does not reduce worst-case cost.
+
+```yaml
+provider: openrouter
+model: google/gemini-3.7-flash
+fallback_model: qwen/qwen3.8-max
+```
+
+Both models use the same configured provider and credentials. See
+[`fallback_model`](configure-lgtmaybe-yml.md#fallback_model) for the recovery
+order, failure behavior, and reporting.
+
+If cost is the binding constraint rather than latency, ollama runs locally:
 
 ```bash
 lgtmaybe review --provider ollama --model qwen2.5-coder:14b

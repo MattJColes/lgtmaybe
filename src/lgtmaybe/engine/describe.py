@@ -14,7 +14,8 @@ restatement, which would contradict this call's output contract).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -64,6 +65,15 @@ _TASK_SUFFIX = "\n\nReturn the description JSON object."
 _MAX_DIFF_LINES_OVER_BUDGET_MARKER = "… [diff truncated for length] …"
 
 
+def _describe_system(cfg: ReviewConfig) -> str:
+    """The describe system prompt, with the output-language directive appended."""
+    return _DESCRIBE_SYSTEM + language_directive(
+        cfg.language,
+        translate='"title", "summary", every walkthrough "summary", and "intent_check"',
+        keep='Keep the "path" values and the "change_type" enum value unchanged.',
+    )
+
+
 def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
     """One provider call → the Markdown body of the PR-description comment.
 
@@ -71,23 +81,41 @@ def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClien
     parsed the raw model text is returned as-is (the pre-structured
     behaviour), so a weak model still yields a usable comment.
     """
-    system = _DESCRIBE_SYSTEM + language_directive(
-        cfg.language,
-        translate='"title", "summary", every walkthrough "summary", and "intent_check"',
-        keep='Keep the "path" values and the "change_type" enum value unchanged.',
-    )
     return structured_comment(
         ctx,
         cfg,
         provider,
-        system=system,
+        system=_describe_system(cfg),
         diff_preamble=_DIFF_PREAMBLE,
         task_suffix=_TASK_SUFFIX,
         result_model=DescribeResult,
         wanted=lambda data: isinstance(data.get("title"), str) and bool(data["title"]),
-        render=lambda desc, has_intent: _render(desc, has_intent=has_intent),
+        render=lambda desc, has_intent: render_description(desc, has_intent=has_intent),
         label="describe",
     )
+
+
+def describe_result(
+    ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient
+) -> tuple[DescribeResult | None, bool]:
+    """The parsed description and whether an intent block was sent.
+
+    What the change overview needs: it lays the sections out itself, so it
+    takes the typed object rather than describe's own rendered Markdown. None
+    when nothing parsed — the overview renders its own "unavailable" line.
+    """
+    parsed, _raw, has_intent = structured_call(
+        ctx,
+        cfg,
+        provider,
+        system=_describe_system(cfg),
+        diff_preamble=_DIFF_PREAMBLE,
+        task_suffix=_TASK_SUFFIX,
+        result_model=DescribeResult,
+        wanted=lambda data: isinstance(data.get("title"), str) and bool(data["title"]),
+        label="describe",
+    )
+    return parsed, has_intent
 
 
 def structured_comment(
@@ -106,17 +134,60 @@ def structured_comment(
 ) -> str:
     """The shared one-call scaffold behind describe and diagram.
 
-    Wraps the (redacted) stated intent and the (redacted, fitted, neutralised)
-    diff — delimited with injection.py's own markers — makes one provider call,
-    leniently parses the first JSON object *wanted* accepts into *result_model*,
-    and hands it to *render* (with whether an intent block was sent). When
-    nothing parses, callers may provide a safe fallback; otherwise the raw text
-    is preserved for compatibility with weak prose-only models.
+    Renders what ``structured_call`` returns: on a parse the *render* result
+    (with whether an intent block was sent), otherwise a caller-supplied safe
+    fallback, or the raw text preserved for compatibility with weak prose-only
+    models.
+    """
+    parsed, raw, has_intent = structured_call(
+        ctx,
+        cfg,
+        provider,
+        system=system,
+        diff_preamble=diff_preamble,
+        task_suffix=task_suffix,
+        result_model=result_model,
+        wanted=wanted,
+        label=label,
+    )
+    if parsed is None:
+        if fallback is None:
+            _log.info("%s output unstructured — posting raw text", label)
+            return raw
+        _log.info("%s output did not match its schema — using safe fallback", label)
+        return fallback(raw)
+    return render(parsed, has_intent)
+
+
+def structured_call(
+    ctx: PRContext,
+    cfg: ReviewConfig,
+    provider: ProviderClient,
+    *,
+    system: str,
+    diff_preamble: str,
+    task_suffix: str,
+    result_model: type[_M],
+    wanted: Callable[[dict[str, Any]], bool],
+    label: str,
+    extra_blocks: Sequence[str] = (),
+) -> tuple[_M | None, str, bool]:
+    """One auxiliary model call over the PR: (parsed-or-None, raw text, intent sent).
+
+    Wraps the (redacted) stated intent, any *extra_blocks* the caller has
+    already wrapped as untrusted data, and the (redacted, fitted, neutralised)
+    diff — delimited with injection.py's own markers — then leniently parses
+    the first JSON object *wanted* accepts into *result_model*.
+
+    The typed seam under every overview section: callers that render Markdown
+    directly go through ``structured_comment``, while the overview needs the
+    object itself to lay several sections out in one comment.
     """
     intent = _intent_text(ctx)
     parts: list[str] = []
     if intent:
         parts.append(wrap_intent(redact(intent)))
+    parts.extend(extra_blocks)
     diff = _fit_diff(redact(ctx.diff), cfg.max_input_tokens)
     parts.append(f"{diff_preamble}{DIFF_START}\n{neutralise(diff)}\n{DIFF_END}")
     user = "\n\n".join(parts) + task_suffix
@@ -130,14 +201,8 @@ def structured_comment(
         model=cfg.model,
         **opts,
     )
-    parsed = parse_structured(result.text, result_model, wanted)
-    if parsed is None:
-        if fallback is None:
-            _log.info("%s output unstructured — posting raw text", label)
-            return result.text
-        _log.info("%s output did not match its schema — using safe fallback", label)
-        return fallback(result.text)
-    return render(parsed, bool(intent))
+    _log.debug("%s call returned", label)
+    return parse_structured(result.text, result_model, wanted), result.text, bool(intent)
 
 
 def _fit_diff(diff: str, max_tokens: int) -> str:
@@ -148,18 +213,79 @@ def _fit_diff(diff: str, max_tokens: int) -> str:
     return "\n".join([*kept, _MAX_DIFF_LINES_OVER_BUDGET_MARKER])
 
 
-def _render(desc: DescribeResult, *, has_intent: bool) -> str:
+def single_line(value: str) -> str:
+    """*value* with every run of whitespace collapsed to one space."""
+    return " ".join(value.split())
+
+
+_MARKDOWN_ESCAPES = str.maketrans({char: f"\\{char}" for char in "\\`*_{}[]<>()#+-!|>&:"})
+
+
+def markdown_text(value: str) -> str:
+    """Render model-authored prose as inert, single-line Markdown text.
+
+    Shared by every section of the change overview: model prose is untrusted
+    output derived from an untrusted diff, so it is escaped wherever it lands
+    rather than trusted to be plain.
+    """
+    return single_line(value).translate(_MARKDOWN_ESCAPES)
+
+
+# A line starting with one of these opens a Markdown block — a heading, quote,
+# table row, list item, or fence — so prose beginning with one would restructure
+# the comment around it rather than sit inside it.
+_BLOCK_OPENER_RE = re.compile(r"^([#>|=`~*+-]|\d+[.)])")
+
+
+def prose_text(value: str) -> str:
+    """Model prose that stays readable but cannot restructure the comment.
+
+    Deliberately lighter than ``markdown_text``: these are the description's own
+    sentences, the headline prose of every overview, and escaping every hyphen,
+    colon and bracket in a paragraph reads worse than the injection it prevents.
+    Three things are enough, because a block construct needs a line of its own:
+    collapse to one line (so the model cannot start a second), defuse ``<`` (so
+    no raw HTML), and escape a leading marker.
+    """
+    text = single_line(value).replace("<", "&lt;")
+    return _BLOCK_OPENER_RE.sub(r"\\\1", text)
+
+
+def render_description(desc: DescribeResult, *, has_intent: bool) -> str:
     """Render the structured description as the Markdown comment body."""
-    lines = [f"## {desc.title}"]
+    head = render_description_head(desc)
+    detail = render_description_detail(desc, has_intent=has_intent)
+    return f"{head}\n\n{detail}" if detail else head
+
+
+def render_description_head(desc: DescribeResult) -> str:
+    """Title, change type and summary — what heads the comment.
+
+    Split from the walkthrough because the change overview puts its High Impact
+    Areas section between the two: a reader meets what the change is, then what
+    is risky about it, before the per-file detail.
+    """
+    lines = [f"## {prose_text(desc.title)}"]
     if desc.change_type:
-        lines += ["", f"**Change type:** {desc.change_type}"]
+        lines += ["", f"**Change type:** {prose_text(desc.change_type)}"]
     if desc.summary:
-        lines += ["", desc.summary]
+        lines += ["", prose_text(desc.summary)]
+    return "\n".join(lines)
+
+
+def render_description_detail(desc: DescribeResult, *, has_intent: bool) -> str:
+    """The per-file walkthrough and the intent check; empty when there is neither."""
+    lines: list[str] = []
     if desc.walkthrough:
-        lines += ["", "### Walkthrough", "", "| File | Change |", "|---|---|"]
+        lines += ["### Walkthrough", "", "| File | Change |", "|---|---|"]
         for entry in desc.walkthrough:
-            summary = " ".join(entry.summary.split())  # keep the table row on one line
-            lines.append(f"| `{entry.path}` | {summary} |")
+            # A bare pipe in either cell ends the column early and mangles the
+            # rest of the row, so it is escaped along with the block openers.
+            path = entry.path.replace("`", "")
+            summary = prose_text(entry.summary).replace("|", r"\|")
+            lines.append(f"| `{path}` | {summary} |")
     if has_intent and desc.intent_check:
-        lines += ["", "### Does it do what it says?", "", desc.intent_check]
+        if lines:
+            lines.append("")
+        lines += ["### Does it do what it says?", "", prose_text(desc.intent_check)]
     return "\n".join(lines)

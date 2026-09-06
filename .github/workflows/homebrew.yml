@@ -49,10 +49,12 @@ jobs:
     steps:
       - name: Resolve version
         id: ver
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           raw="${{ inputs.version }}"
           if [ -z "$raw" ] && [ "${{ github.event_name }}" = "release" ]; then
-            raw="${{ github.event.release.tag_name }}"
+            raw="$RELEASE_TAG"
           fi
           if [ -z "$raw" ]; then
             raw="$(curl -fsSL https://pypi.org/pypi/lgtmaybe/json \
@@ -63,12 +65,12 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Checkout lgtmaybe (for the generator script)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           path: lgtmaybe
 
       - name: Checkout the tap
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: MattJColes/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}

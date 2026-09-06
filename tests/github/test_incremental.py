@@ -301,12 +301,25 @@ COMPARE_URL = f"{BASE_URL}/repos/{REPO}/compare/cafe1234...headsha123"
 
 
 def _mock_compare(
-    status: str, diff: str = SAMPLE_DIFF, *, commits: list[dict[str, object]] | None = None
+    status: str,
+    diff: str = SAMPLE_DIFF,
+    *,
+    commits: list[dict[str, object]] | None = None,
+    total_commits: int | None = None,
 ) -> None:
+    commits = commits or []
+
     def respond(request: httpx.Request) -> httpx.Response:
         if "diff" in request.headers.get("Accept", ""):
             return httpx.Response(200, text=diff)
-        return httpx.Response(200, json={"status": status, "commits": commits or []})
+        return httpx.Response(
+            200,
+            json={
+                "status": status,
+                "commits": commits,
+                "total_commits": len(commits) if total_commits is None else total_commits,
+            },
+        )
 
     respx.route(method="GET", url=COMPARE_URL).mock(side_effect=respond)
 
@@ -324,6 +337,13 @@ def test_compare_diff_none_when_comparison_contains_merge() -> None:
         "ahead",
         commits=[{"sha": "merge123", "parents": [{"sha": "pr123"}, {"sha": "base123"}]}],
     )
+
+    assert _gateway().compare_diff("cafe1234", "headsha123") is None
+
+
+@respx.mock
+def test_compare_diff_none_when_commit_list_is_truncated() -> None:
+    _mock_compare("ahead", commits=[{"sha": "linear", "parents": [{}]}], total_commits=250)
 
     assert _gateway().compare_diff("cafe1234", "headsha123") is None
 

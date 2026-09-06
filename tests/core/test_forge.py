@@ -108,3 +108,35 @@ class TestGatewayRegistry:
         gateway = build(located, "token", ReviewConfig(provider="ollama", model="llama3"))
         assert "git.acme.internal" in gateway._api
         assert gateway._pr_number == 12
+
+    def test_the_gitea_builder_preserves_an_http_origin(self) -> None:
+        from lgtmaybe.cli import gateway_builder
+        from lgtmaybe.core.models import ReviewConfig
+
+        located = parse_pr_url("http://git.acme.internal:3000/team/svc/pulls/12")
+        build = gateway_builder(located.forge)
+        assert build is not None
+
+        gateway = build(
+            located,
+            "token",
+            ReviewConfig(provider="ollama", model="llama3"),
+        )
+
+        assert gateway._api.startswith("http://git.acme.internal:3000/")
+
+    def test_the_gitlab_builder_preserves_an_http_origin(self) -> None:
+        from lgtmaybe.cli import gateway_builder
+        from lgtmaybe.core.models import ReviewConfig
+
+        located = parse_pr_url("http://gl.internal:3000/group/sub/project/-/merge_requests/9")
+        build = gateway_builder(located.forge)
+        assert build is not None
+
+        gateway = build(
+            located,
+            "token",
+            ReviewConfig(provider="ollama", model="llama3"),
+        )
+
+        assert gateway._api.startswith("http://gl.internal:3000/")

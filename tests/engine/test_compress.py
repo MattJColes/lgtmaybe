@@ -30,7 +30,7 @@ def test_the_token_counter_is_cached() -> None:
     """The encoder is built once and reused across count_tokens calls — it is
     resolved once per file during batching, and per LINE inside take_lines, so
     building it each time is slow."""
-    assert _counter_for(None) is _counter_for(None)
+    assert _counter_for() is _counter_for()
 
 
 def test_count_tokens_is_stable_and_positive() -> None:
@@ -271,6 +271,18 @@ def test_expand_hunks_asymmetric_pads_fewer_after() -> None:
     assert " h\n" not in expanded
     # Header widened by 3 leading + 1 trailing = 4 on each side.
     assert "@@ -2,5 +2,6 @@" in expanded
+
+
+def test_expand_hunks_handles_zero_length_sides() -> None:
+    content = "\n".join(f"line {n}" for n in range(1, 9))
+
+    insertion = expand_hunks("@@ -4,0 +5,2 @@\n+line 5\n+line 6\n", content, 3, after=1)
+    deletion = expand_hunks("@@ -5,3 +4,0 @@\n-old 5\n-old 6\n-old 7\n", content, 3, after=1)
+
+    assert insertion == ("@@ -2,4 +2,6 @@\n line 2\n line 3\n line 4\n+line 5\n+line 6\n line 7\n")
+    assert deletion == (
+        "@@ -2,7 +2,4 @@\n line 2\n line 3\n line 4\n-old 5\n-old 6\n-old 7\n line 5\n"
+    )
 
 
 def test_trailing_context_lines_ratio() -> None:
@@ -694,21 +706,19 @@ def test_a_definition_far_above_the_hunk_is_out_of_reach() -> None:
     assert "def long_one" not in expanded
 
 
-class TestTokenCountingIsVisibleAndProviderAware:
+class TestTokenCountingIsVisible:
     """Batching decisions are only as good as the count behind them.
 
-    Two silent failures made the budget meaningless: `tiktoken.get_encoding`
+    One silent failure made the budget meaningless: `tiktoken.get_encoding`
     needs a network fetch on first use, and any failure was swallowed into a
-    `len // 4` character estimate with nothing logged; and `cl100k_base` is
-    OpenAI's tokenizer, applied to every provider, so a non-OpenAI run measured
-    its budget in the wrong model's tokens.
+    `len // 4` character estimate with nothing logged.
+
+    There is deliberately no per-model tokenizer. litellm's registry was tried
+    and resolves to the same OpenAI encoding for every provider it knows
+    (anthropic, vertex, bedrock, ollama alike), so "count in the model's own
+    tokenizer" bought a heavy import and nothing else. One encoder, resolved
+    once.
     """
-
-    def setup_method(self) -> None:
-        compress.set_counting_model(None)
-
-    def teardown_method(self) -> None:
-        compress.set_counting_model(None)
 
     @staticmethod
     def _warnings_while(action) -> list[str]:
@@ -726,6 +736,14 @@ class TestTokenCountingIsVisibleAndProviderAware:
         finally:
             compress._log.removeHandler(handler)
         return [record.getMessage() for record in captured]
+
+    def test_counting_never_imports_litellm(self) -> None:
+        """The engine must not pay a multi-second import to count characters —
+        and a per-model lookup that resolves to the same encoding for every
+        model is not worth one either."""
+        import inspect
+
+        assert "import litellm" not in inspect.getsource(compress)
 
     def test_the_character_fallback_says_so_instead_of_failing_silently(self, monkeypatch) -> None:
         compress._counter_for.cache_clear()
@@ -751,37 +769,3 @@ class TestTokenCountingIsVisibleAndProviderAware:
         estimate = compress.count_tokens(code)
 
         assert estimate >= len(code) / 4, "a 4-chars-per-token estimate under-counts code"
-
-    def test_the_counter_follows_the_configured_model(self, monkeypatch) -> None:
-        """Same text, different tokenizer ⇒ a different count. The cache must not
-        keep serving the previous model's answer."""
-        compress._counter_for.cache_clear()
-        compress.count_tokens.cache_clear()
-        monkeypatch.setattr(
-            compress,
-            "_load_model_counter",
-            lambda model: lambda text: 7 if model == "a-model" else 11,
-        )
-
-        compress.set_counting_model("a-model")
-        first = compress.count_tokens("identical text")
-        compress.set_counting_model("b-model")
-        second = compress.count_tokens("identical text")
-
-        assert (first, second) == (7, 11)
-
-    def test_an_unusable_model_tokenizer_falls_back_rather_than_raising(self, monkeypatch) -> None:
-        compress._counter_for.cache_clear()
-        compress.count_tokens.cache_clear()
-        monkeypatch.setattr(
-            compress,
-            "_load_model_counter",
-            lambda model: (_ for _ in ()).throw(RuntimeError("no tokenizer")),
-        )
-        compress.set_counting_model("mystery-model")
-
-        counted: list[int] = []
-        messages = self._warnings_while(lambda: counted.append(compress.count_tokens("text")))
-
-        assert counted[0] > 0, "counting must never fail a review"
-        assert any("tokenizer" in message for message in messages)

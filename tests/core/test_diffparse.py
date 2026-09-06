@@ -49,6 +49,18 @@ class TestSplitByFile:
         parts = split_by_file("just text", [])
         assert parts == [("unknown", "just text")]
 
+    def test_preserves_a_new_path_containing_the_header_delimiter(self):
+        diff = (
+            "diff --git a/dir b/file.py b/dir b/file.py\n"
+            "--- a/dir b/file.py\t\n"
+            "+++ b/dir b/file.py\t\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+
+        assert split_by_file(diff, ["dir b/file.py"])[0][0] == "dir b/file.py"
+
 
 class TestParseHunkHeader:
     def test_parses_full_header_with_lengths_and_section(self):
@@ -110,6 +122,11 @@ class TestHunkForLine:
         assert hunk is not None
         assert "-old" in hunk
 
+    def test_preserves_non_newline_unicode_separator_in_hunk(self):
+        diff = "diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+const s = 'a\u2028b'\n"
+
+        assert "a\u2028b" in (hunk_for_line(diff, "a.js", 1) or "")
+
 
 class TestWalkDiff:
     def test_yields_kind_and_both_line_numbers_per_in_hunk_line(self):
@@ -144,6 +161,42 @@ class TestWalkDiff:
             ("f.txt", "-", 1, 1, "old line"),
             ("f.txt", "+", 2, 1, "new line"),
         ]
+
+    def test_preserves_a_walked_path_containing_the_header_delimiter(self):
+        diff = (
+            "diff --git a/dir b/file.py b/dir b/file.py\n"
+            "--- a/dir b/file.py\t\n"
+            "+++ b/dir b/file.py\t\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+
+        assert {path for path, *_ in walk_diff(diff)} == {"dir b/file.py"}
+
+    def test_in_hunk_content_that_looks_like_file_headers_is_walked(self):
+        diff = (
+            "diff --git a/query.sql b/query.sql\n"
+            "--- a/query.sql\n"
+            "+++ b/query.sql\n"
+            "@@ -1,2 +1,2 @@\n"
+            "--- a/deceptive-path.sql\n"
+            "+++ b/deceptive-path.sql\n"
+            "-old tail\n"
+            "+new tail\n"
+        )
+
+        assert list(walk_diff(diff)) == [
+            ("query.sql", "-", 1, 1, "-- a/deceptive-path.sql"),
+            ("query.sql", "+", 2, 1, "++ b/deceptive-path.sql"),
+            ("query.sql", "-", 2, 2, "old tail"),
+            ("query.sql", "+", 3, 2, "new tail"),
+        ]
+
+    def test_non_newline_unicode_separator_stays_inside_source_line(self):
+        diff = "diff --git a/a.js b/a.js\n@@ -1 +1,2 @@\n context\n+const s = 'a\u2028b'\n"
+
+        assert list(walk_diff(diff))[-1] == ("a.js", "+", 2, 2, "const s = 'a\u2028b'")
 
 
 class TestChangedLineIndex:
@@ -192,6 +245,11 @@ class TestChangedLineIndex:
 class TestChangedLineCount:
     def test_counts_added_and_removed_lines(self):
         assert changed_line_count(_TWO_FILE_DIFF) == 3
+
+    def test_non_newline_separator_does_not_create_a_second_changed_line(self):
+        diff = "diff --git a/a b/a\n@@ -0,0 +1 @@\n+added\u2028-embedded\n"
+
+        assert changed_line_count(diff) == 1
 
     def test_file_headers_are_not_changed_lines(self):
         # The `---`/`+++` pair every per-file patch carries is diff metadata,

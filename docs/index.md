@@ -33,12 +33,13 @@ line. A clean change just gets a 👍 **LGTM!**.
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
-Reviews aren't all it does. **`/review`** and **`/improve`** run the review,
-**`/describe`** writes a structured overview, **`/diagram`** draws
-[the change](how-to/generate-a-change-diagram.md) — a flowchart of what it
-touches, plus a sequence diagram of the flow it alters — and
-**`/ask <question>`** answers in the change. Run `lgtmaybe diagram` to draw the
-same map locally before you push.
+Reviews aren't all it does. **`/review`** and **`/improve`** run the review, and
+**`/diagram`** posts [the change overview](how-to/generate-a-change-diagram.md) —
+a description, a bold **High Impact Areas** call-out (infrastructure, security
+posture, outage risk, migrations, backups, compatibility, cost and more), a
+flowchart of what the change touches and a sequence diagram of the flow it
+alters. **`/ask`** answers questions in the change. Run `lgtmaybe diagram` to
+print the same overview locally.
 
 ```mermaid
 flowchart LR

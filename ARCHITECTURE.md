@@ -207,8 +207,9 @@ minified, vendored, generated, binary).
 repo `.lgtmaybe.yml` → CLI flags / Action inputs); the user store deliberately
 refuses to persist API keys.
 
-**CLI (`cli/`)** — the Click surface: `review` (local), `diagram` (local change
-diagrams — structure and sequence), `comment` (issue_comment slash commands), `action` (the
+**CLI (`cli/`)** — the Click surface: `review` (local), `diagram` (the local change
+overview — description, high impact areas, structure and sequence), `comment`
+(issue_comment slash commands), `action` (the
 container entrypoint that routes by event), and a `config` group. Slash commands
 (`/review`, `/improve`, `/ask`, `/describe`, `/diagram`) route to the same
 engine/provider.

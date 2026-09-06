@@ -180,10 +180,16 @@ class GiteaGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
 
         if inline:
-            already = self._existing_finding_keys()
-            inline = [
-                (comment, f) for comment, f in inline if not (current_finding_keys([f]) & already)
-            ]
+            unmatched = self._existing_finding_keys()
+            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
+            for comment, finding in inline:
+                keys = current_finding_keys([finding])
+                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
+                if already is None:
+                    new_inline.append((comment, finding))
+                else:
+                    unmatched.pop(already)
+            inline = new_inline
 
         if inline:
             resp = self._client.post(
@@ -321,13 +327,13 @@ class GiteaGateway:
             inline.append((comment, f))
         return inline, demoted, broad
 
-    def _existing_finding_keys(self) -> set[str]:
+    def _existing_finding_keys(self) -> list[set[str]]:
         """Every hidden finding id already posted on this PR by us.
 
         Best-effort: a failure here means a duplicate comment, which is far
         better than failing the whole review.
         """
-        keys: set[str] = set()
+        keys: list[set[str]] = []
         try:
             # Gitea reviews are immutable, so every past lgtmaybe run left its
             # own review object and there is no flat "all review comments for
@@ -342,10 +348,11 @@ class GiteaGateway:
             ]
             with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
                 for comments in pool.map(
-                    lambda rid: self._paginate(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
+                    lambda rid: self._list(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
                 ):
                     for comment in comments:
-                        keys |= finding_keys(comment.get("body") or "")
+                        if found := finding_keys(comment.get("body") or ""):
+                            keys.append(found)
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing review comments failed: %s", exc)
         return keys
@@ -371,7 +378,7 @@ class GiteaGateway:
 
     def _find_comment(self, family: str) -> int | None:
         """The id of our existing comment in ``family``, or None."""
-        for comment in self._paginate(f"{self._issue_api}/comments"):
+        for comment in self._list(f"{self._issue_api}/comments"):
             if family in (comment.get("body") or ""):
                 comment_id = comment.get("id")
                 return int(comment_id) if comment_id is not None else None
@@ -387,9 +394,9 @@ class GiteaGateway:
         """Commit subject lines, feeding the intent lens. Never fails the review."""
         try:
             return [
-                (item.get("commit", {}).get("message") or "").splitlines()[0]
+                message.splitlines()[0]
                 for item in self._paginate(f"{self._pr_api}/commits")
-                if (item.get("commit", {}).get("message") or "").strip()
+                if (message := (item.get("commit", {}).get("message") or "").strip())
             ]
         except Exception as exc:  # noqa: BLE001 — intent is a nice-to-have
             _log.warning("fetching commit subjects failed: %s", exc)
@@ -424,6 +431,11 @@ class GiteaGateway:
         resp = self._client.get(url, headers=self._headers, timeout=_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
+
+    def _list(self, url: str) -> list[dict[str, Any]]:
+        """One unpaginated Gitea list response."""
+        payload = self._get_json(url)
+        return payload if isinstance(payload, list) else []
 
     def _paginate(self, url: str) -> list[dict[str, Any]]:
         """Every page of a Gitea list endpoint, flattened."""

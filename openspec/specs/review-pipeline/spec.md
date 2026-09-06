@@ -216,6 +216,25 @@ name-based filter cannot recognise.
 - **WHEN** `max_file_diff_lines` is `0`
 - **THEN** no file is skipped for size and no size notice is posted
 
+### Requirement: The batching budget is fitted to the model's window
+
+The engine SHALL cap a defaulted `max_input_tokens` at the prompt budget the
+provider reports for its model (feature-detected `input_budget()`; the litellm
+adapter reads litellm's model map, or ollama's `num_ctx`, less the output
+ceiling it sends), before batching. A value the user configured SHALL be left
+alone, a provider with no method or no opinion SHALL change nothing, and the
+fit is only ever downward — the default is also a spend ceiling. Without it a
+100k batch is refused by a 65k-window model and silently truncated by ollama.
+<!-- anchor: engine.input-budget -->
+
+#### Scenario: the model's window is smaller than the default
+- **WHEN** `max_input_tokens` is unset and the provider reports a smaller budget
+- **THEN** batches are built against the reported budget, and the fit is logged
+
+#### Scenario: the user set a budget
+- **WHEN** `max_input_tokens` is configured, even above what the provider reports
+- **THEN** the configured value is used unchanged
+
 ### Requirement: Over-budget files walk hunk-by-hunk
 
 When one file's diff exceeds `max_input_tokens`, the engine SHALL decompose it
@@ -237,11 +256,11 @@ within budget are reviewed whole.
 ### Requirement: An oversized batch is retried smaller, never repeated
 
 A lens call that exhausts a per-request budget SHALL be retried on smaller
-pieces of the same batch rather than re-sent unchanged, bounded to one split
-level, the pieces reviewed concurrently, with the shrink disclosed in the
-summary. Both budgets trigger it: the wall clock, and the `max_tokens` ceiling
-an answer runs into. Findings the model completed before a truncation SHALL be
-kept, and the lens SHALL still count as failed.
+pieces of the same batch rather than re-sent unchanged: one split level, the
+pieces reviewed concurrently, the shrink disclosed in the summary. Three budgets
+trigger it: the wall clock, the `max_tokens` ceiling an answer hits, and the
+context window a prompt is refused by (`ProviderInputTooLarge`, nothing to
+salvage). Findings completed before a truncation SHALL be kept; the lens fails.
 <!-- anchor: engine.timeout-split -->
 
 #### Scenario: a multi-file batch times out
@@ -254,10 +273,10 @@ kept, and the lens SHALL still count as failed.
 - **THEN** its hunks are divided into two groups, one review call each, so an
   oversized lone file still shrinks
 
-#### Scenario: a call runs past its output ceiling
-- **WHEN** a lens call's answer stops at the `max_tokens` ceiling
-- **THEN** the batch is split the same way, and the findings finished before the
-  cut are kept alongside the pieces' findings
+#### Scenario: a call runs past its output ceiling, or its context window
+- **WHEN** a lens call's answer stops at the `max_tokens` ceiling, or its prompt
+  is refused for the window (which alone may also slice inside a lone hunk)
+- **THEN** the batch is split the same way; findings finished before a cut are kept
 
 #### Scenario: a piece exhausts its budget as well
 - **WHEN** a piece of an already-split batch times out or truncates again

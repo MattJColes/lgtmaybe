@@ -14,7 +14,7 @@ class TestOllamaPath:
 
     def test_ollama_model_string_has_ollama_prefix(self) -> None:
         provider = build_provider(Provider.ollama, "llama2")
-        assert provider.model == "ollama/llama2"
+        assert provider.model == "ollama_chat/llama2"
 
     def test_ollama_default_api_base_is_localhost(self) -> None:
         provider = build_provider(Provider.ollama, "llama2")

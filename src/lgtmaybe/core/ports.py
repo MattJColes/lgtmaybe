@@ -59,6 +59,11 @@ class ProviderTruncated(Exception):
     essentially the whole ceiling is not a payload problem at all: covering less
     does not shrink a thinking budget, and only `reasoning_effort` moves it. The
     caller must be able to tell the two apart without re-reading our own message.
+
+    ``cost_usd`` carries the same principle to the price column: the costliest
+    call of the run usually fails, and a failure that reports no cost hides from
+    the cost line the way a runaway once hid from the token ceiling. None when
+    the adapter declines to price it.
     """
 
     def __init__(
@@ -69,12 +74,31 @@ class ProviderTruncated(Exception):
         reasoning_tokens: int | None = None,
         output_tokens: int | None = None,
         input_tokens: int | None = None,
+        cost_usd: float | None = None,
     ) -> None:
         super().__init__(message)
         self.text = text
         self.reasoning_tokens = reasoning_tokens
         self.output_tokens = output_tokens
         self.input_tokens = input_tokens
+        self.cost_usd = cost_usd
+
+
+class ProviderInputTooLarge(Exception):
+    """Part of the provider contract: the prompt outgrew the model's context window.
+
+    The third payload-sized failure, beside :class:`ProviderWallTimeout` (ran out
+    of time) and :class:`ProviderTruncated` (ran out of room to answer): this
+    one ran out of room to *ask*. The backend refuses the request outright — a
+    400 naming the window — so there is no partial answer to salvage, and
+    re-sending the identical prompt can only fail identically. But a smaller
+    prompt succeeds, and only the engine holds the batch, so the engine reacts
+    exactly as it does to the other two: split the batch and review the pieces.
+
+    Named here rather than left as the adapter's generic bad request because the
+    engine must tell it apart from a failure no later call can fix (a dead key,
+    a spent quota): those end the lens, this one earns the split.
+    """
 
 
 class ProviderClient(Protocol):

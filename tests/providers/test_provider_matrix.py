@@ -13,7 +13,10 @@ skipping a variation. Three axes are covered per provider:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
+from pydantic import BaseModel
 
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.credentials import resolve_credentials
@@ -29,7 +32,7 @@ EXPECTED_PREFIX: dict[Provider, str] = {
     Provider.bedrock: "bedrock/",
     Provider.vertex: "vertex_ai/",
     Provider.azure: "azure/",
-    Provider.ollama: "ollama/",
+    Provider.ollama: "ollama_chat/",
     # OpenAI-compatible servers ride the openai route with a custom api_base.
     Provider.openai_compatible: "openai/",
     # GLM / Zhipu AI rides litellm's native zai/ route.
@@ -109,7 +112,10 @@ class TestCloudProviderCredentials:
     def test_ambient_present_resolves_keyless(self, provider: Provider) -> None:
         assert resolve_credentials(provider, ambient_probe=lambda: True).api_key is None
 
-    def test_ambient_absent_raises_actionable_error(self, provider: Provider) -> None:
+    def test_ambient_absent_uses_provider_native_behavior(self, provider: Provider) -> None:
+        if provider is Provider.bedrock:
+            assert resolve_credentials(provider, ambient_probe=lambda: False).api_key is None
+            return
         with pytest.raises(ValueError, match=provider.value):
             resolve_credentials(provider, ambient_probe=lambda: False)
 
@@ -245,3 +251,115 @@ class TestEndpointProviderCredentials:
     def test_build_provider_threads_the_endpoint(self, provider: Provider) -> None:
         built = build_provider(provider, "deepseek-chat", api_key="k", api_base=_CUSTOM_BASE)
         assert built.default_opts.get("api_base") == _CUSTOM_BASE
+
+
+# --- structured output survives litellm's translation, per provider ---------
+
+# One representative model per provider: real ids, so litellm's capability map
+# (and each route's own supported-params list) answers as it would in the field.
+_SCHEMA_MODELS: dict[Provider, str] = {
+    Provider.openai: "gpt-5",
+    Provider.anthropic: "claude-sonnet-4-5",
+    Provider.openrouter: "deepseek/deepseek-chat",
+    Provider.bedrock: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    Provider.vertex: "gemini-2.5-pro",
+    Provider.azure: "gpt-4.1",
+    Provider.ollama: "qwen3:8b",
+    Provider.openai_compatible: "my-local-model",
+    Provider.zai: "glm-4.6",
+}
+
+# The request-shape keys under which a route carries a structured-output
+# contract after translation: OpenAI's own field, a forced tool (our recovery
+# and litellm's own for anthropic), anthropic's native output_format, the
+# bedrock Converse field, ollama's `format`, and Gemini's response_json_schema.
+_SCHEMA_CARRIERS = (
+    "response_format",
+    "tools",
+    "output_format",
+    "outputConfig",
+    "format",
+    "response_json_schema",
+)
+
+
+class _Findings(BaseModel):
+    findings: list[str]
+
+
+@pytest.mark.parametrize("provider", list(Provider))
+def test_the_schema_survives_litellm_translation(provider: Provider) -> None:
+    """What the adapter sends is not what goes on the wire: litellm translates
+    every request per route and, with `drop_params` on, silently removes any
+    OpenAI-vocabulary param the route's list omits. Every other provider test
+    patches `litellm.completion`, so that translation is never exercised — and
+    a route that drops `response_format` (zai) reviewed with no schema at all
+    while the adapter reported enforcement was on. This runs the real
+    translation on the adapter's real kwargs, offline, for every provider.
+    """
+    import litellm
+
+    built = build_provider(
+        provider,
+        _SCHEMA_MODELS[provider],
+        api_key="k",
+        api_base="https://example.invalid"
+        if provider in (*HYBRID_PROVIDERS, *ENDPOINT_PROVIDERS)
+        else None,
+    )
+    translated: list[dict] = []
+
+    def translate(**kwargs):
+        model, custom_llm_provider, _key, _base = litellm.get_llm_provider(kwargs["model"])
+        request = {
+            k: v
+            for k, v in kwargs.items()
+            if k in ("response_format", "tools", "tool_choice", "temperature", "max_tokens")
+        }
+        translated.append(
+            litellm.get_optional_params(
+                model=model, custom_llm_provider=custom_llm_provider, **request
+            )
+        )
+        return _tool_reply() if "tools" in kwargs else _plain_reply()
+
+    with patch("litellm.completion", side_effect=translate):
+        built.complete(
+            [{"role": "user", "content": "hi"}], _SCHEMA_MODELS[provider], response_format=_Findings
+        )
+
+    assert translated, "the adapter never reached litellm"
+    on_the_wire = translated[-1]
+    assert any(key in on_the_wire for key in _SCHEMA_CARRIERS), (
+        f"{provider.value}: litellm's {built.model} translation carries no schema: "
+        f"{sorted(on_the_wire)}"
+    )
+
+
+def _plain_reply():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"findings": []}'), finish_reason="stop"
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+
+
+def _tool_reply():
+    from types import SimpleNamespace
+
+    call = SimpleNamespace(
+        function=SimpleNamespace(name="lgtmaybe_structured_output", arguments='{"findings": []}')
+    )
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="", tool_calls=[call]), finish_reason="tool_calls"
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )

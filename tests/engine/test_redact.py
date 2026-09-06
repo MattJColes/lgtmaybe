@@ -18,6 +18,20 @@ def test_aws_key_redacted() -> None:
     assert REDACTED_PLACEHOLDER in result
 
 
+def test_aws_secret_access_key_redacted() -> None:
+    secret = "wJalrXUtnFEMI" + "/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    result = redact(f'+AWS_SECRET_ACCESS_KEY = "{secret}"\n')
+    assert secret not in result
+    assert "AWS_SECRET_ACCESS_KEY" in result
+
+
+def test_aws_session_token_redacted() -> None:
+    token = "AQoDYXdzEJr" + "//////////wEaEXAMPLETEMPORARYTOKEN"
+    result = redact(f'+AWS_SESSION_TOKEN = "{token}"\n')
+    assert token not in result
+    assert "AWS_SESSION_TOKEN" in result
+
+
 def test_openai_key_redacted() -> None:
     diff = f"+OPENAI_API_KEY={_OPENAI_KEY}\n"
     result = redact(diff)
@@ -141,6 +155,10 @@ def test_quoted_password_literal_redacted() -> None:
     assert "password" in result
 
 
+def test_password_value_overlapping_key_name_is_redacted() -> None:
+    assert redact('password: "sword"') == 'password: "[REDACTED]"'
+
+
 def test_password_prose_not_redacted() -> None:
     """Plain English mentioning a password must not trip the redactor."""
     result = redact("+# Send the user a password reset email when requested\n")
@@ -164,6 +182,12 @@ def test_connection_string_password_redacted() -> None:
     # Host stays visible — only the password segment is scrubbed.
     assert "db.internal" in result
     assert "admin" in result
+
+
+def test_connection_password_matching_username_is_redacted() -> None:
+    result = redact('url = "postgres://alice:alice@db.example.com/app"')
+
+    assert result == 'url = "postgres://alice:[REDACTED]@db.example.com/app"'
 
 
 def test_value_pattern_preserves_key_name() -> None:
@@ -271,6 +295,16 @@ def test_connection_string_pattern_is_not_quadratic() -> None:
     import time
 
     pathological = "x://" + "a" * 200_000  # scheme-like prefix, no credentials
+    start = time.perf_counter()
+    redact(pathological)
+    assert time.perf_counter() - start < 2.0
+
+
+def test_web_token_patterns_are_not_quadratic() -> None:
+    """Repeated token prefixes must not start a full backtracking scan at every offset."""
+    import time
+
+    pathological = "eyJ" * 20_000
     start = time.perf_counter()
     redact(pathological)
     assert time.perf_counter() - start < 2.0

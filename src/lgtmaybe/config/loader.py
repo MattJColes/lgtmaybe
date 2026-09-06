@@ -47,7 +47,10 @@ def load_config(
     merged: dict[str, Any] = dict(_DEFAULTS)
 
     if user_config_path is not None:
-        merged.update(store.load(user_config_path))
+        try:
+            merged.update(store.load(user_config_path))
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValueError(f"could not read YAML file {user_config_path}: {exc}") from exc
 
     file_data = _load_file(config_path, required=config_required)
     merged.update(file_data)
@@ -85,7 +88,7 @@ def _load_lens_files(lens_paths: Any) -> list[dict[str, Any]]:
         else:
             files = [path]
         for file in files:
-            parsed = yaml.safe_load(file.read_text(encoding="utf-8"))
+            parsed = _read_yaml(file)
             if isinstance(parsed, list):
                 lenses.extend(item for item in parsed if isinstance(item, dict))
             elif isinstance(parsed, dict):
@@ -136,11 +139,9 @@ def _load_file(
             raise ValueError(f"config file not found: {config_path}")
         return {}
 
-    raw = config_path.read_text(encoding="utf-8")
-    if not raw.strip():
+    parsed = _read_yaml(config_path)
+    if parsed is None:
         return {}
-
-    parsed = yaml.safe_load(raw)
     if not isinstance(parsed, dict):
         if required:
             raise ValueError(
@@ -149,3 +150,13 @@ def _load_file(
         return {}
 
     return parsed
+
+
+def _read_yaml(path: Path) -> Any:
+    """Read YAML while preserving the failing path at the config boundary."""
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"could not read YAML file {path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"could not parse YAML file {path}: {exc}") from exc

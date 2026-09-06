@@ -148,7 +148,8 @@ def dispatch(
         return
 
     if parsed.name is SlashCommand.diagram:
-        # No arguments — the diagram is always a Mermaid flowchart + ASCII of the change.
+        # No arguments — the overview is always description + high-impact areas
+        # + the Mermaid/text diagrams, each section gated only by config.
         from lgtmaybe.cli import run_diagram
 
         run_diagram(github, provider, cfg)

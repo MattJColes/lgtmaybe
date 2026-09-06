@@ -183,6 +183,14 @@ def test_required_config_must_parse_to_a_mapping(tmp_path):
         load_config(config_path=cfg_file, config_required=True)
 
 
+def test_malformed_config_names_the_file(tmp_path):
+    cfg_file = tmp_path / "broken.yml"
+    cfg_file.write_text("provider: [unclosed")
+
+    with pytest.raises(ValueError, match=r"broken\.yml"):
+        load_config(config_path=cfg_file)
+
+
 def test_non_mapping_default_config_is_ignored(tmp_path):
     """Without config_required (the default ./.lgtmaybe.yml probe), a non-mapping
     file is skipped leniently, as before."""
@@ -317,6 +325,18 @@ def test_lens_paths_accept_a_list_of_lenses_in_one_file(tmp_path):
     cfg = load_config(config_path=cfg_file)
 
     assert sorted(lens.id for lens in cfg.extra_lenses) == ["a", "b"]
+
+
+@pytest.mark.parametrize("contents", [None, "id: [unclosed"])
+def test_bad_lens_file_names_the_path(tmp_path, contents):
+    lens_file = tmp_path / "broken-lens.yml"
+    if contents is not None:
+        lens_file.write_text(contents)
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(f"lens_paths: [{lens_file}]\n")
+
+    with pytest.raises(ValueError, match=r"broken-lens\.yml"):
+        load_config(config_path=cfg_file)
 
 
 def test_lens_paths_pack_scheme_loads_a_bundled_pack(tmp_path):

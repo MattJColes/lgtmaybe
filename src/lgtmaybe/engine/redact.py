@@ -34,10 +34,10 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
     # base64url JSON header, so the three-part JWT pattern below never matches a
     # JWE; without this it would egress whole. Listed first so the 5-segment form
     # is consumed before the 3-segment pattern can claim a prefix of it.
-    re.compile(r"eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){4}"),
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){4}"),
     # JSON Web Tokens: header.payload.signature, each base64url. The payload
     # carries claims/PII, so the whole token must go — not just up to a dot.
-    re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
     # npm automation/auth tokens: npm_ followed by 36 base62 chars.
     re.compile(r"npm_[A-Za-z0-9]{36,}"),
     # PyPI API tokens: pypi- followed by a long base64 macaroon.
@@ -66,7 +66,8 @@ def _replace_pem(m: re.Match[str]) -> str:
 _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # Generic high-entropy assignments: api_key = "..." or token = "..." (value ≥ 16 chars)
     re.compile(
-        r"(?i)(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|secret[_\-]?key|token)"
+        r"(?i)(?:api[_\-]?key|api[_\-]?secret|secret[_\-]?access[_\-]?key|"
+        r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|token)"
         r'\s*[=:]\s*["\']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})["\']?'
     ),
     # Quoted password / passphrase literals: password = "hunter2" (value ≥ 4 chars).
@@ -95,8 +96,9 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
 def _replace_value(m: re.Match[str]) -> str:
     """Replace only the captured ``secret`` group, preserving the key name / scheme."""
     full = m.group(0)
-    value = m.group("secret")
-    return full.replace(value, REDACTED_PLACEHOLDER, 1)
+    start = m.start("secret") - m.start()
+    end = m.end("secret") - m.start()
+    return full[:start] + REDACTED_PLACEHOLDER + full[end:]
 
 
 @lru_cache(maxsize=128)

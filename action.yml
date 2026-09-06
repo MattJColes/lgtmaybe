@@ -123,11 +123,15 @@ inputs:
     required: false
     default: ""
   auto_describe:
-    description: "On a freshly opened (or reopened) PR, post a structured description comment — title, change type, summary, per-file walkthrough, and an intent check — before the review runs, updated in place by later /describe runs. Off by default."
+    description: "Head the change overview comment with a structured description — title, change type, summary, per-file walkthrough, and an intent check. On by default, so it refreshes on every push along with the rest of the overview; set to false to drop the section. The /describe command still posts its own standalone comment."
     required: false
     default: ""
   auto_diagram:
-    description: "On an opened, reopened, or synchronized (push) PR, post or refresh a change diagram comment after the review — a concise summary plus a Mermaid flowchart of the components the PR touches and a Mermaid sequence diagram of the run-time flow it alters (both rendered natively by GitHub), with a text fallback. On by default; set to false to opt out."
+    description: "On an opened, reopened, or synchronized (push) PR, post or refresh the change overview comment after the review — the description, a High Impact Areas section, a Mermaid flowchart of the components the PR touches and a Mermaid sequence diagram of the run-time flow it alters (both rendered natively by GitHub), with a text fallback. On by default; set to false to opt out of the whole overview."
+    required: false
+    default: ""
+  high_impact:
+    description: "Include the High Impact Areas section in the change overview: the changes a reviewer must not miss — infrastructure, security posture, production-outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, and compliance. Deterministic path signals ground the model and also floor the output, so a sensitive file is named even when the model says nothing about it. On by default; set to false to drop the section and its model call."
     required: false
     default: ""
   pr_labels:
@@ -173,7 +177,7 @@ inputs:
   config_path:
     description: "Path to the .lgtmaybe.yml config file, relative to the repo root."
     required: false
-    default: ".lgtmaybe.yml"
+    default: ""
   image:
     description: "Override the container image (advanced; defaults to the released GHCR image)."
     required: false
@@ -315,6 +319,7 @@ runs:
         INPUT_STATIC_ANALYSIS: ${{ inputs.static_analysis }}
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}
+        INPUT_HIGH_IMPACT: ${{ inputs.high_impact }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
         INPUT_LEARN_FEEDBACK: ${{ inputs.learn_feedback }}
         INPUT_FAIL_ON: ${{ inputs.fail_on }}
@@ -330,7 +335,7 @@ runs:
         # newlines survive because the file holds names, never values.
         # The cloud-auth steps export the AWS_/GOOGLE_/CLOUDSDK_/AZURE_ vars.
         compgen -e \
-          | grep -E '^(GITHUB_TOKEN|GITHUB_EVENT_NAME|GITHUB_EVENT_PATH)$|^(INPUT|AWS|GOOGLE|CLOUDSDK|AZURE)_' \
+          | grep -E '^(GITHUB_TOKEN|GITHUB_EVENT_NAME|GITHUB_EVENT_PATH|GITHUB_SERVER_URL|GITHUB_API_URL)$|^(INPUT|AWS|GOOGLE|CLOUDSDK|AZURE)_' \
           > "${RUNNER_TEMP}/lgtmaybe.env"
         # host-gateway mapping: lets api_base reach a model server on the
         # runner host (ollama / openai-compatible) at host.docker.internal,

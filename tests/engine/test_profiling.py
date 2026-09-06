@@ -894,3 +894,106 @@ class TestTheAnsweringModelIsLegibleFromTheProfile:
         )
 
         assert p.calls[0].model == "sonnet"
+
+
+class TestCostReporting:
+    """The run's estimated dollar cost, where the token meter already lives.
+
+    Tokens measure spend only up to a price list nobody keeps in their head;
+    the profile already answers "what did this cost in tokens", so it also
+    answers the question that was actually being asked. litellm's pricing map
+    prices a call when it knows the model; silence, never $0.00, when it does
+    not — a wrong price is worse than no price.
+    """
+
+    def _price(self, p: Profiler, cost: float | None) -> None:
+        p.record_call(
+            label="security",
+            batch=1,
+            elapsed=1.0,
+            attempts=1,
+            input_tokens=1000,
+            output_tokens=100,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            cost_usd=cost,
+        )
+
+    def test_a_priced_call_rides_to_the_record(self) -> None:
+        p = Profiler()
+        self._price(p, 0.005)
+        assert p.calls[0].cost_usd == pytest.approx(0.005)
+
+    def test_an_unpriced_call_stays_silent(self) -> None:
+        p = Profiler()
+        self._price(p, None)
+        assert p.calls[0].cost_usd is None
+
+    def test_the_total_line_prices_the_run(self) -> None:
+        p = Profiler()
+        self._price(p, 0.005)
+        self._price(p, None)
+        assert (
+            "estimated cost: $0.0050 (litellm pricing map; 1 of 2 calls priced)" in p.render_total()
+        )
+
+    def test_a_fully_priced_run_says_so_without_the_count(self) -> None:
+        p = Profiler()
+        self._price(p, 0.005)
+        self._price(p, 0.007)
+        line = p.render_total()
+        assert "estimated cost: $0.0120" in line
+        assert "calls priced" not in line
+
+    def test_an_unpriced_run_says_nothing_about_cost(self) -> None:
+        p = Profiler()
+        self._price(p, None)
+        assert "cost" not in p.render_total()
+
+    def test_a_failed_call_reports_the_cost_it_stamped(self) -> None:
+        """A ceiling hit fails and is routinely the costliest call of a run;
+        the price rides the exception exactly like the token counts do."""
+        p = Profiler()
+        exc = ProviderTruncated("response hit the 4096-token `max_tokens` ceiling")
+        exc.input_tokens = 1000
+        exc.output_tokens = 4096
+        exc.cost_usd = 0.062
+        p.record_error("security", 1, 1.0, exc)
+
+        assert p.calls[0].cost_usd == pytest.approx(0.062)
+        assert "estimated cost: $0.0620 (litellm pricing map)" in p.render_total()
+
+    def test_as_dict_carries_per_call_and_total_cost(self) -> None:
+        p = Profiler()
+        self._price(p, 0.005)
+        self._price(p, 0.0075)
+
+        payload = p.as_dict()
+
+        assert payload["calls"][0]["cost_usd"] == pytest.approx(0.005)
+        assert payload["total_cost_usd"] == pytest.approx(0.0125)
+
+    def test_a_tiny_real_price_does_not_render_as_free(self) -> None:
+        """A total under a tenth of a cent rounds to $0.0000 at four decimals —
+        indistinguishable on the page from "free", the one thing a priced run
+        must never be mistaken for."""
+        p = Profiler()
+        self._price(p, 0.00003)
+
+        assert "estimated cost: $0.000030 (litellm pricing map)" in p.render_total()
+
+    def test_as_dict_total_is_null_when_nothing_was_priced(self) -> None:
+        p = Profiler()
+        self._price(p, None)
+        assert p.as_dict()["total_cost_usd"] is None
+
+    def test_the_cost_rides_from_the_result(self) -> None:
+        p = Profiler()
+        p.record_result(
+            "security",
+            1,
+            1.0,
+            ProviderResult(text="{}", input_tokens=1, output_tokens=1, cost_usd=0.5),
+        )
+
+        assert p.calls[0].cost_usd == pytest.approx(0.5)

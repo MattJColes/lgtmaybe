@@ -12,9 +12,14 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-# "diff --git a/<old> b/<new>" — capture the new-side path. MULTILINE so it can
-# be used both with finditer over a whole diff and with match on a single line.
-FILE_HEADER_RE = re.compile(r"^diff --git a/.+ b/(.+)$", re.MULTILINE)
+# ``diff --git`` is only a patch boundary: its old/new separator is ambiguous
+# when a valid path itself contains `` b/``. The following metadata lines carry
+# an unambiguous side prefix and optional tab-delimited timestamp.
+FILE_HEADER_RE = re.compile(r"^diff --git .+$", re.MULTILINE)
+OLD_FILE_HEADER_RE = re.compile(r"^--- a/(.+?)(?:\t.*)?$", re.MULTILINE)
+NEW_FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+?)(?:\t.*)?$", re.MULTILINE)
+RENAME_TO_RE = re.compile(r"^rename to (.+)$", re.MULTILINE)
+_FALLBACK_FILE_HEADER_RE = re.compile(r"^diff --git a/.+ b/(.+)$", re.MULTILINE)
 
 # "@@ -old_start[,old_len] +new_start[,new_len] @@[ section]"
 HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
@@ -67,12 +72,22 @@ def walk_diff(diff: str) -> Iterator[tuple[str, str, int, int, str]]:
     old_line = 0
     in_hunk = False
 
-    for raw_line in diff.splitlines():
+    for raw_line in diff.removesuffix("\n").split("\n"):
         file_match = FILE_HEADER_RE.match(raw_line)
         if file_match:
-            current_file = file_match.group(1)
+            fallback = _FALLBACK_FILE_HEADER_RE.match(raw_line)
+            current_file = fallback.group(1) if fallback is not None else None
             in_hunk = False
             continue
+        if not in_hunk:
+            old_file_match = OLD_FILE_HEADER_RE.match(raw_line)
+            if old_file_match:
+                current_file = old_file_match.group(1)
+                continue
+            new_file_match = NEW_FILE_HEADER_RE.match(raw_line)
+            if new_file_match:
+                current_file = new_file_match.group(1)
+                continue
         if current_file is None:
             continue
         hunk = parse_hunk_header(raw_line)
@@ -137,7 +152,7 @@ def changed_line_count(diff: str) -> int:
     """
     count = 0
     in_hunk = False
-    for line in diff.splitlines():
+    for line in diff.removesuffix("\n").split("\n"):
         if HUNK_HEADER_RE.match(line):
             in_hunk = True
         elif FILE_HEADER_RE.match(line):
@@ -163,7 +178,7 @@ def hunk_for_line(diff: str, path: str, line: int, side: str = "RIGHT") -> str |
     for patch_path, patch in split_by_file(diff, [path]):
         if patch_path != path:
             continue
-        lines = patch.splitlines()
+        lines = patch.removesuffix("\n").split("\n")
         hunk_starts = [i for i, raw in enumerate(lines) if parse_hunk_header(raw) is not None]
         if not hunk_starts:
             return None
@@ -196,8 +211,20 @@ def split_by_file(diff: str, changed_files: list[str]) -> list[tuple[str, str]]:
 
     result: list[tuple[str, str]] = []
     for i, match in enumerate(matches):
-        path = match.group(1)
         start = match.start()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(diff)
-        result.append((path, diff[start:end]))
+        patch = diff[start:end]
+        path_match = (
+            NEW_FILE_HEADER_RE.search(patch)
+            or RENAME_TO_RE.search(patch)
+            or OLD_FILE_HEADER_RE.search(patch)
+            or _FALLBACK_FILE_HEADER_RE.search(patch)
+        )
+        if path_match is not None:
+            path = path_match.group(1)
+        elif i < len(changed_files):
+            path = changed_files[i]
+        else:
+            path = "unknown"
+        result.append((path, patch))
     return result

@@ -39,7 +39,7 @@ class TestLiteLLMModelString:
         )
 
     def test_ollama_prefix(self) -> None:
-        assert litellm_model_string(Provider.ollama, "llama2") == "ollama/llama2"
+        assert litellm_model_string(Provider.ollama, "llama2") == "ollama_chat/llama2"
 
     def test_azure_prefix(self) -> None:
         assert litellm_model_string(Provider.azure, "gpt-4o") == "azure/gpt-4o"
@@ -143,7 +143,7 @@ class TestBuildProvider:
 
     def test_build_provider_resolves_fallback_model(self) -> None:
         provider = build_provider(Provider.ollama, "qwen3:27b", fallback_model="llama2")
-        assert provider.fallback_model == "ollama/llama2"
+        assert provider.fallback_model == "ollama_chat/llama2"
 
     def test_build_provider_threads_timeout_into_default_opts(self) -> None:
         provider = build_provider(Provider.ollama, "llama2", timeout=600)
@@ -251,7 +251,7 @@ class TestDefaultTimeout:
         with patch("litellm.completion", return_value=response) as mock_completion:
             provider.complete([{"role": "user", "content": "hi"}], model="qwen3:27b")
 
-        assert mock_completion.call_args.kwargs["model"] == "ollama/qwen3:27b"
+        assert mock_completion.call_args.kwargs["model"] == "ollama_chat/qwen3:27b"
 
 
 class TestParamSupport:
@@ -553,3 +553,126 @@ def test_build_provider_defaults_to_capable_when_the_map_is_silent() -> None:
     provider = build_provider(Provider.openai, "gpt-5.5", api_key="k")
 
     assert provider._effort_override_supported is True
+
+
+class TestClaudeThinkingSampling:
+    """A reasoning effort on a Claude route turns into extended thinking, and
+    Anthropic rejects a temperature beside it ("`temperature` may only be set
+    to 1 when thinking is enabled"). litellm forwards both regardless, so the
+    factory withholds the one the user did not ask for: the effort was
+    configured, the temperature is our determinism default.
+    """
+
+    def test_anthropic_effort_withholds_temperature(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.INFO, logger="lgtmaybe.providers.factory"):
+            built = build_provider(
+                Provider.anthropic,
+                "claude-sonnet-4-5",
+                api_key="k",
+                reasoning_effort="medium",
+                temperature=0.0,
+            )
+        assert "temperature" not in built.default_opts
+        assert built.default_opts["reasoning_effort"] == "medium"
+        assert any("temperature" in record.getMessage() for record in caplog.records)
+
+    def test_effort_none_keeps_temperature(self) -> None:
+        """`none` disables thinking, and a non-thinking request takes a temperature."""
+        built = build_provider(
+            Provider.anthropic,
+            "claude-sonnet-4-5",
+            api_key="k",
+            reasoning_effort="none",
+            temperature=0.0,
+        )
+        assert built.default_opts["temperature"] == 0.0
+
+    def test_no_effort_keeps_temperature(self) -> None:
+        built = build_provider(
+            Provider.anthropic, "claude-sonnet-4-5", api_key="k", temperature=0.0
+        )
+        assert built.default_opts["temperature"] == 0.0
+
+    @pytest.mark.parametrize(
+        ("provider", "model"),
+        [
+            (Provider.bedrock, "anthropic.claude-sonnet-4-5-20250929-v1:0"),
+            (Provider.bedrock, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+            (Provider.vertex, "claude-sonnet-4-5@20250929"),
+        ],
+    )
+    def test_claude_on_a_cloud_route_is_treated_the_same(
+        self, provider: Provider, model: str
+    ) -> None:
+        built = build_provider(provider, model, reasoning_effort="low", temperature=0.0)
+        assert "temperature" not in built.default_opts
+
+    @pytest.mark.parametrize(
+        ("provider", "model"),
+        [
+            (Provider.openai, "gpt-5"),
+            (Provider.vertex, "gemini-2.5-pro"),
+            (Provider.bedrock, "amazon.nova-pro-v1:0"),
+            (Provider.ollama, "qwen3:8b"),
+        ],
+    )
+    def test_other_reasoning_routes_keep_temperature(self, provider: Provider, model: str) -> None:
+        built = build_provider(
+            provider, model, api_key="k", reasoning_effort="low", temperature=0.0
+        )
+        assert built.default_opts["temperature"] == 0.0
+
+
+class TestInputBudget:
+    """The prompt budget a model can actually take, read off the route.
+
+    The engine's batching budget (`max_input_tokens`) defaults to a flat number
+    that knows nothing about the model. litellm knows the context window of
+    every hosted model in its map, and ollama's window is the `num_ctx` the
+    factory itself sends — so the adapter can say how much prompt fits, and
+    the engine can fit its batches to it instead of learning from a 400.
+    """
+
+    def test_ollama_budget_is_num_ctx_less_the_output_ceiling(self) -> None:
+        built = build_provider(Provider.ollama, "qwen3:8b")
+        assert (
+            built.input_budget() == built.default_opts["num_ctx"] - built.default_opts["max_tokens"]
+        )
+
+    def test_ollama_budget_follows_an_overridden_num_ctx(self) -> None:
+        built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=8192, max_tokens=1024)
+        assert built.input_budget() == 8192 - 1024
+
+    def test_hosted_budget_comes_from_the_model_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import litellm
+
+        monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": 65536})
+        built = build_provider(Provider.openrouter, "deepseek/deepseek-chat", api_key="k")
+        # openrouter carries the default finite ceiling, which the prompt must leave room for.
+        assert built.input_budget() == 65536 - built.default_opts["max_tokens"]
+
+    def test_an_uncapped_route_gets_the_whole_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import litellm
+
+        monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": 200000})
+        built = build_provider(Provider.anthropic, "claude-sonnet-4-5", api_key="k")
+        assert built.input_budget() == 200000
+
+    def test_an_unmapped_model_has_no_opinion(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import litellm
+
+        def unmapped(model: str) -> dict:
+            raise ValueError("This model isn't mapped yet")
+
+        monkeypatch.setattr(litellm, "get_model_info", unmapped)
+        built = build_provider(Provider.openai_compatible, "my-local", api_base="http://x")
+        assert built.input_budget() is None
+
+    def test_a_map_entry_without_a_window_has_no_opinion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import litellm
+
+        monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": None})
+        built = build_provider(Provider.openai, "gpt-5", api_key="k")
+        assert built.input_budget() is None

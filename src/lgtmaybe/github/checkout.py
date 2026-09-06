@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import os
 import shutil
 import stat
 import subprocess
@@ -86,13 +87,10 @@ def clone_base_tree(
     *repo* is ``owner/name`` (the base repo). *ref* is the base branch name. The
     temp dir is registered for cleanup at process exit. Returns None on any
     filesystem or git failure — the caller treats that as "no corpus". The token
-    is passed as a one-shot ``git -c http.<url>.extraheader`` basic-auth header
-    (the actions/checkout approach) rather than embedded in the clone URL — a
-    URL-embedded token is visible in the clear via /proc/*/cmdline and gets
-    persisted as the remote URL in the temp clone's .git/config. The global
-    ``-c`` applies to this invocation only (unlike ``git clone --config`` it is
-    never written into the new clone's config); ``capture_output`` keeps it out
-    of surfaced stderr, and the clone lands in an ephemeral dir removed at exit.
+    is passed through Git's one-shot ``GIT_CONFIG_*`` environment rather than
+    argv or the clone URL, keeping it out of /proc/*/cmdline and the temp clone's
+    .git/config. ``capture_output`` keeps it out of surfaced stderr, and the
+    clone lands in an ephemeral dir removed at exit.
     """
     try:
         dest = Path(tempfile.mkdtemp(prefix="lgtmaybe-base-"))
@@ -100,13 +98,16 @@ def clone_base_tree(
         return None
     url = f"https://github.com/{repo}.git"
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    auth_config = f"http.https://github.com/.extraheader=Authorization: basic {basic}"
+    git_env = {
+        **os.environ,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: basic {basic}",
+    }
     try:
         runner(
             [
                 "git",
-                "-c",
-                auth_config,
                 "clone",
                 "--depth",
                 "1",
@@ -117,6 +118,7 @@ def clone_base_tree(
                 str(dest),
             ],
             capture_output=True,
+            env=git_env,
             timeout=_CLONE_TIMEOUT,
             check=True,
         )

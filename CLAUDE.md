@@ -62,9 +62,9 @@ autocrlf before checkout.
 - **Fork safety.** Trigger on `pull_request_target` so the review has secrets,
   but **never check out or execute PR code** — fetch the diff via API only.
   Treat all diff content as untrusted input.
-- **No static cloud keys.** Bedrock uses ambient AWS creds; Vertex uses ambient
-  GCP creds; Azure prefers ambient Entra (Azure AD) creds via GitHub OIDC (a
-  static `AZURE_API_KEY` is accepted but not required). Never accept or require a
+- **No required static cloud keys.** Bedrock uses ambient AWS creds; Vertex uses
+  ambient GCP creds; Azure uses a supplied `AZURE_API_KEY` first and otherwise
+  falls back to ambient Entra (Azure AD) creds via GitHub OIDC. Never require a
   service-account JSON or static AWS key.
 
 ### Forges — which code host the review is posted to
@@ -135,16 +135,17 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
 | Provider               | Auth                                                              |
 |------------------------|------------------------------------------------------------------|
 | openai / openrouter / anthropic | API key from `secrets.*` / env / `--api-key`            |
-| zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route. Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
+| zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route (its param list omits `response_format`, so the schema goes as a forced tool call — `_honour_route_schema_support` reads litellm's per-route list before the first call). Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
 | bedrock                | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
 | vertex                 | ambient GCP creds (WIF, or local ADC)                            |
-| azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) → else `AZURE_API_KEY` / `--api-key` |
+| azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); `AZURE_API_KEY` / `--api-key` when supplied → else ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) |
 | ollama                 | none — just an `api_base` (localhost, host.docker.internal, tailscale host); fully local, zero cost |
 | openai-compatible      | requires the endpoint (`--api-base` / `OPENAI_COMPATIBLE_API_BASE`); key **optional** — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, else a placeholder for keyless local servers (llama.cpp / LM Studio / vLLM). litellm `openai/` route to a custom base |
 
-Resolver order: chosen provider → try ambient cloud creds if that's its native
-mode → else API key → ollama needs neither → openai-compatible needs an
-`api_base` (key optional, placeholder when absent) → else **fail with a clear
+Resolver order: chosen provider → use its API key when supported and supplied →
+else try ambient cloud creds if that's its native mode → ollama needs neither →
+openai-compatible needs an `api_base` (key optional, placeholder when absent) →
+else **fail with a clear
 "how to auth this provider" message**.
 
 ## Architecture — ports & adapters (hexagonal)
@@ -219,28 +220,53 @@ pattern, event bus, plugin framework.
    - **`comment` command** — handles the `issue_comment` event and routes slash
      commands to the same engine/provider: `/review` + `/improve` post a review,
      `/ask <q>` replies in-thread (`post_issue_comment`, an adapter-only method
-     beyond the frozen port), and `/describe` posts a **structured description**
-     (`engine/describe.py`: title, change type, summary, per-file walkthrough
-     table, intent check when the PR states one; structured output with a
-     raw-text fallback) via `post_describe_comment` — an idempotent upsert that
-     edits our previous description in place. `ReviewConfig.auto_describe`
-     (default off; Action input `auto_describe`) posts it automatically on a
-     freshly opened/reopened PR, best-effort, before the review. `/diagram`
-     posts a **change diagram** (`engine/diagram.py`: from one structured call
-     returning typed nodes/edges/steps, lgtmaybe renders a Mermaid **flowchart**
-     of the components the PR touches *and* a Mermaid **sequence diagram** of the
-     run-time flow it alters — structure answers "what does this touch", sequence
-     answers "what happens, in what order"; the sequence view is omitted when the
-     model returns no steps, which is also when the `Structure`/`Sequence`
-     headings drop away. Both render natively on GitHub, each with a text
-     rendering that is the terminal view and the fallback; model-authored Mermaid
-     never reaches a fence, and sequence labels are escaped with Mermaid entity
-     codes) via `post_diagram_comment` — its own idempotent
-     upsert with a disjoint marker family. `ReviewConfig.auto_diagram` (default
-     **on**; Action input `auto_diagram`, set false to opt out) posts it
-     automatically on freshly opened/reopened PRs. The local `lgtmaybe diagram` command prints the same body
-     (no GitHub) — a terminal can't render Mermaid, which is what the text
-     rendering is for. **No D2:** GitHub doesn't render it in Markdown.
+     beyond the frozen port), and `/describe` posts a **standalone structured
+     description** (`engine/describe.py`: title, change type, summary, per-file
+     walkthrough table, intent check when the PR states one; structured output
+     with a raw-text fallback) via `post_describe_comment` — an idempotent upsert
+     that edits our previous description in place.
+   - **The change overview (`/diagram`, `auto_diagram`)** — ONE comment via
+     `post_diagram_comment` (its own idempotent upsert + disjoint marker family),
+     composed by `engine/overview.py` from **three concurrent structured calls**
+     on one `ThreadPoolExecutor`, in reading order:
+     1. the **description** (the same `engine/describe.py` call, `describe_result`
+        for the typed object; `ReviewConfig.auto_describe`, default **on** — it
+        rides this comment, so it refreshes on every push);
+     2. **High Impact Areas** (`engine/high_impact.py`, `ReviewConfig.high_impact`,
+        default **on**) — a bold `### **High Impact Areas**` section answering
+        "what could this break beyond itself" over ten areas (infrastructure,
+        security, availability/outage, data_migration, backup_and_recovery,
+        compatibility, observability, dependencies, cost, compliance). Two
+        sources: the model, plus **deterministic path signals** (`path_signals`,
+        per-area regexes) that ground the call as untrusted hints
+        (`injection.wrap_path_signals`, its own neutralised `SIGNALS` family —
+        filenames are attacker-chosen on a fork PR) **and floor the output**: an
+        area with signals the model ignored is still listed "(not assessed by the
+        model)", and a failed/unparseable call renders the floor alone. An empty
+        result names what was checked rather than vanishing. Model-chosen paths
+        not in `changed_files` are dropped;
+     3. the **diagrams** (`engine/diagram.py`: from one structured call returning
+        typed nodes/edges/steps, a Mermaid **flowchart** of what the PR touches
+        *and* a Mermaid **sequence diagram** of the run-time flow it alters —
+        structure answers "what does this touch", sequence "what happens, in what
+        order"; the sequence view is omitted when the model returns no steps.
+        Both render natively on GitHub, each with a text rendering that is the
+        terminal view and the fallback; model-authored Mermaid never reaches a
+        fence, and sequence labels are escaped with Mermaid entity codes).
+     The description heads the comment (the diagram's own title is suppressed);
+     with `auto_describe` off the diagram header returns. Sections 1 and 2 are
+     **best-effort** — a failure renders a visible "unavailable" line, never a
+     silent gap — while the diagram call keeps propagating, because the automatic
+     overview is a **required completion step** (a failure must not stamp the head
+     complete). With both sections off, the body is byte-identical to
+     `build_diagram` and costs one call. `auto_diagram` (Action input, default
+     **on**) is the one switch for the whole comment; `should_auto_diagram` gates
+     it to opened/reopened/synchronize. The local `lgtmaybe diagram` command prints
+     the same body (no GitHub) — a terminal can't render Mermaid, which is what the
+     text rendering is for. **No D2:** GitHub doesn't render it in Markdown.
+     The shared one-call scaffold is `describe.structured_call` (typed result) /
+     `structured_comment` (rendered Markdown); `describe.markdown_text` escapes
+     every section's model prose.
    - **Guards (in the engine):** generated/binary files skipped via
      `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
      denylist globs applied right after it (`engine.passes_path_filters`;
@@ -265,7 +291,13 @@ pattern, event bus, plugin framework.
      each call's context stays small — better recall on big files, especially for
      smaller models. Files within budget are reviewed whole (context preserved).
      `ReviewConfig.recursive` (default **on**; CLI `--recursive/--no-recursive`,
-     Action input `recursive`); the on-demand A/B benchmark `python -m evals.ab
+     Action input `recursive`). A defaulted `max_input_tokens` is first
+     **fitted to the model's window** (`engine._fit_input_budget`, off the
+     adapter's feature-detected `input_budget()`: litellm's model map, or
+     ollama's `num_ctx`, less the output ceiling) — a configured value is left
+     alone. Token counts are one `cl100k_base` encoder for every model: litellm's
+     tokenizer registry resolves to the same encoding for every provider, so a
+     per-model lookup bought nothing; the on-demand A/B benchmark `python -m evals.ab
      --sweep recursive=false,true`
      measures recall + token cost of the walk vs sending whole against a live model.
    - **Incremental review (commit-scoped):** on a re-run, `run_review` reads a
@@ -307,7 +339,10 @@ pattern, event bus, plugin framework.
      `model`, `reflect_model`) share one provider/credentials. CLI
      `--triage-model`, Action input `triage_model`.
    - **Truncation ladder (escalation is LAST):** a truncated lens is first given
-     the remedy its token counts named, on the model the user chose —
+     the remedy its token counts named, on the model the user chose (a prompt the
+     model's context window refuses — litellm's `ContextWindowExceededError`,
+     surfaced as `ProviderInputTooLarge` — takes the same split, with nothing to
+     salvage) —
      `_review_split` (smaller pieces) when the answer outgrew the ceiling,
      `_retry_lower_effort` when the *thinking* did. Only if that fails does
      `engine._escalate_model` re-run the lens once on `fallback_model`. Switching
@@ -338,8 +373,8 @@ pattern, event bus, plugin framework.
      four run on **every** provider: worker count decides only whether they
      overlap, never how many there are. **`full`** runs one call per category.
      An explicit `categories` list overrides the grouping. Every (batch, lens) call runs through **one global
-     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 8
-     cloud, 1 ollama/openai-compatible), then the findings are **merged and
+     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 6
+     for every provider), then the findings are **merged and
      de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
      A soft whole-review deadline (`max_review_seconds`, default 3600s, 0 = off)
      skips still-queued calls once passed — partial results with a notice,

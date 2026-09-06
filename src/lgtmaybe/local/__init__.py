@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from lgtmaybe.core.diff import is_reviewable, is_scannable_manifest
+from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.models import PRContext
 
 # `git diff` over a large working tree (or a repo whose objects are cold) can
@@ -56,14 +57,12 @@ def local_pr_context(
     if working and uncommitted:
         raise ValueError("--working and --uncommitted are mutually exclusive")
 
-    _ensure_repo(cwd)
-    # Everything downstream — the patch headers, `--name-only`, the reader that
+    cwd = _ensure_repo(cwd)
+    # Everything downstream — the patch paths and the reader that
     # opens each changed file — speaks repo-relative paths, because that is what
     # `git diff` reports wherever it is invoked from. Anchor on the repo root so
     # a review run from a subdirectory sees the same worktree as one run from
     # the top, rather than half of it against the wrong base directory.
-    cwd = _repo_root(cwd)
-
     head_sha = _git(cwd, "rev-parse", "HEAD").strip()
 
     if uncommitted:
@@ -84,8 +83,7 @@ def local_pr_context(
         commit_messages = _commit_subjects(cwd, base_ref)
 
     diff = _git(cwd, "diff", spec)
-    name_output = _git(cwd, "diff", "--name-only", spec)
-    changed_files = [line for line in name_output.splitlines() if line]
+    changed_files = [path for path, _patch in split_by_file(diff, []) if path != "unknown"]
 
     # `git diff` only ever reports content git already tracks, so a file you
     # just created is invisible to it — and "review my working tree" almost
@@ -142,7 +140,7 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     process's directory: the paths handed to the reader are repo-relative,
     because that is what git reports wherever it runs.
     """
-    root = (Path(cwd) if cwd is not None else _repo_root(None)).resolve()
+    root = (Path(cwd) if cwd is not None else local_repo_root()).resolve()
 
     def read(path: str) -> str | None:
         try:
@@ -155,7 +153,7 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     return read
 
 
-def _repo_root(cwd: Path | None) -> Path:
+def local_repo_root(cwd: Path | None = None) -> Path:
     """The worktree's top level, or *cwd* itself when git can't say.
 
     Falling back rather than raising keeps a non-repo caller (the file reader's
@@ -234,14 +232,12 @@ def _git(cwd: Path | None, *args: str) -> str:
     return result.stdout
 
 
-def _ensure_repo(cwd: Path | None) -> None:
-    """Raise a clear ValueError unless cwd is inside a git work tree."""
+def _ensure_repo(cwd: Path | None) -> Path:
+    """Return the worktree root, or raise a clear ValueError outside one."""
     try:
-        inside = _git(cwd, "rev-parse", "--is-inside-work-tree").strip()
+        return Path(_git(cwd, "rev-parse", "--show-toplevel").strip())
     except ValueError as exc:
         raise ValueError("not a git repository (run lgtmaybe from inside one)") from exc
-    if inside != "true":
-        raise ValueError("not a git repository (run lgtmaybe from inside one)")
 
 
 def _current_branch(cwd: Path | None) -> str:
@@ -300,4 +296,4 @@ def _repo_name(cwd: Path | None) -> str:
     if url:
         parts = re.split(r"[:/]", url.removesuffix(".git"))
         return "/".join(parts[-2:])
-    return _repo_root(cwd).name
+    return local_repo_root(cwd).name

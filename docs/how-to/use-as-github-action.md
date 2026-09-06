@@ -27,11 +27,11 @@ default shape.
 Ready-to-copy workflows for every cloud and API-key provider live in
 [`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows).
 `auto_diagram` is on by default, so opened and reopened pull requests receive a
-concise change summary and compact Mermaid flowchart automatically. Later
-`synchronize` pushes refresh it and, when the change alters a run-time flow, a
-sequence diagram appears beside it.
-Set it to `false` if you do
-not want the extra model call.
+change overview automatically — a description, a **High Impact Areas** section,
+and a compact Mermaid flowchart. Later `synchronize` pushes refresh it and, when
+the change alters a run-time flow, a sequence diagram appears beside it. Set it
+to `false` for no overview at all, or drop a single section with
+`auto_describe: false` / `high_impact: false`.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -217,7 +217,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 |---|---|---|
 | `provider` | — | One of: `openai`, `openrouter`, `anthropic`, `zai`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible` |
 | `model` | — | Model identifier for the chosen provider |
-| `fallback_model` | — | Model to re-run a call on when `model` cannot answer it. For a truncation it is the *last* remedy, tried only after a smaller payload and a lower `reasoning_effort` have been tried on `model` itself; for any other failure the adapter switches straight to it. Also settable as `fallback_model` in `.lgtmaybe.yml`, which this input overrides |
+| `fallback_model` | — | Model to re-run a call on when `model` cannot answer it. For a truncation it is the *last* remedy, tried only after a smaller payload and a lower `reasoning_effort` have been tried on `model` itself; for any other failure the adapter switches straight to it. Also settable as `fallback_model` in `.lgtmaybe.yml`, which this input overrides. See [Configure fallback_model](configure-lgtmaybe-yml.md#fallback_model) for provider scope, cost, and failure behavior |
 | `api_key` | — | API key for key-based providers (leave empty for bedrock/vertex/ollama and keyless azure) |
 | `api_base` | — | Resource endpoint for azure (`https://<resource>.openai.azure.com`), or a custom base URL for other providers |
 | `timeout` | provider default (ollama/openai-compatible/openrouter 1800s, cloud 600s) | Enforced wall-clock timeout for each model call. Transient failures (capacity 429s, connection blips, 5xx) are retried with exponential backoff; permanent ones (bad key, quota/billing 429, unknown model) and a call that blows this whole timeout fail fast — re-sending the identical request against the identical budget can only burn it twice |
@@ -235,8 +235,9 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `symbol_resolution` | `true` | During reflection, resolve a deferred finding's symbol via ast-grep in a read-only shallow clone of the base branch, so cross-file findings are re-judged against the real definition |
 | `incremental` | auto | Commit-scoped incremental review on `synchronize` pushes (full review elsewhere); `true`/`false` forces it. `/review full` forces a full re-review on demand |
 | `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) sandboxed over the changed files: linters ground the model as untrusted hints, while gitleaks, zizmor, ast-grep and osv-scanner post directly with no model call. The image bundles these tools and an offline vulnerability database |
-| `auto_describe` | `false` | Post a structured description comment when a PR is opened/reopened, before the review |
-| `auto_diagram` | `true` | After each opened, reopened, or synchronized (push) PR review, post or refresh a concise change summary with a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out |
+| `auto_describe` | `true` | Head the change overview with a structured description (title, change type, summary, per-file walkthrough, intent check); set `false` to drop the section |
+| `auto_diagram` | `true` | After each opened, reopened, or synchronized (push) PR review, post or refresh the change overview: description, High Impact Areas, a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out of the whole comment |
+| `high_impact` | `true` | Include the High Impact Areas section in the change overview — infrastructure, security posture, outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, compliance; set `false` to drop the section |
 | `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |

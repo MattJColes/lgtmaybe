@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from lgtmaybe.cli import RuntimeOptions, build_review_context, main, run_review
 from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
+from lgtmaybe.engine import INCOMPLETE_MARKER
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 
 
@@ -17,6 +18,12 @@ class _BoomEngine:
 
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         raise RuntimeError("provider exploded")
+
+
+class _IncompleteEngine(FakeEngine):
+    def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
+        findings, _summary = super().review(ctx, cfg)
+        return findings, f"results may be incomplete\n{INCOMPLETE_MARKER}"
 
 
 def _default_cfg(**overrides: object) -> ReviewConfig:
@@ -125,6 +132,17 @@ class TestReviewCommandLocal:
         parsed = json.loads(json_line)
         assert isinstance(parsed, list)
         assert parsed[0]["severity"] == "low"
+
+    def test_json_flag_reports_incomplete_review_on_stderr(self, monkeypatch):
+        _patch_local(monkeypatch, _IncompleteEngine(FakeProvider()))
+
+        result = CliRunner().invoke(
+            main, ["review", "--provider", "ollama", "--model", "llama3", "--json"]
+        )
+
+        assert result.exit_code == 0, result.output
+        json.loads(result.stdout)
+        assert "results may be incomplete" in result.stderr
 
     def test_format_agent_outputs_correction_instructions(self, monkeypatch):
         """`review --format agent` emits directive instructions for an AI to apply."""
@@ -266,17 +284,50 @@ class TestDiagramCommand:
                 "notes": "",
             }
         )
-        result = ProviderResult(text=payload, input_tokens=1, output_tokens=1)
-        provider = FakeProvider(result=result)
+        from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+
+        provider = FakeProvider(
+            results_by_schema={
+                DiagramResult: ProviderResult(text=payload, input_tokens=1, output_tokens=1),
+                DescribeResult: ProviderResult(
+                    text=json.dumps({"title": "Cache user lookups", "change_type": "feature"}),
+                    input_tokens=1,
+                    output_tokens=1,
+                ),
+                HighImpactResult: ProviderResult(
+                    text=json.dumps(
+                        {
+                            "areas": [
+                                {
+                                    "area": "availability",
+                                    "title": "Cache on the read path",
+                                    "files": [],
+                                    "why": "",
+                                    "check": "",
+                                }
+                            ],
+                            "notes": "",
+                        }
+                    ),
+                    input_tokens=1,
+                    output_tokens=1,
+                ),
+            }
+        )
         monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: provider)
         monkeypatch.setattr(cli_module, "local_pr_context", lambda **kwargs: _LOCAL_CTX)
 
-    def test_diagram_prints_mermaid_and_ascii(self, monkeypatch):
+    def test_diagram_prints_the_overview(self, monkeypatch):
+        """The local command prints the same body the comment carries:
+        description, high impact areas, then the diagrams."""
         self._patch_diagram_provider(monkeypatch)
 
         result = CliRunner().invoke(main, ["diagram", "--provider", "ollama", "--model", "llama3"])
 
         assert result.exit_code == 0, result.output
+        assert "## Cache user lookups" in result.output
+        assert "### **High Impact Areas**" in result.output
+        assert "Cache on the read path" in result.output
         assert "```mermaid" in result.output
         assert "flowchart LR" in result.output
         assert "[Client] --calls--> [App (changed)]" in result.output
@@ -327,6 +378,35 @@ class TestModuleEntrypoint:
 
 class TestGitHubReviewErrorSurfacing:
     """The GitHub path (execute_review, used by the action) posts a failure notice."""
+
+    def test_prefetch_enables_dependency_manifests(self, monkeypatch):
+        import lgtmaybe.cli as cli_module
+
+        class ManifestAwareGitHub(FakeGitHub):
+            def __init__(self):
+                super().__init__()
+                self.scan_manifests = False
+
+            def set_scan_manifests(self, enabled):
+                self.scan_manifests = enabled
+
+            def get_pr_context(self):
+                assert self.scan_manifests
+                return super().get_pr_context()
+
+        github = ManifestAwareGitHub()
+        provider = FakeProvider()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(provider), provider),
+        )
+
+        cli_module.execute_review(
+            _default_cfg(static_analysis={"enabled": True}),
+            RuntimeOptions(pr_url="x"),
+            diagram=True,
+        )
 
     def test_engine_failure_posts_comment_and_raises(self, monkeypatch):
         import click
@@ -494,30 +574,24 @@ class TestConfigPathOption:
         assert result.exit_code != 0
         assert "mapping" in result.output
 
-    def test_missing_default_config_is_fine(self, monkeypatch):
-        """No --config given and no ./.lgtmaybe.yml present still reviews."""
+    def test_malformed_config_errors_without_a_traceback(self, monkeypatch, tmp_path):
+        cfg_file = tmp_path / "broken.yml"
+        cfg_file.write_text("provider: [unclosed")
         _patch_local(monkeypatch)
 
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
+        result = CliRunner().invoke(main, ["review", "--config", str(cfg_file)])
+
+        assert result.exit_code != 0
+        assert f"Error: could not parse YAML file {cfg_file}" in result.output
+
+    def test_missing_default_config_is_fine(self, monkeypatch, tmp_path):
+        """No --config given and no ./.lgtmaybe.yml present still reviews."""
+        _patch_local(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(main, ["review", "--provider", "ollama", "--model", "llama3"])
 
         assert result.exit_code == 0, result.output
-
-
-class TestParsePrUrl:
-    def test_parses_owner_repo_and_number(self):
-        from lgtmaybe.cli import parse_pr_url
-
-        repo, number = parse_pr_url("https://github.com/org/my-repo/pull/42")
-        assert repo == "org/my-repo"
-        assert number == 42
-
-    def test_rejects_non_pr_url(self):
-        from lgtmaybe.cli import parse_pr_url
-
-        with pytest.raises(ValueError, match="Could not parse"):
-            parse_pr_url("https://github.com/org/my-repo/issues/42")
 
 
 class TestBuildReviewContext:
@@ -563,7 +637,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.fallback_model == "ollama/llama2"
+        assert provider.fallback_model == "ollama_chat/llama2"
 
     def test_a_configured_fallback_model_threads_to_provider(self, monkeypatch):
         """It belongs in `.lgtmaybe.yml` beside `model`, `triage_model` and
@@ -575,7 +649,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.fallback_model == "ollama/llama2"
+        assert provider.fallback_model == "ollama_chat/llama2"
 
     def test_the_flag_wins_over_the_configured_fallback_model(self, monkeypatch):
         """Same precedence as `api_base`: the invocation overrides the repo."""
@@ -587,7 +661,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.fallback_model == "ollama/from-flag"
+        assert provider.fallback_model == "ollama_chat/from-flag"
 
     def test_azure_keyless_ad_token_threads_to_provider(self, monkeypatch):
         """Keyless azure resolves an ambient AD token and threads it to litellm."""

@@ -356,18 +356,8 @@ def test_explicit_config_wins_over_auto() -> None:
 
 
 # ---------------------------------------------------------------------------
-# auto-describe (F3): opt-in structured description on PR open
+# the change overview: description + high impact areas + diagrams, one comment
 # ---------------------------------------------------------------------------
-
-
-def test_auto_describe_only_on_open_events_when_enabled() -> None:
-    from lgtmaybe.cli import should_auto_describe
-
-    on = make_cfg(auto_describe=True)
-    assert should_auto_describe(on, event_action="opened") is True
-    assert should_auto_describe(on, event_action="reopened") is True
-    assert should_auto_describe(on, event_action="synchronize") is False
-    assert should_auto_describe(make_cfg(), event_action="opened") is False  # default off
 
 
 def test_run_describe_posts_via_the_idempotent_upsert() -> None:
@@ -430,12 +420,31 @@ def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
             "notes": "",
         }
     )
-    provider = FakeProvider(result=ProviderResult(text=structured, input_tokens=1, output_tokens=1))
+    from lgtmaybe.core.models import DescribeResult, DiagramResult, HighImpactResult
+
+    # Routed by schema: one canned result would feed the diagram payload to the
+    # describe call too, whose lenient "has a title" predicate accepts it.
+    provider = FakeProvider(
+        results_by_schema={
+            DiagramResult: ProviderResult(text=structured, input_tokens=1, output_tokens=1),
+            DescribeResult: ProviderResult(
+                text=_json.dumps({"title": "Add a thing", "summary": "Adds it."}),
+                input_tokens=1,
+                output_tokens=1,
+            ),
+            HighImpactResult: ProviderResult(
+                text=_json.dumps({"areas": [], "notes": ""}), input_tokens=1, output_tokens=1
+            ),
+        }
+    )
 
     run_diagram(github, provider, make_cfg())
 
     assert len(github.diagrams) == 1
-    assert "```mermaid" in github.diagrams[0]
+    body = github.diagrams[0]
+    assert body.startswith("## Add a thing")
+    assert "### **High Impact Areas**" in body
+    assert "```mermaid" in body
     assert github.comments == []
 
 

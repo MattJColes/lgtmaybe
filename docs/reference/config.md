@@ -17,7 +17,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `api_base` | string / null | No | `null` | Api Base |
-| `auto_describe` | boolean | No | `False` | Auto Describe |
+| `auto_describe` | boolean | No | `True` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
 | `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'spec']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
@@ -28,6 +28,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `fallback_model` | string / null | No | `null` | Fallback Model |
 | `finding_rules` | list[FindingRule] | No | `[]` | Finding Rules |
 | `function_context` | boolean | No | `True` | Function Context |
+| `high_impact` | boolean | No | `True` | High Impact |
 | `ignore_fingerprints` | list[string] | No | `[]` | Ignore Fingerprints |
 | `include_paths` | list[string] | No | `[]` | Include Paths |
 | `incremental` | boolean / null | No | `null` | Incremental |
@@ -122,6 +123,7 @@ The normalised return value of one LLM completion, including token usage.
 | `attempts` | integer | No | `1` | Attempts |
 | `cache_creation_tokens` | integer | No | `0` | Cache Creation Tokens |
 | `cache_read_tokens` | integer | No | `0` | Cache Read Tokens |
+| `cost_usd` | number / null | No | `null` | Cost Usd |
 | `input_tokens` | integer | Yes | — | Input Tokens |
 | `model` | string / null | No | `null` | Model |
 | `output_ceiling` | integer / null | No | `null` | Output Ceiling |
@@ -625,7 +627,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Api Base"
     },
     "auto_describe": {
-      "default": false,
+      "default": true,
       "title": "Auto Describe",
       "type": "boolean"
     },
@@ -712,6 +714,11 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "function_context": {
       "default": true,
       "title": "Function Context",
+      "type": "boolean"
+    },
+    "high_impact": {
+      "default": true,
+      "title": "High Impact",
       "type": "boolean"
     },
     "ignore_fingerprints": {
@@ -1174,6 +1181,18 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "default": 0,
       "title": "Cache Read Tokens",
       "type": "integer"
+    },
+    "cost_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost Usd"
     },
     "input_tokens": {
       "title": "Input Tokens",

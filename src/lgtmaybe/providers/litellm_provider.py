@@ -14,11 +14,17 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import suppress
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 import litellm
+
+# litellm.utils re-exports these without listing them in __all__, so mypy
+# rejects the re-exports — import each from the module that defines it, like
+# the exceptions above.
+from litellm.cost_calculator import cost_per_token
 
 # litellm re-exports the openai exception types but doesn't list them in __all__,
 # so mypy rejects litellm.AuthenticationError etc. as un-exported — import them
@@ -26,14 +32,11 @@ import litellm
 from litellm.exceptions import (
     AuthenticationError,
     BadRequestError,
+    ContextWindowExceededError,
     NotFoundError,
     PermissionDeniedError,
     RateLimitError,
 )
-
-# litellm.utils re-exports this without listing it in __all__, so mypy rejects
-# the re-export — import it from the module that defines it, like the
-# exceptions above.
 from litellm.llms.base_llm.base_utils import type_to_response_format_param
 from litellm.utils import supports_prompt_caching
 from pydantic import BaseModel
@@ -56,6 +59,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.core.ports import (
     Message,
+    ProviderInputTooLarge,
     ProviderTruncated,
     ProviderWallTimeout,
 )
@@ -167,6 +171,11 @@ _EXPIRED_CREDENTIAL_MARKERS = (
 )
 
 
+# The attribute a failed call's price rides home on — the same channel as the
+# attempt count (models._ATTEMPTS_ATTR), read back by profiling.record_error.
+_COST_ATTR = "cost_usd"
+
+
 def _mentions(exc: BaseException, markers: tuple[str, ...]) -> bool:
     """True when *exc*'s message mentions any of *markers* (case-insensitively)."""
     msg = str(exc).lower()
@@ -215,7 +224,14 @@ def _is_permanent(exc: BaseException) -> bool:
     # labour. Only the engine holds the batch, so only the engine can change the
     # payload; the adapter can only re-send the same oversized one, which is the
     # attempt worth refusing.
-    return isinstance(exc, ProviderTruncated)
+    if isinstance(exc, ProviderTruncated):
+        return True
+    # And a refused prompt: the identical request is the identical size. Not
+    # unrecoverable, though — `_is_unrecoverable` never sees this type, because
+    # litellm's ContextWindowExceededError is translated into it before the
+    # BadRequestError check there could claim it — so the engine keeps the
+    # remedy it holds and the adapter cannot: a smaller payload.
+    return isinstance(exc, ProviderInputTooLarge)
 
 
 # How long to back off between attempts, by what failed.
@@ -624,7 +640,15 @@ def _rejects_temperature(exc: Exception) -> bool:
     not catch this — the param is supported, only the value is rejected."""
     msg = str(exc).lower()
     return "temperature" in msg and (
-        "does not support" in msg or "unsupported value" in msg or "only the default" in msg
+        "does not support" in msg
+        or "unsupported value" in msg
+        or "only the default" in msg
+        # Anthropic, with extended thinking on: "`temperature` may only be set to
+        # 1 when thinking is enabled". The factory withholds the temperature up
+        # front on the Claude routes it recognises; this covers a route it does
+        # not (a gateway fronting Claude), where the 400 is the first sign.
+        or "may only be set to" in msg
+        or "when thinking is enabled" in msg
     )
 
 
@@ -687,11 +711,85 @@ class LiteLLMProvider:
         # enforcement preserved by another mechanism, that one is enforcement
         # given up. Keyed by MODEL for the same reason.
         self._schema_tool: set[str] = set()
+        # What each model's route takes, as litellm's per-route list answers it
+        # (see `_honour_route_schema_support`): None for a route the lookup
+        # could not name. A memo of the LOOKUP only — the decision it feeds is
+        # re-derived on every call, so a lens that arrives while a sibling's
+        # first call is still being shaped derives the same answer for itself
+        # instead of reading a marker the sibling set before it finished.
+        self._route_params: dict[str, frozenset[str] | None] = {}
+        self._rejected_params: dict[str, set[str]] = {}
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
         # pure function of it. Instance-scoped (not lru_cache) so tests that
         # patch the litellm lookup stay isolated.
         self._cache_capable: dict[str, bool] = {}
+
+    def _honour_route_schema_support(self, model: str, kwargs: dict[str, Any]) -> None:
+        """Choose the schema mechanism the ROUTE takes before the first request.
+
+        The two recoveries in :meth:`_drop_rejected_param` react to evidence — a
+        400 naming the field, an empty body. A third case leaves none: litellm
+        runs with ``drop_params``, which strips every OpenAI-vocabulary param a
+        route's own supported-params list omits, silently, before the request
+        goes out. The zai route lists ``tools`` but not ``response_format``, so
+        the schema vanished on the wire, the model answered prose, and this
+        adapter still reported enforcement was on.
+
+        So the same list litellm consults is consulted here first: a route that
+        omits ``response_format`` but takes ``tools`` gets the schema as the
+        forced tool call up front (enforcement kept), and a route with neither
+        drops it up front and says so (enforcement given up, announced, exactly
+        as the 400 path does). A lookup failure — an unknown route — leaves the
+        schema on: the request-level recoveries still cover it, and a capability
+        lookup must never cost enforcement on a route that would have taken it.
+
+        The lookup is memoised per model; the decision is not. The lens fan-out
+        calls this concurrently on one instance, and a "probed" marker set
+        before the outcome was recorded let a second lens skip the probe, find
+        neither set populated yet, and send the schema litellm then dropped. Each
+        call deriving its own answer from the same list cannot race: the sets
+        the outcome lands in are idempotent, and the announcements fire once.
+        A model that has since given the schema up entirely keeps that: the
+        route's list must not re-enable a tool the route already refused.
+        """
+        if kwargs.get("response_format") is None or model in self._schema_dropped:
+            return
+        if model not in self._route_params:
+            self._route_params[model] = _supported_params(model)
+        supported = self._route_params[model]
+        if supported is None or "response_format" in supported:
+            return
+        if "tools" in supported and self._use_schema_tool(model, kwargs):
+            return
+        self._disable_response_format(model, "route-unsupported")
+        self._strip_schema(kwargs)
+
+    def input_budget(self) -> int | None:
+        """How many prompt tokens this provider's model can take, or None.
+
+        Adapter-only, feature-detected by the engine like ``escalate_model``:
+        the engine's batching budget (``max_input_tokens``) defaults to a flat
+        number, and this is what lets it fit that default to the model instead
+        of learning the window from a refused prompt — or, on ollama, never
+        learning it at all, because the server silently truncates to ``num_ctx``.
+
+        Two sources, in order: ollama's ``num_ctx`` when this provider sends one
+        (the server's window IS that number, whatever litellm's map says of the
+        model), else the ``max_input_tokens`` litellm's model map records for the
+        resolved model string. The output ceiling this provider will send is
+        subtracted, because the backends reserve it: prompt plus ``max_tokens``
+        must fit the window. None when the map has never heard of the model or
+        records no window for it — "no opinion", so the engine keeps its default.
+        """
+        window: Any = self.default_opts.get("num_ctx")
+        if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
+            window = _mapped_input_window(self.model)
+        if window is None:
+            return None
+        ceiling = self.default_opts.get("max_tokens")
+        reserve = ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) else 0
+        return max(0, window - max(0, reserve)) or None
 
     def _disable_response_format(self, model: str, why: str) -> None:
         """Record — and announce — that *model* will not take the schema.
@@ -905,7 +1003,8 @@ class LiteLLMProvider:
         # a cache hit — too late for a fan-out that dispatches its lenses at
         # once. OpenAI uses the same field as a hint for prefix-sharing
         # requests, so one param serves both; drop_params strips it elsewhere.
-        merged.setdefault("prompt_cache_key", _prefix_cache_key(messages))
+        if "prompt_cache_key" not in merged:
+            merged["prompt_cache_key"] = _prefix_cache_key(messages)
         # A factory-built provider carries the resolved litellm model string
         # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
         # An explicit override outranks both: it is the caller naming a model
@@ -921,27 +1020,50 @@ class LiteLLMProvider:
                 # request to the model that just failed it — a second full-price
                 # answer to a question already answered wrong.
                 raise
-            if defer_truncation and isinstance(exc, ProviderTruncated):
-                # The caller asked to own this one. A truncation is the only
-                # failure where somebody upstream has a *better* remedy than
-                # switching model: the engine holds the batch and the token
-                # counts, so it can shrink the payload or lower the thinking
-                # budget — cheap, aimed at the cause the counts named, and still
-                # on the model the user chose. All this adapter could do is
-                # re-send the identical oversized request to a second model.
-                # It still gets to, from `escalate_model`, once the cheap remedy
-                # has had its go. Every other failure falls back here as before.
+            if defer_truncation and isinstance(exc, ProviderTruncated | ProviderInputTooLarge):
+                # The caller asked to own this one. A truncation — or a prompt the
+                # window refused — is the one failure where somebody upstream has
+                # a *better* remedy than switching model: the engine holds the
+                # batch and the token counts, so it can shrink the payload or
+                # lower the thinking budget — cheap, aimed at the cause the
+                # counts named, and still on the model the user chose. All this
+                # adapter could do is re-send the identical oversized request to
+                # a second model. It still gets to, from `escalate_model`, once
+                # the cheap remedy has had its go. Every other failure falls back
+                # here as before.
                 raise
             # The primary's requests were still issued and still billed, so they
             # stay in the total: a fallback rescue that reported one request would
-            # hide the fact that the primary burned its budget first.
+            # hide the fact that the primary burned its budget first. The price
+            # travels with the attempt count — where the primary ran up a tab
+            # (a truncation priced before it raised) the rescue reports the whole
+            # bill, not just its own part of it.
             spent = attempts_of(exc)
+            spent_cost = getattr(exc, "cost_usd", None)
             try:
                 result = self._complete_with_retry(messages, self.fallback_model, **merged)
             except BaseException as fallback_exc:
                 stamp_attempts(fallback_exc, spent + attempts_of(fallback_exc))
+                fallback_cost = getattr(fallback_exc, "cost_usd", None)
+                if spent_cost is not None or fallback_cost is not None:
+                    # setattr via a named constant, not an attribute assignment:
+                    # the target is typed BaseException (the same reason
+                    # models.stamp_attempts sets rather than assigns).
+                    with suppress(Exception):
+                        setattr(
+                            fallback_exc,
+                            _COST_ATTR,
+                            sum(cost for cost in (spent_cost, fallback_cost) if cost is not None),
+                        )
                 raise
-            return result.model_copy(update={"attempts": result.attempts + spent})
+            merged_cost: float | None = None
+            if spent_cost is not None or result.cost_usd is not None:
+                merged_cost = sum(
+                    cost for cost in (spent_cost, result.cost_usd) if cost is not None
+                )
+            return result.model_copy(
+                update={"attempts": result.attempts + spent, "cost_usd": merged_cost}
+            )
 
     def _complete_with_retry(
         self, messages: list[Message], model: str, **kwargs: Any
@@ -986,8 +1108,13 @@ class LiteLLMProvider:
             reraise=True,
         )
         def _call() -> ProviderResult:
-            # A prior call already settled how this model takes (or refuses) the
-            # schema, so don't pay the wasted round-trip again — apply it up front.
+            # What the route can take at all is settled before the first request;
+            # a prior call may already have settled how this model takes (or
+            # refuses) the schema, so don't pay the wasted round-trip again —
+            # apply either up front.
+            self._honour_route_schema_support(model, kwargs)
+            for param in self._rejected_params.get(model, ()):
+                kwargs.pop(param, None)
             if model in self._schema_dropped:
                 self._strip_schema(kwargs)
             elif model in self._schema_tool:
@@ -1018,12 +1145,21 @@ class LiteLLMProvider:
             # here, so a model answering empty twice reports empty rather than
             # spending a third call.
             if not result.text.strip():
+                # The empty body was still generated and still billed, so its
+                # price rides onto the re-sent attempt's — a call recovered
+                # here must not report only the recovery's cost (the same
+                # rule `attempts` follows for the extra request).
+                spent_cost = result.cost_usd
                 if kwargs.get("response_format") is not None or _is_schema_tool(
                     kwargs.get("tools")
                 ):
                     self._disable_response_format(model, "empty-response")
                     self._strip_schema(kwargs)
                 result = self._raw_completion(model, messages, kwargs, count_request)
+                if spent_cost is not None:
+                    result = result.model_copy(
+                        update={"cost_usd": spent_cost + (result.cost_usd or 0.0)}
+                    )
             return result
 
         try:
@@ -1061,6 +1197,15 @@ class LiteLLMProvider:
                     model,
                     _configured_ceiling(kwargs),
                 )
+            except ContextWindowExceededError as exc:
+                # litellm names this one itself, on every route that reports it
+                # (anthropic's "prompt is too long", OpenAI's "maximum context
+                # length"). Handed up under the port's name so the engine can tell
+                # it from the generic bad request it subclasses: that one ends
+                # the lens, this one earns the split. Raised from here — inside
+                # the retry — so `_is_permanent` sees the translated type and
+                # declines the identical re-send.
+                raise ProviderInputTooLarge(str(exc)) from exc
             except Exception as exc:
                 if not self._drop_rejected_param(exc, model, kwargs):
                     raise
@@ -1089,6 +1234,7 @@ class LiteLLMProvider:
             # The param is accepted, only our value isn't — let the model use its
             # own default.
             kwargs.pop("temperature")
+            self._rejected_params.setdefault(model, set()).add("temperature")
             return True
         # Before the schema branch, deliberately: a refused reasoning effort
         # arrives naming `output_config.effort`, which the schema matcher below
@@ -1096,6 +1242,7 @@ class LiteLLMProvider:
         # fails identically, with structured output disabled as collateral.
         if "reasoning_effort" in kwargs and _rejects_reasoning_effort(exc):
             kwargs.pop("reasoning_effort")
+            self._rejected_params.setdefault(model, set()).add("reasoning_effort")
             return True
         # Both branches remember the outcome for this model's later calls, not
         # just this one: the lens fan-out sends the same shape N times, and
@@ -1180,6 +1327,10 @@ class LiteLLMProvider:
         usage = response.usage
         input_tokens: int = usage.prompt_tokens
         output_tokens: int = usage.completion_tokens
+        # Priced here, before the truncation check, so a ceiling hit — routinely
+        # the costliest call of a run — carries its price on the exception just
+        # like it carries its token counts.
+        cost_usd = _estimated_cost_usd(model, usage)
         # A generation that stopped because it ran out of output tokens is cut off
         # mid-token: it can never parse, and passing it on gets it reported as
         # "unparseable model output", which points at the prompt rather than at
@@ -1232,6 +1383,7 @@ class LiteLLMProvider:
                 # Not diagnosis but accounting: the prompt was sent and billed,
                 # so the spend ceiling must see it (see profiling.record_error).
                 input_tokens=input_tokens,
+                cost_usd=cost_usd,
             )
         cache_read, cache_creation = _cache_usage(usage)
         if cache_read or cache_creation:
@@ -1266,6 +1418,8 @@ class LiteLLMProvider:
             # make, and a field that appeared only on rescues would leave the
             # common case unreadable rather than uninteresting.
             model=model,
+            # The price litellm's map puts on this call, or None when it declines.
+            cost_usd=cost_usd,
         )
 
 
@@ -1435,6 +1589,38 @@ def _merge_user_messages(messages: list[Message]) -> list[Message]:
     return [*messages[:start], {"role": "user", "content": joined}]
 
 
+def _supported_params(model: str) -> frozenset[str] | None:
+    """The OpenAI-vocabulary params litellm forwards on *model*'s route, or None.
+
+    The same list litellm's own ``drop_params`` consults, so what this answers
+    is exactly what would be silently removed. None on any lookup failure — an
+    unknown route is a route to try, not a route to strip.
+    """
+    try:
+        supported = litellm.get_supported_openai_params(model=model)
+    except Exception:
+        return None
+    if supported is None:
+        return None
+    return frozenset(str(name) for name in supported)
+
+
+def _mapped_input_window(model: str) -> int | None:
+    """The context window litellm's model map records for *model*, or None.
+
+    A lookup failure or a missing/zero entry is "no opinion": the map does not
+    know the newest models, and an unknown window must never shrink a budget.
+    """
+    try:
+        info = litellm.get_model_info(model)
+    except Exception:
+        return None
+    window = info.get("max_input_tokens") if isinstance(info, Mapping) else None
+    if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
+        return None
+    return window
+
+
 def _supports_cache_control(model: str) -> bool:
     """Whether *model*'s route takes an explicit cache_control breakpoint.
 
@@ -1512,3 +1698,44 @@ def _cache_usage(usage: Any) -> tuple[int, int]:
         "cache_creation_tokens", "cache_write_tokens"
     )
     return int(cache_read or 0), int(cache_creation or 0)
+
+
+def _estimated_cost_usd(model: str, usage: Any) -> float | None:
+    """What litellm's pricing map says this call cost, or None to decline.
+
+    Money is the unit every token count in the profile is a proxy for, and this
+    is the one place that holds both the resolved model string the map keys on
+    and the usage the price is computed from. The cache counts ride along
+    because reads bill at a discount on every route that reports them — pricing
+    the same call without them overstates every cached lens.
+
+    Three shapes of "no price", all answered None because they are the same
+    claim — "no estimate available" — and a profile that renders a number for
+    any of them is lying with more precision than silence:
+
+    - the map has never heard of the model (a brand-new id) and raises;
+    - the map half-knows the id and prices it silently at zero (an unversioned
+      bedrock id does exactly this — indistinguishable by output from the
+      genuinely free routes, so a zero can never be reported as a price);
+    - the call reported no usage at all, so there is nothing to price.
+
+    A price is instrumentation, exactly like the capability lookups above: any
+    failure in here degrades to None, never to a failed review.
+    """
+    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    if not prompt_tokens and not completion_tokens:
+        return None
+    cache_read, cache_creation = _cache_usage(usage)
+    try:
+        prompt_cost, completion_cost = cost_per_token(
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_creation,
+        )
+    except Exception:  # noqa: BLE001 — an unpriced model is not a failed review
+        return None
+    total = float(prompt_cost) + float(completion_cost)
+    return total if total > 0 else None

@@ -21,6 +21,7 @@ automatic where the provider supports it.
 - [Field reference](#field-reference)
   - [provider](#provider)
   - [model](#model)
+  - [fallback_model](#fallback_model)
   - [min_severity](#min_severity)
   - [include_paths / exclude_paths](#include_paths-exclude_paths)
   - [max_files](#max_files)
@@ -37,7 +38,9 @@ automatic where the provider supports it.
   - [incremental](#incremental)
   - [static_analysis](#static_analysis)
   - [triage_model](#triage_model)
+  - [auto_diagram](#auto_diagram)
   - [auto_describe](#auto_describe)
+  - [high_impact](#high_impact)
   - [pr_labels](#pr_labels)
   - [finding_rules](#finding_rules)
   - [summary_template](#summary_template)
@@ -96,6 +99,58 @@ The model identifier for the chosen provider. Format varies by provider:
 | azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
 | ollama | `qwen3.6:27b`, `gemma4:e4b` |
 | openai-compatible | the served model name, e.g. `deepseek-chat` or `meta-llama/Llama-3.1-8B-Instruct` (requires `api_base` — see [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md)) |
+
+### fallback_model
+
+`fallback_model` names one second model for a review call that the primary
+model cannot finish. It is off by default and adds no calls to a healthy
+review.
+
+Both model names go through the configured `provider`, `api_base`, and
+credentials. This means an OpenRouter review can fall back from a Google model
+to a Qwen model because OpenRouter serves both. An `openai` review cannot fall
+back to an Anthropic account. Cross-provider failover needs a separate review
+run.
+
+```yaml
+provider: openrouter
+model: google/gemini-3.7-flash
+fallback_model: qwen/qwen3.8-max
+```
+
+The fallback runs at different points depending on the failure:
+
+| Primary model result | What lgtmaybe does |
+|---|---|
+| Transient provider failure, such as a connection error, capacity rate limit, or 5xx | Exhausts the primary model's bounded retry policy, then tries the fallback model. |
+| Permanent provider failure, such as an unknown model, rejected request, or exhausted quota | Skips repeated primary attempts and tries the fallback model. A shared credential, quota, or endpoint failure will usually reject both. |
+| Output reaches the `max_tokens` ceiling | First retries a smaller payload or lowers `reasoning_effort` on the primary, based on the reported token counts. It tries the fallback only if that remedy also fails. |
+
+The fallback does not judge the primary answer. A clean review, a low-quality
+finding, or zero findings will not trigger it. Output parsing has its own
+bounded repair path.
+
+The fallback gets a fresh request and retry budget, so it adds to the primary
+model's spent time and tokens. The profile keeps both models' calls and the
+review summary names every lens answered by the fallback. Use `--profile` for
+the human-readable `models:` line or `--profile-json` for the model attached to
+each call. Its usage contributes to `max_review_tokens` after the call returns.
+See [Profile Reference](../reference/profile.md#the-models-line).
+
+If the fallback fails, lgtmaybe marks the lens incomplete and stops that
+recovery path. A review with no usable results fails instead of posting a clean
+result. lgtmaybe does not walk a list of models or fall back to the primary
+again. A lens that repeatedly needs the second model is a signal to make that
+model the primary.
+
+Set the same value for one run with `--fallback-model`. The CLI flag and the
+GitHub Action's `fallback_model` input override `.lgtmaybe.yml`.
+
+```bash
+lgtmaybe review --fallback-model qwen/qwen3.8-max
+```
+
+See [Choose a Review Model](choose-a-review-model.md) for current model results.
 
 ### min_severity
 
@@ -523,21 +578,62 @@ triage_model: claude-haiku-4-5   # cheap gatekeeper; unset = no triage
 Default: unset (no triage — every file gets the full review, exactly as
 before).
 
-### auto_describe
+### auto_diagram
 
-Post a **structured PR description** as a comment when a PR is opened (or
-reopened), before the review runs: a suggested title, the change type, a short
-summary, a per-file walkthrough table, and — when the PR states an intent — a
-"does it do what it says" check. The comment is updated **in place** by later
-`/describe` runs, never duplicated, and a describe failure never blocks the
-review. `/describe` posts the same structured description on demand whether or
-not auto-describe is enabled.
+Post the **change overview** as a comment after the review, and refresh it on
+every push: a description of the change, a **High Impact Areas** section, a
+Mermaid flowchart of the components the PR touches, and — when the change alters
+a run-time flow — a Mermaid sequence diagram of it. One comment, updated **in
+place**, never duplicated. `/diagram` posts the same overview on demand.
+
+This is the switch for the whole comment: with it off, nothing auto-posts
+besides the review itself.
 
 ```yaml
-auto_describe: true
+auto_diagram: false
 ```
 
-Default: `false`.
+Default: `true`. See [Generate a change
+overview](generate-a-change-diagram.md).
+
+### auto_describe
+
+Head the change overview with a **structured description**: a suggested title,
+the change type, a short summary, a per-file walkthrough table, and — when the
+PR states an intent — a "does it do what it says" check. Its own model call,
+best-effort: a failure leaves a short note in that slot and never blocks the
+rest of the comment.
+
+Because it rides the overview comment, it refreshes on every push rather than
+only on open. `/describe` still posts a description as its own separate comment,
+whether or not this is enabled.
+
+```yaml
+auto_describe: false
+```
+
+Default: `true`.
+
+### high_impact
+
+Include the **High Impact Areas** section in the change overview — the changes a
+reviewer must not miss, in ten areas: infrastructure, security posture,
+availability (anything that could cause a production outage), data migrations,
+backups and recovery, compatibility, observability, dependencies, cost, and
+compliance.
+
+Deterministic path patterns ground the model call as untrusted hints *and* floor
+its output, so a sensitive file (a `*.tf`, a workflow, a migration, a backup
+policy, a lockfile) is named even when the model says nothing about it. A failed
+call degrades to that floor rather than dropping the section, and an empty
+result says what was checked.
+
+```yaml
+high_impact: false
+```
+
+Default: `true`. See [Generate a change
+overview](generate-a-change-diagram.md).
 
 ### pr_labels
 
