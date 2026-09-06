@@ -65,6 +65,13 @@ quality bar, for example:
 Browse the full catalogue and per-model pricing at
 <https://openrouter.ai/models>.
 
+One catalogue quirk: a model can accept JSON-schema mode through OpenRouter yet
+return replies that parse as empty, so a review comes back with zero findings
+and no error (seen with `anthropic/claude-fable-5.1`). If a model is silent on
+everything, try one diff with `--no-structured-output` — see
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md#structured_output) — before
+writing the model off.
+
 ## Credit reservations
 
 OpenRouter checks your balance **before** it generates anything, costing the

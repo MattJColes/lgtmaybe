@@ -312,13 +312,25 @@ Default: auto (ollama/openai-compatible/openrouter 1800 s, cloud 600 s). See
 
 Constrain the model to emit the findings JSON schema using the provider's native
 JSON mode (litellm `response_format`). This keeps models — especially local ones —
-from returning prose or reasoning instead of findings. Leave it on unless a
-particular model/provider **rejects** `response_format` (some `openai-compatible`
-gateways return a `400`), in which case turn it off; the lenient parser still
-strips fences and pulls JSON out of any surrounding prose. CLI: `--no-structured-output`.
+from returning prose or reasoning instead of findings. Leave it on unless the
+combination in front of you fails in one of two ways:
+
+1. A gateway **rejects** `response_format` outright (some `openai-compatible`
+   gateways return a `400`). The review fails loudly; turn this off.
+2. A gateway **accepts** JSON-schema mode but returns replies the parser reads
+   as empty. This fails *silently*: every lens logs
+   `findings: 0 parsed / 0 returned`, the run exits clean, and a capable model
+   looks like one that finds nothing. Seen with
+   `anthropic/claude-fable-5.1` behind OpenRouter on lgtmaybe 2.3.0 and 2.7.0 —
+   the same diff with the same flags returned 11 parsed findings once this was
+   off. If a model is unexpectedly silent, re-run one diff with
+   `--no-structured-output` before concluding the model finds nothing.
+
+In both cases the lenient parser still strips fences and pulls JSON out of any
+surrounding prose. CLI: `--no-structured-output`.
 
 ```yaml
-structured_output: false   # only if your gateway rejects JSON-schema mode
+structured_output: false   # if your gateway rejects JSON-schema mode, or a model returns zero findings under it
 ```
 
 Default: `true`. See
