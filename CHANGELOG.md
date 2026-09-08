@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.7.0...lgtmaybe-v2.8.0) (2026-09-08)
+
+
+### Features
+
+* estimate and report review cost in the profile ([#645](https://github.com/MattJColes/lgtmaybe/issues/645)) ([9fb52b8](https://github.com/MattJColes/lgtmaybe/commit/9fb52b8dbdd527994dd1f0a0cc0c4dbd58040cff))
+* **provider:** use litellm's capability map for schema, window, and thinking ([#647](https://github.com/MattJColes/lgtmaybe/issues/647)) ([22f4820](https://github.com/MattJColes/lgtmaybe/commit/22f4820678b2ae39b42f8d45db06f7baabe4b966))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 9 updates ([#649](https://github.com/MattJColes/lgtmaybe/issues/649)) ([9ff8bb8](https://github.com/MattJColes/lgtmaybe/commit/9ff8bb888510f33de026e7ac58a363b9efc61f6a))
+
+
+### Documentation
+
+* add GLM-5.3 Flash benchmark results and the silent structured-output failure mode ([#648](https://github.com/MattJColes/lgtmaybe/issues/648)) ([e761d6d](https://github.com/MattJColes/lgtmaybe/commit/e761d6d67fcd62c0e964bc87ed886f89cd861c90))
+
 ## [2.7.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.6.2...lgtmaybe-v2.7.0) (2026-09-02)
 
 
