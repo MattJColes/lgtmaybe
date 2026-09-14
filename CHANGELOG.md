@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.0...lgtmaybe-v2.8.1) (2026-09-14)
+
+
+### Dependencies
+
+* bump the python-dependencies group with 8 updates ([#650](https://github.com/MattJColes/lgtmaybe/issues/650)) ([9ab9242](https://github.com/MattJColes/lgtmaybe/commit/9ab92422d6a4366386b886bc03fae7f229a8ecdc))
+
 ## [2.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.7.0...lgtmaybe-v2.8.0) (2026-09-08)
 
 
