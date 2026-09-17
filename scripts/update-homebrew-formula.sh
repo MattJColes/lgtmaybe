@@ -80,7 +80,8 @@ class Lgtmaybe < Formula
 
   def install
     # lgtmaybe's dependency tree includes Rust extensions (tokenizers, hf-xet,
-    # and litellm >= 1.92, which ships only manylinux wheels) whose sdists
+    # and litellm >= 1.92, itself a compiled package — Linux-only wheels at
+    # 1.92, cp310-abi3 wheels covering macOS from 1.101.0) whose sdists
     # cannot build inside Homebrew's sandbox (no Cargo), so install lgtmaybe
     # and its dependencies from upstream PyPI wheels into an isolated
     # virtualenv. --prefer-binary makes pip back off to the newest version
