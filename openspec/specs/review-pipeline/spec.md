@@ -293,6 +293,38 @@ salvage). Findings completed before a truncation SHALL be kept; the lens fails.
 - **THEN** its pieces run together in an executor of their own, bounded by the
   backend's concurrency — never resubmitted into the pool this call occupies
 
+### Requirement: A truncation is remedied however it was detected
+
+A response cut off mid-answer SHALL enter the same remedy ladder whether the
+adapter raised on it or the parser found its body unterminated. Which detector
+fires is a fact about what the route reports, not about the failure: a route
+that declares `length`, or spends a ceiling we set, is caught by the adapter,
+while one whose finish reason litellm cannot map arrives looking clean and is
+caught only by the JSON never closing. Detected the second way the lens used to
+be lost outright, so an identical cut cost a whole lens on one model and merely
+a slower review on another. The salvage, the reasoning-bound decision, the
+split, the effort step-down and the model escalation SHALL be the same on both
+paths.
+<!-- anchor: engine.truncation-detection -->
+
+#### Scenario: the route declares the cut
+- **WHEN** a lens call fails with a truncation the adapter raised
+- **THEN** the batch is split and its pieces reviewed
+
+#### Scenario: only the unterminated body shows the cut
+- **WHEN** a lens call returns a body that stops mid-object while its route
+  reports a clean finish and spends no ceiling
+- **THEN** the same split runs, and findings completed before the cut are kept
+
+#### Scenario: the split covers the batch
+- **WHEN** the pieces of a parser-detected cut are all reviewed
+- **THEN** the lens counts as answered and no incomplete notice fires
+
+#### Scenario: a cut the route called clean names no ceiling
+- **WHEN** such a truncation is reported
+- **THEN** the notice SHALL NOT claim a `max_tokens` hit, because nothing
+  measured one — it names the tokens written before the body stopped instead
+
 ### Requirement: A split is only attempted when covering less can help
 
 A truncation that spent essentially the whole ceiling reasoning SHALL NOT be
@@ -301,7 +333,8 @@ as the levers: a smaller payload does not shrink a thinking budget, so the split
 would re-spend the whole `max_tokens` ceiling on every piece and fail
 identically — but these counts cannot say whether the thinking expands to fill
 any ceiling given it or merely outgrew this one, and those two have opposite
-fixes. The decision reads the counts the failure carries, never its message.
+fixes. The decision reads the two counts, never any message, and the ceiling it
+divides by is the one the request carried, not however much the model wrote.
 Findings completed before the cut are kept on this path too, and a failure that
 says nothing about size is not split at all.
 <!-- anchor: engine.reasoning-ceiling -->

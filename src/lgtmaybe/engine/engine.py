@@ -1666,6 +1666,101 @@ class LLMReviewEngine:
         )
         return findings + retry, error
 
+    def _remedy_oversized(
+        self,
+        completed: list[ReviewFinding],
+        reason: str,
+        exhausted: str | None,
+        *,
+        messages: list[Message],
+        model: str,
+        response_format: type[ReviewResult] | None,
+        batch_num: int,
+        lens: _Lens,
+        run: _Run | None,
+        on_oversized: _OnOversized | None,
+        effort: dict[str, Any] | None,
+        escalate_to: str | None,
+        slice_hunks: bool = False,
+    ) -> _LensOutcome:
+        """Work the truncation ladder for one cut-off lens call.
+
+        The whole remedy in one place, because a cut-off generation reaches the
+        engine by two different routes and which one fires is an accident of what
+        the provider reports, not a fact about the failure:
+
+        - the adapter sees it, when the route says ``length`` or the response
+          spends a ceiling we configured, and raises ``ProviderTruncated``;
+        - the PARSER sees it, when the route says nothing useful — litellm
+          rewrites an unrecognised finish reason to ``stop``, and a model can stop
+          mid-object well short of the cap — and only the unterminated JSON gives
+          it away.
+
+        The second route used to end here with a reason saying no split was
+        attempted, so an identical failure cost the whole lens on one model and
+        merely a slower review on another. Measured on a gateway model at 43.2%
+        completeness over 100k-token inputs: what the declared ceiling bought was
+        recovery, not accuracy.
+
+        *completed* is the salvage, already stamped. *exhausted* is the
+        reasoning-bound diagnosis (see :func:`_reasoning_exhausted_reason`) or
+        None, decided by the caller because only it holds the right denominator.
+
+        The rungs, in order, and never more than one of the first two:
+        shrink the payload (:meth:`_review_split`) when the answer outgrew the
+        ceiling, step the thinking down (:meth:`_retry_lower_effort`) when the
+        reasoning did, and only then change the model
+        (:meth:`_escalate_model`) — which says nothing about the failure, so it
+        goes last and is spent by the whole batch rather than by each piece.
+        """
+        if exhausted is not None:
+            # The ceiling went on thinking, not on findings: shrinking the
+            # payload cannot shrink that, so the split is skipped and the
+            # reason names the lever that does move it. Checked before the
+            # "already a piece" case below so a piece reports it too — it is
+            # the better diagnosis wherever the truncation happens.
+            _log.warning(
+                "truncation was reasoning-bound — not splitting",
+                extra={"lens": lens.id, "batch": batch_num},
+            )
+            if effort is not None or escalate_to is not None:
+                # Either this IS the step-down retry and it went the same
+                # way — one attempt, not a cascade: the lower level did
+                # not fit either, and grinding down the ladder spends the
+                # whole review proving it — or this is the escalation,
+                # which is the last rung and takes no remedy of its own.
+                # Stepping THAT down would re-run the primary at an effort
+                # the primary has already failed at. The caller that
+                # offered the step-down decides what follows it.
+                return completed, exhausted
+            retried, retry_reason = self._retry_lower_effort(
+                messages, model, response_format, batch_num, lens, exhausted, run
+            )
+            if retry_reason is None or on_oversized is None:
+                # Answered, or this is a piece/retry — see _escalate_model
+                # for why only the whole batch may buy a fallback call.
+                return completed + retried, retry_reason
+            escalated, escalate_reason = self._escalate_model(
+                messages, model, response_format, batch_num, lens, retry_reason, run
+            )
+            return completed + retried + escalated, escalate_reason
+        if on_oversized is None:
+            # Already a piece: nothing smaller to try. Report the reason
+            # rather than recurse — an unbounded cascade would spend the
+            # whole review on a model that cannot answer at any size.
+            return completed, reason
+        findings, split_reason = on_oversized(reason, slice_hunks=slice_hunks)
+        if split_reason is None:
+            return completed + findings, None
+        # The pieces did not cover the batch either, so the payload was
+        # never the whole story. Last rung: the same request, a different
+        # model. Any findings the pieces did manage ride along, and the
+        # overlap with the escalation's collapses in `_dedupe`.
+        escalated, escalate_reason = self._escalate_model(
+            messages, model, response_format, batch_num, lens, split_reason, run
+        )
+        return completed + findings + escalated, escalate_reason
+
     def _review_split(
         self,
         reason: str,
@@ -2196,60 +2291,34 @@ class LLMReviewEngine:
                 # Whatever the model finished before the ceiling cut it off is real,
                 # schema-valid work — kept, exactly as the parse path keeps it, so
                 # the exception path is not the one place a partial answer is binned.
-                completed = self._stamp_and_bound(_salvage_truncated(exc, lens), lens)
-                exhausted = _reasoning_exhausted_reason(exc)
-                if exhausted is not None:
-                    # The ceiling went on thinking, not on findings: shrinking the
-                    # payload cannot shrink that, so the split is skipped and the
-                    # reason names the lever that does move it. Checked before the
-                    # "already a piece" case below so a piece reports it too — it is
-                    # the better diagnosis wherever the truncation happens.
-                    _log.warning(
-                        "truncation was reasoning-bound — not splitting",
-                        extra={"lens": lens.id, "batch": batch_num},
-                    )
-                    if effort is not None or escalate_to is not None:
-                        # Either this IS the step-down retry and it went the same
-                        # way — one attempt, not a cascade: the lower level did
-                        # not fit either, and grinding down the ladder spends the
-                        # whole review proving it — or this is the escalation,
-                        # which is the last rung and takes no remedy of its own.
-                        # Stepping THAT down would re-run the primary at an effort
-                        # the primary has already failed at. The caller that
-                        # offered the step-down decides what follows it.
-                        return completed, exhausted
-                    retried, retry_reason = self._retry_lower_effort(
-                        messages, model, response_format, batch_num, lens, exhausted, run
-                    )
-                    if retry_reason is None or on_oversized is None:
-                        # Answered, or this is a piece/retry — see _escalate_model
-                        # for why only the whole batch may buy a fallback call.
-                        return completed + retried, retry_reason
-                    escalated, escalate_reason = self._escalate_model(
-                        messages, model, response_format, batch_num, lens, retry_reason, run
-                    )
-                    return completed + retried + escalated, escalate_reason
-                if on_oversized is None:
-                    # Already a piece: nothing smaller to try. Report the reason
-                    # rather than recurse — an unbounded cascade would spend the
-                    # whole review on a model that cannot answer at any size.
-                    return completed, reason
-                # A refused prompt may cut inside a lone hunk (see _split_batch):
-                # input size is the whole of that failure, so a smaller slice is
-                # guaranteed to help where for the other two it is a guess.
-                findings, split_reason = on_oversized(
-                    reason, slice_hunks=isinstance(exc, ProviderInputTooLarge)
+                #
+                # The counts come off the exception only when it is a truncation:
+                # a call that spent its ceiling HAS no ceiling left, so its
+                # `output_tokens` is the denominator. The other two carry neither.
+                reasoning, spent = (
+                    (exc.reasoning_tokens, exc.output_tokens)
+                    if isinstance(exc, ProviderTruncated)
+                    else (None, None)
                 )
-                if split_reason is None:
-                    return completed + findings, None
-                # The pieces did not cover the batch either, so the payload was
-                # never the whole story. Last rung: the same request, a different
-                # model. Any findings the pieces did manage ride along, and the
-                # overlap with the escalation's collapses in `_dedupe`.
-                escalated, escalate_reason = self._escalate_model(
-                    messages, model, response_format, batch_num, lens, split_reason, run
+                return self._remedy_oversized(
+                    self._stamp_and_bound(_salvage_truncated(exc, lens), lens),
+                    reason,
+                    _reasoning_exhausted_reason(reasoning, spent),
+                    messages=messages,
+                    model=model,
+                    response_format=response_format,
+                    batch_num=batch_num,
+                    lens=lens,
+                    run=run,
+                    on_oversized=on_oversized,
+                    effort=effort,
+                    escalate_to=escalate_to,
+                    # A refused prompt may cut inside a lone hunk (see
+                    # _split_batch): input size is the whole of that failure, so a
+                    # smaller slice is guaranteed to help where for the other two
+                    # it is a guess.
+                    slice_hunks=isinstance(exc, ProviderInputTooLarge),
                 )
-                return completed + findings + escalated, escalate_reason
             return [], reason
         elapsed = time.perf_counter() - started
         self._note_answering_model(result, lens)
@@ -2312,21 +2381,26 @@ class LLMReviewEngine:
             # the only place this is ever seen, so it names which fault it was —
             # and how much of the lens survived, because "3 findings recovered"
             # and "0 recovered" are very different states to be told about.
-            findings, salvaged = exc.recovered, len(exc.recovered)
+            salvaged = len(exc.recovered)
             recovered_note = (
                 f"; {salvaged} finding{_plural(salvaged)} completed before the cut "
                 f"{_plural(salvaged, 'is', 'are')} included"
                 if salvaged
                 else ""
             )
-            # Worded like the adapter's own ceiling error (see
-            # litellm_provider._map_response): the ceiling is `max_tokens`, which
-            # is usually a value the user set, not the model's own limit.
+            # Deliberately NOT worded as a `max_tokens` hit. The adapter's error
+            # says that because it has proof — a `length` finish reason, or a
+            # response that spent a ceiling we set. Here there is none: the route
+            # called this a clean finish and the body simply stops, which can mean
+            # a cap the route never mentions or a generation that fell over. The
+            # old wording asserted the ceiling anyway and printed `output_tokens`
+            # as if it were that ceiling, sending the reader to raise a number
+            # that may not be the one they hit.
             reason = (
-                f"response truncated at the {result.output_tokens}-token `max_tokens` "
-                "ceiling — truncation was detected from the incomplete response body, so no "
-                "automatic split was attempted; raise `max_tokens` if it repeats"
-                f"{recovered_note}"
+                f"response truncated — the body stopped mid-answer after "
+                f"{result.output_tokens} output tokens while the route reported a clean "
+                "finish, so the cut was detected from the unterminated body; the batch is "
+                f"re-reviewed in smaller pieces automatically{recovered_note}"
             )
             _log.warning(reason, extra={"lens": lens.id, "recovered": salvaged})
             profiler.record_result(
@@ -2337,12 +2411,32 @@ class LLMReviewEngine:
                 findings=salvaged,
                 error=reason,
             )
-            # The findings fall through to be stamped like any others, but the
-            # reason travels with them: the call still counts as failed, so the
-            # incomplete notice fires and a partial lens is never read as a clean
-            # one. Returning the salvage without it would be the silent
-            # half-answer this whole path exists to prevent.
-            return self._stamp_and_bound(findings, lens), reason
+            # Same failure as the adapter-detected one, so the same ladder — this
+            # is the wire that was missing. The salvage is stamped like any other
+            # finding and rides along; the reason travels with it and is cleared
+            # only if a rung actually covers the batch, so a half-answer is never
+            # read as a clean bill of health.
+            #
+            # `slice_hunks` stays False: this is a cut on the way OUT, and unlike
+            # a refused prompt it gives no reason to believe a lone hunk is the
+            # unit that must shrink.
+            return self._remedy_oversized(
+                self._stamp_and_bound(exc.recovered, lens),
+                reason,
+                # The share that decides whether covering less can help, read off
+                # the ceiling the request CARRIED — `output_tokens` here is
+                # wherever the body happened to stop, which is a share of nothing.
+                _reasoning_exhausted_reason(result.reasoning_tokens, result.output_ceiling),
+                messages=messages,
+                model=model,
+                response_format=response_format,
+                batch_num=batch_num,
+                lens=lens,
+                run=run,
+                on_oversized=on_oversized,
+                effort=effort,
+                escalate_to=escalate_to,
+            )
         findings = self._stamp_and_bound(findings, lens)
         profiler.record_result(
             lens.id,
@@ -2359,7 +2453,7 @@ class LLMReviewEngine:
         return findings, None
 
 
-def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
+def _reasoning_exhausted_reason(reasoning: int | None, ceiling: int | None) -> str | None:
     """Why splitting this failure cannot help, or None when it still can.
 
     A truncation normally means the payload asked for more answer than one
@@ -2370,11 +2464,21 @@ def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
     thousand-line one. Splitting there re-spends the whole ceiling on every piece
     and fails identically — pure added latency on a review that is already slow.
 
-    Decided from the numbers the adapter measured (see ProviderTruncated), never
-    from its message: this reads the diagnosis as data, exactly as the structured
-    findings contract requires. Both counts are needed — the reasoning spend is
-    meaningless without the ceiling it is a share of — so a route that reports
-    neither keeps the split it has always had.
+    Decided from the numbers the adapter measured, never from its message: this
+    reads the diagnosis as data, exactly as the structured findings contract
+    requires. Both counts are needed — the reasoning spend is meaningless without
+    the ceiling it is a share of — so a route that reports neither keeps the split
+    it has always had.
+
+    Takes the two counts rather than the failure that carried them, because the
+    same judgement is now made on two paths and they hold them differently. A
+    ``ProviderTruncated`` spent its ceiling by definition, so its `output_tokens`
+    IS the denominator; a response the route called finished stopped somewhere
+    short of one, so its denominator is the `output_ceiling` the request was sent
+    with. Reading `output_tokens` on that second path would compare the thinking
+    against however much the model happened to write, which is not a share of
+    anything. Callers that hold no counts at all — a wall timeout, a refused
+    prompt — pass None and keep their split.
 
     The returned reason replaces the adapter's, which promises a split this
     failure is not going to get and warns that a higher ceiling makes things
@@ -2389,15 +2493,17 @@ def _reasoning_exhausted_reason(exc: BaseException) -> str | None:
     re-run at a higher cap separates them, so the reader is handed the choice
     rather than one of the two asserted as proven.
     """
-    if not isinstance(exc, ProviderTruncated):
-        return None
-    reasoning, ceiling = exc.reasoning_tokens, exc.output_tokens
     if not reasoning or not ceiling:
         return None
     if reasoning < ceiling * _REASONING_DOMINANT_SHARE:
         return None
+    # The literal name, not `type(exc).__name__`: every reason the engine reports
+    # reads as "<Fault>: <what happened>", and this diagnosis is now reached both
+    # from a response the adapter raised on and from one only the parser caught.
+    # The second has no exception to take a name from, and the fault it describes
+    # is the same one either way.
     return (
-        f"{type(exc).__name__}: spent {reasoning} of the {ceiling}-token `max_tokens` "
+        f"ProviderTruncated: spent {reasoning} of the {ceiling}-token `max_tokens` "
         "ceiling on reasoning, so the batch was not split — a smaller payload cannot "
         "shrink a thinking budget. Lower `reasoning_effort`, or raise `max_tokens` if "
         "this model simply thinks bigger than the ceiling"
