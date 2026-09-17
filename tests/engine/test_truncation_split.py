@@ -258,7 +258,18 @@ def test_an_unsplittable_batch_reports_the_ceiling_with_its_salvage() -> None:
     assert "`max_tokens`" in summary
 
 
-def test_parser_detected_truncation_does_not_claim_a_split() -> None:
+def test_an_unsplittable_parser_detected_truncation_reports_with_its_salvage() -> None:
+    """Nothing smaller to try, so it reports — and does not assert a ceiling.
+
+    The single-hunk twin of the split tests below. Two things it pins:
+
+    - it terminates rather than looping, keeping what the model completed;
+    - it does NOT claim a `max_tokens` hit. The adapter's error says that because
+      it has proof; here the route called the call finished and the body merely
+      stops, so naming a ceiling sends the reader to raise a number that may not
+      be the one they hit. The old wording asserted it anyway, and printed
+      `output_tokens` as though it were that ceiling.
+    """
     provider = FakeProvider(
         result=ProviderResult(
             text=_cut_off_json("one.py", "first_change = os.getcwd()", "cwd is never validated"),
@@ -267,12 +278,14 @@ def test_parser_detected_truncation_does_not_claim_a_split() -> None:
         )
     )
 
-    _findings, summary = LLMReviewEngine(provider).review(
+    findings, summary = LLMReviewEngine(provider).review(
         _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
     )
 
-    assert "no automatic split was attempted" in summary
-    assert "re-reviewed in smaller pieces automatically" not in summary
+    assert [f.title for f in findings] == ["cwd is never validated"]
+    assert "results may be incomplete" in summary
+    assert "stopped mid-answer" in summary
+    assert "`max_tokens` ceiling" not in summary
 
 
 class _TruncatesOnReasoning(FakeProvider):
@@ -760,3 +773,97 @@ def test_the_step_down_respects_a_termination_signal() -> None:
         clear_interrupt()
 
     assert provider.efforts == ["medium"]
+
+
+# --- The same truncation, seen by the parser instead of the adapter -----------
+#
+# Two detectors, and until now only one of them was wired to the ladder above.
+#
+# The adapter's test (litellm_provider._map_response) is `finish_reason ==
+# "length"` or the response spending a ceiling we configured. A route that
+# reports neither — litellm rewrites any finish reason it does not recognise to
+# `stop`, and a model can stop mid-JSON well short of the cap — arrives looking
+# like a clean finish, and only `parse_findings` notices the object never closed.
+#
+# That is not a different failure. It is the same cut-off generation, and the
+# same batch is still the thing that asked for more answer than one call could
+# hold. Measured: one gateway model reported 43.2% completeness on 100k-token
+# inputs — over half its lens calls returning nothing parseable — while a model
+# whose route DOES declare the ceiling recovered from the identical condition.
+# The difference bought recovery, not accuracy.
+
+
+def _clean_but_cut_off(text: str) -> ProviderResult:
+    """A response the route calls finished, whose body stops mid-object.
+
+    `output_tokens` deliberately sits well under any ceiling and no reasoning
+    breakdown is reported, so nothing here trips the adapter's test — this is
+    the shape that reaches the engine as a success.
+    """
+    return ProviderResult(text=text, input_tokens=10, output_tokens=120)
+
+
+class _CutsOffUntilSmaller(FakeProvider):
+    """Returns an unterminated body for the whole batch; answers a half cleanly.
+
+    The parse-path twin of ``_TruncatesUntilSmaller`` — identical behaviour,
+    reported through a clean ``ProviderResult`` rather than an exception.
+    """
+
+    def __init__(self, partial: str = "") -> None:
+        super().__init__()
+        self.diffs: list[str] = []
+        self._partial = partial or '{"findings": [{"path": "one.py", "li'
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        diff = "\n".join(str(m.get("content", "")) for m in messages)
+        self.diffs.append(diff)
+        if _shows(diff, "one.py", "two.py"):
+            return _clean_but_cut_off(self._partial)
+        path = "one.py" if _shows(diff, "one.py") else "two.py"
+        anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
+        return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
+
+
+def test_a_parser_detected_truncation_is_split_like_any_other() -> None:
+    """The lens is recovered, not lost, when only the parser saw the cut.
+
+    Which detector fired is an accident of what the route reports. It must not
+    decide whether the batch gets its remedy.
+    """
+    provider = _CutsOffUntilSmaller()
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]
+    assert len(provider.diffs) == 3  # the cut-off call, then one per half
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1
+
+
+def test_a_parser_detected_truncation_keeps_its_salvage_through_the_split() -> None:
+    """The findings completed before the cut ride along, as on the other path."""
+    partial = _cut_off_json("one.py", "early_change = os.sep", "sep is never validated")
+    findings, _summary = LLMReviewEngine(_CutsOffUntilSmaller(partial)).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    titles = sorted(f.title for f in findings)
+    assert "sep is never validated" in titles  # salvaged from the cut-off body
+    assert "unchecked value in two.py" in titles  # produced by the split
+    salvaged = next(f for f in findings if f.title == "sep is never validated")
+    assert salvaged.category == ReviewCategory.security.value
+
+
+def test_a_parser_detected_truncation_that_split_cleanly_reports_no_failure() -> None:
+    """A lens the split recovered is a lens that answered.
+
+    The incomplete notice exists to stop a half-answer reading as a clean bill of
+    health. Once the pieces covered the batch there is no half-answer left, and
+    firing it anyway would train readers to ignore it.
+    """
+    _findings, summary = LLMReviewEngine(_CutsOffUntilSmaller()).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert "results may be incomplete" not in summary
