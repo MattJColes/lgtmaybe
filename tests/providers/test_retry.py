@@ -2795,3 +2795,361 @@ class TestThinkingTemperatureRejection:
 
         assert result.text == "ok without temperature"
         assert seen == [0.0, "absent"]
+
+
+class TestTheSchemaLadderIsNeverSkipped:
+    """Structured output degrades one rung at a time — schema → forced tool call
+    → prompt-instructed JSON — and every trigger has to walk it.
+
+    Only the 400-rejection path did. An empty reply and an engine-reported
+    unparseable reply both jumped straight to the floor, which made a single
+    blip on one lens cost enforcement for every later call of the run: the fan-out
+    shares one provider instance and the drop is keyed by model, never lifted.
+    Bedrock is where it bit — the forced tool call is the mechanism its Converse
+    endpoint actually implements, and it was the rung being skipped."""
+
+    MODEL = "bedrock/us.anthropic.claude-opus-5"
+
+    def test_an_empty_schema_reply_demotes_to_the_tool_call_first(self) -> None:
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                return _fake_response("")
+            if "tools" in kwargs:
+                seen.append("tools")
+                return _tool_call_response('{"findings": []}')
+            seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen == ["rf", "tools"], "the tool rung must be tried before the floor"
+        assert provider.schema_dropped() is False, "enforcement was kept, so no downgrade notice"
+
+    def test_an_empty_tool_mode_reply_then_reaches_the_floor(self) -> None:
+        """One rung per observation. A model answering empty under the tool call
+        too has no mechanism left, and that IS the downgrade."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                return _fake_response("")
+            if "tools" in kwargs:
+                seen.append("tools")
+                return _fake_response("")
+            seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "a"}], self.MODEL, response_format=ReviewResult
+            )
+            result = provider.complete(
+                [{"role": "user", "content": "b"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert seen == ["rf", "tools", "tools", "plain"]
+        assert provider.schema_dropped() is True
+
+    def test_one_empty_reply_does_not_cost_the_rest_of_the_run(self) -> None:
+        """The regression this class exists for: a single blip used to send every
+        later call of the fan-out out with no schema at all."""
+        calls = {"n": 0}
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            calls["n"] += 1
+            if "response_format" in kwargs:
+                seen.append("rf")
+                return _fake_response("" if calls["n"] == 1 else '{"findings": []}')
+            if "tools" in kwargs:
+                seen.append("tools")
+                return _tool_call_response('{"findings": []}')
+            seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            for _ in range(4):
+                provider.complete(
+                    [{"role": "user", "content": "a"}], self.MODEL, response_format=ReviewResult
+                )
+
+        assert "plain" not in seen, "every call stayed schema-enforced"
+        assert provider.schema_dropped() is False
+
+    def test_the_engine_s_ask_demotes_to_the_tool_call_first(self) -> None:
+        """``drop_response_format`` is the engine reporting a reply that parsed
+        to nothing useful. That is evidence against the mechanism in play, not
+        against structured output as a whole — so it steps down one rung."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                return _fake_response("prose, not findings")
+            if "tools" in kwargs:
+                seen.append("tools")
+                return _tool_call_response('{"findings": []}')
+            seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(model=self.MODEL)
+            provider.complete(
+                [{"role": "user", "content": "a"}], self.MODEL, response_format=ReviewResult
+            )
+            provider.drop_response_format(self.MODEL, "unparseable-output")
+            assert provider.sends_response_format(self.MODEL) is True
+            provider.complete(
+                [{"role": "user", "content": "b"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert seen == ["rf", "tools"]
+        assert provider.schema_dropped() is False
+
+    def test_a_second_ask_reaches_the_floor(self) -> None:
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+            elif "tools" in kwargs:
+                seen.append("tools")
+            else:
+                seen.append("plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(model=self.MODEL)
+            provider.complete(
+                [{"role": "user", "content": "a"}], self.MODEL, response_format=ReviewResult
+            )
+            provider.drop_response_format(self.MODEL, "unparseable-output")
+            provider.drop_response_format(self.MODEL, "unparseable-output")
+            assert provider.sends_response_format(self.MODEL) is False
+            provider.complete(
+                [{"role": "user", "content": "b"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert seen == ["rf", "plain"]
+        assert provider.schema_dropped() is True
+
+    def test_an_ask_with_no_expressible_schema_goes_straight_to_the_floor(self) -> None:
+        """A ``response_format`` carrying no JSON Schema cannot become a tool at
+        all, so that rung does not exist and pretending it does would leave the
+        model sending the shape the engine just rejected."""
+        provider = LiteLLMProvider(model="openai/gpt-4o")
+
+        provider.drop_response_format("openai/gpt-4o", "unparseable-output")
+
+        assert provider.sends_response_format("openai/gpt-4o") is False
+
+
+class TestLitellmsOwnToolConversionRefused:
+    """Most Bedrock models have no native structured-output support in litellm's
+    map, so litellm silently rewrites ``response_format`` into ITS own forced
+    ``json_tool_call`` — a tool this adapter never sees in ``kwargs``.
+
+    When Bedrock refuses that shape the refusal names ``toolConfig`` /
+    ``toolChoice``, which the ``response_format`` matcher does not know, and
+    ``_is_schema_tool`` is False because the tool was never ours. Neither
+    recovery fired, the 400 is permanent, and the lens died outright — the exact
+    failure the tool fallback was built to prevent, on the models that need it
+    most."""
+
+    MODEL = "bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0"
+
+    def _refuses_tools_with(self, message: str) -> Any:
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                raise litellm.BadRequestError(
+                    message=f"litellm.BadRequestError: BedrockException - {message}",
+                    model=kwargs["model"],
+                    llm_provider="bedrock",
+                )
+            return _fake_response('{"findings": []}')
+
+        return side_effect
+
+    def test_a_named_field_refusal_degrades_instead_of_failing(self) -> None:
+        side_effect = self._refuses_tools_with(
+            '{"message":"The model returned the following errors: '
+            'toolConfig.toolChoice: Extra inputs are not permitted"}'
+        )
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+        assert provider.schema_dropped() is True
+
+    def test_a_prose_refusal_of_forced_tool_choice_is_recognised(self) -> None:
+        """Bedrock does not always name the field. "tool choice" with a space
+        carries none of the spellings the matcher knew, so the 400 read as
+        unrelated and killed the call."""
+        side_effect = self._refuses_tools_with(
+            "This model doesn't support tool choice of type tool"
+        )
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            result = provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert result.text == '{"findings": []}'
+
+    def test_our_own_tool_is_not_re_sent_into_the_same_refusal(self) -> None:
+        """The route has just refused a forced tool call. Offering it ours would
+        be the identical shape at the identical ceiling — go to the floor."""
+        seen: list[str] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if "response_format" in kwargs:
+                seen.append("rf")
+                raise litellm.BadRequestError(
+                    message="BedrockException - toolConfig.toolChoice: Extra inputs "
+                    "are not permitted",
+                    model=kwargs["model"],
+                    llm_provider="bedrock",
+                )
+            seen.append("tools" if "tools" in kwargs else "plain")
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
+            )
+
+        assert seen == ["rf", "plain"]
+
+    def test_a_callers_own_tools_are_never_blamed(self) -> None:
+        """With the caller's tools on the request a ``toolConfig`` refusal is
+        ambiguous — it may be about theirs. Guessing would silently disable
+        enforcement over someone else's bug, so the error surfaces as itself."""
+        caller_tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        side_effect = self._refuses_tools_with("toolConfig.tools: Extra inputs are not permitted")
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider()
+            with pytest.raises(litellm.BadRequestError):
+                provider.complete(
+                    [{"role": "user", "content": "hi"}],
+                    self.MODEL,
+                    response_format=ReviewResult,
+                    tools=caller_tools,
+                )
+
+
+class TestBedrockSchemaWhitelist:
+    """Bedrock's native structured-output validator takes the OpenAI *strict*
+    subset of JSON Schema and answers "Extra inputs are not permitted" for
+    anything outside it.
+
+    Removing the keywords one incident at a time does not converge: issue #531
+    was ``minimum``, and the very next keyword in the same class — ``default``,
+    which pydantic emits for every field with one — was still on the wire. The
+    schema is therefore pruned to the keywords the subset names, not stripped of
+    the ones a bug report happened to reach. Everything pruned is a constraint
+    the same pydantic model re-checks when the reply is parsed, so nothing is
+    enforced less by leaving it out."""
+
+    MODEL = "bedrock/us.anthropic.claude-opus-5"
+
+    def _sent_schema(self, response_format: Any) -> dict[str, Any]:
+        with patch(
+            "litellm.completion", return_value=_fake_response('{"findings": []}')
+        ) as mock_completion:
+            provider = LiteLLMProvider()
+            provider.complete(
+                [{"role": "user", "content": "hi"}], self.MODEL, response_format=response_format
+            )
+        sent: dict[str, Any] = mock_completion.call_args.kwargs["response_format"]
+        return sent
+
+    def test_default_is_pruned_like_the_numeric_bounds(self) -> None:
+        """``ReviewFinding.anchored`` and ``.broad`` both carry one, and every
+        field is in ``required`` anyway, so the model must supply them."""
+        sent = self._sent_schema(ReviewResult)
+
+        assert '"default"' not in json.dumps(sent)
+
+    @pytest.mark.parametrize(
+        "keyword",
+        ["$defs", "$ref", "additionalProperties", "anyOf", "enum", "items", "required"],
+    )
+    def test_the_structural_keywords_survive(self, keyword: str) -> None:
+        """Pruning must not reach the keywords that carry the shape — a schema
+        without its ``$defs`` or ``enum`` constrains nothing."""
+        sent = self._sent_schema(ReviewResult)
+
+        assert f'"{keyword}"' in json.dumps(sent)
+
+    def test_the_schema_still_describes_the_findings_envelope(self) -> None:
+        sent = self._sent_schema(ReviewResult)
+
+        schema = sent["json_schema"]["schema"]
+        assert schema["properties"]["findings"]["items"]["$ref"]
+        assert "path" in schema["$defs"]["ReviewFinding"]["properties"]
+        assert sent["json_schema"]["strict"] is True
+
+    def test_a_property_named_like_a_pruned_keyword_survives(self) -> None:
+        """The prune removes schema keywords, not fields. ``properties`` maps
+        NAMES to schemas, so a field called ``default`` is a field."""
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "Thing",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "default": {"type": "string", "default": "x"},
+                        "minimum": {"type": "integer", "minimum": 0},
+                    },
+                },
+                "strict": True,
+            },
+        }
+        sent = self._sent_schema(response_format)
+
+        properties = sent["json_schema"]["schema"]["properties"]
+        assert properties["default"] == {"type": "string"}
+        assert properties["minimum"] == {"type": "integer"}
+        # The caller's dict is reused across the lens fan-out — never mutated.
+        assert response_format["json_schema"]["schema"]["properties"]["default"] == {
+            "type": "string",
+            "default": "x",
+        }
+
+    def test_enum_values_are_not_read_as_schemas(self) -> None:
+        """``enum`` holds VALUES. Descending into them would prune the keys off
+        an object a caller legitimately wants matched exactly."""
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "Thing",
+                "schema": {
+                    "type": "object",
+                    "properties": {"mode": {"enum": [{"default": 1}, "off"]}},
+                },
+                "strict": True,
+            },
+        }
+        sent = self._sent_schema(response_format)
+
+        assert sent["json_schema"]["schema"]["properties"]["mode"]["enum"] == [
+            {"default": 1},
+            "off",
+        ]

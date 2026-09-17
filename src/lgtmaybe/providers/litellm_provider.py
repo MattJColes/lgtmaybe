@@ -472,10 +472,19 @@ def _rejects_tool_config(exc: Exception) -> bool:
     --enable-auto-tool-choice and --tool-call-parser to be set``, which carries
     none of ``_REJECTION_PHRASES`` — so without these the 400 read as permanent
     and killed the review rather than degrading to prompt-instructed JSON.
+
+    The spaced spellings are Bedrock's. It does not always name the field: a
+    model or region without forced tool use answers in prose — "This model
+    doesn't support tool choice of type tool" — which carries no underscore, no
+    camel case, and not even the plural ``tools`` the matcher keyed on. That 400
+    read as unrelated, so it was re-raised and the lens died where it could have
+    degraded.
     """
     if any(phrase in str(exc).lower() for phrase in _TOOL_PARSER_PHRASES):
         return True
-    return _rejects_field(exc, "toolconfig", "tool_choice", "toolchoice", "tools")
+    return _rejects_field(
+        exc, "toolconfig", "tool_choice", "toolchoice", "tools", "tool choice", "tool use"
+    )
 
 
 # The one tool we ever offer. Named, not anonymous, because ``tool_choice`` has
@@ -505,25 +514,61 @@ def _json_schema_of(response_format: Any) -> dict[str, Any] | None:
 
 _BEDROCK_PREFIX = "bedrock/"
 
-# Bedrock's structured-output validator accepts only a subset of JSON Schema:
-# the numeric-bound keywords pydantic emits for ``Field(ge=…, le=…)`` —
-# ``ReviewFinding.line``'s ``minimum``, ``confidence``'s ``minimum``/``maximum``
-# — are "Extra inputs" that 400 the whole request before the model ever runs
-# (issue #531). The bounds are re-checked by the same pydantic model when the
-# reply is parsed, so nothing is enforced less by not sending them.
-_SCHEMA_BOUND_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf")
+# Bedrock's structured-output validator accepts only a subset of JSON Schema —
+# the OpenAI *strict* subset — and answers "Extra inputs are not permitted" for
+# any keyword outside it, 400ing the whole request before the model ever runs.
+#
+# A WHITELIST, not a blacklist, and that is the point. Issue #531 was
+# ``minimum`` (pydantic's rendering of ``Field(ge=…)`` on ``ReviewFinding.line``
+# and ``confidence``); removing it left ``default`` — which pydantic emits for
+# every field carrying one, ``anchored`` and ``broad`` here — still on the wire
+# for the next report to find. Naming what the subset takes converges; removing
+# what a bug report reached does not.
+#
+# Everything pruned is a constraint the same pydantic model re-checks when the
+# reply is parsed, so nothing is enforced less by leaving it out. The structural
+# keywords stay: a schema without its ``$defs``/``$ref``/``enum`` constrains
+# nothing at all.
+_BEDROCK_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "prefixItems",
+        "enum",
+        "const",
+        "anyOf",
+        "allOf",
+        "oneOf",
+        "not",
+        "$ref",
+        "$defs",
+        "definitions",
+        "title",
+        "description",
+    }
+)
 
-# Keys whose value maps property NAMES to schemas. The strip descends into
+# Keys whose value maps property NAMES to schemas. The prune descends into
 # their values but never pops keys off the map itself: a field literally named
-# "minimum" is a field, not a keyword.
+# "default" is a field, not a keyword.
 _SCHEMA_NAME_MAPS = ("properties", "$defs", "definitions", "patternProperties")
 
+# The whitelisted keys whose value holds literal VALUES rather than sub-schemas.
+# Descending into them would prune the keys off an object a caller wants matched
+# exactly. Every other value-bearing keyword is pruned before the walk reaches it.
+_SCHEMA_VALUE_KEYS = ("enum", "const")
 
-def _strip_numeric_bounds(schema: dict[str, Any]) -> None:
-    """Remove the numeric-bound keywords from *schema*, in place, recursively."""
-    for key in _SCHEMA_BOUND_KEYS:
-        schema.pop(key, None)
+
+def _prune_to_supported_keys(schema: dict[str, Any]) -> None:
+    """Keep only :data:`_BEDROCK_SCHEMA_KEYS` in *schema*, in place, recursively."""
+    for unsupported in [key for key in schema if key not in _BEDROCK_SCHEMA_KEYS]:
+        schema.pop(unsupported, None)
     for key, value in schema.items():
+        if key in _SCHEMA_VALUE_KEYS:
+            continue
         if key in _SCHEMA_NAME_MAPS and isinstance(value, dict):
             children: Iterable[Any] = value.values()
         elif isinstance(value, list):
@@ -532,7 +577,7 @@ def _strip_numeric_bounds(schema: dict[str, Any]) -> None:
             children = (value,)
         for child in children:
             if isinstance(child, dict):
-                _strip_numeric_bounds(child)
+                _prune_to_supported_keys(child)
 
 
 def _bedrock_wire_response_format(response_format: Any) -> Any:
@@ -547,7 +592,7 @@ def _bedrock_wire_response_format(response_format: Any) -> Any:
     class, because each litellm transformation knows its own schema dialect
     (vertex deliberately derives a compact ``$ref`` schema from the class that a
     pre-converted strict dict would deny it). A shape carrying no schema —
-    ``{"type": "json_object"}``, say — has nothing to strip and goes out as it
+    ``{"type": "json_object"}``, say — has nothing to prune and goes out as it
     came.
     """
     if isinstance(response_format, type) and issubclass(response_format, BaseModel):
@@ -560,7 +605,7 @@ def _bedrock_wire_response_format(response_format: Any) -> Any:
     schema = nested.get("schema") if isinstance(nested, Mapping) else None
     if not isinstance(schema, dict):
         return response_format
-    _strip_numeric_bounds(schema)
+    _prune_to_supported_keys(schema)
     return converted
 
 
@@ -711,6 +756,14 @@ class LiteLLMProvider:
         # enforcement preserved by another mechanism, that one is enforcement
         # given up. Keyed by MODEL for the same reason.
         self._schema_tool: set[str] = set()
+        # Models whose `response_format` has been seen to carry a JSON Schema,
+        # so the tool rung exists for them. Only `_call` can know this — it sees
+        # the request — and only `drop_response_format` needs it, because that
+        # one is asked to step down with no request in hand. A `response_format`
+        # with no schema in it (`{"type": "json_object"}`) cannot become a tool
+        # at all, and pretending that rung exists would leave the model sending
+        # the shape the engine just rejected. Keyed by MODEL like the two above.
+        self._schema_expressible: set[str] = set()
         # What each model's route takes, as litellm's per-route list answers it
         # (see `_honour_route_schema_support`): None for a route the lookup
         # could not name. A memo of the LOOKUP only — the decision it feeds is
@@ -848,6 +901,40 @@ class LiteLLMProvider:
             )
         return True
 
+    def _demote_schema(self, model: str, why: str) -> None:
+        """Step *model*'s structured output down ONE rung, with no request in hand.
+
+        The request-shaped triggers demote by rewriting ``kwargs`` — a rejected
+        ``response_format`` becomes the forced tool call, an empty reply under
+        the tool call gives the schema up. This one is asked by the ENGINE, which
+        holds no request: it has parsed a reply that arrived well-formed and
+        turned out not to be findings, and that is a fact only it can see.
+
+        The ladder is the same either way, which is the whole point of routing it
+        here. Marking the model for tool mode is enough to demote it: the next
+        ``_call`` reads that set and swaps the schema over before the request
+        goes out. Straight to the floor — what this used to do — meant one
+        unparseable reply on one lens cost enforcement for every later call of
+        the run, including the mechanism that reply was never produced under.
+
+        The rung has to exist, though. A ``response_format`` carrying no JSON
+        Schema cannot become a tool, so for a model that has only ever sent one
+        of those the tool mode would be a no-op and the model would keep sending
+        the shape the engine just rejected — the floor is the honest answer
+        there.
+        """
+        if model in self._schema_dropped:
+            return
+        if model in self._schema_tool or model not in self._schema_expressible:
+            self._disable_response_format(model, why)
+            return
+        self._schema_tool.add(model)
+        _log.info(
+            "structured output stepped down to a forced tool call for this model — "
+            "the schema is still enforced",
+            extra={"model": model, "reason": why},
+        )
+
     @staticmethod
     def _strip_schema(kwargs: dict[str, Any]) -> None:
         """Remove every structured-output mechanism THIS ADAPTER added.
@@ -862,13 +949,19 @@ class LiteLLMProvider:
             kwargs.pop("tool_choice", None)
 
     def drop_response_format(self, model: str, why: str) -> None:
-        """Stop sending the schema for *model* — asked by the engine, not inferred.
+        """Step *model*'s structured output down a rung — asked by the engine.
 
         The two existing triggers are things the adapter can see for itself: a
         400 naming the param, and schema mode decoding to an empty string. The
         third cannot be seen from here at all — a reply that arrives non-empty
         and well-formed on the wire, and turns out not to be findings. Only the
         engine parses, so only the engine knows.
+
+        It steps down rather than stopping outright (see :meth:`_demote_schema`),
+        because the engine's evidence is against the mechanism that produced the
+        reply, not against enforcement itself. The name is unchanged: the engine
+        feature-detects this method by it, and what the engine means — "stop
+        trusting this schema mode" — is exactly what a demotion does.
 
         Hence the first engine→adapter *setter*, where ``schema_dropped`` and
         ``lower_reasoning_effort`` are read-only probes. It stays off the frozen
@@ -880,7 +973,7 @@ class LiteLLMProvider:
         the one ``_call`` looks up — a factory-built provider carries the
         prefixed litellm string, and the engine only knows ``cfg.model``.
         """
-        self._disable_response_format(self.model or model, why)
+        self._demote_schema(self.model or model, why)
 
     def sends_response_format(self, model: str) -> bool:
         """Whether a call for *model* would actually carry the schema.
@@ -1113,6 +1206,8 @@ class LiteLLMProvider:
             # refuses) the schema, so don't pay the wasted round-trip again —
             # apply either up front.
             self._honour_route_schema_support(model, kwargs)
+            if _json_schema_of(kwargs.get("response_format")) is not None:
+                self._schema_expressible.add(model)
             for param in self._rejected_params.get(model, ()):
                 kwargs.pop(param, None)
             if model in self._schema_dropped:
@@ -1150,9 +1245,18 @@ class LiteLLMProvider:
                 # here must not report only the recovery's cost (the same
                 # rule `attempts` follows for the extra request).
                 spent_cost = result.cost_usd
-                if kwargs.get("response_format") is not None or _is_schema_tool(
-                    kwargs.get("tools")
-                ):
+                # ONE RUNG, not the floor. An empty body is evidence against the
+                # mechanism that was in play, not against structured output as a
+                # whole — so a schema-mode blip is re-sent as the forced tool
+                # call first, and only an empty reply under THAT gives the schema
+                # up. Going straight to the floor here made a single empty reply
+                # on one lens cost enforcement for every later call of the run:
+                # the fan-out shares one provider instance, the drop is keyed by
+                # model, and nothing ever lifts it. On bedrock it skipped the one
+                # mechanism Converse actually implements.
+                had_schema = kwargs.get("response_format") is not None
+                demoted = had_schema and self._use_schema_tool(model, kwargs)
+                if not demoted and (had_schema or _is_schema_tool(kwargs.get("tools"))):
                     self._disable_response_format(model, "empty-response")
                     self._strip_schema(kwargs)
                 result = self._raw_completion(model, messages, kwargs, count_request)
@@ -1251,6 +1355,30 @@ class LiteLLMProvider:
             if not self._use_schema_tool(model, kwargs):
                 self._disable_response_format(model, "rejected")
                 kwargs.pop("response_format")
+            return True
+        # The schema is in flight but the refusal names a TOOL field, and there
+        # is no tool of ours on the request — so litellm rewrote the schema into
+        # one of its own. It does that for every bedrock model its capability map
+        # does not flag for native structured output, which is most of them: a
+        # forced ``json_tool_call`` this adapter never sees in ``kwargs``.
+        #
+        # Neither recovery could fire. The matcher above does not know the word
+        # ``toolConfig``, and ``_is_schema_tool`` is False because the tool was
+        # never ours — so a permanent 400 ended the lens on exactly the models
+        # the tool fallback exists for. Swapping OUR tool in would re-send the
+        # same forced-tool shape the route just refused, at the same ceiling, so
+        # this rung is the floor: prompt-instructed JSON, announced.
+        #
+        # Only when the caller brought no tools. With theirs on the request a
+        # ``toolConfig`` refusal may be about theirs, and guessing would disable
+        # enforcement over someone else's bug.
+        if (
+            kwargs.get("response_format") is not None
+            and kwargs.get("tools") is None
+            and _rejects_tool_config(exc)
+        ):
+            self._disable_response_format(model, "internal-tool-rejected")
+            self._strip_schema(kwargs)
             return True
         if _is_schema_tool(kwargs.get("tools")) and _rejects_tool_config(exc):
             self._disable_response_format(model, "tool-rejected")
