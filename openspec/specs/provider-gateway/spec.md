@@ -191,22 +191,22 @@ rather than fail — `temperature` when only the default value is accepted,
 before the schema, whose matcher would otherwise claim `output_config.effort`
 and drop the wrong param), and the structured-output `response_format` under
 either spelling of the field it becomes: the Anthropic layer's
-`output_config.format` or the Converse-level `outputConfig`. `drop_params`
-cannot cover these — the capability map says the param is supported, so the
-refusal is only visible in the error. A rejected `response_format` SHALL first
-be re-sent as the SAME schema as a forced tool call; only a route refusing
-that too falls back to prompt-instructed JSON. Each outcome SHALL be
-remembered for THAT MODEL's later calls only, and losing the schema SHALL be
-announced once — silently, it reads as a model that stopped honouring it.
-litellm's stdout banner SHALL be suppressed, and the engine MAY ask for the
-same drop on the one trigger the adapter cannot see: a well-formed reply that
-is not findings.
+`output_config.format` or the Converse-level `outputConfig`. It SHALL also
+degrade a refusal of the tool shape litellm rewrote the schema into on the
+caller's behalf — a tool-field refusal arriving while a `response_format` is in
+flight with no tool of the adapter's own on the request, and the caller holding
+none either. `drop_params` cannot cover any of these — the capability map says
+the param is supported, so the refusal is only visible in the error. Each
+outcome SHALL be remembered for THAT MODEL's later calls only, and losing the
+schema SHALL be announced once — silently, it reads as a model that stopped
+honouring it. litellm's stdout banner SHALL be suppressed.
 <!-- anchor: provider.param-drop -->
 
-#### Scenario: the route rejects the structured-output field
-- **WHEN** a Bedrock model 400s on the field `response_format` became
-- **THEN** the same schema is re-sent as a forced tool call and the rest of the
-  fan-out uses that shape up front, keeping enforcement instead of losing it
+#### Scenario: litellm converted the schema into its own forced tool
+- **WHEN** a Bedrock model with no native structured-output support 400s on
+  `toolConfig`, the tool having been built by litellm rather than the adapter
+- **THEN** the review degrades to prompt-instructed JSON rather than dying on a
+  permanent 400 no recovery could see
 
 #### Scenario: another model shares the provider
 - **WHEN** one model rejects the schema while a second model — a fallback, or
@@ -222,6 +222,41 @@ is not findings.
 #### Scenario: a provider error is mapped during a machine-readable run
 - **WHEN** litellm maps a provider error while `--format json` is in force
 - **THEN** nothing is printed to stdout, so the findings array stays parseable
+
+### Requirement: Structured output degrades one rung at a time
+
+Every trigger that doubts a model's structured output SHALL step it down ONE
+rung — schema, then the SAME schema as a forced tool call, then
+prompt-instructed JSON — never straight to the floor. The triggers are a 400
+naming the field, a reply whose schema mode decoded to nothing, and the engine
+reporting a well-formed reply that was not findings; each is a single
+observation about the mechanism in play, not about enforcement as a whole. The
+floor SHALL cost two observations, and the tool rung SHALL be skipped only when
+it cannot exist — a `response_format` carrying no JSON Schema, or a route that
+has already refused a tool. Reaching the floor SHALL retire the tool with it.
+
+One rung per observation is what bounds the blast radius. The fan-out shares one
+provider instance, the outcome is keyed by model, and nothing lifts it for the
+rest of the run, so a single empty reply on one lens used to cost enforcement
+for every later call — including on Bedrock, whose Converse endpoint implements
+structured output AS the forced tool call that was being skipped.
+<!-- anchor: provider.schema-ladder -->
+
+#### Scenario: one lens gets an empty reply under the schema
+- **WHEN** a schema-mode call returns an empty body
+- **THEN** it is re-sent as a forced tool call, and the rest of the fan-out stays
+  schema-enforced rather than dropping to prompt-instructed JSON
+
+#### Scenario: the engine reports a reply that was not findings
+- **WHEN** the engine asks the adapter to stop trusting the schema mode
+- **THEN** the model steps down to the forced tool call, and only a second such
+  ask gives the schema up
+
+#### Scenario: the rung does not exist
+- **WHEN** the model's `response_format` carries no JSON Schema, so no tool could
+  enforce it
+- **THEN** the drop goes straight to the floor rather than leaving the model
+  sending the shape that was just rejected
 
 ### Requirement: The schema mechanism is chosen for the route before the first call
 
@@ -286,28 +321,32 @@ and handed to a caller that owns the remedy exactly as a truncation is.
 
 ### Requirement: The bedrock schema is narrowed to the subset its validator takes
 
-On the bedrock route the structured-output schema SHALL go out without the
-numeric-bound keywords pydantic derives from field constraints (`minimum`,
-`maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`): Bedrock's
-structured-output validator treats them as extra inputs and 400s the whole
-request before the model ever runs. The request SHALL otherwise carry the exact
-dict litellm would derive from the pydantic class itself, applied per effective
-model — a non-bedrock fallback keeps the class, whose own route derives its own
-schema dialect from it — and the strip SHALL remove only keywords, never a
-property that happens to share a keyword's name. Nothing is enforced less: the
-same pydantic model re-checks the bounds when the reply is parsed.
+On the bedrock route the structured-output schema SHALL be pruned to the
+keywords Bedrock's validator names — the OpenAI strict subset — rather than
+stripped of the ones a bug report reached: anything outside it is an extra input
+that 400s the whole request before the model ever runs. A whitelist because a
+blacklist does not converge; removing `minimum` left `default`, which pydantic
+emits for every field carrying one, on the wire for the next report to find. The
+structural keywords SHALL survive, since a schema without its `$defs`, `$ref` or
+`enum` constrains nothing. The request SHALL otherwise carry the exact dict
+litellm would derive from the pydantic class itself, applied per effective model
+— a non-bedrock fallback keeps the class, whose own route derives its own schema
+dialect from it — and the prune SHALL remove only keywords, never a property
+that happens to share a keyword's name, and never descend into a keyword holding
+literal values. Nothing is enforced less: the same pydantic model re-checks every
+pruned constraint when the reply is parsed.
 <!-- anchor: provider.schema-subset -->
 
 #### Scenario: a bedrock model is asked for structured output
 - **WHEN** a review call goes out to a bedrock model with a pydantic
-  `response_format` whose fields carry `ge`/`le` bounds
-- **THEN** the request carries the schema litellm would derive minus the bound
-  keywords, and the reply is still validated against the full model on parse
+  `response_format` whose fields carry `ge`/`le` bounds and defaults
+- **THEN** the request carries the schema litellm would derive minus both, and
+  the reply is still validated against the full model on parse
 
 #### Scenario: the tool-mode fallback re-sends the schema
 - **WHEN** the route refuses `response_format` and the schema is re-sent as a
   forced tool call
-- **THEN** the tool's parameters carry the stripped schema too, so the same
+- **THEN** the tool's parameters carry the pruned schema too, so the same
   validator cannot reject the recovery
 
 ### Requirement: A configured param is never discarded in silence

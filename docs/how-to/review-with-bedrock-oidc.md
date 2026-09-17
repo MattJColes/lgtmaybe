@@ -169,18 +169,30 @@ account and region. For an inference-profile id (`us.`/`eu.`/`apac.`-prefixed),
 the policy must also allow the `inference-profile/*` ARN, not just
 `foundation-model/*`.
 
-**`output_config.format: Extra inputs are not permitted`** — the model's Converse
-route doesn't accept the structured-output field lgtmaybe asks for, and Bedrock
-rejects the whole request with a 400. No action is needed: lgtmaybe detects the
-rejection and re-sends the *same* schema through the mechanism Converse does
-implement — a forced tool call, whose arguments are the findings — so output
-stays schema-enforced. It remembers that for the rest of the run, so the rest of
-the lens fan-out uses that shape straight away. Only if the route refuses the
-tool schema too does it fall back to prompt-instructed JSON (the prompt asks for
-JSON anyway and the parser is lenient); that fallback is logged as a warning. If
-you're on a build from before this (the symptom is every lens failing at once,
-and the review reporting `every review call failed`), upgrade, or pass
-`--no-structured-output` / set `structured_output: false` as a stopgap.
+**`output_config.format: Extra inputs are not permitted`**, **`outputConfig`**,
+or a `toolConfig` / "doesn't support tool choice" refusal — the model's Converse
+route doesn't accept the structured-output shape lgtmaybe asks for, and Bedrock
+rejects the whole request with a 400. No action is needed: enforcement degrades
+one rung at a time rather than being switched off. A rejected `response_format`
+is re-sent as the *same* schema through the mechanism Converse does implement —
+a forced tool call, whose arguments are the findings — and the rest of the lens
+fan-out uses that shape straight away. Only a route that refuses the tool too
+falls back to prompt-instructed JSON (the prompt asks for JSON anyway and the
+parser is lenient); that fallback is logged as a warning naming the model and
+the reason. If you're on a build from before this (the symptom is every lens
+failing at once, and the review reporting `every review call failed`), upgrade,
+or pass `--no-structured-output` / set `structured_output: false` as a stopgap.
+
+**Every review comes back unstructured after one odd reply** — an empty reply,
+or one that parsed to something that wasn't findings, is evidence against the
+mechanism in play, not against enforcement. It now steps the model down to the
+forced tool call and keeps the schema; only a second such reply gives it up. On
+a build from before this, one blip on one lens cost enforcement for every later
+call of the run. The provider log names what happened:
+`structured output stepped down to a forced tool call` is the middle rung and
+costs you nothing, while `structured output disabled for this model` is the
+floor and carries a `reason` (`empty-response`, `unparseable-output`,
+`tool-rejected`, `internal-tool-rejected`) worth reading.
 
 **`The provided model identifier is invalid`** — the `model` is not a Bedrock
 model id. Two common causes: (1) it's a non-Bedrock id such as `openai.gpt-5.5`
