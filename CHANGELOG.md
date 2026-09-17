@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.0...lgtmaybe-v2.8.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **engine:** remedy a parser-detected truncation like any other ([#652](https://github.com/MattJColes/lgtmaybe/issues/652)) ([48b7694](https://github.com/MattJColes/lgtmaybe/commit/48b769472509f5b9b3c425ee3110acd6655cac91))
+* **provider:** walk the structured-output ladder on every trigger ([#654](https://github.com/MattJColes/lgtmaybe/issues/654)) ([eb86515](https://github.com/MattJColes/lgtmaybe/commit/eb865153000d663c22938756c9caa8eeaea5a163))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 8 updates ([#650](https://github.com/MattJColes/lgtmaybe/issues/650)) ([9ab9242](https://github.com/MattJColes/lgtmaybe/commit/9ab92422d6a4366386b886bc03fae7f229a8ecdc))
+* raise litellm floor to 1.101.0 for corrected price map ([#653](https://github.com/MattJColes/lgtmaybe/issues/653)) ([916d4cf](https://github.com/MattJColes/lgtmaybe/commit/916d4cff73e1c248177980d67f354407814cf95f))
+
 ## [2.8.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.7.0...lgtmaybe-v2.8.0) (2026-09-08)
 
 
