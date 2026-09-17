@@ -88,6 +88,12 @@ engine.recursive-walk:
       has: { field: name, regex: '^batch_files$' }
     files: [src/lgtmaybe/engine/**/*.py]
 
+engine.truncation-detection:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_remedy_oversized$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.timeout-split:
   - rule:
       kind: function_definition

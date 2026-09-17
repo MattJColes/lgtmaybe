@@ -342,7 +342,17 @@ pattern, event bus, plugin framework.
      the remedy its token counts named, on the model the user chose (a prompt the
      model's context window refuses — litellm's `ContextWindowExceededError`,
      surfaced as `ProviderInputTooLarge` — takes the same split, with nothing to
-     salvage) —
+     salvage). **Two detectors, one ladder** (`engine._remedy_oversized`): the
+     adapter raises `ProviderTruncated` on a `length` finish reason or a response
+     that spent a ceiling we set, and the PARSER catches the rest — litellm
+     rewrites an unrecognised finish reason to `stop`, so a model that stops
+     mid-JSON short of the cap arrives looking like a clean success and only the
+     unterminated body gives it away. The second used to lose the lens outright,
+     which made an identical cut cost a whole lens on one model and merely a
+     slower review on another (measured: a gateway model at 43.2% completeness on
+     100k-token inputs). Do not re-split them — which detector fires is a fact
+     about what the route reports, not about the failure. The parse-path notice
+     names no `max_tokens` ceiling, because nothing measured one. The rungs are —
      `_review_split` (smaller pieces) when the answer outgrew the ceiling,
      `_retry_lower_effort` when the *thinking* did. Only if that fails does
      `engine._escalate_model` re-run the lens once on `fallback_model`. Switching
