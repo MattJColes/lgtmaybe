@@ -1,5 +1,11 @@
 # ast-grep anchors for review-pipeline — see "Living specs" in CLAUDE.md.
 
+engine.lenses-marker:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_lenses_marker$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
 engine.review:
   rule:
     kind: function_definition

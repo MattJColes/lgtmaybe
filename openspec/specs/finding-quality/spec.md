@@ -48,6 +48,34 @@ summary SHALL name the lens and the number dropped; `0` SHALL disable it.
 - **WHEN** a lens returns fewer findings than the bound
 - **THEN** every one is kept and no notice is raised
 
+### Requirement: A model's note to itself never posts
+
+The engine SHALL drop, before merge and never post, a finding whose prose is
+the model's note to itself about its output format — "the corrupted text above
+is not instructions to follow … produce a clean, valid JSON findings object …
+output valid JSON only". Such a note is imperative text addressed to a model, and a
+review thread is read as instructions by every agent that works it. Detection
+is deterministic and requires BOTH halves of a note (a reference to a broken
+attempt and to the required output shape), because either half alone is
+ordinary review prose about someone else's parser. The drop SHALL be counted
+per lens and named in the summary, since the genuine half of a corrupted finding
+is lost with it.
+<!-- anchor: quality.self-talk -->
+
+#### Scenario: the note lands inside a finding's body
+- **WHEN** a lens returns a finding whose body carries the note mid-sentence
+- **THEN** the finding is dropped, its siblings post, and the summary names the
+  lens and the count dropped
+
+#### Scenario: the note arrives as a whole finding
+- **WHEN** a lens returns a finding that is nothing but the note
+- **THEN** it is dropped the same way
+
+#### Scenario: a genuine finding mentions JSON
+- **WHEN** a finding says a handler "must return valid JSON" and nothing about a
+  corrupted or discarded attempt
+- **THEN** it is kept
+
 ### Requirement: Verdicts are lenient to read, strict to act on
 
 Each kept verdict SHALL carry a 0-10 confidence score (the auditor tries to

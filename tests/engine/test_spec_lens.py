@@ -336,3 +336,67 @@ class TestSpecAddedByThePR:
 
         assert "SPEC_START" not in _prompts(provider)
         assert len(provider.calls) == 4
+
+
+class TestOverBudgetSpec:
+    """A spec that matched and could not be sent is a lens the round should have
+    run and did not — the summary says so. Silence is right for "nothing
+    matched"; it is wrong here, because a gate reading the summary would count
+    the round complete."""
+
+    # Far over any budget however tokens are counted (the exact encoder, or the
+    # ~3-chars-per-token fallback when it cannot be fetched).
+    _HUGE = "1. WHEN a link is created THEN it SHALL expire in 30 days\n" * 20_000
+
+    def _write_huge_kiro_spec(self, root: Path, slug: str) -> None:
+        spec_dir = root / ".kiro" / "specs" / slug
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "requirements.md").write_text(self._HUGE, encoding="utf-8")
+        (spec_dir / "tasks.md").write_text(self._HUGE, encoding="utf-8")
+
+    def test_a_matched_spec_that_fits_nothing_skips_the_lens_with_a_notice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._write_huge_kiro_spec(tmp_path, "payment-links")
+        monkeypatch.chdir(tmp_path)
+        provider = FakeProvider(findings=[])
+
+        _findings, summary = LLMReviewEngine(provider).review(
+            _ctx(head_branch="payment-links"), _cfg(max_input_tokens=80_000)
+        )
+
+        assert "SPEC_START" not in _prompts(provider)
+        assert len(provider.calls) == 4
+        assert "`.kiro/specs/payment-links` matches this PR" in summary
+        assert "fit the spec budget (10000 tokens" in summary
+        assert "the spec lens was skipped" in summary
+
+    def test_a_spec_that_fits_beside_one_that_does_not_still_runs_and_names_the_gap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_kiro_spec(tmp_path, "payment-links")
+        self._write_huge_kiro_spec(tmp_path, "payment-refunds")
+        monkeypatch.chdir(tmp_path)
+        provider = FakeProvider(findings=[])
+
+        _findings, summary = LLMReviewEngine(provider).review(
+            _ctx(title="deliver payment-links and payment-refunds"),
+            _cfg(max_input_tokens=80_000),
+        )
+
+        assert len(provider.calls) == 5
+        assert "`.kiro/specs/payment-refunds` matches this PR" in summary
+        assert "judged the diff against the rest only" in summary
+
+    def test_a_spec_within_budget_raises_no_notice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_kiro_spec(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        provider = FakeProvider(findings=[])
+
+        _findings, summary = LLMReviewEngine(provider).review(
+            _ctx(head_branch="payment-links"), _cfg()
+        )
+
+        assert "spec budget" not in summary
