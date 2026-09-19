@@ -2723,10 +2723,12 @@ class _SpecContext(NamedTuple):
 
     #: The redacted spec block, or None to skip the spec lens.
     text: str | None
-    #: Roots of the specs that matched this PR but none of whose files fit the
-    #: budget. A matched spec that goes unsent is a lens the round should have
-    #: run and did not, which the summary says out loud — unlike the ordinary
-    #: "nothing matched" skip, which is silent by design.
+    #: Roots of the specs that matched this PR but none of whose files could fit
+    #: the budget on their own. A matched spec that goes unsent is a lens the
+    #: round should have run and did not, which the summary says out loud —
+    #: unlike the ordinary "nothing matched" skip, which is silent by design. A
+    #: spec that lost the budget to a higher-ranked one is not here: it could
+    #: have fit, so the notice's advice would be wrong for it.
     unfit: tuple[str, ...]
 
 
@@ -2769,7 +2771,9 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> _SpecContext
         head_texts=ctx.file_contents,
         budget_tokens=budget,
     )
-    unfit = tuple(b.root for b in selected if not any(path in contents for path in b.files))
+    unfit = specs.unfit_bundles(
+        selected, contents, root=root, head_texts=ctx.file_contents, budget_tokens=budget
+    )
     if unfit:
         _log.warning(
             "matched spec did not fit the spec budget",

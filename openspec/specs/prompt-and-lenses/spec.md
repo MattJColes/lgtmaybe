@@ -224,7 +224,9 @@ changes, which come from its head text.
 #### Scenario: a spec directory unrelated to the PR
 - **WHEN** several specs exist and none is edited, named by the branch, or named
   by the stated intent
-- **THEN** no spec is selected and the lens is skipped
+- **THEN** no spec is selected and the lens is skipped — an un-archived change
+  proposal is not evidence on its own; being in flight only ranks it above a
+  living spec the PR also names
 
 #### Scenario: the PR commits the spec it implements
 - **WHEN** a selected spec file is among the PR's changed files
@@ -235,6 +237,8 @@ changes, which come from its head text.
 - **THEN** that entry is carried into the spec block as a claim to verify
 
 #### Scenario: a matched spec exceeds the spec budget
-- **WHEN** a selected spec has no file that fits `max_input_tokens // 8`
+- **WHEN** a selected spec has no file that fits `max_input_tokens // 8` on its own
 - **THEN** the summary names it and the budget — the lens was skipped, or ran
   against the specs that did fit — rather than skipping silently like a no-match
+- **AND** a selected spec that lost the shared budget to a higher-ranked one is
+  logged, not reported: it could have fit, so the notice's advice would be wrong

@@ -85,6 +85,13 @@ _NUMERIC_PREFIX_RE = re.compile(r"^\d+[-_]")
 _SCORE_PR_TOUCHES_SPEC = 4
 _SCORE_BRANCH_NAMES_SPEC = 3
 _SCORE_INTENT_NAMES_SPEC = 2
+# Rank only, never a match on its own. An un-archived change proposal is work in
+# flight, so when a PR names both a proposal and the living spec it amends, the
+# proposal is what the PR delivers. But a repository with thirty proposals in
+# flight is not a PR delivering all thirty: selecting on this alone held every
+# PR in such a repository to the two proposals that sorted first, judged each
+# against a spec it never mentioned, and — once the first filled the spec
+# budget — reported the second as unfit.
 _SCORE_ACTIVE_CHANGE = 1
 
 
@@ -321,7 +328,10 @@ def _mentions(text: str, slug: str) -> bool:
     return False
 
 
-def _score(bundle: SpecBundle, changed_files: Sequence[str], branch: str, intent_text: str) -> int:
+def _evidence(
+    bundle: SpecBundle, changed_files: Sequence[str], branch: str, intent_text: str
+) -> int:
+    """What the PR itself says about *bundle*: it edits it, or names it."""
     score = 0
     prefix = f"{bundle.root}/"
     if any(path.startswith(prefix) for path in changed_files):
@@ -330,8 +340,12 @@ def _score(bundle: SpecBundle, changed_files: Sequence[str], branch: str, intent
         score += _SCORE_BRANCH_NAMES_SPEC
     if intent_text and _mentions(intent_text, bundle.slug):
         score += _SCORE_INTENT_NAMES_SPEC
-    if bundle.root.startswith("openspec/changes/"):
-        # An un-archived change proposal is work in flight by definition.
+    return score
+
+
+def _score(bundle: SpecBundle, changed_files: Sequence[str], branch: str, intent_text: str) -> int:
+    score = _evidence(bundle, changed_files, branch, intent_text)
+    if score and bundle.root.startswith("openspec/changes/"):
         score += _SCORE_ACTIVE_CHANGE
     return score
 
@@ -349,7 +363,9 @@ def select(
     named after one, or its title/description/commits name one. When nothing
     scores, the answer is usually none — silence beats holding a change to a
     spec it never mentioned. The one exception is a repository with a **single**
-    spec directory, where there is nothing else the PR could be delivering.
+    spec directory, where there is nothing else the PR could be delivering. An
+    un-archived OpenSpec change proposal ranks above a living spec when the PR
+    names both, and is not selected on the strength of being in flight.
     """
     if not bundles:
         return []
@@ -430,6 +446,46 @@ def load_spec_files(
         budget_tokens=max(1, budget_tokens),
         max_files=MAX_SPEC_FILES,
     )
+
+
+def unfit_bundles(
+    bundles: Sequence[SpecBundle],
+    contents: Mapping[str, str],
+    *,
+    root: Path,
+    head_texts: Mapping[str, str],
+    budget_tokens: int,
+) -> tuple[str, ...]:
+    """Roots of the selected bundles no file of which could fit the budget on its own.
+
+    Selected bundles share one budget and one file cap, spent in rank order, so
+    a bundle can end up with no accepted file for two very different reasons:
+    every file it has is larger than the whole budget, or a higher-ranked bundle
+    took the budget first. Only the first is "did not fit" — the lever the
+    summary names for it (split the spec, raise the budget) is right there and
+    wrong for the second, which is rank order doing its job and is logged rather
+    than reported. Each file is costed exactly as the loader charged it.
+    """
+    read = _reader(root, head_texts)
+    unfit: list[str] = []
+    for bundle in bundles:
+        if any(path in contents for path in bundle.files):
+            continue
+        costs = [retrieve.redacted_cost(text) for path in bundle.files if (text := read(path))]
+        if not costs:
+            _log.warning("matched spec has no readable file", extra={"spec": bundle.root})
+        elif min(costs) <= budget_tokens:
+            _log.info(
+                "matched spec lost the spec budget to a higher-ranked spec",
+                extra={
+                    "spec": bundle.root,
+                    "smallest_file_tokens": min(costs),
+                    "budget_tokens": budget_tokens,
+                },
+            )
+        else:
+            unfit.append(bundle.root)
+    return tuple(unfit)
 
 
 _LEAD_IN = (
