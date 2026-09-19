@@ -10,7 +10,21 @@ should fail. Clear them by default; a test that needs one sets it explicitly via
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+
+# litellm resolves its model-capability map by DOWNLOADING
+# model_prices_and_context_window.json at import time unless this is set, so
+# `supports_prompt_caching(...)` answers from whatever upstream published today
+# rather than from anything uv.lock pins. That turned a green commit red with no
+# code change when two openrouter entries stopped declaring prompt caching. Pin
+# the suite to the map shipped with the locked litellm, so the assertions are a
+# function of the lockfile. `setdefault`, so a deliberate live-map run still
+# works: `LITELLM_LOCAL_MODEL_COST_MAP=False uv run pytest`.
+#
+# This must precede every import below that can pull in litellm.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+from pathlib import Path  # noqa: E402
 
 import pytest
 import yaml
