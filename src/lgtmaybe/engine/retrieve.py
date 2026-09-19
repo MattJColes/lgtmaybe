@@ -62,6 +62,16 @@ def local_file_fetcher(root: Path) -> FileFetcher:
     return read
 
 
+def redacted_cost(raw: str) -> int:
+    """What accepting *raw* would cost against a budget: its redacted token count.
+
+    The same two steps ``resolve_needs`` takes before charging a file, so a caller
+    asking "would this file have fit on its own?" (the spec lens, deciding whether
+    to report a spec as unfit) gets exactly the number the loader charged for it.
+    """
+    return count_tokens(redact(raw))
+
+
 def resolve_needs(
     needs: list[str],
     fetch_file: FileFetcher,

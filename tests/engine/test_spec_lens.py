@@ -81,6 +81,19 @@ def _write_kiro_spec(root: Path, slug: str = "payment-links", body: str | None =
     )
 
 
+def _write_openspec_change(
+    root: Path, slug: str, *, deltas: tuple[str, ...] = (), body: str = "placeholder\n"
+) -> None:
+    change_dir = root / "openspec" / "changes" / slug
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "proposal.md").write_text(body, encoding="utf-8")
+    (change_dir / "tasks.md").write_text("- [ ] 1.1 Do the thing\n", encoding="utf-8")
+    for capability in deltas:
+        delta = change_dir / "specs" / capability
+        delta.mkdir(parents=True, exist_ok=True)
+        (delta / "spec.md").write_text(body, encoding="utf-8")
+
+
 def _prompts(provider: FakeProvider) -> str:
     return "\n".join(str(m.get("content", "")) for c in provider.calls for m in c["messages"])
 
@@ -338,6 +351,29 @@ class TestSpecAddedByThePR:
         assert len(provider.calls) == 4
 
 
+class TestActiveChangesAreNotEvidence:
+    """A repository with change proposals in flight is not a PR delivering them.
+    Selecting on that alone made every PR in such a repository run the spec lens
+    against whichever proposals sort first — and, once the first of those filled
+    the budget, report the second as unfit."""
+
+    def test_an_unrelated_pr_in_a_repo_with_active_changes_runs_no_spec_lens(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write_openspec_change(tmp_path, "add-shared-connectors")
+        _write_openspec_change(tmp_path, "bound-model-reads")
+        monkeypatch.chdir(tmp_path)
+        provider = FakeProvider(findings=[])
+
+        _findings, summary = LLMReviewEngine(provider).review(
+            _ctx(title="fix(infra): stop a deploy from racing a stopped cluster"), _cfg()
+        )
+
+        assert "SPEC_START" not in _prompts(provider)
+        assert len(provider.calls) == 4
+        assert "spec budget" not in summary
+
+
 class TestOverBudgetSpec:
     """A spec that matched and could not be sent is a lens the round should have
     run and did not — the summary says so. Silence is right for "nothing
@@ -399,4 +435,26 @@ class TestOverBudgetSpec:
             _ctx(head_branch="payment-links"), _cfg()
         )
 
+        assert "spec budget" not in summary
+
+    def test_a_spec_crowded_out_by_a_higher_ranked_one_is_not_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Selected specs share one budget and one file cap, spent in rank order.
+        A spec that got nothing because the one ahead of it took the lot could
+        have fit — saying "none of its files fit the spec budget" would be false,
+        and the lever that notice names (split it, raise the budget) is the wrong
+        one. That is rank order working, and it is logged, not reported."""
+        # Nine small files: the first bundle alone exhausts the eight-file cap.
+        _write_openspec_change(tmp_path, "add-billing", deltas=tuple(f"cap-{n}" for n in range(7)))
+        _write_openspec_change(tmp_path, "add-refunds")
+        monkeypatch.chdir(tmp_path)
+        provider = FakeProvider(findings=[])
+
+        _findings, summary = LLMReviewEngine(provider).review(
+            _ctx(title="deliver add-billing and add-refunds"), _cfg(max_input_tokens=80_000)
+        )
+
+        assert len(provider.calls) == 5
+        assert "add-billing" in _prompts(provider)
         assert "spec budget" not in summary

@@ -213,6 +213,50 @@ class TestSelect:
 
         assert [s.slug for s in first] == [s.slug for s in second]
 
+    def _change(self, slug: str) -> SpecBundle:
+        return SpecBundle(
+            system=SpecSystem.openspec,
+            slug=slug,
+            root=f"openspec/changes/{slug}",
+            files=(f"openspec/changes/{slug}/proposal.md",),
+        )
+
+    def test_an_active_change_proposal_is_not_evidence_on_its_own(self) -> None:
+        # Work in flight is not work THIS PR delivers. A repository with thirty
+        # un-archived proposals would otherwise hold every PR to the two that sort
+        # first, and judge each against a spec it never mentioned.
+        proposals = [
+            self._change(slug)
+            for slug in ("add-shared-connectors", "bound-model-reads", "render-on-answer")
+        ]
+
+        selected = select(
+            proposals,
+            changed_files=["src/infra/deploy.py"],
+            branch="fix/deploy-does-not-race-a-stopped-cluster",
+            intent_text="Title: stop a deploy from racing a stopped cluster",
+        )
+
+        assert selected == []
+
+    def test_an_active_change_outranks_a_living_spec_when_both_are_named(self) -> None:
+        living = SpecBundle(
+            system=SpecSystem.openspec,
+            slug="billing",
+            root="openspec/specs/billing",
+            files=("openspec/specs/billing/spec.md",),
+        )
+        change = self._change("add-billing")
+
+        selected = select(
+            [living, change],
+            changed_files=["src/billing.py"],
+            branch="",
+            intent_text="Title: deliver add-billing",
+        )
+
+        assert [s.slug for s in selected] == ["add-billing", "billing"]
+
 
 class TestTickedTasks:
     def test_extracts_a_task_the_pr_ticked_off(self) -> None:
