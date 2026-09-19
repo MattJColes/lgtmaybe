@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.1...lgtmaybe-v2.8.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* **engine:** a model's note to itself never posts, and the summary names the lenses that ran ([#655](https://github.com/MattJColes/lgtmaybe/issues/655)) ([d770c07](https://github.com/MattJColes/lgtmaybe/commit/d770c07ca87fd119f0f0d74ac3f0e72e9080c40b))
+
 ## [2.8.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.0...lgtmaybe-v2.8.1) (2026-09-17)
 
 
