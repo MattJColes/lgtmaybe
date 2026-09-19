@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.2...lgtmaybe-v2.8.3) (2026-09-19)
+
+
+### Bug Fixes
+
+* **engine:** an active change is not evidence on its own, and unfit means could not fit ([#657](https://github.com/MattJColes/lgtmaybe/issues/657)) ([7e08c85](https://github.com/MattJColes/lgtmaybe/commit/7e08c85b15bd04e4ab0e8ce05a3f7312a02117f1))
+
 ## [2.8.2](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.1...lgtmaybe-v2.8.2) (2026-09-19)
 
 
