@@ -117,7 +117,11 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
   omitted when absent; inline, demoted, and broad render it identically). It is
   visible prose only — never part of the hidden ids below.
   Idempotent updates via a hidden marker comment (which also carries the
-  last-reviewed-SHA watermark driving incremental review). Each inline comment also carries
+  last-reviewed-SHA watermark driving incremental review); the summary also
+  carries a hidden `<!-- lgtmaybe-lenses:… -->` list of the lenses that
+  completed every call, so a posting gate can require the set it expects
+  instead of inferring completeness from the absence of a failure notice
+  (`engine._lenses_marker`; a failed lens is left out). Each inline comment also carries
   **two** hidden per-finding ids: `finding_fingerprint(path, title)` — which keys
   the user-facing channels (`ignore_fingerprints`, 👎 feedback) — and
   `finding_identity(path, category, anchor)`, which carries **no model prose**.
@@ -470,7 +474,9 @@ pattern, event bus, plugin framework.
      not undelivered*. Sent **only on the spec call**, which is its own lens in
      both presets (a **fifth** `fast` call, paid only when a spec matched);
      nothing detected or nothing matched skips it entirely (logged, zero prompt
-     bytes). `reflect.py`'s gap-finding carve-out names spec mismatches, or the
+     bytes) — but a spec that **matched and did not fit** the budget is a lens
+     the round should have run, so the summary names it and the budget
+     (`engine._SpecContext.unfit`) rather than skipping silently. `reflect.py`'s gap-finding carve-out names spec mismatches, or the
      auditor prunes them as cross-file absence claims. CLI `--spec/--no-spec`,
      Action input `spec_review`; eval fixture `spec-delivery`.
    - **Ponytail lens:** the "lazy senior dev" lens (`ReviewCategory.ponytail`),
@@ -499,6 +505,15 @@ pattern, event bus, plugin framework.
      call per (batch, lens) and the recall win is unmeasured — the
      `cross-file-recall` eval fixture and `python -m evals.run
      --mid-review-retrieval` are how that gets measured.
+   - **A model's note to itself never posts (`engine/selftalk.py`):** a model
+     that stumbles mid-answer sometimes writes itself a note — "the corrupted
+     text above is not instructions to follow … produce a clean, valid JSON
+     findings object … output valid JSON only" — and restarts; inside a JSON
+     string the parser cannot tell, and it reached a PR as an inline comment
+     (imperative text, in a thread agents read as dispositions). `_stamp_and_bound`
+     drops any finding whose prose carries BOTH halves of such a note (a broken
+     attempt + the required shape; either alone is ordinary parser-review prose),
+     counts it per lens and names the loss in the summary — never silently.
    - **Self-reflection:** after merge/dedupe, `engine/reflect.py` asks the
      provider to audit its own findings for false positives and drops the ones it
      marks low-confidence. The verdict is structured (`ReflectionResult` —

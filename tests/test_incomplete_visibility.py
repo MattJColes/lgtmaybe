@@ -337,3 +337,18 @@ def test_incomplete_marker_cannot_be_mistaken_for_another_marker_family() -> Non
     assert _SUMMARY_MARKER not in INCOMPLETE_MARKER
     assert _FINDING_MARKER.search(INCOMPLETE_MARKER) is None
     assert _REVIEWED_MARKER.search(INCOMPLETE_MARKER) is None
+
+
+def test_lenses_marker_cannot_be_mistaken_for_another_marker_family() -> None:
+    """Same property for the lenses marker: it sits in every summary, so a collision
+    with the review's idempotency marker would make every round look like a re-run."""
+    from lgtmaybe.core.comment import FINDING_MARKER as _FINDING_MARKER
+    from lgtmaybe.engine.engine import LENSES_MARKER_PREFIX
+    from lgtmaybe.github.rest_gateway import _MARKER as _SUMMARY_MARKER
+    from lgtmaybe.github.rest_gateway import _REVIEWED_MARKER
+
+    marker = f"{LENSES_MARKER_PREFIX}artefacts,security -->"
+    assert _SUMMARY_MARKER not in marker
+    assert _FINDING_MARKER.search(marker) is None
+    assert _REVIEWED_MARKER.search(marker) is None
+    assert INCOMPLETE_MARKER not in marker

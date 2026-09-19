@@ -57,3 +57,9 @@ quality.lens-bound:
     kind: function_definition
     has: { field: name, regex: '^_stamp_and_bound$' }
   files: [src/lgtmaybe/engine/**/*.py]
+
+quality.self-talk:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^is_self_talk$' }
+  files: [src/lgtmaybe/engine/**/*.py]

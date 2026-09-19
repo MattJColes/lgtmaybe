@@ -15,11 +15,11 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
@@ -80,6 +80,7 @@ from .redact import redact
 from .reflect import reflect_findings
 from .repair import repair_findings
 from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
+from .selftalk import drop_self_talk
 from .severity import clamp_to_category_ceiling
 from .static_analysis import (
     SCAN_CATEGORY_PREFIX,
@@ -171,6 +172,14 @@ _WARMUP_MIN_TOKENS = 2048
 # adapter matches on.
 INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
 
+# Which lenses completed every call they were given, stamped into the summary as
+# a hidden comma-separated list (`<!-- lgtmaybe-lenses:artefacts,code-health,… -->`).
+# A posting gate that wants "every lens ran" can require the set it expects
+# rather than infer completeness from the ABSENCE of a failure notice — a lens
+# that never ran leaves no notice to find. Its own marker family, disjoint from
+# the summary/finding/reviewed/incomplete markers, like the one above.
+LENSES_MARKER_PREFIX = "<!-- lgtmaybe-lenses:"
+
 # The reason string a call skipped by the token ceiling reports. Shared with the
 # summary step, which counts these to tell a budget stop (spend the user chose)
 # apart from the provider failures the generic incomplete notice covers.
@@ -259,6 +268,13 @@ class _NoticeState:
     suppressed: int
     off_diff: int
     open_finding_threads: int
+    # Findings dropped per lens because their prose was the model's note to
+    # itself about its output format (see selftalk.py).
+    self_talk: dict[str, int] = field(default_factory=dict)
+    # Matched spec roots none of whose files fit the spec budget, and whether
+    # the spec lens ran at all (against the specs that did fit).
+    spec_unfit: list[str] = field(default_factory=list)
+    spec_reviewed: bool = False
 
 
 def _build_notices(state: _NoticeState) -> list[str]:
@@ -284,6 +300,22 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"🔎 Triage skipped {len(state.skipped_by_triage)} low-risk "
             f"file{_plural(len(state.skipped_by_triage))}: {listed}{more} "
             "(`/review full` reviews everything)."
+        )
+    if state.spec_unfit:
+        listed = ", ".join(f"`{root}`" for root in state.spec_unfit)
+        count = len(state.spec_unfit)
+        budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
+        outcome = (
+            "the spec lens judged the diff against the rest only"
+            if state.spec_reviewed
+            else "the spec lens was skipped, so the diff was not judged against "
+            + _plural(count, "it", "them")
+        )
+        notices.append(
+            f"📐 {listed} match{_plural(count, 'es', '')} this PR but none of "
+            f"{_plural(count, 'its', 'their')} files fit the spec budget ({budget} tokens, "
+            f"an eighth of `max_input_tokens`) — {outcome}. Raise `max_input_tokens` "
+            "or split the spec into smaller files to review against it."
         )
     budget_skips = state.errors.count(_BUDGET_SKIP_REASON)
     if budget_skips:
@@ -372,6 +404,18 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"⚠️ Bounded a lens to the top {cfg.max_findings_per_lens} findings by severity: "
             f"{listed}. A lens returning many more findings than this is usually restating "
             f"one claim across many lines. Raise max_findings_per_lens to keep them all."
+        )
+    if state.self_talk:
+        count = sum(state.self_talk.values())
+        listed = ", ".join(f"`{lens}` ({n})" for lens, n in sorted(state.self_talk.items()))
+        notices.append(
+            f"🗑️ {count} finding{_plural(count)} {_plural(count, 'was', 'were')} dropped because "
+            f"the model's reply carried its own repair note inside {_plural(count, 'it', 'them')} "
+            '("discard the corrupted output… output valid JSON only") — '
+            f"{listed}. That is the model talking to itself, not a review, and posting it would "
+            "put an instruction in front of everyone who reads this thread; whatever genuine "
+            "finding it was wrapped around is lost with it. A model that keeps doing this is "
+            "unstable on this workload — try a different model."
         )
     if state.reflection_skipped:
         notices.append(
@@ -915,6 +959,9 @@ class LLMReviewEngine:
         # under-report the drop in the summary notice.
         self._flooded: dict[str, int] = {}
         self._flooded_lock = threading.Lock()
+        # Same shape and same lock: findings dropped per lens for being the
+        # model's note to itself (see selftalk.py and _stamp_and_bound).
+        self._self_talk: dict[str, int] = {}
         # Resolved once per review so every (batch, lens) result reads the same
         # bound without threading cfg through the fan-out's every hop.
         self._max_findings_per_lens = cfg.max_findings_per_lens
@@ -945,7 +992,8 @@ class LLMReviewEngine:
         #     and skips the lens entirely. Wrapped per batch like the intent,
         #     and for the same reason: the hidden-file list is batch-specific.
         with profiler.stage("spec_context"):
-            clean_spec = _resolve_spec(cfg, ctx, self._workspace_root)
+            spec_context = _resolve_spec(cfg, ctx, self._workspace_root)
+            clean_spec = spec_context.text
         # Mid-review retrieval budget, or None when a lens may not defer at all:
         # the feature is off, or nothing injected a read-only reader to fetch
         # with. One scalar rather than a config-plus-fetcher pair threaded down
@@ -1380,15 +1428,21 @@ class LLMReviewEngine:
                 suppressed=suppressed,
                 off_diff=off_diff,
                 open_finding_threads=ctx.open_finding_threads,
+                self_talk=dict(self._self_talk),
+                spec_unfit=list(spec_context.unfit),
+                spec_reviewed=clean_spec is not None,
             )
         )
+        # Which lenses completed, on every summary shape — hidden, so it costs
+        # the rendered body nothing and a terminal never prints it.
+        lenses_marker = _lenses_marker(lenses, failed_lenses)
         if notices:
-            return filtered, "\n\n".join([*notices, summary_line])
+            return filtered, "\n\n".join([*notices, summary_line]) + f"\n{lenses_marker}"
         # A genuinely clean review (nothing flagged, every call succeeded) gets an
         # explicit thumbs-up rather than a bare "0 findings".
         if not filtered:
-            return filtered, f"👍 LGTM!\n\n{summary_line}"
-        return filtered, summary_line
+            return filtered, f"👍 LGTM!\n\n{summary_line}\n{lenses_marker}"
+        return filtered, f"{summary_line}\n{lenses_marker}"
 
     def _fan_out(
         self, per_batch: list[tuple[bool, list[_PreparedCall]]], workers: int
@@ -2177,6 +2231,22 @@ class LLMReviewEngine:
         `ReviewConfig.max_findings_per_lens`.
         """
         findings = _stamp_categories(findings, lens)
+        # A finding whose prose is the model's note to itself about its output
+        # format is corrupted output, not a review — and it is imperative text,
+        # which must never reach a thread that agents read as instructions.
+        # Dropped first so it cannot take a slot from a genuine finding below.
+        findings, self_talk = drop_self_talk(findings)
+        if self_talk:
+            with self._flooded_lock:
+                self._self_talk[lens.id] = self._self_talk.get(lens.id, 0) + len(self_talk)
+            _log.warning(
+                "dropped findings carrying the model's own repair note",
+                extra={
+                    "lens": lens.id,
+                    "dropped": len(self_talk),
+                    "titles": [f.title[:120] for f in self_talk],
+                },
+            )
         cap = self._max_findings_per_lens
         if not cap or len(findings) <= cap:
             return findings
@@ -2648,8 +2718,20 @@ def files_not_visible(changed_files: Sequence[str], batch_paths: set[str]) -> li
 _SPEC_BUDGET_DIVISOR = 8
 
 
-def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> str | None:
-    """The committed spec block for this PR, or None to skip the spec lens.
+class _SpecContext(NamedTuple):
+    """What spec resolution decided: the block to send, and what it could not."""
+
+    #: The redacted spec block, or None to skip the spec lens.
+    text: str | None
+    #: Roots of the specs that matched this PR but none of whose files fit the
+    #: budget. A matched spec that goes unsent is a lens the round should have
+    #: run and did not, which the summary says out loud — unlike the ordinary
+    #: "nothing matched" skip, which is silent by design.
+    unfit: tuple[str, ...]
+
+
+def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> _SpecContext:
+    """The committed spec block for this PR, or a skip — with what did not fit.
 
     Four deterministic steps — detect, select, read, render — and any of them
     coming up empty means no spec lens runs at all. Silence is the right answer
@@ -2666,11 +2748,12 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> str | None:
     ticked-task claims, which are mined from the raw diff rather than from an
     already-redacted file.
     """
+    skipped = _SpecContext(None, ())
     if not cfg.spec_review:
-        return None
+        return skipped
     bundles = specs.detect(root, cfg.spec_paths, ctx.changed_files)
     if not bundles:
-        return None
+        return skipped
     selected = specs.select(
         bundles,
         changed_files=ctx.changed_files,
@@ -2678,22 +2761,40 @@ def _resolve_spec(cfg: ReviewConfig, ctx: PRContext, root: Path) -> str | None:
         intent_text=_intent_text(ctx),
     )
     if not selected:
-        return None
+        return skipped
+    budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
     contents = specs.load_spec_files(
         selected,
         root=root,
         head_texts=ctx.file_contents,
-        budget_tokens=cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR,
+        budget_tokens=budget,
     )
+    unfit = tuple(b.root for b in selected if not any(path in contents for path in b.files))
+    if unfit:
+        _log.warning(
+            "matched spec did not fit the spec budget",
+            extra={"specs": list(unfit), "budget_tokens": budget},
+        )
     text = specs.build_spec_text(selected, contents, claims=specs.ticked_tasks(ctx.diff))
     if text is None:
         _log.info("spec lens skipped — no spec text fit the budget")
-        return None
+        return _SpecContext(None, unfit)
     _log.info(
         "spec lens enabled",
         extra={"specs": [b.root for b in selected], "files": sorted(contents)},
     )
-    return redact(text)
+    return _SpecContext(redact(text), unfit)
+
+
+def _lenses_marker(lenses: Sequence[_Lens], failed_lenses: Sequence[str]) -> str:
+    """The hidden marker naming every lens that completed all of its calls.
+
+    A lens with any failed or skipped call is left out: the failure notice
+    already names it, and a gate reading this marker wants the lenses whose
+    verdict it can rely on, not the ones that were merely attempted.
+    """
+    completed = sorted({lens.id for lens in lenses} - set(failed_lenses))
+    return f"{LENSES_MARKER_PREFIX}{','.join(completed)} -->"
 
 
 def _intent_text(ctx: PRContext) -> str:

@@ -46,6 +46,24 @@ stage failure surfaces to the caller.
 - **THEN** the summary says so instead of claiming LGTM — this run's count covers
   what it reviewed now, which an incremental run may not include
 
+### Requirement: The summary names the lenses that completed
+
+Every summary SHALL carry a hidden `<!-- lgtmaybe-lenses:… -->` marker listing,
+sorted and comma-separated, the lenses that completed every call they were
+given. A gate that wants "every lens ran" needs a positive list: a lens that
+never ran leaves no failure notice to find. A lens with any failed or skipped
+call is left out — the failure notice already names it — and the marker family
+is disjoint from the summary, finding, reviewed and incomplete markers.
+<!-- anchor: engine.lenses-marker -->
+
+#### Scenario: a clean fast-preset round
+- **WHEN** all four fast-preset calls succeed and no spec matched
+- **THEN** the summary ends with `lgtmaybe-lenses:artefacts,code-health,correctness,security`
+
+#### Scenario: one lens fails
+- **WHEN** the security lens's call raises and the others succeed
+- **THEN** the marker lists the other three and the incomplete notice names security
+
 ### Requirement: Per-lens fan-out through one bounded executor
 
 Every `(batch, lens)` call SHALL run through one global bounded executor sized

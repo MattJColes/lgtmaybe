@@ -233,3 +233,8 @@ changes, which come from its head text.
 #### Scenario: a task the PR ticked off
 - **WHEN** the diff flips a `tasks.md` checkbox from unticked to ticked
 - **THEN** that entry is carried into the spec block as a claim to verify
+
+#### Scenario: a matched spec exceeds the spec budget
+- **WHEN** a selected spec has no file that fits `max_input_tokens // 8`
+- **THEN** the summary names it and the budget — the lens was skipped, or ran
+  against the specs that did fit — rather than skipping silently like a no-match

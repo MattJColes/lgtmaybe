@@ -16,6 +16,7 @@ live in scheduled background tooling (Dependabot + the audit workflow).
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
 import subprocess
 import sys
@@ -88,6 +89,28 @@ def test_release_workflow_regenerates_the_lockfile() -> None:
         "release-please.yml must run `uv lock` on the Release PR branch so the "
         "version bump and the lockfile land together"
     )
+
+
+def test_the_model_capability_map_is_pinned_to_the_lockfile() -> None:
+    """The suite must not consult a map litellm downloads at import time.
+
+    Unset, `litellm.model_cost` is fetched from upstream on import, so anything
+    asserting a model capability — prompt caching, context window — is asserting
+    on a file that can change under a commit that already passed. That is the
+    same time-of-check dependence this module's docstring keeps out of the gate,
+    and it cost a green commit: two openrouter entries stopped declaring prompt
+    caching upstream, and three tests went red with no code change.
+
+    Pinned, the same assertions are a function of `uv.lock`, which is what makes
+    them reproducible. Deleting the line in conftest brings the flakiness back,
+    so it fails here rather than on someone's unrelated pull request.
+    """
+    assert os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP") == "True"
+
+    from litellm.utils import supports_prompt_caching
+
+    # Answered from the shipped map: a lookup, not a download.
+    assert supports_prompt_caching(model="anthropic/claude-sonnet-4-20250514") is True
 
 
 def test_no_default_encoding_io() -> None:

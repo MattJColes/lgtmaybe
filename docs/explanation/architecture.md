@@ -389,7 +389,13 @@ network recovers but a dead-end failure surfaces fast:
   new findings arrive as individual review comments GitHub wraps in bodyless
   reviews — an incomplete run also posts the notice as its own PR comment. A
   half-complete review must never look like a clean one. A review that failed
-  outright posts its failure notice the same way.
+  outright posts its failure notice the same way. The summary also carries a
+  hidden `<!-- lgtmaybe-lenses:… -->` list of the lenses that completed every
+  call, so a gate that wants "every lens ran" can require the set it expects
+  instead of inferring it from the absence of a notice — a lens that never ran
+  leaves none to find. A matched spec that did not fit the spec budget is named
+  the same way, because a spec lens that should have run and did not is a gap,
+  not a no-match.
 
 - **One global fan-out pool.** Every (batch, lens) call runs through a single
   `ThreadPoolExecutor` sized by `max_concurrency` — default **6 workers** for
