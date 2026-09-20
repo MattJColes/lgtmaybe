@@ -30,6 +30,10 @@ claim about unshown code like any other. An unparseable audit keeps everything.
 - **THEN** the audit still runs, because a review that overran still needs
   pruning; only a termination signal skips it
 
+#### Scenario: a large diff exhausts the reflection grounding budget
+- **WHEN** reflection defers a finding and the full PR diff leaves no room for fetched code
+- **THEN** the recheck retains patches for deferred findings and requested files, excluding unrelated patches so retrieved evidence reaches the auditor
+
 ### Requirement: One lens cannot flood a review
 
 A single (batch, lens) call SHALL contribute at most `max_findings_per_lens`

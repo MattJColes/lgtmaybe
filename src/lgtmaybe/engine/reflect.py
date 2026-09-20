@@ -12,6 +12,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
@@ -239,7 +240,18 @@ def reflect_findings(
                 "reflection deferral — fetched files for recheck",
                 extra={"hop": hop + 1, "files": sorted(fetched)},
             )
-            augmented = ctx.model_copy(update={"file_contents": {**ctx.file_contents, **fetched}})
+            # Unrelated patches can consume the entire grounding budget on a large PR.
+            # Recheck only deferred findings, retaining their patches and requested files.
+            paths = {finding.path for finding in deferred} | set(fetched)
+            diff = "".join(
+                patch for path, patch in split_by_file(ctx.diff, ctx.changed_files) if path in paths
+            )
+            augmented = ctx.model_copy(
+                update={
+                    "diff": diff,
+                    "file_contents": {**ctx.file_contents, **fetched},
+                }
+            )
             survivors.extend(
                 reflect_findings(
                     deferred,
