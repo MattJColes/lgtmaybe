@@ -126,6 +126,12 @@ engine.reasoning-step-down:
       has: { field: name, regex: '^lower_reasoning_effort$' }
     files: [src/lgtmaybe/providers/**/*.py]
 
+engine.reasoning-off:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^disable_reasoning$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 engine.mid-review-retrieval:
   rule:
     kind: function_definition

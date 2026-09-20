@@ -396,7 +396,7 @@ SHALL be named in the summary.
 
 #### Scenario: the lower effort truncates too
 - **WHEN** the step-down retry is itself reasoning-bound
-- **THEN** it reports and stops — one attempt, never a walk down the ladder
+- **THEN** no further graded step is taken — the one rung left is off (below)
 #### Scenario: no effort was configured
 - **WHEN** a reasoning-bound truncation comes from a run that set no effort
 - **THEN** the retry goes out at the floor, in that provider's own effort shape
@@ -415,12 +415,46 @@ SHALL be named in the summary.
 - **WHEN** the deadline, token budget or a termination signal lands first
 - **THEN** the retry is not issued and the truncation is reported as it stands
 
+### Requirement: A step-down that is itself reasoning-bound is retried once with reasoning off
+
+A step-down retry that spends its ceiling on reasoning again SHALL be re-run
+exactly once with reasoning switched off, before any change of model, and only
+where the provider can express "off" in its own shape. Measured on GLM 5.3
+through OpenRouter: `low` and `minimal` both spent a 12,288-token ceiling on
+thought in 10 retries of 11, and the fallback model then did the same at ten
+times the price — that model treats effort as a switch, and the graded step
+lands nowhere. The off retry SHALL NOT be sent when the step-down already was
+off, when the step-down cut for a reason other than reasoning, or past the
+deadline, token budget or interrupt. A lens that only answered with reasoning
+off SHALL be named in the summary as such, apart from lenses that answered at a
+lower setting, because it is a different claim about the findings.
+<!-- anchor: engine.reasoning-off -->
+
+#### Scenario: off answers where the dial did not
+- **WHEN** the step-down retry is reasoning-bound and the route can switch off
+- **THEN** one more call goes out with reasoning off, its findings join the
+  review, and the summary names the lens as answered without thinking
+
+#### Scenario: off truncates too
+- **WHEN** the reasoning-off retry is cut as well
+- **THEN** it reports and stops on the primary; the model escalation, if
+  configured, is the next and last rung
+
+#### Scenario: the step-down already was off
+- **WHEN** a configured `minimal` steps to `none` and that cut is reasoning-bound
+- **THEN** nothing more is sent on the primary — a second call at `none` would
+  be the request that just failed, billed twice
+
+#### Scenario: the step-down cut for another reason
+- **WHEN** the step-down retry's answer, not its thinking, outgrew the ceiling
+- **THEN** the off switch is not tried, because thinking less cannot help
+
 ### Requirement: A truncation escalates to a second model only as a last resort
 
 A truncated lens SHALL be re-run once on `fallback_model` only after the remedy
 its token counts named has been tried on the primary and failed — a smaller
-payload for a payload-bound truncation, a lower `reasoning_effort` for a
-reasoning-bound one. Switching model says nothing about the failure: it re-sends
+payload for a payload-bound truncation, a lower `reasoning_effort` and then
+reasoning off for a reasoning-bound one. Switching model says nothing about the failure: it re-sends
 the same request at the same ceiling, so it is last. Exactly one attempt, spent
 by the whole batch and never by each piece, skipped with no fallback configured,
 and re-checking the deadline, token budget and interrupt first. Lens calls SHALL
