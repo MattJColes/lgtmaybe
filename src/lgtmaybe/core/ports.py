@@ -101,6 +101,28 @@ class ProviderInputTooLarge(Exception):
     """
 
 
+class DiffUnavailable(Exception):
+    """Part of the gateway contract: the host will not serve the change's diff.
+
+    GitHub answers the ``.diff`` media type with **406 Not Acceptable** once a
+    pull request passes 300 files or 20,000 lines — a limit of the host, not a
+    transport fault, so no retry and no other token changes the answer. Fetching
+    the diff via the API is the only way the reviewer ever reads PR content
+    (never a checkout, which is what keeps ``pull_request_target`` safe), so with
+    it refused there is nothing to review.
+
+    Named so the CLI can tell it from every other fetch failure: those are
+    reported as a failed review and exit non-zero, this one is disclosed as a
+    review that did not happen — a notice carrying the host's reason, nothing
+    stamped complete, exit zero. A silent LGTM would be the bug; so would a
+    red job for a PR the reviewer was never able to look at.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class ProviderClient(Protocol):
     """Port: an LLM backend that returns a normalised completion."""
 

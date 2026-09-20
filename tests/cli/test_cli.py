@@ -685,3 +685,83 @@ class TestBuildReviewContext:
 
 def test_runtime_options_is_owned_by_the_cli_package() -> None:
     assert RuntimeOptions.__module__ == "lgtmaybe.cli"
+
+
+class TestDiffUnavailable:
+    """GitHub refuses to serve the diff of a PR over 300 files / 20,000 lines
+    (HTTP 406). lgtmaybe never checks PR code out, so with no diff there is
+    nothing to review — that is a skip to disclose, not a failure to report."""
+
+    REASON = "Sorry, the diff exceeded the maximum number of files (300)."
+
+    def _github(self):
+        from lgtmaybe.core.ports import DiffUnavailable
+
+        reason = self.REASON
+
+        class _NoDiffGitHub(FakeGitHub):
+            def __init__(self):
+                super().__init__()
+                self.marked_reviewed: list[str | None] = []
+
+            def get_pr_context(self):
+                raise DiffUnavailable(reason)
+
+            def mark_reviewed(self, head_sha):
+                self.marked_reviewed.append(head_sha)
+
+        return _NoDiffGitHub()
+
+    @pytest.mark.parametrize("diagram", [False, True])
+    def test_posts_a_skip_notice_and_exits_zero(self, monkeypatch, diagram):
+        import lgtmaybe.cli as cli_module
+
+        github = self._github()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(FakeProvider()), FakeProvider()),
+        )
+
+        # No ClickException: the job must go green.
+        cli_module.execute_review(_default_cfg(), RuntimeOptions(pr_url="x"), diagram=diagram)
+
+        # One review body (no findings, no diff fetch) and the same notice as a
+        # PR comment, exactly like a failure — an in-place body edit on a
+        # re-run notifies nobody.
+        assert len(github.posted) == 1
+        findings, summary = github.posted[0]
+        assert findings == []
+        assert github.posted_diffs == [None]
+        assert github.comments == [summary]
+        # It says what happened and why, in GitHub's words, and that nothing
+        # was looked at — never "LGTM", never "failed".
+        assert "not reviewed" in summary
+        assert self.REASON in summary
+        assert "lgtm" not in summary.lower().replace("lgtmaybe", "")
+        assert "failed" not in summary.lower()
+        assert "<!-- lgtmaybe-skipped -->" in summary
+        # Nothing is stamped complete and no overview is attempted.
+        assert all(sha is None for sha in github.marked_reviewed)
+        assert github.diagrams == []
+
+    def test_slash_review_posts_the_same_skip_notice(self, monkeypatch):
+        import lgtmaybe.cli as cli_module
+
+        github = self._github()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(FakeProvider()), FakeProvider()),
+        )
+        event = {
+            "comment": {"body": "/review"},
+            "issue": {"number": 7, "pull_request": {}},
+            "repository": {"full_name": "owner/repo"},
+        }
+
+        cli_module.execute_comment(event, _default_cfg(), RuntimeOptions(pr_url="x"))
+
+        assert len(github.posted) == 1
+        assert "not reviewed" in github.posted[0][1]
+        assert github.comments == [github.posted[0][1]]

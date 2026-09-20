@@ -20,6 +20,13 @@ is what makes `pull_request_target` (secrets available) safe on fork PRs.
 - **WHEN** the review runs with repo secrets on a fork PR
 - **THEN** no PR code is fetched other than as API-returned text
 
+#### Scenario: the host will not serve the diff
+- **WHEN** GitHub answers the diff request with 406 (over 300 files or 20,000
+  lines)
+- **THEN** the adapter raises `DiffUnavailable` carrying GitHub's reason, and
+  the CLI posts a "not reviewed" notice with a hidden
+  `<!-- lgtmaybe-skipped -->` marker, stamps nothing complete, and exits zero
+
 ### Requirement: Posting is idempotent via a hidden marker
 
 Reviews SHALL post as one batched REST review (inline comments + summary),
