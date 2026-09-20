@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.8.5](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.4...lgtmaybe-v2.8.5) (2026-09-20)
+
+
+### Bug Fixes
+
+* **github:** skip, not fail, when GitHub refuses to serve a PR's diff ([#665](https://github.com/MattJColes/lgtmaybe/issues/665)) ([381ef96](https://github.com/MattJColes/lgtmaybe/commit/381ef9661f4c5bcca952fbfc0189d453556344a7))
+* retain fetched grounding in large-diff reflection rechecks ([#667](https://github.com/MattJColes/lgtmaybe/issues/667)) ([a6ac60f](https://github.com/MattJColes/lgtmaybe/commit/a6ac60f95fd180093756e5d5bbadf27c29ca27b5))
+
 ## [2.8.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.3...lgtmaybe-v2.8.4) (2026-09-20)
 
 
