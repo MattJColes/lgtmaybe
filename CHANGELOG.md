@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.8.4](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.3...lgtmaybe-v2.8.4) (2026-09-20)
+
+
+### Bug Fixes
+
+* **engine:** retry a reasoning-bound step-down once with reasoning off ([#661](https://github.com/MattJColes/lgtmaybe/issues/661)) ([c53d5ac](https://github.com/MattJColes/lgtmaybe/commit/c53d5ac6eadbd4223426555bd02024d4ef1790be))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 8 updates plus anyio to 4.14.2 ([#664](https://github.com/MattJColes/lgtmaybe/issues/664)) ([5703a0e](https://github.com/MattJColes/lgtmaybe/commit/5703a0e5129bb002382d3c49ebe486ffd6f9a927))
+
 ## [2.8.3](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.2...lgtmaybe-v2.8.3) (2026-09-19)
 
 
