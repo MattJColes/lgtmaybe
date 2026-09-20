@@ -358,7 +358,14 @@ pattern, event bus, plugin framework.
      about what the route reports, not about the failure. The parse-path notice
      names no `max_tokens` ceiling, because nothing measured one. The rungs are —
      `_review_split` (smaller pieces) when the answer outgrew the ceiling,
-     `_retry_lower_effort` when the *thinking* did. Only if that fails does
+     `_retry_lower_effort` when the *thinking* did — one graded step down, and
+     if that cut is reasoning-bound too, one more call with reasoning switched
+     off (`LiteLLMProvider.disable_reasoning`, feature-detected like the
+     step-down). Measured on GLM 5.3 through OpenRouter (three rounds on one
+     large PR): `low` and `minimal` both spent a 12,288 ceiling on thought in 10
+     retries of 11, so the model treats effort as a switch and the graded step
+     landed nowhere; the fallback model then cut identically at ten times the
+     price. Only if off fails too does
      `engine._escalate_model` re-run the lens once on `fallback_model`. Switching
      model says nothing about the failure — it re-sends the same request at the
      same ceiling — so it is the last rung, spent by the whole batch and never by

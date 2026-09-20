@@ -317,6 +317,13 @@ model more room to think.
 
 Unset sends nothing, so a route without a reasoning channel is unaffected.
 
+Some models treat this as a switch rather than a dial. GLM 5.3 through
+OpenRouter spent a 12,288-token ceiling on thought at `low` and again at
+`minimal`, in 10 retries of 11; only `none` moved it. lgtmaybe's ladder now
+takes that step for you — one graded step down, then reasoning off, then the
+fallback model — but on such a model `none` as the *configured* value saves the
+two failed calls that precede it.
+
 #### But do not read "cheaper" as "better value"
 
 Bounding thinking is the fix for a **reasoning-bound truncation**. It is not a

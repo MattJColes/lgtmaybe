@@ -2193,6 +2193,66 @@ class TestSteppingReasoningEffortDown:
         assert provider.default_opts["reasoning_effort"] == "high"
 
 
+class TestSwitchingReasoningOff:
+    """The rung below the step-down, for a model whose thinking is a switch.
+
+    GLM 5.3 through OpenRouter treats `low` and `minimal` alike — both spent a
+    12,288-token ceiling on thought, ten retries in eleven — so the one graded
+    step the engine takes lands nowhere. Off is the setting that moves it, and
+    the adapter answers it in the same provider shape as the step-down.
+    """
+
+    def test_a_flat_effort_switches_off(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="medium")
+
+        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
+
+    def test_already_off_has_nothing_to_switch(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="none")
+
+        assert provider.disable_reasoning() is None
+
+    def test_default_can_still_be_switched_off(self) -> None:
+        """`default` names no rung to step DOWN from, but off is not a step —
+        it is a position, and it is well-defined whatever the route decided."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="default")
+
+        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
+
+    def test_openrouters_nested_object_switches_off_in_place(self) -> None:
+        provider = LiteLLMProvider(
+            model="openrouter/z-ai/glm-5.3-flash",
+            extra_body={"reasoning": {"effort": "low"}, "provider": {"sort": "latency"}},
+        )
+
+        assert provider.disable_reasoning() == {
+            "extra_body": {
+                "reasoning": {"effort": "none"},
+                "provider": {"sort": "latency"},
+            }
+        }
+
+    def test_an_unset_effort_on_openrouter_switches_off_nested(self) -> None:
+        provider = LiteLLMProvider(model="openrouter/z-ai/glm-5.3-flash")
+
+        assert provider.disable_reasoning() == {"extra_body": {"reasoning": {"effort": "none"}}}
+
+    def test_an_incapable_flat_route_gets_no_switch(self) -> None:
+        """Same rule as the floor: a param the route would strip re-sends the
+        request that just failed."""
+        provider = LiteLLMProvider(model="openai/gpt-5.5")
+        provider._effort_override_supported = False
+
+        assert provider.disable_reasoning() is None
+
+    def test_switching_off_is_an_override_not_a_mutation(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="high")
+
+        provider.disable_reasoning()
+
+        assert provider.default_opts["reasoning_effort"] == "high"
+
+
 class TestSchemaDropIsVisibleAndScoped:
     """Dropping ``response_format`` silently downgrades every later call to
     prompt-instructed JSON, and a weaker model then plausibly answers in prose —

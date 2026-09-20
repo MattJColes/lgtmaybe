@@ -234,6 +234,29 @@ def test_the_escalation_starts_no_ladder_of_its_own() -> None:
     assert spent == [(None, None), (None, "low"), (FALLBACK, None)]
 
 
+def test_reasoning_off_sits_between_the_step_down_and_the_escalation() -> None:
+    """Every remedy aimed at the primary runs before the model changes, and off
+    is one of them: primary, primary stepped down, primary with thinking off,
+    then and only then the fallback — which still takes no ladder of its own."""
+
+    class _BothTruncateWithAnOffSwitch(_Escalating):
+        def disable_reasoning(self) -> dict[str, Any] | None:
+            return {"reasoning_effort": "none"}
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            raise self._exc_factory()
+
+    provider = _BothTruncateWithAnOffSwitch()
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_CTX, _cfg())
+
+    spent = [
+        (c["opts"].get("model_override"), c["opts"].get("reasoning_effort")) for c in provider.calls
+    ]
+    assert spent == [(None, None), (None, "low"), (None, "none"), (FALLBACK, None)]
+
+
 def test_no_fallback_configured_changes_nothing() -> None:
     """A run without a second model must send byte-identical requests and pay
     exactly what it paid before."""

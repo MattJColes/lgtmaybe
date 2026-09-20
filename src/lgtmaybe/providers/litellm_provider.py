@@ -1028,40 +1028,34 @@ class LiteLLMProvider:
         resolved, and returned as an override rather than mutated in place: this
         is one retry's request, not a new setting for the rest of the run.
         """
-        flat = self.default_opts.get("reasoning_effort")
-        if isinstance(flat, str):
-            lower = _one_level_lower(flat)
-            return {"reasoning_effort": lower} if lower else None
-        raw_extra = self.default_opts.get("extra_body")
-        extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
-        nested = extra.get("reasoning")
-        if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
-            lower = _one_level_lower(nested["effort"])
-            if not lower:
-                return None
-            # The whole extra_body is replaced, not deep-merged: `complete` merges
-            # per-call opts over the defaults a key at a time, so a partial
-            # extra_body here would drop every other key it carries.
-            return {"extra_body": {**extra, "reasoning": {**nested, "effort": lower}}}
-        # Nothing configured in either shape, so the floor picks its own shape —
-        # from the ROUTE, never from whether `extra_body` happens to exist, which
-        # a caller may set for any unrelated provider option.
-        #
-        # OpenRouter gets the nested object for the same reason the factory
-        # re-routes a configured effort into it: litellm forwards the flat param
-        # only for models its capability map flags reasoning-capable, and the
-        # newest models are not in that map — exactly the set that truncates this
-        # way. A flat param there would be dropped and the retry would fail
-        # identically. OpenRouter takes the nested object regardless of model.
-        if self.model.startswith(_OPENROUTER_PREFIX):
-            return {"extra_body": {**extra, "reasoning": {"effort": _EFFORT_FLOOR}}}
-        # Flat param, so `drop_params` gets a say. A route whose capability entry
-        # omits it would have the floor stripped and re-send the request that
-        # just failed — billed twice for one answer. Report the original failure
-        # instead; the engine already stops when this answers None.
-        if not self._effort_override_supported:
-            return None
-        return {"reasoning_effort": _EFFORT_FLOOR}
+        return _effort_override(
+            self, lambda current: _EFFORT_FLOOR if current is None else _one_level_lower(current)
+        )
+
+    def disable_reasoning(self) -> dict[str, Any] | None:
+        """Per-call opts that switch this provider's reasoning off entirely.
+
+        The rung below :meth:`lower_reasoning_effort`, for a model whose thinking
+        is a switch rather than a dial. Measured on GLM 5.3 through OpenRouter
+        (three rounds on one large PR): a `low` call spent its whole
+        12,288-token ceiling thinking, the step-down to `minimal` spent the whole
+        ceiling identically in 10 of 11 retries, and the fallback model did the
+        same. The graded levels do not move that model; ``none`` does. Consulted
+        by the engine ONLY after a step-down retry was itself reasoning-bound, so
+        a healthy call — and a model the step-down does fix — never sends it.
+
+        ``None`` when there is nothing to switch: reasoning already off, or a flat
+        route whose capability map would strip the param and re-send the request
+        that just failed. ``default`` is not the bottom of anything, so it CAN be
+        switched off — off is a position, not a step down from one.
+
+        Same shape rules as the step-down (flat ``reasoning_effort``, or the nested
+        ``reasoning`` object for OpenRouter), and an override rather than a
+        mutation, for the same reasons.
+        """
+        return _effort_override(
+            self, lambda current: None if current == _EFFORT_OFF else _EFFORT_OFF
+        )
 
     def escalate_model(self) -> str | None:
         """The resolved fallback model, for a caller that owns the escalation.
@@ -1566,6 +1560,10 @@ _EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
 # understands, where the two below it are unevenly supported.
 _EFFORT_FLOOR = "low"
 
+# Thinking switched off: the rung below every graded level, and the only one a
+# model that treats effort as a switch responds to (see `disable_reasoning`).
+_EFFORT_OFF = "none"
+
 # ``openrouter/`` — derived rather than spelled out, so it cannot drift from the
 # route prefix the factory builds model strings with. The one route that reads a
 # nested ``reasoning`` object.
@@ -1579,6 +1577,57 @@ def _one_level_lower(effort: str) -> str | None:
     except ValueError:
         return None
     return _EFFORT_LADDER[index - 1] if index else None
+
+
+def _effort_override(
+    provider: Any, choose: Callable[[str | None], str | None]
+) -> dict[str, Any] | None:
+    """Build one retry's effort override in *provider*'s own shape.
+
+    *choose* maps the configured effort (``None`` when nothing is configured)
+    to the level to send, or ``None`` for "nothing to send". The shape is
+    decided here, once, for both the step-down and the off switch. A module
+    function rather than a method because the adapter's two public probes are
+    borrowed unbound onto test fakes, which only carry the three attributes read
+    here (``default_opts``, ``model``, ``_effort_override_supported``).
+    """
+    flat = provider.default_opts.get("reasoning_effort")
+    if isinstance(flat, str):
+        target = choose(flat)
+        return {"reasoning_effort": target} if target else None
+    raw_extra = provider.default_opts.get("extra_body")
+    extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
+    nested = extra.get("reasoning")
+    if isinstance(nested, dict) and isinstance(nested.get("effort"), str):
+        target = choose(nested["effort"])
+        if not target:
+            return None
+        # The whole extra_body is replaced, not deep-merged: `complete` merges
+        # per-call opts over the defaults a key at a time, so a partial
+        # extra_body here would drop every other key it carries.
+        return {"extra_body": {**extra, "reasoning": {**nested, "effort": target}}}
+    target = choose(None)
+    if not target:
+        return None
+    # Nothing configured in either shape, so the override picks its own shape —
+    # from the ROUTE, never from whether `extra_body` happens to exist, which
+    # a caller may set for any unrelated provider option.
+    #
+    # OpenRouter gets the nested object for the same reason the factory
+    # re-routes a configured effort into it: litellm forwards the flat param
+    # only for models its capability map flags reasoning-capable, and the
+    # newest models are not in that map — exactly the set that truncates this
+    # way. A flat param there would be dropped and the retry would fail
+    # identically. OpenRouter takes the nested object regardless of model.
+    if provider.model.startswith(_OPENROUTER_PREFIX):
+        return {"extra_body": {**extra, "reasoning": {"effort": target}}}
+    # Flat param, so `drop_params` gets a say. A route whose capability entry
+    # omits it would have the override stripped and re-send the request that
+    # just failed — billed twice for one answer. Report the original failure
+    # instead; the engine already stops when this answers None.
+    if not provider._effort_override_supported:
+        return None
+    return {"reasoning_effort": target}
 
 
 def _configured_ceiling(kwargs: dict[str, Any]) -> int | None:
