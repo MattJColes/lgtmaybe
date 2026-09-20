@@ -26,6 +26,8 @@ is what makes `pull_request_target` (secrets available) safe on fork PRs.
 - **THEN** the adapter raises `DiffUnavailable` carrying GitHub's reason, and
   the CLI posts a "not reviewed" notice with a hidden
   `<!-- lgtmaybe-skipped -->` marker, stamps nothing complete, and exits zero
+- **AND** a slash command that needs the diff (`/review`, `/improve`, …)
+  takes the same path: the same notice, the same zero exit
 
 ### Requirement: Posting is idempotent via a hidden marker
 
