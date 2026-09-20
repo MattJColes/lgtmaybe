@@ -47,6 +47,7 @@ from lgtmaybe.core.models import (
     PRContext,
     ReviewFinding,
 )
+from lgtmaybe.core.ports import DiffUnavailable
 
 from .checkout import clone_base_tree
 
@@ -128,6 +129,17 @@ def _first_comment(node: dict[str, Any]) -> dict[str, Any]:
     """A review thread's opening comment, or ``{}`` when it has none."""
     comments = node.get("comments", {}).get("nodes", [])
     return comments[0] if comments else {}
+
+
+def _diff_refusal_reason(resp: httpx.Response) -> str:
+    """GitHub's own words for refusing the diff, with the status for context."""
+    try:
+        message = resp.json().get("message")
+    except (ValueError, AttributeError):
+        message = None
+    if not isinstance(message, str) or not message.strip():
+        message = "GitHub would not serve the diff for this pull request."
+    return f"{message.strip()} (HTTP 406 from {resp.request.url})"
 
 
 class RestGitHubGateway:
@@ -939,12 +951,21 @@ class RestGitHubGateway:
         return resp.json()
 
     def _fetch_pr_diff(self) -> str:
-        """The PR's unified diff — a single GET with the ``.diff`` Accept header."""
+        """The PR's unified diff — a single GET with the ``.diff`` Accept header.
+
+        Raises :class:`DiffUnavailable` on GitHub's 406: the PR is over the 300
+        files / 20,000 lines the diff media type will render, and the body
+        names which (``"Sorry, the diff exceeded the maximum number of files
+        (300)."``). The message rides the exception so the notice can quote
+        the host rather than guess.
+        """
         resp = self._client.get(
             self._pr_api,
             headers={**self._headers, "Accept": "application/vnd.github.v3.diff"},
             timeout=_TIMEOUT,
         )
+        if resp.status_code == 406:
+            raise DiffUnavailable(_diff_refusal_reason(resp))
         resp.raise_for_status()
         return resp.text
 

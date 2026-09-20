@@ -397,6 +397,16 @@ network recovers but a dead-end failure surfaces fast:
   the same way, because a spec lens that should have run and did not is a gap,
   not a no-match.
 
+- **A diff the host will not serve is a review that did not happen.** GitHub
+  answers the diff request with 406 once a PR passes 300 files or 20,000
+  lines, and lgtmaybe reads PR content through that API only — never a
+  checkout — so there is nothing to review and no retry that changes it. That
+  run posts a "not reviewed" notice quoting GitHub's reason, with a hidden
+  `<!-- lgtmaybe-skipped -->` marker, stamps nothing complete, and exits
+  zero: not a failure (a red job for a PR the reviewer could never look at
+  only teaches people to ignore red jobs), and never an LGTM. The fix is a
+  smaller PR; no reviewer setting moves the host's limit.
+
 - **One global fan-out pool.** Every (batch, lens) call runs through a single
   `ThreadPoolExecutor` sized by `max_concurrency` — default **6 workers** for
   hosted providers (an extra worker can cut a full-latency wave off the wall
