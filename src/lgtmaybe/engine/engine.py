@@ -271,6 +271,9 @@ class _NoticeState:
     # Findings dropped per lens because their prose was the model's note to
     # itself about its output format (see selftalk.py).
     self_talk: dict[str, int] = field(default_factory=dict)
+    # Lenses that answered only once reasoning was switched off — the rung below
+    # `stepped_down`, and a different claim about where the findings came from.
+    reasoning_off: list[str] = field(default_factory=list)
     # Matched spec roots none of whose files fit the spec budget, and whether
     # the spec lens ran at all (against the specs that did fit).
     spec_unfit: list[str] = field(default_factory=list)
@@ -384,6 +387,17 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"({listed}). Those findings come from the lower setting — lower "
             "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
             "first attempt rather than the second."
+        )
+    if state.reasoning_off:
+        count = len(state.reasoning_off)
+        listed = ", ".join(f"`{lens}`" for lens in state.reasoning_off)
+        notices.append(
+            f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
+            f"ceiling on reasoning at a lower `reasoning_effort` too, and was re-run "
+            f"once with reasoning switched off ({listed}). Those findings come from "
+            "a run without thinking — this model treats `reasoning_effort` as a "
+            "switch, so set it to `none` yourself, or raise `max_tokens`, to make "
+            "that the first attempt rather than the third."
         )
     if state.escalated:
         count = len(state.escalated)
@@ -629,6 +643,20 @@ class _PayloadReason(_RetryableReason):
     ``the smaller payload also ran out of room`` (nothing left to try) and ``a
     piece hit a capacity 429`` (the provider faltered, and the rescue wave is
     exactly what should have it). Collapsing them excluded the second.
+    """
+
+    __slots__ = ()
+
+
+class _ReasoningBoundReason(str):
+    """A truncation whose ceiling went on thought, not on the answer.
+
+    Produced only by :func:`_reasoning_exhausted_reason`, and read by
+    :meth:`LLMReviewEngine._retry_lower_effort` to tell a step-down retry that
+    cut the same way (take the off switch) from one that cut for another reason
+    (stop). NOT a :class:`_RetryableReason`: an identical request runs to the
+    identical ceiling, so the rescue wave has nothing to offer it. The same
+    plain-``str`` trick as its siblings, for the same reasons.
     """
 
     __slots__ = ()
@@ -940,6 +968,9 @@ class LLMReviewEngine:
         # not calls — the same lens stepping down in two batches is one fact
         # about the review, not two.
         self._stepped_down: set[str] = set()
+        # Lenses that answered only with reasoning switched off (the rung below
+        # the step-down); kept apart because the summary makes a different claim.
+        self._reasoning_off: set[str] = set()
         # Lenses a SECOND model answered, keyed to the model that answered them.
         # Two paths land here and the reader cannot tell them apart, which is the
         # point: the engine escalating a truncation itself (see _escalate_model),
@@ -1419,6 +1450,7 @@ class LLMReviewEngine:
                 failed_lenses=failed_lenses,
                 split_batches=len(self._split_batches),
                 stepped_down=sorted(self._stepped_down),
+                reasoning_off=sorted(self._reasoning_off),
                 escalated=dict(self._escalated),
                 repaired=sorted(self._repaired),
                 flooded=dict(self._flooded),
@@ -2030,7 +2062,46 @@ class LLMReviewEngine:
             # produced no such findings. That run reports the failure it already
             # had — claiming a recovery on top of it would be two wrong notices.
             self._stepped_down.add(lens.id)
-        return findings, error
+            return findings, error
+        if not isinstance(error, _ReasoningBoundReason):
+            # The lower effort cut for some OTHER reason — the answer outgrew the
+            # ceiling, a quota, a refused request. Thinking less again is not the
+            # remedy for any of those, and the caller decides what is.
+            return findings, error
+        # The graded step landed nowhere: the same ceiling, spent the same way.
+        # Measured on GLM 5.3 through OpenRouter (a large PR, three rounds), where
+        # `low` and `minimal` both spent the whole 12,288 ceiling on thought in
+        # 10 retries of 11, and the fallback model then did the same at ten times
+        # the price. A model whose thinking is a switch does not answer to a
+        # dial, so the one further step is to off — and it is taken BEFORE the
+        # model changes, because switching model says nothing about the failure.
+        off = getattr(self._provider, "disable_reasoning", None)
+        switch_off = off() if callable(off) else None
+        if not switch_off or switch_off == step_down:
+            # No switch on this route, or the step-down already was it (a
+            # configured `minimal` steps to `none`): a second request at the
+            # same setting is the byte-identical call that just failed.
+            return findings, error
+        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+            return findings, error
+        _log.warning(
+            "the lower effort exhausted the ceiling too — retrying once with reasoning off",
+            extra={"lens": lens.id, "batch": batch_num, "effort": switch_off},
+        )
+        more, error = self._complete_lens(
+            messages,
+            model,
+            response_format,
+            batch_num,
+            lens,
+            None,
+            None,
+            effort=switch_off,
+            run=run,
+        )
+        if error is None:
+            self._reasoning_off.add(lens.id)
+        return findings + more, error
 
     def _escalate_model(
         self,
@@ -2572,7 +2643,7 @@ def _reasoning_exhausted_reason(reasoning: int | None, ceiling: int | None) -> s
     # from a response the adapter raised on and from one only the parser caught.
     # The second has no exception to take a name from, and the fault it describes
     # is the same one either way.
-    return (
+    return _ReasoningBoundReason(
         f"ProviderTruncated: spent {reasoning} of the {ceiling}-token `max_tokens` "
         "ceiling on reasoning, so the batch was not split — a smaller payload cannot "
         "shrink a thinking budget. Lower `reasoning_effort`, or raise `max_tokens` if "

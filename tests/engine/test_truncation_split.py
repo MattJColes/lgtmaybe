@@ -573,7 +573,10 @@ def test_a_model_reasoning_at_its_own_default_still_gets_the_retry() -> None:
 
 
 def test_a_second_reasoning_bound_truncation_reports_and_stops() -> None:
-    """One attempt, not a cascade — the same posture as the split's one level."""
+    """One graded attempt, not a walk down the ladder — the same posture as the
+    split's one level. This provider offers no off switch (`disable_reasoning`
+    is feature-detected, like the step-down itself), so the second cut is the
+    end of the road for it."""
     provider = _TruncatesUntilEffortDrops(answers_at=_TruncatesUntilEffortDrops._NEVER)
 
     with pytest.raises(ReviewIncompleteError) as exc_info:
@@ -581,6 +584,120 @@ def test_a_second_reasoning_bound_truncation_reports_and_stops() -> None:
 
     assert provider.efforts == ["medium", "low"]  # and no third
     assert "reasoning_effort" in str(exc_info.value)
+
+
+class _TruncatesUntilReasoningIsOff(_TruncatesUntilEffortDrops):
+    """A model whose thinking is a switch, not a dial.
+
+    The shape GLM 5.3 (flash and standard) showed through OpenRouter on a
+    60k-token batch: `low` spent the whole 12,288 ceiling thinking, the
+    step-down to `minimal` spent the whole ceiling identically (10 of 11
+    retries), and the fallback model did the same. Graded levels do not move
+    it; only switching thought off does.
+    """
+
+    def disable_reasoning(self) -> dict[str, Any] | None:
+        if self._effort == "none":
+            return None
+        return {"reasoning_effort": "none"}
+
+
+def test_a_step_down_that_exhausts_again_is_retried_once_with_reasoning_off() -> None:
+    """The rung the ladder stopped one short of.
+
+    Measured over three rounds on one large PR (~60k-token batches, GLM 5.3
+    through OpenRouter): every reasoning-bound cut on the big batch was followed by a
+    `minimal` retry that cut identically, then a fallback-model call ten times
+    the price that cut identically too. The lens was lost each time, and the
+    lever that would have moved a binary-thinking model — off — was never
+    pulled. So a step-down that is itself reasoning-bound takes exactly one
+    more step, to off, before the model is changed.
+    """
+    provider = _TruncatesUntilReasoningIsOff(answers_at="none")
+
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
+    )
+
+    assert provider.efforts == ["medium", "low", "none"]  # one graded step, then off
+    assert [f.title for f in findings] == ["unchecked value in one.py"]
+    # Named as its own fact: findings from a run without thinking are not the
+    # same claim as findings from a lower setting.
+    assert "switched off" in summary
+
+
+def test_a_third_reasoning_bound_cut_reports_and_stops() -> None:
+    """Off is the bottom. A model that still fills the ceiling with thought it
+    was told not to have is not going to answer at any setting, and the ladder
+    hands the batch to the fallback model rather than spend more on it."""
+    provider = _TruncatesUntilReasoningIsOff(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == ["medium", "low", "none"]  # and no fourth
+
+
+def test_reasoning_off_is_not_tried_when_the_step_down_lands_there_already() -> None:
+    """Configured `minimal`, the one graded step IS the off switch. A second
+    request at the same setting would be the byte-identical call that just
+    failed, billed twice."""
+    provider = _TruncatesUntilReasoningIsOff(
+        effort="minimal", answers_at=_TruncatesUntilEffortDrops._NEVER
+    )
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == ["minimal", "none"]  # never "none" twice
+
+
+def test_reasoning_off_is_not_tried_when_the_step_down_cut_for_another_reason() -> None:
+    """The off switch answers a reasoning-bound cut and nothing else. A
+    step-down retry whose ANSWER outgrew the ceiling says the payload is the
+    problem, and thinking less cannot fix that."""
+
+    class _AnswerOutgrowsAtLow(_TruncatesUntilReasoningIsOff):
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            effort = opts.get("reasoning_effort", self._effort)
+            if effort == "low":
+                self.efforts.append(effort)
+                raise ProviderTruncated(
+                    _CEILING, text="", reasoning_tokens=10, output_tokens=_REASONING_CEILING
+                )
+            return super().complete(messages, model, **opts)
+
+    provider = _AnswerOutgrowsAtLow(answers_at=_TruncatesUntilEffortDrops._NEVER)
+
+    with pytest.raises(ReviewIncompleteError):
+        LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
+
+    assert provider.efforts == ["medium", "low"]  # payload-bound at low: no off retry
+
+
+def test_the_off_switch_reaches_an_openrouter_route_through_the_real_adapter() -> None:
+    """End to end through the REAL adapter methods, in the shape the failure
+    arrived in: an OpenRouter GLM route with nothing configured. The floor goes
+    out nested, and so does off — the flat param would be dropped there."""
+
+    class _GlmThroughOpenRouter(_TruncatesUntilReasoningIsOff):
+        model = "openrouter/z-ai/glm-5.3-flash"
+        default_opts: dict[str, Any] = {}
+        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+        disable_reasoning = LiteLLMProvider.disable_reasoning
+
+        def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+            nested = opts.get("extra_body", {}).get("reasoning", {})
+            return super().complete(messages, model, reasoning_effort=nested.get("effort"))
+
+    provider = _GlmThroughOpenRouter(effort=None, answers_at="none")
+
+    findings, _summary = LLMReviewEngine(provider).review(
+        _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
+    )
+
+    assert provider.efforts == [None, _EFFORT_FLOOR, "none"]
+    assert [f.title for f in findings] == ["unchecked value in one.py"]
 
 
 def test_a_failed_step_down_is_not_reported_as_a_recovery() -> None:
