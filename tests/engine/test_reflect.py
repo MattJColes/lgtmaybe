@@ -906,3 +906,30 @@ def test_audit_prompt_tells_the_auditor_the_diff_is_untrusted() -> None:
     lowered = prompt.lower()
     assert "instructions" in lowered
     assert "do not follow" in lowered or "not follow" in lowered
+
+
+def test_deferred_file_reaches_recheck_when_full_diff_exceeds_batch_budget() -> None:
+    changed = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n" + _CTX.diff
+    unrelated = (
+        "diff --git a/unrelated.py b/unrelated.py\n--- a/unrelated.py\n+++ b/unrelated.py\n"
+        + _CTX.diff * 2000
+    )
+    ctx = _CTX.model_copy(
+        update={"diff": changed + unrelated, "changed_files": ["a.py", "unrelated.py"]}
+    )
+    cfg = _CFG.model_copy(update={"max_input_tokens": 4000})
+    provider = _ScriptedProvider(
+        [
+            _needs_envelope(0, ["other.py"]),
+            _envelope([(0, True)]),
+        ]
+    )
+    fetcher = _RecordingFetcher({"other.py": "verified_definition = 42\n"})
+
+    reflect_findings([_HIGH], ctx, cfg, provider, fetch_file=fetcher)
+
+    assert fetcher.calls == ["other.py"]
+    recheck = _user_text(provider.calls[1])
+    assert "verified_definition = 42" in recheck
+    assert changed in recheck
+    assert "unrelated.py" not in recheck
