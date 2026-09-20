@@ -40,6 +40,7 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.core.ports import (
+    DiffUnavailable,
     ProviderClient,
     ReviewEngine,
     ReviewGateway,
@@ -86,6 +87,12 @@ class RuntimeOptions:
 
 
 _log = get_logger(__name__)
+
+# Hidden marker on the notice posted when the host would not serve the diff
+# (GitHub's 406 on a PR over 300 files / 20,000 lines). A posting gate can key
+# on it the way it keys on the incomplete marker: this head was NOT reviewed,
+# and the run said so rather than failing or passing.
+SKIPPED_MARKER = "<!-- lgtmaybe-skipped -->"
 
 
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
@@ -825,21 +832,23 @@ def execute_review(
     github, engine, provider = _build_context_or_fail(cfg, runtime)
 
     ctx: PRContext | None = None
-    if diagram:
-        want_manifests = getattr(github, "set_scan_manifests", None)
-        if callable(want_manifests):
-            want_manifests(cfg.static_analysis.enabled)
-        # A failed prefetch means run_review fetches and surfaces the failure
-        # itself. Fetching here lets the review and the change overview share
-        # one current-head context.
-        try:
-            ctx = github.get_pr_context()
-        except Exception:
-            _log.warning("PR context prefetch failed — overview skipped", exc_info=True)
-
     # From here we have a gateway, so any failure is surfaced back to the PR as
     # a short comment rather than failing silently — then we exit non-zero.
     try:
+        if diagram:
+            want_manifests = getattr(github, "set_scan_manifests", None)
+            if callable(want_manifests):
+                want_manifests(cfg.static_analysis.enabled)
+            # A failed prefetch means run_review fetches and surfaces the
+            # failure itself. Fetching here lets the review and the change
+            # overview share one current-head context. A refused diff is
+            # not retried by run_review — it is the same answer twice.
+            try:
+                ctx = github.get_pr_context()
+            except DiffUnavailable:
+                raise
+            except Exception:
+                _log.warning("PR context prefetch failed — overview skipped", exc_info=True)
         run_review(
             github=github,
             engine=engine,
@@ -849,6 +858,17 @@ def execute_review(
             provider=provider,
             diagram_required=diagram,
         )
+    except DiffUnavailable as exc:
+        # The host will not serve the diff (GitHub: over 300 files / 20,000
+        # lines). No diff means no content was seen, and no retry changes
+        # that — so this is disclosed as a review that did not happen, not
+        # reported as one that failed. Exit zero: a red job for a PR the
+        # reviewer was never able to look at only teaches people to ignore
+        # red jobs.
+        _log.warning("diff unavailable — review skipped", extra={"reason": exc.reason})
+        _post_skipped(github, exc)
+        click.echo(f"review skipped: {exc.reason}")
+        return
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"review failed: {exc}") from exc
@@ -886,16 +906,47 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
 
     try:
         dispatch(parsed, github=github, engine=engine, provider=provider, cfg=cfg)
+    except DiffUnavailable as exc:
+        # Same disclosure as execute_review: no diff, nothing seen, exit zero.
+        _log.warning("diff unavailable — command skipped", extra={"reason": exc.reason})
+        _post_skipped(github, exc)
+        click.echo(f"/{parsed.name} skipped: {exc.reason}")
+        return
     except Exception as exc:
         _post_failure(github, exc)
         raise click.ClickException(f"/{parsed.name} failed: {exc}") from exc
+
+
+def _post_skipped(github: ReviewGateway, exc: DiffUnavailable) -> None:
+    """Post the not-reviewed notice for a diff the host refused to serve.
+
+    Says three things, in this order: nothing was looked at, why (in the
+    host's words), and what moves it — a smaller PR, since the limit is the
+    host's and no reviewer setting changes it. Same two writes as a failure
+    notice, for the same reason: on a re-run the review-body edit notifies
+    nobody.
+    """
+    notice = (
+        "ℹ️ lgtmaybe did not review this pull request — GitHub would not serve "
+        f"its diff, so **none of its content was seen**.\n\n> {exc.reason}\n\n"
+        "GitHub stops rendering a diff past 300 files or 20,000 lines. lgtmaybe "
+        "reads pull request content through that API only (never a checkout), "
+        "so there is nothing to review until the change is split into smaller "
+        "pull requests. This is not a review and not an approval: **not reviewed**."
+        f"\n\n{SKIPPED_MARKER}\n_lgtmaybe {package_version()}_"
+    )
+    _post_notice(github, notice)
 
 
 def _post_failure(github: ReviewGateway, exc: Exception) -> None:
     """Post a short failure notice to the PR; never raise from here."""
     # Name the version: unlike the summary line this notice carries no model,
     # so without it a failure report says nothing about what was running.
-    notice = f"⚠️ lgtmaybe review failed: {exc}\n\n_lgtmaybe {package_version()}_"
+    _post_notice(github, f"⚠️ lgtmaybe review failed: {exc}\n\n_lgtmaybe {package_version()}_")
+
+
+def _post_notice(github: ReviewGateway, notice: str) -> None:
+    """Post a findings-free notice as the review body AND a PR comment; never raise."""
     try:
         # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next

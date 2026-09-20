@@ -458,3 +458,62 @@ def test_a_path_with_a_fragment_character_still_reaches_the_server() -> None:
     # `.path` decodes; the wire form is what the `#` breaks.
     assert captured[0].url.raw_path.endswith(b"/contents/src/C%23/Foo.cs?ref=deadbeef")
     assert captured[0].url.params["ref"] == "deadbeef"
+
+
+@respx.mock
+def test_diff_refused_by_github_raises_diff_unavailable() -> None:
+    """GitHub answers 406 on the ``.diff`` media type when a PR is over 300
+    files / 20,000 lines. That is not a transport failure and no retry can
+    change it, so the adapter raises the typed ``DiffUnavailable`` carrying
+    GitHub's own reason — the CLI turns it into a skip notice, not a failure."""
+    from lgtmaybe.core.ports import DiffUnavailable
+
+    reason = "Sorry, the diff exceeded the maximum number of files (300)."
+    respx.route(
+        method="GET",
+        url=PR_URL,
+        headers={"Accept": "application/vnd.github.v3.diff"},
+    ).mock(
+        return_value=httpx.Response(
+            406,
+            json={
+                "message": reason,
+                "errors": [{"resource": "PullRequest", "field": "diff", "code": "too_large"}],
+            },
+        )
+    )
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_detail.json"))
+    )
+
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, client=httpx.Client())
+
+    with pytest.raises(DiffUnavailable) as excinfo:
+        gateway.get_pr_context()
+
+    assert reason in str(excinfo.value)
+    assert "406" in str(excinfo.value)
+
+
+@respx.mock
+def test_diff_refusal_with_unparseable_body_uses_fallback_reason() -> None:
+    """A 406 whose body is not JSON (or carries no message) must still raise
+    the typed exception with a usable reason — never crash on the body."""
+    from lgtmaybe.core.ports import DiffUnavailable
+
+    respx.route(
+        method="GET",
+        url=PR_URL,
+        headers={"Accept": "application/vnd.github.v3.diff"},
+    ).mock(return_value=httpx.Response(406, text="<html>Not Acceptable</html>"))
+    respx.route(method="GET", url=PR_URL).mock(
+        return_value=httpx.Response(200, json=_load_json("pr_detail.json"))
+    )
+
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, client=httpx.Client())
+
+    with pytest.raises(DiffUnavailable) as excinfo:
+        gateway.get_pr_context()
+
+    assert "would not serve the diff" in str(excinfo.value)
+    assert "406" in str(excinfo.value)
