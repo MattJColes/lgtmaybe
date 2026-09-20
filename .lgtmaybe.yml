@@ -86,4 +86,11 @@ max_tokens: 16384
 # at, which is the headroom that raise was buying back. And `medium` truncated
 # once in two runs where `low` truncated twice, which is directionally
 # interesting but n=2: do not read it as a fix for the runaway.
+#
+# On z-ai/glm-5.3-flash (the dogfood model since 2026-09-20) the graded levels
+# are a switch, not a dial: `low`, `minimal` and `medium` all leave thinking on,
+# and only `none` turns it off. So `medium` costs nothing extra here, and the
+# lever for a lens that spends its ceiling on thought is the ladder's own
+# reasoning-off rung (#661), which this dogfood exists to exercise. Do not read
+# the four-run table above as a measurement of THIS model; it predates it.
 reasoning_effort: medium
