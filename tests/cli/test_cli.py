@@ -745,7 +745,10 @@ class TestDiffUnavailable:
         assert all(sha is None for sha in github.marked_reviewed)
         assert github.diagrams == []
 
-    def test_slash_review_posts_the_same_skip_notice(self, monkeypatch):
+    @pytest.mark.parametrize("command", ["/review", "/improve", "/describe", "/diagram"])
+    def test_slash_commands_post_the_same_skip_notice(self, monkeypatch, command):
+        """Every command that needs the diff takes the skip path, not the
+        failure one — the spec names them all, so the test does too."""
         import lgtmaybe.cli as cli_module
 
         github = self._github()
@@ -755,7 +758,7 @@ class TestDiffUnavailable:
             lambda cfg, runtime: (github, FakeEngine(FakeProvider()), FakeProvider()),
         )
         event = {
-            "comment": {"body": "/review"},
+            "comment": {"body": command},
             "issue": {"number": 7, "pull_request": {}},
             "repository": {"full_name": "owner/repo"},
         }
