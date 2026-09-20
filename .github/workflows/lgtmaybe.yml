@@ -92,29 +92,34 @@ jobs:
         with:
           image: lgtmaybe:dogfood
           provider: openrouter
-          # google/gemini-3.7-flash (released 2026-08-13) is Google's Flash-class
-          # workhorse for coding and agentic work: cheap enough to run on every
-          # PR — which is what a per-PR dogfood needs; a pricier model exhausts
-          # the key's monthly limit, and OpenRouter then rejects each call with
-          # a 402 — with a 1M-token context no dogfood diff comes near. Routed
-          # through OpenRouter so the existing OPENROUTER_API_KEY keeps working:
-          # lgtmaybe has no native gemini provider, and vertex would mean
-          # standing up WIF for a dogfood.
+          # z-ai/glm-5.3-flash, since 2026-09-20 (was google/gemini-3.7-flash).
+          # Cheap enough to run on every PR — which is what a per-PR dogfood
+          # needs; a pricier model exhausts the key's monthly limit, and
+          # OpenRouter then rejects each call with a 402 — and by an order of
+          # magnitude the cheapest model in docs/how-to/choose-a-review-model.md
+          # (58.6% recall / 66.7% precision on the breadth suite at 2.7.0, but
+          # 0.0% clean pass: expect a nit or two on green PRs). The switch also
+          # dogfoods the reasoning ladder on the model family it was built
+          # against: GLM treats `reasoning_effort` as a switch, not a dial, so
+          # a reasoning-bound cut is answered by the ladder's reasoning-off
+          # rung (#661), and this is where that rung gets exercised on real
+          # diffs before anyone else depends on it.
           # The id is OpenRouter's exact catalogue form. A guessed variant is
           # what OpenRouter rejected on #319 — `{"message": "... is not a valid
           # model ID","code": 400}` on every lens, so the review posted a
           # failure instead of a review.
-          model: "google/gemini-3.7-flash"
-          # Gemini 3 models are tuned for their default temperature of 1.0:
-          # Google's Gemini 3 developer guide warns that lowering it risks
-          # looping and degraded reasoning, and its migration advice is to
-          # remove explicit low-temperature settings outright. lgtmaybe
-          # defaults to 0.0 for reproducible reviews, so this override is
-          # load-bearing — do not delete it for determinism's sake.
-          # `reasoning_effort: medium` (.lgtmaybe.yml) maps onto this model's
-          # thinking levels, where MEDIUM is also the model default (3.7 Flash
-          # rejects MINIMAL with a validation error).
-          temperature: "1.0"
+          model: "z-ai/glm-5.3-flash"
+          # The non-flash sibling is the last rung only: a healthy call never
+          # reaches it, and a truncated one gets a split, a lower effort and
+          # reasoning off on flash first. At ~10x flash's per-call price it is
+          # insurance against a lost lens, not a second reviewer.
+          fallback_model: "z-ai/glm-5.3"
+          # No `temperature` override: the 1.0 that sat here was Gemini 3's
+          # documented requirement (its guide warns lower values loop), not
+          # ours. lgtmaybe's 0.0 default is back for reproducible reviews.
+          # `reasoning_effort: medium` (.lgtmaybe.yml) still goes out in
+          # OpenRouter's nested `reasoning` object; see the note there on what
+          # it means for this model.
           # The default 100k input budget hands one call more diff than its
           # output budget can answer for: the response is cut off mid-JSON and
           # the lens is lost (three of four on #309). Smaller batches keep each
@@ -124,8 +129,8 @@ jobs:
           # .lgtmaybe.yml), NOT the model's — an earlier revision of this
           # comment said the model "tops out at 16k", which sent the reader to
           # a knob they cannot move. The 16k is ours, against models that ran
-          # to 65,536 when a lens went away (gemini-3.7-flash's output window
-          # is also 65,536). Reasoning models spend that same budget on thought
+          # to 65,536 when a lens went away. Reasoning models spend that same
+          # budget on thought
           # before writing a finding; `--profile` reports the split
           # (`think_tok`). Two models in a row truncated lenses at that cap on
           # bigger batches, so the smaller batches stay until re-measured on
