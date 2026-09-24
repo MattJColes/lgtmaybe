@@ -1,17 +1,17 @@
 # Contributing to lgtmaybe
 
-Thanks for considering a contribution. lgtmaybe is solo-maintained — the
-maintainer merges and decides — so this is deliberately short: run it locally,
-add a test, open a PR.
+Thanks for contributing. lgtmaybe is maintained by one person, so keep each
+change focused and open a PR. Code changes need a test; documentation changes
+need a successful docs build.
 
 ## The bar
 
-A PR is mergeable when it has **green CI and a test** — not when it wins a style
-debate (ruff handles style). Specifically:
+A code PR needs **green CI and a behavioral test**. Documentation-only PRs need
+the docs build to pass. Specifically:
 
-- **TDD, always.** Write the test from the change's stated input/output *first*,
-  watch it fail, then write the minimum code to pass. CI rejects a diff that adds
-  code without a test.
+- **Write the test first for code changes.** Start from the expected input and
+  output, watch the test fail, then write the minimum code to pass. CI rejects
+  code changes without a test.
 - **Tests are behavioural.** Call the function, assert the result. Use the fakes
   in `tests/fakes/`; only mock at true system boundaries (the LLM, the GitHub
   API). Don't mock the code under test.
@@ -49,18 +49,18 @@ Outdated-version and CVE checks run **in the background** (Dependabot and the
 `audit` workflow), not in this per-PR gate — they depend on what's published
 upstream, so they can't be deterministic.
 
-Preview the docs site locally:
+Build the docs (or replace `build --strict` with `serve` for a live preview):
 
 ```bash
-uv run --group docs mkdocs serve
+uv run --group docs mkdocs build --strict
 ```
 
 ## Opening a PR
 
 1. Branch with a conventional prefix: `feat/`, `fix/`, `chore/`, `docs/`.
-2. Make the change test-first; keep it minimal and focused.
-3. Ensure the five commands above are green.
-4. Open the PR with a short description of the behaviour change. The maintainer
+2. For code changes, make the change test-first. Keep every PR focused.
+3. Run the relevant checks above; build the docs for documentation changes.
+4. Open the PR with a short description of the change. The maintainer
    dogfoods lgtmaybe on its own PRs, so expect an automated review too.
 
 ## Good first issues

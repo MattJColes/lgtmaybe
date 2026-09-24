@@ -4,13 +4,12 @@ description: Measure what a lgtmaybe review actually spends, then cut it — tri
 
 # Reduce Review Cost
 
-A review's token cost is a **product, not a sum**: every lens re-sends the whole
-diff, and every batch pays that again. On a hosted provider that multiplies into
-real money faster than most people expect, and the first you usually hear about
-it is the provider invoice.
+A review can make several model calls per diff batch. Each call has an input
+cost, even when prompt caching reduces the bill. Large diffs create more
+batches, so cost can rise quickly on a hosted provider.
 
-This guide shows you how to see the number, then how to bring it down without
-giving up the findings you actually want.
+This guide shows you how to measure that cost and lower it while keeping the
+findings you need.
 
 > Deciding **who** can trigger a review is a related but separate question —
 > see [Trust and Cost](../explanation/trust-and-cost.md). Every setting below is
@@ -56,10 +55,9 @@ priced, the line says how many rather than passing a partial total off as the
 sum. Cache reads are billed at their discount, so a run with a warm prefix
 shows it.
 
-`in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
-the diff, over and over, once per lens per batch. The per-call table above it
-shows exactly which lens and which batch each call belongs to, so you can see
-whether the cost is lens count, batch count, or one enormous file.
+`in` can dwarf `out` because each review call includes diff content. The
+per-call table shows which lens and batch each call belongs to, so you can see
+whether the cost comes from call count, batch count, or one large file.
 
 On a reasoning model, read the table's `think_tok` column next to `out_tok`.
 That is how much of the output budget went on thought before the model wrote a
@@ -83,12 +81,13 @@ with its own token counts, so you can total a run without the summary.
 For one review:
 
 ```
-input tokens  ≈  batches × lenses × (diff + context padding + hints)
+input tokens  ≈  batches × calls per batch × (diff + context padding + hints)
 ```
 
-- **lenses** — the `fast` preset (the default) makes **four** calls per batch;
-  `full` makes one per category, up to nine. This is the biggest multiplier in
-  the formula.
+- **calls per batch** — the `fast` preset (the default) makes **four** core
+  calls per batch; `full` makes one per built-in category, up to nine. A
+  matching committed spec adds its own call. This is the biggest multiplier
+  in the formula.
 - **batches** — a diff larger than `max_input_tokens` is split, and *each*
   batch pays the full lens fan-out again. The default is 100k, fitted down to
   what the model's context window can take when that is known (litellm's model

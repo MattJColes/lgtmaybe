@@ -10,10 +10,10 @@ description: Provider-agnostic AI code review for pull and merge requests on Git
 
 </div>
 
-lgtmaybe reviews the code a pull request changes. Pick OpenAI, Claude, Bedrock,
-Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it on
-**GitHub, GitLab, or Gitea** — or from your terminal. The change gets inline
-comments and one summary; locally, you get the same findings before you push.
+lgtmaybe reviews pull and merge requests on **GitHub, GitLab, and Gitea**. You
+can also review a local Git diff before pushing. Choose a hosted model, ollama,
+or another OpenAI-compatible endpoint. Reviews on a code host post inline
+comments and one summary; local reviews print findings in your terminal.
 
 It reads the diff and a little surrounding code, but only comments on changed
 lines. It never checks out or runs the change. Generated files and binaries are
@@ -33,13 +33,12 @@ line. A clean change just gets a 👍 **LGTM!**.
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
-Reviews aren't all it does. **`/review`** and **`/improve`** run the review, and
-**`/diagram`** posts [the change overview](how-to/generate-a-change-diagram.md) —
-a description, a bold **High Impact Areas** call-out (infrastructure, security
-posture, outage risk, migrations, backups, compatibility, cost and more), a
-flowchart of what the change touches and a sequence diagram of the flow it
-alters. **`/ask`** answers questions in the change. Run `lgtmaybe diagram` to
-print the same overview locally.
+Slash commands can refresh a review (`/review`, `/improve`), answer a question
+(`/ask`), post a structured description (`/describe`), or post
+[a change overview](how-to/generate-a-change-diagram.md) (`/diagram`). The
+overview describes high-impact areas and includes a flowchart; it adds a
+sequence diagram when the change alters a runtime flow. Run `lgtmaybe diagram`
+to print a text version locally.
 
 ```mermaid
 flowchart LR
@@ -93,9 +92,8 @@ on any host below.
 | Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
 | None | `lgtmaybe review` locally | — | [Install the CLI](how-to/install-the-cli.md) |
 
-The review is identical on all three. What differs is what each host's API can
-do with the result — auto-resolving a fixed finding, reviewing only new commits,
-and keyless cloud auth are not available everywhere. See
+The same review runs on all three hosts. Their APIs and workflows differ in
+thread resolution, incremental reviews, and keyless cloud auth. See
 [Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 
 ## For AI agents

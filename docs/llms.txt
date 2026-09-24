@@ -1,6 +1,6 @@
 # lgtmaybe
 
-> Provider-agnostic AI pull-request reviewer. It posts inline review comments and a summary onto a GitHub pull request, or prints findings locally from your git diff. Seven hosted providers, local ollama, and any OpenAI-compatible endpoint — one flag, and keyless OIDC/WIF auth for cloud providers (no static keys in secrets).
+> AI code review for GitHub, GitLab, Gitea, and local Git diffs. It posts inline findings and a summary on pull and merge requests, or prints findings locally. Choose from seven hosted providers, ollama, or any OpenAI-compatible endpoint. Bedrock, Vertex, and Azure support keyless cloud auth.
 
 ## Tutorial
 
@@ -41,5 +41,5 @@
 - [What gets reviewed](https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/): What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
 - [Architecture](https://lgtmaybe.coles.codes/explanation/architecture/): lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
 - [Auth model](https://lgtmaybe.coles.codes/explanation/auth-model/): How lgtmaybe authenticates to each provider — keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
-- [Data and privacy](https://lgtmaybe.coles.codes/explanation/data-and-privacy/): Exactly what data lgtmaybe sends where — diffs only, secret redaction before egress, no code checkout, fully local with ollama.
+- [Data and privacy](https://lgtmaybe.coles.codes/explanation/data-and-privacy/): What lgtmaybe sends to model providers, including optional context and specs, and how it redacts secrets before egress.
 - [Trust and cost](https://lgtmaybe.coles.codes/explanation/trust-and-cost/): How lgtmaybe's trigger gate and cost model work — who can start a review, and why opening it wide is a cost not a security choice.
