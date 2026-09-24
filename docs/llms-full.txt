@@ -1,6 +1,6 @@
 # lgtmaybe — full documentation
 
-> Provider-agnostic AI pull-request reviewer. It posts inline review comments and a summary onto a GitHub pull request, or prints findings locally from your git diff. Seven hosted providers, local ollama, and any OpenAI-compatible endpoint — one flag, and keyless OIDC/WIF auth for cloud providers (no static keys in secrets).
+> AI code review for GitHub, GitLab, Gitea, and local Git diffs. It posts inline findings and a summary on pull and merge requests, or prints findings locally. Choose from seven hosted providers, ollama, or any OpenAI-compatible endpoint. Bedrock, Vertex, and Azure support keyless cloud auth.
 
 Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
@@ -16,10 +16,10 @@ Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
 </div>
 
-lgtmaybe reviews the code a pull request changes. Pick OpenAI, Claude, Bedrock,
-Vertex, Azure, ollama, or any OpenAI-compatible endpoint, then run it on
-**GitHub, GitLab, or Gitea** — or from your terminal. The change gets inline
-comments and one summary; locally, you get the same findings before you push.
+lgtmaybe reviews pull and merge requests on **GitHub, GitLab, and Gitea**. You
+can also review a local Git diff before pushing. Choose a hosted model, ollama,
+or another OpenAI-compatible endpoint. Reviews on a code host post inline
+comments and one summary; local reviews print findings in your terminal.
 
 It reads the diff and a little surrounding code, but only comments on changed
 lines. It never checks out or runs the change. Generated files and binaries are
@@ -39,13 +39,12 @@ line. A clean change just gets a 👍 **LGTM!**.
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterized-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
-Reviews aren't all it does. **`/review`** and **`/improve`** run the review, and
-**`/diagram`** posts [the change overview](how-to/generate-a-change-diagram.md) —
-a description, a bold **High Impact Areas** call-out (infrastructure, security
-posture, outage risk, migrations, backups, compatibility, cost and more), a
-flowchart of what the change touches and a sequence diagram of the flow it
-alters. **`/ask`** answers questions in the change. Run `lgtmaybe diagram` to
-print the same overview locally.
+Slash commands can refresh a review (`/review`, `/improve`), answer a question
+(`/ask`), post a structured description (`/describe`), or post
+[a change overview](how-to/generate-a-change-diagram.md) (`/diagram`). The
+overview describes high-impact areas and includes a flowchart; it adds a
+sequence diagram when the change alters a runtime flow. Run `lgtmaybe diagram`
+to print a text version locally.
 
 ```mermaid
 flowchart LR
@@ -99,9 +98,8 @@ on any host below.
 | Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
 | None | `lgtmaybe review` locally | — | [Install the CLI](how-to/install-the-cli.md) |
 
-The review is identical on all three. What differs is what each host's API can
-do with the result — auto-resolving a fixed finding, reviewing only new commits,
-and keyless cloud auth are not available everywhere. See
+The same review runs on all three hosts. Their APIs and workflows differ in
+thread resolution, incremental reviews, and keyless cloud auth. See
 [Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 
 ## For AI agents
@@ -1302,6 +1300,7 @@ OpenRouter offers using its `vendor/model` name.
 - [Run locally](#run-locally)
 - [Choosing the model](#choosing-the-model)
 - [Credit reservations](#credit-reservations)
+- [Rate limits](#rate-limits)
 - [Persist non-secret defaults](#persist-non-secret-defaults)
 
 ## Get an API key
@@ -4223,13 +4222,12 @@ you are happy, then open your PR. To post reviews on the PR itself, wire up the
 
 # Reduce Review Cost
 
-A review's token cost is a **product, not a sum**: every lens re-sends the whole
-diff, and every batch pays that again. On a hosted provider that multiplies into
-real money faster than most people expect, and the first you usually hear about
-it is the provider invoice.
+A review can make several model calls per diff batch. Each call has an input
+cost, even when prompt caching reduces the bill. Large diffs create more
+batches, so cost can rise quickly on a hosted provider.
 
-This guide shows you how to see the number, then how to bring it down without
-giving up the findings you actually want.
+This guide shows you how to measure that cost and lower it while keeping the
+findings you need.
 
 > Deciding **who** can trigger a review is a related but separate question —
 > see [Trust and Cost](../explanation/trust-and-cost.md). Every setting below is
@@ -4275,10 +4273,9 @@ priced, the line says how many rather than passing a partial total off as the
 sum. Cache reads are billed at their discount, so a run with a warm prefix
 shows it.
 
-`in` dwarfing `out` is normal and explains most of the cost: you are paying to *send*
-the diff, over and over, once per lens per batch. The per-call table above it
-shows exactly which lens and which batch each call belongs to, so you can see
-whether the cost is lens count, batch count, or one enormous file.
+`in` can dwarf `out` because each review call includes diff content. The
+per-call table shows which lens and batch each call belongs to, so you can see
+whether the cost comes from call count, batch count, or one large file.
 
 On a reasoning model, read the table's `think_tok` column next to `out_tok`.
 That is how much of the output budget went on thought before the model wrote a
@@ -4302,12 +4299,13 @@ with its own token counts, so you can total a run without the summary.
 For one review:
 
 ```
-input tokens  ≈  batches × lenses × (diff + context padding + hints)
+input tokens  ≈  batches × calls per batch × (diff + context padding + hints)
 ```
 
-- **lenses** — the `fast` preset (the default) makes **four** calls per batch;
-  `full` makes one per category, up to nine. This is the biggest multiplier in
-  the formula.
+- **calls per batch** — the `fast` preset (the default) makes **four** core
+  calls per batch; `full` makes one per built-in category, up to nine. A
+  matching committed spec adds its own call. This is the biggest multiplier
+  in the formula.
 - **batches** — a diff larger than `max_input_tokens` is split, and *each*
   batch pays the full lens fan-out again. The default is 100k, fitted down to
   what the model's context window can take when that is known (litellm's model
@@ -7485,16 +7483,15 @@ display key values.
 
 # Data and Privacy
 
-This document states precisely what data lgtmaybe sends to external services,
-what is redacted before egress, which providers are fully local, and how
-credentials are handled. No data flows occur beyond what is described here.
+This page explains what lgtmaybe sends to a model provider, what it redacts
+first, how local mode differs, and how credentials are handled.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends four grouped model calls under the default `fast` preset — the
-same four on every provider, overlapping when there is more than one worker.
-`full` sends one per category. The review calls fan out through one bounded pool and
-are followed by a self-reflection call. Each call contains some subset of:
+lgtmaybe makes four core review calls per diff batch under the default `fast`
+preset, or one per built-in category under `full`. A matching committed spec
+adds a separate spec-review call. Calls share a concurrency limit and are
+followed by a reflection pass. They can contain:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been
@@ -7504,8 +7501,8 @@ are followed by a self-reflection call. Each call contains some subset of:
   the **changed files only**. This gives the model the surrounding function and
   definitions so it makes fewer false-positive findings. The amount is capped by
   `context_lines` (default 20, `0` disables it) and shrinks as the diff grows;
-  this content is redacted just like the diff. It is fetched read-only via the
-  GitHub API — your code is never checked out or executed.
+  this content is redacted just like the diff. On GitHub, it is fetched
+  read-only via the API. Pull request code is never checked out or executed.
 - **PR metadata** — the repository name, PR number, base and head SHAs, and
   the list of changed file paths.
 - **The PR's stated intent** — the PR title, description, and the first line of
@@ -7517,20 +7514,27 @@ are followed by a self-reflection call. Each call contains some subset of:
   `.lgtmaybe.yml` and it is never sent at all.
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
+- **Configured instructions and reference files**, if `directory_rules` is
+  set. Reference files come from the trusted base-branch workspace, are
+  bounded, and are redacted before model calls.
+- **Matching specification text**, when a repository has a supported spec
+  workflow and the change matches a committed spec. The spec lens sends a
+  bounded, redacted selection from that spec.
+- **Additional file context**, when a review or reflection needs to check a
+  finding against another file. Retrieval is read-only, bounded, and redacted;
+  `mid_review_retrieval` is opt-in.
 
-Nothing else is sent. lgtmaybe does not send:
+Review calls do not send:
 
 - PR comments or review threads
 - Commit message bodies (only the first line of each message)
-- Repository contents beyond the changed files (only their hunks plus the
-  surrounding context lines described above)
+- Unrequested repository files or the whole repository
 - Committer identity or email addresses
 - Any other data from the repository's git history
 
 The **change overview** (`/diagram`, `auto_diagram`) makes up to three calls —
-description, High Impact Areas, diagrams — and each sends exactly the same
-inputs as a review call: the redacted diff and, when present, the redacted
-stated intent. The High Impact Areas call additionally sends the **paths** of
+description, High Impact Areas, diagrams — using the redacted diff and, when
+present, the redacted stated intent. The High Impact Areas call also sends the **paths** of
 changed files matching its risk patterns, which are already part of the diff it
 sends. No new data flows; the calls only ask the model for a different output.
 The standalone `/describe` comment sends the same inputs again. The diagram comment
@@ -7637,7 +7641,7 @@ defends in depth (OWASP LLM01):
 
 lgtmaybe does not execute any code from the PR.
 
-## Ollama: fully local, zero egress
+## Ollama: local or self-hosted
 
 When `--provider ollama` is used, the diff and all other data are sent only to
 the ollama server you specify via `--api-base`. If that server is
@@ -7661,9 +7665,10 @@ provider's data handling policies:
 
 ## Credentials
 
-lgtmaybe never logs, stores, or transmits API keys. For Bedrock and Vertex,
-short-lived ambient credentials are used and are never written to disk by
-lgtmaybe. See [Auth Model](./auth-model.md) for details.
+lgtmaybe does not log or persist API keys. API-key providers receive the key
+as part of authentication for model calls. For Bedrock and Vertex, lgtmaybe
+uses short-lived ambient credentials and does not write them to disk. See
+[Auth Model](./auth-model.md) for details.
 
 ## GitHub token
 
@@ -7695,9 +7700,8 @@ cloned at all.
 
 # Trust and Cost
 
-lgtmaybe lets you decide **who can trigger a review**. This document explains that
-choice and the small cost angle behind it, so you can pick the setting that fits
-your repo. The step-by-step setup is in
+lgtmaybe lets you decide **who can trigger a review**. Hosted models charge for
+each run, so this choice affects cost. The setup steps are in
 [Use as a GitHub Action](../how-to/use-as-github-action.md).
 
 ## Who do you want reviews to run for?

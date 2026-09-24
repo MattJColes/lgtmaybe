@@ -54,7 +54,7 @@ review a change on any of the three hosts.
 
 ```
 lgtmaybe/
-├── src/lgtmaybe/            # the application (≈3.2k LOC)
+├── src/lgtmaybe/            # the application
 │   ├── __main__.py          # `python -m lgtmaybe` / Docker ENTRYPOINT → Click CLI
 │   │
 │   ├── core/                # the hexagon's centre — no outward dependencies
@@ -83,8 +83,8 @@ lgtmaybe/
 │   │   ├── credentials.py   #   chain-of-responsibility credential resolver
 │   │   └── constants.py     #   shared provider defaults (e.g. ollama base URL)
 │   │
-│   ├── github/              # GitHub adapter (a ReviewGateway) — the complete one
-│   │   ├── rest_gateway.py  #   fetch PR context · post review · in-thread replies
+│   ├── github/              # GitHub adapter (a ReviewGateway)
+│   │   ├── rest_gateway.py  #   fetch PR context · post review · resolve threads
 │   │   └── checkout.py      #   read-only base-branch clone for symbol resolution
 │   ├── gitlab/              # GitLab adapter — discussions, REST thread resolution
 │   ├── gitea/               # Gitea adapter — immutable reviews, pre-post de-dupe

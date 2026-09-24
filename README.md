@@ -4,108 +4,87 @@
 
 # lgtmaybe
 
-Provider-agnostic code reviewer for **GitHub, GitLab, and Gitea**. Seven hosted
-model providers, local ollama, and any OpenAI-compatible endpoint — one flag, no
-static keys for cloud providers. Posts inline review comments and a summary.
+AI code review for **GitHub, GitLab, and Gitea**, or your local Git diff. Choose
+from seven hosted providers, ollama, or any OpenAI-compatible endpoint. Reviews
+post inline findings and a summary on pull and merge requests; the CLI prints
+findings locally. Bedrock, Vertex, and Azure support keyless cloud auth.
 
 📖 **Full documentation:** <https://lgtmaybe.coles.codes/>
 
 ## What it reviews
 
-lgtmaybe fetches the diff through your code host's API and reviews the lines a
-pull request (or merge request) changes. It never checks out or runs your code. To judge each change in
-context it also reads a few surrounding lines from the file. It only ever
-comments on what the PR actually changed, not the whole repository.
+lgtmaybe fetches a pull or merge request's diff through the code host API, or
+reads your local Git diff. It reads surrounding lines for context and comments
+only on changed lines. It does not check out or run pull request code.
 
-Reviews surface the kind of thing a careful reviewer would flag, each graded from
-`info` up to `critical`:
+Findings are graded from `info` to `critical`. The built-in lenses look for:
 
-- **Logic and correctness bugs** — edge cases, null dereferences, off-by-one and
-  boundary errors, mismatched ranges, unhandled error paths, races and TOCTOU,
-  missed `await`s, numeric and timezone bugs.
-- **Security vulnerabilities** — the model is prompted with an **OWASP-aligned
-  checklist**: injection, XSS, CSRF and open redirects, hardcoded secrets,
-  broken authn/authz (including JWT pitfalls), path traversal, unrestricted
-  uploads, SSRF, insecure deserialization and XXE, mass assignment, weak crypto,
-  resource/DoS safety (including ReDoS), secrets or PII (passwords, tokens,
-  SSNs, card data) leaking into logs, and CI/IaC misconfiguration (workflow
-  script injection, unpinned actions, broad IAM, public buckets). Security
-  findings are first-class, not an afterthought.
-- **Missing or weak tests** for changed code paths, with a suggested test to
-  drop in.
-- **Undocumented public APIs or stale docs** the change just made wrong.
-- **Factually outdated code** — deprecated APIs, end-of-life or vulnerable
-  dependencies, typosquat-looking additions — when the diff shows them.
-- **Performance regressions** — N+1 queries, accidentally quadratic work,
-  redundant computation, allocations or blocking I/O on hot paths, unbounded
-  queries, caches that never evict.
-- **Needless complexity** — deep nesting / high cyclomatic complexity, over-long
-  functions, duplicated logic.
-- **Intent** — does the PR do what it says? lgtmaybe reads the PR title,
-  description, and commit names (or your `git log` commit names on the CLI) and
-  flags out-of-scope hunks, code that contradicts the stated intent, and
-  promised behaviour the diff never implements.
-- **Ponytail** — the "lazy senior dev" lens: the best code is the code you never
-  wrote. Flags code that needn't exist at all — YAGNI, reach for the standard
-  library, do it in fewer lines.
+- **Correctness and security** — logic errors, missed `await`s, injection,
+  broken authorization, leaked secrets, and CI configuration risks.
+- **Tests and documentation** — missing coverage for changed behavior,
+  undocumented public APIs, and docs made stale by the change.
+- **Code health** — deprecated APIs, risky dependencies, performance
+  regressions, and needless complexity.
+- **Intent** — changes that contradict the PR title, description, or commits,
+  or leave promised behavior unimplemented.
+- **Ponytail** — code that need not exist, including opportunities to use the
+  standard library or a simpler approach.
 
-Generated and non-reviewable files (lockfiles, minified bundles, vendored
-directories, binaries) are skipped automatically, and secrets are redacted from
-the diff before it is sent to the model.
+[What gets reviewed](docs/explanation/what-gets-reviewed.md) has the full scope
+and examples.
 
-**Hardened against malicious PRs.** lgtmaybe never checks out or runs PR code,
-treats the diff as untrusted input, defends against prompt injection (including
-forged delimiter break-out attempts), and redacts a broad set of secret formats
-(cloud keys, GitHub/Slack/Google/Stripe tokens, private keys, passwords, and
-credentials in connection strings) before anything leaves your environment. See
-[Data and Privacy](docs/explanation/data-and-privacy.md).
+Generated files, lockfiles, vendored code, and binaries are skipped. The diff
+is treated as untrusted input, and detected secrets are redacted before model
+calls. See [Data and Privacy](docs/explanation/data-and-privacy.md) for what is
+sent to a provider and how prompt injection is handled.
 
-**Fast by default.** Reviews run the **`fast` preset** by default: all nine
-categories in **four model calls**, one per concern — security, correctness
-(including stated intent), code health
-(performance/complexity/ponytail/deprecation), and artefacts
-(tests/documentation). The same four run on every provider; worker count
-changes only how they are scheduled, so a cloud review overlaps them while a
-single-slot local one runs them in turn. `--preset full` (or `preset: full` in
-`.lgtmaybe.yml`) restores the one-call-per-lens deep audit for release branches.
-On top of that, all calls across all batches share **one concurrency pool**
-(`max_concurrency`, default 6 on cloud providers) and share a **cached
-preamble-plus-diff prefix** on the routes that support it, so the diff is
-processed once per batch, not once per lens. Add `--profile` to any run to see exactly where
-the time and tokens went.
+**Fast by default.** The `fast` preset covers all nine built-in categories in
+four model calls: security, correctness, code health, and tests/documentation.
+`--preset full` runs each category separately for a deeper audit. A matching
+committed spec can add a separate spec-review call. Calls share a concurrency
+limit; providers that support prompt caching can reuse the diff prefix. Add
+`--profile` to see time and token use.
 
-**How the scope is bounded.** Every run is capped so a large PR can't blow up
-latency:
+**Large changes stay bounded.** The main controls are:
 
-- `preset` (default `fast`) — four calls, one per concern (security, correctness, code health, artefacts), the same on every provider; `full` runs one call per lens.
-- `max_files` (default 50) — reviews the top-N changed files and notes how many were skipped.
-- `max_input_tokens` (default 100k) — batches the diff to fit the model's budget.
-- `max_concurrency` (default 6, every provider) — concurrent model calls across the whole fan-out. What decides local throughput is the server's own setting (`OLLAMA_NUM_PARALLEL`, llama.cpp `-np`, vLLM batching); set `1` to run serially.
-- `recursive` (default on) — when a single file's diff exceeds that budget, walks it hunk-by-hunk instead of sending it whole; `--no-recursive` sends files whole.
-- `categories` (default all nine) — which review lenses to run; an explicit list overrides the preset grouping and runs exactly those lenses, one call each.
-- `min_severity` (default `low`) plus `include_paths` / `exclude_paths` — focus the review on what you care about.
+- `max_files` (default 50) limits the changed files reviewed and reports skips.
+- `max_input_tokens` (default 100k) splits the diff into batches.
+- `recursive` (on by default) reviews an oversized file hunk by hunk;
+  `--no-recursive` turns this off.
+- `max_concurrency` (default 6) limits simultaneous model calls. Local server
+  settings also affect how many calls can run at once.
+- `categories`, `min_severity`, and path filters narrow what runs and what is
+  reported. An explicit category list runs one call per selected lens.
 
 See [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md) for every knob.
 
-**Big files, small models.** When one file's diff is too big for a single model
-call, lgtmaybe reviews it **hunk-by-hunk** rather than whole, so the model never
-loses the tail of a large file. On by default; `--no-recursive` turns it off.
-Smaller local models gain the most — across 8 runs on two fixtures, a local
-**qwen3.5:4b** averaged **88% recall** reviewing hunk-by-hunk versus **61%**
-reviewing files whole, with its *worst* run matching the whole-file method's
-*best* (a real effect, not noise), at ~2.4× the tokens. See
-[the benchmark](DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
+For the measured recall and token cost of hunk-by-hunk review on a small local
+model, see [the recursive-review benchmark](DEVELOPMENT.md#benchmarking-the-recursive-rlm-walk).
 
-**What you get back.** Each finding is structured data — file, line, severity, a
-title, an explanation, and an optional suggested fix — so it renders the same
-everywhere:
+**What you get back.** Each finding includes a file, line, severity, title,
+explanation, and sometimes a suggested fix:
 
-- **On a pull or merge request** — an inline comment on the exact changed line for each finding, plus one summary comment naming the model used. Re-running updates the summary instead of duplicating it, never repeats a finding it already posted, and a clean change gets a 👍 **LGTM!**. On GitHub and GitLab a conversation auto-resolves once its finding is verified fixed; Gitea has no thread-resolution API, so its comments stay open. See [Where it posts](#where-it-posts).
-- **On the CLI** — `lgtmaybe review` reads your local `git` diff and prints the findings (a readable listing, a JSON array with `--json`, or `--format agent` for an AI coding agent to read and apply); nothing is posted anywhere.
+- **On a pull or merge request**, findings appear on changed lines alongside
+  one summary naming the model. Re-runs update the summary and avoid duplicate
+  findings. A clean review gets a 👍 **LGTM!**. GitHub and GitLab can resolve
+  conversations once a fix is verified; Gitea cannot. See [Where it posts](#where-it-posts).
+- **On the CLI**, `lgtmaybe review` prints findings without posting them.
+  Choose readable output, JSON (`--json`), or instructions for a coding agent
+  (`--format agent`).
 
-Beyond the review, slash commands on the PR route to the same engine: **`/review`** and **`/improve`** post (or refresh) the review, **`/ask <question>`** answers a question about the change in-thread, **`/describe`** posts a standalone **structured description**, and **`/diagram`** (`auto_diagram`) posts the **change overview** — one comment carrying a description of the change, a bold **High Impact Areas** section calling out what could bite (infrastructure, security posture, production-outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, compliance), and an automatically laid-out Mermaid flowchart of the components the PR touches plus a Mermaid **sequence diagram** of the run-time flow it alters (omitted when there isn't one), both rendered natively in the comment, with a text fallback that also prints from `lgtmaybe diagram` locally. See [Generate a change overview](docs/how-to/generate-a-change-diagram.md).
+Slash commands add more options on a pull or merge request: `/review` and
+`/improve` refresh the review, `/ask <question>` answers in the conversation,
+`/describe` posts a structured description, and `/diagram` posts a change
+overview. The overview includes high-impact areas and a Mermaid flowchart;
+it adds a sequence diagram when the change alters a runtime flow. Run
+`lgtmaybe diagram` for a local text version. See
+[Generate a change overview](docs/how-to/generate-a-change-diagram.md).
 
-On re-runs and big PRs the review stays cheap: a `synchronize` push triggers an **incremental review** of just the new commits, an optional cheap **triage model** (`triage_model`) skips plainly-non-substantive files before the strong model runs, and optional **static-analysis fusion** (`static_analysis`) runs deterministic tools over the changed files — ruff/bandit/mypy/semgrep feed the review as untrusted hints, while gitleaks (secrets), zizmor (GitHub Actions workflow security), ast-grep (your own structural rules) and osv-scanner (known dependency vulnerabilities) post findings directly with no model call. semgrep ships with a small MIT rule pack, so it works without configuration.
+On GitHub, a push triggers an incremental review of new commits. Optional
+`triage_model` skips plainly non-substantive files. Optional `static_analysis`
+uses installed tools: ruff, bandit, mypy, and semgrep provide hints to the
+model; gitleaks, zizmor, ast-grep, and osv-scanner can post deterministic
+findings directly. See [Reduce review cost](docs/how-to/reduce-review-cost.md).
 
 <p align="center">
   <img src="docs/assets/marketplace/marketplace-screenshot-1.png" alt="An inline lgtmaybe review comment on a GitHub pull request flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a suggested parameterized-query fix" width="640">
@@ -120,10 +99,10 @@ On re-runs and big PRs the review stays cheap: a `synchronize` push triggers an 
 A fuller walkthrough with example output is in
 [What gets reviewed](docs/explanation/what-gets-reviewed.md).
 
-## Quick start (60 seconds, local, zero cost)
+## Quick start (local, no API key)
 
-From inside a git repo, on a branch with changes, review your diff against the
-remote primary branch and print the findings:
+Start ollama and pull a model as shown in [Getting Started](docs/tutorial/getting-started.md).
+Then, from a Git branch with changes, review the diff against the primary branch:
 
 ```bash
 pip install lgtmaybe        # or Homebrew — see docs/how-to/install-the-cli.md
@@ -148,13 +127,7 @@ the [GitHub Action](#use-as-a-github-action) — or, on another host,
 [Gitea Actions](docs/how-to/review-on-gitea.md). See
 [Getting Started](docs/tutorial/getting-started.md) for the full walkthrough.
 
-> **Picking a model:** compare cloud and local models separately. In the current
-> cloud breadth results, Qwen 3.8 Max and GLM 5.2 scored 71.4% and 72.2%
-> balanced F1; Qwen reported 8 false positives and GLM reported 24. The only
-> current local breadth run is Qwen 3.6 35B at 57.1% balanced F1. See the
-> [cloud and local model guide](docs/how-to/choose-a-review-model.md), or inspect
-> the
-> [live benchmark results](https://github.com/MattJColes/lgtmaybe-benchmarks).
+For model choices and benchmark limits, see [Choose a review model](docs/how-to/choose-a-review-model.md).
 
 ## Providers
 

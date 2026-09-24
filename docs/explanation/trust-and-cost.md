@@ -4,9 +4,8 @@ description: How lgtmaybe's trigger gate and cost model work — who can start a
 
 # Trust and Cost
 
-lgtmaybe lets you decide **who can trigger a review**. This document explains that
-choice and the small cost angle behind it, so you can pick the setting that fits
-your repo. The step-by-step setup is in
+lgtmaybe lets you decide **who can trigger a review**. Hosted models charge for
+each run, so this choice affects cost. The setup steps are in
 [Use as a GitHub Action](../how-to/use-as-github-action.md).
 
 ## Who do you want reviews to run for?

@@ -1,19 +1,18 @@
 ---
-description: Exactly what data lgtmaybe sends where — diffs only, secret redaction before egress, no code checkout, fully local with ollama.
+description: What lgtmaybe sends to model providers, including optional context and specs, and how it redacts secrets before egress.
 ---
 
 # Data and Privacy
 
-This document states precisely what data lgtmaybe sends to external services,
-what is redacted before egress, which providers are fully local, and how
-credentials are handled. No data flows occur beyond what is described here.
+This page explains what lgtmaybe sends to a model provider, what it redacts
+first, how local mode differs, and how credentials are handled.
 
 ## What is sent to the LLM provider
 
-lgtmaybe sends four grouped model calls under the default `fast` preset — the
-same four on every provider, overlapping when there is more than one worker.
-`full` sends one per category. The review calls fan out through one bounded pool and
-are followed by a self-reflection call. Each call contains some subset of:
+lgtmaybe makes four core review calls per diff batch under the default `fast`
+preset, or one per built-in category under `full`. A matching committed spec
+adds a separate spec-review call. Calls share a concurrency limit and are
+followed by a reflection pass. They can contain:
 
 - The **compressed PR diff** — the unified diff of changed files, after
   generated files, lockfiles, minified assets, and vendored code have been
@@ -23,8 +22,8 @@ are followed by a self-reflection call. Each call contains some subset of:
   the **changed files only**. This gives the model the surrounding function and
   definitions so it makes fewer false-positive findings. The amount is capped by
   `context_lines` (default 20, `0` disables it) and shrinks as the diff grows;
-  this content is redacted just like the diff. It is fetched read-only via the
-  GitHub API — your code is never checked out or executed.
+  this content is redacted just like the diff. On GitHub, it is fetched
+  read-only via the API. Pull request code is never checked out or executed.
 - **PR metadata** — the repository name, PR number, base and head SHAs, and
   the list of changed file paths.
 - **The PR's stated intent** — the PR title, description, and the first line of
@@ -36,20 +35,27 @@ are followed by a self-reflection call. Each call contains some subset of:
   `.lgtmaybe.yml` and it is never sent at all.
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
+- **Configured instructions and reference files**, if `directory_rules` is
+  set. Reference files come from the trusted base-branch workspace, are
+  bounded, and are redacted before model calls.
+- **Matching specification text**, when a repository has a supported spec
+  workflow and the change matches a committed spec. The spec lens sends a
+  bounded, redacted selection from that spec.
+- **Additional file context**, when a review or reflection needs to check a
+  finding against another file. Retrieval is read-only, bounded, and redacted;
+  `mid_review_retrieval` is opt-in.
 
-Nothing else is sent. lgtmaybe does not send:
+Review calls do not send:
 
 - PR comments or review threads
 - Commit message bodies (only the first line of each message)
-- Repository contents beyond the changed files (only their hunks plus the
-  surrounding context lines described above)
+- Unrequested repository files or the whole repository
 - Committer identity or email addresses
 - Any other data from the repository's git history
 
 The **change overview** (`/diagram`, `auto_diagram`) makes up to three calls —
-description, High Impact Areas, diagrams — and each sends exactly the same
-inputs as a review call: the redacted diff and, when present, the redacted
-stated intent. The High Impact Areas call additionally sends the **paths** of
+description, High Impact Areas, diagrams — using the redacted diff and, when
+present, the redacted stated intent. The High Impact Areas call also sends the **paths** of
 changed files matching its risk patterns, which are already part of the diff it
 sends. No new data flows; the calls only ask the model for a different output.
 The standalone `/describe` comment sends the same inputs again. The diagram comment
@@ -156,7 +162,7 @@ defends in depth (OWASP LLM01):
 
 lgtmaybe does not execute any code from the PR.
 
-## Ollama: fully local, zero egress
+## Ollama: local or self-hosted
 
 When `--provider ollama` is used, the diff and all other data are sent only to
 the ollama server you specify via `--api-base`. If that server is
@@ -180,9 +186,10 @@ provider's data handling policies:
 
 ## Credentials
 
-lgtmaybe never logs, stores, or transmits API keys. For Bedrock and Vertex,
-short-lived ambient credentials are used and are never written to disk by
-lgtmaybe. See [Auth Model](./auth-model.md) for details.
+lgtmaybe does not log or persist API keys. API-key providers receive the key
+as part of authentication for model calls. For Bedrock and Vertex, lgtmaybe
+uses short-lived ambient credentials and does not write them to disk. See
+[Auth Model](./auth-model.md) for details.
 
 ## GitHub token
 

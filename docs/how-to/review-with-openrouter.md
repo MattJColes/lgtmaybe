@@ -15,6 +15,7 @@ OpenRouter offers using its `vendor/model` name.
 - [Run locally](#run-locally)
 - [Choosing the model](#choosing-the-model)
 - [Credit reservations](#credit-reservations)
+- [Rate limits](#rate-limits)
 - [Persist non-secret defaults](#persist-non-secret-defaults)
 
 ## Get an API key

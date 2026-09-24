@@ -1,5 +1,5 @@
 site_name: lgtmaybe
-site_description: Provider-agnostic AI PR reviewer — OpenAI, Claude, Bedrock, Vertex, Azure, ollama and more. One flag, keyless OIDC/WIF for cloud, no keys in secrets. GitHub Action + CLI.
+site_description: AI code review for GitHub, GitLab, Gitea, and local Git diffs. Choose a hosted or local model; Bedrock, Vertex, and Azure support keyless cloud auth.
 site_url: https://lgtmaybe.coles.codes/
 repo_url: https://github.com/MattJColes/lgtmaybe
 repo_name: MattJColes/lgtmaybe

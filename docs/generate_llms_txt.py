@@ -30,11 +30,11 @@ LLMS_FULL_PATH = DOCS / "llms-full.txt"
 SITE_URL = "https://lgtmaybe.coles.codes/"
 
 SUMMARY = (
-    "Provider-agnostic AI pull-request reviewer. It posts inline review comments "
-    "and a summary onto a GitHub pull request, or prints findings locally from "
-    "your git diff. Seven hosted providers, local ollama, and any "
-    "OpenAI-compatible endpoint — one flag, and keyless OIDC/WIF auth for cloud "
-    "providers (no static keys in secrets)."
+    "AI code review for GitHub, GitLab, Gitea, and local Git diffs. It posts "
+    "inline findings and a summary on pull and merge requests, or prints "
+    "findings locally. Choose from seven hosted providers, ollama, or any "
+    "OpenAI-compatible endpoint. Bedrock, Vertex, and Azure support keyless "
+    "cloud auth."
 )
 
 
