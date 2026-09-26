@@ -41,7 +41,7 @@ def test_model_selection_guide_is_linked_from_readme_and_docs_nav() -> None:
     readme = (_ROOT / "README.md").read_text(encoding="utf-8")
     mkdocs = (_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
 
-    assert "## Choose a Cloud Model" in guide_text
-    assert "## Choose a Local Model" in guide_text
+    assert "## Cloud Models" in guide_text
+    assert "## Local Models" in guide_text
     assert f"docs/{guide}" in readme
     assert f"Choose a review model: {guide}" in mkdocs
