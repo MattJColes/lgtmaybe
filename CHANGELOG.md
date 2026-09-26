@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.5...lgtmaybe-v2.9.0) (2026-09-26)
+
+
+### Features
+
+* **release:** publish linux/arm64 image alongside amd64 ([#671](https://github.com/MattJColes/lgtmaybe/issues/671)) ([072b421](https://github.com/MattJColes/lgtmaybe/commit/072b421fdde915d5834777edc4c1b4a008edc8ac))
+
+
+### Documentation
+
+* refresh model recommendations from 2.8.5 benchmarks ([#668](https://github.com/MattJColes/lgtmaybe/issues/668)) ([f23bea4](https://github.com/MattJColes/lgtmaybe/commit/f23bea447547eb10203a33c2e4a7675e0215d6e5))
+* simplify guidance and clarify privacy scope ([#670](https://github.com/MattJColes/lgtmaybe/issues/670)) ([1a8dc33](https://github.com/MattJColes/lgtmaybe/commit/1a8dc3375c4871428ef8a5a37314347bfcc083b3))
+
 ## [2.8.5](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.4...lgtmaybe-v2.8.5) (2026-09-20)
 
 
