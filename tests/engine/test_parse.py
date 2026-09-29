@@ -541,3 +541,9 @@ def test_truncation_recovery_ignores_engine_owned_fields() -> None:
     with pytest.raises(ParseError) as exc:
         parse_findings(raw)
     assert [f.confidence for f in exc.value.recovered] == [None]
+
+
+def test_model_supplied_category_is_preserved() -> None:
+    """`category` is the model's per-finding attribution, not engine-owned."""
+    result = parse_findings(json.dumps({"findings": [dict(_VALID_FINDING, category="style")]}))
+    assert result[0].category == "style"
