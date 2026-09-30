@@ -522,6 +522,17 @@ class RestGitHubGateway:
             body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
         self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
 
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """Every PR conversation comment as ``(author, body)``, oldest first."""
+        return [
+            (
+                (comment.get("user") or {}).get("login") or "",
+                comment.get("body") or "",
+            )
+            for resp in self._paginate(f"{self._issue_api}/comments?per_page=100")
+            for comment in resp.json()
+        ]
+
     def _upsert_marked_comment(
         self, body: str, marker: str, *, preserve: re.Pattern[str] | None = None
     ) -> None:

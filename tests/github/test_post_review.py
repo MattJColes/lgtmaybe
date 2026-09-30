@@ -989,6 +989,26 @@ def test_post_diagram_comment_scoped_by_marker_key() -> None:
     assert "<!-- lgtmaybe-diagram:ollama/llama3 -->" in str(captured["body"])
 
 
+@respx.mock
+def test_list_conversation_comments_reads_every_page_with_authors() -> None:
+    """The existing-overview scan reads the whole PR conversation, author first."""
+    page_two = f"{COMMENTS_URL}?per_page=100&page=2"
+    respx.route(method="GET", url=f"{COMMENTS_URL}?per_page=100").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"id": 1, "body": "first", "user": {"login": "alice"}}],
+            headers={"Link": f'<{page_two}>; rel="next"'},
+        )
+    )
+    respx.route(method="GET", url=page_two).mock(
+        return_value=httpx.Response(200, json=[{"id": 2, "body": None, "user": None}])
+    )
+
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+
+    assert gateway.list_conversation_comments() == [("alice", "first"), ("", "")]
+
+
 # ---------------------------------------------------------------------------
 # PR labels: reconcile the managed set, best-effort
 # ---------------------------------------------------------------------------

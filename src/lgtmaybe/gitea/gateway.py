@@ -239,6 +239,13 @@ class GiteaGateway:
         """
         self._upsert_comment(f"{body}\n\n{self._diagram_marker}", self._diagram_marker)
 
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """Every PR conversation comment as ``(author, body)``, oldest first."""
+        return [
+            ((comment.get("user") or {}).get("login") or "", comment.get("body") or "")
+            for comment in self._list(f"{self._issue_api}/comments")
+        ]
+
     def set_scan_manifests(self, enabled: bool) -> None:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled

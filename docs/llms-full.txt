@@ -550,7 +550,10 @@ change overview automatically — a description, a **High Impact Areas** section
 and a compact Mermaid flowchart. Later `synchronize` pushes refresh it and, when
 the change alters a run-time flow, a sequence diagram appears beside it. Set it
 to `false` for no overview at all, or drop a single section with
-`auto_describe: false` / `high_impact: false`.
+`auto_describe: false` / `high_impact: false`. When the PR description or
+another author's comment already carries a Mermaid or PlantUML diagram, the
+automatic overview is skipped and the review summary says so; `/diagram` still
+posts one on request.
 ollama runs the model on your own machine, so it is local-only — use the
 [CLI](run-locally-with-ollama.md) rather than a posting workflow.
 
@@ -4050,6 +4053,15 @@ or in `.lgtmaybe.yml`:
 ```yaml
 auto_diagram: false
 ```
+
+The automatic overview stands back when the pull request already diagrams the
+change: a fenced `mermaid` or `plantuml` block in the PR description, or in a
+comment someone else posted (a teammate, or another review bot's walkthrough).
+The review still runs and its summary names where the existing diagram lives.
+Once lgtmaybe has posted its own overview on a PR it keeps refreshing that one,
+so it never goes stale. Comment `/diagram` to post the overview anyway — slash
+commands skip the check. Gitea runs the same check through the shared Action
+entrypoint. (The `gitlab-ci` command posts no automatic overview yet.)
 
 The description and High Impact Areas sections are best-effort: a failure there
 is logged, leaves a visible note in its slot, and never blocks the rest. The

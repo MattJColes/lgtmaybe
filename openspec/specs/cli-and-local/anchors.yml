@@ -108,6 +108,16 @@ cli.starter-workflow-diagrams:
     has: { field: name, regex: '^should_auto_diagram$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.existing-overview:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^find_existing_overview$' }
+    files: [src/lgtmaybe/core/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^existing_overview_note$' }
+    files: [src/lgtmaybe/cli/**/*.py]
+
 cli.docs-homepage-diagram:
   rule:
     kind: fenced_code_block

@@ -250,6 +250,18 @@ class GitLabGateway:
         """
         self._upsert_note(f"{body}\n\n{self._diagram_marker}", self._diagram_marker)
 
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """Every merge request note as ``(author, body)``, oldest first.
+
+        GitLab's system notes ("added 1 commit") are events, not anyone's
+        comment, so they are left out. Shares the notes fetch the upserts use.
+        """
+        return [
+            ((note.get("author") or {}).get("username") or "", note.get("body") or "")
+            for note in self._notes()
+            if not note.get("system")
+        ]
+
     def set_scan_manifests(self, enabled: bool) -> None:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled
@@ -499,11 +511,15 @@ class GitLabGateway:
             )
         resp.raise_for_status()
 
-    def _find_note(self, family: str) -> int | None:
-        """The id of our existing note in ``family``, or None."""
+    def _notes(self) -> list[dict[str, Any]]:
+        """Every note on the merge request, fetched once per run."""
         if self._notes_cache is None:
             self._notes_cache = self._paginate(f"{self._mr_api}/notes")
-        for note in self._notes_cache:
+        return self._notes_cache
+
+    def _find_note(self, family: str) -> int | None:
+        """The id of our existing note in ``family``, or None."""
+        for note in self._notes():
             if family in (note.get("body") or ""):
                 note_id = note.get("id")
                 return int(note_id) if note_id is not None else None

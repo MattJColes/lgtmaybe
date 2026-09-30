@@ -251,6 +251,15 @@ or in `.lgtmaybe.yml`:
 auto_diagram: false
 ```
 
+The automatic overview stands back when the pull request already diagrams the
+change: a fenced `mermaid` or `plantuml` block in the PR description, or in a
+comment someone else posted (a teammate, or another review bot's walkthrough).
+The review still runs and its summary names where the existing diagram lives.
+Once lgtmaybe has posted its own overview on a PR it keeps refreshing that one,
+so it never goes stale. Comment `/diagram` to post the overview anyway — slash
+commands skip the check. Gitea runs the same check through the shared Action
+entrypoint. (The `gitlab-ci` command posts no automatic overview yet.)
+
 The description and High Impact Areas sections are best-effort: a failure there
 is logged, leaves a visible note in its slot, and never blocks the rest. The
 diagram itself is a required completion step, so a failed diagram leaves the

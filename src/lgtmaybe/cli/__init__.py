@@ -27,6 +27,7 @@ from typing import Any
 import click
 
 from lgtmaybe.cli.render import flatten_details, render_findings
+from lgtmaybe.core.comment import find_existing_overview, marker
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import Forge, PRLocator, token_env_var
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
@@ -105,6 +106,33 @@ def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
     return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
 
 
+def existing_overview_note(github: ReviewGateway, ctx: PRContext, cfg: ReviewConfig) -> str | None:
+    """The summary note that replaces the automatic overview, or None to post it.
+
+    A PR whose description or conversation already diagrams the change gets no
+    second overview from us — the review says where the existing one is and how
+    to ask for ours. Best-effort in one direction only: a failed comment listing
+    still checks the description, and anything short of a found diagram posts.
+    """
+    comments: list[tuple[str, str]] = []
+    list_comments = getattr(github, "list_conversation_comments", None)
+    if list_comments is not None:
+        try:
+            comments = list_comments()
+        except Exception as exc:  # noqa: BLE001 - the scan may only remove a duplicate
+            _log.warning("reading PR comments for an existing overview failed: %s", exc)
+    where = find_existing_overview(
+        ctx.description, comments, own_marker=marker("lgtmaybe-diagram", _marker_key(cfg))
+    )
+    if where is None:
+        return None
+    _log.info("change overview already on the PR — auto overview skipped", extra={"where": where})
+    return (
+        f"_Change overview not posted: {where} already diagrams this change. "
+        "Comment `/diagram` to post lgtmaybe's._"
+    )
+
+
 def run_describe(
     github: ReviewGateway,
     provider: ProviderClient,
@@ -172,6 +200,11 @@ def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewC
     return cfg.model_copy(update={"incremental": event_action == "synchronize"})
 
 
+def _marker_key(cfg: ReviewConfig) -> str:
+    """Scopes this setup's hidden markers, so each provider/model owns its comments."""
+    return f"{cfg.provider}/{cfg.model}"
+
+
 # Which forges lgtmaybe can build a gateway for. A forge that parses but is not
 # in here is recognised-but-unimplemented, which earns a different (and much more
 # useful) error than an unparseable URL.
@@ -180,7 +213,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         repo=located.repo,
         pr_number=located.number,
         token=token,
-        marker_key=f"{cfg.provider}/{cfg.model}",
+        marker_key=_marker_key(cfg),
         resolve_fixed=cfg.resolve_fixed,
     ),
     Forge.gitlab: lambda located, token, cfg: GitLabGateway(
@@ -188,7 +221,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         repo=located.repo,
         pr_number=located.number,
         token=token,
-        marker_key=f"{cfg.provider}/{cfg.model}",
+        marker_key=_marker_key(cfg),
         resolve_fixed=cfg.resolve_fixed,
         scheme=located.scheme,
     ),
@@ -197,7 +230,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         repo=located.repo,
         pr_number=located.number,
         token=token,
-        marker_key=f"{cfg.provider}/{cfg.model}",
+        marker_key=_marker_key(cfg),
         scheme=located.scheme,
     ),
 }
@@ -444,6 +477,7 @@ def run_review(
     ctx: PRContext | None = None,
     provider: ProviderClient | None = None,
     diagram_required: bool = False,
+    summary_note: str | None = None,
 ) -> tuple[list[ReviewFinding], str]:
     """Run a full or hybrid review and optionally persist its completion state.
 
@@ -452,6 +486,7 @@ def run_review(
     all cases so callers can inspect output. ``provider`` performs explicit
     validation of earlier findings and builds a required automatic diagram.
     ``diagram_required`` makes that current-head diagram part of completion.
+    ``summary_note`` is appended to the summary as posted.
 
     With ``cfg.incremental`` on and a gateway that supports it, only the diff
     since the last completed head is reviewed while earlier findings are
@@ -493,6 +528,8 @@ def run_review(
         )
         if validation_summary:
             summary += f"\n\n{validation_summary}"
+    if summary_note:
+        summary += f"\n\n{summary_note}"
 
     if not dry_run:
         # Prepare the watermark for the review body. This is only in-memory
@@ -849,6 +886,10 @@ def execute_review(
                 raise
             except Exception:
                 _log.warning("PR context prefetch failed — overview skipped", exc_info=True)
+        note = None
+        if diagram and ctx is not None:
+            note = existing_overview_note(github, ctx, cfg)
+            diagram = note is None
         run_review(
             github=github,
             engine=engine,
@@ -857,6 +898,7 @@ def execute_review(
             ctx=ctx,
             provider=provider,
             diagram_required=diagram,
+            summary_note=note,
         )
     except DiffUnavailable as exc:
         # The host will not serve the diff (GitHub: over 300 files / 20,000

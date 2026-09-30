@@ -265,7 +265,12 @@ pattern, event bus, plugin framework.
      complete). With both sections off, the body is byte-identical to
      `build_diagram` and costs one call. `auto_diagram` (Action input, default
      **on**) is the one switch for the whole comment; `should_auto_diagram` gates
-     it to opened/reopened/synchronize. The local `lgtmaybe diagram` command prints
+     it to opened/reopened/synchronize, and `existing_overview_note` then stands it
+     down when the PR already diagrams the change — a Mermaid/PlantUML fence in the
+     description or a comment not carrying this setup's own diagram marker
+     (`core/comment.find_existing_overview`, fed by the gateways'
+     `SupportsConversation`). The review summary names the skip and `/diagram`;
+     slash commands never consult it. The local `lgtmaybe diagram` command prints
      the same body (no GitHub) — a terminal can't render Mermaid, which is what the
      text rendering is for. **No D2:** GitHub doesn't render it in Markdown.
      The shared one-call scaffold is `describe.structured_call` (typed result) /

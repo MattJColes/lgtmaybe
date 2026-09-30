@@ -491,6 +491,37 @@ class TestThreadResolution:
         assert _gateway().count_open_finding_threads() == 1
 
 
+class TestConversation:
+    @respx.mock
+    def test_lists_human_and_bot_notes_but_not_system_notes(self) -> None:
+        """GitLab's own "added 1 commit" notes are events, not anyone's overview."""
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"body": "added 1 commit", "system": True, "author": {"username": "a"}},
+                    {"body": "walkthrough", "system": False, "author": {"username": "bot"}},
+                    {"body": None},
+                ],
+            )
+        )
+
+        assert _gateway().list_conversation_comments() == [("bot", "walkthrough"), ("", "")]
+
+    @respx.mock
+    def test_shares_the_notes_fetch_with_the_upserts(self) -> None:
+        _stub_post_routes()
+        listed = respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        gateway = _gateway()
+
+        gateway.list_conversation_comments()
+        gateway.post_diagram_comment("diagram")
+
+        assert listed.call_count == 1
+
+
 class TestCapabilities:
     def test_declares_what_gitlab_can_serve(self) -> None:
         from lgtmaybe.core import ports
@@ -503,6 +534,7 @@ class TestCapabilities:
             "SupportsLabels",
             "SupportsChecks",
             "SupportsThreadResolution",
+            "SupportsConversation",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
