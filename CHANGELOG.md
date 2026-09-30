@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.9.0...lgtmaybe-v2.9.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **parse:** ignore engine-owned fields a reviewing model fills in ([#673](https://github.com/MattJColes/lgtmaybe/issues/673)) ([9569687](https://github.com/MattJColes/lgtmaybe/commit/95696870d793da44572d14f9ca708c73a1547505))
+
+
+### Dependencies
+
+* bump the python-dependencies group with 6 updates ([#672](https://github.com/MattJColes/lgtmaybe/issues/672)) ([bf97f7d](https://github.com/MattJColes/lgtmaybe/commit/bf97f7dca3d840ad87861570634a23e292e85d90))
+
 ## [2.9.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.8.5...lgtmaybe-v2.9.0) (2026-09-26)
 
 
