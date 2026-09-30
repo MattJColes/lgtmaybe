@@ -86,8 +86,12 @@ The only human-only pieces:
   the formula by hand on a Mac, run
   `scripts/update-homebrew-formula.sh <version> path/to/homebrew-tap/Formula/lgtmaybe.rb`.
 - **winget:** fork [`microsoft/winget-pkgs`](https://github.com/microsoft/winget-pkgs).
-  Create a classic GitHub PAT with the `public_repo` scope and add it to this
-  repo as **`WINGET_TOKEN`**. For the first release, build/upload the Windows
+  Create a classic GitHub PAT with the `public_repo` **and `workflow`** scopes
+  and add it to this repo as **`WINGET_TOKEN`**. `wingetcreate` syncs the fork
+  with upstream before it opens each PR, and `microsoft/winget-pkgs` changes
+  files under `.github/workflows/` often. GitHub refuses a fork sync that brings
+  in workflow-file changes unless the token has the `workflow` scope, so with
+  `public_repo` alone the submission fails on almost every release. For the first release, build/upload the Windows
   asset and run `wingetcreate new <asset-url>` manually with package id
   `MattJColes.lgtmaybe`, installer type `portable`, command alias `lgtmaybe`,
   and MIT licence metadata. Microsoft moderates a new package before it exists;
@@ -106,6 +110,12 @@ The only human-only pieces:
    `release-please` workflow via **workflow_dispatch** with the tag name.
 4. If Windows publication needs recovery, dispatch `windows-exe` for the tag,
    then dispatch `winget` after the release asset is visible.
+5. If the `winget` job fails with "The forked repository could not be synced
+   with the upstream commits", sync `MattJColes/winget-pkgs` with upstream
+   (**Sync fork** on its `master`, or
+   `gh api -X POST repos/MattJColes/winget-pkgs/merge-upstream -f branch=master`),
+   then dispatch `winget` again with the version. If it keeps recurring, check
+   that `WINGET_TOKEN` still carries the `workflow` scope.
 
 ## Rotate the public App private key
 
