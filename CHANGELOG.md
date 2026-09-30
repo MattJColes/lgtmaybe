@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.10.0...lgtmaybe-v2.11.0) (2026-09-30)
+
+
+### Features
+
+* **risk:** risk-of-change verdict on every review ([#678](https://github.com/MattJColes/lgtmaybe/issues/678)) ([efc4e3f](https://github.com/MattJColes/lgtmaybe/commit/efc4e3fa1f9d4f2df611ff999b509dee46a1864d))
+
 ## [2.10.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.9.1...lgtmaybe-v2.10.0) (2026-09-30)
 
 
