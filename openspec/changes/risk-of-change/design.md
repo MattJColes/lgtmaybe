@@ -71,6 +71,18 @@ Alternatives rejected:
 ast-grep respects `.gitignore` by default, so `node_modules` and virtualenvs are
 skipped.
 
+Importers that the PR itself adds or changes are excluded, and a file the PR
+adds scores zero. This makes the count identical whether the workspace is the
+base checkout (Action) or the PR head (local CLI, GitLab CI), and it keeps the
+meaning to one thing: the existing code this change can break. The PR's own
+importers are already in the diff. Added files are read from the diff's
+`new file mode` / `--- /dev/null` headers.
+
+A timeout or a non-zero ast-grep exit discards partial output and marks every
+supported changed file unassessed. Partial counts would look precise without
+being so. Anything else raised inside `assess_risk` becomes the unavailable
+verdict.
+
 **D3. The scan is bounded and never reaches the model.** It runs through the
 same subprocess helpers as `engine/static_analysis.py`: scrubbed environment and
 a hard timeout (20s). It parses files and executes nothing. It runs at most once

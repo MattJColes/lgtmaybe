@@ -37,7 +37,10 @@ is produced.
 
 For each changed file in a supported language (Python, TypeScript, JavaScript),
 the assessment SHALL count the distinct workspace files that import it,
-excluding the file itself. Five or more importers SHALL raise the verdict to at
+excluding the file itself and any file the pull request adds or changes.
+Blast radius measures the code that already depends on a file, so a file the
+pull request adds has zero importers by definition - a measured result, not an
+unassessed one - and the PR's own importers are already visible in its diff. Five or more importers SHALL raise the verdict to at
 least `medium`, and twenty or more to at least `high`. A changed file matching
 any `risk.core_paths` glob SHALL raise the verdict to at least `high` whatever
 its importer count. Each file that raises the level SHALL be named with its
@@ -52,8 +55,9 @@ count. Paths are rendered as inline code with backticks stripped.
 - **THEN** the verdict is at least `high` and names `src/shared/clock.py` as a core path
 
 #### Scenario: a new file
-- **WHEN** a changed file does not yet exist in the workspace
-- **THEN** it contributes no importers and is not reported as unassessed
+- **WHEN** the pull request adds `src/new_core.py` and ten new files that import it
+- **THEN** it contributes no importers and is not reported as unassessed, whether
+  the workspace is the base checkout or the PR head
 
 ### Requirement: Unmeasured blast radius is named, never scored low
 <!-- anchor: risk.unassessed -->
@@ -65,6 +69,16 @@ and SHALL still apply every other factor. Wherever the level renders (summary
 line, overview, marker consumers aside), a `low` level MUST carry the
 unassessed caveat alongside it, so an unmeasured blast radius never reads as a
 measured clean result.
+
+Classification is fixed: a scan that exceeds its time limit or exits with an
+error discards any partial output and marks every supported changed file
+unassessed; an unsupported language marks only that file; any other failure
+makes the whole assessment unavailable (see "Every review carries a
+deterministic risk verdict").
+
+#### Scenario: scan times out part-way
+- **WHEN** the scan exceeds its time limit after parsing some files
+- **THEN** every supported changed file is listed as not assessed and the other factors still set the level
 
 #### Scenario: no workspace checkout
 - **WHEN** the review runs with an empty workspace and changes `src/app.py`
