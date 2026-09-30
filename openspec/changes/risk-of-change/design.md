@@ -86,8 +86,9 @@ verdict.
 **D3. The scan is bounded and never reaches the model.** It runs through the
 same subprocess helpers as `engine/static_analysis.py`: scrubbed environment and
 a hard timeout (20s). It parses files and executes nothing. It runs at most once
-per workspace and head per process (memoised), because both the review and the
-overview need it. Importer paths only feed counts and the rendered reasons, and
+per run: `run_review` assesses the full PR once and carries the result on
+`PRContext.risk`, which the summary, the labels and the overview all read (the
+engine assesses on demand only when a caller didn't, e.g. the local CLI). Importer paths only feed counts and the rendered reasons, and
 are never put in a prompt. Rendered paths strip backticks, the same as
 `high_impact._paths`, because filenames are attacker-chosen on a fork PR.
 
@@ -124,7 +125,7 @@ named, never scored low").
 `RiskConfig(enabled: bool = True, core_paths: list[str] = [])` on
 `ReviewConfig.risk`:
 - CLI: `--risk/--no-risk` maps to `enabled`.
-- Action: input `risk_of_change` (empty means the default).
+- Action: input `risk` (empty means the default), handled like `static_analysis`.
 - YAML: `core_paths` is set here only, like other list-valued config.
 
 `core_paths` globs reuse `engine.passes_path_filters` semantics, so `**/`
@@ -145,8 +146,8 @@ treat a missing marker as unknown rather than read a guessed level.
   covers the known hubs. Resolving tsconfig `paths` and re-exports is a
   follow-up.
 - [A large monorepo scan exceeds 20s] → the timeout marks code files unassessed,
-  and the rest of the verdict still stands. The memoised scan means we pay it
-  once per run.
+  and the rest of the verdict still stands. Carrying the result on the context
+  means we pay it once per run.
 - [On GitLab CI the workspace is the MR head, not a trusted base] → the scan is
   read-only parsing, and nothing from it reaches the model. An author can
   inflate their own risk (harmless). Deflating it means deleting importers,
@@ -164,7 +165,7 @@ Ships as a `feat:` commit, so release-please cuts a minor version. Existing
 installs see the risk segment and marker on their next review with no config
 change. Users with a custom `summary_template` see no visible change until they
 add `{risk}`. To roll back per repo, set `risk: {enabled: false}` or the Action
-input `risk_of_change: false`. Labels only appear for repos that already opted
+input `risk: false`. Labels only appear for repos that already opted
 into `pr_labels`.
 
 ## Open Questions

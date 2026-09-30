@@ -53,6 +53,13 @@ def _apply_static_analysis_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewC
     )
 
 
+def _apply_risk_flag(cfg: ReviewConfig, flag: bool | None) -> ReviewConfig:
+    """Overlay the --risk on/off flag onto the nested config, keeping ``core_paths``."""
+    if flag is None:
+        return cfg
+    return cfg.model_copy(update={"risk": cfg.risk.model_copy(update={"enabled": flag})})
+
+
 def _parse_bool(value: str | None) -> bool | None:
     """Parse an action bool input the way pydantic parses the others.
 
@@ -432,6 +439,14 @@ local_diff_options = _stack(
     "pip install lgtmaybe[static-analysis])",
 )
 @click.option(
+    "--risk/--no-risk",
+    default=None,
+    help="Assess the change's risk — low, medium, high or critical — from how many "
+    "files import each changed file, sensitive paths, change size, and code changed "
+    "without tests, and print it on the summary line. Deterministic, no model call "
+    "(default on; --no-risk disables)",
+)
+@click.option(
     "--profile-json",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
@@ -466,11 +481,13 @@ def review(**inputs: Any) -> None:
         profile_json=inputs.pop("profile_json"),
     )
     static_analysis = inputs.pop("static_analysis")
+    risk = inputs.pop("risk")
     base = inputs.pop("base")
     output_format = inputs.pop("output_format")
     as_json = inputs.pop("as_json")
     cfg = _load_cfg(config_path, user_config_path=store.user_config_path(), **inputs)
     cfg = _apply_static_analysis_flag(cfg, static_analysis)
+    cfg = _apply_risk_flag(cfg, risk)
 
     fmt = output_format or ("json" if as_json else "human")
     execute_local_review(cfg, runtime, base=base, working=working, uncommitted=uncommitted, fmt=fmt)
@@ -552,6 +569,7 @@ def action() -> None:
         **{key: value for key, value in inputs.items() if key not in _RUNTIME_INPUTS},
     )
     cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
+    cfg = _apply_risk_flag(cfg, _parse_bool(inputs["risk"]))
     runtime = RuntimeOptions(
         api_key=inputs["api_key"],
         api_base=inputs["api_base"],

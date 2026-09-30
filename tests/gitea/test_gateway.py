@@ -180,6 +180,27 @@ class TestPostReview:
         assert "new_position" not in comment
 
     @respx.mock
+    def test_the_summary_keeps_the_risk_marker(self) -> None:
+        """The engine stamps the risk verdict; the adapter must post it verbatim."""
+        respx.route(method="GET", url__startswith=f"{PR_URL}/reviews").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        create = respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={"id": 100})
+        )
+
+        summary = "0 findings · risk high\n<!-- lgtmaybe-risk:high -->"
+        _gateway(httpx.Client()).post_review([], summary, diff=DIFF)
+
+        import json as _json
+
+        body = _json.loads(create.calls[0].request.content)["body"]
+        assert "<!-- lgtmaybe-risk:high -->" in body
+
+    @respx.mock
     def test_the_summary_is_upserted_so_a_rerun_edits_it_in_place(self) -> None:
         """Gitea reviews cannot be edited, so the summary lives in an issue comment."""
         respx.route(method="GET", url__startswith=f"{PR_URL}/reviews").mock(

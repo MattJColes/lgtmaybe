@@ -39,6 +39,7 @@
 ## Explanation
 
 - [What gets reviewed](https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/): What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
+- [Risk of change](https://lgtmaybe.coles.codes/explanation/risk-of-change/): How lgtmaybe sizes a pull request's risk of change - low, medium, high or critical - from blast radius, sensitive paths, size and tests, with no model call.
 - [Architecture](https://lgtmaybe.coles.codes/explanation/architecture/): lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
 - [Auth model](https://lgtmaybe.coles.codes/explanation/auth-model/): How lgtmaybe authenticates to each provider — keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
 - [Data and privacy](https://lgtmaybe.coles.codes/explanation/data-and-privacy/): What lgtmaybe sends to model providers, including optional context and specs, and how it redacts secrets before egress.

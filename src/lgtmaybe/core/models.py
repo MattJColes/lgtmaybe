@@ -208,6 +208,25 @@ class StaticAnalysisConfig(_Strict):
     ast_grep_rules: str | None = None
 
 
+class RiskConfig(_Strict):
+    """Risk of change: a deterministic low/medium/high/critical verdict per PR.
+
+    Built from the change's blast radius (how many workspace files import each
+    changed file, via an ast-grep scan), the High Impact path signals, change
+    size, and whether code changed without a test changing. No model call, so
+    the verdict is free, stable across re-runs, and something a gate can read.
+    """
+
+    # On by default: the verdict rides the summary line every review already
+    # posts, so it costs one line and no call.
+    enabled: bool = True
+    # Globs naming modules the importer scan can't see as central — config
+    # loaders, plugin registries, anything reached by dynamic import. A changed
+    # file matching one is at least `high`, whatever its importer count.
+    # YAML-only, like `spec_paths`.
+    core_paths: list[str] = Field(default_factory=list)
+
+
 class ReviewFinding(_Strict):
     """A single inline review comment the model wants to post."""
 
@@ -727,6 +746,38 @@ def is_unrecoverable(exc: BaseException) -> bool:
     return getattr(exc, _UNRECOVERABLE_ATTR, False) is True
 
 
+RiskLevel = Literal["low", "medium", "high", "critical"]
+
+
+class RiskReason(_Strict):
+    """One reason a risk verdict is at its level.
+
+    ``factor`` names the rule that fired and ``key`` what makes it distinct from
+    another reason of the same factor (the High Impact area, or the factor
+    itself): two distinct ``high`` reasons make a change ``critical``, while two
+    Terraform files are one reason. ``text`` is rendered Markdown, paths already
+    backtick-stripped.
+    """
+
+    factor: Literal["blast_radius", "area", "size", "untested", "scope"]
+    key: str
+    level: RiskLevel
+    text: str
+
+
+class RiskAssessment(_Strict):
+    """A change's risk verdict: its level, the ranked reasons, and the gaps.
+
+    ``level`` None means the assessment itself failed and nothing is claimed.
+    ``unassessed`` lists changed code files whose blast radius was not measured,
+    so a ``low`` verdict can never pass for a measured clean result.
+    """
+
+    level: RiskLevel | None
+    reasons: list[RiskReason] = Field(default_factory=list)
+    unassessed: list[str] = Field(default_factory=list)
+
+
 class PRContext(_Strict):
     """Everything the engine needs about a PR — fetched via API, never checkout."""
 
@@ -772,6 +823,11 @@ class PRContext(_Strict):
     # as a clean PR while earlier findings sit unaddressed. Populated by the
     # GitHub gateway, 0 for the local CLI (no conversations to track).
     open_finding_threads: int = Field(default=0, ge=0)
+    # The risk-of-change verdict, assessed once on the FULL pull request before
+    # incremental, triage or file-cap scoping narrows `diff`, so every surface
+    # (summary, labels, overview) reports the same level. None = not assessed
+    # yet; the engine assesses on demand when a caller did not.
+    risk: RiskAssessment | None = None
 
 
 class ReviewConfig(_Strict):
@@ -996,6 +1052,10 @@ class ReviewConfig(_Strict):
     # file is named even when the model says nothing about it. Best-effort.
     # Default on; set false to drop the section and its call.
     high_impact: bool = True
+    # Risk of change: a deterministic low/medium/high/critical verdict with its
+    # reasons, on the summary line, in the change overview and (with
+    # `pr_labels`) as a `risk/<level>` label. See `RiskConfig`.
+    risk: RiskConfig = Field(default=RiskConfig())
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the

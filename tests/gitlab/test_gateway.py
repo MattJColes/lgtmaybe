@@ -248,6 +248,21 @@ class TestPostReview:
         assert not create.called
 
     @respx.mock
+    def test_the_summary_note_keeps_the_risk_marker(self) -> None:
+        """The engine stamps the risk verdict; the adapter must post it verbatim."""
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+
+        _gateway().post_review([], "0 findings · risk high\n<!-- lgtmaybe-risk:high -->", diff=DIFF)
+
+        assert "<!-- lgtmaybe-risk:high -->" in json.loads(create.calls[0].request.content)["body"]
+
+    @respx.mock
     def test_a_finding_already_discussed_is_not_posted_again(self) -> None:
         from lgtmaybe.core.findings import finding_fingerprint
 

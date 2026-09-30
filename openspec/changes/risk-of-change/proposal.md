@@ -29,7 +29,7 @@ is stable, free, and something a merge gate can rely on.
 - The verdict describes the whole PR, so an incremental re-review reports the
   same level as a full one.
 - Config: `risk.enabled` (default on), `risk.core_paths` (default empty); CLI
-  `--risk/--no-risk`; Action input `risk_of_change`. `summary_template` gains a
+  `--risk/--no-risk`; Action input `risk`. `summary_template` gains a
   `{risk}` placeholder.
 - Local `lgtmaybe review` shows the verdict via the summary it already prints
   (`human` and `agent` formats). `--json` keeps its current array shape.

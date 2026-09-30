@@ -768,3 +768,30 @@ class TestDiffUnavailable:
         assert len(github.posted) == 1
         assert "not reviewed" in github.posted[0][1]
         assert github.comments == [github.posted[0][1]]
+
+
+class TestRiskFlag:
+    """`--risk/--no-risk` flips only `risk.enabled`, keeping `core_paths`."""
+
+    def _captured(self, monkeypatch, args, tmp_path, yml=""):
+        import lgtmaybe.cli.commands as commands
+
+        captured = {}
+        monkeypatch.setattr(
+            commands, "execute_local_review", lambda cfg, *a, **k: captured.setdefault("cfg", cfg)
+        )
+        cfg_file = tmp_path / ".lgtmaybe.yml"
+        cfg_file.write_text(f"provider: ollama\nmodel: llama3\n{yml}")
+        result = CliRunner().invoke(main, ["review", "--config", str(cfg_file), *args])
+        assert result.exit_code == 0, result.output
+        return captured["cfg"]
+
+    def test_default_keeps_risk_on(self, monkeypatch, tmp_path):
+        assert self._captured(monkeypatch, [], tmp_path).risk.enabled is True
+
+    def test_no_risk_turns_it_off_and_keeps_core_paths(self, monkeypatch, tmp_path):
+        cfg = self._captured(
+            monkeypatch, ["--no-risk"], tmp_path, yml="risk:\n  core_paths: ['core/**']\n"
+        )
+        assert cfg.risk.enabled is False
+        assert cfg.risk.core_paths == ["core/**"]

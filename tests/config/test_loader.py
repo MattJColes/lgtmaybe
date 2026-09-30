@@ -385,3 +385,18 @@ def test_lens_paths_pack_cannot_escape_bundled_dir(tmp_path, evil):
 
     with pytest.raises(ValueError, match="lens pack"):
         load_config(config_path=cfg_file)
+
+
+def test_risk_round_trips_from_file(tmp_path):
+    """risk.enabled defaults on; risk.core_paths comes from .lgtmaybe.yml."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\n")
+    assert load_config(config_path=cfg_file).risk.enabled is True
+
+    cfg_file.write_text(
+        "provider: openai\nmodel: gpt-4o\n"
+        "risk:\n  enabled: false\n  core_paths: ['src/shared/**']\n"
+    )
+    cfg = load_config(config_path=cfg_file)
+    assert cfg.risk.enabled is False
+    assert cfg.risk.core_paths == ["src/shared/**"]

@@ -93,9 +93,9 @@ deterministic risk verdict").
 
 The level SHALL be the highest level any factor raises it to, and SHALL be
 `critical` when two or more distinct factors each raise it to `high`. Beyond
-blast radius: a High Impact path signal for infrastructure, security, data
-migration, or backup and recovery SHALL raise it to `high`, and any other High
-Impact path signal to `medium`; 500 or more changed lines SHALL raise it to
+blast radius: a High Impact path signal on a file that is neither a test nor
+documentation SHALL raise it to `high` for infrastructure, security, data
+migration, or backup and recovery, and to `medium` for any other area; 500 or more changed lines SHALL raise it to
 `medium`; and 50 or more changed lines of non-test code with no test file
 changed SHALL raise it to `medium`. A change touching only documentation and
 test files SHALL be `low` with that stated as its reason. Distinct means a

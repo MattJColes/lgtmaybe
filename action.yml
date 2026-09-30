@@ -134,6 +134,10 @@ inputs:
     description: "Include the High Impact Areas section in the change overview: the changes a reviewer must not miss — infrastructure, security posture, production-outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, and compliance. Deterministic path signals ground the model and also floor the output, so a sensitive file is named even when the model says nothing about it. On by default; set to false to drop the section and its model call."
     required: false
     default: ""
+  risk:
+    description: "Assess each PR's risk of change — low, medium, high or critical — from how many files import each changed file, the High Impact path signals, change size, and code changed without tests. Deterministic, no model call: the level and its top reason ride the review summary line, a hidden lgtmaybe-risk marker a workflow can read, the change overview, and (with pr_labels) a risk/<level> label. On by default; set to false to turn it off."
+    required: false
+    default: ""
   pr_labels:
     description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, and consider-splitting when the diff spans many unrelated directories. Best-effort; off by default."
     required: false
@@ -320,6 +324,7 @@ runs:
         INPUT_AUTO_DESCRIBE: ${{ inputs.auto_describe }}
         INPUT_AUTO_DIAGRAM: ${{ inputs.auto_diagram }}
         INPUT_HIGH_IMPACT: ${{ inputs.high_impact }}
+        INPUT_RISK: ${{ inputs.risk }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
         INPUT_LEARN_FEEDBACK: ${{ inputs.learn_feedback }}
         INPUT_FAIL_ON: ${{ inputs.fail_on }}

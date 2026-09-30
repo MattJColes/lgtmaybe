@@ -32,6 +32,7 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     ReviewPreset,
     ReviewResult,
+    RiskAssessment,
     StaticAnalysisTool,
     ToolMode,
     is_unrecoverable,
@@ -80,6 +81,7 @@ from .redact import redact
 from .reflect import reflect_findings
 from .repair import repair_findings
 from .retrieve import MAX_FETCH_FILES, FileFetcher, resolve_needs
+from .risk import assess_risk, risk_marker, risk_segment
 from .selftalk import drop_self_talk
 from .severity import clamp_to_category_ceiling
 from .static_analysis import (
@@ -884,6 +886,15 @@ class LLMReviewEngine:
         # fetcher above can pull it. None keeps the prior path-only behaviour.
         self._resolve_symbol = resolve_symbol
 
+    def _risk(self, ctx: PRContext, cfg: ReviewConfig) -> RiskAssessment | None:
+        """The risk-of-change verdict for the summary; None when risk is off."""
+        if not cfg.risk.enabled:
+            return None
+        if ctx.risk is not None:
+            return ctx.risk
+        with profiler.stage("risk"):
+            return assess_risk(ctx, cfg, self._workspace_root)
+
     def _fit_input_budget(self, cfg: ReviewConfig) -> ReviewConfig:
         """Shrink the default batching budget to what the model can actually take.
 
@@ -923,6 +934,10 @@ class LLMReviewEngine:
     def review(self, ctx: PRContext, cfg: ReviewConfig) -> tuple[list[ReviewFinding], str]:
         """Run the review pipeline and return (findings, summary)."""
         cfg = self._fit_input_budget(cfg)
+        # First, while `ctx` is still whatever the caller handed in: a verdict it
+        # already carries was assessed on the WHOLE pull request (the CLI does so
+        # before incremental scoping narrows the diff), so it is reported as is.
+        risk = self._risk(ctx, cfg)
         # Soft whole-review deadline: model calls reaching execution after this
         # instant are skipped (in-flight ones finish), so a pathological run
         # degrades to partial-with-a-notice instead of grinding on. Measured
@@ -1434,7 +1449,7 @@ class LLMReviewEngine:
 
                 filtered = apply_finding_rules(filtered, cfg)
 
-        summary_line = _summary_line(len(filtered), cfg)
+        summary_line = _summary_line(len(filtered), cfg, risk)
         profiler.record_returned_findings(len(filtered))
 
         notices = _build_notices(
@@ -1468,6 +1483,10 @@ class LLMReviewEngine:
         # Which lenses completed, on every summary shape — hidden, so it costs
         # the rendered body nothing and a terminal never prints it.
         lenses_marker = _lenses_marker(lenses, failed_lenses)
+        # The risk marker rides just above it, so the lenses marker still closes
+        # every summary. No verdict (off, or unavailable) means no marker at all.
+        if risk is not None and (marker := risk_marker(risk)):
+            lenses_marker = f"{marker}\n{lenses_marker}"
         if notices:
             return filtered, "\n\n".join([*notices, summary_line]) + f"\n{lenses_marker}"
         # A genuinely clean review (nothing flagged, every call succeeded) gets an
@@ -2699,18 +2718,23 @@ def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[Review
     return clamp_to_category_ceiling(stamped)
 
 
-def _summary_line(count: int, cfg: ReviewConfig) -> str:
+def _summary_line(count: int, cfg: ReviewConfig, risk: RiskAssessment | None = None) -> str:
     """The review summary line: the user's template, or the built-in default.
 
     A template that fails to format (unknown placeholder, stray brace) is
     logged and falls back to the default — a cosmetic option must never fail
-    a review.
+    a review. ``{risk}`` renders the risk-of-change segment (empty when off).
     """
     version = package_version()
+    segment = risk_segment(risk) if risk is not None else ""
     if cfg.summary_template:
         try:
             return cfg.summary_template.format(
-                count=count, provider=cfg.provider.value, model=cfg.model, version=version
+                count=count,
+                provider=cfg.provider.value,
+                model=cfg.model,
+                version=version,
+                risk=segment,
             )
         except (KeyError, IndexError, ValueError) as exc:
             _log.warning(
@@ -2718,8 +2742,9 @@ def _summary_line(count: int, cfg: ReviewConfig) -> str:
                 extra={"error": str(exc)},
             )
     plural = _plural(count)
+    risk_part = f" · {segment}" if segment else ""
     return (
-        f"{count} finding{plural} · provider {cfg.provider} · model {cfg.model} "
+        f"{count} finding{plural}{risk_part} · provider {cfg.provider} · model {cfg.model} "
         f"· lgtmaybe {version}"
     )
 

@@ -484,3 +484,39 @@ def test_high_impact_result_defaults_to_no_areas() -> None:
     from lgtmaybe.core.models import HighImpactResult
 
     assert HighImpactResult.model_validate({"areas": []}).areas == []
+
+
+def test_risk_config_defaults_on_with_no_core_paths() -> None:
+    """Risk of change is on for every review unless a user turns it off."""
+    from lgtmaybe.core.models import RiskConfig
+
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4o")
+    assert cfg.risk == RiskConfig(enabled=True, core_paths=[])
+
+
+def test_risk_config_rejects_unknown_keys() -> None:
+    from lgtmaybe.core.models import RiskConfig
+
+    with pytest.raises(ValidationError):
+        RiskConfig.model_validate({"enabled": True, "thresholds": {"high": 3}})
+
+
+def test_pr_context_carries_an_optional_risk_assessment() -> None:
+    """The CLI assesses risk on the full PR and carries it past incremental scoping."""
+    from lgtmaybe.core.models import RiskAssessment, RiskReason
+
+    risk = RiskAssessment(
+        level="high",
+        reasons=[RiskReason(factor="area", key="infrastructure", level="high", text="x")],
+    )
+    ctx = PRContext(
+        diff="",
+        changed_files=[],
+        base_sha="a",
+        head_sha="b",
+        repo="o/r",
+        pr_number=1,
+        risk=risk,
+    )
+    assert PRContext.model_validate_json(ctx.model_dump_json()).risk == risk
+    assert ctx.model_copy(update={"diff": "narrowed"}).risk == risk

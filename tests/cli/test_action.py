@@ -719,6 +719,36 @@ class TestActionRouting:
         assert result.exit_code == 0, result.output
         assert captured == {"static_analysis": True, "profile": True}
 
+    @pytest.mark.parametrize(("value", "expected"), [(None, True), ("false", False), ("on", True)])
+    def test_risk_input_reaches_the_nested_config(self, tmp_path, monkeypatch, value, expected):
+        """INPUT_RISK flips risk.enabled; an empty input keeps the default (on)."""
+        captured: dict[str, object] = {}
+
+        import lgtmaybe.cli as cli_module
+
+        def fake_build(cfg, runtime):
+            captured["risk"] = cfg.risk.enabled
+            return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", fake_build)
+        event = _write_event(
+            tmp_path,
+            {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 1}},
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        if value is None:
+            monkeypatch.delenv("INPUT_RISK", raising=False)
+        else:
+            monkeypatch.setenv("INPUT_RISK", value)
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"risk": expected}
+
     def test_parse_bool_helper_matches_pydantic_spellings(self):
         from lgtmaybe.cli.commands import _parse_bool
 

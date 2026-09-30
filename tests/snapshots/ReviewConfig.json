@@ -335,6 +335,26 @@
       "title": "ReviewPreset",
       "type": "string"
     },
+    "RiskConfig": {
+      "additionalProperties": false,
+      "description": "Risk of change: a deterministic low/medium/high/critical verdict per PR.\n\nBuilt from the change's blast radius (how many workspace files import each\nchanged file, via an ast-grep scan), the High Impact path signals, change\nsize, and whether code changed without a test changing. No model call, so\nthe verdict is free, stable across re-runs, and something a gate can read.",
+      "properties": {
+        "core_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Core Paths",
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "RiskConfig",
+      "type": "object"
+    },
     "Severity": {
       "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
       "enum": [
@@ -764,6 +784,13 @@
       "default": true,
       "title": "Retry Without Schema",
       "type": "boolean"
+    },
+    "risk": {
+      "$ref": "#/$defs/RiskConfig",
+      "default": {
+        "core_paths": [],
+        "enabled": true
+      }
     },
     "spec_paths": {
       "items": {

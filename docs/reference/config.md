@@ -57,6 +57,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `repair_unparseable` | boolean | No | `True` | Repair Unparseable |
 | `resolve_fixed` | boolean | No | `True` | Resolve Fixed |
 | `retry_without_schema` | boolean | No | `True` | Retry Without Schema |
+| `risk` | RiskConfig | No | `{'enabled': True, 'core_paths': []}` |  |
 | `spec_paths` | list[string] | No | `[]` | Spec Paths |
 | `spec_review` | boolean | No | `True` | Spec Review |
 | `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
@@ -149,6 +150,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `open_finding_threads` | integer | No | `0` | Open Finding Threads |
 | `pr_number` | integer | Yes | — | Pr Number |
 | `repo` | string | Yes | — | Repo |
+| `risk` | RiskAssessment / null | No | `null` |  |
 | `scan_contents` | object | No | — | Scan Contents |
 | `title` | string | No | `` | Title |
 
@@ -495,6 +497,26 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "title": "ReviewPreset",
       "type": "string"
+    },
+    "RiskConfig": {
+      "additionalProperties": false,
+      "description": "Risk of change: a deterministic low/medium/high/critical verdict per PR.\n\nBuilt from the change's blast radius (how many workspace files import each\nchanged file, via an ast-grep scan), the High Impact path signals, change\nsize, and whether code changed without a test changing. No model call, so\nthe verdict is free, stable across re-runs, and something a gate can read.",
+      "properties": {
+        "core_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Core Paths",
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "RiskConfig",
+      "type": "object"
     },
     "Severity": {
       "description": "Finding severity, ordered low \u2192 high for `min_severity` filtering.",
@@ -926,6 +948,13 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "title": "Retry Without Schema",
       "type": "boolean"
     },
+    "risk": {
+      "$ref": "#/$defs/RiskConfig",
+      "default": {
+        "core_paths": [],
+        "enabled": true
+      }
+    },
     "spec_paths": {
       "items": {
         "type": "string"
@@ -1257,6 +1286,93 @@ The canonical machine-readable schemas. These are the source of truth for provid
 
 ```json
 {
+  "$defs": {
+    "RiskAssessment": {
+      "additionalProperties": false,
+      "description": "A change's risk verdict: its level, the ranked reasons, and the gaps.\n\n``level`` None means the assessment itself failed and nothing is claimed.\n``unassessed`` lists changed code files whose blast radius was not measured,\nso a ``low`` verdict can never pass for a measured clean result.",
+      "properties": {
+        "level": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Level"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/RiskReason"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "unassessed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unassessed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "title": "RiskAssessment",
+      "type": "object"
+    },
+    "RiskReason": {
+      "additionalProperties": false,
+      "description": "One reason a risk verdict is at its level.\n\n``factor`` names the rule that fired and ``key`` what makes it distinct from\nanother reason of the same factor (the High Impact area, or the factor\nitself): two distinct ``high`` reasons make a change ``critical``, while two\nTerraform files are one reason. ``text`` is rendered Markdown, paths already\nbacktick-stripped.",
+      "properties": {
+        "factor": {
+          "enum": [
+            "blast_radius",
+            "area",
+            "size",
+            "untested",
+            "scope"
+          ],
+          "title": "Factor",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "factor",
+        "key",
+        "level",
+        "text"
+      ],
+      "title": "RiskReason",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "description": "Everything the engine needs about a PR \u2014 fetched via API, never checkout.",
   "properties": {
@@ -1325,6 +1441,17 @@ The canonical machine-readable schemas. These are the source of truth for provid
     "repo": {
       "title": "Repo",
       "type": "string"
+    },
+    "risk": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RiskAssessment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "scan_contents": {
       "additionalProperties": {

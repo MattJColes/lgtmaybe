@@ -508,6 +508,15 @@ def run_review(
         # prefetch upstream cannot bypass it.
         overview_note = existing_overview_note(github, ctx, cfg)
         diagram_required = overview_note is None
+    if cfg.risk.enabled and ctx.risk is None:
+        # Assessed here, on the WHOLE pull request, before incremental scoping
+        # narrows the diff: every surface (summary, labels, overview) then reads
+        # this one verdict, and a one-line follow-up push reports the level of
+        # the PR it belongs to. The workspace is the engine's default: the cwd.
+        from lgtmaybe.engine.risk import assess_risk
+
+        with profiler.stage("risk"):
+            ctx = ctx.model_copy(update={"risk": assess_risk(ctx, cfg, Path.cwd())})
     review_ctx, incremental_since, already_complete = _incremental_context(
         github, ctx, cfg, diagram_required=diagram_required
     )
@@ -1081,9 +1090,9 @@ def pr_url_from_event(event: dict[str, Any]) -> str:
 
 #: Inputs ``action()`` handles itself rather than passing to ``ReviewConfig``:
 #: credentials and per-run options that live on ``RuntimeOptions``, the nested
-#: static-analysis toggle, and the config file path.
+#: static-analysis and risk toggles, and the config file path.
 _RUNTIME_INPUTS = frozenset(
-    {"api_key", "api_base", "fallback_model", "profile", "static_analysis", "config_path"}
+    {"api_key", "api_base", "fallback_model", "profile", "static_analysis", "risk", "config_path"}
 )
 
 #: Config fields intentionally available only through the config file or local

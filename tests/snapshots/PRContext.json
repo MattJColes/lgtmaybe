@@ -1,4 +1,91 @@
 {
+  "$defs": {
+    "RiskAssessment": {
+      "additionalProperties": false,
+      "description": "A change's risk verdict: its level, the ranked reasons, and the gaps.\n\n``level`` None means the assessment itself failed and nothing is claimed.\n``unassessed`` lists changed code files whose blast radius was not measured,\nso a ``low`` verdict can never pass for a measured clean result.",
+      "properties": {
+        "level": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Level"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/RiskReason"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "unassessed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unassessed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "title": "RiskAssessment",
+      "type": "object"
+    },
+    "RiskReason": {
+      "additionalProperties": false,
+      "description": "One reason a risk verdict is at its level.\n\n``factor`` names the rule that fired and ``key`` what makes it distinct from\nanother reason of the same factor (the High Impact area, or the factor\nitself): two distinct ``high`` reasons make a change ``critical``, while two\nTerraform files are one reason. ``text`` is rendered Markdown, paths already\nbacktick-stripped.",
+      "properties": {
+        "factor": {
+          "enum": [
+            "blast_radius",
+            "area",
+            "size",
+            "untested",
+            "scope"
+          ],
+          "title": "Factor",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "factor",
+        "key",
+        "level",
+        "text"
+      ],
+      "title": "RiskReason",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "description": "Everything the engine needs about a PR \u2014 fetched via API, never checkout.",
   "properties": {
@@ -67,6 +154,17 @@
     "repo": {
       "title": "Repo",
       "type": "string"
+    },
+    "risk": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RiskAssessment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "scan_contents": {
       "additionalProperties": {
