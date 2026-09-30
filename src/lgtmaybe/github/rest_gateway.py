@@ -42,6 +42,7 @@ from lgtmaybe.core.diff import (
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     EFFORT_PREFIX,
+    RISK_PREFIX,
     SECURITY_LABEL,
     SPLITTING_LABEL,
     ActiveFinding,
@@ -567,8 +568,9 @@ class RestGitHubGateway:
     def apply_pr_labels(self, labels: list[str]) -> None:
         """Reconcile our managed PR labels to exactly *labels*. Best-effort.
 
-        Only labels this tool owns (the ``review-effort/`` family,
-        ``possible-security-issue``, ``consider-splitting``) are ever removed —
+        Only labels this tool owns (the ``review-effort/`` and ``risk/``
+        families, ``possible-security-issue``, ``consider-splitting``) are ever
+        removed —
         anything a human applied is untouched. Any API failure is logged and
         swallowed: a labelling hiccup must never fail an otherwise-successful
         review. Adapter-only, beyond the frozen port.
@@ -583,7 +585,8 @@ class RestGitHubGateway:
             managed = {
                 name
                 for name in current
-                if name.startswith(EFFORT_PREFIX) or name in (SECURITY_LABEL, SPLITTING_LABEL)
+                if name.startswith((EFFORT_PREFIX, RISK_PREFIX))
+                or name in (SECURITY_LABEL, SPLITTING_LABEL)
             }
             for stale in sorted(managed - set(labels)):
                 # The label name is a single path segment — quote it fully, or

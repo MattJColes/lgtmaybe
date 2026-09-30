@@ -1,0 +1,51 @@
+# ast-grep anchors for risk-of-change — see "Living specs" in CLAUDE.md.
+
+risk.assess:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^assess_risk$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+risk.blast-radius:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_count_importers$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+risk.unassessed:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_blast_radius$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+risk.level:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_level$' }
+  files: [src/lgtmaybe/engine/risk.py]
+
+risk.whole-pr:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_risk$' }
+  files: [src/lgtmaybe/engine/engine.py]
+
+risk.summary:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^risk_segment$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^risk_marker$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+risk.overview:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^render_risk_section$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_risk_section$' }
+    files: [src/lgtmaybe/engine/**/*.py]

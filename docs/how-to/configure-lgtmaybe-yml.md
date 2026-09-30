@@ -41,6 +41,7 @@ automatic where the provider supports it.
   - [auto_diagram](#auto_diagram)
   - [auto_describe](#auto_describe)
   - [high_impact](#high_impact)
+  - [risk](#risk)
   - [pr_labels](#pr_labels)
   - [finding_rules](#finding_rules)
   - [summary_template](#summary_template)
@@ -635,6 +636,34 @@ high_impact: false
 Default: `true`. See [Generate a change
 overview](generate-a-change-diagram.md).
 
+### risk
+
+Assess each PR's **risk of change** as `low`, `medium`, `high` or `critical`,
+with the reasons behind it. It is deterministic and makes no model call. It
+combines how many files in the workspace import each changed file (Python and
+TS/JS, via ast-grep), the High Impact path signals, the size of the change, and
+code changed without any test changing.
+
+The level and its top reason ride the review summary line, the change overview
+explains every reason, a hidden `<!-- lgtmaybe-risk:<level> -->` marker lets a
+workflow read it, and with `pr_labels` on the PR gets a `risk/<level>` label.
+
+`core_paths` names modules the importer count can't see as central, such as a
+config loader or a plugin registry. A changed file matching one is at least
+`high`.
+
+```yaml
+risk:
+  core_paths:
+    - src/shared/**
+    - "**/settings.py"
+```
+
+Default: on, with no `core_paths`. Turn it off with `risk: {enabled: false}`,
+`--no-risk`, or the Action input `risk: false`. See [Risk of
+Change](../explanation/risk-of-change.md) for how the level is decided and how to
+gate on it.
+
 ### pr_labels
 
 Attach labels derived from the finished review — **no extra model calls**:
@@ -644,6 +673,9 @@ Attach labels derived from the finished review — **no extra model calls**:
 - `possible-security-issue` — a high/critical finding from the security lens
   was posted;
 - `consider-splitting` — the diff spans many unrelated top-level directories.
+- `risk/<level>` — the [risk of change](../explanation/risk-of-change.md)
+  verdict, when `risk` is on. One level at a time: a new verdict replaces the
+  old label on GitHub.
 
 Labels are reconciled on each run (a stale `review-effort/2` is removed when
 the score changes) and only lgtmaybe's own label families are ever touched.

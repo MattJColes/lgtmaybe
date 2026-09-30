@@ -20,7 +20,7 @@ silent success.
 
 ### Requirement: One orchestrator behind every entrypoint
 
-`run_review` SHALL orchestrate the shared flow — completed-head read, same-head no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, and `action` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path; explicit `incremental: false` and `/review full` SHALL run a full review.
+`run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, and `action` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path; explicit `incremental: false` and `/review full` SHALL run a full review.
 <!-- anchor: cli.run-review -->
 
 #### Scenario: Action synchronize event

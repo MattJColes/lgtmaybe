@@ -22,15 +22,18 @@ change as a whole.
 
 ## What you get
 
-Three focused model calls, run concurrently, compose one comment in reading
-order:
+Three focused model calls, run concurrently, plus one deterministic section,
+compose one comment in reading order:
 
 1. a **description** — a suggested title, the change type, a short summary, a
    per-file walkthrough, and a "does it do what it says" check when the PR
    states an intent (`auto_describe`);
-2. **[High Impact Areas](#high-impact-areas)** — the changes a reviewer must not
+2. **Risk of Change** — the change's `low` to `critical` verdict and every
+   reason behind it, computed without a model call (`risk`; see
+   [Risk of Change](../explanation/risk-of-change.md));
+3. **[High Impact Areas](#high-impact-areas)** — the changes a reviewer must not
    miss, in a bold-titled section (`high_impact`);
-3. up to two **diagrams**, each in two renderings — a **Mermaid flowchart** of
+4. up to two **diagrams**, each in two renderings — a **Mermaid flowchart** of
    the structure, a **Mermaid sequence diagram** of the run-time flow when the
    change alters one, and a **plain-text rendering** of each, which is what
    shows in a terminal and serves as the fallback if the Mermaid can't be
@@ -68,6 +71,11 @@ in a collapsible "Text version" underneath:
 
 > User reads now check Redis before PostgreSQL, and successful database reads
 > populate the cache for later requests.
+
+> ### **Risk of Change: Critical**
+>
+> - touches infrastructure: `infra/redis.tf`, `ops/backup_retention.tf`
+> - touches backup and recovery: `ops/backup_retention.tf`
 
 > ### **High Impact Areas**
 >
@@ -278,7 +286,8 @@ $ lgtmaybe diagram --provider ollama --model llama3
 It diffs your branch against the base (the same base resolution as `lgtmaybe
 review`; `--base` overrides, `--working` includes uncommitted edits,
 `--uncommitted` reviews only the working-tree edits). The output is the same
-body the `/diagram` comment carries — description, High Impact Areas, then each
+body the `/diagram` comment carries — description, Risk of Change, High Impact
+Areas, then each
 diagram's Mermaid source and its text rendering — with one adaptation: a
 terminal renders no HTML, so the collapsible "Text version" wrapper is flattened
 into a plain labelled section:

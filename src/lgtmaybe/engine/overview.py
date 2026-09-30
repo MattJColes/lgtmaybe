@@ -1,7 +1,8 @@
 """The change overview: one comment answering three questions about a PR.
 
-What is this change (the description), what is risky about it (High Impact
-Areas), and what does it touch and in what order (the diagrams). Each is its
+What is this change (the description), how far could it reach and what is
+risky about it (Risk of Change, then High Impact Areas), and what does it touch
+and in what order (the diagrams). Each is its
 own focused model call — one prompt doing three jobs degrades all three — and
 they run concurrently, so the overview costs about as much wall-clock as its
 slowest call rather than the sum of them.
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import TypeVar
 
 from lgtmaybe.core.logging import get_logger
@@ -36,6 +38,7 @@ from .diagram import (
     render_diagram_views,
 )
 from .high_impact import build_high_impact
+from .risk import assess_risk, render_risk_section
 
 _T = TypeVar("_T")
 
@@ -71,9 +74,11 @@ def build_overview(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) 
         )
         high_impact = impact.result() if impact is not None else None
 
-    # Whole-body fast path: with both sections off there is nothing to compose,
+    risk = _risk_section(ctx, cfg)
+
+    # Whole-body fast path: with every section off there is nothing to compose,
     # and the overview must stay byte-identical to the standalone diagram.
-    if not cfg.auto_describe and high_impact is None:
+    if not cfg.auto_describe and high_impact is None and risk is None:
         return render_diagram_comment(graph)
 
     sections: list[str] = []
@@ -84,6 +89,8 @@ def build_overview(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) 
     elif graph is not None:
         sections.append(_diagram_head(graph))
 
+    if risk is not None:
+        sections.append(risk)
     if high_impact is not None:
         sections.append(high_impact)
     if desc is not None:
@@ -92,6 +99,20 @@ def build_overview(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) 
     views = None if graph is None else render_diagram_views(graph, headed=True)
     sections.append(views if views is not None else DIAGRAM_INVALID_NOTICE)
     return "\n\n".join(section for section in sections if section)
+
+
+def _risk_section(ctx: PRContext, cfg: ReviewConfig) -> str | None:
+    """The Risk of Change section, or None when risk is off.
+
+    A verdict the context already carries was assessed on the whole PR by the
+    review this overview follows, so it renders as is and the two agree. With
+    none (`/diagram`, the local `lgtmaybe diagram`) it is assessed here, over
+    the process's workspace like the engine's default. No model call.
+    """
+    if not cfg.risk.enabled:
+        return None
+    risk = ctx.risk if ctx.risk is not None else assess_risk(ctx, cfg, Path.cwd())
+    return render_risk_section(risk)
 
 
 def _diagram_head(graph: DiagramResult) -> str:

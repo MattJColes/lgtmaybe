@@ -106,6 +106,7 @@ nav:
       - Profile output: reference/profile.md
   - Explanation:
       - What gets reviewed: explanation/what-gets-reviewed.md
+      - Risk of change: explanation/risk-of-change.md
       - Architecture: explanation/architecture.md
       - Auth model: explanation/auth-model.md
       - Data and privacy: explanation/data-and-privacy.md

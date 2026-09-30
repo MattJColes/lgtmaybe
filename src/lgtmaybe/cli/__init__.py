@@ -513,6 +513,18 @@ def run_review(
     )
     if already_complete:
         return [], f"Head {ctx.head_sha[:7]} is already complete; nothing changed."
+    if cfg.risk.enabled and ctx.risk is None:
+        # Assessed on `ctx`, the WHOLE pull request, not on `review_ctx`, which
+        # incremental scoping may have narrowed: every surface (summary, labels,
+        # overview) then reads this one verdict, and a one-line follow-up push
+        # reports the level of the PR it belongs to. The workspace is the
+        # engine's default: the cwd.
+        from lgtmaybe.engine.risk import assess_risk
+
+        with profiler.stage("risk"):
+            risk = assess_risk(ctx, cfg, Path.cwd())
+        ctx = ctx.model_copy(update={"risk": risk})
+        review_ctx = review_ctx.model_copy(update={"risk": risk})
     review_ctx = _apply_learned_feedback(github, review_ctx, cfg)
     findings, summary = engine.review(review_ctx, cfg)
 
@@ -1081,9 +1093,9 @@ def pr_url_from_event(event: dict[str, Any]) -> str:
 
 #: Inputs ``action()`` handles itself rather than passing to ``ReviewConfig``:
 #: credentials and per-run options that live on ``RuntimeOptions``, the nested
-#: static-analysis toggle, and the config file path.
+#: static-analysis and risk toggles, and the config file path.
 _RUNTIME_INPUTS = frozenset(
-    {"api_key", "api_base", "fallback_model", "profile", "static_analysis", "config_path"}
+    {"api_key", "api_base", "fallback_model", "profile", "static_analysis", "risk", "config_path"}
 )
 
 #: Config fields intentionally available only through the config file or local

@@ -257,12 +257,15 @@ pattern, event bus, plugin framework.
         Both render natively on GitHub, each with a text rendering that is the
         terminal view and the fallback; model-authored Mermaid never reaches a
         fence, and sequence labels are escaped with Mermaid entity codes).
+     Between the description and High Impact Areas sits a deterministic **Risk
+     of Change** section (`engine/risk.py`, below) — no call, so it adds nothing
+     to the fan-out.
      The description heads the comment (the diagram's own title is suppressed);
      with `auto_describe` off the diagram header returns. Sections 1 and 2 are
      **best-effort** — a failure renders a visible "unavailable" line, never a
      silent gap — while the diagram call keeps propagating, because the automatic
      overview is a **required completion step** (a failure must not stamp the head
-     complete). With both sections off, the body is byte-identical to
+     complete). With both sections and risk off, the body is byte-identical to
      `build_diagram` and costs one call. `auto_diagram` (Action input, default
      **on**) is the one switch for the whole comment; `should_auto_diagram` gates
      it to opened/reopened/synchronize, and `existing_overview_note` then stands it
@@ -582,10 +585,28 @@ pattern, event bus, plugin framework.
      `engine/rules.py` just before posting. Deliberately NOT an arbitrary
      hook: no user code ever runs. Findings carry an engine-stamped
      `category` (the originating lens id) that rules and labels key on.
+   - **Risk of change (default on, no model call):** `engine/risk.py` sizes the
+     whole PR as `low`/`medium`/`high`/`critical` with ranked reasons — blast
+     radius (one sandboxed ast-grep scan of the workspace counting the files
+     that import each changed Python/TS/JS file, excluding test files and
+     importers the PR itself touches; a file the PR adds scores zero), `risk.core_paths` globs
+     (at least `high`), the High Impact `path_signals` on non-test, non-doc
+     files (infra/security/data-migration/backup `high`, the rest `medium`),
+     500+ changed lines and 50+ untested code lines (`medium`); two distinct
+     `high` reasons are `critical`, docs-and-tests-only is `low`. `run_review`
+     assesses the FULL context before incremental scoping and carries it on
+     `PRContext.risk`, so the summary segment (`risk high (reason, +N more)`,
+     `{risk}` in `summary_template`), the hidden `<!-- lgtmaybe-risk:<level> -->`
+     marker (just above the lenses marker), the overview section and the
+     `risk/<level>` label all agree. A file it cannot measure (unsupported
+     language, no checkout, scan timeout/error) is listed as unassessed and a
+     `low` verdict always carries that caveat; any other failure is `risk
+     unavailable` with no marker. `risk.enabled` / `--no-risk` / Action input
+     `risk`. Never approval state — the marker is for the user's own gate.
    - **PR labels (F4):** `ReviewConfig.pr_labels` (default off; Action input
      `pr_labels`) — `engine/labels.py` derives `review-effort/1-5`,
-     `possible-security-issue` (high/critical security-lens finding), and
-     `consider-splitting` (sprawling diff) from data already computed; the
+     `possible-security-issue` (high/critical security-lens finding),
+     `consider-splitting` (sprawling diff), and `risk/<level>` (with risk on) from data already computed; the
      gateway reconciles only lgtmaybe's own label families, best-effort.
    - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
      (comment only — no GitHub approval state) — still naming the model.
