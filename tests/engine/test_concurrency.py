@@ -55,24 +55,43 @@ class TestResolveWorkers:
 
 
 class _ConcurrencyTrackingProvider(FakeProvider):
-    """Counts in-flight completions so tests can assert the pool's real width."""
+    """Counts in-flight completions so tests can assert the pool's real width.
 
-    def __init__(self, delay: float = 0.05) -> None:
+    With ``expect``, each call holds until that many are in flight together (or
+    ``gate_timeout`` passes), so an exact-width assertion measures the pool and
+    not whether the OS started every worker inside one short sleep: a worker
+    thread spawning late on a loaded Windows runner used to leave the peak one
+    short. A pool narrower than ``expect`` still fails — the gate times out, the
+    rest of the calls stop waiting, and the peak stays below it.
+    """
+
+    def __init__(
+        self, delay: float = 0.05, *, expect: int | None = None, gate_timeout: float = 5.0
+    ) -> None:
         super().__init__()
         self._delay = delay
-        self._lock = threading.Lock()
+        self._expect = expect
+        self._gate_timeout = gate_timeout
+        self._cond = threading.Condition()
         self._in_flight = 0
         self.max_in_flight = 0
 
     def complete(self, messages, model, **opts):  # type: ignore[override]
-        with self._lock:
+        with self._cond:
             self._in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self._in_flight)
+            self._cond.notify_all()
+            if self._expect is not None:
+                expect = self._expect
+                if not self._cond.wait_for(
+                    lambda: self.max_in_flight >= expect, timeout=self._gate_timeout
+                ):
+                    self._expect = None  # the pool is narrower: stop gating the rest
         try:
             time.sleep(self._delay)
             return ProviderResult(text='{"findings": []}', input_tokens=1, output_tokens=1)
         finally:
-            with self._lock:
+            with self._cond:
                 self._in_flight -= 1
 
 
@@ -97,7 +116,7 @@ def _multi_file_ctx(n_files: int, lines_per_file: int = 40) -> PRContext:
 class TestFlattenedFanOut:
     def test_parallel_fast_correctness_tasks_overlap(self) -> None:
         cfg = ReviewConfig(provider=Provider.openai, model="m", reflect=False)
-        provider = _ConcurrencyTrackingProvider()
+        provider = _ConcurrencyTrackingProvider(expect=4)
 
         LLMReviewEngine(provider).review(_multi_file_ctx(1), cfg)
 
@@ -120,8 +139,19 @@ class TestFlattenedFanOut:
             reflect=False,
             recursive=False,
         )
-        provider = _ConcurrencyTrackingProvider()
+        provider = _ConcurrencyTrackingProvider(expect=2)
         LLMReviewEngine(provider).review(ctx, cfg)
+        assert provider.max_in_flight == 2
+
+    def test_a_narrower_pool_still_fails_the_gate(self) -> None:
+        """The gate waits for the expected width but never manufactures it: a
+        pool held to two workers peaks at two, so an exact-width test on a
+        narrowed pool still fails rather than passing on a timeout."""
+        cfg = ReviewConfig(provider=Provider.openai, model="m", max_concurrency=2, reflect=False)
+        provider = _ConcurrencyTrackingProvider(expect=4, gate_timeout=0.2)
+
+        LLMReviewEngine(provider).review(_multi_file_ctx(1), cfg)
+
         assert provider.max_in_flight == 2
 
     def test_max_concurrency_bounds_the_pool(self) -> None:
