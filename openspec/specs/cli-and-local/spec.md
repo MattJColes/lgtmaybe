@@ -300,7 +300,7 @@ uses a legacy Windows encoding.
 
 ### Requirement: Starter workflows enable the automatic change overview
 
-The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events from the full current PR context, post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
+The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events from the full current PR context (unless the PR already diagrams the change, below), post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
 <!-- anchor: cli.starter-workflow-diagrams -->
 
 #### Scenario: New repository adopts a supplied workflow
@@ -323,6 +323,23 @@ The supplied GitHub Actions starter workflows SHALL rely on the automatic change
 #### Scenario: Diagram generation fails
 - **WHEN** the automatic overview is enabled and the current-head diagram cannot be generated or posted
 - **THEN** the run fails without advancing completion, even if its review result already posted
+
+### Requirement: The automatic overview defers to an existing one
+
+The Action SHALL NOT post its automatic change overview when the pull request already diagrams the change: a fenced Mermaid block (the diagram kind every forge renders) in the PR description or in a conversation comment it did not post itself. Its own earlier overview (this provider/model's diagram marker) SHALL keep the slot and keep refreshing, and another lgtmaybe setup's overview SHALL count as existing. A skipped overview SHALL be named in the review summary with the `/diagram` command that posts one, and the posted review result alone SHALL be the completion watermark for that run. A failed comment listing SHALL still check the description and otherwise post as usual. Slash commands SHALL never consult the check.
+<!-- anchor: cli.existing-overview -->
+
+#### Scenario: another tool already posted a walkthrough diagram
+- **WHEN** an `opened` or `synchronize` run finds a Mermaid fence in another author's PR comment
+- **THEN** the review posts without the overview and its summary names that comment and `/diagram`
+
+#### Scenario: lgtmaybe posted the overview earlier
+- **WHEN** the conversation carries this setup's own diagram marker beside another tool's diagram
+- **THEN** the overview refreshes as usual
+
+#### Scenario: a reviewer asks for the overview anyway
+- **WHEN** the comment body is `/diagram` on a PR that already carries a diagram
+- **THEN** the overview upserts as usual
 
 ### Requirement: Homepage demonstrates change diagrams
 

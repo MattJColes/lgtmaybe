@@ -27,6 +27,8 @@ class FakeGitHub:
         self.check_runs: list[dict[str, str]] = []
         # Resolve-on-fix review-thread replies — beyond the frozen port.
         self.replies: list[tuple[str, str]] = []
+        # (author, body) comments already on the PR conversation.
+        self.conversation: list[tuple[str, str]] = []
 
     def get_pr_context(self) -> PRContext:
         return self._ctx
@@ -44,6 +46,10 @@ class FakeGitHub:
     def post_describe_comment(self, body: str) -> None:
         """Idempotent PR-description upsert — beyond the frozen port."""
         self.described.append(body)
+
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """The PR conversation as (author, body) — beyond the frozen port."""
+        return list(self.conversation)
 
     def post_diagram_comment(self, body: str, *, completed_sha: str | None = None) -> None:
         """Idempotent change-diagram upsert — beyond the frozen port."""

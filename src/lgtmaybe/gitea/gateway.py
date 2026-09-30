@@ -35,6 +35,7 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
     current_finding_keys,
     finding_keys,
     marker,
@@ -101,7 +102,7 @@ class GiteaGateway:
         # update never clobbers the description or the diagram.
         self._marker = marker("lgtmaybe", marker_key)
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
-        self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
+        self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
         self._scan_manifests = False
 
@@ -238,6 +239,13 @@ class GiteaGateway:
         review, which this adapter does not offer.
         """
         self._upsert_comment(f"{body}\n\n{self._diagram_marker}", self._diagram_marker)
+
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """Every PR conversation comment as ``(author, body)``, oldest first."""
+        return [
+            ((comment.get("user") or {}).get("login") or "", comment.get("body") or "")
+            for comment in self._list(f"{self._issue_api}/comments")
+        ]
 
     def set_scan_manifests(self, enabled: bool) -> None:
         """Also fetch dependency-manifest text on the next context fetch."""

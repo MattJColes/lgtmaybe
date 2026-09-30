@@ -23,6 +23,7 @@ import httpx
 from tenacity import Retrying, retry_if_result, stop_after_attempt
 
 from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
     FINDING_MARKER,
     IDENTITY_MARKER,
     current_finding_keys,
@@ -181,7 +182,7 @@ class RestGitHubGateway:
         # another. Each is scoped to the provider/model key when there is one.
         self._marker = marker("lgtmaybe", marker_key)
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
-        self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
+        self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._resolve_fixed = resolve_fixed
         # Per-run cache of "does this login have write+ access?" — feedback
         # learning only trusts a 👎 from someone who can push, and a PR's
@@ -521,6 +522,17 @@ class RestGitHubGateway:
         if completed_sha is not None:
             body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
         self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
+
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """Every PR conversation comment as ``(author, body)``, oldest first."""
+        return [
+            (
+                (comment.get("user") or {}).get("login") or "",
+                comment.get("body") or "",
+            )
+            for resp in self._paginate(f"{self._issue_api}/comments?per_page=100")
+            for comment in resp.json()
+        ]
 
     def _upsert_marked_comment(
         self, body: str, marker: str, *, preserve: re.Pattern[str] | None = None

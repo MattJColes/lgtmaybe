@@ -759,3 +759,150 @@ class TestActionRouting:
             "api_base": "https://my-resource.openai.azure.com",
             "api_key": "azure-secret",
         }
+
+
+_FOREIGN_OVERVIEW = "## Walkthrough\n\n```mermaid\nflowchart LR\n  a --> b\n```\n"
+
+
+class TestExistingOverview:
+    """The automatic overview stands back when the PR already diagrams the change.
+
+    The author's description or another tool's walkthrough already carrying a
+    diagram makes ours a duplicate. The review still runs and says why the
+    overview is missing; ``/diagram`` still posts one on request.
+    """
+
+    def _run_opened(self, tmp_path, monkeypatch, github: FakeGitHub) -> None:
+        import lgtmaybe.cli as cli_module
+
+        provider = FakeProvider()
+        monkeypatch.setattr(
+            cli_module,
+            "build_review_context",
+            lambda cfg, runtime: (github, FakeEngine(provider), provider),
+        )
+        event = _write_event(
+            tmp_path,
+            {
+                "action": "opened",
+                "repository": {"full_name": "org/repo"},
+                "pull_request": {"number": 3},
+            },
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+
+        result = CliRunner().invoke(main, ["action"])
+        assert result.exit_code == 0, result.output
+        assert len(github.posted) == 1
+
+    def test_a_diagram_in_the_pr_description_skips_the_overview(self, tmp_path, monkeypatch):
+        from tests.fakes.github import _DEFAULT_CTX
+
+        github = FakeGitHub(_DEFAULT_CTX.model_copy(update={"description": _FOREIGN_OVERVIEW}))
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert github.diagrams == []
+        summary = github.posted[0][1]
+        assert "the PR description" in summary
+        assert "/diagram" in summary
+
+    def test_another_tools_diagram_comment_skips_the_overview(self, tmp_path, monkeypatch):
+        github = FakeGitHub()
+        github.conversation = [("coderabbitai[bot]", _FOREIGN_OVERVIEW)]
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert github.diagrams == []
+        assert "`coderabbitai[bot]`" in github.posted[0][1]
+
+    def test_our_own_earlier_overview_keeps_refreshing(self, tmp_path, monkeypatch):
+        github = FakeGitHub()
+        ours = f"{_FOREIGN_OVERVIEW}\n<!-- lgtmaybe-diagram:ollama/llama3 -->"
+        github.conversation = [
+            ("coderabbitai[bot]", _FOREIGN_OVERVIEW),
+            ("github-actions[bot]", ours),
+        ]
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert len(github.diagrams) == 1
+
+    def test_a_pr_without_a_diagram_still_gets_the_overview(self, tmp_path, monkeypatch):
+        github = FakeGitHub()
+        github.conversation = [("alice", "Looks good, one question below.")]
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert len(github.diagrams) == 1
+        assert "/diagram" not in github.posted[0][1]
+
+    def test_a_failed_comment_scan_still_posts_the_overview(self, tmp_path, monkeypatch):
+        """The scan only ever removes a duplicate — it never costs the overview."""
+
+        class _BrokenListing(FakeGitHub):
+            def list_conversation_comments(self) -> list[tuple[str, str]]:
+                raise RuntimeError("comments API down")
+
+        github = _BrokenListing()
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert len(github.diagrams) == 1
+
+    def test_a_failed_context_prefetch_still_runs_the_check(self, tmp_path, monkeypatch):
+        """run_review refetches the context itself, and the check runs on that one."""
+
+        class _FlakyPrefetch(FakeGitHub):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fetches = 0
+
+            def get_pr_context(self):
+                self.fetches += 1
+                if self.fetches == 1:
+                    raise RuntimeError("transient API error")
+                return super().get_pr_context()
+
+        github = _FlakyPrefetch()
+        github.conversation = [("coderabbitai[bot]", _FOREIGN_OVERVIEW)]
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert github.fetches == 2
+        assert github.diagrams == []
+        assert "/diagram" in github.posted[0][1]
+
+    def test_a_gateway_without_comment_listing_still_checks_the_description(
+        self, tmp_path, monkeypatch
+    ):
+        from tests.fakes.github import _DEFAULT_CTX
+
+        class _NoListing(FakeGitHub):
+            list_conversation_comments = None
+
+        github = _NoListing(_DEFAULT_CTX.model_copy(update={"description": _FOREIGN_OVERVIEW}))
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert github.diagrams == []
+
+    def test_the_slash_command_still_posts_over_an_existing_overview(self):
+        from lgtmaybe.cli.slash import dispatch, parse_command
+
+        github = FakeGitHub()
+        github.conversation = [("coderabbitai[bot]", _FOREIGN_OVERVIEW)]
+        provider = FakeProvider()
+
+        dispatch(
+            parse_command("/diagram"),
+            github=github,
+            engine=FakeEngine(provider),
+            provider=provider,
+            cfg=ReviewConfig(provider=Provider.ollama, model="llama3"),
+        )
+
+        assert len(github.diagrams) == 1

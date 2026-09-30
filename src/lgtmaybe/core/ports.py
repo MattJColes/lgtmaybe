@@ -214,6 +214,15 @@ class SupportsDiagram(Protocol):
 
 
 @runtime_checkable
+class SupportsConversation(Protocol):
+    """Read the comments already on the change's conversation."""
+
+    def list_conversation_comments(self) -> list[tuple[str, str]]:
+        """Every conversation comment as ``(author, body)``, oldest first."""
+        ...
+
+
+@runtime_checkable
 class SupportsIncremental(Protocol):
     """Review only the commits pushed since the last successful review.
 

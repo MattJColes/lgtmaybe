@@ -365,6 +365,27 @@ class TestPostReview:
         assert not reviews.called
 
 
+class TestConversation:
+    @respx.mock
+    def test_lists_pr_comments_with_their_authors(self) -> None:
+        """What the existing-overview scan reads before an automatic overview."""
+        respx.get(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": 1, "body": "```mermaid\nflowchart LR\n```", "user": {"login": "bot"}},
+                    {"id": 2, "body": None},
+                ],
+            )
+        )
+        gateway = _gateway(httpx.Client())
+
+        assert gateway.list_conversation_comments() == [
+            ("bot", "```mermaid\nflowchart LR\n```"),
+            ("", ""),
+        ]
+
+
 class TestCapabilities:
     """What this adapter can and cannot do, declared rather than discovered."""
 
@@ -378,6 +399,7 @@ class TestCapabilities:
             "SupportsDiagram",
             "SupportsLabels",
             "SupportsChecks",
+            "SupportsConversation",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 

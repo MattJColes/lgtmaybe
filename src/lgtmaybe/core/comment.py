@@ -10,6 +10,7 @@ block, and the hidden idempotency markers are the same on all of them. Only the
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from .findings import finding_fingerprint, finding_identity
 from .models import ReviewFinding
@@ -74,6 +75,41 @@ def marker(family: str, key: str | None) -> str:
     its describe/diagram siblings).
     """
     return f"<!-- {family}:{key} -->" if key else f"<!-- {family} -->"
+
+
+# The change-overview comment's marker family, shared by every gateway's upsert
+# and the existing-overview check so the two can never drift apart.
+DIAGRAM_MARKER_FAMILY = "lgtmaybe-diagram"
+
+# A fenced Mermaid diagram — the one kind all three forges render. The info
+# string is what marks it; the word in prose proves nothing. PlantUML is left
+# out: GitHub and Gitea show it as source, which replaces no rendered overview.
+_DIAGRAM_FENCE = re.compile(r"^[ \t>]*(?:`{3,}|~{3,})[ \t]*mermaid\b", re.IGNORECASE | re.MULTILINE)
+
+
+def find_existing_overview(
+    description: str, comments: Iterable[tuple[str, str]], *, own_marker: str
+) -> str | None:
+    """Where a diagram of this change already lives on the PR, or None.
+
+    The author is named in inline code, never as an @-mention: the note rides
+    every review summary, and a mention would notify them each time.
+
+    Reads the PR description and each ``(author, body)`` conversation comment
+    for a fenced diagram. Our own overview (``own_marker``, this provider/model's
+    diagram marker) keeps the slot: once posted we keep refreshing it, since a
+    frozen overview goes stale on the next push. Another lgtmaybe setup's
+    overview counts as existing — it is the same duplicate from our side.
+    """
+    comments = list(comments)
+    if any(own_marker in body for _author, body in comments):
+        return None
+    if _DIAGRAM_FENCE.search(description):
+        return "the PR description"
+    for author, body in comments:
+        if _DIAGRAM_FENCE.search(body):
+            return f"a comment by `{author}`" if author else "a comment"
+    return None
 
 
 def finding_bullet(f: ReviewFinding) -> str:
