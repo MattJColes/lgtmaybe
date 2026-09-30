@@ -1048,6 +1048,39 @@ def test_apply_pr_labels_reconciles_managed_labels_only() -> None:
 
 
 @respx.mock
+def test_apply_pr_labels_replaces_a_stale_risk_level() -> None:
+    """The risk/ family holds one level: a new verdict replaces the old one, and
+    a run that reports none (risk off, or unavailable) removes the stale claim."""
+    current = [{"name": "risk/medium"}, {"name": "bug"}]
+    respx.route(method="GET", url__startswith=LABELS_URL).mock(
+        return_value=httpx.Response(200, json=current)
+    )
+    deleted: list[str] = []
+
+    def capture_delete(request: httpx.Request) -> httpx.Response:
+        deleted.append(request.url.raw_path.decode().rsplit("/", 1)[-1])
+        return httpx.Response(200, json=[])
+
+    respx.route(method="DELETE", url__startswith=LABELS_URL).mock(side_effect=capture_delete)
+    added: dict[str, object] = {}
+
+    def capture_post(request: httpx.Request) -> httpx.Response:
+        added.update(json.loads(request.content))
+        return httpx.Response(200, json=[])
+
+    respx.route(method="POST", url=LABELS_URL).mock(side_effect=capture_post)
+    gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN)
+
+    gateway.apply_pr_labels(["review-effort/1", "risk/high"])
+    assert deleted == ["risk%2Fmedium"]
+    assert added == {"labels": ["review-effort/1", "risk/high"]}
+
+    deleted.clear()
+    gateway.apply_pr_labels(["review-effort/1"])
+    assert deleted == ["risk%2Fmedium"]
+
+
+@respx.mock
 def test_apply_pr_labels_swallows_api_failures() -> None:
     respx.route(method="GET", url__startswith=LABELS_URL).mock(return_value=httpx.Response(500))
 

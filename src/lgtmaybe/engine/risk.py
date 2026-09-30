@@ -116,12 +116,14 @@ _DOC_RE = re.compile(r"\.(?:md|mdx|rst|adoc)$|(?:^|/)docs?/", re.IGNORECASE)
 
 # One rule per language family. TypeScript, TSX and JavaScript share a shape:
 # static imports, `export … from`, and `require()` / dynamic `import()` calls.
+# `severity: hint` pinned so a match can never turn ast-grep's exit code
+# non-zero — a non-zero exit is how a failed scan is recognised.
 _PY_RULE = (
-    "id: py-imports\nlanguage: python\n"
+    "id: py-imports\nlanguage: python\nseverity: hint\n"
     "rule: {any: [{kind: import_statement}, {kind: import_from_statement}]}\n"
 )
 _JS_RULE = (
-    "id: {lang}-imports\nlanguage: {lang}\n"
+    "id: {lang}-imports\nlanguage: {lang}\nseverity: hint\n"
     "rule:\n"
     "  any:\n"
     "    - {{kind: import_statement}}\n"
@@ -350,7 +352,9 @@ def _count_importers(
     """Distinct importers per target, or None when the scan did not complete.
 
     Importers the PR itself changes are excluded, so the count is the code that
-    already depends on a file — identical on a base or a head workspace.
+    already depends on a file — identical on a base or a head workspace. Test
+    files are excluded too: a test importing a module is its coverage, not
+    production code the change can break.
     """
     binary = _find_binary()
     if binary is None:
@@ -373,7 +377,7 @@ def _count_importers(
     for match in iter_matches(stdout):
         importer = str(match.get("file") or "").replace("\\", "/").removeprefix("./")
         text = str(match.get("text") or "")
-        if not importer or importer in changed:
+        if not importer or importer in changed or is_test_path(importer):
             continue
         if str(match.get("ruleId")) == "py-imports":
             hits = {py_index[key] for key in _python_keys(text, importer) if key in py_index}

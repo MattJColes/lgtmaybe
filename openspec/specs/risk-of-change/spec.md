@@ -1,15 +1,12 @@
-# Spec Delta
+# risk-of-change Specification
 
 ## Purpose
 
 Gives every review a single, deterministic answer to "how far could this change
 reach?" - a risk level with its reasons - so a reviewer can size their attention
 before reading a line, and a merge gate can act on it without a model call.
-
-## ADDED Requirements
-
+## Requirements
 ### Requirement: Every review carries a deterministic risk verdict
-<!-- anchor: risk.assess -->
 
 With `risk.enabled` on (the default), every review SHALL assess the change's
 risk as one of `low`, `medium`, `high` or `critical`, together with the reasons
@@ -19,6 +16,7 @@ PR and workspace always yield the same verdict. A failure inside the assessment
 SHALL degrade to a verdict that says the assessment is unavailable and MUST NOT
 fail the review. With `risk.enabled` off, no verdict, marker, section or label
 is produced.
+<!-- anchor: risk.assess -->
 
 #### Scenario: default configuration
 - **WHEN** a review runs with no risk configuration
@@ -33,7 +31,6 @@ is produced.
 - **THEN** the review still posts, the summary line reads `risk unavailable`, and no risk marker is carried
 
 ### Requirement: Blast radius counts the importers of each changed file
-<!-- anchor: risk.blast-radius -->
 
 The assessment SHALL count, for each changed file in a supported language
 (Python, TypeScript, JavaScript), the distinct non-test workspace files that
@@ -46,6 +43,7 @@ least `medium`, and twenty or more to at least `high`. A changed file matching
 any `risk.core_paths` glob SHALL raise the verdict to at least `high` whatever
 its importer count. Each file that raises the level SHALL be named with its
 count. Paths are rendered as inline code with backticks stripped.
+<!-- anchor: risk.blast-radius -->
 
 #### Scenario: a widely imported module changes
 - **WHEN** a changed Python module is imported by 84 files in the workspace
@@ -61,7 +59,6 @@ count. Paths are rendered as inline code with backticks stripped.
   the workspace is the base checkout or the PR head
 
 ### Requirement: Unmeasured blast radius is named, never scored low
-<!-- anchor: risk.unassessed -->
 
 The verdict SHALL name a changed code file as "blast radius not assessed" when
 its blast radius cannot be measured - no workspace available, the scan exceeded
@@ -76,6 +73,7 @@ error discards any partial output and marks every supported changed file
 unassessed; an unsupported language marks only that file; any other failure
 makes the whole assessment unavailable (see "Every review carries a
 deterministic risk verdict").
+<!-- anchor: risk.unassessed -->
 
 #### Scenario: scan times out part-way
 - **WHEN** the scan exceeds its time limit after parsing some files
@@ -90,7 +88,6 @@ deterministic risk verdict").
 - **THEN** the verdict names `lib/billing.rb` as not assessed and does not claim the change is low risk without that caveat
 
 ### Requirement: Factors combine into a level by fixed rules
-<!-- anchor: risk.level -->
 
 The level SHALL be the highest level any factor raises it to, and SHALL be
 `critical` when two or more distinct factors each raise it to `high`. Beyond
@@ -102,6 +99,7 @@ changed SHALL raise it to `medium`. A change touching only documentation and
 test files SHALL be `low` with that stated as its reason. Distinct means a
 different factor or a different High Impact area; two files in one area count
 once.
+<!-- anchor: risk.level -->
 
 #### Scenario: core module and infrastructure together
 - **WHEN** a module with 30 importers and a Terraform file both change
@@ -116,19 +114,18 @@ once.
 - **THEN** the verdict is `low` with the reason "docs and tests only"
 
 ### Requirement: The verdict covers the whole pull request
-<!-- anchor: risk.whole-pr -->
 
 The verdict SHALL be assessed over every file and line the pull request changes,
 before any incremental, triage or file-cap scoping narrows what the lenses
 review, so a re-review after a small push reports the same level as a full
 review of the same head.
+<!-- anchor: risk.whole-pr -->
 
 #### Scenario: incremental re-review
 - **WHEN** a PR whose full change is `high` gets a one-line follow-up commit reviewed incrementally
 - **THEN** the summary still reports `high` with the same reasons
 
 ### Requirement: The summary carries the verdict and a hidden marker
-<!-- anchor: risk.summary -->
 
 Every review summary SHALL name the level and its highest-ranked reason on the
 summary line, and SHALL carry a hidden `<!-- lgtmaybe-risk:<level> -->` marker
@@ -138,6 +135,7 @@ template without it renders no visible verdict, but the marker is still carried.
 A clean review's `LGTM` summary carries the verdict too. An unavailable
 assessment SHALL render as `risk unavailable` and carry no marker, so a gate
 reads its absence as unknown rather than as a level.
+<!-- anchor: risk.summary -->
 
 #### Scenario: default summary line
 - **WHEN** a review finds three issues on a `high` change
@@ -148,13 +146,13 @@ reads its absence as unknown rather than as a level.
 - **THEN** the visible line shows no risk segment and the hidden marker is still present
 
 ### Requirement: The overview explains the verdict
-<!-- anchor: risk.overview -->
 
 When the change overview posts and risk is enabled, it SHALL carry a
 `Risk of Change` section, headed with the level, placed directly above High
 Impact Areas and listing every reason. The section MUST agree with the summary's
 level for the same head. The local `lgtmaybe diagram` command SHALL print the
 same section.
+<!-- anchor: risk.overview -->
 
 #### Scenario: overview with a high-risk change
 - **WHEN** the overview posts for a `high` change with two reasons

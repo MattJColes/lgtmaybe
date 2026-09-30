@@ -1,14 +1,16 @@
 """Review-effort and risk labels (F4), derived from the finished review.
 
 No extra model calls: everything here is computed from the diff and the
-findings the review already produced. Three labels:
+findings the review already produced. Four labels:
 
 - ``review-effort/1``–``5`` — a size estimate from the changed-line count, so
   reviewers can gauge a PR at a glance;
 - ``possible-security-issue`` — a high/critical security finding posted this
   run, from the security lens or from a secret/SAST scanner;
 - ``consider-splitting`` — the diff sprawls across many unrelated top-level
-  directories, a hint that it bundles several themes.
+  directories, a hint that it bundles several themes;
+- ``risk/<level>`` — the risk-of-change verdict (``engine/risk.py``), when the
+  context carries one.
 
 The set is config-gated (``ReviewConfig.pr_labels``, default off) and applied
 best-effort by the GitHub adapter — a labelling failure never fails a review.
@@ -20,6 +22,7 @@ from lgtmaybe.core.diffparse import changed_line_count
 from lgtmaybe.core.models import (
     _SCAN_CATEGORY_PREFIX,
     EFFORT_PREFIX,
+    RISK_PREFIX,
     SECURITY_LABEL,
     SPLITTING_LABEL,
     PRContext,
@@ -65,6 +68,8 @@ def compute_labels(findings: list[ReviewFinding], ctx: PRContext) -> list[str]:
         labels.append(SECURITY_LABEL)
     if _sprawls(ctx.changed_files):
         labels.append(SPLITTING_LABEL)
+    if ctx.risk is not None and ctx.risk.level is not None:
+        labels.append(f"{RISK_PREFIX}{ctx.risk.level}")
     return labels
 
 

@@ -139,7 +139,7 @@ inputs:
     required: false
     default: ""
   pr_labels:
-    description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, and consider-splitting when the diff spans many unrelated directories. Best-effort; off by default."
+    description: "Attach labels derived from the review (no extra model calls): a review-effort/1-5 size estimate, possible-security-issue when a high/critical security finding posts, consider-splitting when the diff spans many unrelated directories, and risk/<level> for the risk-of-change verdict (with risk on). Best-effort; off by default."
     required: false
     default: ""
   learn_feedback:

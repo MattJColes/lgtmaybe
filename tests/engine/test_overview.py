@@ -11,7 +11,9 @@ the diagrams into the single body ``/diagram``, ``auto_diagram`` and the local
   leaves a visible "unavailable" line and never blocks the rest;
 - the diagram call keeps its failure semantics, because a required automatic
   diagram must be able to fail a run rather than silently complete it;
-- with both sections off the body is byte-identical to the standalone diagram,
+- the deterministic Risk of Change section sits between the head and High
+  Impact Areas, and costs no call;
+- with every section off the body is byte-identical to the standalone diagram,
   and costs exactly one call.
 """
 
@@ -31,6 +33,9 @@ from lgtmaybe.core.models import (
     Provider,
     ProviderResult,
     ReviewConfig,
+    RiskAssessment,
+    RiskConfig,
+    RiskReason,
 )
 from lgtmaybe.core.ports import Message
 from lgtmaybe.engine.diagram import build_diagram
@@ -173,8 +178,10 @@ class TestLayout:
 
 
 class TestToggles:
-    def test_both_sections_off_is_the_standalone_diagram(self) -> None:
-        cfg = _CFG.model_copy(update={"auto_describe": False, "high_impact": False})
+    def test_every_section_off_is_the_standalone_diagram(self) -> None:
+        cfg = _CFG.model_copy(
+            update={"auto_describe": False, "high_impact": False, "risk": RiskConfig(enabled=False)}
+        )
         provider, control = _provider(), _provider()
 
         body = build_overview(_CTX, cfg, provider)
@@ -243,3 +250,50 @@ class TestDegradedSections:
         assert "### **High Impact Areas**" in body
         assert "couldn't produce a valid change diagram" in body
         assert "## Architecture of this change" not in body
+
+
+class TestRisk:
+    _HEAD = "### **Risk of Change: High**"
+
+    def test_risk_sits_between_the_head_and_high_impact(self) -> None:
+        body = build_overview(_CTX, _CFG, _provider())
+
+        head = body.index("## Halve the cluster node count")
+        assert head < body.index(self._HEAD) < body.index("### **High Impact Areas**")
+        assert "- touches infrastructure: `infra/main.tf`" in body
+
+    def test_a_verdict_on_the_context_is_rendered_as_is(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The review assessed the whole PR; the overview must agree with it."""
+        import lgtmaybe.engine.overview as overview
+
+        def boom(*_a: object, **_k: object) -> RiskAssessment:
+            raise AssertionError("re-assessed a context that already carried a verdict")
+
+        monkeypatch.setattr(overview, "assess_risk", boom)
+        carried = RiskAssessment(
+            level="medium",
+            reasons=[
+                RiskReason(factor="size", key="size", level="medium", text="600 changed lines")
+            ],
+        )
+
+        body = build_overview(_CTX.model_copy(update={"risk": carried}), _CFG, _provider())
+
+        assert "### **Risk of Change: Medium**\n\n- 600 changed lines" in body
+
+    def test_risk_off_drops_the_section(self) -> None:
+        cfg = _CFG.model_copy(update={"risk": RiskConfig(enabled=False)})
+
+        assert "Risk of Change" not in build_overview(_CTX, cfg, _provider())
+
+    def test_risk_stands_without_high_impact_or_the_description(self) -> None:
+        cfg = _CFG.model_copy(update={"auto_describe": False, "high_impact": False})
+        provider = _provider()
+
+        body = build_overview(_CTX, cfg, provider)
+
+        assert body.startswith("## Cluster topology")
+        assert body.index(self._HEAD) < body.index("### Structure")
+        assert _schemas(provider) == {DiagramResult}

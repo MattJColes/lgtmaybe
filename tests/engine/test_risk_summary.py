@@ -145,3 +145,17 @@ def test_run_review_skips_the_assessment_when_disabled(
         dry_run=False,
     )
     assert engine.reviewed_ctxs[0].risk is None
+
+
+def test_a_same_head_no_op_does_not_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    import lgtmaybe.engine.risk as risk_module
+    from tests.cli.test_incremental_review import IncrementalFakeGitHub, RecordingEngine
+
+    def boom(*_a: object, **_k: object) -> RiskAssessment:
+        raise AssertionError("assessed risk for a head that was already complete")
+
+    monkeypatch.setattr(risk_module, "assess_risk", boom)
+    github = IncrementalFakeGitHub(_CTX, last_sha=_CTX.head_sha, compare_result="")
+    run_review(
+        github=github, engine=RecordingEngine(), cfg=make_cfg(incremental=True), dry_run=False
+    )

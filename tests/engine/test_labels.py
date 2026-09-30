@@ -118,3 +118,19 @@ def test_a_leaked_secret_earns_the_security_label() -> None:
     )
 
     assert SECURITY_LABEL in compute_labels([finding], ctx)
+
+
+def test_a_risk_verdict_earns_exactly_one_risk_label() -> None:
+    from lgtmaybe.core.models import RiskAssessment
+
+    ctx = _ctx().model_copy(update={"risk": RiskAssessment(level="high")})
+    labels = compute_labels([], ctx)
+    assert [label for label in labels if label.startswith("risk/")] == ["risk/high"]
+
+
+def test_no_verdict_or_an_unavailable_one_earns_no_risk_label() -> None:
+    from lgtmaybe.core.models import RiskAssessment
+
+    unavailable = _ctx().model_copy(update={"risk": RiskAssessment(level=None)})
+    for ctx in (_ctx(), unavailable):
+        assert not [label for label in compute_labels([], ctx) if label.startswith("risk/")]

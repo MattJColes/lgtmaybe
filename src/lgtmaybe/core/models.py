@@ -23,6 +23,7 @@ Side = Literal["LEFT", "RIGHT"]
 EFFORT_PREFIX = "review-effort/"
 SECURITY_LABEL = "possible-security-issue"
 SPLITTING_LABEL = "consider-splitting"
+RISK_PREFIX = "risk/"
 
 
 class Severity(StrEnum):

@@ -55,8 +55,8 @@ parses files and runs nothing. On `pull_request_target` the checkout is the
 trusted base branch, and nothing from the scan is sent to the model.
 
 The count measures the code that already depends on a file. A file the PR adds
-has no existing importers, and importers the PR itself changes are left out,
-because they are already in the diff.
+has no existing importers, importers the PR itself changes are left out
+because they are already in the diff, and test files don't count as importers.
 
 When a blast radius can't be measured, the verdict names the file instead of
 guessing. This happens for a language the scan doesn't read, when there is no

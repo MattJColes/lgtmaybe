@@ -132,6 +132,15 @@ def test_the_file_itself_and_files_the_pr_changes_are_not_importers(tmp_path: Pa
     assert result.level == "low"  # 4 importers left: below the medium bar
 
 
+def test_test_files_are_not_counted_as_importers(tmp_path: Path) -> None:
+    """Blast radius is the production code a change can break; a test that
+    imports the module is its coverage, not its dependents."""
+    files = {"src/pkg/__init__.py": "", "src/pkg/core.py": ""}
+    files |= {f"tests/test_core{i}.py": "from pkg import core\n" for i in range(6)}
+    result = assess_risk(_ctx(("src/pkg/core.py", 1)), _cfg(), _write(tmp_path, files))
+    assert result.level == "low"
+
+
 def test_a_file_the_pr_adds_has_no_importers_and_is_not_unassessed(tmp_path: Path) -> None:
     """Measured zero, not unmeasured — on a head workspace the PR's own importers
     exist, but they are the PR's, already in its diff."""

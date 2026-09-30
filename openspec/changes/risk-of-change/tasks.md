@@ -33,19 +33,19 @@ code that passes it.
 
 ## 5. Overview Section
 
-- [ ] 5.1 `render_risk_section` headed `### **Risk of Change: <Level>**` listing every reason; verify tests for low, high and critical with unassessed files
-- [ ] 5.2 Place it in `build_overview` after the description and before High Impact Areas, gated on `risk.enabled` and independent of `high_impact`; verify tests in `tests/engine/test_overview.py` for order and for `high_impact` off
-- [ ] 5.3 `lgtmaybe diagram` prints the same section; verify a CLI test on its output
-- [ ] 5.4 Update CLAUDE.md (a Risk of Change entry beside the change overview) and the docs homepage overview example if it shows the section order; verify the homepage spec tests in `tests/docs/` still pass
+- [x] 5.1 `render_risk_section` headed `### **Risk of Change: <Level>**` listing every reason; verify tests for low, high and critical with unassessed files
+- [x] 5.2 Place it in `build_overview` after the description and before High Impact Areas, gated on `risk.enabled` and independent of `high_impact`; verify tests in `tests/engine/test_overview.py` for order and for `high_impact` off
+- [x] 5.3 `lgtmaybe diagram` prints the same section; verify a CLI test on its output
+- [x] 5.4 Update CLAUDE.md (a Risk of Change entry beside the change overview) and the docs homepage overview example if it shows the section order; verify the homepage spec tests in `tests/docs/` still pass
 
 ## 6. Labels
 
-- [ ] 6.1 Add the `risk/` label family to `engine/labels.py`, exactly one level at a time, skipped when risk is disabled; verify tests in `tests/engine/test_labels.py`
-- [ ] 6.2 Reconciliation replaces a stale `risk/` label and leaves it alone when risk is disabled; verify GitHub adapter tests for the three scenarios in the modified "Labels touch only our own families" requirement, plus the same for any other gateway implementing `SupportsLabels`
+- [x] 6.1 Add the `risk/` label family to `engine/labels.py`, exactly one level at a time, skipped when risk is disabled; verify tests in `tests/engine/test_labels.py`
+- [x] 6.2 Reconciliation replaces a stale `risk/` label and leaves it alone when risk is disabled; verify GitHub adapter tests for the three scenarios in the modified "Labels touch only our own families" requirement (Gitea and GitLab only ever add labels, so there is no reconcile to extend there)
 
 ## 7. Integration
 
-- [ ] 7.1 Add `openspec/specs/risk-of-change/anchors.yml` binding each anchor id to its function, and update the `github.labels` section; verify `uv run pytest tests/specs -q` passes
-- [ ] 7.2 Verify `npx -y @fission-ai/openspec@latest validate --specs` and `validate risk-of-change --strict` pass
-- [ ] 7.3 Run the full gate (`uv run pytest`, ruff, mypy, `uv lock --check`); verify all green
-- [ ] 7.4 Run `lgtmaybe review` locally on this repo against a branch touching `src/lgtmaybe/core/models.py` and on a docs-only branch; verify the first reports `high` or above naming the importer count and the second reports `low` with "docs and tests only"
+- [x] 7.1 Add `openspec/specs/risk-of-change/anchors.yml` binding each anchor id to its function, and update the `github.labels` section; verify `uv run pytest tests/specs -q` passes
+- [x] 7.2 Verify `npx -y @fission-ai/openspec@latest validate --specs` and `validate risk-of-change --strict` pass
+- [x] 7.3 Run the full gate (`uv run pytest`, ruff, mypy, `uv lock --check`); verify all green
+- [x] 7.4 Run the assessment locally on this repo against a branch touching `src/lgtmaybe/core/models.py` and on a docs-only commit (a full `lgtmaybe review` needs model credentials; the verdict needs none); verify the first reports `high` or above naming the importer count and the second reports `low` with "docs and tests only"

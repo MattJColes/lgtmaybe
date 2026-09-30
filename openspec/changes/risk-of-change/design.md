@@ -71,7 +71,8 @@ Alternatives rejected:
 ast-grep respects `.gitignore` by default, so `node_modules` and virtualenvs are
 skipped.
 
-Importers that the PR itself adds or changes are excluded, and a file the PR
+Importers that the PR itself adds or changes are excluded, as are test files
+(a test importing a module is its coverage, not a dependent), and a file the PR
 adds scores zero. This makes the count identical whether the workspace is the
 base checkout (Action) or the PR head (local CLI, GitLab CI), and it keeps the
 meaning to one thing: the existing code this change can break. The PR's own

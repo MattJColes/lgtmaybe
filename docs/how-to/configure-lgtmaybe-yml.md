@@ -673,6 +673,9 @@ Attach labels derived from the finished review — **no extra model calls**:
 - `possible-security-issue` — a high/critical finding from the security lens
   was posted;
 - `consider-splitting` — the diff spans many unrelated top-level directories.
+- `risk/<level>` — the [risk of change](../explanation/risk-of-change.md)
+  verdict, when `risk` is on. One level at a time: a new verdict replaces the
+  old label on GitHub.
 
 Labels are reconciled on each run (a stale `review-effort/2` is removed when
 the score changes) and only lgtmaybe's own label families are ever touched.

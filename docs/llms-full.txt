@@ -761,7 +761,7 @@ pass `aws_role_arn`, `gcp_wif_provider`, or `azure_client_id`. All require
 | `auto_diagram` | `true` | After each opened, reopened, or synchronized (push) PR review, post or refresh the change overview: description, High Impact Areas, a Mermaid flowchart and, when the change alters a flow, a sequence diagram; set `false` to opt out of the whole comment |
 | `high_impact` | `true` | Include the High Impact Areas section in the change overview — infrastructure, security posture, outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, compliance; set `false` to drop the section |
 | `risk` | `true` | Assess the PR's risk of change (low/medium/high/critical) from importer counts, sensitive paths, size and untested code — deterministic, no model call; shown on the summary line, in the overview, as a hidden `lgtmaybe-risk` marker, and (with `pr_labels`) a `risk/<level>` label. Set `false` to turn it off |
-| `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting` (best-effort, no extra model calls) |
+| `pr_labels` | `false` | Attach derived labels: `review-effort/1-5`, `possible-security-issue`, `consider-splitting`, `risk/<level>` (best-effort, no extra model calls) |
 | `fail_on` | — (off) | Merge-gate threshold (`info`/`low`/`medium`/`high`/`critical`). Creates a `lgtmaybe` Check Run that **fails** when any finding is at or above this severity — make it a required check to block merges. See [Gate merges on findings](#gate-merges-on-findings) |
 | `profile` | `false` | Print a timing profile (per-stage and per-call tables, token and cache usage) in the Action log |
 | `aws_role_arn` | — | IAM role ARN to assume via OIDC for bedrock (keyless) |
@@ -3363,6 +3363,9 @@ Attach labels derived from the finished review — **no extra model calls**:
 - `possible-security-issue` — a high/critical finding from the security lens
   was posted;
 - `consider-splitting` — the diff spans many unrelated top-level directories.
+- `risk/<level>` — the [risk of change](../explanation/risk-of-change.md)
+  verdict, when `risk` is on. One level at a time: a new verdict replaces the
+  old label on GitHub.
 
 Labels are reconciled on each run (a stale `review-effort/2` is removed when
 the score changes) and only lgtmaybe's own label families are ever touched.
@@ -3855,15 +3858,18 @@ change as a whole.
 
 ## What you get
 
-Three focused model calls, run concurrently, compose one comment in reading
-order:
+Three focused model calls, run concurrently, plus one deterministic section,
+compose one comment in reading order:
 
 1. a **description** — a suggested title, the change type, a short summary, a
    per-file walkthrough, and a "does it do what it says" check when the PR
    states an intent (`auto_describe`);
-2. **[High Impact Areas](#high-impact-areas)** — the changes a reviewer must not
+2. **Risk of Change** — the change's `low` to `critical` verdict and every
+   reason behind it, computed without a model call (`risk`; see
+   [Risk of Change](../explanation/risk-of-change.md));
+3. **[High Impact Areas](#high-impact-areas)** — the changes a reviewer must not
    miss, in a bold-titled section (`high_impact`);
-3. up to two **diagrams**, each in two renderings — a **Mermaid flowchart** of
+4. up to two **diagrams**, each in two renderings — a **Mermaid flowchart** of
    the structure, a **Mermaid sequence diagram** of the run-time flow when the
    change alters one, and a **plain-text rendering** of each, which is what
    shows in a terminal and serves as the fallback if the Mermaid can't be
@@ -3901,6 +3907,11 @@ in a collapsible "Text version" underneath:
 
 > User reads now check Redis before PostgreSQL, and successful database reads
 > populate the cache for later requests.
+
+> ### **Risk of Change: Critical**
+>
+> - touches infrastructure: `infra/redis.tf`, `ops/backup_retention.tf`
+> - touches backup and recovery: `ops/backup_retention.tf`
 
 > ### **High Impact Areas**
 >
@@ -4111,7 +4122,8 @@ $ lgtmaybe diagram --provider ollama --model llama3
 It diffs your branch against the base (the same base resolution as `lgtmaybe
 review`; `--base` overrides, `--working` includes uncommitted edits,
 `--uncommitted` reviews only the working-tree edits). The output is the same
-body the `/diagram` comment carries — description, High Impact Areas, then each
+body the `/diagram` comment carries — description, Risk of Change, High Impact
+Areas, then each
 diagram's Mermaid source and its text rendering — with one adaptation: a
 terminal renders no HTML, so the collapsible "Text version" wrapper is flattened
 into a plain labelled section:
@@ -7129,8 +7141,8 @@ parses files and runs nothing. On `pull_request_target` the checkout is the
 trusted base branch, and nothing from the scan is sent to the model.
 
 The count measures the code that already depends on a file. A file the PR adds
-has no existing importers, and importers the PR itself changes are left out,
-because they are already in the diff.
+has no existing importers, importers the PR itself changes are left out
+because they are already in the diff, and test files don't count as importers.
 
 When a blast radius can't be measured, the verdict names the file instead of
 guessing. This happens for a language the scan doesn't read, when there is no

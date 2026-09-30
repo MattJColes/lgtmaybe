@@ -332,6 +332,18 @@ class TestDiagramCommand:
         assert "flowchart LR" in result.output
         assert "[Client] --calls--> [App (changed)]" in result.output
 
+    def test_diagram_prints_the_risk_section(self, monkeypatch, tmp_path):
+        """The local overview carries the same Risk of Change section the PR
+        comment does, above High Impact Areas."""
+        self._patch_diagram_provider(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(main, ["diagram", "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code == 0, result.output
+        assert "### **Risk of Change: " in result.output
+        assert result.output.index("Risk of Change") < result.output.index("High Impact Areas")
+
     def test_diagram_output_flattens_the_collapsible_wrapper(self, monkeypatch):
         """A terminal cannot collapse a <details> block, so the local view shows
         each text rendering as a plain labelled section rather than raw HTML —
