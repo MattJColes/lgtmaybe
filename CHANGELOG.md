@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.9.1...lgtmaybe-v2.10.0) (2026-09-30)
+
+
+### Features
+
+* **overview:** skip the auto overview when the PR already diagrams the change ([#675](https://github.com/MattJColes/lgtmaybe/issues/675)) ([c32c70c](https://github.com/MattJColes/lgtmaybe/commit/c32c70c0a48396ad453374c289d4b624198accaa))
+
+
+### Documentation
+
+* **release:** winget token needs the workflow scope ([#676](https://github.com/MattJColes/lgtmaybe/issues/676)) ([a3b71bd](https://github.com/MattJColes/lgtmaybe/commit/a3b71bdf0d433b27738a1d3dad3f592ec73f8378))
+
 ## [2.9.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.9.0...lgtmaybe-v2.9.1) (2026-09-30)
 
 
