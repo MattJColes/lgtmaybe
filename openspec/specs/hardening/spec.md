@@ -97,7 +97,8 @@ of brackets that were never a container.
 
 #### Scenario: model wraps JSON in a code fence
 - **WHEN** the reply is valid findings JSON inside markdown fences
-- **THEN** parsing succeeds; fields still validate against the strict schema
+- **THEN** parsing succeeds; fields still validate against the strict schema,
+  once any engine-owned `anchored` / `broad` / `confidence` value is discarded
 
 #### Scenario: the reply is cut off mid-findings
 - **WHEN** a reply ends inside an unclosed array, so its earlier complete

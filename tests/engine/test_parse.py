@@ -509,3 +509,41 @@ def test_mixed_case_severity_does_not_drop_sibling_findings() -> None:
     result = parse_findings(_json_findings([miscased, valid]))
     assert {f.path for f in result} == {"a.py", "b.py"}
     assert result[0].severity == Severity.high
+
+
+def test_self_scored_confidence_does_not_fail_the_lens() -> None:
+    """A model's own 0-100 confidence must not sink every finding in its lens.
+
+    `confidence` is the reflection auditor's 0-10 score, never the reviewer's,
+    but it sits on the schema the lens call advertises. Claude fills it in on a
+    0-100 scale, so one `85` failed the strict `le=10` check and the lens posted
+    nothing — a "no issues found" that was really a parse failure.
+    """
+    scored = dict(_VALID_FINDING, path="a.py", confidence=85)
+    valid = dict(_VALID_FINDING, path="b.py")
+    result = parse_findings(json.dumps({"findings": [scored, valid]}))
+    assert {f.path for f in result} == {"a.py", "b.py"}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("confidence", 9), ("anchored", False), ("broad", True)]
+)
+def test_engine_owned_fields_are_ignored_from_the_model(field: str, value: object) -> None:
+    """The engine derives these; whatever the reviewing model wrote is discarded."""
+    result = parse_findings(json.dumps({"findings": [dict(_VALID_FINDING, **{field: value})]}))
+    assert getattr(result[0], field) == ReviewFinding.model_fields[field].default
+
+
+def test_truncation_recovery_ignores_engine_owned_fields() -> None:
+    """Salvaged findings from a cut-off answer get the same treatment."""
+    done = json.dumps(dict(_VALID_FINDING, confidence=85))
+    raw = '{"findings": [' + done + ', {"path": "b.py", "line": 2'
+    with pytest.raises(ParseError) as exc:
+        parse_findings(raw)
+    assert [f.confidence for f in exc.value.recovered] == [None]
+
+
+def test_model_supplied_category_is_preserved() -> None:
+    """`category` is the model's per-finding attribution, not engine-owned."""
+    result = parse_findings(json.dumps({"findings": [dict(_VALID_FINDING, category="style")]}))
+    assert result[0].category == "style"
