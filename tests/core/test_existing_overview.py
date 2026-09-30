@@ -30,14 +30,19 @@ def test_nothing_diagrammed_means_nothing_found() -> None:
     assert find_existing_overview("Mentions mermaid in prose.", comments, own_marker=OWN) is None
 
 
-def test_tilde_fences_quoted_fences_and_plantuml_count() -> None:
+def test_tilde_fences_and_quoted_fences_count() -> None:
     for body in (
         "~~~mermaid\nflowchart LR\n~~~",
         "> ```mermaid\n> flowchart LR\n> ```",
         "```  Mermaid\nflowchart LR\n```",
-        "```plantuml\n@startuml\n@enduml\n```",
     ):
         assert find_existing_overview(body, [], own_marker=OWN) == "the PR description", body
+
+
+def test_a_plantuml_fence_does_not_count() -> None:
+    """GitHub and Gitea show PlantUML as source, so it replaces no rendered overview."""
+    body = "```plantuml\n@startuml\nA -> B\n@enduml\n```"
+    assert find_existing_overview(body, [], own_marker=OWN) is None
 
 
 def test_our_own_overview_keeps_the_slot() -> None:

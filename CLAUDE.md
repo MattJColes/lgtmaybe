@@ -266,7 +266,7 @@ pattern, event bus, plugin framework.
      `build_diagram` and costs one call. `auto_diagram` (Action input, default
      **on**) is the one switch for the whole comment; `should_auto_diagram` gates
      it to opened/reopened/synchronize, and `existing_overview_note` then stands it
-     down when the PR already diagrams the change — a Mermaid/PlantUML fence in the
+     down when the PR already diagrams the change — a Mermaid fence in the
      description or a comment not carrying this setup's own diagram marker
      (`core/comment.find_existing_overview`, fed by the gateways'
      `SupportsConversation`). The review summary names the skip and `/diagram`;

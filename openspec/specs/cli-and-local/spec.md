@@ -326,7 +326,7 @@ The supplied GitHub Actions starter workflows SHALL rely on the automatic change
 
 ### Requirement: The automatic overview defers to an existing one
 
-The Action SHALL NOT post its automatic change overview when the pull request already diagrams the change: a fenced Mermaid or PlantUML block in the PR description or in a conversation comment it did not post itself, on any forge. Its own earlier overview (this provider/model's diagram marker) SHALL keep the slot and keep refreshing, and another lgtmaybe setup's overview SHALL count as existing. A skipped overview SHALL be named in the review summary with the `/diagram` command that posts one, and the posted review result alone SHALL be the completion watermark for that run. A failed comment listing SHALL still check the description and otherwise post as usual. Slash commands SHALL never consult the check.
+The Action SHALL NOT post its automatic change overview when the pull request already diagrams the change: a fenced Mermaid block (the diagram kind every forge renders) in the PR description or in a conversation comment it did not post itself. Its own earlier overview (this provider/model's diagram marker) SHALL keep the slot and keep refreshing, and another lgtmaybe setup's overview SHALL count as existing. A skipped overview SHALL be named in the review summary with the `/diagram` command that posts one, and the posted review result alone SHALL be the completion watermark for that run. A failed comment listing SHALL still check the description and otherwise post as usual. Slash commands SHALL never consult the check.
 <!-- anchor: cli.existing-overview -->
 
 #### Scenario: another tool already posted a walkthrough diagram

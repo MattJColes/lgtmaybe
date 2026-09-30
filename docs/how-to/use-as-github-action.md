@@ -32,7 +32,7 @@ and a compact Mermaid flowchart. Later `synchronize` pushes refresh it and, when
 the change alters a run-time flow, a sequence diagram appears beside it. Set it
 to `false` for no overview at all, or drop a single section with
 `auto_describe: false` / `high_impact: false`. When the PR description or
-another author's comment already carries a Mermaid or PlantUML diagram, the
+any comment lgtmaybe didn't post already carries a Mermaid diagram, the
 automatic overview is skipped and the review summary says so; `/diagram` still
 posts one on request.
 ollama runs the model on your own machine, so it is local-only — use the

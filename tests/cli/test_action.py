@@ -853,6 +853,43 @@ class TestExistingOverview:
 
         assert len(github.diagrams) == 1
 
+    def test_a_failed_context_prefetch_still_runs_the_check(self, tmp_path, monkeypatch):
+        """run_review refetches the context itself, and the check runs on that one."""
+
+        class _FlakyPrefetch(FakeGitHub):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fetches = 0
+
+            def get_pr_context(self):
+                self.fetches += 1
+                if self.fetches == 1:
+                    raise RuntimeError("transient API error")
+                return super().get_pr_context()
+
+        github = _FlakyPrefetch()
+        github.conversation = [("coderabbitai[bot]", _FOREIGN_OVERVIEW)]
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert github.fetches == 2
+        assert github.diagrams == []
+        assert "/diagram" in github.posted[0][1]
+
+    def test_a_gateway_without_comment_listing_still_checks_the_description(
+        self, tmp_path, monkeypatch
+    ):
+        from tests.fakes.github import _DEFAULT_CTX
+
+        class _NoListing(FakeGitHub):
+            list_conversation_comments = None
+
+        github = _NoListing(_DEFAULT_CTX.model_copy(update={"description": _FOREIGN_OVERVIEW}))
+
+        self._run_opened(tmp_path, monkeypatch, github)
+
+        assert github.diagrams == []
+
     def test_the_slash_command_still_posts_over_an_existing_overview(self):
         from lgtmaybe.cli.slash import dispatch, parse_command
 

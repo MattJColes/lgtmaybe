@@ -35,6 +35,7 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
     current_finding_keys,
     finding_keys,
     marker,
@@ -101,7 +102,7 @@ class GiteaGateway:
         # update never clobbers the description or the diagram.
         self._marker = marker("lgtmaybe", marker_key)
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
-        self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
+        self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
         self._scan_manifests = False
 

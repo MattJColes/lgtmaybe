@@ -23,6 +23,7 @@ import httpx
 from tenacity import Retrying, retry_if_result, stop_after_attempt
 
 from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
     FINDING_MARKER,
     IDENTITY_MARKER,
     current_finding_keys,
@@ -181,7 +182,7 @@ class RestGitHubGateway:
         # another. Each is scoped to the provider/model key when there is one.
         self._marker = marker("lgtmaybe", marker_key)
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
-        self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
+        self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._resolve_fixed = resolve_fixed
         # Per-run cache of "does this login have write+ access?" — feedback
         # learning only trusts a 👎 from someone who can push, and a PR's

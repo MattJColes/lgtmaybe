@@ -252,8 +252,9 @@ auto_diagram: false
 ```
 
 The automatic overview stands back when the pull request already diagrams the
-change: a fenced `mermaid` or `plantuml` block in the PR description, or in a
-comment someone else posted (a teammate, or another review bot's walkthrough).
+change: a fenced `mermaid` block in the PR description, or in any comment
+lgtmaybe didn't post itself (yours, a teammate's, or another review bot's
+walkthrough).
 The review still runs and its summary names where the existing diagram lives.
 Once lgtmaybe has posted its own overview on a PR it keeps refreshing that one,
 so it never goes stale. Comment `/diagram` to post the overview anyway — slash

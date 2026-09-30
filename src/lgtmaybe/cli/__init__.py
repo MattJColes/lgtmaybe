@@ -27,7 +27,7 @@ from typing import Any
 import click
 
 from lgtmaybe.cli.render import flatten_details, render_findings
-from lgtmaybe.core.comment import find_existing_overview, marker
+from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import Forge, PRLocator, token_env_var
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
@@ -46,6 +46,7 @@ from lgtmaybe.core.ports import (
     ReviewEngine,
     ReviewGateway,
     SupportsBaseCheckout,
+    SupportsConversation,
     SupportsFileContents,
 )
 from lgtmaybe.core.version import package_version
@@ -115,14 +116,13 @@ def existing_overview_note(github: ReviewGateway, ctx: PRContext, cfg: ReviewCon
     still checks the description, and anything short of a found diagram posts.
     """
     comments: list[tuple[str, str]] = []
-    list_comments = getattr(github, "list_conversation_comments", None)
-    if list_comments is not None:
+    if isinstance(github, SupportsConversation):
         try:
-            comments = list_comments()
+            comments = github.list_conversation_comments()
         except Exception as exc:  # noqa: BLE001 - the scan may only remove a duplicate
             _log.warning("reading PR comments for an existing overview failed: %s", exc)
     where = find_existing_overview(
-        ctx.description, comments, own_marker=marker("lgtmaybe-diagram", _marker_key(cfg))
+        ctx.description, comments, own_marker=marker(DIAGRAM_MARKER_FAMILY, _marker_key(cfg))
     )
     if where is None:
         return None
@@ -477,7 +477,6 @@ def run_review(
     ctx: PRContext | None = None,
     provider: ProviderClient | None = None,
     diagram_required: bool = False,
-    summary_note: str | None = None,
 ) -> tuple[list[ReviewFinding], str]:
     """Run a full or hybrid review and optionally persist its completion state.
 
@@ -485,8 +484,9 @@ def run_review(
     engine, and optionally posts the review. Returns (findings, summary) in
     all cases so callers can inspect output. ``provider`` performs explicit
     validation of earlier findings and builds a required automatic diagram.
-    ``diagram_required`` makes that current-head diagram part of completion.
-    ``summary_note`` is appended to the summary as posted.
+    ``diagram_required`` makes that current-head diagram part of completion,
+    unless the PR already diagrams the change (``existing_overview_note``): then
+    the review alone completes the head and its summary names the skip.
 
     With ``cfg.incremental`` on and a gateway that supports it, only the diff
     since the last completed head is reviewed while earlier findings are
@@ -502,6 +502,12 @@ def run_review(
         if callable(want_manifests):
             want_manifests(cfg.static_analysis.enabled)
         ctx = github.get_pr_context()
+    overview_note = None
+    if diagram_required and not dry_run:
+        # Checked here, on whichever context this run holds, so a failed
+        # prefetch upstream cannot bypass it.
+        overview_note = existing_overview_note(github, ctx, cfg)
+        diagram_required = overview_note is None
     review_ctx, incremental_since, already_complete = _incremental_context(
         github, ctx, cfg, diagram_required=diagram_required
     )
@@ -528,8 +534,8 @@ def run_review(
         )
         if validation_summary:
             summary += f"\n\n{validation_summary}"
-    if summary_note:
-        summary += f"\n\n{summary_note}"
+    if overview_note:
+        summary += f"\n\n{overview_note}"
 
     if not dry_run:
         # Prepare the watermark for the review body. This is only in-memory
@@ -886,10 +892,6 @@ def execute_review(
                 raise
             except Exception:
                 _log.warning("PR context prefetch failed — overview skipped", exc_info=True)
-        note = None
-        if diagram and ctx is not None:
-            note = existing_overview_note(github, ctx, cfg)
-            diagram = note is None
         run_review(
             github=github,
             engine=engine,
@@ -898,7 +900,6 @@ def execute_review(
             ctx=ctx,
             provider=provider,
             diagram_required=diagram,
-            summary_note=note,
         )
     except DiffUnavailable as exc:
         # The host will not serve the diff (GitHub: over 300 files / 20,000

@@ -77,11 +77,14 @@ def marker(family: str, key: str | None) -> str:
     return f"<!-- {family}:{key} -->" if key else f"<!-- {family} -->"
 
 
-# A fenced diagram — Mermaid renders natively on all three forges, PlantUML on
-# GitLab. The info string is what marks it; the word in prose proves nothing.
-_DIAGRAM_FENCE = re.compile(
-    r"^[ \t>]*(?:`{3,}|~{3,})[ \t]*(?:mermaid|plantuml)\b", re.IGNORECASE | re.MULTILINE
-)
+# The change-overview comment's marker family, shared by every gateway's upsert
+# and the existing-overview check so the two can never drift apart.
+DIAGRAM_MARKER_FAMILY = "lgtmaybe-diagram"
+
+# A fenced Mermaid diagram — the one kind all three forges render. The info
+# string is what marks it; the word in prose proves nothing. PlantUML is left
+# out: GitHub and Gitea show it as source, which replaces no rendered overview.
+_DIAGRAM_FENCE = re.compile(r"^[ \t>]*(?:`{3,}|~{3,})[ \t]*mermaid\b", re.IGNORECASE | re.MULTILINE)
 
 
 def find_existing_overview(

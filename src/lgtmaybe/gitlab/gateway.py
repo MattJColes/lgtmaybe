@@ -30,6 +30,7 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
     FINDING_MARKER,
     IDENTITY_MARKER,
     current_finding_keys,
@@ -100,7 +101,7 @@ class GitLabGateway:
         self._resolve_fixed = resolve_fixed
         self._marker = marker("lgtmaybe", marker_key)
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
-        self._diagram_marker = marker("lgtmaybe-diagram", marker_key)
+        self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
         # The three SHAs every positioned discussion must carry. Cached from the
         # MR payload, because posting a finding needs them and post_review is
