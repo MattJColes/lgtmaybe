@@ -303,6 +303,23 @@ def _is_container(value: Any) -> bool:
     return isinstance(value, dict) and isinstance(value.get("findings"), list)
 
 
+# Fields the engine derives after parsing (re-anchoring and reflection), so a
+# reviewing model's own value is meaningless — and, since they sit on the schema
+# the lens call advertises, a model will fill them in anyway. Claude scores
+# `confidence` on 0-100, which failed the strict 0-10 bound and took every
+# finding in the lens down with it. The same three `reflect` hides from the
+# auditor. `category` is deliberately NOT here: a merged lens reads the model's
+# per-finding attribution.
+_ENGINE_OWNED = frozenset({"anchored", "broad", "confidence"})
+
+
+def _validate_finding(item: Any) -> ReviewFinding:
+    """*item* as a ReviewFinding, with any engine-owned field the model wrote dropped."""
+    if isinstance(item, dict):
+        item = {k: v for k, v in item.items() if k not in _ENGINE_OWNED}
+    return ReviewFinding.model_validate(item)
+
+
 def _recover_complete_findings(raw: str) -> list[ReviewFinding]:
     """Every valid finding the model finished emitting before it was cut off.
 
@@ -317,7 +334,7 @@ def _recover_complete_findings(raw: str) -> list[ReviewFinding]:
         if not isinstance(value, dict) or _is_container(value):
             continue
         try:
-            recovered.append(ReviewFinding.model_validate(value))
+            recovered.append(_validate_finding(value))
         except Exception:  # noqa: S110 — a non-finding object is simply not one
             continue
     return recovered
@@ -388,7 +405,7 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
         if items is None:
             continue
         try:
-            parsed = [ReviewFinding.model_validate(item) for item in items]
+            parsed = [_validate_finding(item) for item in items]
         except Exception as exc:
             last_error = exc
             continue
