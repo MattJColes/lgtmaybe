@@ -55,10 +55,13 @@ _CACHEABLE_MODELS = [
     # OpenRouter passes cache_control through for the model families that take
     # it (claude, gemini, minimax, glm, z-ai) and STRIPS it for the rest, so we
     # mark broadly and let litellm decide per model — see the deepseek case in
-    # TestOpenRouterBreakpoints.
+    # TestOpenRouterBreakpoints. The adapter still needs litellm's capability
+    # map to say the id caches: 1.103 sourced openrouter/minimax/minimax-m2 and
+    # openrouter/deepseek/deepseek-chat as `supports_prompt_caching: false`, so
+    # pick ids the map still marks.
     "openrouter/anthropic/claude-sonnet-4.5",
     "openrouter/z-ai/glm-4.6",
-    "openrouter/minimax/minimax-m2",
+    "openrouter/minimax/minimax-m2.7",
 ]
 
 _UNCACHEABLE_MODELS = [
@@ -257,12 +260,12 @@ class TestOpenRouterBreakpoints:
 
     @pytest.mark.parametrize(
         "model",
-        ["anthropic/claude-sonnet-4.5", "z-ai/glm-4.6", "minimax/minimax-m2"],
+        ["anthropic/claude-sonnet-4.5", "z-ai/glm-4.6", "minimax/minimax-m2.7"],
     )
     def test_breakpoints_survive_for_supported_families(self, model: str) -> None:
         assert self._breakpoints_reaching_the_api(model) == 2
 
-    @pytest.mark.parametrize("model", ["deepseek/deepseek-chat", "qwen/qwen3-max"])
+    @pytest.mark.parametrize("model", ["deepseek/deepseek-chat-v3.1", "qwen/qwen3-max"])
     def test_breakpoints_are_stripped_for_the_rest_not_rejected(self, model: str) -> None:
         """The reason we can mark the whole openrouter route: an unsupported
         model loses the marker upstream instead of erroring on it."""
@@ -272,7 +275,7 @@ class TestOpenRouterBreakpoints:
         """deepseek via openrouter still gets our breakpoint — harmless (litellm
         removes it) and it keeps the split prefix identical across lenses, which
         is what deepseek's automatic caching keys on."""
-        sent = _sent_split("openrouter/deepseek/deepseek-chat")
+        sent = _sent_split("openrouter/deepseek/deepseek-chat-v3.1")
         assert len(sent) == 2
         assert sent[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
