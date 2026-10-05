@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.11.0...lgtmaybe-v2.11.1) (2026-10-05)
+
+
+### Dependencies
+
+* bump the python-dependencies group with 7 updates plus urllib3 to 2.8.0 ([#681](https://github.com/MattJColes/lgtmaybe/issues/681)) ([66f1fff](https://github.com/MattJColes/lgtmaybe/commit/66f1fffff03966e85d2917bef60830a603dba913))
+
 ## [2.11.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.10.0...lgtmaybe-v2.11.0) (2026-09-30)
 
 
