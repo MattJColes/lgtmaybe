@@ -98,3 +98,26 @@ def _isolate_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolate_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep tests independent of files in the developer's checkout."""
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_posting_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The HTTP fixture token belongs to Actions unless a test owns its identity boundary."""
+    import json
+
+    import httpx
+
+    original = httpx.Client.send
+
+    def send(client, request, **kwargs):
+        if (
+            request.method == "POST"
+            and str(request.url) == "https://api.github.com/graphql"
+            and json.loads(request.content).get("query") == "query { viewer { login } }"
+        ):
+            return httpx.Response(
+                200, json={"data": {"viewer": {"login": "github-actions[bot]"}}}, request=request
+            )
+        return original(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx.Client, "send", send)

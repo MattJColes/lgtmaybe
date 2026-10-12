@@ -218,13 +218,12 @@ class RestGitHubGateway:
         # never record "reviewed up to head" — the next run would then skip
         # commits nobody reviewed.
         self._reviewed_sha: str | None = None
-        # Memoized marker-review lookup: last_reviewed_sha (incremental) and
-        # post_review both walk the full paginated reviews list for the same
-        # marker, and nothing posts a review between the two reads within one
-        # run — so the second walk is always identical. _done guards the
-        # one-shot, since None is a valid "no marker review" result.
-        self._existing_review_entry: tuple[int, str] | None = None
+        # Watermark reads and pre-post lookup share one paginated scan. A
+        # successful post invalidates it so later reads see the new native summary.
+        # _done distinguishes a cached missing match from an unfetched list.
+        self._existing_review_entry: tuple[int, str, str | None] | None = None
         self._existing_review_done = False
+        self._posting_login: str | None = None
 
     def _post(self, url: str, **kwargs: Any) -> httpx.Response:
         """POST once more when GitHub explicitly tells us how long to wait."""
@@ -340,8 +339,8 @@ class RestGitHubGateway:
     ) -> None:
         """Post (or update) a single review with batched inline comments.
 
-        If a previous review from this tool exists (identified by ``_MARKER`` in
-        the body), it is updated in-place rather than creating a duplicate.
+        A completed review at a new commit gets a fresh native summary; reruns
+        at that commit update it in-place. Older summaries retain their history.
 
         The ``diff`` parameter is optional; when omitted the method fetches just
         the PR diff (one ``.diff``-Accept GET — never the full ``get_pr_context``
@@ -372,16 +371,18 @@ class RestGitHubGateway:
         reviews_url = f"{self._pr_api}/reviews"
 
         if existing is not None:
+            new_commit = self._reviewed_sha is not None and existing[2] != self._reviewed_sha
             # Update the existing review body (inline comments cannot be changed
             # through this endpoint, but the summary is updated).
             update_url = f"{reviews_url}/{existing[0]}"
-            resp = self._client.put(
-                update_url,
-                headers=self._json_headers,
-                json={"body": body},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
+            if not new_commit:
+                resp = self._client.put(
+                    update_url,
+                    headers=self._json_headers,
+                    json={"body": body},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
             # The review-update endpoint can't add inline comments, so post the
             # NEW findings (fingerprints not already on the PR) as individual
             # review comments — otherwise a re-run's fresh findings would only
@@ -395,6 +396,21 @@ class RestGitHubGateway:
             )
             if rejected:
                 body = build_body([*demoted, *rejected])
+            if new_commit:
+                # Publish completion only after required inline writes succeed.
+                resp = self._post(
+                    reviews_url,
+                    headers=self._json_headers,
+                    json={
+                        "body": body,
+                        "event": "COMMENT",
+                        "comments": [],
+                        "commit_id": self._reviewed_sha,
+                    },
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+            elif rejected:
                 resp = self._client.put(
                     update_url,
                     headers=self._json_headers,
@@ -413,6 +429,8 @@ class RestGitHubGateway:
                 "event": "COMMENT",
                 "comments": comments,
             }
+            if self._reviewed_sha is not None:
+                payload["commit_id"] = self._reviewed_sha
             resp = self._post(
                 reviews_url,
                 headers=self._json_headers,
@@ -432,6 +450,8 @@ class RestGitHubGateway:
                     timeout=_TIMEOUT,
                 )
             resp.raise_for_status()
+        self._existing_review_entry = None
+        self._existing_review_done = False
 
     def get_file_contents(self, path: str) -> str | None:
         """Return the head-revision text of *path*, or None if it can't be fetched.
@@ -639,10 +659,10 @@ class RestGitHubGateway:
     def last_reviewed_sha(self) -> str | None:
         """The head SHA covered by our previous review, or None.
 
-        Read back from the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
-        ``post_review`` stamps into the summary body. None when there is no
-        prior review, the review predates the marker, or the lookup fails —
-        the caller then runs a full review.
+        Read the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
+        ``post_review`` stamps into the summary. No prior marker or an HTTP
+        lookup failure returns None, so the caller runs a full review. Invalid
+        authenticated-actor metadata raises instead of authorizing reuse.
         """
         try:
             entry = self._find_existing_review_entry()
@@ -650,7 +670,7 @@ class RestGitHubGateway:
             return None
         if entry is None:
             return None
-        _review_id, body = entry
+        _review_id, body, _commit_id = entry
         match = _REVIEWED_MARKER.search(body)
         return match.group(1) if match else None
 
@@ -671,7 +691,12 @@ class RestGitHubGateway:
             for resp in self._paginate(url):
                 for comment in resp.json():
                     body = comment.get("body") or ""
-                    if self._diagram_marker not in body:
+                    user = comment.get("user")
+                    if (
+                        self._diagram_marker not in body
+                        or not isinstance(user, dict)
+                        or user.get("login") != self._posting_login
+                    ):
                         continue
                     match = _DIAGRAMMED_MARKER.search(body)
                     return match.group(1) if match else None
@@ -1039,26 +1064,41 @@ class RestGitHubGateway:
             # httpx parses the Link header for us.
             next_url = resp.links.get("next", {}).get("url")
 
-    def _find_existing_review_entry(self) -> tuple[int, str] | None:
-        """Return ``(id, body)`` of the first review carrying our marker, or None.
+    def _find_existing_review_entry(self) -> tuple[int, str, str | None] | None:
+        """Return ``(id, body, commit_id)`` of the latest matching review, or None.
 
-        Follows Link rel=next pagination — a busy PR can hold more than one page
-        of reviews, and missing the marker there would duplicate the review
-        instead of updating it. Memoized for the run: the incremental watermark
-        read and the post both need it, and no review is posted in between.
+        Follows every Link rel=next page. Watermark reads and pre-post lookup
+        share the cached scan; a successful post invalidates it so later reads
+        can find the newly created native summary.
         """
         if self._existing_review_done:
             return self._existing_review_entry
+        if self._posting_login is None:
+            data = self._graphql("query { viewer { login } }", {})
+            viewer = data.get("viewer") if isinstance(data, dict) else None
+            login = viewer.get("login") if isinstance(viewer, dict) else None
+            if not isinstance(login, str) or not login.strip():
+                raise RuntimeError("GitHub did not identify the authenticated posting actor")
+            self._posting_login = login
         for resp in self._paginate(f"{self._pr_api}/reviews?per_page=100"):
             for review in resp.json():
+                user = review.get("user")
+                if not isinstance(user, dict) or user.get("login") != self._posting_login:
+                    continue
                 body: str = review.get("body", "") or ""
-                if self._marker in body:
+                if self._marker in body and (
+                    self._existing_review_entry is None
+                    or review["id"] > self._existing_review_entry[0]
+                ):
                     review_id: int = review["id"]
-                    self._existing_review_entry = (review_id, body)
-                    self._existing_review_done = True
-                    return self._existing_review_entry
+                    commit_id = review.get("commit_id")
+                    self._existing_review_entry = (
+                        review_id,
+                        body,
+                        commit_id if isinstance(commit_id, str) else None,
+                    )
         self._existing_review_done = True
-        return None
+        return self._existing_review_entry
 
     # ------------------------------------------------------------------
     # Auto-resolve fixed conversations (GraphQL — the REST review API can't

@@ -6,6 +6,7 @@ import json
 import threading
 
 import httpx
+import pytest
 import respx
 from pytest import MonkeyPatch
 
@@ -121,7 +122,13 @@ def test_initial_review_salvages_a_comment_rejected_by_github() -> None:
 def test_post_review_updates_existing_review_on_second_call() -> None:
     """Second post_review call updates the existing review rather than creating another."""
     existing_review_id = 99
-    existing_reviews = [{"id": existing_review_id, "body": f"Old summary {MARKER}"}]
+    existing_reviews = [
+        {
+            "id": existing_review_id,
+            "body": f"Old summary {MARKER}",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(
         return_value=httpx.Response(200, json=existing_reviews)
     )
@@ -169,7 +176,13 @@ def test_post_review_finds_existing_review_past_first_page() -> None:
     updated in place rather than duplicated."""
     existing_review_id = 99
     page1 = [{"id": i, "body": f"human review {i}"} for i in range(30)]
-    page2 = [{"id": existing_review_id, "body": f"Old summary {MARKER}"}]
+    page2 = [
+        {
+            "id": existing_review_id,
+            "body": f"Old summary {MARKER}",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     page2_url = f"{REVIEWS_URL}?page=2"
 
     # One route serves both pages in order: a respx URL pattern without a query
@@ -461,7 +474,13 @@ def test_post_review_uses_provider_scoped_marker() -> None:
 def test_post_review_with_distinct_marker_keys_coexist() -> None:
     """A review from another provider/model is left intact; a gateway with a
     different marker_key creates its own review instead of overwriting it."""
-    other = [{"id": 7, "body": "Anthropic summary <!-- lgtmaybe:anthropic/claude-haiku-4-5 -->"}]
+    other = [
+        {
+            "id": 7,
+            "body": "Anthropic summary <!-- lgtmaybe:anthropic/claude-haiku-4-5 -->",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=other))
 
     create_bodies: list[dict[object, object]] = []
@@ -503,7 +522,14 @@ def _mark_existing_review() -> None:
     re-run's individual inline posting now makes (#443): the posted-comments
     listing (dedupe), the comment POST, and the lazy PR-head fetch that anchors
     a run with no completion watermark."""
-    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    existing = [
+        {
+            "id": 99,
+            "body": f"Old summary {MARKER}",
+            "commit_id": "deadbee",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
@@ -1160,6 +1186,7 @@ def test_reviews_list_fetched_once_per_run() -> None:
                 {
                     "id": existing_review_id,
                     "body": f"Old summary {MARKER}\n<!-- lgtmaybe-reviewed:def5678 -->",
+                    "user": {"login": "github-actions[bot]"},
                 }
             ],
         )
@@ -1739,3 +1766,261 @@ def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
     gw.post_review([finding], "New summary", diff=SAMPLE_DIFF)
 
     assert posted == [], "a pre-badge comment must still suppress its re-post"
+
+
+@respx.mock
+@pytest.mark.parametrize("native_commit", ["a" * 40, None])
+def test_completed_new_head_preserves_old_native_review(native_commit: str | None) -> None:
+    old = {
+        "id": 99,
+        "body": f"Old summary {MARKER}",
+        "commit_id": native_commit,
+        "user": {"login": "github-actions[bot]"},
+    }
+    respx.get(REVIEWS_URL).mock(return_value=httpx.Response(200, json=[old]))
+    created = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    updated = respx.put(f"{REVIEWS_URL}/99").mock(return_value=httpx.Response(200))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("b" * 40)
+
+    gateway.post_review([], "Clean summary")
+
+    payload = json.loads(created.calls[0].request.content)
+    assert payload == {
+        "body": f"Clean summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:{'b' * 40} -->",
+        "event": "COMMENT",
+        "comments": [],
+        "commit_id": "b" * 40,
+    }
+    assert not updated.called
+    assert old["body"] == f"Old summary {MARKER}"
+
+
+@respx.mock
+def test_completed_same_native_head_updates_without_duplicate() -> None:
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "b" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    update = respx.put(f"{REVIEWS_URL}/99").mock(return_value=httpx.Response(200))
+    create = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("b" * 40)
+
+    gateway.post_review([], "Clean summary")
+
+    assert update.called
+    assert not create.called
+
+
+@respx.mock
+def test_latest_provider_summary_across_pages_drives_completion_and_updates() -> None:
+    respx.get(REVIEWS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'a' * 40} -->",
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                }
+            ],
+            headers={"Link": f'<{REVIEWS_URL}?per_page=100&page=2>; rel="next"'},
+        )
+    )
+    respx.get(REVIEWS_URL + "?per_page=100&page=2").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 102,
+                    "body": "<!-- lgtmaybe:other/model -->",
+                    "commit_id": "wrong",
+                    "user": {"login": "github-actions[bot]"},
+                },
+                {
+                    "id": 101,
+                    "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'b' * 40} -->",
+                    "commit_id": "b" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    update = respx.put(f"{REVIEWS_URL}/101").mock(return_value=httpx.Response(200))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    assert gateway.last_completed_sha(diagram_required=False) == "b" * 40
+    gateway.mark_reviewed("b" * 40)
+
+    gateway.post_review([], "Latest summary")
+
+    assert update.called
+
+
+@respx.mock
+def test_initial_completed_review_binds_actual_commit_despite_a_newer_pr_head() -> None:
+    respx.get(REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
+    create = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    # No lookup of a newer PR head is permitted: only the actually reviewed commit binds it.
+    newer_head = respx.get(PR_URL).mock(
+        return_value=httpx.Response(200, json={"head": {"sha": "c" * 40}})
+    )
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("b" * 40)
+
+    gateway.post_review([], "Clean summary")
+
+    assert json.loads(create.calls[0].request.content)["commit_id"] == "b" * 40
+
+    assert not newer_head.called
+
+
+@respx.mock
+def test_new_native_summary_preserves_one_for_one_inline_dedupe() -> None:
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    fp = finding_fingerprint(FINDINGS[0].path, FINDINGS[0].title)
+    respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(
+        return_value=httpx.Response(200, json=[{"body": f"<!-- lgtmaybe-finding:{fp} -->"}])
+    )
+    inline = respx.post(REVIEW_COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 200})
+    )
+    summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("new")
+
+    gateway.post_review([FINDINGS[0], FINDINGS[0]], "Two occurrences", diff=SAMPLE_DIFF)
+
+    assert inline.call_count == 1
+    assert json.loads(inline.calls[0].request.content)["commit_id"] == "new"
+    assert json.loads(summary.calls[0].request.content)["comments"] == []
+
+
+@respx.mock
+def test_inline_failure_never_publishes_complete_new_native_summary() -> None:
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
+    respx.post(REVIEW_COMMENTS_URL).mock(return_value=httpx.Response(500))
+    summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("new")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        gateway.post_review(FINDINGS, "Complete summary", diff=SAMPLE_DIFF)
+
+    assert not summary.called
+
+
+@respx.mock
+def test_summary_creation_failure_is_fatal_and_keeps_old_completion() -> None:
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'a' * 40} -->",
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    respx.post(REVIEWS_URL).mock(return_value=httpx.Response(500))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("new")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        gateway.post_review([], "Complete summary")
+
+    assert gateway.last_completed_sha(diagram_required=False) == "a" * 40
+
+
+@respx.mock
+def test_incomplete_new_head_does_not_create_a_complete_native_summary() -> None:
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'a' * 40} -->",
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    update = respx.put(f"{REVIEWS_URL}/99").mock(return_value=httpx.Response(200))
+    create = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    respx.get(PR_URL).mock(return_value=httpx.Response(200, json=_pr_detail()))
+    gateway.mark_reviewed(None)
+
+    gateway.post_review([], "<!-- lgtmaybe-incomplete -->")
+
+    assert "lgtmaybe-reviewed:" not in json.loads(update.calls[0].request.content)["body"]
+    assert not create.called
+
+
+@respx.mock
+def test_rejected_new_head_inline_finding_remains_in_fresh_native_summary() -> None:
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
+    respx.post(REVIEW_COMMENTS_URL).mock(return_value=httpx.Response(422))
+    summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("b" * 40)
+
+    gateway.post_review(FINDINGS, "Complete summary", diff=SAMPLE_DIFF)
+
+    payload = json.loads(summary.calls[0].request.content)
+    assert payload["commit_id"] == "b" * 40
+    assert "Import order" in payload["body"]
+    assert payload["comments"] == []

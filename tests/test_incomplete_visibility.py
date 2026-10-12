@@ -264,7 +264,16 @@ def test_notice_is_visible_on_a_re_run() -> None:
     """The regression: a re-run only PUTs the old review's body, so without the
     comment the PR shows nothing but bodiless one-comment reviews."""
     respx.route(method="GET", url=_REVIEWS_URL).mock(
-        return_value=httpx.Response(200, json=[{"id": 99, "body": f"Old summary {_MARKER}"}])
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": f"Old summary {_MARKER}",
+                    "user": {"login": "github-actions[bot]"},
+                }
+            ],
+        )
     )
     put_bodies: list[str] = []
     respx.route(method="PUT", url=f"{_REVIEWS_URL}/99").mock(
