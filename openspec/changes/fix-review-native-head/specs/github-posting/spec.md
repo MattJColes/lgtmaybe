@@ -61,4 +61,3 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 #### Scenario: a review run fails
 - **WHEN** posting fails after review
 - **THEN** the watermark does not move, so nothing is skipped next run
-
