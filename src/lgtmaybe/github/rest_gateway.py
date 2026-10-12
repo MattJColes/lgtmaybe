@@ -218,11 +218,9 @@ class RestGitHubGateway:
         # never record "reviewed up to head" — the next run would then skip
         # commits nobody reviewed.
         self._reviewed_sha: str | None = None
-        # Memoized marker-review lookup: last_reviewed_sha (incremental) and
-        # post_review both walk the full paginated reviews list for the same
-        # marker, and nothing posts a review between the two reads within one
-        # run — so the second walk is always identical. _done guards the
-        # one-shot, since None is a valid "no marker review" result.
+        # Watermark reads and pre-post lookup share one paginated scan. A
+        # successful post invalidates it so later reads see the new native summary.
+        # _done distinguishes a cached missing match from an unfetched list.
         self._existing_review_entry: tuple[int, str, str | None] | None = None
         self._existing_review_done = False
         self._posting_login: str | None = None
@@ -661,10 +659,10 @@ class RestGitHubGateway:
     def last_reviewed_sha(self) -> str | None:
         """The head SHA covered by our previous review, or None.
 
-        Read back from the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
-        ``post_review`` stamps into the summary body. None when there is no
-        prior review, the review predates the marker, or the lookup fails —
-        the caller then runs a full review.
+        Read the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
+        ``post_review`` stamps into the summary. No prior marker or an HTTP
+        lookup failure returns None, so the caller runs a full review. Invalid
+        authenticated-actor metadata raises instead of authorizing reuse.
         """
         try:
             entry = self._find_existing_review_entry()
@@ -1069,10 +1067,9 @@ class RestGitHubGateway:
     def _find_existing_review_entry(self) -> tuple[int, str, str | None] | None:
         """Return ``(id, body, commit_id)`` of the latest matching review, or None.
 
-        Follows Link rel=next pagination — a busy PR can hold more than one page
-        of reviews, and missing the marker there would duplicate the review
-        instead of updating it. Memoized for the run: the incremental watermark
-        read and the post both need it, and no review is posted in between.
+        Follows every Link rel=next page. Watermark reads and pre-post lookup
+        share the cached scan; a successful post invalidates it so later reads
+        can find the newly created native summary.
         """
         if self._existing_review_done:
             return self._existing_review_entry
