@@ -129,17 +129,21 @@ class _FakePR:
 
     def __init__(self) -> None:
         self.review_body: str | None = None
+        self.review_commit: str | None = None
         self.inline_bodies: list[str] = []
 
     # -- reviews ---------------------------------------------------------
     def list_reviews(self, request: httpx.Request) -> httpx.Response:
         if self.review_body is None:
             return httpx.Response(200, json=[])
-        return httpx.Response(200, json=[{"id": 99, "body": self.review_body}])
+        return httpx.Response(
+            200, json=[{"id": 99, "body": self.review_body, "commit_id": self.review_commit}]
+        )
 
     def create_review(self, request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         self.review_body = payload["body"]
+        self.review_commit = payload.get("commit_id")
         for comment in payload.get("comments", []):
             self.inline_bodies.append(comment["body"])
         return httpx.Response(201, json={"id": 99})
@@ -363,7 +367,9 @@ class _ResolveGraphQL:
 def _existing_review() -> None:
     """A prior lgtmaybe review exists, so this run takes the re-run path."""
     respx.route(method="GET", url=REVIEWS_URL).mock(
-        return_value=httpx.Response(200, json=[{"id": 99, "body": "Old summary <!-- lgtmaybe -->"}])
+        return_value=httpx.Response(
+            200, json=[{"id": 99, "body": "Old summary <!-- lgtmaybe -->", "commit_id": HEAD_SHA}]
+        )
     )
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})

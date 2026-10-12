@@ -116,8 +116,9 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
   (`rest_gateway._finding_badge`, each half
   omitted when absent; inline, demoted, and broad render it identically). It is
   visible prose only — never part of the hidden ids below.
-  Idempotent updates via a hidden marker comment (which also carries the
-  last-reviewed-SHA watermark driving incremental review); the summary also
+  Same-native-commit updates use a hidden marker; a completed review at another
+  commit creates a fresh native summary, preserving older history. The latest
+  matching summary carries the last-reviewed-SHA watermark driving incremental review; the summary also
   carries a hidden `<!-- lgtmaybe-lenses:… -->` list of the lenses that
   completed every call, so a posting gate can require the set it expects
   instead of inferring completeness from the absence of a failure notice

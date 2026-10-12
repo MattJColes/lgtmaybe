@@ -382,7 +382,7 @@ def _mock_update_flow(
 ) -> tuple[list[dict[str, object]], respx.Route]:
     """Mock a re-run: existing review found, PUT body, list review comments,
     capture POSTed new comments. Returns (captured_new_comments, put_route)."""
-    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     put_route = respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
@@ -422,7 +422,7 @@ def test_rerun_posts_new_inline_comment_with_commit_id() -> None:
 
 @respx.mock
 def test_rerun_demotes_a_422_comment_and_posts_later_findings() -> None:
-    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     updated_bodies: list[str] = []
 
@@ -509,7 +509,7 @@ def test_rerun_keeps_non_422_comment_errors_fatal() -> None:
 
 @respx.mock
 def test_rerun_fails_when_the_recovery_body_cannot_be_updated() -> None:
-    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     update_attempts = 0
 
@@ -553,7 +553,7 @@ def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
     resolve-on-fix pass) no longer counts as an existing finding — the same
     finding reintroduced later posts again instead of being suppressed forever."""
     fp = finding_fingerprint(FINDING.path, FINDING.title)
-    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
