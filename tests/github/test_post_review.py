@@ -122,7 +122,13 @@ def test_initial_review_salvages_a_comment_rejected_by_github() -> None:
 def test_post_review_updates_existing_review_on_second_call() -> None:
     """Second post_review call updates the existing review rather than creating another."""
     existing_review_id = 99
-    existing_reviews = [{"id": existing_review_id, "body": f"Old summary {MARKER}"}]
+    existing_reviews = [
+        {
+            "id": existing_review_id,
+            "body": f"Old summary {MARKER}",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(
         return_value=httpx.Response(200, json=existing_reviews)
     )
@@ -170,7 +176,13 @@ def test_post_review_finds_existing_review_past_first_page() -> None:
     updated in place rather than duplicated."""
     existing_review_id = 99
     page1 = [{"id": i, "body": f"human review {i}"} for i in range(30)]
-    page2 = [{"id": existing_review_id, "body": f"Old summary {MARKER}"}]
+    page2 = [
+        {
+            "id": existing_review_id,
+            "body": f"Old summary {MARKER}",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     page2_url = f"{REVIEWS_URL}?page=2"
 
     # One route serves both pages in order: a respx URL pattern without a query
@@ -462,7 +474,13 @@ def test_post_review_uses_provider_scoped_marker() -> None:
 def test_post_review_with_distinct_marker_keys_coexist() -> None:
     """A review from another provider/model is left intact; a gateway with a
     different marker_key creates its own review instead of overwriting it."""
-    other = [{"id": 7, "body": "Anthropic summary <!-- lgtmaybe:anthropic/claude-haiku-4-5 -->"}]
+    other = [
+        {
+            "id": 7,
+            "body": "Anthropic summary <!-- lgtmaybe:anthropic/claude-haiku-4-5 -->",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=other))
 
     create_bodies: list[dict[object, object]] = []
@@ -504,7 +522,14 @@ def _mark_existing_review() -> None:
     re-run's individual inline posting now makes (#443): the posted-comments
     listing (dedupe), the comment POST, and the lazy PR-head fetch that anchors
     a run with no completion watermark."""
-    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "deadbee"}]
+    existing = [
+        {
+            "id": 99,
+            "body": f"Old summary {MARKER}",
+            "commit_id": "deadbee",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
@@ -1161,6 +1186,7 @@ def test_reviews_list_fetched_once_per_run() -> None:
                 {
                     "id": existing_review_id,
                     "body": f"Old summary {MARKER}\n<!-- lgtmaybe-reviewed:def5678 -->",
+                    "user": {"login": "github-actions[bot]"},
                 }
             ],
         )
@@ -1745,7 +1771,12 @@ def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
 @respx.mock
 @pytest.mark.parametrize("native_commit", ["a" * 40, None])
 def test_completed_new_head_preserves_old_native_review(native_commit: str | None) -> None:
-    old = {"id": 99, "body": f"Old summary {MARKER}", "commit_id": native_commit}
+    old = {
+        "id": 99,
+        "body": f"Old summary {MARKER}",
+        "commit_id": native_commit,
+        "user": {"login": "github-actions[bot]"},
+    }
     respx.get(REVIEWS_URL).mock(return_value=httpx.Response(200, json=[old]))
     created = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
     updated = respx.put(f"{REVIEWS_URL}/99").mock(return_value=httpx.Response(200))
@@ -1771,7 +1802,12 @@ def test_completed_same_native_head_updates_without_duplicate() -> None:
         return_value=httpx.Response(
             200,
             json=[
-                {"id": 99, "body": MARKER, "commit_id": "b" * 40},
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "b" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
             ],
         )
     )
@@ -1796,6 +1832,7 @@ def test_latest_provider_summary_across_pages_drives_completion_and_updates() ->
                     "id": 99,
                     "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'a' * 40} -->",
                     "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
                 }
             ],
             headers={"Link": f'<{REVIEWS_URL}?per_page=100&page=2>; rel="next"'},
@@ -1805,11 +1842,17 @@ def test_latest_provider_summary_across_pages_drives_completion_and_updates() ->
         return_value=httpx.Response(
             200,
             json=[
-                {"id": 102, "body": "<!-- lgtmaybe:other/model -->", "commit_id": "wrong"},
+                {
+                    "id": 102,
+                    "body": "<!-- lgtmaybe:other/model -->",
+                    "commit_id": "wrong",
+                    "user": {"login": "github-actions[bot]"},
+                },
                 {
                     "id": 101,
                     "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'b' * 40} -->",
                     "commit_id": "b" * 40,
+                    "user": {"login": "github-actions[bot]"},
                 },
             ],
         )
@@ -1848,7 +1891,12 @@ def test_new_native_summary_preserves_one_for_one_inline_dedupe() -> None:
         return_value=httpx.Response(
             200,
             json=[
-                {"id": 99, "body": MARKER, "commit_id": "a" * 40},
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
             ],
         )
     )
@@ -1876,7 +1924,12 @@ def test_inline_failure_never_publishes_complete_new_native_summary() -> None:
         return_value=httpx.Response(
             200,
             json=[
-                {"id": 99, "body": MARKER, "commit_id": "a" * 40},
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
             ],
         )
     )
@@ -1902,6 +1955,7 @@ def test_summary_creation_failure_is_fatal_and_keeps_old_completion() -> None:
                     "id": 99,
                     "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'a' * 40} -->",
                     "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
                 },
             ],
         )
@@ -1926,6 +1980,7 @@ def test_incomplete_new_head_does_not_create_a_complete_native_summary() -> None
                     "id": 99,
                     "body": f"{MARKER}\n<!-- lgtmaybe-reviewed:{'a' * 40} -->",
                     "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
                 },
             ],
         )
@@ -1948,7 +2003,12 @@ def test_rejected_new_head_inline_finding_remains_in_fresh_native_summary() -> N
         return_value=httpx.Response(
             200,
             json=[
-                {"id": 99, "body": MARKER, "commit_id": "a" * 40},
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
             ],
         )
     )

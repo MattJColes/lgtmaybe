@@ -31,11 +31,11 @@ is what makes `pull_request_target` (secrets available) safe on fork PRs.
 
 ### Requirement: Posting is idempotent via a hidden marker
 
-Reviews SHALL reuse the latest matching provider/model summary across all pages
-when its native commit equals the reviewed commit. A completed different-commit
-review SHALL create a fresh summary at its actual reviewed commit, preserving
-prior summaries and one-for-one inline dedupe. The hidden marker carries the
-last-reviewed-SHA watermark that drives incremental review.
+Reviews SHALL reuse the latest matching token-authenticated actor/provider/model
+summary across all pages when its native commit equals the reviewed commit.
+Unknown authenticated identity SHALL fail closed. A completed different-commit
+review SHALL create a fresh summary at its reviewed commit, preserving history
+and one-for-one inline dedupe; its hidden marker carries the incremental watermark.
 When GitHub rejects a rerun position with 422, later comments SHALL post; rejected
 findings SHALL remain in the body. Other posting failures SHALL remain fatal.
 <!-- anchor: github.post-review -->
@@ -131,7 +131,7 @@ Inline, demoted, and broad findings SHALL render it identically.
 
 ### Requirement: Incremental review is commit-scoped and safe
 
-A follow-up run with a completed-head watermark SHALL review only the compare-API diff since that head and explicitly validate earlier open findings against the new head. The completed watermark SHALL move only after a non-partial review result and, when automatic diagrams are enabled, the current-head diagram have posted; force-push, missing marker, compare failure, and incomplete attempts SHALL fall back to a full review. A run whose head already equals the completed head SHALL make no model calls or duplicate posts. LEFT-side new findings SHALL be dropped and resolution scope SHALL remain limited to findings actually validated.
+A follow-up run with a completed-head watermark SHALL review only the compare-API diff since that head and explicitly validate earlier open findings against the new head. The completed watermark SHALL move only after a non-partial review result and, when automatic diagrams are enabled, the current-head diagram have posted; force-push, missing marker, compare failure, and incomplete attempts SHALL fall back to a full review. Completion summaries and diagrams SHALL belong to the authenticated token's GitHub viewer. A run whose head already equals the completed head SHALL make no model calls or duplicate posts. LEFT-side new findings SHALL be dropped and resolution scope SHALL remain limited to findings actually validated.
 <!-- anchor: github.incremental -->
 
 #### Scenario: a later push follows a complete review

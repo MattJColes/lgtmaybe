@@ -137,7 +137,15 @@ class _FakePR:
         if self.review_body is None:
             return httpx.Response(200, json=[])
         return httpx.Response(
-            200, json=[{"id": 99, "body": self.review_body, "commit_id": self.review_commit}]
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": self.review_body,
+                    "commit_id": self.review_commit,
+                    "user": {"login": "github-actions[bot]"},
+                }
+            ],
         )
 
     def create_review(self, request: httpx.Request) -> httpx.Response:
@@ -368,7 +376,15 @@ def _existing_review() -> None:
     """A prior lgtmaybe review exists, so this run takes the re-run path."""
     respx.route(method="GET", url=REVIEWS_URL).mock(
         return_value=httpx.Response(
-            200, json=[{"id": 99, "body": "Old summary <!-- lgtmaybe -->", "commit_id": HEAD_SHA}]
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": "Old summary <!-- lgtmaybe -->",
+                    "commit_id": HEAD_SHA,
+                    "user": {"login": "github-actions[bot]"},
+                }
+            ],
         )
     )
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(

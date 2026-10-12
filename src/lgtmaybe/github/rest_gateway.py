@@ -225,6 +225,7 @@ class RestGitHubGateway:
         # one-shot, since None is a valid "no marker review" result.
         self._existing_review_entry: tuple[int, str, str | None] | None = None
         self._existing_review_done = False
+        self._posting_login: str | None = None
 
     def _post(self, url: str, **kwargs: Any) -> httpx.Response:
         """POST once more when GitHub explicitly tells us how long to wait."""
@@ -692,7 +693,12 @@ class RestGitHubGateway:
             for resp in self._paginate(url):
                 for comment in resp.json():
                     body = comment.get("body") or ""
-                    if self._diagram_marker not in body:
+                    user = comment.get("user")
+                    if (
+                        self._diagram_marker not in body
+                        or not isinstance(user, dict)
+                        or user.get("login") != self._posting_login
+                    ):
                         continue
                     match = _DIAGRAMMED_MARKER.search(body)
                     return match.group(1) if match else None
@@ -1070,8 +1076,18 @@ class RestGitHubGateway:
         """
         if self._existing_review_done:
             return self._existing_review_entry
+        if self._posting_login is None:
+            data = self._graphql("query { viewer { login } }", {})
+            viewer = data.get("viewer") if isinstance(data, dict) else None
+            login = viewer.get("login") if isinstance(viewer, dict) else None
+            if not isinstance(login, str) or not login.strip():
+                raise RuntimeError("GitHub did not identify the authenticated posting actor")
+            self._posting_login = login
         for resp in self._paginate(f"{self._pr_api}/reviews?per_page=100"):
             for review in resp.json():
+                user = review.get("user")
+                if not isinstance(user, dict) or user.get("login") != self._posting_login:
+                    continue
                 body: str = review.get("body", "") or ""
                 if self._marker in body and (
                     self._existing_review_entry is None

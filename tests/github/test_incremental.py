@@ -151,7 +151,13 @@ def test_mark_reviewed_none_clears_watermark() -> None:
 
 @respx.mock
 def test_last_reviewed_sha_reads_marker_from_existing_review() -> None:
-    existing = [{"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}]
+    existing = [
+        {
+            "id": 7,
+            "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
 
     assert _gateway().last_reviewed_sha() == "cafe1234"
@@ -159,7 +165,9 @@ def test_last_reviewed_sha_reads_marker_from_existing_review() -> None:
 
 @respx.mock
 def test_last_reviewed_sha_none_without_marker() -> None:
-    existing = [{"id": 7, "body": f"Old summary {MARKER}"}]  # pre-P2 review: no SHA stamp
+    existing = [
+        {"id": 7, "body": f"Old summary {MARKER}", "user": {"login": "github-actions[bot]"}}
+    ]  # pre-P2 review: no SHA stamp
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
 
     assert _gateway().last_reviewed_sha() is None
@@ -181,11 +189,14 @@ def test_last_reviewed_sha_none_on_api_error() -> None:
 
 @respx.mock
 def test_diagrammed_head_is_the_completed_head_when_required() -> None:
-    review = [{"id": 7, "body": f"Old summary\n\n{MARKER}"}]
+    review = [
+        {"id": 7, "body": f"Old summary\n\n{MARKER}", "user": {"login": "github-actions[bot]"}}
+    ]
     diagram = [
         {
             "id": 9,
             "body": "Diagram\n\n<!-- lgtmaybe-diagram -->\n<!-- lgtmaybe-diagrammed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
         }
     ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=review))
@@ -198,7 +209,13 @@ def test_diagrammed_head_is_the_completed_head_when_required() -> None:
 
 @respx.mock
 def test_review_marker_is_completion_when_diagram_is_disabled() -> None:
-    review = [{"id": 7, "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->"}]
+    review = [
+        {
+            "id": 7,
+            "body": f"Old summary\n\n{MARKER}\n<!-- lgtmaybe-reviewed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=review))
 
     assert _gateway().last_completed_sha(diagram_required=False) == "cafe1234"
@@ -382,7 +399,14 @@ def _mock_update_flow(
 ) -> tuple[list[dict[str, object]], respx.Route]:
     """Mock a re-run: existing review found, PUT body, list review comments,
     capture POSTed new comments. Returns (captured_new_comments, put_route)."""
-    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
+    existing = [
+        {
+            "id": 99,
+            "body": f"Old summary {MARKER}",
+            "commit_id": "headsha123",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     put_route = respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
@@ -422,7 +446,14 @@ def test_rerun_posts_new_inline_comment_with_commit_id() -> None:
 
 @respx.mock
 def test_rerun_demotes_a_422_comment_and_posts_later_findings() -> None:
-    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
+    existing = [
+        {
+            "id": 99,
+            "body": f"Old summary {MARKER}",
+            "commit_id": "headsha123",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     updated_bodies: list[str] = []
 
@@ -509,7 +540,14 @@ def test_rerun_keeps_non_422_comment_errors_fatal() -> None:
 
 @respx.mock
 def test_rerun_fails_when_the_recovery_body_cannot_be_updated() -> None:
-    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
+    existing = [
+        {
+            "id": 99,
+            "body": f"Old summary {MARKER}",
+            "commit_id": "headsha123",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     update_attempts = 0
 
@@ -553,7 +591,14 @@ def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
     resolve-on-fix pass) no longer counts as an existing finding — the same
     finding reintroduced later posts again instead of being suppressed forever."""
     fp = finding_fingerprint(FINDING.path, FINDING.title)
-    existing = [{"id": 99, "body": f"Old summary {MARKER}", "commit_id": "headsha123"}]
+    existing = [
+        {
+            "id": 99,
+            "body": f"Old summary {MARKER}",
+            "commit_id": "headsha123",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
@@ -606,7 +651,9 @@ def test_rerun_without_any_resolvable_head_demotes_new_findings_to_the_body(
     """The anchor-less fallback must never silently drop findings (#443): when
     no head SHA can be resolved at all, the unmatched candidates demote into
     the review body — the same recovery as a 422 — with a warning."""
-    existing = [{"id": 99, "body": f"Old summary {MARKER}"}]
+    existing = [
+        {"id": 99, "body": f"Old summary {MARKER}", "user": {"login": "github-actions[bot]"}}
+    ]
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=existing))
     updated_bodies: list[str] = []
 
