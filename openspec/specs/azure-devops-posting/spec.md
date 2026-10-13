@@ -1,0 +1,144 @@
+# azure-devops-posting Specification
+
+## Purpose
+
+The Azure DevOps Repos adapter (`azure_devops/gateway.py`): the fourth forge,
+and the one with no unified-diff endpoint. This spec records how a pull request
+URL and pipeline environment become a locator, how the diff is assembled from
+file contents, how findings become positioned threads, and which optional
+capabilities the adapter does not claim yet.
+
+## Requirements
+
+### Requirement: A pull request URL names organisation, project, and repository
+
+The locator SHALL recognise Azure DevOps Services pull request URLs on
+`dev.azure.com/{org}` and the legacy `{org}.visualstudio.com`, and SHALL carry
+them as the decoded `organisation/project/repository` path. An omitted project
+segment SHALL mean the project shares the repository's name; a segment that
+decodes to contain `/` SHALL be refused, as SHALL the same URL tail on any
+other host (Azure DevOps Server).
+<!-- anchor: azure-devops.locator -->
+
+#### Scenario: the legacy host
+- **WHEN** the URL is `https://acme.visualstudio.com/Proj/_git/api/pullrequest/7`
+- **THEN** the locator's repo is `acme/Proj/api`
+
+#### Scenario: a project name with a space
+- **WHEN** the URL is `https://dev.azure.com/acme/My%20Project/_git/api/pullrequest/3`
+- **THEN** the locator's repo is `acme/My Project/api` and its number is 3
+
+#### Scenario: an on-premises collection
+- **WHEN** the URL's host is not `dev.azure.com` or `*.visualstudio.com`
+- **THEN** parsing fails naming Azure DevOps Server as unsupported
+
+### Requirement: The diff is assembled from iteration changes
+
+`get_pr_context` SHALL diff the latest iteration's changes against the merge
+base (`commonRefCommit`), reading each side through the Items API only.
+Unreviewable files SHALL NOT be fetched; they, oversized sides, and non-UTF-8
+text SHALL appear as hunkless binary patches. A path holding a control
+character SHALL be left out, and a change list past the file cap SHALL raise
+`DiffUnavailable`.
+<!-- anchor: azure-devops.context -->
+
+#### Scenario: a lockfile changes
+- **WHEN** `package-lock.json` is in the change list
+- **THEN** it is listed as changed with a binary patch and its contents are never requested
+
+#### Scenario: a sprawling change
+- **WHEN** the latest iteration lists more than 300 changed files
+- **THEN** the review is disclosed as not run rather than run on part of the change
+
+#### Scenario: an iteration without commits
+- **WHEN** the latest iteration names no source or merge-base commit
+- **THEN** the adapter raises rather than reviewing an empty diff
+
+### Requirement: Rendered diffs agree with the shared parser
+
+A diff rendered from two file texts SHALL be in `git diff` form so the shared
+parser, commentable-line index, and file splitter read it unchanged: `/dev/null`
+for an added or deleted side, `rename from`/`rename to` for a rename, lines
+split on newline only, and every content line behind a diff marker so file text
+can never forge a header.
+<!-- anchor: azure-devops.render -->
+
+#### Scenario: hostile file content
+- **WHEN** an added file's text contains `diff --git` and `@@` lines
+- **THEN** the parser still sees exactly one file and treats them as added lines
+
+### Requirement: Each finding is its own positioned thread
+
+Every inline finding SHALL be posted as an `active` thread whose
+`threadContext` carries the file path and a one-line `rightFileStart`/
+`rightFileEnd` range for the new side or `leftFileStart`/`leftFileEnd` for the
+old side. A finding SHALL be demoted into the summary when it is not confidently
+anchored, does not land on a commentable diff line, or Azure DevOps rejects its
+thread.
+<!-- anchor: azure-devops.positions -->
+
+#### Scenario: a removed line
+- **WHEN** a finding carries side LEFT
+- **THEN** its thread sets `leftFileStart` and no right-file range
+
+### Requirement: The summary lives in an edited general thread
+
+The summary, description, and diagram SHALL each be a `closed` general thread
+whose first comment carries its own hidden marker family and is edited in place
+on a re-run. An edit refused with 403 or 404 SHALL move on to the next thread
+carrying the marker, and a new thread SHALL be posted when none can be edited,
+never failing the review.
+<!-- anchor: azure-devops.upsert -->
+
+#### Scenario: a re-run
+- **WHEN** a review runs twice on the same pull request
+- **THEN** the summary thread's first comment is edited and no second summary is created
+
+### Requirement: Findings are de-duplicated against live threads
+
+Before posting, the adapter SHALL read the hidden finding ids from the first
+comment of every thread that is neither deleted nor `fixed`, and drop each
+finding matching one, consuming each existing id once. A won't-fix or closed
+thread SHALL keep suppressing its finding; a fixed one SHALL NOT.
+<!-- anchor: azure-devops.dedupe -->
+
+#### Scenario: a fixed finding returns
+- **WHEN** a finding's earlier thread is `fixed` and the finding is produced again
+- **THEN** a new thread is posted for it
+
+### Requirement: Tokens choose their auth scheme and stay private
+
+The adapter SHALL send `AZURE_DEVOPS_TOKEN` as basic auth with an empty user
+name, and otherwise `SYSTEM_ACCESSTOKEN` as a bearer token, preferring the
+former when both are set. Tokens SHALL travel only in the `Authorization` header,
+never in a URL or a log line, and every request SHALL pin `api-version=7.1`.
+<!-- anchor: azure-devops.auth -->
+
+#### Scenario: only the pipeline token is set
+- **WHEN** `SYSTEM_ACCESSTOKEN` is set and `AZURE_DEVOPS_TOKEN` is not
+- **THEN** requests carry `Authorization: Bearer <token>`
+
+### Requirement: Azure Pipelines identifies the pull request
+
+The `azure-pipelines` command SHALL build the pull request URL from
+`SYSTEM_COLLECTIONURI`, `SYSTEM_TEAMPROJECT`, `BUILD_REPOSITORY_NAME`, and
+`SYSTEM_PULLREQUEST_PULLREQUESTID`, naming whichever is missing, and SHALL
+refuse a build of a repository whose `BUILD_REPOSITORY_PROVIDER` is not Azure
+Repos.
+<!-- anchor: azure-devops.pipelines -->
+
+#### Scenario: a CI build that is not for a pull request
+- **WHEN** `SYSTEM_PULLREQUEST_PULLREQUESTID` is unset
+- **THEN** the command fails naming that variable and the build validation policy
+
+### Requirement: Unbuilt capabilities are not claimed
+
+The adapter SHALL declare file contents, description, diagram, and conversation
+reading, and SHALL NOT claim incremental review, thread resolution, labels,
+checks, feedback, or base checkout, so the caller degrades to a full review
+without them.
+<!-- anchor: azure-devops.capabilities -->
+
+#### Scenario: thread resolution is probed
+- **WHEN** a caller checks the adapter for thread resolution
+- **THEN** the check fails and resolve-on-fix is skipped
