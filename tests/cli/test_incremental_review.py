@@ -348,6 +348,20 @@ def test_auto_resolves_off_for_opened_event() -> None:
     assert resolved.incremental is False
 
 
+def test_event_action_reads_gitea_synchronized_as_synchronize() -> None:
+    """Gitea Actions writes a push to the PR as ``synchronized`` (its
+    ``api.HookIssueSynchronized``) into the event payload, where GitHub writes
+    ``synchronize``. Both are the same event, so both read as one action."""
+    from lgtmaybe.cli import pr_event_action
+
+    assert pr_event_action({"action": "synchronized"}) == "synchronize"
+    assert pr_event_action({"action": "synchronize"}) == "synchronize"
+    assert pr_event_action({"action": "opened"}) == "opened"
+    assert pr_event_action({"action": "reopened"}) == "reopened"
+    assert pr_event_action({}) == ""
+    assert pr_event_action({"action": None}) == ""
+
+
 def test_explicit_config_wins_over_auto() -> None:
     on = resolve_auto_incremental(make_cfg(incremental=True), event_action="opened")
     assert on.incremental is True

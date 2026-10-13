@@ -30,6 +30,7 @@ from lgtmaybe.cli import (
     execute_review,
     main,
     mr_url_from_ci_env,
+    pr_event_action,
     pr_url_from_event,
     pr_url_from_pipelines_env,
     resolve_auto_incremental,
@@ -749,7 +750,7 @@ def action() -> None:
 
     # incremental=None (auto): review only the new commits on a synchronize
     # push, do a full review on open/reopen. Explicit config/input wins.
-    event_action = str(event.get("action") or "")
+    event_action = pr_event_action(event)
     cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
     # The change overview refreshes on a synchronize push too, so a replacement

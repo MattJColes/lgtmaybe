@@ -438,6 +438,10 @@ The supplied GitHub Actions starter workflows SHALL rely on the automatic change
   review while the automatic overview is enabled
 - **THEN** the surviving run posts or updates the change overview
 
+#### Scenario: Gitea reports a push as synchronized
+- **WHEN** a Gitea Actions event payload carries `"action": "synchronized"`
+- **THEN** the overview refreshes exactly as on GitHub's `synchronize`
+
 #### Scenario: A new head completes
 - **WHEN** a non-partial review and required diagram both post for the current head
 - **THEN** later synchronize runs may use that head as their hybrid-review base
