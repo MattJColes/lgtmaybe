@@ -1,0 +1,31 @@
+# Hooks for the pre-commit framework (https://pre-commit.com).
+# Usage and a ready-to-copy .pre-commit-config.yaml:
+# docs/how-to/review-before-you-commit.md
+#
+# lgtmaybe computes its own diff from git, so neither hook takes filenames and
+# both always run. Each run calls your model provider: the credentials come from
+# the environment, and pre-push (one review per push) is the recommended stage.
+# Add `args: [--fail-on, high]` to block on findings (exit 3); without it the
+# hook only prints the review.
+- id: lgtmaybe
+  name: lgtmaybe (review staged changes)
+  description: AI review of the changes you are about to commit (working tree vs HEAD).
+  entry: lgtmaybe review --uncommitted
+  language: python
+  pass_filenames: false
+  always_run: true
+  require_serial: true
+  verbose: true
+  stages: [pre-commit]
+  minimum_pre_commit_version: "3.2.0"
+- id: lgtmaybe-pre-push
+  name: lgtmaybe (review branch before push)
+  description: AI review of your branch against the remote's primary branch before you push.
+  entry: lgtmaybe review
+  language: python
+  pass_filenames: false
+  always_run: true
+  require_serial: true
+  verbose: true
+  stages: [pre-push]
+  minimum_pre_commit_version: "3.2.0"
