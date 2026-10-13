@@ -27,11 +27,14 @@ from collections.abc import Callable, Iterator
 from enum import StrEnum
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ReviewFinding
 
 _M = TypeVar("_M", bound=BaseModel)
+
+_log = get_logger(__name__)
 
 
 class ParseFailure(StrEnum):
@@ -380,7 +383,8 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
 
     Accepts the ``{"findings": [...]}`` structured-output envelope or a bare
     array, with reasoning blocks, fences, prose (even bracket-bearing prose), and
-    trailing commas tolerated.
+    trailing commas tolerated. Each finding is validated on its own: an invalid
+    one is dropped (and logged) while its valid siblings are kept.
 
     Raises:
         ParseError: if the text cannot be recovered into valid findings.
@@ -404,11 +408,35 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
         items = _as_findings_list(value)
         if items is None:
             continue
-        try:
-            parsed = [_validate_finding(item) for item in items]
-        except Exception as exc:
-            last_error = exc
+        # Item by item: one rejected finding (an unknown severity, `line: 0`, an
+        # extra field) must not take its valid siblings down with it.
+        parsed: list[ReviewFinding] = []
+        rejected: list[ValidationError] = []
+        for item in items:
+            try:
+                parsed.append(_validate_finding(item))
+            except ValidationError as exc:
+                rejected.append(exc)
+        if rejected and not parsed:
+            last_error = rejected[0]
             continue
+        if rejected:
+            # Field locations and error types only — never the input values,
+            # which are the provider's body.
+            _log.warning(
+                "dropped findings that failed validation",
+                extra={
+                    "rejected": len(rejected),
+                    "kept": len(parsed),
+                    "errors": sorted(
+                        {
+                            f"{'.'.join(map(str, err['loc']))}: {err['type']}"
+                            for exc in rejected
+                            for err in exc.errors()
+                        }
+                    ),
+                },
+            )
         if _is_container(value):
             return parsed
         single = single if single is not None else parsed

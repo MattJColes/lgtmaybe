@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator
 
 import pytest
@@ -509,6 +510,37 @@ def test_mixed_case_severity_does_not_drop_sibling_findings() -> None:
     result = parse_findings(_json_findings([miscased, valid]))
     assert {f.path for f in result} == {"a.py", "b.py"}
     assert result[0].severity == Severity.high
+
+
+@pytest.mark.parametrize("bad", [{"severity": "warning"}, {"line": 0}, {"exploit": "rm -rf /"}])
+def test_one_invalid_finding_does_not_drop_its_siblings(bad: dict) -> None:  # type: ignore[type-arg]
+    """Each item in the envelope is validated alone; only the bad one is lost.
+
+    Validating the batch as a group meant one rejected item failed the whole
+    envelope, and the fallback walk then returned only the FIRST finding that
+    parsed as a standalone object — as a clean success, three findings silently
+    gone.
+    """
+    items = [dict(_VALID_FINDING, title=f"t{n}") for n in range(1, 5)]
+    items[1].update(bad)
+    captured: list[logging.LogRecord] = []
+    handler = logging.Handler(level=logging.WARNING)
+    handler.emit = captured.append  # type: ignore[method-assign]
+    parse._log.addHandler(handler)
+    try:
+        result = parse_findings(json.dumps({"findings": items}))
+    finally:
+        parse._log.removeHandler(handler)
+    assert [f.title for f in result] == ["t1", "t3", "t4"]
+    assert [r.__dict__.get("rejected") for r in captured] == [1]
+
+
+def test_an_envelope_with_only_invalid_findings_is_still_a_schema_failure() -> None:
+    """Nothing valid left is the lens failing, not a clean review."""
+    bad = [dict(_VALID_FINDING, severity="warning"), dict(_VALID_FINDING, line=0)]
+    with pytest.raises(ParseError) as exc_info:
+        parse_findings(json.dumps({"findings": bad}))
+    assert exc_info.value.shape is ParseFailure.schema
 
 
 def test_self_scored_confidence_does_not_fail_the_lens() -> None:
