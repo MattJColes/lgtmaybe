@@ -1919,7 +1919,9 @@ def test_new_native_summary_preserves_one_for_one_inline_dedupe() -> None:
                 {
                     "body": f"<!-- lgtmaybe-finding:{fp} -->",
                     "user": {"login": "github-actions[bot]"},
-                }
+                },
+                # Someone else's copy of the id is not one of our comments.
+                {"body": f"<!-- lgtmaybe-finding:{fp} -->", "user": {"login": "pr-author"}},
             ],
         )
     )
@@ -1932,9 +1934,45 @@ def test_new_native_summary_preserves_one_for_one_inline_dedupe() -> None:
 
     gateway.post_review([FINDINGS[0], FINDINGS[0]], "Two occurrences", diff=SAMPLE_DIFF)
 
-    assert inline.call_count == 1
-    assert json.loads(inline.calls[0].request.content)["commit_id"] == "new"
-    assert json.loads(summary.calls[0].request.content)["comments"] == []
+    payload = json.loads(summary.calls[0].request.content)
+    assert len(payload["comments"]) == 1, "one occurrence was already posted by us"
+    assert not inline.called, "the new occurrence rides the summary review"
+    assert payload["commit_id"] == "new"
+
+
+@respx.mock
+def test_new_head_findings_post_in_the_one_review_not_one_call_each() -> None:
+    """A fresh native review can carry inline comments; only the update endpoint
+    cannot. One content-creating call per finding hits GitHub's secondary rate
+    limit (and notifies once per finding) on exactly the PRs with many findings."""
+    respx.get(REVIEWS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 99,
+                    "body": MARKER,
+                    "commit_id": "a" * 40,
+                    "user": {"login": "github-actions[bot]"},
+                },
+            ],
+        )
+    )
+    respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
+    inline = respx.post(REVIEW_COMMENTS_URL).mock(return_value=httpx.Response(201, json={}))
+    summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    findings = [
+        FINDINGS[0].model_copy(update={"title": f"finding {i}", "line": line})
+        for i, line in enumerate((2, 5, 6) * 20)
+    ]
+    gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
+    gateway.mark_reviewed("new")
+
+    gateway.post_review(findings, "60 findings", diff=SAMPLE_DIFF)
+
+    assert not inline.called
+    assert summary.call_count == 1
+    assert len(json.loads(summary.calls[0].request.content)["comments"]) == 60
 
 
 @respx.mock
@@ -1953,15 +1991,18 @@ def test_inline_failure_never_publishes_complete_new_native_summary() -> None:
         )
     )
     respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
-    respx.post(REVIEW_COMMENTS_URL).mock(return_value=httpx.Response(500))
-    summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    inline = respx.post(REVIEW_COMMENTS_URL).mock(return_value=httpx.Response(201, json={}))
+    # The comments ride the summary review itself, so a failed post creates both
+    # or neither: there is no state where completion published without them.
+    respx.post(REVIEWS_URL).mock(return_value=httpx.Response(500))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
     gateway.mark_reviewed("new")
 
     with pytest.raises(httpx.HTTPStatusError):
         gateway.post_review(FINDINGS, "Complete summary", diff=SAMPLE_DIFF)
 
-    assert not summary.called
+    assert not inline.called
+    assert gateway.last_completed_sha(diagram_required=False) is None
 
 
 @respx.mock
@@ -2033,13 +2074,18 @@ def test_rejected_new_head_inline_finding_remains_in_fresh_native_summary() -> N
     )
     respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(return_value=httpx.Response(200, json=[]))
     respx.post(REVIEW_COMMENTS_URL).mock(return_value=httpx.Response(422))
-    summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
+    # The batched review is refused as a whole; the per-comment fallback then
+    # isolates the bad position, exactly as on the first post.
+    summary = respx.post(REVIEWS_URL).mock(
+        side_effect=[httpx.Response(422), httpx.Response(201, json={"id": 100})]
+    )
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
     gateway.mark_reviewed("b" * 40)
 
     gateway.post_review(FINDINGS, "Complete summary", diff=SAMPLE_DIFF)
 
-    payload = json.loads(summary.calls[0].request.content)
+    assert len(json.loads(summary.calls[0].request.content)["comments"]) == 1
+    payload = json.loads(summary.calls[1].request.content)
     assert payload["commit_id"] == "b" * 40
     assert "Import order" in payload["body"]
     assert payload["comments"] == []

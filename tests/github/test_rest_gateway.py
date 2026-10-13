@@ -191,6 +191,35 @@ def test_get_pr_context_skips_unfetchable_file() -> None:
     assert ctx.file_contents["src/utils.py"] == "ok"
 
 
+@respx.mock
+def test_get_pr_context_never_fetches_head_text_of_a_deleted_file() -> None:
+    """A deleted file has no head text: fetching it is a guaranteed 404, one per
+    file — 300 wasted GETs on a PR that deletes a directory. It is still a
+    changed file."""
+    _base_routes()
+    respx.route(method="GET", url__startswith=FILES_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"filename": "src/gone.py", "status": "removed"},
+                {"filename": "uv.lock", "status": "removed"},
+                {"filename": "src/app.py", "status": "modified"},
+            ],
+        )
+    )
+    gone = _contents_route("src/gone.py").mock(return_value=httpx.Response(404))
+    lock = _contents_route("uv.lock").mock(return_value=httpx.Response(404))
+    _contents_route("src/app.py").mock(return_value=httpx.Response(200, text="ok"))
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.set_scan_manifests(True)
+    ctx = gw.get_pr_context()
+
+    assert ctx.changed_files == ["src/gone.py", "uv.lock", "src/app.py"]
+    assert ctx.file_contents == {"src/app.py": "ok"}
+    assert not gone.called and not lock.called
+
+
 # ---------------------------------------------------------------------------
 # Stated intent: PR title / description / commit names for the intent lens
 # ---------------------------------------------------------------------------

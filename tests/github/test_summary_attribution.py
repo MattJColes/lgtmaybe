@@ -279,6 +279,7 @@ def test_a_forged_id_in_someone_elses_inline_comment_does_not_hide_a_finding() -
             inline.append(json.loads(request.content))
             return httpx.Response(201, json={})
         if request.method == "POST" and path.endswith("/reviews"):
+            inline.extend(json.loads(request.content)["comments"])
             return httpx.Response(201, json={"id": 100})
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
