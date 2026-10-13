@@ -844,7 +844,9 @@ Default: no rules.
 ### project
 
 Tell the reviewer what kind of project this is, so a weekend prototype and a
-regulated payments service don't get the same review.
+regulated payments service don't get the same review. See
+[Calibrate reviews to your project](calibrate-reviews-to-your-project.md) for
+the full walkthrough.
 
 ```yaml
 project:
