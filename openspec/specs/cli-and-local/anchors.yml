@@ -6,6 +6,12 @@ cli.review-command:
     has: { field: name, regex: '^review$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.progressive-help:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^ProgressiveHelpCommand$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.run-review:
   rule:
     kind: function_definition
@@ -62,6 +68,12 @@ cli.profile-output:
     has: { field: name, regex: '^_write_profile_json$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.sarif-output:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^render_sarif$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.local-context:
   rule:
     kind: function_definition
@@ -77,6 +89,16 @@ cli.config:
       kind: function_definition
       has: { field: name, regex: '^set_key$' }
     files: [src/lgtmaybe/config/**/*.py]
+
+cli.config-init:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^config_init$' }
+    files: [src/lgtmaybe/cli/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^detect$' }
+    files: [src/lgtmaybe/config/detect.py]
 
 cli.github-identity:
   rule:

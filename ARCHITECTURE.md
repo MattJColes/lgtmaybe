@@ -264,8 +264,8 @@ prompt, so it must come from config you control, never PR-author content.
 **Output & posting** — structured findings (path, line, severity, title, body,
 optional suggestion). On GitHub: inline comments on the exact changed line + one
 summary naming the model, updated idempotently (no duplicates), with a 👍 **LGTM!**
-on a clean PR. On the CLI: `human`, `json`, or `agent` (instructions an AI coding
-agent can apply) formats.
+on a clean PR. On the CLI: `human`, `json`, `agent` (instructions an AI coding
+agent can apply), or `sarif` (a SARIF 2.1.0 log for code scanning) formats.
 
 **Reviewer hardening** (so a malicious PR can't subvert the reviewer):
 - **Fork safety** — runs on `pull_request_target` for secrets but never checks

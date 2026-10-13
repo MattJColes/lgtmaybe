@@ -4,7 +4,11 @@ Precedence (highest to lowest):
   1. Explicit CLI / action inputs (only keys whose value is not None)
   2. Repo config file (.lgtmaybe.yml)
   3. User-level config (~/.config/lgtmaybe/config.yml), when a path is given
-  4. Built-in defaults (provider=ollama, model=llama3)
+  4. ReviewConfig's own field defaults
+
+There is deliberately no built-in provider or model. A guessed default (this
+used to be ollama/llama3) fails for most users minutes into a run; when no
+layer names both, loading raises ``ProviderNotConfigured`` up front instead.
 """
 
 from __future__ import annotations
@@ -17,10 +21,32 @@ import yaml
 from lgtmaybe.config import store
 from lgtmaybe.core.models import ReviewConfig
 
-_DEFAULTS: dict[str, Any] = {
-    "provider": "ollama",
-    "model": "llama3",
-}
+# What the local CLI should do about a missing provider/model. Entrypoints with
+# a different configuration surface (the Action's inputs, GitLab CI) swap this
+# line for their own via ``ProviderNotConfigured.message``.
+LOCAL_SETUP_HINT = "run `lgtmaybe config init`, or pass `--provider`/`--model`."
+
+
+class ProviderNotConfigured(ValueError):
+    """No configuration layer named a provider, or named one without a model.
+
+    A ``ValueError`` so the callers that already turn loader errors into a clean
+    CLI error keep doing so; ``missing`` names the absent keys so an entrypoint
+    can phrase its own remedy (``message``).
+    """
+
+    def __init__(self, missing: tuple[str, ...]) -> None:
+        self.missing = missing
+        super().__init__(self.message(LOCAL_SETUP_HINT))
+
+    def message(self, remedy: str) -> str:
+        """The two-line pointer: what is missing and how to fix it, then why."""
+        what = "provider" if "provider" in self.missing else "model"
+        return (
+            f"No {what} configured - {remedy}\n"
+            "lgtmaybe has no built-in default model; it no longer assumes ollama/llama3."
+        )
+
 
 # Curated lens packs shipped inside the package (src/lgtmaybe/lenses/<name>/).
 # Referenced from `lens_paths` as `pack:<name>` so a pip-installed user can
@@ -36,15 +62,16 @@ def load_config(
     config_required: bool = False,
     **cli_inputs: Any,
 ) -> ReviewConfig:
-    """Return a ReviewConfig by merging defaults, configs, and CLI inputs.
+    """Return a ReviewConfig by merging configs and CLI inputs.
 
     Pass explicit CLI values as keyword arguments — only non-None values
     override lower-precedence layers.  Supply a ``config_path`` (repo file) and/or
     ``user_config_path`` (user-level file); the user layer sits below the repo.
     With ``config_required`` (a user-chosen ``--config`` path, not the default
     probe), a missing or non-mapping file raises instead of being ignored.
+    With no provider or model from any layer, raises ``ProviderNotConfigured``.
     """
-    merged: dict[str, Any] = dict(_DEFAULTS)
+    merged: dict[str, Any] = {}
 
     if user_config_path is not None:
         try:
@@ -67,6 +94,10 @@ def load_config(
     if lens_paths:
         loaded = _load_lens_files(lens_paths)
         merged["extra_lenses"] = list(merged.get("extra_lenses") or []) + loaded
+
+    missing = tuple(key for key in ("provider", "model") if not merged.get(key))
+    if missing:
+        raise ProviderNotConfigured(missing)
 
     return ReviewConfig.model_validate(merged)
 

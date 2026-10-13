@@ -9,6 +9,7 @@ register onto the ``main`` / ``config`` groups defined there.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,6 +22,7 @@ from lgtmaybe.cli import (
     _RUNTIME_INPUTS,
     RuntimeOptions,
     action_inputs,
+    build_provider_engine,
     config_cmd,
     execute_comment,
     execute_local_diagram,
@@ -33,9 +35,11 @@ from lgtmaybe.cli import (
     resolve_auto_incremental,
     should_auto_diagram,
 )
-from lgtmaybe.config import store
-from lgtmaybe.config.loader import load_config
+from lgtmaybe.config import detect, store
+from lgtmaybe.config.loader import LOCAL_SETUP_HINT, ProviderNotConfigured, load_config
 from lgtmaybe.core.models import Provider, ReviewConfig, ReviewPreset, Severity
+from lgtmaybe.core.ports import ProviderTruncated
+from lgtmaybe.providers.factory import DEFAULT_OLLAMA_BASE
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -71,12 +75,27 @@ def _parse_bool(value: str | None) -> bool | None:
     return value.strip().lower() in ("true", "t", "1", "yes", "y", "on")
 
 
-def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
+#: How each CI entrypoint says "configure a provider". Neither has a user
+#: config file or a `config init` to run, so the local pointer would mislead.
+_ACTION_SETUP_HINT = (
+    "set the action's `provider` and `model` inputs in your workflow's `with:` block, "
+    "or add them to .lgtmaybe.yml."
+)
+_FLAGS_SETUP_HINT = "pass `--provider`/`--model`, or add them to .lgtmaybe.yml."
+
+
+def _load_cfg(
+    config_path: str | None,
+    *,
+    setup_hint: str = LOCAL_SETUP_HINT,
+    **inputs: Any,
+) -> ReviewConfig:
     """Load config; an explicitly given path must exist and parse to a mapping.
 
     None (no --config / no config_path input) probes the default
     ``.lgtmaybe.yml`` leniently — absent is fine. Loader errors surface as a
-    clean CLI error rather than a traceback.
+    clean CLI error rather than a traceback. ``setup_hint`` is the remedy shown
+    when no layer configures a provider/model, phrased for the entrypoint.
     """
     try:
         return load_config(
@@ -84,6 +103,8 @@ def _load_cfg(config_path: str | None, **inputs: Any) -> ReviewConfig:
             config_required=config_path is not None,
             **inputs,
         )
+    except ProviderNotConfigured as exc:
+        raise click.ClickException(exc.message(setup_hint)) from exc
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -129,6 +150,78 @@ def _stack(*options: Callable[..., Any]) -> Callable[[F], F]:
         return func
 
     return wrap
+
+
+class ProgressiveHelpCommand(click.Command):
+    """A command whose ``--help`` shows only its everyday options.
+
+    ``common`` names the parameters a first-time user reaches for; every other
+    option is tuning, listed only by ``--help-all`` and summarised in the short
+    help by one trailing line. Rendering only: every option parses exactly the
+    same either way.
+    """
+
+    def __init__(self, *args: Any, common: frozenset[str], **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.common = common | {"help_all"}
+
+    def format_options(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        common: list[tuple[str, str]] = []
+        advanced: list[tuple[str, str]] = []
+        for param in self.get_params(ctx):
+            record = param.get_help_record(ctx)
+            if record is not None:
+                is_common = param.name in self.common or "--help" in param.opts
+                (common if is_common else advanced).append(record)
+        if ctx.meta.get(_HELP_ALL_KEY):
+            for title, records in (("Common options", common), ("Advanced options", advanced)):
+                with formatter.section(title):
+                    formatter.write_dl(records)
+            return
+        with formatter.section("Options"):
+            formatter.write_dl(common)
+        formatter.write_paragraph()
+        formatter.write_text(
+            f"{len(advanced)} advanced tuning options: run `{ctx.command_path} --help-all`"
+        )
+
+
+_HELP_ALL_KEY = "lgtmaybe.help_all"
+
+
+def _show_help_all(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """Eager ``--help-all``: print the full option reference, then exit."""
+    if not value or ctx.resilient_parsing:
+        return
+    ctx.meta[_HELP_ALL_KEY] = True
+    click.echo(ctx.get_help(), color=ctx.color)
+    ctx.exit()
+
+
+help_all_option = click.option(
+    "--help-all",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_show_help_all,
+    help="Show every option, including the advanced tuning ones, and exit.",
+)
+
+#: The options `review --help` shows; the rest wait for `--help-all`.
+_COMMON_REVIEW_OPTIONS = frozenset(
+    {
+        "provider",
+        "model",
+        "base",
+        "working",
+        "uncommitted",
+        "output_format",
+        "as_json",
+        "min_severity",
+        "full_preset",
+        "config_path",
+    }
+)
 
 
 #: The provider/model/credential flags every model-invoking command takes.
@@ -214,7 +307,7 @@ local_diff_options = _stack(
 )
 
 
-@main.command()
+@main.command(cls=ProgressiveHelpCommand, common=_COMMON_REVIEW_OPTIONS)
 @model_options
 @local_diff_options
 @click.option(
@@ -313,10 +406,11 @@ local_diff_options = _stack(
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["human", "json", "agent"]),
+    type=click.Choice(["human", "json", "agent", "sarif"]),
     default=None,
-    help="Output format: human listing (default), json array, or agent "
-    "(correction instructions for an AI coding agent to read and apply).",
+    help="Output format: human listing (default), json array, agent "
+    "(correction instructions for an AI coding agent to read and apply), or "
+    "sarif (a SARIF 2.1.0 log for GitHub code scanning or any SARIF viewer).",
 )
 @click.option(
     "--json",
@@ -463,6 +557,7 @@ local_diff_options = _stack(
     help="Print a timing profile at the end of the run: total wall time, "
     "per-stage and per-call tables, and prompt-cache hit totals",
 )
+@help_all_option
 def review(**inputs: Any) -> None:
     """Review local git changes and print findings — no GitHub needed."""
     working = inputs.pop("working")
@@ -556,7 +651,7 @@ def comment(
 ) -> None:
     """Handle an issue_comment event: route a /slash command to the engine."""
     event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-    cfg = _load_cfg(config_path, provider=provider, model=model)
+    cfg = _load_cfg(config_path, setup_hint=_FLAGS_SETUP_HINT, provider=provider, model=model)
     runtime = _runtime(api_key, api_base, fallback_model)
     execute_comment(event, cfg, runtime)
 
@@ -575,6 +670,7 @@ def action() -> None:
     inputs = action_inputs()
     cfg = _load_cfg(
         inputs["config_path"],
+        setup_hint=_ACTION_SETUP_HINT,
         **{key: value for key, value in inputs.items() if key not in _RUNTIME_INPUTS},
     )
     cfg = _apply_static_analysis_flag(cfg, _parse_bool(inputs["static_analysis"]))
@@ -619,7 +715,7 @@ def gitlab_ci(
     ``CI_*`` variables and configuration comes from the ordinary flags,
     environment, and ``.lgtmaybe.yml`` — everything downstream is shared.
     """
-    cfg = _load_cfg(config_path, provider=provider, model=model)
+    cfg = _load_cfg(config_path, setup_hint=_FLAGS_SETUP_HINT, provider=provider, model=model)
     runtime = replace(_runtime(api_key, api_base, fallback_model), pr_url=mr_url_from_ci_env())
     execute_review(cfg, runtime)
 
@@ -685,17 +781,141 @@ def config_set(key: str, value: str) -> None:
     click.echo(f"{key} = {coerced}")
 
 
-@config_cmd.command("init")
-def config_init() -> None:
-    """Interactively create the config file."""
-    provider = click.prompt("Provider", default="ollama")
-    model = click.prompt("Model", default="llama3")
-    api_base = click.prompt("API base (blank for none)", default="", show_default=False)
+#: Generous enough for ollama to load a model cold, short enough that a stuck
+#: endpoint does not leave the wizard hanging for the review-sized default.
+_VERIFY_TIMEOUT = 180
+
+#: Where each provider that needs an endpoint reads it from the environment.
+_BASE_ENV: dict[Provider, str] = {
+    Provider.azure: "AZURE_API_BASE",
+    Provider.openai_compatible: "OPENAI_COMPATIBLE_API_BASE",
+}
+
+
+def _parse_provider(value: str) -> Provider:
+    """A provider from its listed number or its name; re-prompts on anything else."""
+    text = value.strip()
+    providers = list(Provider)
+    if text.isdigit() and 1 <= int(text) <= len(providers):
+        return providers[int(text) - 1]
     try:
-        store.set_key("provider", provider)
-        store.set_key("model", model)
-        if api_base.strip():
-            store.set_key("api_base", api_base)
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        return Provider(text)
+    except ValueError:
+        names = ", ".join(p.value for p in providers)
+        raise click.BadParameter(f"unknown provider {text!r}; choose one of: {names}") from None
+
+
+def _choose_provider(found: list[detect.Detection]) -> tuple[Provider, detect.Detection | None]:
+    """Offer the strongest detection; fall back to the numbered list."""
+    if found:
+        if len(found) > 1:
+            click.echo("Detected:")
+            for item in found:
+                click.echo(f"  {item.provider.value}: {item.reason}")
+        first = found[0]
+        if click.confirm(f"Found {first.reason} - use {first.provider.value}?", default=True):
+            return first.provider, first
+    else:
+        click.echo("No provider API key, cloud credentials or running ollama detected.")
+    for number, provider in enumerate(Provider, start=1):
+        click.echo(f"  {number}. {provider.value}")
+    chosen: Provider = click.prompt("Provider (number or name)", value_proc=_parse_provider)
+    return chosen, next((item for item in found if item.provider is chosen), None)
+
+
+def _choose_api_base(
+    provider: Provider, found: detect.Detection | None
+) -> tuple[str | None, tuple[str, ...]]:
+    """The endpoint to store (None = the provider's own default), plus any
+    models a running ollama there has pulled."""
+    if provider is Provider.ollama:
+        if found is not None:
+            return None, found.models
+        base: str = click.prompt("ollama API base", default=DEFAULT_OLLAMA_BASE)
+        base = base.strip().rstrip("/")
+        models = detect.ollama_models(base)
+        if models is None:
+            click.echo(f"No ollama answered at {base}; start it with `ollama serve`.")
+        return (None if base == DEFAULT_OLLAMA_BASE else base), models or ()
+    env_var = _BASE_ENV.get(provider)
+    if env_var is None or os.environ.get(env_var):
+        # Not needed, or the resolver will read it from the environment itself.
+        return None, ()
+    hint = (
+        "https://<resource>.openai.azure.com"
+        if provider is Provider.azure
+        else "an OpenAI /v1 base URL, e.g. http://localhost:8000/v1"
+    )
+    entered: str = click.prompt(f"{provider.value} endpoint ({hint})")
+    return entered.strip(), ()
+
+
+def _choose_model(provider: Provider, pulled: tuple[str, ...]) -> str:
+    """Prompt for the model, defaulting to a current suggestion when there is one."""
+    if provider is Provider.ollama:
+        if pulled:
+            click.echo(f"Pulled models: {', '.join(pulled)}")
+        else:
+            click.echo(
+                "No pulled models found; pull one first, e.g. "
+                f"`ollama pull {detect.SUGGESTED_MODELS[Provider.ollama]}`."
+            )
+    label = {
+        Provider.azure: "Deployment name",
+        Provider.openai_compatible: "Model (the name the server serves)",
+    }.get(provider, "Model")
+    suggested = detect.suggest_model(provider, pulled)
+    model: str = click.prompt(label, default=suggested) if suggested else click.prompt(label)
+    return model.strip()
+
+
+def _verify_setup(provider: Provider, model: str, api_base: str | None) -> None:
+    """One tiny completion through the review's own credential + provider path,
+    so a bad key or model fails now, with the same "how to auth" message."""
+    click.echo(f"Checking {provider.value} / {model} with one short request...")
+    cfg = ReviewConfig(provider=provider, model=model, api_base=api_base, timeout=_VERIFY_TIMEOUT)
+    # The review's structured INFO logs would interleave with the prompts.
+    logging.disable(logging.INFO)
+    try:
+        _engine, client = build_provider_engine(cfg, RuntimeOptions(api_base=api_base))
+        client.complete([{"role": "user", "content": "Reply with the single word: ok"}], model)
+    except ProviderTruncated:
+        pass  # It answered: a reasoning model may spend the budget thinking.
+    except Exception as exc:
+        raise click.ClickException(
+            f"{exc}\nNothing was written. Fix the above and rerun `lgtmaybe config init`, "
+            "or pass --no-verify to write the config without checking."
+        ) from exc
+    finally:
+        logging.disable(logging.NOTSET)
+    click.echo("OK: the model answered.")
+
+
+@config_cmd.command("init")
+@click.option(
+    "--verify/--no-verify",
+    default=True,
+    help="Check the provider and model with one tiny completion before writing "
+    "(default on; --no-verify writes without a model call)",
+)
+def config_init(verify: bool) -> None:
+    """Detect your credentials and a running ollama, then write the config file.
+
+    API keys are never written: they stay in your environment.
+    """
+    provider, found = _choose_provider(detect.detect())
+    api_base, pulled = _choose_api_base(provider, found)
+    model = _choose_model(provider, pulled)
+    if verify:
+        _verify_setup(provider, model, api_base)
+
+    data = store.load()
+    data.update(provider=provider.value, model=model)
+    if api_base:
+        data["api_base"] = api_base
+    else:
+        # A base kept from an earlier setup would be sent to the new provider.
+        data.pop("api_base", None)
+    store.save(data)
     click.echo(f"Wrote {store.user_config_path()}")
+    click.echo("Next: lgtmaybe review")

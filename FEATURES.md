@@ -1,6 +1,6 @@
 # Product spec: CLI configuration, simplified
 
-**Status:** proposed · **Owner:** Matt Coles · **Scope:** local CLI UX only —
+**Status:** P0-1, P0-2 and P0-3 shipped; P1 and P2 proposed · **Owner:** Matt Coles · **Scope:** local CLI UX only —
 no engine behavior changes, no flag removals.
 
 ## The problem
@@ -54,6 +54,11 @@ needs. Tuning knobs earn their visibility when the user signals intent
 
 ### P0-1 — Progressive-disclosure help
 
+> **Shipped.** `review --help` lists the Common options and ends with a count of
+> the advanced ones; `review --help-all` lists both groups under their own
+> headings (`ProgressiveHelpCommand` in `cli/commands.py`). The
+> `lgtmaybe help review --all` alias was not added: `help` stays a non-command.
+
 Group `review`'s options into **Common** (~8, shown by default) and
 **Advanced** (everything else, shown with `lgtmaybe review --help-all` /
 `lgtmaybe help review --all`, and summarized by one trailing line in the short
@@ -75,6 +80,12 @@ help: *"23 advanced tuning options: run `lgtmaybe review --help-all`"*).
 `--help-all` shows the full reference; a hidden option still parses.
 
 ### P0-2 — `config init` detects instead of asks
+
+> **Shipped.** Detection lives in `config/detect.py` (env keys, `AZURE_API_BASE`,
+> AWS env/shared files, the GCP probe the credential resolver already uses, and
+> ollama's `/api/tags`), with the suggested-model table checked against the
+> how-to guides by a test. Verification goes through the review's own
+> credential resolver and provider factory; `--no-verify` skips it.
 
 Turn the three raw prompts into a short wizard that observes the environment
 first and confirms rather than interrogates:
@@ -100,6 +111,11 @@ first and confirms rather than interrogates:
 with two keypresses; a wrong API key fails during init, not during review.
 
 ### P0-3 — Retire the `llama3` built-in default
+
+> **Shipped.** The loader raises `ProviderNotConfigured` when no layer sets a
+> provider and model. `review` and `diagram` point at `config init`; the
+> Action names its `provider`/`model` inputs, and `gitlab-ci` / `comment` name
+> the flags and `.lgtmaybe.yml`.
 
 With no config at all, `lgtmaybe review` should not assume `ollama/llama3`.
 Instead fail fast with a two-line pointer: *"No provider configured — run

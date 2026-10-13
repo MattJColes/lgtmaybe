@@ -87,8 +87,10 @@ Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
 provider: anthropic
 ```
 
-If neither the file nor a flag sets `provider` and `model`, lgtmaybe falls back
-to `ollama` with `llama3`.
+There is no built-in provider or model. If no flag, no `.lgtmaybe.yml` and no
+user config (written by `lgtmaybe config init`) sets both, lgtmaybe stops before
+doing any work and tells you how to configure one. In the GitHub Action, set the
+`provider` and `model` inputs instead.
 
 ### model
 
@@ -916,8 +918,8 @@ lgtmaybe review \
   --min-severity high
 ```
 
-Most single-value settings have a flag; run `lgtmaybe review --help` for the
-list. List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
+Most single-value settings have a flag; run `lgtmaybe review --help-all` for
+the list (`--help` alone shows only the everyday ones). List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
 `categories`, `finding_rules`, `extra_lenses`, `lens_paths`, `directory_rules`,
 `project`, `spec_paths`, `risk.core_paths` and the `static_analysis` sub-keys.
 The `--static-analysis` and `--risk` flags switch those features on or off and

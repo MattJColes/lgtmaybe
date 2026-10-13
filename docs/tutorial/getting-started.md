@@ -49,15 +49,44 @@ ollama pull qwen3.6:27b   # or any model you prefer
 
 Leave `ollama serve` running in a separate terminal.
 
-## Step 3: Review Your Changes
+## Step 3: Point lgtmaybe at ollama
+
+lgtmaybe has no built-in model, so tell it once which provider and model to
+use:
+
+```bash
+lgtmaybe config init
+```
+
+It finds the running ollama and the models you have pulled, so you only
+confirm:
+
+```console
+Found ollama running at http://localhost:11434 (1 model pulled) - use ollama? [Y/n]:
+Pulled models: qwen3.6:27b
+Model [qwen3.6:27b]:
+Checking ollama / qwen3.6:27b with one short request...
+OK: the model answered.
+Wrote /home/you/.config/lgtmaybe/config.yml
+Next: lgtmaybe review
+```
+
+Press Enter twice. Before it writes anything, it sends the model one tiny
+request, so a stopped server or a model you have not pulled fails here, not
+halfway through a review. The file holds only the provider and model; if you
+later use a hosted provider, its API key stays in your environment.
+
+If ollama is on another machine, answer `n`, choose `ollama`, and enter its
+address. You can also skip `config init` and pass `--provider ollama --model
+qwen3.6:27b` to each command. Without either, `lgtmaybe review` stops straight
+away and tells you to run `config init`.
+
+## Step 4: Review Your Changes
 
 From inside a git repo, on a branch with some changes, run:
 
 ```bash
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434
+lgtmaybe review
 ```
 
 lgtmaybe diffs your current branch against the remote primary branch
@@ -80,21 +109,27 @@ To review the whole worktree (your branch's commits plus uncommitted edits),
 add `--working`. To review only the uncommitted edits, add `--uncommitted`. To
 diff against a different base, pass `--base main`.
 
-## Step 4: Change the Output Format
+`lgtmaybe review --help` lists the everyday options; `--help-all` adds the
+advanced tuning ones.
+
+## Step 5: Change the Output Format
 
 `--format` controls what `review` prints. `--json` (shorthand for
 `--format json`) emits a JSON array ready to pipe into other tooling:
 
 ```bash
-lgtmaybe review --provider ollama --model qwen3.6:27b \
-  --api-base http://localhost:11434 --json
+lgtmaybe review --json
 ```
 
 `--format agent` prints the findings as correction instructions an AI coding
 agent can read and apply, for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-## Step 5: See the Whole Change
+`--format sarif` prints a SARIF 2.1.0 log you can upload to GitHub code
+scanning or open in an IDE. See
+[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
+
+## Step 6: See the Whole Change
 
 `lgtmaybe diagram` sends the same local diff to three concurrent model calls and
 prints the **change overview**:
@@ -107,10 +142,7 @@ prints the **change overview**:
   when it alters a run-time flow
 
 ```bash
-lgtmaybe diagram \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434
+lgtmaybe diagram
 ```
 
 It takes the same `--base` / `--working` / `--uncommitted` flags as `review`.
@@ -121,7 +153,7 @@ terminal. Paste the Mermaid into a GitHub comment or
 [mermaid.live](https://mermaid.live) to see it drawn. See
 [Generate a change overview](../how-to/generate-a-change-diagram.md).
 
-## Step 6: Post Reviews on Real Pull Requests
+## Step 7: Post Reviews on Real Pull Requests
 
 The CLI reviews local changes. To post inline comments and a summary on real
 pull requests, wire lgtmaybe into your code host. The review is the same on

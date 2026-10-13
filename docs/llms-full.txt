@@ -160,15 +160,44 @@ ollama pull qwen3.6:27b   # or any model you prefer
 
 Leave `ollama serve` running in a separate terminal.
 
-## Step 3: Review Your Changes
+## Step 3: Point lgtmaybe at ollama
+
+lgtmaybe has no built-in model, so tell it once which provider and model to
+use:
+
+```bash
+lgtmaybe config init
+```
+
+It finds the running ollama and the models you have pulled, so you only
+confirm:
+
+```console
+Found ollama running at http://localhost:11434 (1 model pulled) - use ollama? [Y/n]:
+Pulled models: qwen3.6:27b
+Model [qwen3.6:27b]:
+Checking ollama / qwen3.6:27b with one short request...
+OK: the model answered.
+Wrote /home/you/.config/lgtmaybe/config.yml
+Next: lgtmaybe review
+```
+
+Press Enter twice. Before it writes anything, it sends the model one tiny
+request, so a stopped server or a model you have not pulled fails here, not
+halfway through a review. The file holds only the provider and model; if you
+later use a hosted provider, its API key stays in your environment.
+
+If ollama is on another machine, answer `n`, choose `ollama`, and enter its
+address. You can also skip `config init` and pass `--provider ollama --model
+qwen3.6:27b` to each command. Without either, `lgtmaybe review` stops straight
+away and tells you to run `config init`.
+
+## Step 4: Review Your Changes
 
 From inside a git repo, on a branch with some changes, run:
 
 ```bash
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434
+lgtmaybe review
 ```
 
 lgtmaybe diffs your current branch against the remote primary branch
@@ -191,21 +220,27 @@ To review the whole worktree (your branch's commits plus uncommitted edits),
 add `--working`. To review only the uncommitted edits, add `--uncommitted`. To
 diff against a different base, pass `--base main`.
 
-## Step 4: Change the Output Format
+`lgtmaybe review --help` lists the everyday options; `--help-all` adds the
+advanced tuning ones.
+
+## Step 5: Change the Output Format
 
 `--format` controls what `review` prints. `--json` (shorthand for
 `--format json`) emits a JSON array ready to pipe into other tooling:
 
 ```bash
-lgtmaybe review --provider ollama --model qwen3.6:27b \
-  --api-base http://localhost:11434 --json
+lgtmaybe review --json
 ```
 
 `--format agent` prints the findings as correction instructions an AI coding
 agent can read and apply, for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-## Step 5: See the Whole Change
+`--format sarif` prints a SARIF 2.1.0 log you can upload to GitHub code
+scanning or open in an IDE. See
+[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
+
+## Step 6: See the Whole Change
 
 `lgtmaybe diagram` sends the same local diff to three concurrent model calls and
 prints the **change overview**:
@@ -218,10 +253,7 @@ prints the **change overview**:
   when it alters a run-time flow
 
 ```bash
-lgtmaybe diagram \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434
+lgtmaybe diagram
 ```
 
 It takes the same `--base` / `--working` / `--uncommitted` flags as `review`.
@@ -232,7 +264,7 @@ terminal. Paste the Mermaid into a GitHub comment or
 [mermaid.live](https://mermaid.live) to see it drawn. See
 [Generate a change overview](../how-to/generate-a-change-diagram.md).
 
-## Step 6: Post Reviews on Real Pull Requests
+## Step 7: Post Reviews on Real Pull Requests
 
 The CLI reviews local changes. To post inline comments and a summary on real
 pull requests, wire lgtmaybe into your code host. The review is the same on
@@ -302,8 +334,10 @@ Verify it:
 lgtmaybe --help
 ```
 
-That prints the command list with usage examples. `<command> --help` (for
-example `lgtmaybe review --help`) lists every option for one command.
+That prints the command list with usage examples. `<command> --help` lists a
+command's options. For `lgtmaybe review` it shows only the everyday ones and
+ends with a line pointing at `lgtmaybe review --help-all`, which lists the
+advanced tuning options too.
 
 To check which build you are running, for a bug report or a benchmark record:
 
@@ -414,6 +448,28 @@ To use `--static-analysis` locally, install the tools it drives with
 zizmor). gitleaks and osv-scanner are separate binaries you install yourself;
 any tool that is not installed is skipped. The Action image bundles all of
 them.
+
+## Configure a Provider
+
+lgtmaybe has no built-in model, so tell it which provider and model to use
+once:
+
+```bash
+lgtmaybe config init
+```
+
+It looks for a provider API key in your environment (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`), Azure, AWS or Google
+Cloud credentials, and a running ollama with its pulled models. It offers the
+first one it finds, suggests a current model, then checks the pair with one
+tiny request so a wrong key or model fails now rather than mid-review. It
+writes the provider and model to `~/.config/lgtmaybe/config.yml`; API keys stay
+in your environment and are never written. Pass `--no-verify` to skip the
+check, for example when you are offline.
+
+Until a provider is configured (by `config init`, a `.lgtmaybe.yml`, or
+`--provider`/`--model`), `lgtmaybe review` stops at once with a pointer to
+`config init` instead of guessing a model.
 
 ## Next Steps
 
@@ -3087,8 +3143,10 @@ Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
 provider: anthropic
 ```
 
-If neither the file nor a flag sets `provider` and `model`, lgtmaybe falls back
-to `ollama` with `llama3`.
+There is no built-in provider or model. If no flag, no `.lgtmaybe.yml` and no
+user config (written by `lgtmaybe config init`) sets both, lgtmaybe stops before
+doing any work and tells you how to configure one. In the GitHub Action, set the
+`provider` and `model` inputs instead.
 
 ### model
 
@@ -3916,8 +3974,8 @@ lgtmaybe review \
   --min-severity high
 ```
 
-Most single-value settings have a flag; run `lgtmaybe review --help` for the
-list. List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
+Most single-value settings have a flag; run `lgtmaybe review --help-all` for
+the list (`--help` alone shows only the everyday ones). List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
 `categories`, `finding_rules`, `extra_lenses`, `lens_paths`, `directory_rules`,
 `project`, `spec_paths`, `risk.core_paths` and the `static_analysis` sub-keys.
 The `--static-analysis` and `--risk` flags switch those features on or off and
@@ -4977,6 +5035,116 @@ the [GitHub Action](use-as-github-action.md) to review pull requests in CI.
 - [Install the CLI](install-the-cli.md) - the same `lgtmaybe review` the hooks run
 - [Fix findings with an AI agent](fix-findings-with-an-ai-agent.md) - turn local findings into corrections
 - [Reduce review cost](reduce-review-cost.md) - make each run cheaper
+
+---
+
+<!-- Source: https://lgtmaybe.coles.codes/how-to/upload-findings-as-sarif/ -->
+
+# Upload Findings as SARIF
+
+`lgtmaybe review --format sarif` prints the findings as a
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+log instead of a listing. SARIF is the format GitHub code scanning ingests, and
+most IDEs have a SARIF viewer, so the same findings can live next to your other
+static-analysis alerts rather than in pull request comments.
+
+## Write the Log
+
+```bash
+lgtmaybe review --provider openai --model gpt-5.5 --format sarif > lgtmaybe.sarif
+```
+
+stdout carries the SARIF log and nothing else. The token footer, the `--profile`
+table, and the "results may be incomplete" notice all go to stderr, so the
+redirect always captures a parseable file. Every other `review` option
+(`--working`, `--base`, `--min-severity` and so on) works as usual.
+
+## What the Log Contains
+
+| SARIF field | Comes from |
+|---|---|
+| `tool.driver.rules` | One rule per review lens that raised a finding (`security`, `correctness`, ...), sorted |
+| `results[].ruleId` | The finding's lens; `review` when it has none |
+| `results[].level` | `critical` and `high` are `error`, `medium` is `warning`, `low` and `info` are `note` |
+| `results[].message.text` | The finding's title, a blank line, then its body |
+| `results[].locations` | The repo-relative file, plus `region.startLine` when the line is real |
+| `results[].partialFingerprints` | `lgtmaybeFingerprint/v1` and `lgtmaybeIdentity/v1`, the same ids lgtmaybe hides in posted comments |
+| `results[].properties` | `severity`, plus `confidence` (0 to 10) and `suggestion` when present |
+| `invocations[].executionSuccessful` | `false` when a review lens failed, so a partial log never reads as clean |
+
+A finding whose anchor matched no changed line, or one on the old (LEFT) side of
+the diff, names its file without a line. Its line number would be a guess or
+would point into the old file, and a wrong-line alert misleads more than a
+file-level one. The suggested fix is free text rather than an exact replacement,
+so it is kept in `properties.suggestion` instead of a SARIF `fixes` entry.
+
+The output is deterministic: the same findings give the same bytes, so a re-run
+uploads an identical log.
+
+## Upload to GitHub Code Scanning
+
+Code scanning must be available on the repository (public repositories, or
+private ones with GitHub Code Security). This workflow reviews each pull request
+from a branch in the same repository and uploads the log:
+
+```yaml
+name: lgtmaybe SARIF
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload-sarif
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # lgtmaybe diffs against the base branch
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+      - name: Review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          uvx lgtmaybe review --provider openai --model gpt-5.5 \
+            --base "origin/$BASE_REF" --format sarif > lgtmaybe.sarif
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: lgtmaybe.sarif
+          category: lgtmaybe
+```
+
+`BASE_REF` goes through an environment variable rather than being expanded into
+the script, which keeps workflow expressions out of the shell. `category` keeps
+lgtmaybe's alerts separate from CodeQL or any other SARIF upload on the same
+commit.
+
+This runs on `pull_request` and checks out the pull request, which is fine for
+branches in your own repository. A pull request from a fork gets no secrets on
+`pull_request`, so the review step has no key. To review fork pull requests, use
+the [GitHub Action](use-as-github-action.md) instead: it runs on
+`pull_request_target`, reads the diff through the API, and never checks out PR
+code.
+
+## Open It in an IDE
+
+Any SARIF viewer can open the file directly, for example the SARIF Viewer
+extension for VS Code. Result paths are relative to `%SRCROOT%`; point the
+viewer at your repository root when it asks.
+
+## See Also
+
+- [Install the CLI](install-the-cli.md)
+- [Fix findings with an AI agent](fix-findings-with-an-ai-agent.md): the
+  `--format agent` output
+- [What gets reviewed](../explanation/what-gets-reviewed.md): every finding field
 
 ---
 
@@ -7185,8 +7353,8 @@ change. The JSON payload carries a `schema_version` so you can pin against it.
 ## Which Stream the Table Uses
 
 The table goes to **stdout** for a human-format review, and to **stderr** when
-the findings themselves are machine-readable (`--format json`, `--format agent`
-or `--json`), so stdout stays parseable. Without `--profile`, a local review
+the findings themselves are machine-readable (`--format json`, `--format agent`,
+`--format sarif` or `--json`), so stdout stays parseable. Without `--profile`, a local review
 still prints its `tokens:` footer, always to stderr.
 
 `--profile-json` writes to a **file**, so it never collides with either stream.
@@ -7941,6 +8109,11 @@ $ lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localh
 `--format agent` turns the findings into plain correction instructions an AI
 coding agent can read and apply, for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
+
+`--format sarif` prints a SARIF 2.1.0 log for GitHub code scanning or an IDE
+SARIF viewer: one rule per lens, the severity folded onto SARIF's three levels,
+and the finding's fingerprint and identity as `partialFingerprints`. See
+[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
 
 ## See Also
 
