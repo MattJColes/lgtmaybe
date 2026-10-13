@@ -137,6 +137,11 @@ zizmor). gitleaks and osv-scanner are separate binaries you install yourself;
 any tool that is not installed is skipped. The Action image bundles all of
 them.
 
+To serve reviews to a coding agent with `lgtmaybe mcp`, install the MCP SDK
+with `pip install 'lgtmaybe[mcp]'`. The Homebrew formula and Windows executable
+do not include it. See
+[Use from a coding agent over MCP](use-from-a-coding-agent-over-mcp.md).
+
 ## Next Steps
 
 - Run your first local review: [Getting started](../tutorial/getting-started.md).

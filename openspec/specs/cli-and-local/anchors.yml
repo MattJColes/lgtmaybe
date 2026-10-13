@@ -68,6 +68,12 @@ cli.local-context:
     has: { field: name, regex: '^local_pr_context$' }
   files: [src/lgtmaybe/local/**/*.py]
 
+cli.mcp-server:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_server$' }
+  files: [src/lgtmaybe/cli/mcp_server.py]
+
 cli.config:
   - rule:
       kind: function_definition

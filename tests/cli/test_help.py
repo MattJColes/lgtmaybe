@@ -28,7 +28,7 @@ def test_help_examples_cover_every_local_command() -> None:
     `lgtmaybe diagram` got reported as unshipped."""
     result = CliRunner().invoke(main, ["--help"])
     examples = result.output.split("Examples:", 1)[1]
-    for command in ("review", "diagram", "config"):
+    for command in ("review", "diagram", "mcp", "config"):
         assert f"lgtmaybe {command}" in examples
 
 

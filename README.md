@@ -207,6 +207,7 @@ the docs root.
 - [Calibrate reviews to your project](docs/how-to/calibrate-reviews-to-your-project.md)
 - [Generate a change overview](docs/how-to/generate-a-change-diagram.md)
 - [Fix findings with an AI agent](docs/how-to/fix-findings-with-an-ai-agent.md)
+- [Use from a coding agent (MCP)](docs/how-to/use-from-a-coding-agent-over-mcp.md)
 - [Reduce review cost](docs/how-to/reduce-review-cost.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
 
