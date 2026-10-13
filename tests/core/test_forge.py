@@ -95,6 +95,38 @@ class TestParsePRUrl:
         with pytest.raises(ValueError, match="Could not parse"):
             parse_pr_url("https://github.com/org/repo")
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://ghe.acme.io/acme/api/pull/12",
+            "https://github.com.evil.example/acme/api/pull/12",
+            "https://token@github.com/acme/api/pull/12",
+        ],
+    )
+    def test_refuses_a_github_url_on_any_other_host(self, url: str) -> None:
+        """The GitHub gateway always calls api.github.com with GITHUB_TOKEN.
+
+        Accepting another host's URL would send that token to github.com for a
+        repo the user never named — refuse it, as the Action path refuses GHES.
+        """
+        with pytest.raises(ValueError, match="GitHub Enterprise Server is not supported"):
+            parse_pr_url(url)
+
+    @pytest.mark.parametrize("host", ["github.com", "www.github.com", "GitHub.com"])
+    def test_accepts_github_dot_com(self, host: str) -> None:
+        located = parse_pr_url(f"https://{host}/org/repo/pull/42")
+        assert (located.forge, located.repo, located.number) == (Forge.github, "org/repo", 42)
+
+    def test_accepts_a_trailing_tab_segment(self) -> None:
+        """A URL copied from the Files tab still names the same PR."""
+        located = parse_pr_url("https://github.com/org/repo/pull/42/files")
+        assert (located.repo, located.number) == ("org/repo", 42)
+
+    def test_the_host_is_the_url_host_not_a_path_segment(self) -> None:
+        """A Gitea served under a sub-path must not turn that segment into the host."""
+        with pytest.raises(ValueError, match="Could not parse"):
+            parse_pr_url("https://example.com/gitea/org/repo/pulls/1")
+
     def test_the_error_names_every_supported_url_shape(self) -> None:
         """The message has to be actionable on whichever host the user is on."""
         with pytest.raises(ValueError) as excinfo:

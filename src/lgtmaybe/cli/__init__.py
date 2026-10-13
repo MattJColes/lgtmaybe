@@ -31,7 +31,7 @@ from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
 from lgtmaybe.core.diffparse import split_by_file
-from lgtmaybe.core.forge import Forge, PRLocator, token_env_vars
+from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -1144,10 +1144,7 @@ def _change_url(repo: str, number: int) -> str:
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
     if os.environ.get("GITHUB_API_URL", "").rstrip("/").endswith("/api/v3"):
-        raise click.ClickException(
-            "GitHub Enterprise Server is not supported; run lgtmaybe on GitHub.com, "
-            "GitLab, or Gitea."
-        )
+        raise click.ClickException(GHES_UNSUPPORTED)
     return f"{server}/{repo}/pulls/{number}"
 
 
