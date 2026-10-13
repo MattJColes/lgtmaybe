@@ -229,8 +229,15 @@ context of the **base branch**. Code from the fork is never checked out or
 executed, and the diff is fetched only through the host's API. A malicious PR
 therefore can't reach the repository's secrets.
 
-GitLab and Gitea have no `pull_request_target` equivalent: their merge- and
-pull-request pipelines run with the project's own secrets. The protection
-holds for the same reason. lgtmaybe never checks out or executes change-request
-code on any host, so there is nothing for an attacker to run. The supplied
-GitLab job also sets `GIT_STRATEGY: none`, so the repository is never cloned.
+lgtmaybe never checks out or executes change-request code on any host, so a
+change has nothing of its own to run inside the review. That does not protect
+the pipeline definition. A GitLab merge request pipeline, a Gitea
+`pull_request` run and an Azure Pipelines pull request build all run the CI
+configuration from the change itself, so anyone who can push a branch can
+rewrite the job that holds the secrets. Gitea 1.21 and later supports
+`pull_request_target`, which the supplied Gitea workflow uses; GitLab and Azure
+DevOps have no equivalent. Each guide's security section covers who can change
+the pipeline and how to keep the secrets out of their reach:
+[GitLab](../how-to/review-on-gitlab.md#security-who-can-change-the-pipeline),
+[Gitea](../how-to/review-on-gitea.md#security-who-can-change-the-workflow) and
+[Azure DevOps](../how-to/review-on-azure-devops.md#security-who-can-change-the-pipeline).
