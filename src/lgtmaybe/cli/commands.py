@@ -262,9 +262,10 @@ local_diff_options = _stack(
     "--fail-on",
     default=None,
     type=click.Choice(Severity),
-    help="Merge-gate threshold: on the GitHub Action, create a Check Run that "
-    "fails when any finding is at or above this severity (make it a required "
-    "check in branch protection). Default off",
+    help="Fail when any finding is at or above this severity. Locally, exit 3 "
+    "after printing (for a pre-commit/pre-push hook or a script); on the GitHub "
+    "Action, create a Check Run that fails (make it a required check in branch "
+    "protection). Default off",
 )
 @click.option(
     "--unanchored-min-severity",
@@ -490,7 +491,15 @@ def review(**inputs: Any) -> None:
     cfg = _apply_risk_flag(cfg, risk)
 
     fmt = output_format or ("json" if as_json else "human")
-    execute_local_review(cfg, runtime, base=base, working=working, uncommitted=uncommitted, fmt=fmt)
+    execute_local_review(
+        cfg,
+        runtime,
+        base=base,
+        working=working,
+        uncommitted=uncommitted,
+        fmt=fmt,
+        fail_on=inputs["fail_on"],
+    )
 
 
 @main.command()

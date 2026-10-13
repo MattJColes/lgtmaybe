@@ -209,6 +209,25 @@ against the worktree's top level, not the caller's directory.
 - **WHEN** `lgtmaybe review` runs from a package directory, not the repo root
 - **THEN** it sees the whole worktree, with each file's head text loaded
 
+### Requirement: A local review can gate on severity
+
+`lgtmaybe review --fail-on <severity>` SHALL exit with status 3
+(`FAIL_ON_EXIT_CODE`) after printing its findings when any finding is at or
+above that severity, so a pre-commit / pre-push hook or script can block on
+findings. Status 3 is distinct from 1 (the review could not run) and 2 (a usage
+error). Only the explicit flag gates a local run: a `fail_on` from config is
+the Action's merge gate and never changes a local exit status.
+<!-- anchor: cli.local-fail-on -->
+
+#### Scenario: a hook blocks a push on a high finding
+- **WHEN** the `lgtmaybe-pre-push` hook from `.pre-commit-hooks.yaml` runs
+  `lgtmaybe review --fail-on high` and finds a `high` or `critical` issue
+- **THEN** the findings print on stdout and the run exits 3, stopping the push
+
+#### Scenario: the repo config sets fail_on
+- **WHEN** `.lgtmaybe.yml` sets `fail_on` and `review` runs without the flag
+- **THEN** the local run exits 0 whatever it finds
+
 ### Requirement: Diagnostics never corrupt machine output
 
 stdout SHALL carry only the review's deliverable. The opt-in profile table is a
