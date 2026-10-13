@@ -33,7 +33,7 @@ from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview,
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
-from lgtmaybe.core.logging import get_logger
+from lgtmaybe.core.logging import get_logger, register_secret
 from lgtmaybe.core.models import (
     PRContext,
     Provider,
@@ -472,6 +472,7 @@ def build_review_context(
             "automatically)."
         )
     _token_var, token = picked
+    register_secret(token)
 
     github = build_gateway(located, token, cfg)
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
