@@ -1,5 +1,5 @@
 ---
-description: Scope review instructions and reference files to part of a monorepo with directory_rules: strict on payments/**, lenient on tests/**, with an architecture doc read before src/**.
+description: "Scope review instructions and reference files to part of a monorepo with directory_rules - strict on payments/**, lenient on tests/**, and an architecture doc read before src/**."
 ---
 
 # Scope Review Instructions to a Directory
