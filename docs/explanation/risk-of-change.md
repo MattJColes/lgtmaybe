@@ -18,7 +18,7 @@ reads the same on every re-run of the same head, and a workflow can rely on it.
 The review summary line names the level and its top reason:
 
 ```text
-3 findings · risk high (`src/core/models.py` is imported by 84 files, +2 more) · provider … · model …
+3 findings · risk high (`src/core/models.py` is imported by 84 files, +2 more) · provider … · model … · lgtmaybe …
 ```
 
 The change overview lists every reason in a **Risk of Change** section above
@@ -37,11 +37,15 @@ Each factor raises the level, and the verdict takes the highest:
 |---|---|
 | A changed file imported by 5 or more files in the repository | `medium` |
 | A changed file imported by 20 or more files, or matching a `risk.core_paths` glob | `high` |
-| Touching infrastructure, security, data migrations, or backup and recovery paths | `high` |
-| Touching any other High Impact area (dependencies, compatibility, cost, …) | `medium` |
+| Touching an infrastructure, security, data migration, or backup and recovery path | `high` |
+| Touching a path for any other High Impact area (dependencies, compatibility, cost, …) | `medium` |
 | 500 or more changed lines | `medium` |
 | 50 or more changed lines of code with no test file changed | `medium` |
 | A [`regulated` project stage](../how-to/calibrate-reviews-to-your-project.md) | `medium` |
+
+The area rows use the same path patterns as the
+[High Impact Areas](../how-to/generate-a-change-diagram.md#high-impact-areas)
+floor, applied to changed files that are not tests or documentation.
 
 Two distinct `high` reasons make the change `critical`: a widely imported
 module and a Terraform file, say, or an auth change and a database migration.
@@ -63,7 +67,8 @@ because they are already in the diff, and test files don't count as importers.
 
 When a blast radius can't be measured, the verdict names the file instead of
 guessing. This happens for a language the scan doesn't read, when there is no
-checkout, or when the scan runs past its 20-second limit. A `low` verdict with
+checkout, when the ast-grep binary is missing or the scan fails, or when the
+scan runs past its 20-second limit. A `low` verdict with
 unmeasured files always says so:
 
 ```text
@@ -78,7 +83,7 @@ aliases or barrel re-exports. Name those in `risk.core_paths` (see
 
 lgtmaybe never approves or blocks a PR on its risk. The marker lets you decide
 what a level means for your team. For example, a step after the lgtmaybe step
-can request a second reviewer when the review summary carries
+can request a second reviewer when the latest review summary carries
 `lgtmaybe-risk:critical`:
 
 ```yaml
@@ -87,11 +92,16 @@ can request a second reviewer when the review summary carries
     GH_TOKEN: ${{ github.token }}
     PR: ${{ github.event.pull_request.number }}
   run: |
-    if gh pr view "$PR" --json reviews --jq '.reviews[].body' \
-        | grep -q 'lgtmaybe-risk:critical'; then
+    latest=$(gh pr view "$PR" --json reviews \
+      --jq '[.reviews[].body | select(contains("lgtmaybe-risk:"))] | last // ""')
+    if grep -q 'lgtmaybe-risk:critical' <<<"$latest"; then
       gh pr edit "$PR" --add-reviewer my-org/platform-leads
     fi
 ```
+
+Reading only the latest summary matters: each new head commit gets a fresh
+summary, so an older review can still carry a level the current change no
+longer has.
 
 If the assessment itself fails, the summary reads `risk unavailable` and no
 marker is written, so a gate reads a missing marker as "unknown", never as a
