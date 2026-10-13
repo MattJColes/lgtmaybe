@@ -203,6 +203,10 @@ the last reviewed SHA rather than the whole PR. That is the default, so leave
 `incremental` unset. Comment `/review full` when you want everything
 re-reviewed.
 
+The `gitlab-ci` command does the same on every merge request pipeline after
+the first. To re-review everything there, run the pipeline with
+`LGTMAYBE_INCREMENTAL=false`.
+
 Locally there is no watermark: every `lgtmaybe review` re-reviews the whole
 branch at full price. If you are iterating, review only what you just changed:
 

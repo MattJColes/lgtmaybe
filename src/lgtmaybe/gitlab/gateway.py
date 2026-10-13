@@ -14,15 +14,18 @@ differs rather than merely renaming things:
    on GitLab it is a ``PUT`` on the discussion, which is why this adapter can
    offer resolve-on-fix where the Gitea one cannot.
 
-Deliberately absent: incremental review. GitLab's compare endpoint returns
-per-file diffs that could be reassembled into a unified diff, so this is a
-"not yet" rather than a "cannot" — but until it is built and measured, the
-capability is not claimed and every run is a full review.
+4. **Incremental review rides the repository compare API.** It returns
+   per-file diffs plus the commit list, so the increment is reassembled into a
+   unified diff here, and "is this a plain push on top of the watermark?" is
+   answered from the commits' parent ids (GitLab has no ``ahead`` status).
+   GitLab also exposes no "the lines moved" flag on a discussion, so the
+   adapter derives one from the diff since the note was positioned.
 """
 
 from __future__ import annotations
 
 import base64
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote
@@ -31,8 +34,10 @@ import httpx
 
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
+    DIAGRAMMED_MARKER,
     FINDING_MARKER,
     IDENTITY_MARKER,
+    REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
     marker,
@@ -46,7 +51,7 @@ from lgtmaybe.core.diff import (
     is_reviewable,
     is_scannable_manifest,
 )
-from lgtmaybe.core.diffparse import walk_diff
+from lgtmaybe.core.diffparse import parse_hunk_header, walk_diff
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
 from lgtmaybe.core.paginate import paginate_pages
@@ -62,6 +67,25 @@ _PAGE_LIMIT = 100
 # Written into a resolved thread before it is closed, so the trail explains
 # itself to whoever reads the merge request later.
 _RESOLVED_REPLY = "✅ Looks resolved."
+
+# GitLab's smallest admin-configurable ``diff_max_files``. Past an instance's
+# diff limits the compare API stops listing files and says nothing about it, so
+# a list this long may already be cut short and cannot stand in for a review.
+_COMPARE_MAX_FILES = 500
+
+# Per-file flags GitLab sets when it withheld some or all of a file's patch.
+_TRUNCATION_FLAGS = ("too_large", "collapsed", "overflow")
+
+# Characters that would let an attacker-chosen file name forge a diff header
+# line (or the tab-delimited timestamp the header parser strips).
+_UNSAFE_PATH_CHARS = ("\n", "\r", "\t")
+
+# Developer: the lowest GitLab role that can push, so the analogue of the GitHub
+# write permission that feedback learning trusts.
+_DEVELOPER_ACCESS = 30
+
+# The award emoji name GitLab gives 👎.
+_THUMBS_DOWN = "thumbsdown"
 
 
 class GitLabGateway:
@@ -92,7 +116,8 @@ class GitLabGateway:
         # GitLab addresses a project by its URL-encoded full path, which is what
         # lets an arbitrarily nested group path travel in a URL segment.
         self._project = quote(repo, safe="")
-        self._api = f"{scheme}://{host}/api/v4/projects/{self._project}"
+        self._root = f"{scheme}://{host}/api/v4"
+        self._api = f"{self._root}/projects/{self._project}"
         self._mr_api = f"{self._api}/merge_requests/{pr_number}"
         self._headers = {"PRIVATE-TOKEN": token, "Accept": "application/json"}
         self._client = client if client is not None else httpx.Client(timeout=_TIMEOUT)
@@ -115,6 +140,22 @@ class GitLabGateway:
         # mutated between them (see `_discussions`).
         self._discussions_cache: list[dict[str, Any]] | None = None
         self._notes_cache: list[dict[str, Any]] | None = None
+        # Head SHA this run completed, set by the orchestrator on the success
+        # path only. Never inferred inside post_review: a failure notice posts
+        # through the same method and must not claim the head was reviewed.
+        self._reviewed_sha: str | None = None
+        # Files this incremental run re-reviewed; resolve-on-fix stays inside
+        # them. None means a full review, so no restriction.
+        self._incremental_paths: set[str] | None = None
+        # The token's own user id. A watermark is only believed from a note this
+        # identity wrote: anyone can post a note carrying our marker.
+        self._posting_user_id: int | None = None
+        self._posting_user_done = False
+        # One compare per (from, to) pair: the increment and the outdated check
+        # usually ask for the same one.
+        self._compare_cache: dict[tuple[str, str], dict[str, Any] | None] = {}
+        # Feedback learning asks once per reactor, not once per discussion.
+        self._push_access_cache: dict[int, bool] = {}
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -217,7 +258,19 @@ class GitLabGateway:
             if not self._post_discussion(position, render_inline_body(finding)):
                 demoted.append(finding)
 
-        body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
+        # A watermark is only ever the one appended below: model prose reaches
+        # the summary and the demoted findings, so any marker inside it is
+        # stripped rather than left for a reader to mistake for ours.
+        content = REVIEWED_MARKER.sub(
+            "", f"{summary}{render_demoted(demoted)}{render_broad(broad)}"
+        )
+        body = f"{content}\n\n{self._marker}"
+        # The note is edited in place, so an unmarked post (a failure notice, a
+        # partial run) keeps the head the last successful run recorded instead
+        # of erasing it: those commits were reviewed, and nothing since was.
+        watermark = self._reviewed_sha or self._carried_marker(self._marker, REVIEWED_MARKER)
+        if watermark:
+            body += f"\n<!-- lgtmaybe-reviewed:{watermark} -->"
         self._upsert_note(body, self._marker)
         if self._resolve_fixed:
             self._resolve_fixed_threads()
@@ -246,10 +299,17 @@ class GitLabGateway:
     def post_diagram_comment(self, body: str, *, completed_sha: str | None = None) -> None:
         """Upsert the change diagram in its own marker family.
 
-        ``completed_sha`` is accepted and ignored: it drives incremental review,
-        which this adapter does not offer.
+        ``completed_sha`` stamps the head whose required overview posted, the
+        completion record incremental review reads when diagrams are required.
+        A manual refresh (no SHA) keeps the previous stamp, and a marker inside
+        the model-written diagram is stripped so content can never forge one.
         """
-        self._upsert_note(f"{body}\n\n{self._diagram_marker}", self._diagram_marker)
+        body = DIAGRAMMED_MARKER.sub("", body).rstrip()
+        stamp = completed_sha or self._carried_marker(self._diagram_marker, DIAGRAMMED_MARKER)
+        body = f"{body}\n\n{self._diagram_marker}"
+        if stamp:
+            body += f"\n<!-- lgtmaybe-diagrammed:{stamp} -->"
+        self._upsert_note(body, self._diagram_marker)
 
     def list_conversation_comments(self) -> list[tuple[str, str]]:
         """Every merge request note as ``(author, body)``, oldest first.
@@ -267,6 +327,82 @@ class GitLabGateway:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled
 
+    # ------------------------------------------------------------------
+    # Incremental review
+    # ------------------------------------------------------------------
+
+    def last_reviewed_sha(self) -> str | None:
+        """The head recorded by our last successful review, or None.
+
+        Read from the summary note's hidden watermark, and only from a note the
+        token's own user wrote: a forged note claiming the current head is done
+        would otherwise skip the review entirely. Any API failure, or an
+        identity that cannot be established, returns None so the caller runs a
+        full review.
+        """
+        try:
+            note = self._own_note(self._marker, REVIEWED_MARKER)
+        except (httpx.HTTPError, ValueError) as exc:
+            _log.info("reading the review watermark failed — full review: %s", exc)
+            return None
+        return _last_match(REVIEWED_MARKER, note)
+
+    def last_completed_sha(self, *, diagram_required: bool) -> str | None:
+        """The latest head whose required review outputs all posted.
+
+        Without a required diagram that is the review watermark. With one, the
+        diagram note's stamp is the record (it is written only after the review
+        posted), provided our summary note exists at all, which is the rule the
+        GitHub adapter applies too.
+        """
+        if not diagram_required:
+            return self.last_reviewed_sha()
+        try:
+            if self._own_note(self._marker) is None:
+                return None
+            note = self._own_note(self._diagram_marker, DIAGRAMMED_MARKER)
+        except (httpx.HTTPError, ValueError) as exc:
+            _log.info("reading the diagram watermark failed — full review: %s", exc)
+            return None
+        return _last_match(DIAGRAMMED_MARKER, note)
+
+    def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
+        """The unified diff of the commits pushed since ``base_sha``, or None.
+
+        Read-only, via the repository compare API (never a checkout). GitLab has
+        no "ahead" status, so the commit list is checked instead: every commit
+        must chain back through a single parent from ``head_sha`` to
+        ``base_sha``. A force-push or rebase (the chain ends elsewhere), a merge,
+        an unknown SHA (GitLab answers with an empty comparison), a compare that
+        timed out or withheld any file's patch, an unsafe path, and any API
+        failure all return None, so the caller falls back to a full review
+        rather than trusting a meaningless increment.
+        """
+        comparison = self._compare(base_sha, head_sha)
+        if comparison is None:
+            return None
+        reason = _unusable_increment(comparison, base_sha, head_sha)
+        if reason is not None:
+            _log.info("incremental compare not usable — falling back to full review: %s", reason)
+            return None
+        return _unified_diff(comparison["diffs"])
+
+    def mark_reviewed(self, head_sha: str | None) -> None:
+        """Prepare the watermark for the next summary post (success path only).
+
+        In-memory until ``post_review`` writes it. The CLI's failure path calls
+        ``mark_reviewed(None)`` so a failure notice never records the new head.
+        """
+        self._reviewed_sha = head_sha
+
+    def set_incremental_scope(self, paths: set[str] | None) -> None:
+        """Restrict resolve-on-fix to discussions on ``paths`` (None = no limit).
+
+        A finding on a file this increment did not touch is missing from the
+        run's findings only because nobody looked, so its thread stays open.
+        """
+        self._incremental_paths = paths
+
     def list_active_findings(self) -> list[ActiveFinding]:
         """Our own unresolved finding discussions, keyed by their hidden ids."""
         active: list[ActiveFinding] = []
@@ -283,17 +419,18 @@ class GitLabGateway:
                 continue  # someone else's discussion
             fingerprint = FINDING_MARKER.search(body)
             identity = IDENTITY_MARKER.search(body)
+            position = first.get("position") or {}
             active.append(
                 ActiveFinding(
                     thread_id=str(discussion.get("id")),
                     comment_id=first.get("id"),
-                    path=(first.get("position") or {}).get("new_path") or "",
+                    path=position.get("new_path") or "",
                     body=body,
                     fingerprint=fingerprint.group(1) if fingerprint else None,
                     identity=identity.group(1) if identity else None,
-                    # GitLab exposes no "the lines moved" signal, so resolution
-                    # here rests entirely on the caller's validated allowlist.
-                    outdated=False,
+                    # GitLab exposes no "the lines moved" flag, so it is derived
+                    # from the diff since the note was positioned.
+                    outdated=self._is_outdated(position),
                 )
             )
         self._active_findings = active
@@ -366,6 +503,44 @@ class GitLabGateway:
             resp.raise_for_status()
         except Exception as exc:  # noqa: BLE001 — a status must never fail a review
             _log.warning("creating commit status failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Feedback learning
+    # ------------------------------------------------------------------
+
+    def list_downvoted_fingerprints(self) -> set[str]:
+        """Fingerprints of our findings a member who can push awarded 👎.
+
+        Reads the ``thumbsdown`` award emoji on the first note of each of our
+        finding discussions (resolved or not: a 👎 judges the finding, not the
+        thread). On a public project anyone can award an emoji, so only a
+        Developer-or-above member's counts, and an unverifiable reactor never
+        suppresses anything. High and critical security findings are never
+        suppressed this way, which the suppression pass enforces. A note whose
+        awards cannot be read is skipped, so its finding is simply not
+        suppressed.
+        """
+        candidates: list[tuple[int, str]] = []
+        for discussion in self._discussions():
+            notes = discussion.get("notes") or []
+            if not notes:
+                continue
+            first = notes[0]
+            match = FINDING_MARKER.search(first.get("body") or "")
+            note_id = first.get("id")
+            if match is None or not isinstance(note_id, int):
+                continue  # not one of ours
+            candidates.append((note_id, match.group(1)))
+        if not candidates:
+            return set()
+        workers = min(_CONTENT_FETCH_WORKERS, len(candidates))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            reactors = list(pool.map(lambda c: self._thumbs_down_users(c[0]), candidates))
+        return {
+            fingerprint
+            for (_note_id, fingerprint), users in zip(candidates, reactors, strict=True)
+            if any(self._can_push(user) for user in sorted(users))
+        }
 
     # ------------------------------------------------------------------
     # Internals
@@ -452,7 +627,13 @@ class GitLabGateway:
         """
         if not self._validated_fixed_thread_ids:
             return
-        for thread_id in sorted(self._validated_fixed_thread_ids):
+        thread_ids = set(self._validated_fixed_thread_ids)
+        if self._incremental_paths is not None:
+            # An incremental run validated against its own increment only: a
+            # thread on any other file has no fresh evidence behind it.
+            paths = {f.thread_id: f.path for f in self._active_findings or []}
+            thread_ids = {t for t in thread_ids if paths.get(t) in self._incremental_paths}
+        for thread_id in sorted(thread_ids):
             try:
                 self.reply_in_thread(thread_id, _RESOLVED_REPLY)
                 resp = self._client.put(
@@ -520,11 +701,149 @@ class GitLabGateway:
 
     def _find_note(self, family: str) -> int | None:
         """The id of our existing note in ``family``, or None."""
+        note = self._family_note(family)
+        if note is None:
+            return None
+        note_id = note.get("id")
+        return int(note_id) if note_id is not None else None
+
+    def _family_note(self, family: str) -> dict[str, Any] | None:
+        """The note an upsert in ``family`` would edit, or None."""
         for note in self._notes():
             if family in (note.get("body") or ""):
-                note_id = note.get("id")
-                return int(note_id) if note_id is not None else None
+                return note
         return None
+
+    def _carried_marker(self, family: str, pattern: re.Pattern[str]) -> str | None:
+        """The stamp already on the note an upsert in ``family`` will edit.
+
+        Carried forward so an edit that sets no new stamp keeps the old one.
+        Taken from the very note being replaced, whoever wrote it: readers only
+        believe a stamp in a note our own identity wrote, so carrying one never
+        makes it trusted. A read failure carries nothing, which only costs the
+        next run a full review.
+        """
+        try:
+            return _last_match(pattern, self._family_note(family))
+        except (httpx.HTTPError, ValueError) as exc:
+            _log.warning("reading the previous %s note failed: %s", family, exc)
+            return None
+
+    def _own_note(
+        self, family: str, required: re.Pattern[str] | None = None
+    ) -> dict[str, Any] | None:
+        """Our own newest note in ``family`` (carrying ``required``, when given).
+
+        Resolves the token's identity only when a candidate exists, so a merge
+        request with no such note costs no extra request. An identity that
+        cannot be established yields None: no note is trusted without it.
+        """
+        candidates = [
+            note
+            for note in self._notes()
+            if family in (body := note.get("body") or "")
+            and (required is None or required.search(body))
+        ]
+        if not candidates:
+            return None
+        user_id = self._posting_user()
+        if user_id is None:
+            return None
+        return next(
+            (note for note in candidates if (note.get("author") or {}).get("id") == user_id),
+            None,
+        )
+
+    def _posting_user(self) -> int | None:
+        """The token's own user id, fetched once per run; None when unknown."""
+        if not self._posting_user_done:
+            self._posting_user_done = True
+            data = self._get_json(f"{self._root}/user")
+            user_id = data.get("id") if isinstance(data, dict) else None
+            self._posting_user_id = user_id if isinstance(user_id, int) else None
+        return self._posting_user_id
+
+    def _compare(self, from_sha: str, to_sha: str) -> dict[str, Any] | None:
+        """The straight (``git diff from to``) comparison, or None on any failure."""
+        key = (from_sha, to_sha)
+        if key not in self._compare_cache:
+            comparison: dict[str, Any] | None = None
+            try:
+                resp = self._client.get(
+                    f"{self._api}/repository/compare",
+                    headers=self._headers,
+                    params={"from": from_sha, "to": to_sha, "straight": "true"},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                comparison = payload if isinstance(payload, dict) else None
+            except (httpx.HTTPError, ValueError) as exc:
+                _log.info("compare %s..%s failed: %s", from_sha[:7], to_sha[:7], exc)
+            self._compare_cache[key] = comparison
+        return self._compare_cache[key]
+
+    def _is_outdated(self, position: dict[str, Any]) -> bool:
+        """Whether the code under a positioned note changed since it was placed.
+
+        GitLab re-positions a note onto each new head while its line survives,
+        so a note still positioned at an older head is one whose code moved. It
+        is outdated when a hunk of the straight diff from that head to ours
+        covers its new-side line, or its file was deleted. Fails closed: an
+        unknown head, a LEFT-side note (pushes do not change the base), a
+        withheld patch, or any compare failure all read as not outdated, so
+        nothing is resolved without evidence.
+        """
+        head = self._head_sha
+        posted_at = position.get("head_sha")
+        path = position.get("new_path")
+        line = position.get("new_line")
+        if not head or not isinstance(posted_at, str) or posted_at == head:
+            return False
+        if not path or not isinstance(line, int):
+            return False
+        diffs = (self._compare(posted_at, head) or {}).get("diffs")
+        if not isinstance(diffs, list):
+            return False
+        for entry in diffs:
+            if not isinstance(entry, dict) or entry.get("old_path") != path:
+                continue
+            if entry.get("deleted_file"):
+                return True
+            for raw in (entry.get("diff") or "").split("\n"):
+                hunk = parse_hunk_header(raw)
+                if hunk and hunk.old_start <= line < hunk.old_start + max(hunk.old_len, 1):
+                    return True
+        return False
+
+    def _thumbs_down_users(self, note_id: int) -> set[int]:
+        """Ids of the users who awarded 👎 to one note; empty when unreadable."""
+        try:
+            awards = self._paginate(f"{self._mr_api}/notes/{note_id}/award_emoji")
+        except (httpx.HTTPError, ValueError) as exc:
+            _log.warning("reading award emoji on note %s failed: %s", note_id, exc)
+            return set()
+        users: set[int] = set()
+        for award in awards:
+            user_id = (award.get("user") or {}).get("id")
+            if award.get("name") == _THUMBS_DOWN and isinstance(user_id, int):
+                users.add(user_id)
+        return users
+
+    def _can_push(self, user_id: int) -> bool:
+        """Whether a user is a Developer-or-above member; fails closed, cached."""
+        cached = self._push_access_cache.get(user_id)
+        if cached is not None:
+            return cached
+        allowed = False
+        try:
+            member = self._get_json(f"{self._api}/members/all/{user_id}")
+            level = member.get("access_level") if isinstance(member, dict) else None
+            allowed = isinstance(level, int) and level >= _DEVELOPER_ACCESS
+        except (httpx.HTTPError, ValueError) as exc:
+            _log.warning("membership check for user %s failed: %s", user_id, exc)
+        self._push_access_cache[user_id] = allowed
+        return allowed
 
     def _fetch_mr_diff(self) -> str:
         """The merge request's unified diff."""
@@ -580,3 +899,95 @@ class GitLabGateway:
             limit=_PAGE_LIMIT,
             timeout=_TIMEOUT,
         )
+
+
+def _last_match(pattern: re.Pattern[str], note: dict[str, Any] | None) -> str | None:
+    """The last capture of ``pattern`` in a note's body, or None.
+
+    The last, because the adapter always appends its own stamp after the body.
+    """
+    if note is None:
+        return None
+    found: list[str] = pattern.findall(note.get("body") or "")
+    return found[-1] if found else None
+
+
+def _unusable_increment(comparison: dict[str, Any], base_sha: str, head_sha: str) -> str | None:
+    """Why a comparison cannot stand in for a review of base..head, or None.
+
+    The commit list is ``git log base..head``. On a plain push it is a chain of
+    single-parent commits from head back to base; anything else (a rebase or
+    force-push, where the chain ends somewhere other than base; a merge; a
+    commit outside the chain; an empty list, GitLab's answer for an unknown SHA)
+    means the diff does not describe "what was pushed since the review".
+    """
+    if comparison.get("compare_same_ref"):
+        return "identical refs"
+    if comparison.get("compare_timeout"):
+        return "compare timed out"
+    commits = comparison.get("commits")
+    if not isinstance(commits, list) or not commits:
+        return "no commits between the two SHAs"
+    parents: dict[str, str] = {}
+    for commit in commits:
+        commit_id = commit.get("id") if isinstance(commit, dict) else None
+        parent_ids = commit.get("parent_ids") if isinstance(commit, dict) else None
+        if not isinstance(commit_id, str) or not isinstance(parent_ids, list):
+            return "commit ancestry is not verifiable"
+        if len(parent_ids) != 1 or not isinstance(parent_ids[0], str):
+            return "the increment contains a merge"
+        parents[commit_id] = parent_ids[0]
+    current, walked = head_sha, 0
+    while current != base_sha:
+        if current not in parents or walked >= len(parents):
+            return "head does not descend from the last reviewed commit"
+        current, walked = parents[current], walked + 1
+    if walked != len(parents):
+        return "the commit list holds commits outside the push"
+    diffs = comparison.get("diffs")
+    if not isinstance(diffs, list):
+        return "no file diffs"
+    if len(diffs) >= _COMPARE_MAX_FILES:
+        return "the file list may be cut short at GitLab's diff limit"
+    for entry in diffs:
+        if not isinstance(entry, dict):
+            return "malformed file diff"
+        if any(entry.get(flag) for flag in _TRUNCATION_FLAGS):
+            return "GitLab withheld part of a file's patch"
+        for key in ("old_path", "new_path"):
+            path = entry.get(key)
+            if not isinstance(path, str) or not path:
+                return "a file diff names no path"
+            if any(char in path for char in _UNSAFE_PATH_CHARS):
+                return "a file path cannot be written into a diff header safely"
+    return None
+
+
+def _unified_diff(entries: list[dict[str, Any]]) -> str:
+    """Reassemble the compare API's per-file patches into one ``git diff``.
+
+    Each entry already carries its hunks; what it lacks is the file header the
+    shared diff parser keys on. Paths were vetted by ``_unusable_increment``.
+    """
+    parts: list[str] = []
+    for entry in entries:
+        old, new = entry["old_path"], entry["new_path"]
+        a_mode, b_mode = entry.get("a_mode"), entry.get("b_mode")
+        lines = [f"diff --git a/{old} b/{new}"]
+        if entry.get("new_file"):
+            lines.append(f"new file mode {b_mode or '100644'}")
+        elif entry.get("deleted_file"):
+            lines.append(f"deleted file mode {a_mode or '100644'}")
+        else:
+            if a_mode and b_mode and a_mode != b_mode:
+                lines += [f"old mode {a_mode}", f"new mode {b_mode}"]
+            if entry.get("renamed_file"):
+                lines += [f"rename from {old}", f"rename to {new}"]
+        patch = entry.get("diff") or ""
+        if patch:
+            lines.append("--- /dev/null" if entry.get("new_file") else f"--- a/{old}")
+            lines.append("+++ /dev/null" if entry.get("deleted_file") else f"+++ b/{new}")
+            if not patch.endswith("\n"):
+                patch += "\n"
+        parts.append("\n".join(lines) + "\n" + patch)
+    return "".join(parts)

@@ -84,7 +84,7 @@ sequence diagram when the change alters a runtime flow. Run `lgtmaybe diagram`
 for a local text version. See
 [Generate a change overview](docs/how-to/generate-a-change-diagram.md).
 
-On GitHub, a push triggers an incremental review of only the new commits.
+On GitHub and GitLab, a push triggers an incremental review of only the new commits.
 Optional `triage_model` lets a cheap model skip plainly non-substantive files.
 Optional `static_analysis` runs installed tools: ruff, bandit, mypy, and semgrep
 feed hints to the model, while gitleaks, zizmor, ast-grep, and osv-scanner post
@@ -169,7 +169,8 @@ findings. What differs is what each host's API can do with the result:
 | Inline comments + summary | ✅ | ✅ | ✅ |
 | Slash commands | ✅ | ✅ | ✅ |
 | Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API |
-| Incremental re-review | ✅ | not yet | ✗ no compare diff |
+| Incremental re-review | ✅ | ✅ | ✗ no compare diff |
+| Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ |
 | Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key |
 
 ## Documentation

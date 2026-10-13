@@ -81,6 +81,13 @@ def marker(family: str, key: str | None) -> str:
 # and the existing-overview check so the two can never drift apart.
 DIAGRAM_MARKER_FAMILY = "lgtmaybe-diagram"
 
+# Completion watermarks driving incremental review, shared by every adapter that
+# offers it so the wire format cannot drift between forges. The review summary
+# carries the last head whose review fully posted; the diagram comment carries
+# the last head whose required overview posted. The capture group is the SHA.
+REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
+DIAGRAMMED_MARKER = re.compile(r"<!-- lgtmaybe-diagrammed:([0-9a-f]{7,40}) -->")
+
 # A fenced Mermaid diagram — the one kind all three forges render. The info
 # string is what marks it; the word in prose proves nothing. PlantUML is left
 # out: GitHub and Gitea show it as source, which replaces no rendered overview.

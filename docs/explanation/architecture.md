@@ -81,8 +81,8 @@ cannot do instead of failing at run time.
 | `SupportsLabels` | ✅ | ✅ | ✅ |
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
-| `SupportsIncremental`: review only new commits | ✅ | not yet | ✗ no compare diff |
-| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ |
+| `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ |
 
 `tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
@@ -101,7 +101,12 @@ Gitea is close to GitHub; GitLab is not.
   on the pull request.
 - **GitLab** has no batched review object. Each finding is its own
   **discussion**, positioned by old/new path and line plus the merge request's
-  `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST.
+  `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST. Its
+  compare API returns per-file patches and no "ahead" status, so the adapter
+  reassembles the increment into a unified diff and checks from the commits'
+  parent ids that the new head builds on the last reviewed one. It also works
+  out the "lines moved" signal GitLab doesn't expose, from the diff since each
+  discussion was posted.
 
 lgtmaybe uses GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
 it at each adapter's boundary: `new_position`/`old_position` on Gitea,
@@ -116,7 +121,9 @@ own instance.
 
 GitLab CI has neither an event payload file nor `INPUT_*` variables, so it gets
 its own `gitlab-ci` command that reads GitLab's predefined `CI_*` variables.
-Everything downstream (locator, gateway registry, engine) is shared.
+Everything downstream (locator, gateway registry, engine) is shared. With no
+`synchronize` action to key on, `gitlab-ci` treats an unset `incremental` as on:
+the first pipeline has no watermark yet, so it is a full review anyway.
 
 ## Review Pipeline
 

@@ -550,14 +550,16 @@ class TestCapabilities:
             "SupportsChecks",
             "SupportsThreadResolution",
             "SupportsConversation",
+            "SupportsIncremental",
+            "SupportsFeedback",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
-    def test_does_not_claim_incremental_review(self) -> None:
-        """Reviewing an increment needs a diff between two commits; that comes later."""
+    def test_does_not_claim_a_base_checkout(self) -> None:
+        """Symbol lookup clones the base branch; nothing on GitLab offers that yet."""
         from lgtmaybe.core import ports
 
-        assert not isinstance(GitLabGateway.__new__(GitLabGateway), ports.SupportsIncremental)
+        assert not isinstance(GitLabGateway.__new__(GitLabGateway), ports.SupportsBaseCheckout)
 
 
 class TestLabels:
