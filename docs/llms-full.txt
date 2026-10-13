@@ -1,6 +1,6 @@
 # lgtmaybe — full documentation
 
-> AI code review for GitHub, GitLab, Gitea, and local Git diffs. It posts inline findings and a summary on pull and merge requests, or prints findings locally. Choose from seven hosted providers, ollama, or any OpenAI-compatible endpoint. Bedrock, Vertex, and Azure support keyless cloud auth.
+> AI code review for GitHub, GitLab, Gitea, Azure DevOps, and local Git diffs. It posts inline findings and a summary on pull and merge requests, or prints findings locally. Choose from seven hosted providers, ollama, or any OpenAI-compatible endpoint. Bedrock, Vertex, and Azure support keyless cloud auth.
 
 Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
@@ -16,9 +16,9 @@ Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 
 </div>
 
-lgtmaybe reviews pull and merge requests on **GitHub, GitLab, and Gitea**. You
-can also review a local Git diff before pushing. Choose a hosted model, ollama,
-or another OpenAI-compatible endpoint. Reviews on a code host post inline
+lgtmaybe reviews pull and merge requests on **GitHub, GitLab, Gitea, and Azure
+DevOps**. You can also review a local Git diff before pushing. Choose a hosted
+model, ollama, or another OpenAI-compatible endpoint. Reviews on a code host post inline
 comments and one summary; local reviews print findings in your terminal.
 
 It reads the diff and a little surrounding code, but comments only on changed
@@ -66,7 +66,7 @@ flowchart LR
 <div class="grid cards" markdown>
 
 - **Tutorial:** [Getting started](tutorial/getting-started.md): your first review with ollama, locally and free.
-- **How-to:** [install the CLI](how-to/install-the-cli.md), [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md).
+- **How-to:** [install the CLI](how-to/install-the-cli.md), [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md), [Azure DevOps](how-to/review-on-azure-devops.md).
 - **Reference:** [Configuration](reference/config.md): every config field and schema.
 - **Explanation:** [What gets reviewed](explanation/what-gets-reviewed.md), [Architecture](explanation/architecture.md), [Auth model](explanation/auth-model.md), [Data & privacy](explanation/data-and-privacy.md).
 
@@ -96,9 +96,10 @@ on any host below.
 | GitHub | GitHub Action | `GITHUB_TOKEN` | [GitHub Action](how-to/use-as-github-action.md) |
 | GitLab | GitLab CI job | `GITLAB_TOKEN` | [Review on GitLab](how-to/review-on-gitlab.md) |
 | Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
+| Azure DevOps | Azure Pipelines job | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](how-to/review-on-azure-devops.md) |
 | None | `lgtmaybe review` locally | n/a | [Install the CLI](how-to/install-the-cli.md) |
 
-The same review runs on all three hosts. They differ in thread resolution,
+The same review runs on every host. They differ in thread resolution,
 incremental reviews, and keyless cloud auth. See
 [Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 
@@ -266,8 +267,8 @@ terminal. Paste the Mermaid into a GitHub comment or
 ## Step 7: Post Reviews on Real Pull Requests
 
 The CLI reviews local changes. To post inline comments and a summary on real
-pull requests, wire lgtmaybe into your code host. The review is the same on all
-three; only the setup differs:
+pull requests, wire lgtmaybe into your code host. The review is the same on
+every host; only the setup differs:
 
 - **GitHub:** add the Action to your repo.
   See [Use as a GitHub Action](../how-to/use-as-github-action.md).
@@ -275,6 +276,8 @@ three; only the setup differs:
   See [Review on GitLab](../how-to/review-on-gitlab.md).
 - **Gitea:** add a Gitea Actions workflow.
   See [Review on Gitea](../how-to/review-on-gitea.md).
+- **Azure DevOps:** add an Azure Pipelines build validation policy.
+  See [Review on Azure DevOps](../how-to/review-on-azure-devops.md).
 
 ## What Happened Under the Hood
 
@@ -1156,6 +1159,243 @@ revokes it at the end of the job. To review across repositories, set
 
 Do not combine `app_id` / `app_private_key` with
 `github_identity: lgtmaybe`. The Action checks this before minting a token.
+
+---
+
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-on-azure-devops/ -->
+
+# Review Pull Requests on Azure DevOps
+
+lgtmaybe posts reviews to Azure DevOps Repos as well as GitHub, GitLab and
+Gitea. The review itself is identical (same lenses, same reflection pass, same
+findings) because none of it depends on the host. Only the adapter that reads
+the change and posts the comments differs.
+
+Azure DevOps Services is supported: `dev.azure.com/{organisation}` and the
+legacy `{organisation}.visualstudio.com`. Azure DevOps Server (on-premises) is
+not supported yet.
+
+## Set It Up
+
+Azure Pipelines runs a pull request build from the YAML in the pull request
+itself, so the job that holds the model key must not live in the repository
+being reviewed. The setup below keeps it in a template in a separate, protected
+repository, and the reviewed repository only extends it. Read
+[Security: who can change the pipeline](#security-who-can-change-the-pipeline)
+before choosing anything simpler.
+
+1. **Create a protected template repository.** For example
+   `Platform/pipeline-templates`. Add branch policies to its `main` branch so
+   nobody can change it without a review from someone trusted with the secrets.
+   Commit
+   [`examples/azure-devops/lgtmaybe-review.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/azure-devops/lgtmaybe-review.yml)
+   to it.
+
+2. **Store the model key in a variable group.** In *Pipelines → Library*,
+   create a variable group named `lgtmaybe-secrets` holding the provider key as
+   a secret, for example `ANTHROPIC_API_KEY`. Use a key with a spend limit.
+
+3. **Require the template.** On that variable group, open *Approvals and
+   checks*, add a **Required template** check, and name the template
+   repository, `refs/heads/main` and `lgtmaybe-review.yml`. A pipeline that does
+   not extend exactly that template is refused the key, whatever its YAML says.
+
+4. **Let the pipeline comment.** lgtmaybe posts with the job's own token,
+   `System.AccessToken`. In *Project settings → Repositories → Security*,
+   select the project's build service identity
+   (`<Project> Build Service (<Organisation>)`) on the reviewed repository and
+   allow **Contribute to pull requests**, and nothing broader.
+
+5. **Add the pipeline to the reviewed repository.** Copy
+   [`examples/azure-devops/azure-pipelines.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/azure-devops/azure-pipelines.yml),
+   point its `resources.repositories` entry at your template repository, and
+   create a pipeline from it. Approve its access to the template repository and
+   the variable group on the first run.
+
+6. **Run it on pull requests.** Azure Repos starts pull request builds from a
+   branch policy, not from a `pr:` trigger. In *Project settings →
+   Repositories → Policies*, open the target branch and add the pipeline under
+   **Build validation**.
+
+The reviewed repository's pipeline holds no steps and no secrets:
+
+```yaml
+trigger: none
+
+resources:
+  repositories:
+    - repository: trusted
+      type: git
+      name: Platform/pipeline-templates
+      ref: refs/heads/main
+
+extends:
+  template: lgtmaybe-review.yml@trusted
+```
+
+The template in the protected repository runs the GHCR image with the
+`azure-pipelines` command:
+
+```yaml
+jobs:
+  - job: lgtmaybe
+    pool:
+      vmImage: ubuntu-latest
+    variables:
+      - group: lgtmaybe-secrets
+    steps:
+      - checkout: none
+
+      - script: |
+          docker run --rm \
+            -e SYSTEM_COLLECTIONURI -e SYSTEM_TEAMPROJECT \
+            -e BUILD_REPOSITORY_NAME -e BUILD_REPOSITORY_PROVIDER \
+            -e SYSTEM_PULLREQUEST_PULLREQUESTID \
+            -e SYSTEM_ACCESSTOKEN -e ANTHROPIC_API_KEY \
+            ghcr.io/mattjcoles/lgtmaybe:v2 \
+            azure-pipelines --provider anthropic --model claude-sonnet-4-6
+        displayName: lgtmaybe review
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+          ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+```
+
+Secret variables, `System.AccessToken` included, reach a script only when they
+are mapped under `env:`, which is why both are listed there. The template takes
+no parameters on purpose: a parameter would let the pull request's YAML pass
+steps into the job that holds the secrets.
+
+`azure-pipelines` finds the pull request from the predefined variables
+`SYSTEM_COLLECTIONURI`, `SYSTEM_TEAMPROJECT`, `BUILD_REPOSITORY_NAME` and
+`SYSTEM_PULLREQUEST_PULLREQUESTID`. On a build that is not validating a pull
+request there is no id, and lgtmaybe fails with an error naming the missing
+variable rather than guessing. A pipeline building a GitHub repository is
+refused too: those pull requests live on GitHub, so use the
+[GitHub Action](use-as-github-action.md). Azure Pipelines always sets
+`BUILD_REPOSITORY_PROVIDER`; when it is unset (running the command by hand),
+the repository is treated as Azure Repos.
+
+Configure the review with the command's flags: `--provider`, `--model`,
+`--fallback-model`, `--api-key`, `--api-base` and `--config`.
+
+### Without Docker
+
+On a self-hosted agent without Docker, install the CLI instead. These steps
+replace the `steps:` of the protected template, never the reviewed
+repository's pipeline:
+
+```yaml
+    steps:
+      - checkout: none
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: "3.12"
+      - script: |
+          pip install lgtmaybe
+          lgtmaybe azure-pipelines --provider anthropic --model claude-sonnet-4-6
+        displayName: lgtmaybe review
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+          ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+```
+
+## Tokens
+
+lgtmaybe reads the Azure DevOps token from one of two variables:
+
+| Variable | What it is | Sent as |
+|---|---|---|
+| `AZURE_DEVOPS_TOKEN` | A personal access token with **Code (Read & write)** scope | Basic auth, empty user name |
+| `SYSTEM_ACCESSTOKEN` | The job's own token, mapped from `$(System.AccessToken)` | Bearer token |
+
+When both are set, `AZURE_DEVOPS_TOKEN` wins. Use a personal access token when
+the comments should come from a named account rather than the build service.
+Either way the token travels only in the `Authorization` header and is never
+logged.
+
+## Try It Locally First
+
+Reviewing a pull request by URL happens in the pipeline, where the token and
+the pull request live. Locally, `lgtmaybe review` reviews the branch you have
+checked out against the remote primary branch, and prints the findings instead
+of posting them:
+
+```bash
+git switch my-feature-branch
+export ANTHROPIC_API_KEY=...
+lgtmaybe review --provider anthropic --model claude-sonnet-4-6
+```
+
+## How It Differs from GitHub
+
+Azure DevOps serves no unified diff. lgtmaybe reads the pull request's latest
+iteration, lists the files it changes against the merge base, fetches each
+file's text before and after, and builds the diff itself. Lockfiles, vendored
+and binary files are listed as changed but never fetched, and a file side over
+1 MB is treated like a binary. A pull request changing more than 300 files is
+not reviewed; lgtmaybe says so instead of reviewing part of it. The same goes
+when Azure DevOps reports no merge base for the pull request. A file Azure
+DevOps keeps throttling or failing to return is retried, then left out on its
+own and named under **Files not reviewed** in the summary; a 401 or 403 fails
+the review, since that means the token is wrong.
+
+Each finding is its own comment thread on the changed line, left **active** so
+a "resolve all comments" branch policy can hold the merge until someone deals
+with it. The summary is a general thread that is edited in place on each run.
+It is created **closed**, so it never holds a merge on its own. A finding whose
+thread is already open, or marked *Won't fix* or *Closed*, is not posted again;
+a finding whose thread was marked *Resolved* and that comes back is.
+
+These are not available yet:
+
+| Not available | Why | What happens instead |
+|---|---|---|
+| Incremental review | Not built yet | Every run is a full review |
+| Resolve-on-fix | Not built yet; Azure DevOps threads can be resolved over REST | Fixed findings' threads stay open for a human to resolve |
+| Slash commands (`/review`, `/ask`, …) | `azure-pipelines` reviews the pull request; nothing routes comments to it | Queue the build again to review again |
+| Change overview comment | `azure-pipelines` runs the review only | No description or diagram thread is posted |
+| PR labels and the `fail_on` merge gate | Not built yet in the Azure DevOps adapter | No labels or pull request status are set |
+| 👎 feedback (`learn_feedback`) | Not built yet | A downvoted finding can be posted again on a later run |
+| Symbol resolution | No base-branch clone in the Azure DevOps adapter | Reflection judges cross-file findings without the symbol's definition |
+| One-click suggestions | Azure DevOps has no suggestion blocks | A suggested fix shows as a code block |
+| Azure DevOps Server | Only Azure DevOps Services URLs are recognised | The URL is refused with an error naming Azure DevOps Server |
+
+Keyless model auth (Bedrock, Vertex, Azure OpenAI through GitHub OIDC) is built
+into the GitHub composite action, not the `azure-pipelines` command. Use an API
+key, or `ollama` against a model on the agent.
+
+## Security: Who Can Change the Pipeline
+
+A pull request build in Azure Pipelines runs the YAML from the pull request's
+own merge result. This is the opposite of GitHub's `pull_request_target`, where
+the base branch's workflow runs. Anyone who can push a branch and open a pull
+request can therefore rewrite a pipeline file in that repository, keep its
+variable mappings, and send every secret those steps can read to a server of
+their choosing. `checkout: none` does not help: the YAML itself is the part the
+pull request controls.
+
+So a pipeline file in the reviewed repository that maps a secret is only safe
+when everyone who can open a pull request there is already trusted with that
+secret. Otherwise use the setup above:
+
+- The secret-bearing job lives in a template in a separate repository with
+  branch policies, and the reviewed repository only `extends` it.
+- The model key sits in a variable group guarded by a **Required template**
+  check, so a pipeline that drops the `extends`, or points it at another branch
+  or file, is refused the key.
+- **Builds of pull requests from forks get no secrets by default. Keep that
+  setting off.**
+- Grant the build service only **Contribute to pull requests** on the reviewed
+  repository, and keep *Limit job authorization scope to current project*
+  turned on. Any pipeline can map its own `System.AccessToken`, so its
+  permissions are what a rewritten pipeline could use.
+- Prefer `System.AccessToken` over a personal access token. If you must use a
+  personal access token, give it only **Code (Read & write)** on this
+  organisation, a short expiry, and keep it in the protected variable group.
+- Use a model key with a spend limit, so a leaked key has a ceiling.
+
+lgtmaybe itself never checks out or executes pull request code. It reads the
+change through the API and treats every byte of it as untrusted input.
 
 ---
 
@@ -7985,7 +8225,8 @@ surface left undocumented, are exempt and still raised.
 
 ### On a Pull or Merge Request
 
-The rendering below is GitHub's. GitLab and Gitea show the same findings with
+The rendering below is GitHub's. GitLab, Gitea and Azure DevOps show the same
+findings with
 the same badges; [how each host posts them](#how-each-host-posts) differs, and
 is covered at the end of this section.
 
@@ -8057,25 +8298,28 @@ normally.
 
 On **GitLab** the same thing happens over plain REST. On **Gitea** it does not
 happen at all: Gitea has no thread-resolution API, so finding comments stay open
-for a human to close.
+for a human to close. On **Azure DevOps** it is not built yet, so finding
+threads also stay open.
 
 ### How Each Host Posts
 
 The findings are identical everywhere. What each host's API allows is not:
 
-| | GitHub | GitLab | Gitea |
-|---|---|---|---|
-| Inline comments | one batched review | one discussion per finding | one batched review |
-| Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place |
-| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted |
-| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
-| Incremental review of new commits | ✅ | ✅ | ✗ no compare diff |
-| Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ |
+| | GitHub | GitLab | Gitea | Azure DevOps |
+|---|---|---|---|---|
+| Inline comments | one batched review | one discussion per finding | one batched review | one thread per finding |
+| Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place | a general thread, edited in place |
+| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids it posted itself, once the token's identity is known |
+| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
+| Incremental review of new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ | not yet |
 
 A submitted **Gitea** review can't be edited, so its summary moves to an
 ordinary comment and duplicate findings are filtered *before* posting.
 **GitLab** has no batched review object, so each finding becomes its own
-positioned discussion.
+positioned discussion. **Azure DevOps** serves no diff at all, so lgtmaybe
+builds one from the file contents before and after the change, and each finding
+becomes its own positioned thread.
 
 When a PR is clean (no findings, and every file was within the caps), the
 summary is short:
@@ -8279,6 +8523,7 @@ flowchart TB
     github["github/<br/>GitHub REST adapter"] -- implements --> ports
     gitlab["gitlab/<br/>GitLab REST adapter"] -- implements --> ports
     gitea["gitea/<br/>Gitea REST adapter"] -- implements --> ports
+    azure["azure_devops/<br/>Azure DevOps REST adapter"] -- implements --> ports
 ```
 
 Two independent choices meet at these ports: which **model** reviews the code
@@ -8319,6 +8564,7 @@ The URL is all lgtmaybe needs:
 | `github.com/org/repo/pull/42` | GitHub | `GITHUB_TOKEN` |
 | `gitlab.com/group/sub/project/-/merge_requests/42` | GitLab | `GITLAB_TOKEN` |
 | `gitea.example.com/org/repo/pulls/42` | Gitea | `GITEA_TOKEN` |
+| `dev.azure.com/org/project/_git/repo/pullrequest/42` | Azure DevOps | `AZURE_DEVOPS_TOKEN` or `SYSTEM_ACCESSTOKEN` |
 
 The host is parsed from the URL rather than assumed, because self-hosted GitLab
 and Gitea are the normal case. `cli._GATEWAY_BUILDERS` maps the resolved forge
@@ -8331,25 +8577,25 @@ to its adapter.
 is useful long before it is complete, and it can be honest about what its host
 cannot do instead of failing at run time.
 
-| Capability | GitHub | GitLab | Gitea |
-|---|---|---|---|
-| `SupportsFileContents`: read head text for context | ✅ | ✅ | ✅ |
-| `SupportsDescribe` / `SupportsDiagram`: upserted comments | ✅ | ✅ | ✅ |
-| `SupportsConversation`: read existing comments | ✅ | ✅ | ✅ |
-| `SupportsLabels` | ✅ | ✅ | ✅ |
-| `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ |
-| `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
-| `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff |
-| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ |
-| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ |
+| Capability | GitHub | GitLab | Gitea | Azure DevOps |
+|---|---|---|---|---|
+| `SupportsFileContents`: read head text for context | ✅ | ✅ | ✅ | ✅ |
+| `SupportsDescribe` / `SupportsDiagram`: upserted comments | ✅ | ✅ | ✅ | ✅ |
+| `SupportsConversation`: read existing comments | ✅ | ✅ | ✅ | ✅ |
+| `SupportsLabels` | ✅ | ✅ | ✅ | not yet |
+| `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
+| `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
+| `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
+| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
 `tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
-and the GitLab and Gitea tests assert those adapters do **not** claim what
-their host cannot serve. That keeps this table honest.
+and the GitLab, Gitea and Azure DevOps tests assert those adapters do **not**
+claim what they cannot serve. That keeps this table honest.
 
 ### Where the Hosts Differ
 
-Gitea is close to GitHub; GitLab is not.
+Gitea is close to GitHub; GitLab and Azure DevOps are not.
 
 - **GitHub** batches every inline comment into one review object and resolves
   threads over GraphQL.
@@ -8365,10 +8611,15 @@ Gitea is close to GitHub; GitLab is not.
   parent ids that the new head builds on the last reviewed one. It also works
   out the "lines moved" signal GitLab doesn't expose, from the diff since each
   discussion was posted.
+- **Azure DevOps** serves no unified diff. The adapter lists the latest
+  iteration's changed files against the merge base, fetches each file's text
+  on both sides, and renders the diff with `core/diffbuild.py`, so the shared
+  parser reads it like any other. Each finding is its own thread positioned by
+  `threadContext`, and the summary is a general thread edited in place.
 
 lgtmaybe uses GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
 it at each adapter's boundary: `new_position`/`old_position` on Gitea,
-`new_line`/`old_line` on GitLab.
+`new_line`/`old_line` on GitLab, right-file/left-file ranges on Azure DevOps.
 
 ### Entrypoints
 
@@ -8382,6 +8633,8 @@ its own `gitlab-ci` command that reads GitLab's predefined `CI_*` variables.
 Everything downstream (locator, gateway registry, engine) is shared. With no
 `synchronize` action to key on, `gitlab-ci` treats an unset `incremental` as on:
 the first pipeline has no watermark yet, so it is a full review anyway.
+Azure Pipelines is in the same position, so `azure-pipelines` reads its
+predefined `SYSTEM_*` and `BUILD_*` variables.
 
 ## Review Pipeline
 
@@ -8840,6 +9093,7 @@ the change-request URL:
 | GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is enough |
 | GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
 | Gitea | `GITEA_TOKEN` | A token with `write:repository` and `write:issue` |
+| Azure DevOps | `AZURE_DEVOPS_TOKEN`, else `SYSTEM_ACCESSTOKEN` | A personal access token with Code (Read & write) scope, or the pipeline's own token with *Contribute to pull requests* granted to the build service |
 
 These are always tokens. There is no keyless path to a code host, and lgtmaybe
 does not attempt one. The token is read from the environment only and, like a
@@ -8848,8 +9102,8 @@ provider key, is never written to `.lgtmaybe.yml` or logged.
 !!! note "Keyless cloud auth is GitHub-only"
 
     Bedrock, Vertex, and Azure go keyless by exchanging a **GitHub Actions**
-    OIDC token. GitLab CI and Gitea Actions have no equivalent exchange wired
-    up, so on those hosts use an API-key provider, or `ollama` against a
+    OIDC token. GitLab CI, Gitea Actions and Azure Pipelines have no equivalent
+    exchange wired up, so on those hosts use an API-key provider, or `ollama` against a
     runner-local model, which needs no credential at all.
 
 ## Least-Privilege IAM

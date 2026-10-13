@@ -37,7 +37,7 @@ noticing — and tests inject fakes instead of patching.
    └───────┬───────────────────────────┬───────────┘
            │ ProviderClient            │ ReviewGateway
            ▼                           ▼
-   providers/ (litellm)        github/ · gitlab/ · gitea/
+   providers/ (litellm)        github/ · gitlab/ · gitea/ · azure_devops/
            │                    (REST)  ·  local/ (git)
            │                           │
            ▼                           ▼
@@ -88,6 +88,7 @@ lgtmaybe/
 │   │   └── checkout.py      #   read-only base-branch clone for symbol resolution
 │   ├── gitlab/              # GitLab adapter — discussions, REST thread resolution
 │   ├── gitea/               # Gitea adapter — immutable reviews, pre-post de-dupe
+│   ├── azure_devops/        # Azure DevOps adapter: diff built from file contents, threads
 │   │
 │   ├── lenses/              # bundled opt-in lens packs (design/robustness/interface/frontend), loaded via pack:<name>
 │   ├── local/               # local-mode adapter: build a PRContext from `git`
@@ -108,6 +109,7 @@ lgtmaybe/
 ├── examples/workflows/      # one ready-to-copy GitHub workflow per model provider
 ├── examples/gitlab/         # ready-to-copy .gitlab-ci.yml
 ├── examples/gitea/          # ready-to-copy Gitea Actions workflow
+├── examples/azure-devops/   # ready-to-copy azure-pipelines.yml
 │
 ├── action.yml              # composite Action: keyless OIDC/WIF auth → docker run GHCR image
 ├── Dockerfile              # lean runtime image (uv sync --no-dev --frozen)
@@ -150,14 +152,15 @@ resolved forge to its adapter.
 | GitHub | `/pull/42` | `GITHUB_TOKEN` | `lgtmaybe action` (GitHub Actions) |
 | GitLab | `/-/merge_requests/42` | `GITLAB_TOKEN` | `lgtmaybe gitlab-ci` (CI_* vars) |
 | Gitea | `/pulls/42` | `GITEA_TOKEN` | `lgtmaybe action` (same runtime as GitHub) |
+| Azure DevOps | `/_git/repo/pullrequest/42` | `AZURE_DEVOPS_TOKEN` or `SYSTEM_ACCESSTOKEN` | `lgtmaybe azure-pipelines` (SYSTEM_* vars) |
 
 `ReviewGateway` requires only three methods — fetch context, post a review, post
 a comment. Everything richer (incremental review, thread resolution, labels,
 checks, feedback, file reads) is an optional `Supports*` protocol the CLI probes
 for and skips when absent. That is what lets an adapter be **honest** about what
 its host cannot do rather than failing at run time: Gitea claims neither
-incremental review nor thread resolution, and GitLab claims thread resolution
-but not (yet) incremental.
+incremental review nor thread resolution, GitLab claims thread resolution
+but not (yet) incremental, and Azure DevOps claims neither yet.
 
 The engine never sees a gateway at all — it takes a `PRContext` and returns
 findings — which is why `local/` can produce one from `git` with no host

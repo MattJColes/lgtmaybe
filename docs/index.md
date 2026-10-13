@@ -1,5 +1,5 @@
 ---
-description: Provider-agnostic AI code review for pull and merge requests on GitHub, GitLab and Gitea, using OpenAI, Claude, Bedrock, Vertex, Azure, ollama or any OpenAI-compatible endpoint. Inline review comments, keyless OIDC/WIF cloud auth, GitHub Action, GitLab CI and CLI.
+description: Provider-agnostic AI code review for pull and merge requests on GitHub, GitLab, Gitea and Azure DevOps, using OpenAI, Claude, Bedrock, Vertex, Azure, ollama or any OpenAI-compatible endpoint. Inline review comments, keyless OIDC/WIF cloud auth, GitHub Action, GitLab CI and CLI.
 ---
 
 <div class="hero" markdown>
@@ -10,9 +10,9 @@ description: Provider-agnostic AI code review for pull and merge requests on Git
 
 </div>
 
-lgtmaybe reviews pull and merge requests on **GitHub, GitLab, and Gitea**. You
-can also review a local Git diff before pushing. Choose a hosted model, ollama,
-or another OpenAI-compatible endpoint. Reviews on a code host post inline
+lgtmaybe reviews pull and merge requests on **GitHub, GitLab, Gitea, and Azure
+DevOps**. You can also review a local Git diff before pushing. Choose a hosted
+model, ollama, or another OpenAI-compatible endpoint. Reviews on a code host post inline
 comments and one summary; local reviews print findings in your terminal.
 
 It reads the diff and a little surrounding code, but comments only on changed
@@ -60,7 +60,7 @@ flowchart LR
 <div class="grid cards" markdown>
 
 - **Tutorial:** [Getting started](tutorial/getting-started.md): your first review with ollama, locally and free.
-- **How-to:** [install the CLI](how-to/install-the-cli.md), [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md).
+- **How-to:** [install the CLI](how-to/install-the-cli.md), [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md), [Azure DevOps](how-to/review-on-azure-devops.md).
 - **Reference:** [Configuration](reference/config.md): every config field and schema.
 - **Explanation:** [What gets reviewed](explanation/what-gets-reviewed.md), [Architecture](explanation/architecture.md), [Auth model](explanation/auth-model.md), [Data & privacy](explanation/data-and-privacy.md).
 
@@ -90,9 +90,10 @@ on any host below.
 | GitHub | GitHub Action | `GITHUB_TOKEN` | [GitHub Action](how-to/use-as-github-action.md) |
 | GitLab | GitLab CI job | `GITLAB_TOKEN` | [Review on GitLab](how-to/review-on-gitlab.md) |
 | Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
+| Azure DevOps | Azure Pipelines job | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](how-to/review-on-azure-devops.md) |
 | None | `lgtmaybe review` locally | n/a | [Install the CLI](how-to/install-the-cli.md) |
 
-The same review runs on all three hosts. They differ in thread resolution,
+The same review runs on every host. They differ in thread resolution,
 incremental reviews, and keyless cloud auth. See
 [Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 

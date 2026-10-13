@@ -23,13 +23,15 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import click
 
+from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
 from lgtmaybe.core.diffparse import split_by_file
-from lgtmaybe.core.forge import Forge, PRLocator, token_env_var
+from lgtmaybe.core.forge import Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -253,7 +255,39 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         marker_key=_marker_key(cfg),
         scheme=located.scheme,
     ),
+    Forge.azure_devops: lambda located, token, cfg: AzureDevOpsGateway(
+        host=located.host,
+        repo=located.repo,
+        pr_number=located.number,
+        token=token,
+        marker_key=_marker_key(cfg),
+        scheme=located.scheme,
+        bearer=_azure_devops_token_is_bearer(),
+    ),
 }
+
+
+def _forge_token(forge: Forge) -> tuple[str, str] | None:
+    """``(variable, token)`` for the first of ``forge``'s token variables that is set.
+
+    The one place token precedence is decided: ``build_review_context`` reads
+    the token from it, and the Azure DevOps builder reads which variable won.
+    """
+    for var in token_env_vars(forge):
+        if value := os.environ.get(var):
+            return var, value
+    return None
+
+
+def _azure_devops_token_is_bearer() -> bool:
+    """Whether the Azure DevOps token in play is the pipeline's own.
+
+    A personal access token (``AZURE_DEVOPS_TOKEN``) is sent as basic auth; the
+    job's OAuth token (``SYSTEM_ACCESSTOKEN``) as a bearer token. Which one is
+    in play is whichever ``_forge_token`` picked, never re-derived here.
+    """
+    picked = _forge_token(Forge.azure_devops)
+    return picked is not None and picked[0] == "SYSTEM_ACCESSTOKEN"
 
 
 def gateway_builder(
@@ -429,13 +463,14 @@ def build_review_context(
             f"{', '.join(sorted(_GATEWAY_BUILDERS))} so far."
         )
 
-    token_var = token_env_var(located.forge)
-    token = os.environ.get(token_var)
-    if not token:
+    picked = _forge_token(located.forge)
+    if picked is None:
         raise ValueError(
-            f"{token_var} is required to fetch the change and post the review. "
-            "Set it in the environment (the GitHub Action provides it automatically)."
+            f"{' or '.join(token_env_vars(located.forge))} is required to fetch the change "
+            "and post the review. Set it in the environment (the GitHub Action provides it "
+            "automatically)."
         )
+    _token_var, token = picked
 
     github = build_gateway(located, token, cfg)
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
@@ -1132,6 +1167,48 @@ def mr_url_from_ci_env() -> str:
             'Run the job with `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"`.'
         )
     return f"{server}/{project}/-/merge_requests/{iid}"
+
+
+def pr_url_from_pipelines_env() -> str:
+    """Build the pull request URL from Azure Pipelines' predefined variables.
+
+    The Azure DevOps counterpart to ``mr_url_from_ci_env``: no event payload,
+    so the collection, project, repository, and pull request id come from the
+    job's environment and are assembled into the URL the shared locator parses.
+
+    A missing pull request id usually means the pipeline ran as a CI build
+    rather than as the build validation policy on a branch, so the message
+    names the variable and the fix.
+    """
+    # Azure Pipelines always sets this ("TfsGit" for Azure Repos). An unset or
+    # empty value only happens outside a pipeline (running the command by hand
+    # with the other variables exported), and is treated as Azure Repos: the
+    # URL it builds still has to parse as an Azure DevOps pull request.
+    provider = os.environ.get("BUILD_REPOSITORY_PROVIDER", "")
+    if provider and provider != "TfsGit":
+        raise click.ClickException(
+            f"This pipeline builds a {provider} repository; `azure-pipelines` reviews Azure "
+            "Repos pull requests only. For a GitHub repository, use the GitHub Action."
+        )
+    required = {
+        name: os.environ.get(name, "").strip()
+        for name in ("SYSTEM_COLLECTIONURI", "SYSTEM_TEAMPROJECT", "BUILD_REPOSITORY_NAME")
+    }
+    for name, value in required.items():
+        if not value:
+            raise click.ClickException(
+                f"{name} is not set; run `lgtmaybe azure-pipelines` inside an Azure Pipelines job."
+            )
+    pr_id = os.environ.get("SYSTEM_PULLREQUEST_PULLREQUESTID", "").strip()
+    if not pr_id.isdigit():
+        raise click.ClickException(
+            "SYSTEM_PULLREQUEST_PULLREQUESTID is not set: this build is not validating a pull "
+            "request. Run the pipeline from a build validation branch policy."
+        )
+    collection = required["SYSTEM_COLLECTIONURI"].rstrip("/")
+    project = quote(required["SYSTEM_TEAMPROJECT"], safe="")
+    repo = quote(required["BUILD_REPOSITORY_NAME"], safe="")
+    return f"{collection}/{project}/_git/{repo}/pullrequest/{pr_id}"
 
 
 def pr_url_from_event(event: dict[str, Any]) -> str:

@@ -1,0 +1,27 @@
+# Copy into the Azure Repos repository you want reviewed (for example as
+# azure-pipelines.yml), create a pipeline from it, then add that pipeline as a
+# Build validation branch policy on the target branch (Project settings ->
+# Repositories -> Policies). Azure Repos runs pull request builds from the
+# branch policy; YAML `pr:` triggers only apply to GitHub and Bitbucket.
+#
+# Why this file holds no steps: Azure Pipelines runs a pull request build from
+# the YAML in the pull request itself. Anyone who can open a pull request could
+# rewrite a step here and read every secret it maps. So the job that holds the
+# model key lives in lgtmaybe-review.yml, in a separate repository only trusted
+# people can push to, and this file only extends it. A "Required template"
+# check on the variable group holding the key refuses any run that does not
+# extend that exact template. See docs/how-to/review-on-azure-devops.md.
+
+trigger: none
+
+resources:
+  repositories:
+    # The protected template repository: <project>/<repository>, with branch
+    # policies on main so nobody can change the template without review.
+    - repository: trusted
+      type: git
+      name: Platform/pipeline-templates
+      ref: refs/heads/main
+
+extends:
+  template: lgtmaybe-review.yml@trusted

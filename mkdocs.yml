@@ -1,5 +1,5 @@
 site_name: lgtmaybe
-site_description: AI code review for GitHub, GitLab, Gitea, and local Git diffs. Choose a hosted or local model; Bedrock, Vertex, and Azure support keyless cloud auth.
+site_description: AI code review for GitHub, GitLab, Gitea, Azure DevOps, and local Git diffs. Choose a hosted or local model; Bedrock, Vertex, and Azure support keyless cloud auth.
 site_url: https://lgtmaybe.coles.codes/
 repo_url: https://github.com/MattJColes/lgtmaybe
 repo_name: MattJColes/lgtmaybe
@@ -78,6 +78,7 @@ nav:
           - Choose a review model: how-to/choose-a-review-model.md
           - Use as a GitHub Action: how-to/use-as-github-action.md
           - Post as lgtmaybe[bot]: how-to/post-as-a-github-app.md
+          - Review on Azure DevOps: how-to/review-on-azure-devops.md
           - Review on Gitea: how-to/review-on-gitea.md
           - Review on GitLab: how-to/review-on-gitlab.md
       - Cloud providers (API key):

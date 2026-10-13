@@ -156,8 +156,8 @@ terminal. Paste the Mermaid into a GitHub comment or
 ## Step 7: Post Reviews on Real Pull Requests
 
 The CLI reviews local changes. To post inline comments and a summary on real
-pull requests, wire lgtmaybe into your code host. The review is the same on all
-three; only the setup differs:
+pull requests, wire lgtmaybe into your code host. The review is the same on
+every host; only the setup differs:
 
 - **GitHub:** add the Action to your repo.
   See [Use as a GitHub Action](../how-to/use-as-github-action.md).
@@ -165,6 +165,8 @@ three; only the setup differs:
   See [Review on GitLab](../how-to/review-on-gitlab.md).
 - **Gitea:** add a Gitea Actions workflow.
   See [Review on Gitea](../how-to/review-on-gitea.md).
+- **Azure DevOps:** add an Azure Pipelines build validation policy.
+  See [Review on Azure DevOps](../how-to/review-on-azure-devops.md).
 
 ## What Happened Under the Hood
 

@@ -457,7 +457,8 @@ surface left undocumented, are exempt and still raised.
 
 ### On a Pull or Merge Request
 
-The rendering below is GitHub's. GitLab and Gitea show the same findings with
+The rendering below is GitHub's. GitLab, Gitea and Azure DevOps show the same
+findings with
 the same badges; [how each host posts them](#how-each-host-posts) differs, and
 is covered at the end of this section.
 
@@ -529,25 +530,28 @@ normally.
 
 On **GitLab** the same thing happens over plain REST. On **Gitea** it does not
 happen at all: Gitea has no thread-resolution API, so finding comments stay open
-for a human to close.
+for a human to close. On **Azure DevOps** it is not built yet, so finding
+threads also stay open.
 
 ### How Each Host Posts
 
 The findings are identical everywhere. What each host's API allows is not:
 
-| | GitHub | GitLab | Gitea |
-|---|---|---|---|
-| Inline comments | one batched review | one discussion per finding | one batched review |
-| Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place |
-| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted |
-| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
-| Incremental review of new commits | ✅ | ✅ | ✗ no compare diff |
-| Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ |
+| | GitHub | GitLab | Gitea | Azure DevOps |
+|---|---|---|---|---|
+| Inline comments | one batched review | one discussion per finding | one batched review | one thread per finding |
+| Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place | a general thread, edited in place |
+| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids it posted itself, once the token's identity is known |
+| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
+| Incremental review of new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ | not yet |
 
 A submitted **Gitea** review can't be edited, so its summary moves to an
 ordinary comment and duplicate findings are filtered *before* posting.
 **GitLab** has no batched review object, so each finding becomes its own
-positioned discussion.
+positioned discussion. **Azure DevOps** serves no diff at all, so lgtmaybe
+builds one from the file contents before and after the change, and each finding
+becomes its own positioned thread.
 
 When a PR is clean (no findings, and every file was within the caps), the
 summary is short:

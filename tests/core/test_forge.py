@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from lgtmaybe.core.forge import Forge, PRLocator, parse_pr_url, token_env_var
+from lgtmaybe.core.forge import Forge, PRLocator, parse_pr_url, token_env_var, token_env_vars
 
 
 class TestParsePRUrl:
@@ -38,6 +38,59 @@ class TestParsePRUrl:
             forge=Forge.gitea, host="gitea.example.com", repo="org/repo", number=9
         )
 
+    def test_parses_an_azure_devops_pull_request(self) -> None:
+        """Organisation, project, and repository all travel in ``repo``."""
+        located = parse_pr_url("https://dev.azure.com/acme/Payments/_git/api/pullrequest/42")
+        assert located == PRLocator(
+            forge=Forge.azure_devops, host="dev.azure.com", repo="acme/Payments/api", number=42
+        )
+
+    def test_parses_a_legacy_visualstudio_pull_request(self) -> None:
+        """The legacy host carries the organisation in its subdomain."""
+        located = parse_pr_url("https://acme.visualstudio.com/Payments/_git/api/pullrequest/7")
+        assert located == PRLocator(
+            forge=Forge.azure_devops,
+            host="acme.visualstudio.com",
+            repo="acme/Payments/api",
+            number=7,
+        )
+
+    def test_azure_devops_segments_are_decoded(self) -> None:
+        """Project names may contain spaces; the locator carries them readable."""
+        located = parse_pr_url(
+            "https://dev.azure.com/acme/My%20Project/_git/my%20repo/pullrequest/3?_a=files"
+        )
+        assert located.repo == "acme/My Project/my repo"
+        assert located.number == 3
+
+    def test_azure_devops_short_form_names_the_project_after_the_repo(self) -> None:
+        """Azure DevOps drops the project segment when it equals the repo name."""
+        located = parse_pr_url("https://dev.azure.com/acme/_git/api/pullrequest/5")
+        assert located.repo == "acme/api/api"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://dev.azure.com/acme/Payments/_git/api",
+            "https://dev.azure.com/acme/Payments/_git/api/pullrequest/abc",
+            "https://dev.azure.com/acme/Payments/_git/api/pullrequests",
+            "https://dev.azure.com/_git/api/pullrequest/1",
+            "https://dev.azure.com/acme/%2E%2E/_git/api/pullrequest/1",
+            "https://dev.azure.com/acme/a/b/_git/api/pullrequest/1",
+            "https://dev.azure.com/acme/Payments/_git/a%2Fb/pullrequest/1",
+        ],
+    )
+    def test_rejects_malformed_azure_devops_urls(self, url: str) -> None:
+        with pytest.raises(ValueError):
+            parse_pr_url(url)
+
+    def test_azure_devops_server_is_named_as_unsupported(self) -> None:
+        """An on-premises collection is recognisable, so say why it is refused."""
+        with pytest.raises(ValueError, match="Azure DevOps Server"):
+            parse_pr_url(
+                "https://tfs.corp.example/tfs/DefaultCollection/Proj/_git/api/pullrequest/1"
+            )
+
     def test_rejects_a_url_that_is_not_a_pull_request(self) -> None:
         with pytest.raises(ValueError, match="Could not parse"):
             parse_pr_url("https://github.com/org/repo")
@@ -50,6 +103,7 @@ class TestParsePRUrl:
         assert "/pull/" in message
         assert "/merge_requests/" in message
         assert "/pulls/" in message
+        assert "/pullrequest/" in message
 
 
 class TestTokenEnvVar:
@@ -61,6 +115,7 @@ class TestTokenEnvVar:
             (Forge.github, "GITHUB_TOKEN"),
             (Forge.gitlab, "GITLAB_TOKEN"),
             (Forge.gitea, "GITEA_TOKEN"),
+            (Forge.azure_devops, "AZURE_DEVOPS_TOKEN"),
         ],
     )
     def test_names_the_conventional_variable(self, forge: Forge, expected: str) -> None:
@@ -72,7 +127,16 @@ class TestTokenEnvVar:
             "GITHUB_TOKEN",
             "GITLAB_TOKEN",
             "GITEA_TOKEN",
+            "AZURE_DEVOPS_TOKEN",
         }
+
+    def test_azure_devops_also_accepts_the_pipeline_access_token(self) -> None:
+        """A PAT wins when both are set; the pipeline's own token is the fallback."""
+        assert token_env_vars(Forge.azure_devops) == ("AZURE_DEVOPS_TOKEN", "SYSTEM_ACCESSTOKEN")
+
+    def test_other_forges_read_exactly_one_variable(self) -> None:
+        for forge in (Forge.github, Forge.gitlab, Forge.gitea):
+            assert token_env_vars(forge) == (token_env_var(forge),)
 
 
 class TestGatewayRegistry:
@@ -124,6 +188,28 @@ class TestGatewayRegistry:
         )
 
         assert gateway._api.startswith("http://git.acme.internal:3000/")
+
+    def test_the_azure_devops_builder_addresses_the_organisation(self) -> None:
+        from lgtmaybe.cli import gateway_builder
+        from lgtmaybe.core.models import ReviewConfig
+
+        located = parse_pr_url("https://dev.azure.com/acme/My%20Project/_git/api/pullrequest/4")
+        build = gateway_builder(located.forge)
+        assert build is not None
+        gateway = build(located, "token", ReviewConfig(provider="ollama", model="llama3"))
+        assert gateway._repo_api == (
+            "https://dev.azure.com/acme/My%20Project/_apis/git/repositories/api"
+        )
+
+    def test_the_legacy_azure_devops_host_is_kept(self) -> None:
+        from lgtmaybe.cli import gateway_builder
+        from lgtmaybe.core.models import ReviewConfig
+
+        located = parse_pr_url("https://acme.visualstudio.com/Proj/_git/api/pullrequest/4")
+        build = gateway_builder(located.forge)
+        assert build is not None
+        gateway = build(located, "token", ReviewConfig(provider="ollama", model="llama3"))
+        assert gateway._repo_api == "https://acme.visualstudio.com/Proj/_apis/git/repositories/api"
 
     def test_the_gitlab_builder_preserves_an_http_origin(self) -> None:
         from lgtmaybe.cli import gateway_builder

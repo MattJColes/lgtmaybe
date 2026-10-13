@@ -21,6 +21,7 @@ flowchart TB
     github["github/<br/>GitHub REST adapter"] -- implements --> ports
     gitlab["gitlab/<br/>GitLab REST adapter"] -- implements --> ports
     gitea["gitea/<br/>Gitea REST adapter"] -- implements --> ports
+    azure["azure_devops/<br/>Azure DevOps REST adapter"] -- implements --> ports
 ```
 
 Two independent choices meet at these ports: which **model** reviews the code
@@ -61,6 +62,7 @@ The URL is all lgtmaybe needs:
 | `github.com/org/repo/pull/42` | GitHub | `GITHUB_TOKEN` |
 | `gitlab.com/group/sub/project/-/merge_requests/42` | GitLab | `GITLAB_TOKEN` |
 | `gitea.example.com/org/repo/pulls/42` | Gitea | `GITEA_TOKEN` |
+| `dev.azure.com/org/project/_git/repo/pullrequest/42` | Azure DevOps | `AZURE_DEVOPS_TOKEN` or `SYSTEM_ACCESSTOKEN` |
 
 The host is parsed from the URL rather than assumed, because self-hosted GitLab
 and Gitea are the normal case. `cli._GATEWAY_BUILDERS` maps the resolved forge
@@ -73,25 +75,25 @@ to its adapter.
 is useful long before it is complete, and it can be honest about what its host
 cannot do instead of failing at run time.
 
-| Capability | GitHub | GitLab | Gitea |
-|---|---|---|---|
-| `SupportsFileContents`: read head text for context | ✅ | ✅ | ✅ |
-| `SupportsDescribe` / `SupportsDiagram`: upserted comments | ✅ | ✅ | ✅ |
-| `SupportsConversation`: read existing comments | ✅ | ✅ | ✅ |
-| `SupportsLabels` | ✅ | ✅ | ✅ |
-| `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ |
-| `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
-| `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff |
-| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ |
-| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ |
+| Capability | GitHub | GitLab | Gitea | Azure DevOps |
+|---|---|---|---|---|
+| `SupportsFileContents`: read head text for context | ✅ | ✅ | ✅ | ✅ |
+| `SupportsDescribe` / `SupportsDiagram`: upserted comments | ✅ | ✅ | ✅ | ✅ |
+| `SupportsConversation`: read existing comments | ✅ | ✅ | ✅ | ✅ |
+| `SupportsLabels` | ✅ | ✅ | ✅ | not yet |
+| `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
+| `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
+| `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
+| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
 `tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
-and the GitLab and Gitea tests assert those adapters do **not** claim what
-their host cannot serve. That keeps this table honest.
+and the GitLab, Gitea and Azure DevOps tests assert those adapters do **not**
+claim what they cannot serve. That keeps this table honest.
 
 ### Where the Hosts Differ
 
-Gitea is close to GitHub; GitLab is not.
+Gitea is close to GitHub; GitLab and Azure DevOps are not.
 
 - **GitHub** batches every inline comment into one review object and resolves
   threads over GraphQL.
@@ -107,10 +109,15 @@ Gitea is close to GitHub; GitLab is not.
   parent ids that the new head builds on the last reviewed one. It also works
   out the "lines moved" signal GitLab doesn't expose, from the diff since each
   discussion was posted.
+- **Azure DevOps** serves no unified diff. The adapter lists the latest
+  iteration's changed files against the merge base, fetches each file's text
+  on both sides, and renders the diff with `core/diffbuild.py`, so the shared
+  parser reads it like any other. Each finding is its own thread positioned by
+  `threadContext`, and the summary is a general thread edited in place.
 
 lgtmaybe uses GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
 it at each adapter's boundary: `new_position`/`old_position` on Gitea,
-`new_line`/`old_line` on GitLab.
+`new_line`/`old_line` on GitLab, right-file/left-file ranges on Azure DevOps.
 
 ### Entrypoints
 
@@ -124,6 +131,8 @@ its own `gitlab-ci` command that reads GitLab's predefined `CI_*` variables.
 Everything downstream (locator, gateway registry, engine) is shared. With no
 `synchronize` action to key on, `gitlab-ci` treats an unset `incremental` as on:
 the first pipeline has no watermark yet, so it is a full review anyway.
+Azure Pipelines is in the same position, so `azure-pipelines` reads its
+predefined `SYSTEM_*` and `BUILD_*` variables.
 
 ## Review Pipeline
 

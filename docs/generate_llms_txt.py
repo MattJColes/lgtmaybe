@@ -30,7 +30,7 @@ LLMS_FULL_PATH = DOCS / "llms-full.txt"
 SITE_URL = "https://lgtmaybe.coles.codes/"
 
 SUMMARY = (
-    "AI code review for GitHub, GitLab, Gitea, and local Git diffs. It posts "
+    "AI code review for GitHub, GitLab, Gitea, Azure DevOps, and local Git diffs. It posts "
     "inline findings and a summary on pull and merge requests, or prints "
     "findings locally. Choose from seven hosted providers, ollama, or any "
     "OpenAI-compatible endpoint. Bedrock, Vertex, and Azure support keyless "

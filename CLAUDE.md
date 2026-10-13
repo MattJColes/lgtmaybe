@@ -70,7 +70,7 @@ autocrlf before checkout.
 ### Forges — which code host the review is posted to
 
 A second axis, orthogonal to the LLM provider: **`Forge`** (`core/forge.py`) is
-github / gitlab / gitea, and `Provider` stays the model backend. Never overload
+github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. Never overload
 "provider" for a code host.
 
 - The **engine never sees a gateway.** It takes a `PRContext` and returns
@@ -103,13 +103,31 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
   back to the watermark (else full review). The watermark is read only from a
   note the token's own user wrote, and an unmarked post keeps the old one. 👎
   feedback reads `thumbsdown` award emoji from Developer+ members.
+  **Azure DevOps** (`azure_devops/gateway.py`, Services only, api-version 7.1)
+  serves no unified diff, so the adapter reads the latest iteration's changes
+  against the merge base, fetches both sides via the Items API (unreviewable
+  files never fetched, >1 MB sides shown as binary, >300 files raise
+  `DiffUnavailable`, as does a missing merge base; 429/5xx/timeouts retry, then
+  only that file degrades to binary and is named in the summary; 401/403 fail
+  loudly), and renders the diff with host-neutral `core/diffbuild.py` so the
+  shared parser reads it unchanged. Each finding is an active thread positioned
+  by `threadContext`; summary/describe/diagram are closed general threads edited
+  in place. Identity is `connectionData` `authenticatedUser.id`: de-dupe trusts
+  only live, non-`fixed` threads whose root comment that identity wrote, and
+  trusts none when it is unknown; the upsert edits only our own marked threads,
+  and when the identity is unknown tries every marked thread and lets the
+  host's author check (403) decide. `PRLocator.repo` is `org/project/repo` (decoded). Token:
+  `AZURE_DEVOPS_TOKEN` (PAT, basic) else `SYSTEM_ACCESSTOKEN` (bearer)
+  (`forge.token_env_vars`). Incremental, thread resolution, labels, checks and
+  feedback are unbuilt and unclaimed.
 - **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
   the same env contract; only `GITHUB_SERVER_URL` differs, and
   `cli._change_url` reads it). GitLab CI has neither an event payload nor
   `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`; with no
   `synchronize` action, it resolves unset `incremental` to on
   (`cli.resolve_ci_incremental`; `--no-incremental` / `LGTMAYBE_INCREMENTAL`
-  override).
+  override). Azure Pipelines likewise gets `azure-pipelines`, reading
+  `SYSTEM_*`/`BUILD_*` (`cli.pr_url_from_pipelines_env`).
 
 ## Key decisions (do not relitigate)
 

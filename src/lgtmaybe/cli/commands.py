@@ -31,6 +31,7 @@ from lgtmaybe.cli import (
     main,
     mr_url_from_ci_env,
     pr_url_from_event,
+    pr_url_from_pipelines_env,
     resolve_auto_incremental,
     resolve_ci_incremental,
     should_auto_diagram,
@@ -793,6 +794,30 @@ def gitlab_ci(
         )
     )
     runtime = replace(_runtime(api_key, api_base, fallback_model), pr_url=mr_url_from_ci_env())
+    execute_review(cfg, runtime)
+
+
+@main.command("azure-pipelines")
+@model_options
+def azure_pipelines(
+    provider: str | None,
+    model: str | None,
+    fallback_model: str | None,
+    api_key: str | None,
+    api_base: str | None,
+    config_path: str | None,
+) -> None:
+    """Azure Pipelines entrypoint: review the Azure Repos pull request this build validates.
+
+    The counterpart to ``gitlab-ci``. Azure Pipelines has no event payload, so
+    the pull request comes from the predefined ``SYSTEM_*`` and ``BUILD_*``
+    variables; authenticate with ``AZURE_DEVOPS_TOKEN`` (a personal access
+    token) or the job's own ``SYSTEM_ACCESSTOKEN`` mapped into the environment.
+    """
+    cfg = _load_cfg(config_path, provider=provider, model=model)
+    runtime = replace(
+        _runtime(api_key, api_base, fallback_model), pr_url=pr_url_from_pipelines_env()
+    )
     execute_review(cfg, runtime)
 
 

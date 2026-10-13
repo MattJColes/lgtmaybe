@@ -1,0 +1,65 @@
+azure-devops.locator:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_parse_azure_devops$' }
+  files: [src/lgtmaybe/core/forge.py]
+
+azure-devops.context:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^get_pr_context$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.render:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^file_patch$' }
+  files: [src/lgtmaybe/core/diffbuild.py]
+
+azure-devops.positions:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_partition_findings$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.upsert:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_upsert$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.dedupe:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_existing_finding_keys$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.auth:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_azure_devops_token_is_bearer$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+azure-devops.pipelines:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^pr_url_from_pipelines_env$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+azure-devops.capabilities:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^AzureDevOpsGateway$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.fetch:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fetch_text$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.scan:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fetch_scan_contents$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
