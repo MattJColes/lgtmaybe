@@ -53,9 +53,11 @@ config.
 
 ## Choosing the model
 
-Use any chat model your key can access: `gpt-5.5` for the strongest reviews, or
-a smaller model to cut cost. Pass litellm's native OpenAI name — the same string
-you'd send to the API.
+Use any chat model your key can access: `gpt-5.5`, or one of the newer GPT-6
+models (`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`), or a smaller model to cut
+cost. Pass litellm's native OpenAI name — the same string you'd send to the API.
+[Choose a review model](choose-a-review-model.md) has measured results for the
+GPT-6 family.
 
 ## Persist non-secret defaults
 

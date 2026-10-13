@@ -94,10 +94,10 @@ The model identifier for the chosen provider. Format varies by provider:
 |---|---|
 | openai | `gpt-5.5` |
 | anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
-| openrouter | `anthropic/claude-sonnet-4-6` |
+| openrouter | `anthropic/claude-sonnet-4.6` |
 | zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` pass through too) |
-| bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5` (prefer the cross-region inference profile; a non-Bedrock id like `openai.gpt-5.5` is invalid — see [Review with Bedrock](review-with-bedrock-oidc.md)) |
-| vertex | `gemini-3-pro`, `gemini-3.5-flash` |
+| bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (prefer the cross-region inference profile; another provider's name like `gpt-6-sol` is invalid — Bedrock's is `openai.gpt-6-sol`; see [Review with Bedrock](review-with-bedrock-oidc.md)) |
+| vertex | `gemini-3.8-flash`, `gemini-3.1-pro-preview` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
 | ollama | `qwen3.6:27b`, `gemma4:e4b` |
 | openai-compatible | the served model name, e.g. `deepseek-chat` or `meta-llama/Llama-3.1-8B-Instruct` (requires `api_base` — see [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md)) |

@@ -34,7 +34,7 @@ A rule needs at least one of `instructions` and `context_files` to do anything.
 
 ```yaml
 provider: bedrock
-model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+model: us.anthropic.claude-sonnet-4-6
 
 directory_rules:
   - paths: ["payments/**", "billing/**"]

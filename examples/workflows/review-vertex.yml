@@ -55,6 +55,6 @@ jobs:
       - uses: MattJColes/lgtmaybe@v2
         with:
           provider: vertex
-          model: gemini-3-pro
+          model: gemini-3.8-flash
           gcp_wif_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           gcp_service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}

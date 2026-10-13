@@ -707,7 +707,7 @@ Swap the `provider`, `model`, and `api_key` inputs:
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openrouter
-    model: anthropic/claude-sonnet-4-6
+    model: anthropic/claude-sonnet-4.6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)
@@ -795,7 +795,7 @@ state, so a clean review stays comment-only.
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openai
-    model: gpt-4o
+    model: gpt-5.5
     api_key: ${{ secrets.OPENAI_API_KEY }}
     fail_on: high   # block merge on any high/critical finding
 ```
@@ -1187,9 +1187,11 @@ config.
 
 ## Choosing the model
 
-Use any chat model your key can access: `gpt-5.5` for the strongest reviews, or
-a smaller model to cut cost. Pass litellm's native OpenAI name — the same string
-you'd send to the API.
+Use any chat model your key can access: `gpt-5.5`, or one of the newer GPT-6
+models (`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`), or a smaller model to cut
+cost. Pass litellm's native OpenAI name — the same string you'd send to the API.
+[Choose a review model](choose-a-review-model.md) has measured results for the
+GPT-6 family.
 
 ## Persist non-secret defaults
 
@@ -1263,15 +1265,16 @@ config.
 ## Choosing the model
 
 Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
-strong default. Reach for an Opus-class model when you want the deepest review
-and are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+strong default. Reach for an Opus-class model (`claude-opus-5-5`) when you want
+the deepest review and are happy to pay more, or a Haiku-class model
+(`claude-haiku-4-5`) to cut cost on smaller PRs.
 
 ## Want it through a gateway instead?
 
 If you route Claude through OpenRouter or a Bedrock/Vertex deployment rather than
 the Anthropic API directly, use that provider instead:
 
-- [OpenRouter](review-with-openrouter.md) — `anthropic/claude-sonnet-4-6`
+- [OpenRouter](review-with-openrouter.md) — `anthropic/claude-sonnet-4.6`
 - [Bedrock (keyless OIDC)](review-with-bedrock-oidc.md)
 - [Vertex (keyless WIF)](review-with-vertex-wif.md)
 
@@ -1322,7 +1325,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openrouter
-    model: anthropic/claude-sonnet-4-6
+    model: anthropic/claude-sonnet-4.6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
@@ -1336,7 +1339,7 @@ including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-r
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
 
-lgtmaybe review --provider openrouter --model anthropic/claude-sonnet-4-6
+lgtmaybe review --provider openrouter --model anthropic/claude-sonnet-4.6
 ```
 
 You can pass the key inline with `--api-key sk-or-...` instead of the env var.
@@ -1348,7 +1351,7 @@ config.
 OpenRouter models are named `vendor/model`. Pick whichever fits your budget and
 quality bar, for example:
 
-- `anthropic/claude-sonnet-4-6`
+- `anthropic/claude-sonnet-4.6`
 - `openai/gpt-5.5`
 - `z-ai/glm-4.6`
 
@@ -1435,7 +1438,7 @@ key may spend, not how often it may call.
 
 ```yaml
 provider: openrouter
-model: anthropic/claude-sonnet-4-6
+model: anthropic/claude-sonnet-4.6
 ```
 
 With that file in place, `lgtmaybe review` needs no flags. See
@@ -1596,8 +1599,8 @@ through an inference profile — see the model table below.
 
 Scope each `Resource` to specific model / inference-profile ARNs for tighter
 least-privilege once it works, e.g.
-`arn:aws:bedrock:*:<account-id>:inference-profile/us.anthropic.claude-opus-4-8*`
-and `arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*`.
+`arn:aws:bedrock:*:<account-id>:inference-profile/us.anthropic.claude-opus-5-5*`
+and `arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*`.
 
 ## Workflow example
 
@@ -1646,24 +1649,33 @@ jobs:
 ## Choosing a Bedrock model ID
 
 The `model` must be a **Bedrock** model identifier. Bedrock hosts Anthropic
-Claude, Amazon Nova/Titan, Meta Llama, Mistral, Cohere and others — it does
-**not** host OpenAI's GPT models, so an id like `openai.gpt-5.5` is rejected with
+Claude, Amazon Nova/Titan, Meta Llama, Mistral, Cohere, OpenAI GPT and others,
+each under Bedrock's own id — `openai.gpt-6-sol`, not OpenAI's `gpt-6-sol`. An
+id written for another provider's API is rejected with
 `The provided model identifier is invalid`. Use one of the Claude ids below
 (prefixed with a cross-region inference profile — see the note):
 
 | Model | Inference-profile ID (recommended) | Base model ID |
 |---|---|---|
-| Claude Opus 4.8 | `us.anthropic.claude-opus-4-8` | `anthropic.claude-opus-4-8` |
+| Claude Opus 5.5 | `us.anthropic.claude-opus-5-5` | `anthropic.claude-opus-5-5` |
 | Claude Sonnet 4.6 | `us.anthropic.claude-sonnet-4-6` | `anthropic.claude-sonnet-4-6` |
-| Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5` | `anthropic.claude-haiku-4-5` |
+| Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | `anthropic.claude-haiku-4-5-20251001-v1:0` |
+
+Haiku 4.5 keeps its dated `-20251001-v1:0` suffix on Bedrock; unlike Opus 5.5
+and Sonnet 4.6, it has no undated `anthropic.claude-haiku-4-5` id.
+
+On Bedrock, Claude Opus 4.7 and later (Opus 5.5 included) take lgtmaybe's
+findings schema as a forced tool call rather than native structured output —
+litellm picks that route from its model map, so there is nothing to configure.
 
 **Prefer the inference-profile form.** Most current Claude models on Bedrock are
 invocable only through a cross-region inference profile, not via on-demand
 throughput on the bare model id — so a bare id often fails with the same
 `invalid model identifier` (or `on-demand throughput isn't supported`) error.
 Prefix with your geography: `us.` (US), `eu.` (Europe) or `apac.` (Asia
-Pacific), matching `aws_region`. Use the bare `anthropic.…` id only where
-on-demand access to that model is enabled in your region.
+Pacific), or the narrower `au.` / `jp.`, matching `aws_region` — or `global.` to
+let Bedrock route the call to any commercial region. Use the bare `anthropic.…`
+id only where on-demand access to that model is enabled in your region.
 
 ## Running locally with ambient AWS credentials
 
@@ -1727,11 +1739,12 @@ floor and carries a `reason` (`empty-response`, `unparseable-output`,
 `tool-rejected`, `internal-tool-rejected`) worth reading.
 
 **`The provided model identifier is invalid`** — the `model` is not a Bedrock
-model id. Two common causes: (1) it's a non-Bedrock id such as `openai.gpt-5.5`
-or another provider's name — Bedrock hosts Claude / Nova / Llama / Mistral /
-Cohere, not OpenAI GPT, so pick a Claude id from the table above; (2) the model
-needs a cross-region inference profile — prefix with `us.`/`eu.`/`apac.` (e.g.
-`us.anthropic.claude-sonnet-4-6`) rather than the bare `anthropic.…` id.
+model id. Two common causes: (1) it's another provider's name such as
+`gpt-6-sol` or `claude-sonnet-4-6` — Bedrock names its models its own way
+(`openai.gpt-6-sol`, `us.anthropic.claude-sonnet-4-6`), so pick an id from the
+table above; (2) the model needs a cross-region inference profile — prefix with
+`us.`/`eu.`/`apac.` (e.g. `us.anthropic.claude-sonnet-4-6`) rather than the bare
+`anthropic.…` id.
 
 ---
 
@@ -1813,7 +1826,7 @@ jobs:
       - uses: MattJColes/lgtmaybe@v2
         with:
           provider: vertex
-          model: gemini-3-pro
+          model: gemini-3.8-flash
           gcp_wif_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           gcp_service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 ```
@@ -1829,11 +1842,17 @@ jobs:
 
 | Model | Vertex model ID |
 |---|---|
-| Gemini 3 Pro | `gemini-3-pro` |
-| Gemini 3.1 Pro | `gemini-3.1-pro` |
-| Gemini 3 Flash | `gemini-3-flash` |
+| Gemini 3.8 Flash | `gemini-3.8-flash` |
 | Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Gemini 3.1 Pro (preview) | `gemini-3.1-pro-preview` |
+| Gemini 3 Pro (preview) | `gemini-3-pro-preview` |
 | Gemini 2.5 Pro | `gemini-2.5-pro` |
+| Claude Opus 5.5 | `claude-opus-5-5` |
+
+Use the Gemini 3.x Pro `-preview` ids as written: litellm's model map has no
+bare `gemini-3-pro` or `gemini-3.1-pro` entry, so with those lgtmaybe can't fit
+its input budget to the model's window. Claude on Vertex must be enabled in
+Model Garden first, and `VERTEXAI_LOCATION` must be a region that serves it.
 
 ## Running locally with ADC
 
@@ -1849,7 +1868,7 @@ export VERTEXAI_LOCATION=us-central1
 
 lgtmaybe review \
   --provider vertex \
-  --model gemini-3-pro
+  --model gemini-3.8-flash
 ```
 
 This reviews your current branch's changes with Vertex; lgtmaybe does not accept
@@ -2784,10 +2803,10 @@ The model identifier for the chosen provider. Format varies by provider:
 |---|---|
 | openai | `gpt-5.5` |
 | anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
-| openrouter | `anthropic/claude-sonnet-4-6` |
+| openrouter | `anthropic/claude-sonnet-4.6` |
 | zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` pass through too) |
-| bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5` (prefer the cross-region inference profile; a non-Bedrock id like `openai.gpt-5.5` is invalid — see [Review with Bedrock](review-with-bedrock-oidc.md)) |
-| vertex | `gemini-3-pro`, `gemini-3.5-flash` |
+| bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (prefer the cross-region inference profile; another provider's name like `gpt-6-sol` is invalid — Bedrock's is `openai.gpt-6-sol`; see [Review with Bedrock](review-with-bedrock-oidc.md)) |
+| vertex | `gemini-3.8-flash`, `gemini-3.1-pro-preview` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment` (not the upstream model id — see [Review with Azure](review-with-azure.md)) |
 | ollama | `qwen3.6:27b`, `gemma4:e4b` |
 | openai-compatible | the served model name, e.g. `deepseek-chat` or `meta-llama/Llama-3.1-8B-Instruct` (requires `api_base` — see [Use a custom OpenAI-compatible endpoint](use-a-custom-openai-compatible-endpoint.md)) |
@@ -3776,7 +3795,7 @@ A rule needs at least one of `instructions` and `context_files` to do anything.
 
 ```yaml
 provider: bedrock
-model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+model: us.anthropic.claude-sonnet-4-6
 
 directory_rules:
   - paths: ["payments/**", "billing/**"]
@@ -3901,7 +3920,7 @@ at, and lgtmaybe adjusts both its defaults and the model's guidance to match.
 
 ```yaml
 provider: bedrock
-model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+model: us.anthropic.claude-sonnet-4-6
 
 project:
   stage: regulated

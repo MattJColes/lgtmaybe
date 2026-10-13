@@ -33,7 +33,7 @@ Copy [`examples/workflows/review-openrouter.yml`][wf] to
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openrouter
-    model: anthropic/claude-sonnet-4-6
+    model: anthropic/claude-sonnet-4.6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 ```
 
@@ -47,7 +47,7 @@ including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-r
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
 
-lgtmaybe review --provider openrouter --model anthropic/claude-sonnet-4-6
+lgtmaybe review --provider openrouter --model anthropic/claude-sonnet-4.6
 ```
 
 You can pass the key inline with `--api-key sk-or-...` instead of the env var.
@@ -59,7 +59,7 @@ config.
 OpenRouter models are named `vendor/model`. Pick whichever fits your budget and
 quality bar, for example:
 
-- `anthropic/claude-sonnet-4-6`
+- `anthropic/claude-sonnet-4.6`
 - `openai/gpt-5.5`
 - `z-ai/glm-4.6`
 
@@ -146,7 +146,7 @@ key may spend, not how often it may call.
 
 ```yaml
 provider: openrouter
-model: anthropic/claude-sonnet-4-6
+model: anthropic/claude-sonnet-4.6
 ```
 
 With that file in place, `lgtmaybe review` needs no flags. See

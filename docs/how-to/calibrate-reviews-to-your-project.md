@@ -25,7 +25,7 @@ at, and lgtmaybe adjusts both its defaults and the model's guidance to match.
 
 ```yaml
 provider: bedrock
-model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+model: us.anthropic.claude-sonnet-4-6
 
 project:
   stage: regulated

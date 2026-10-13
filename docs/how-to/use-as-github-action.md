@@ -188,7 +188,7 @@ Swap the `provider`, `model`, and `api_key` inputs:
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openrouter
-    model: anthropic/claude-sonnet-4-6
+    model: anthropic/claude-sonnet-4.6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)
@@ -276,7 +276,7 @@ state, so a clean review stays comment-only.
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openai
-    model: gpt-4o
+    model: gpt-5.5
     api_key: ${{ secrets.OPENAI_API_KEY }}
     fail_on: high   # block merge on any high/critical finding
 ```

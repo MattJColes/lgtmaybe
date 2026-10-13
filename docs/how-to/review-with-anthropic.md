@@ -55,15 +55,16 @@ config.
 ## Choosing the model
 
 Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
-strong default. Reach for an Opus-class model when you want the deepest review
-and are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+strong default. Reach for an Opus-class model (`claude-opus-5-5`) when you want
+the deepest review and are happy to pay more, or a Haiku-class model
+(`claude-haiku-4-5`) to cut cost on smaller PRs.
 
 ## Want it through a gateway instead?
 
 If you route Claude through OpenRouter or a Bedrock/Vertex deployment rather than
 the Anthropic API directly, use that provider instead:
 
-- [OpenRouter](review-with-openrouter.md) — `anthropic/claude-sonnet-4-6`
+- [OpenRouter](review-with-openrouter.md) — `anthropic/claude-sonnet-4.6`
 - [Bedrock (keyless OIDC)](review-with-bedrock-oidc.md)
 - [Vertex (keyless WIF)](review-with-vertex-wif.md)
 
