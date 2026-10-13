@@ -92,7 +92,10 @@ _NOTE_STATUS = "closed"
 _FIXED_STATUSES = frozenset({"fixed", 2})
 
 # Change types arrive as a comma-separated flag string ("rename, edit"), or as
-# the integer flags they serialise from.
+# the integer flags they serialise from. The values are Azure DevOps'
+# VersionControlChangeType enum (as published in microsoft/azure-devops-node-api,
+# GitInterfaces.ts): None 0, Add 1, Edit 2, Encoding 4, Rename 8, Delete 16,
+# Undelete 32. Encoding (4) is deliberately absent: it changes no lines.
 _CHANGE_FLAGS = {1: "add", 2: "edit", 8: "rename", 16: "delete", 32: "undelete"}
 
 
@@ -158,6 +161,12 @@ class AzureDevOpsGateway:
         self._repo = repo
         self._pr_number = pr_number
         self._repo_api = f"{collection}/{_segment(project)}/_apis/git/repositories/{_segment(name)}"
+        # Who the token authenticates as. An organisation-level endpoint that
+        # answers for a personal access token and for the pipeline's
+        # System.AccessToken alike (the latter is the project build service).
+        self._connection_data_url = f"{collection}/_apis/connectionData"
+        self._identity: str | None = None
+        self._identity_resolved = False
         self._pr_api = f"{self._repo_api}/pullRequests/{pr_number}"
         if bearer:
             authorization = f"Bearer {token}"
@@ -211,6 +220,21 @@ class AzureDevOpsGateway:
                     binary_file_patch(old_path=change.old_path, new_path=change.new_path)
                 )
                 continue
+            # A side the change list promised but the Items API could not find
+            # (a path renamed or deleted between the listing and the fetch) is
+            # diffed as empty: every line then reads as added or removed. Name
+            # the file so that rendering is never mistaken for the real change.
+            for side, path, text, commit in (
+                ("old", change.old_path, old, base_sha),
+                ("new", change.new_path, new, head_sha),
+            ):
+                if path is not None and text is None:
+                    _log.warning(
+                        "the %s side of %r was not found at %s; diffing it as empty",
+                        side,
+                        path,
+                        commit,
+                    )
             patches.append(
                 file_patch(
                     old_path=change.old_path,
@@ -518,13 +542,19 @@ class AzureDevOpsGateway:
     def _upsert(self, body: str, family: str, threads: list[dict[str, Any]] | None = None) -> None:
         """Edit our earlier comment in this marker family, or open a new thread.
 
-        Only a comment's author may edit it, so a comment someone else posted
-        carrying our marker answers 403. Each candidate is tried in turn, so a
-        planted marker neither fails the review nor hides our own comment
-        behind it; with none editable, a new thread is opened.
+        Only threads the token's own identity opened are candidates, so a
+        marker someone else planted is never an edit target. When the identity
+        is unknown every marked thread is a candidate: Azure DevOps lets only a
+        comment's author edit it, so another author's comment answers 403 and
+        the next is tried. A 403 or 404 never fails the review; with nothing
+        editable, a new thread is opened.
         """
         candidates = _find_root_comments(self._threads() if threads is None else threads, family)
-        for thread_id, comment_id in candidates:
+        identity = self._own_identity()
+        if identity is not None:
+            candidates = [(tid, root) for tid, root in candidates if _author_id(root) == identity]
+        for thread_id, root in candidates:
+            comment_id = root.get("id")
             resp = self._client.patch(
                 f"{self._pr_api}/threads/{thread_id}/comments/{comment_id}",
                 headers=self._headers,
@@ -540,15 +570,51 @@ class AzureDevOpsGateway:
         self._create_thread(body, status=_NOTE_STATUS)
 
     def _existing_finding_keys(self, threads: list[dict[str, Any]]) -> list[set[str]]:
-        """Hidden ids of our unresolved finding threads, one set per thread."""
+        """Hidden ids of our own unresolved finding threads, one set per thread.
+
+        Only a thread whose first comment the token's own identity wrote counts.
+        A finding's ids derive from its path and title, both public, so anyone
+        who may comment on the pull request (its author included) could plant a
+        thread carrying them and suppress the finding. When the identity cannot
+        be resolved nothing is trusted: a finding may then post twice, but is
+        never hidden.
+        """
+        identity = self._own_identity()
+        if identity is None:
+            return []
         keys: list[set[str]] = []
         for thread in threads:
             if thread.get("isDeleted") or thread.get("status") in _FIXED_STATUSES:
                 continue
             root = _root_comment(thread)
-            if root is not None and (found := finding_keys(root.get("content") or "")):
+            if root is None or _author_id(root) != identity:
+                continue
+            if found := finding_keys(root.get("content") or ""):
                 keys.append(found)
         return keys
+
+    def _own_identity(self) -> str | None:
+        """The id of the identity the token authenticates as, resolved once.
+
+        None when it cannot be read; callers must then treat no thread as ours.
+        """
+        if not self._identity_resolved:
+            self._identity_resolved = True
+            try:
+                resp = self._client.get(
+                    self._connection_data_url, headers=self._headers, timeout=_TIMEOUT
+                )
+                resp.raise_for_status()
+                user = (resp.json() or {}).get("authenticatedUser") or {}
+                identity = user.get("id")
+                self._identity = identity if isinstance(identity, str) and identity else None
+            except Exception as exc:  # noqa: BLE001 (fail safe: trust no thread)
+                _log.warning("reading the token's identity failed: %s", exc)
+            if self._identity is None:
+                _log.warning(
+                    "the token's identity is unknown, so no earlier thread is trusted as ours"
+                )
+        return self._identity
 
     def _threads(self) -> list[dict[str, Any]]:
         """Every thread on the pull request (the endpoint is not paged)."""
@@ -581,16 +647,25 @@ def _root_comment(thread: dict[str, Any]) -> dict[str, Any] | None:
     return root
 
 
-def _find_root_comments(threads: list[dict[str, Any]], family: str) -> list[tuple[Any, Any]]:
-    """``(thread id, comment id)`` of every live thread opened with ``family``'s marker."""
-    found: list[tuple[Any, Any]] = []
+def _find_root_comments(
+    threads: list[dict[str, Any]], family: str
+) -> list[tuple[Any, dict[str, Any]]]:
+    """``(thread id, root comment)`` of every live thread opened with ``family``'s marker."""
+    found: list[tuple[Any, dict[str, Any]]] = []
     for thread in threads:
         if thread.get("isDeleted"):
             continue
         root = _root_comment(thread)
         if root is not None and family in (root.get("content") or ""):
-            found.append((thread.get("id"), root.get("id")))
+            found.append((thread.get("id"), root))
     return found
+
+
+def _author_id(comment: dict[str, Any]) -> str | None:
+    """The identity id of a comment's author, or None when absent."""
+    author = comment.get("author")
+    identity = author.get("id") if isinstance(author, dict) else None
+    return identity if isinstance(identity, str) and identity else None
 
 
 def _change_kinds(change_type: Any) -> set[str]:
@@ -632,4 +707,9 @@ def _describe_change(entry: dict[str, Any]) -> _Change | None:
         return _Change(old_path=None, new_path=path)
     if "rename" in kinds and original is not None and original != path:
         return _Change(old_path=original, new_path=path)
+    # Anything else, including a rename whose originalPath is missing or names
+    # the same path, is an edit in place. Without a distinct old path there is
+    # no honest old side to read, and reading the new path at the merge base is
+    # the closest truthful comparison; if that path did not exist there, the
+    # 404 is logged by get_pr_context rather than papered over.
     return _Change(old_path=path, new_path=path)

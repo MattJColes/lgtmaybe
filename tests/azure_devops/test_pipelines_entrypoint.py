@@ -84,6 +84,15 @@ class TestPRUrlFromPipelinesEnv:
         with pytest.raises(Exception, match="GitHub Action"):
             pr_url_from_pipelines_env()
 
+    @pytest.mark.parametrize("provider", [None, ""])
+    def test_an_unset_repository_provider_is_treated_as_azure_repos(
+        self, monkeypatch: pytest.MonkeyPatch, provider: str | None
+    ) -> None:
+        """Azure Pipelines always sets it; running the command by hand may not."""
+        _set(monkeypatch, BUILD_REPOSITORY_PROVIDER=provider)
+
+        assert pr_url_from_pipelines_env() == PR_URL
+
     def test_the_command_fails_clearly_outside_a_pull_request_build(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

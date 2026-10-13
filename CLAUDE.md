@@ -104,8 +104,10 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
   `DiffUnavailable`), and renders the diff with host-neutral
   `core/diffbuild.py` so the shared parser reads it unchanged. Each finding is
   an active thread positioned by `threadContext`; summary/describe/diagram are
-  closed general threads edited in place; de-dupe reads hidden ids from live,
-  non-`fixed` threads. `PRLocator.repo` is `org/project/repo` (decoded). Token:
+  closed general threads edited in place; de-dupe and the upsert trust only
+  live threads whose root comment the token's own identity wrote
+  (`connectionData` `authenticatedUser.id`; unknown identity = trust nothing),
+  and `fixed` threads never suppress. `PRLocator.repo` is `org/project/repo` (decoded). Token:
   `AZURE_DEVOPS_TOKEN` (PAT, basic) else `SYSTEM_ACCESSTOKEN` (bearer)
   (`forge.token_env_vars`). Incremental, thread resolution, labels, checks and
   feedback are unbuilt and unclaimed.

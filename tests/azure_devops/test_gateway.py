@@ -35,6 +35,11 @@ TOKEN = "ado-pat-secret-value"
 REPO_API = "https://dev.azure.com/acme/My%20Project/_apis/git/repositories/api"
 PR_API = f"{REPO_API}/pullRequests/{PR_ID}"
 THREADS = f"{PR_API}/threads"
+CONNECTION_DATA = "https://dev.azure.com/acme/_apis/connectionData"
+
+# The identity the token authenticates as, and someone else's.
+SELF_ID = "0f1e2d3c-self"
+OTHER_ID = "9a8b7c6d-other"
 
 BASE_SHA = "base123"
 HEAD_SHA = "head456"
@@ -124,6 +129,8 @@ class FakeAzureDevOps:
         self.edited: list[tuple[int, int, str]] = []
         self.reject_threads_at: set[str] = set()
         self.forbid_edits = False
+        self.identity_status = 200
+        self.identity_calls = 0
         self.requests: list[httpx.Request] = []
         self._next_id = 1000
 
@@ -147,6 +154,14 @@ class FakeAzureDevOps:
         respx.route(method="PATCH", url__startswith=f"{THREADS}/").mock(
             side_effect=self._edit_comment
         )
+        respx.get(CONNECTION_DATA).mock(side_effect=self._connection_data)
+
+    def _connection_data(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        self.identity_calls += 1
+        if self.identity_status != 200:
+            return httpx.Response(self.identity_status, json={"message": "nope"})
+        return httpx.Response(200, json={"authenticatedUser": {"id": SELF_ID}})
 
     def _record(self, response: httpx.Response) -> Any:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -193,7 +208,7 @@ class FakeAzureDevOps:
                     "id": 1,
                     "content": payload["comments"][0]["content"],
                     "commentType": "text",
-                    "author": {"displayName": "Build Service"},
+                    "author": {"id": SELF_ID, "displayName": "Build Service"},
                 }
             ],
         }
@@ -230,10 +245,19 @@ def _gateway(*, bearer: bool = False, marker_key: str | None = None) -> AzureDev
 
 
 def _thread(thread_id: int, content: str, **extra: Any) -> dict[str, Any]:
+    """A thread whose root comment, by default, the token's own identity wrote."""
     return {
         "id": thread_id,
         "status": extra.pop("status", "active"),
-        "comments": [{"id": 1, "content": content, "commentType": "text", **extra}],
+        "comments": [
+            {
+                "id": 1,
+                "content": content,
+                "commentType": "text",
+                "author": {"id": SELF_ID, "displayName": "Build Service"},
+                **extra,
+            }
+        ],
     }
 
 
@@ -246,6 +270,13 @@ class TestAddressing:
             host="acme.visualstudio.com", repo="acme/Proj/api", pr_number=1, token="t"
         )
         assert gateway._repo_api == "https://acme.visualstudio.com/Proj/_apis/git/repositories/api"
+
+    def test_the_identity_is_read_from_the_organisation(self) -> None:
+        assert _gateway()._connection_data_url == CONNECTION_DATA
+        legacy = AzureDevOpsGateway(
+            host="acme.visualstudio.com", repo="acme/Proj/api", pr_number=1, token="t"
+        )
+        assert legacy._connection_data_url == "https://acme.visualstudio.com/_apis/connectionData"
 
     def test_a_repo_that_is_not_three_segments_is_refused(self) -> None:
         with pytest.raises(ValueError, match="organisation/project/repository"):
@@ -280,6 +311,8 @@ class TestTokenHandling:
 
         assert fake.requests
         for request in fake.requests:
+            if request.url.path.endswith("/connectionData"):
+                continue  # an organisation-level endpoint, not the versioned git API
             assert request.url.params["api-version"] == "7.1"
             assert TOKEN not in str(request.url)
 
@@ -409,6 +442,45 @@ class TestGetPRContext:
         assert "evil" not in ctx.diff
 
     @respx.mock
+    def test_an_integer_change_type_is_decoded_by_bit(self) -> None:
+        """VersionControlChangeType flags: Edit 2 | Rename 8."""
+        changes = [
+            {"changeType": 2 | 8, "item": {"path": "/renamed.py"}, "originalPath": "/before.py"}
+        ]
+        FakeAzureDevOps(changes=changes).install()
+        diff = _gateway().get_pr_context().diff
+
+        assert "rename from before.py\nrename to renamed.py" in diff
+        assert "-b = 2\n+b = 3" in diff
+
+    @respx.mock
+    def test_an_integer_delete_is_decoded_by_bit(self) -> None:
+        changes = [{"changeType": 16, "item": {"path": "/gone.py"}}]
+        FakeAzureDevOps(changes=changes).install()
+
+        assert "deleted file mode 100644" in _gateway().get_pr_context().diff
+
+    @respx.mock
+    def test_a_missing_side_of_an_edit_is_named_in_the_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        files = {k: v for k, v in FILES.items() if k != ("/app.py", BASE_SHA)}
+        FakeAzureDevOps(changes=CHANGES[:1], files=files).install()
+        caplog.set_level(logging.WARNING)
+        _gateway().get_pr_context()
+
+        assert any("app.py" in r.getMessage() for r in caplog.records)
+
+    @respx.mock
+    def test_a_failing_commit_listing_leaves_the_intent_without_commits(self) -> None:
+        FakeAzureDevOps().install()
+        respx.get(f"{PR_API}/commits").mock(return_value=httpx.Response(500, text="boom"))
+        ctx = _gateway().get_pr_context()
+
+        assert ctx.commit_messages == []
+        assert ctx.title == "Add a thing"
+
+    @respx.mock
     def test_too_many_changed_files_is_disclosed_not_silently_truncated(self) -> None:
         many = [
             {"changeType": "edit", "item": {"path": f"/f{i}.py"}}
@@ -455,6 +527,18 @@ class TestGetPRContext:
         gateway.get_pr_context()
         assert gateway.get_file_contents("app.py") == APP_NEW
         assert gateway.get_file_contents("missing.py") is None
+
+    @respx.mock
+    def test_file_contents_fetches_an_unchanged_file_at_the_head(self) -> None:
+        """Reflection asks for files the diff never touched; those come from the API."""
+        files = {**FILES, ("/lib/util.py", HEAD_SHA): b"def helper():\n    return 1\n"}
+        fake = FakeAzureDevOps(files=files)
+        fake.install()
+        gateway = _gateway()
+        gateway.get_pr_context()
+
+        assert gateway.get_file_contents("lib/util.py") == "def helper():\n    return 1\n"
+        assert ("/lib/util.py", HEAD_SHA) in fake.item_requests
 
 
 class TestPositions:
@@ -576,8 +660,8 @@ class TestSummary:
 
     @respx.mock
     def test_a_summary_it_may_not_edit_is_replaced_by_a_new_one(self) -> None:
-        """Someone else's comment carrying our marker must not fail the review."""
-        fake = FakeAzureDevOps(threads=[_thread(5, "planted\n\n<!-- lgtmaybe -->")])
+        """A refused edit of our own comment must not fail the review."""
+        fake = FakeAzureDevOps(threads=[_thread(5, "old\n\n<!-- lgtmaybe -->")])
         fake.install()
         fake.forbid_edits = True
         _gateway().post_review([], "👍 LGTM!", diff="")
@@ -585,15 +669,45 @@ class TestSummary:
         assert fake.created[-1]["comments"][0]["content"].startswith("👍 LGTM!")
 
     @respx.mock
-    def test_a_planted_marker_does_not_hide_our_own_summary(self) -> None:
-        """An earlier comment quoting our marker must not cost a duplicate each run."""
+    def test_an_unexpected_edit_failure_raises(self) -> None:
+        """Only 403/404 fall through to a new thread; anything else is a real error."""
+        fake = FakeAzureDevOps(threads=[_thread(5, "old\n\n<!-- lgtmaybe -->")])
+        fake.install()
+        respx.route(method="PATCH", url__startswith=f"{THREADS}/").mock(
+            return_value=httpx.Response(500, json={"message": "boom"})
+        )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            _gateway().post_review([], "updated", diff="")
+        assert not fake.created
+
+    @respx.mock
+    def test_a_planted_marker_is_never_an_edit_target(self) -> None:
+        """Only a thread the token's own identity opened is ours to edit."""
         fake = FakeAzureDevOps(
             threads=[
-                _thread(5, "planted\n\n<!-- lgtmaybe -->"),
+                _thread(5, "planted\n\n<!-- lgtmaybe -->", author={"id": OTHER_ID}),
                 _thread(6, "ours\n\n<!-- lgtmaybe -->"),
             ]
         )
         fake.install()
+        _gateway().post_review([], "updated", diff="")
+
+        assert [(tid, cid) for tid, cid, _c in fake.edited] == [(6, 1)]
+        assert not [r for r in fake.requests if "/threads/5/" in r.url.path]
+        assert not fake.created
+
+    @respx.mock
+    def test_without_an_identity_the_host_decides_who_may_edit(self) -> None:
+        """Azure DevOps refuses edits to another author's comment, so trying is safe."""
+        fake = FakeAzureDevOps(
+            threads=[
+                _thread(5, "planted\n\n<!-- lgtmaybe -->", author={"id": OTHER_ID}),
+                _thread(6, "ours\n\n<!-- lgtmaybe -->"),
+            ]
+        )
+        fake.install()
+        fake.identity_status = 500
         real_edit = fake._edit_comment
 
         def edit_only_ours(request: httpx.Request) -> httpx.Response:
@@ -675,6 +789,49 @@ class TestDedupe:
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
     @respx.mock
+    def test_a_thread_planted_by_someone_else_does_not_suppress(self) -> None:
+        """Path and title are public, so anyone could forge a finding's hidden id."""
+        planted = self._posted_finding_thread(author={"id": OTHER_ID, "displayName": "Author"})
+        fake = FakeAzureDevOps(threads=[planted])
+        fake.install()
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        assert len([t for t in fake.created if t.get("threadContext")]) == 1
+
+    @respx.mock
+    def test_a_thread_without_an_author_does_not_suppress(self) -> None:
+        fake = FakeAzureDevOps(threads=[self._posted_finding_thread(author={})])
+        fake.install()
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        assert len([t for t in fake.created if t.get("threadContext")]) == 1
+
+    @respx.mock
+    def test_an_identity_lookup_failure_suppresses_nothing(self) -> None:
+        """Fail safe: a finding may post twice, but is never hidden."""
+        fake = FakeAzureDevOps(threads=[self._posted_finding_thread()])
+        fake.install()
+        fake.identity_status = 401
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        assert len([t for t in fake.created if t.get("threadContext")]) == 1
+
+    @respx.mock
+    def test_the_identity_is_looked_up_once_per_gateway(self) -> None:
+        fake = FakeAzureDevOps(threads=[self._posted_finding_thread()])
+        fake.install()
+        gateway = _gateway()
+        diff = gateway.get_pr_context().diff
+        gateway.post_review([FINDING], "1 finding", diff=diff)
+        gateway.post_review([FINDING], "1 finding", diff=diff)
+        gateway.post_describe_comment("A description")
+
+        assert fake.identity_calls == 1
+
+    @respx.mock
     def test_dedupe_consumes_each_existing_finding_once(self) -> None:
         fake = FakeAzureDevOps(threads=[self._posted_finding_thread()])
         fake.install()
@@ -696,7 +853,7 @@ class TestConversation:
         threads = [
             _thread(1, "```mermaid\nflowchart LR\n```", author={"displayName": "Dev"}),
             _thread(2, "Policy updated", commentType="system"),
-            _thread(3, "no author"),
+            _thread(3, "no author", author={}),
         ]
         FakeAzureDevOps(threads=threads).install()
 

@@ -1131,6 +1131,10 @@ def pr_url_from_pipelines_env() -> str:
     rather than as the build validation policy on a branch, so the message
     names the variable and the fix.
     """
+    # Azure Pipelines always sets this ("TfsGit" for Azure Repos). An unset or
+    # empty value only happens outside a pipeline (running the command by hand
+    # with the other variables exported), and is treated as Azure Repos: the
+    # URL it builds still has to parse as an Azure DevOps pull request.
     provider = os.environ.get("BUILD_REPOSITORY_PROVIDER", "")
     if provider and provider != "TfsGit":
         raise click.ClickException(

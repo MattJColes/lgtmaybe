@@ -52,16 +52,26 @@ a "resolve all comments" branch policy never waits on them, while findings can
 still hold a merge, as that policy intends. A rejected finding thread is
 demoted into the summary.
 
-### D4. Upsert by marker, de-duplicate by hidden id
+### D4. Trust only our own threads
 
-The summary is found by its marker in a live thread's first comment and edited
-with `PATCH .../threads/{id}/comments/{id}`. A 403 or 404 (someone else's
-comment carrying our marker, or a thread deleted since) moves on to the next
-candidate, so a planted marker can neither fail the review nor hide our own
-summary; with none editable, a new thread is opened. De-duplication reads the hidden ids of the
-first comment of every live thread except `fixed` ones: a resolved finding that
-returns is reported again (GitLab's rule), while won't-fix, by-design and closed
-dispositions keep suppressing it.
+A finding's hidden ids derive from its path and title, both public, so anyone
+who can comment on the pull request (its author included) could plant a thread
+carrying them and suppress the finding. The adapter therefore resolves the
+token's own identity once per gateway (`GET {collection}/_apis/connectionData`,
+`authenticatedUser.id`; it answers for a personal access token and for
+`System.AccessToken`, the latter as the project build service) and compares it
+with each root comment's `author.id`.
+
+- De-duplication reads hidden ids only from live, non-`fixed` threads we wrote:
+  a resolved finding that returns is reported again (GitLab's rule), while
+  won't-fix, by-design and closed dispositions of ours keep suppressing it. If
+  the identity cannot be read, no thread is trusted: a finding may post twice,
+  but is never hidden.
+- The summary, description and diagram are edited only in a thread we opened,
+  found by its marker. With the identity unknown every marked thread is tried,
+  which is still safe because Azure DevOps lets only a comment's author edit
+  it; a 403 or 404 moves on to the next candidate, and with none editable a new
+  thread is opened.
 
 ### D5. Two token shapes, one variable list
 

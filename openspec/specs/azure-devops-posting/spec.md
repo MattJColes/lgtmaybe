@@ -85,26 +85,38 @@ thread.
 
 The summary, description, and diagram SHALL each be a `closed` general thread
 whose first comment carries its own hidden marker family and is edited in place
-on a re-run. An edit refused with 403 or 404 SHALL move on to the next thread
-carrying the marker, and a new thread SHALL be posted when none can be edited,
-never failing the review.
+on a re-run. Only threads whose first comment the token's own identity wrote
+SHALL be edit targets; when the identity is unknown, the host's author check
+decides. An edit refused with 403 or 404 SHALL move on to the next candidate,
+and a new thread SHALL be posted when none can be edited, never failing the
+review.
 <!-- anchor: azure-devops.upsert -->
 
 #### Scenario: a re-run
 - **WHEN** a review runs twice on the same pull request
 - **THEN** the summary thread's first comment is edited and no second summary is created
 
+#### Scenario: someone else plants the marker
+- **WHEN** another user's thread carries the summary marker
+- **THEN** it is never edited, and our own summary thread is
+
 ### Requirement: Findings are de-duplicated against live threads
 
-Before posting, the adapter SHALL read the hidden finding ids from the first
-comment of every thread that is neither deleted nor `fixed`, and drop each
-finding matching one, consuming each existing id once. A won't-fix or closed
-thread SHALL keep suppressing its finding; a fixed one SHALL NOT.
+Before posting, the adapter SHALL drop each finding whose hidden id appears in
+the first comment of a live, non-`fixed` thread written by the token's own
+identity (`connectionData`'s `authenticatedUser.id`, resolved once), consuming
+each id once. A thread by anyone else SHALL NOT suppress a finding, and when the
+identity cannot be read no thread SHALL. A won't-fix or closed thread of ours
+SHALL keep suppressing its finding; a fixed one SHALL NOT.
 <!-- anchor: azure-devops.dedupe -->
 
 #### Scenario: a fixed finding returns
 - **WHEN** a finding's earlier thread is `fixed` and the finding is produced again
 - **THEN** a new thread is posted for it
+
+#### Scenario: a planted finding id
+- **WHEN** the pull request's author opens a thread carrying an expected finding's id
+- **THEN** the finding is still posted
 
 ### Requirement: Tokens choose their auth scheme and stay private
 
