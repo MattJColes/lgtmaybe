@@ -24,8 +24,10 @@ Verify it:
 lgtmaybe --help
 ```
 
-That prints the command list with usage examples. `<command> --help` (for
-example `lgtmaybe review --help`) lists every option for one command.
+That prints the command list with usage examples. `<command> --help` lists a
+command's options. For `lgtmaybe review` it shows only the everyday ones and
+ends with a line pointing at `lgtmaybe review --help-all`, which lists the
+advanced tuning options too.
 
 To check which build you are running, for a bug report or a benchmark record:
 
@@ -136,6 +138,28 @@ To use `--static-analysis` locally, install the tools it drives with
 zizmor). gitleaks and osv-scanner are separate binaries you install yourself;
 any tool that is not installed is skipped. The Action image bundles all of
 them.
+
+## Configure a Provider
+
+lgtmaybe has no built-in model, so tell it which provider and model to use
+once:
+
+```bash
+lgtmaybe config init
+```
+
+It looks for a provider API key in your environment (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`), Azure, AWS or Google
+Cloud credentials, and a running ollama with its pulled models. It offers the
+first one it finds, suggests a current model, then checks the pair with one
+tiny request so a wrong key or model fails now rather than mid-review. It
+writes the provider and model to `~/.config/lgtmaybe/config.yml`; API keys stay
+in your environment and are never written. Pass `--no-verify` to skip the
+check, for example when you are offline.
+
+Until a provider is configured (by `config init`, a `.lgtmaybe.yml`, or
+`--provider`/`--model`), `lgtmaybe review` stops at once with a pointer to
+`config init` instead of guessing a model.
 
 ## Next Steps
 

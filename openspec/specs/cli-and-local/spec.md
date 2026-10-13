@@ -18,6 +18,20 @@ silent success.
 - **THEN** the run exits non-zero with the error surfaced, and a failure
   comment is posted on the PR
 
+### Requirement: Review help discloses progressively
+
+`lgtmaybe review --help` SHALL list only the everyday options (provider,
+model, base, working, uncommitted, format/json, min-severity, full, config)
+and end with one line counting the advanced tuning options and naming
+`--help-all`, which lists every option under Common and Advanced headings.
+The split is rendering only: every option parses the same either way.
+<!-- anchor: cli.progressive-help -->
+
+#### Scenario: first-time user asks for help
+- **WHEN** `lgtmaybe review --help` runs
+- **THEN** the output fits one screen (about 40 lines) and points at
+  `--help-all` for the rest
+
 ### Requirement: One orchestrator behind every entrypoint
 
 `run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, and `action` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path; explicit `incremental: false` and `/review full` SHALL run a full review.
@@ -280,12 +294,44 @@ specific wins), and the user-level store persists only non-secret defaults —
 API keys stay in the environment, never written to disk. An explicitly chosen
 config path (`--config` / the Action's `config_path`) must exist and parse to
 a mapping — a typo'd path fails loudly rather than silently running with
-defaults; the default `.lgtmaybe.yml` probe stays lenient when absent.
+defaults; the default `.lgtmaybe.yml` probe stays lenient when absent. There
+is no built-in provider or model: when no layer sets both, loading fails
+before any diff or model work with a two-line pointer phrased for the
+entrypoint (`config init` locally, the `provider`/`model` inputs in the
+Action, flags or `.lgtmaybe.yml` for `gitlab-ci` / `comment`).
 <!-- anchor: cli.config -->
 
 #### Scenario: user tries to persist a key
 - **WHEN** `lgtmaybe config set` targets an API key
 - **THEN** it is refused; keys are read from env/flags at run time only
+
+#### Scenario: nothing configured on a fresh install
+- **WHEN** `lgtmaybe review` runs with no flag, repo file, or user config
+  naming a provider and model
+- **THEN** it exits non-zero at once, pointing at `lgtmaybe config init` or
+  `--provider`/`--model`, and never guesses a model
+
+### Requirement: First-run setup detects, then verifies
+
+`lgtmaybe config init` SHALL detect provider API keys, cheaply visible ambient
+cloud credentials, and a running ollama (with its pulled models) before
+asking anything, offer the strongest detection as the default, validate the
+provider against the enum, and suggest a current model from a table kept in
+step with the how-to guides. Unless `--no-verify` is given, it SHALL make one
+tiny completion through the review's own credential resolver and provider
+factory before writing, so a bad key or model fails during setup with the
+same "how to auth" message a review would show. Only provider, model and
+api_base are written; keys stay in the environment.
+<!-- anchor: cli.config-init -->
+
+#### Scenario: a machine with a running ollama
+- **WHEN** `config init` runs and ollama answers `/api/tags`
+- **THEN** two Enter presses confirm ollama and a pulled model, the model is
+  checked, and the file path and `lgtmaybe review` are printed
+
+#### Scenario: a wrong API key
+- **WHEN** the verification call fails
+- **THEN** init exits non-zero with the provider's error and writes nothing
 
 ### Requirement: The Action selects GitHub identity explicitly
 
