@@ -281,7 +281,7 @@ settings can also go in `.lgtmaybe.yml`; an input you set overrides the file.
 | `max_review_tokens` | `0` (off) | Soft ceiling on billable tokens (input plus output) across every model call. Once it passes, no further calls start and the review posts what it has with a notice. Run once with `profile: true`, read the total, then set this above it |
 | `max_concurrency` | `6` | Concurrent model calls across the whole review. Set `1` for a serial local run |
 | `max_input_tokens` | `100000` | Token budget per model call before the diff is split into batches. Left unset, it is lowered to fit the model's context window when that is known |
-| `max_tokens` | model's own ceiling | Cap on the tokens each call may generate. Set it on a prepaid route like OpenRouter, which reserves prompt plus `max_tokens` against your balance and assumes the model's full ceiling when no cap is sent. ollama gets a finite default |
+| `max_tokens` | 16384 on ollama, openai-compatible and openrouter; the model's own ceiling elsewhere | Cap on the tokens each call may generate. `0` sends no cap. OpenRouter reserves prompt plus `max_tokens` against a prepaid balance, so the finite default keeps that bounded; raise it when a long answer is being cut off |
 | `max_findings_per_lens` | `50` | Ceiling on findings from one (batch, lens) call, a backstop against a degenerate reply. When it fires, the highest-severity findings are kept and the review names the lens and the count dropped. `0` disables |
 | `reasoning_effort` | route default | Bound how much a reasoning model thinks per call: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `default`. Use it when lens calls truncate or run long |
 | `temperature` | `0.0` | Sampling temperature (`0.0` is deterministic) |
