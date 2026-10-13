@@ -9397,10 +9397,12 @@ text, and any fetched file context. Recognised formats include:
   (`xoxb-…`), npm tokens (`npm_…`), and PyPI tokens (`pypi-…`).
 - **JSON Web Tokens**: `eyJ….eyJ….…` and five-part encrypted JWEs, as whole
   tokens, since the payload can carry claims and PII.
-- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks.
+- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks, encrypted ones
+  included.
 - **Generic credentials**: `api_key` / `secret_key` / `access_token` / `token`
   assignments with a value of 16 or more characters, quoted `password` /
-  `passwd` / `passphrase` / `pwd` literals, `Authorization: Bearer/Basic …`
+  `passwd` / `passphrase` / `pwd` literals (the key may be quoted too, as in
+  JSON), `Authorization: Bearer/Basic …`
   headers, passwords in connection-string URLs (`scheme://user:secret@host`),
   and Azure storage or Cosmos connection-string keys (`AccountKey=…` /
   `SharedAccessKey=…`).
