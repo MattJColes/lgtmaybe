@@ -33,6 +33,7 @@ from lgtmaybe.cli import (
     pr_url_from_event,
     pr_url_from_pipelines_env,
     resolve_auto_incremental,
+    resolve_ci_incremental,
     should_auto_diagram,
 )
 from lgtmaybe.config import detect, store
@@ -759,6 +760,14 @@ def action() -> None:
 
 @main.command("gitlab-ci")
 @model_options
+@click.option(
+    "--incremental/--no-incremental",
+    default=None,
+    envvar="LGTMAYBE_INCREMENTAL",
+    help="Review only the commits since the last completed review (default: on whenever "
+    "a watermark exists). --no-incremental, or LGTMAYBE_INCREMENTAL=false on a manual "
+    "pipeline, forces a full re-review.",
+)
 def gitlab_ci(
     provider: str | None,
     model: str | None,
@@ -766,6 +775,7 @@ def gitlab_ci(
     api_key: str | None,
     api_base: str | None,
     config_path: str | None,
+    incremental: bool | None,
 ) -> None:
     """GitLab CI entrypoint: review the merge request this pipeline is for.
 
@@ -774,7 +784,15 @@ def gitlab_ci(
     ``CI_*`` variables and configuration comes from the ordinary flags,
     environment, and ``.lgtmaybe.yml`` — everything downstream is shared.
     """
-    cfg = _load_cfg(config_path, setup_hint=_FLAGS_SETUP_HINT, provider=provider, model=model)
+    cfg = resolve_ci_incremental(
+        _load_cfg(
+            config_path,
+            setup_hint=_FLAGS_SETUP_HINT,
+            provider=provider,
+            model=model,
+            incremental=incremental,
+        )
+    )
     runtime = replace(_runtime(api_key, api_base, fallback_model), pr_url=mr_url_from_ci_env())
     execute_review(cfg, runtime)
 

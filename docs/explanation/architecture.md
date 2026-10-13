@@ -83,8 +83,8 @@ cannot do instead of failing at run time.
 | `SupportsLabels` | ✅ | ✅ | ✅ | not yet |
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
-| `SupportsIncremental`: review only new commits | ✅ | not yet | ✗ no compare diff | not yet |
-| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ | not yet |
+| `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
 `tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
@@ -103,7 +103,12 @@ Gitea is close to GitHub; GitLab and Azure DevOps are not.
   on the pull request.
 - **GitLab** has no batched review object. Each finding is its own
   **discussion**, positioned by old/new path and line plus the merge request's
-  `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST.
+  `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST. Its
+  compare API returns per-file patches and no "ahead" status, so the adapter
+  reassembles the increment into a unified diff and checks from the commits'
+  parent ids that the new head builds on the last reviewed one. It also works
+  out the "lines moved" signal GitLab doesn't expose, from the diff since each
+  discussion was posted.
 - **Azure DevOps** serves no unified diff. The adapter lists the latest
   iteration's changed files against the merge base, fetches each file's text
   on both sides, and renders the diff with `core/diffbuild.py`, so the shared
@@ -123,9 +128,11 @@ own instance.
 
 GitLab CI has neither an event payload file nor `INPUT_*` variables, so it gets
 its own `gitlab-ci` command that reads GitLab's predefined `CI_*` variables.
+Everything downstream (locator, gateway registry, engine) is shared. With no
+`synchronize` action to key on, `gitlab-ci` treats an unset `incremental` as on:
+the first pipeline has no watermark yet, so it is a full review anyway.
 Azure Pipelines is in the same position, so `azure-pipelines` reads its
 predefined `SYSTEM_*` and `BUILD_*` variables.
-Everything downstream (locator, gateway registry, engine) is shared.
 
 ## Review Pipeline
 

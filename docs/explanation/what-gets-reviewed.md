@@ -543,7 +543,8 @@ The findings are identical everywhere. What each host's API allows is not:
 | Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place | a general thread, edited in place |
 | Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids it posted itself, once the token's identity is known |
 | Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
-| Incremental review of new commits | ✅ | not yet | ✗ no compare diff | not yet |
+| Incremental review of new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ | not yet |
 
 A submitted **Gitea** review can't be edited, so its summary moves to an
 ordinary comment and duplicate findings are filtered *before* posting.

@@ -24,8 +24,10 @@ from tenacity import Retrying, retry_if_result, stop_after_attempt
 
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
+    DIAGRAMMED_MARKER,
     FINDING_MARKER,
     IDENTITY_MARKER,
+    REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
     marker,
@@ -102,8 +104,9 @@ _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 # Hidden marker stamped into the summary review body recording the head SHA
 # this review covered, so the next run can review only the commits pushed
 # since (commit-scoped incremental review). The capture group is the SHA.
-_REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
-_DIAGRAMMED_MARKER = re.compile(r"<!-- lgtmaybe-diagrammed:([0-9a-f]{7,40}) -->")
+# Defined in core.comment so every forge stamps the same wire format.
+_REVIEWED_MARKER = REVIEWED_MARKER
+_DIAGRAMMED_MARKER = DIAGRAMMED_MARKER
 
 
 # Concurrency for the per-file head-content fetch. The contents are independent

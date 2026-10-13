@@ -236,8 +236,12 @@ class TestPostReview:
         )
         respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
             return_value=httpx.Response(
-                200, json=[{"id": 55, "body": "old summary\n\n<!-- lgtmaybe -->"}]
+                200,
+                json=[{"id": 55, "body": "old summary\n\n<!-- lgtmaybe -->", "author": {"id": 99}}],
             )
+        )
+        respx.get(f"https://{HOST}/api/v4/user").mock(
+            return_value=httpx.Response(200, json={"id": 99})
         )
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
@@ -550,14 +554,16 @@ class TestCapabilities:
             "SupportsChecks",
             "SupportsThreadResolution",
             "SupportsConversation",
+            "SupportsIncremental",
+            "SupportsFeedback",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
-    def test_does_not_claim_incremental_review(self) -> None:
-        """Reviewing an increment needs a diff between two commits; that comes later."""
+    def test_does_not_claim_a_base_checkout(self) -> None:
+        """Symbol lookup clones the base branch; nothing on GitLab offers that yet."""
         from lgtmaybe.core import ports
 
-        assert not isinstance(GitLabGateway.__new__(GitLabGateway), ports.SupportsIncremental)
+        assert not isinstance(GitLabGateway.__new__(GitLabGateway), ports.SupportsBaseCheckout)
 
 
 class TestLabels:

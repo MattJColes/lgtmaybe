@@ -208,6 +208,20 @@ def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewC
     return cfg.model_copy(update={"incremental": event_action == "synchronize"})
 
 
+def resolve_ci_incremental(cfg: ReviewConfig) -> ReviewConfig:
+    """Resolve ``incremental=None`` (auto) for a GitLab CI merge request pipeline.
+
+    GitLab CI has no ``synchronize`` action to key on: every merge request
+    pipeline looks alike. Auto therefore means "incremental whenever a completed
+    watermark exists", which ``run_review`` already reduces to a full review on
+    the first pipeline (no watermark), after a force-push or rebase, and on any
+    compare failure. An explicit True/False still wins.
+    """
+    if cfg.incremental is not None:
+        return cfg
+    return cfg.model_copy(update={"incremental": True})
+
+
 def _marker_key(cfg: ReviewConfig) -> str:
     """Scopes this setup's hidden markers, so each provider/model owns its comments."""
     return f"{cfg.provider}/{cfg.model}"
@@ -785,7 +799,7 @@ def _validate_prior_findings(
         FindingValidation(
             thread_id=verdict.thread_id,
             status=FindingValidationStatus.uncertain,
-            reason="the model reported a fix but GitHub does not mark the finding outdated",
+            reason="the model reported a fix but the forge does not mark the finding outdated",
         )
         if verdict.status is FindingValidationStatus.fixed
         and verdict.thread_id not in outdated_thread_ids
@@ -1391,6 +1405,7 @@ __all__ = [
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",
+    "resolve_ci_incremental",
     "run_describe",
     "run_local_review",
     "run_review",

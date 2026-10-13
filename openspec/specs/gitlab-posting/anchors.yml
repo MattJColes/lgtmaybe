@@ -23,7 +23,35 @@ gitlab.upsert:
   files: [src/lgtmaybe/gitlab/**/*.py]
 
 gitlab.resolve:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_resolve_fixed_threads$' }
+    files: [src/lgtmaybe/gitlab/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_is_outdated$' }
+    files: [src/lgtmaybe/gitlab/**/*.py]
+
+gitlab.incremental:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^compare_diff$' }
+    files: [src/lgtmaybe/gitlab/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^_unusable_increment$' }
+    files: [src/lgtmaybe/gitlab/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^last_reviewed_sha$' }
+    files: [src/lgtmaybe/gitlab/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^mark_reviewed$' }
+    files: [src/lgtmaybe/gitlab/**/*.py]
+
+gitlab.feedback:
   rule:
     kind: function_definition
-    has: { field: name, regex: '^_resolve_fixed_threads$' }
+    has: { field: name, regex: '^list_downvoted_fingerprints$' }
   files: [src/lgtmaybe/gitlab/**/*.py]

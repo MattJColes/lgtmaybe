@@ -95,8 +95,14 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
   batched review object, so each finding is its own *discussion* positioned by
   old/new path + line and the MR's three diff refs; the summary is an upserted
   note; thread resolution works over plain REST (no GraphQL), gated on the
-  caller's validated allowlist because GitLab exposes no "lines moved" signal.
-  Incremental is unbuilt there — a "not yet", not a "cannot".
+  caller's validated allowlist and scoped to the increment's files. GitLab
+  exposes no "lines moved" signal, so `_is_outdated` derives one from the
+  straight compare since the note's positioned head. Incremental review uses
+  the repository compare API reassembled into a unified diff; with no "ahead"
+  status, `_unusable_increment` requires a single-parent commit chain from head
+  back to the watermark (else full review). The watermark is read only from a
+  note the token's own user wrote, and an unmarked post keeps the old one. 👎
+  feedback reads `thumbsdown` award emoji from Developer+ members.
   **Azure DevOps** (`azure_devops/gateway.py`, Services only, api-version 7.1)
   serves no unified diff, so the adapter reads the latest iteration's changes
   against the merge base, fetches both sides via the Items API (unreviewable
@@ -117,9 +123,11 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
 - **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
   the same env contract; only `GITHUB_SERVER_URL` differs, and
   `cli._change_url` reads it). GitLab CI has neither an event payload nor
-  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`; Azure
-  Pipelines likewise gets `azure-pipelines`, reading `SYSTEM_*`/`BUILD_*`
-  (`cli.pr_url_from_pipelines_env`).
+  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`; with no
+  `synchronize` action, it resolves unset `incremental` to on
+  (`cli.resolve_ci_incremental`; `--no-incremental` / `LGTMAYBE_INCREMENTAL`
+  override). Azure Pipelines likewise gets `azure-pipelines`, reading
+  `SYSTEM_*`/`BUILD_*` (`cli.pr_url_from_pipelines_env`).
 
 ## Key decisions (do not relitigate)
 
@@ -344,7 +352,8 @@ pattern, event bus, plugin framework.
      un-re-reviewed finding is never spuriously resolved; LEFT-side findings
      are dropped (their line numbers are relative to the last-reviewed head,
      not the PR base). `ReviewConfig.incremental` (default None = auto: on for
-     the Action's `synchronize` event, full elsewhere; Action input
+     the Action's `synchronize` event and every `gitlab-ci` pipeline, full
+     elsewhere; Action input
      `incremental`); `/review full` forces a full re-review.
    - **Static-analysis fusion (default off):** with `static_analysis.enabled`,
      installed deterministic tools (the eight in `StaticAnalysisTool` — ruff,
