@@ -651,6 +651,26 @@ class _PayloadReason(_RetryableReason):
     __slots__ = ()
 
 
+class _PiecesReason(_RetryableReason):
+    """A split whose pieces faltered on the provider: the rescue re-runs just those.
+
+    Re-running the call that split would replay the original whole batch — the
+    payload :class:`_PayloadReason` already knows cannot work, another full
+    timeout or ``max_tokens`` bill — and then every piece again, the ones that
+    answered included (observed as whole, a, b, whole, a, b). So the split hands
+    the rescue wave the only retry worth paying for: :attr:`retry`, the failed
+    pieces alone. A plain attribute, because a ``str`` subtype cannot carry a
+    non-empty ``__slots__``.
+    """
+
+    retry: Callable[[], _LensOutcome]
+
+
+def _provider_side(reason: str | None) -> bool:
+    """True when a split piece failed on the provider, not on its own size."""
+    return _rescuable(reason) and not isinstance(reason, _PayloadReason)
+
+
 class _ReasoningBoundReason(str):
     """A truncation whose ceiling went on thought, not on the answer.
 
@@ -1599,11 +1619,17 @@ class LLMReviewEngine:
             extra={"calls": len(retrying), "lenses": [calls[i].lens_id for i in retrying]},
         )
         merged = list(outcomes)
+
+        def rerun(index: int) -> _LensOutcome:
+            # A split's failed pieces, never the oversized whole — see _PiecesReason.
+            error = outcomes[index][1]
+            return error.retry() if isinstance(error, _PiecesReason) else calls[index].task()
+
         width = min(len(retrying), _RESCUE_WORKERS)
         with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-rescue") as pool:
             # map() yields in submission order, so the merge stays deterministic
             # however the calls interleave.
-            rescued = list(pool.map(lambda i: calls[i].task(), retrying))
+            rescued = list(pool.map(rerun, retrying))
         for index, (findings, error) in zip(retrying, rescued, strict=True):
             first_findings, _ = merged[index]
             merged[index] = (first_findings + findings, error)
@@ -2007,8 +2033,9 @@ class LLMReviewEngine:
         #   original oversized request is the "identical request against an
         #   identical budget" the adapter refuses to repeat, at twice the calls.
         # - A piece that failed on the PROVIDER — a capacity 429, a 5xx, a stalled
-        #   connection — says nothing about size. Its marker travels on, because
-        #   one more go after the wave has drained is exactly what it needs.
+        #   connection — says nothing about size. One more go after the wave has
+        #   drained is exactly what it needs — for THAT piece alone, which is
+        #   what :class:`_PiecesReason` hands the rescue wave.
         #
         # Collapsing the two is the bug this replaces: every split failure was
         # reported plain, so a transient blip inside a piece silently forfeited
@@ -2023,9 +2050,26 @@ class LLMReviewEngine:
         # own failure, which is what the notice should name), while retryability
         # is a property of ANY piece having faltered provider-side.
         last = errors[-1]
-        if any(_rescuable(e) and not isinstance(e, _PayloadReason) for e in errors):
-            return findings, _RetryableReason(last)
-        return findings, str(last)
+        flaky = [piece for piece, (_, e) in zip(pieces, outcomes, strict=True) if _provider_side(e)]
+        if not flaky:
+            return findings, str(last)
+        settled = [e for e in errors if not _provider_side(e)]
+
+        def retry() -> _LensOutcome:
+            # Serial: this runs on a rescue worker, and that wave is narrow on
+            # purpose (see _RESCUE_WORKERS). Plain errors out — the rescue is
+            # one wave, so its outcome is never rescued again.
+            again = [review_piece(piece) for piece in flaky]
+            if any(error is None for _, error in again):
+                self._split_batches.add(batch_num)
+            remaining = settled + [error for _, error in again if error is not None]
+            return [f for found, _ in again for f in found], (
+                str(remaining[-1]) if remaining else None
+            )
+
+        reason = _PiecesReason(last)
+        reason.retry = retry
+        return findings, reason
 
     def _retry_lower_effort(
         self,
