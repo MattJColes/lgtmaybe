@@ -161,3 +161,9 @@ distribution.action-major:
     has: { field: key, regex: '^image$' }
   language: yaml
   files: [action.yml]
+
+cli.local-fail-on:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^execute_local_review$' }
+  files: [src/lgtmaybe/cli/**/*.py]
