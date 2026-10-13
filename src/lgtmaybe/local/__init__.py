@@ -32,7 +32,14 @@ _QUOTE_PATH_OFF = ("-c", "core.quotePath=false")
 # `diff.noprefix` / `diff.mnemonicPrefix`, `color.diff=always` or `diff.external`
 # reshapes that output, which used to leave `changed_files` empty and every
 # finding unanchored — so every `git diff` we run pins the format explicitly.
-_DIFF_FORMAT = ("--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/")
+# A `diff.<driver>.textconv` filter rewrites the hunk lines themselves.
+_DIFF_FORMAT = (
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+)
 
 
 def local_pr_context(
