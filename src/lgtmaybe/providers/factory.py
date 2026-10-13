@@ -226,6 +226,59 @@ def dropped_params(provider: Provider, model: str, params: Iterable[str]) -> lis
     )
 
 
+def declared_effort_capability(
+    provider: Provider, model: str
+) -> tuple[frozenset[str] | None, str | None]:
+    """The ``reasoning_effort`` levels litellm's map says this model accepts, and
+    the one it reasons at by default — ``None`` for whichever the map leaves out.
+
+    Feeds the truncation step-down only (see ``LiteLLMProvider.lower_reasoning_
+    effort``): a healthy call never reads either answer. The entry is looked up
+    as litellm's own ``declared_reasoning_efforts_for_model`` does — under the
+    route prefix, then bare — but resolved through the per-level flags as well as
+    the explicit level list, because the flags are where the map records that
+    gpt-5.5 refuses ``minimal`` or azure's gpt-5 cannot switch off.
+
+    Fails OPEN like ``dropped_params`` and for the same reason: an entry with no
+    effort metadata, or with ``supports_reasoning: false`` — contradicted by the
+    very truncation that makes this consulted — is no opinion, not an empty set.
+    The resolver lives in litellm's router internals, outside its public API, so
+    any import or lookup failure is no opinion too.
+    """
+    try:
+        import litellm
+        from litellm.router_utils.reasoning_effort_capability import (
+            declared_reasoning_efforts,
+            resolve_supported_reasoning_efforts,
+        )
+
+        routed = f"{_PREFIXES[provider]}/{model}"
+        key = next(
+            (k for k in (routed, model) if isinstance(litellm.model_cost.get(k), dict)), None
+        )
+        if key is None:
+            return None, None
+        # The resolver reads `key` to find the entry's bare twin, where the flags
+        # of a prefixed entry often live; the raw map entry does not carry it.
+        entry: dict[str, Any] = {**litellm.model_cost[key], "key": key}
+        levels: tuple[str, ...] | None = None
+        if entry.get("supports_reasoning") is not False:
+            levels = declared_reasoning_efforts(entry)
+            if levels is None:
+                levels = resolve_supported_reasoning_efforts(entry, deployment_is_mapped=False)
+        default = entry.get("default_reasoning_effort")
+        owner = entry.get("litellm_provider")
+        if default is None and isinstance(owner, str) and key.startswith(f"{owner}/"):
+            twin = litellm.model_cost.get(key.removeprefix(f"{owner}/"))
+            default = twin.get("default_reasoning_effort") if isinstance(twin, dict) else None
+        return (
+            frozenset(levels) if levels is not None else None,
+            default if isinstance(default, str) else None,
+        )
+    except Exception:
+        return None, None
+
+
 def _honour_param_support(provider: Provider, model: str, opts: dict[str, Any]) -> None:
     """Say (once, up front) which configured params this model will discard, and
     re-route the one that has a native home on OpenRouter.
@@ -401,10 +454,15 @@ def build_provider(
     effort_supported = "reasoning_effort" not in dropped_params(
         provider, model, ["reasoning_effort"]
     )
+    # Same place, same reason, same fail-open rule: which rungs the step-down
+    # may land on, resolved once here rather than on every retry.
+    effort_levels, default_effort = declared_effort_capability(provider, model)
 
     return LiteLLMProvider(
         model=resolved_model,
         fallback_model=resolved_fallback,
         effort_override_supported=effort_supported,
+        effort_levels=effort_levels,
+        default_effort=default_effort,
         **opts,
     )
