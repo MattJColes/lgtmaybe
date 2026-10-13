@@ -129,9 +129,10 @@ class FakeAzureDevOps:
         self.edited: list[tuple[int, int, str]] = []
         self.reject_threads_at: set[str] = set()
         self.reject_status = 400
-        # Refuse any thread carrying pullRequestThreadContext, as a host that
-        # does not accept it would.
+        # Refuse any thread carrying pullRequestThreadContext with this status,
+        # as a host that does not accept it (400) or a failing host (5xx) would.
         self.reject_tracking = False
+        self.reject_tracking_status = 400
         # Status changes as (thread id, status), and replies as
         # (thread id, parent comment id, content), in the order they arrived.
         self.status_changes: list[tuple[int, Any]] = []
@@ -224,7 +225,9 @@ class FakeAzureDevOps:
         if path in self.reject_threads_at:
             return httpx.Response(self.reject_status, json={"message": "refused"})
         if self.reject_tracking and "pullRequestThreadContext" in payload:
-            return httpx.Response(400, json={"message": "invalid thread context"})
+            return httpx.Response(
+                self.reject_tracking_status, json={"message": "invalid thread context"}
+            )
         self._next_id += 1
         thread = {
             "id": self._next_id,
@@ -833,6 +836,20 @@ class TestPositions:
         assert "Additional findings" not in fake.created[-1]["comments"][0]["content"]
 
     @respx.mock
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_a_failing_host_is_not_retried_without_the_iteration_context(self, status: int) -> None:
+        """A 5xx may follow a thread the host did create: a retry would duplicate it."""
+        fake = FakeAzureDevOps()
+        fake.install()
+        fake.reject_tracking = True
+        fake.reject_tracking_status = status
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        assert [t for t in fake.created if t.get("threadContext")] == []
+        assert "Hardcoded password" in fake.created[-1]["comments"][0]["content"]
+
+    @respx.mock
     def test_post_review_builds_the_diff_itself_when_not_given_one(self) -> None:
         fake = FakeAzureDevOps()
         fake.install()
@@ -1189,6 +1206,36 @@ class TestResolveOnFix:
         assert fake.status_changes == []
 
     @respx.mock
+    def test_a_left_side_thread_stays_open(self) -> None:
+        """Pushes do not change the base, so a removed line's thread has no evidence."""
+        thread = self._posted()
+        context = thread["threadContext"]
+        context["leftFileStart"] = context.pop("rightFileStart")
+        context["leftFileEnd"] = context.pop("rightFileEnd")
+        fake = self._fake(thread)
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_side_that_cannot_be_read_stays_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failed fetch is no evidence the line changed."""
+        monkeypatch.setattr(gateway_module, "_sleep", lambda _seconds: None)
+        fake = self._fake(self._posted())
+        fake.item_script[("/app.py", "stale")] = [httpx.Response(503)] * 3
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_side_missing_at_the_posting_iteration_stays_open(self) -> None:
+        fake = FakeAzureDevOps(threads=[self._posted()])
+        fake.install()
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
     def test_a_file_deleted_since_is_resolved(self) -> None:
         files = {**FILES, ("/old.py", "stale"): b"a = 1\nb = 2\n"}
         fake = FakeAzureDevOps(threads=[self._posted(path="/old.py")], files=files)
@@ -1289,6 +1336,29 @@ class TestResolveOnFix:
 
         assert {f.thread_id for f in active} == {"7", "8"}
         assert fake.status_changes == [(8, "fixed")]
+
+    @respx.mock
+    def test_an_empty_allowlist_resolves_nothing(self) -> None:
+        """What the caller installs when it could not read the active findings."""
+        fake = self._fake(self._posted())
+        gateway = _gateway()
+        ctx = gateway.get_pr_context()
+        gateway.set_validated_fixed_threads(set())
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review([], "summary", diff=ctx.diff)
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_an_allowlist_never_reaches_someone_elses_thread(self) -> None:
+        fake = self._fake(self._posted(author={"id": OTHER_ID}))
+        gateway = _gateway()
+        ctx = gateway.get_pr_context()
+        gateway.set_validated_fixed_threads({"7"})
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review([], "summary", diff=ctx.diff)
+
+        assert fake.status_changes == []
 
 
 class TestActiveFindings:

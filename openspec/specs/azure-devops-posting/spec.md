@@ -201,7 +201,7 @@ identity wrote, when neither of its hidden ids was produced this run and its
 line has changed since it was posted; a validated allowlist, when installed,
 SHALL decide instead. Azure DevOps has no outdated flag, so each finding thread
 SHALL be created with a `pullRequestThreadContext` naming the iteration it was
-posted at (retried once without it if refused), and the line SHALL count as
+posted at (retried once without it only on a 400), and the line SHALL count as
 changed only when the diff from that iteration's head to ours replaces or
 removes it, or the file is gone; `trackingCriteria`'s original position SHALL
 win once present. A thread with no recorded iteration, a left-side thread, or

@@ -122,7 +122,7 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
   to `fixed` (then replies) when the finding is gone and the line changed. ADO
   has no outdated flag, so each finding thread is posted with a
   `pullRequestThreadContext` naming its iteration (retried without it if
-  refused), and `_is_outdated` diffs the file from that iteration's head to
+  refused with 400), and `_is_outdated` diffs the file from that iteration's head to
   ours (`trackingCriteria`'s original position wins once ADO re-tracks it). It
   is gated on `mark_reviewed(head)`, so a partial run or failure notice
   resolves nothing. Incremental, labels, checks and feedback are unbuilt and

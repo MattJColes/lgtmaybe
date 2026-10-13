@@ -724,8 +724,11 @@ class AzureDevOpsGateway:
         paths rather than burying every finding in the summary.
 
         The thread records the iteration it was posted at, which resolve-on-fix
-        needs later. That record is a nice-to-have, so a refused thread is tried
-        once more without it before the finding is demoted.
+        needs later. That record is a nice-to-have, so a thread refused with 400
+        (the host rejecting the payload) is tried once more without it before
+        the finding is demoted. Nothing else is retried: after a timeout or a
+        5xx the host may already have created the thread, and a second attempt
+        would duplicate it.
         """
         tracking = self._tracking_context(path)
         for attempt in (tracking, None) if tracking is not None else (None,):
@@ -736,8 +739,11 @@ class AzureDevOpsGateway:
                 if exc.response.status_code in (401, 403):
                     raise
                 _log.warning("posting a finding thread failed: %s", exc)
+                if exc.response.status_code != 400:
+                    return False
             except Exception as exc:  # noqa: BLE001 (one rejected position is not fatal)
                 _log.warning("posting a finding thread failed: %s", exc)
+                return False
         return False
 
     def _tracking_context(self, path: str) -> dict[str, Any] | None:
@@ -897,20 +903,20 @@ class AzureDevOpsGateway:
     ) -> list[str]:
         """Our open finding threads whose finding is gone and whose line changed.
 
-        A validated allowlist, when the caller installed one, decides instead.
-        Gone means neither hidden id was produced this run, so a reworded finding
-        still counts as reported. The line check is only paid for gone findings.
+        A validated allowlist, when the caller installed one, decides instead,
+        and an empty one resolves nothing: the caller installs that when it
+        could not read the active findings. Gone means neither hidden id was
+        produced this run, so a reworded finding still counts as reported. The
+        line check is only paid for gone findings.
         """
-        if self._validated_fixed_thread_ids is not None and self._active_findings is not None:
-            return [
-                finding.thread_id
-                for finding in self._active_findings
-                if finding.thread_id in self._validated_fixed_thread_ids
-            ]
+        own = self._open_finding_threads(threads)
+        if self._validated_fixed_thread_ids is not None:
+            allowed = self._validated_fixed_thread_ids
+            return [str(thread.get("id")) for thread, _ in own if str(thread.get("id")) in allowed]
         current = current_finding_keys(findings)
         return [
             str(thread.get("id"))
-            for thread, root in self._open_finding_threads(threads)
+            for thread, root in own
             if not finding_keys(root.get("content") or "") & current and self._is_outdated(thread)
         ]
 
