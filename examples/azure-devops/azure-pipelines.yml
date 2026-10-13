@@ -1,0 +1,42 @@
+# Copy into your Azure Repos repository (for example as azure-pipelines.yml),
+# create a pipeline from it, then add that pipeline as a Build validation branch
+# policy on the target branch (Project settings -> Repositories -> Policies).
+# Azure Repos runs pull request builds from the branch policy; YAML `pr:`
+# triggers only apply to GitHub and Bitbucket repositories.
+#
+# Azure Pipelines has no event payload, so lgtmaybe reads the pull request from
+# the predefined SYSTEM_* and BUILD_* variables and takes its configuration from
+# ordinary flags and environment.
+#
+# Auth to Azure DevOps uses the job's own token, System.AccessToken, mapped into
+# the environment below. Grant the project's build service identity
+# ("<Project> Build Service (<Org>)") "Contribute to pull requests" on the
+# repository (Project settings -> Repositories -> Security). To post as a named
+# user instead, store a personal access token with Code (Read & write) scope as
+# the secret variable AZURE_DEVOPS_TOKEN and map that instead.
+#
+# Add the model key as a secret pipeline variable, e.g. ANTHROPIC_API_KEY.
+# Secret variables are never exposed to scripts unless mapped under `env:`.
+
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  # lgtmaybe never checks out or executes pull request code; it reads the diff
+  # through the API, so the job does not need the repository at all.
+  - checkout: none
+
+  - script: |
+      docker run --rm \
+        -e SYSTEM_COLLECTIONURI -e SYSTEM_TEAMPROJECT \
+        -e BUILD_REPOSITORY_NAME -e BUILD_REPOSITORY_PROVIDER \
+        -e SYSTEM_PULLREQUEST_PULLREQUESTID \
+        -e SYSTEM_ACCESSTOKEN -e ANTHROPIC_API_KEY \
+        ghcr.io/mattjcoles/lgtmaybe:v2 \
+        azure-pipelines --provider anthropic --model claude-sonnet-4-6
+    displayName: lgtmaybe review
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)

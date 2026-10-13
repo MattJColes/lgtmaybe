@@ -70,7 +70,7 @@ autocrlf before checkout.
 ### Forges — which code host the review is posted to
 
 A second axis, orthogonal to the LLM provider: **`Forge`** (`core/forge.py`) is
-github / gitlab / gitea, and `Provider` stays the model backend. Never overload
+github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. Never overload
 "provider" for a code host.
 
 - The **engine never sees a gateway.** It takes a `PRContext` and returns
@@ -97,10 +97,24 @@ github / gitlab / gitea, and `Provider` stays the model backend. Never overload
   note; thread resolution works over plain REST (no GraphQL), gated on the
   caller's validated allowlist because GitLab exposes no "lines moved" signal.
   Incremental is unbuilt there — a "not yet", not a "cannot".
+  **Azure DevOps** (`azure_devops/gateway.py`, Services only, api-version 7.1)
+  serves no unified diff, so the adapter reads the latest iteration's changes
+  against the merge base, fetches both sides via the Items API (unreviewable
+  files never fetched, >1 MB sides shown as binary, >300 files raise
+  `DiffUnavailable`), and renders the diff with host-neutral
+  `core/diffbuild.py` so the shared parser reads it unchanged. Each finding is
+  an active thread positioned by `threadContext`; summary/describe/diagram are
+  closed general threads edited in place; de-dupe reads hidden ids from live,
+  non-`fixed` threads. `PRLocator.repo` is `org/project/repo` (decoded). Token:
+  `AZURE_DEVOPS_TOKEN` (PAT, basic) else `SYSTEM_ACCESSTOKEN` (bearer)
+  (`forge.token_env_vars`). Incremental, thread resolution, labels, checks and
+  feedback are unbuilt and unclaimed.
 - **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
   the same env contract; only `GITHUB_SERVER_URL` differs, and
   `cli._change_url` reads it). GitLab CI has neither an event payload nor
-  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`.
+  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`; Azure
+  Pipelines likewise gets `azure-pipelines`, reading `SYSTEM_*`/`BUILD_*`
+  (`cli.pr_url_from_pipelines_env`).
 
 ## Key decisions (do not relitigate)
 

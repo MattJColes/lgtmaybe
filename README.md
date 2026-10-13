@@ -4,10 +4,11 @@
 
 # lgtmaybe
 
-AI code review for **GitHub, GitLab, and Gitea**, or your local Git diff. Choose
-from seven hosted providers, ollama, or any OpenAI-compatible endpoint. On a
-pull or merge request, lgtmaybe posts inline findings and a summary; the CLI
-prints findings locally. Bedrock, Vertex, and Azure support keyless cloud auth.
+AI code review for **GitHub, GitLab, Gitea, and Azure DevOps**, or your local
+Git diff. Choose from seven hosted providers, ollama, or any OpenAI-compatible
+endpoint. On a pull or merge request, lgtmaybe posts inline findings and a
+summary; the CLI prints findings locally. Bedrock, Vertex, and Azure support
+keyless cloud auth.
 
 📖 **Full documentation:** <https://lgtmaybe.coles.codes/>
 
@@ -129,8 +130,9 @@ areas, and a picture of the components it touches and the flow it alters. Run
 `lgtmaybe --help` lists every command with usage examples, and
 `lgtmaybe review --help` shows every option. To post reviews on real pull
 requests, set up the [GitHub Action](#use-as-a-github-action), or on another
-host, [GitLab CI](docs/how-to/review-on-gitlab.md) or
-[Gitea Actions](docs/how-to/review-on-gitea.md).
+host, [GitLab CI](docs/how-to/review-on-gitlab.md),
+[Gitea Actions](docs/how-to/review-on-gitea.md) or
+[Azure Pipelines](docs/how-to/review-on-azure-devops.md).
 [Getting Started](docs/tutorial/getting-started.md) has the full walkthrough,
 and [Choose a review model](docs/how-to/choose-a-review-model.md) compares
 models.
@@ -159,18 +161,19 @@ above works on any host below.
 | GitHub | GitHub Action (`MattJColes/lgtmaybe@v2`) | `GITHUB_TOKEN` | [GitHub Action](docs/how-to/use-as-github-action.md) |
 | GitLab | GitLab CI job (`lgtmaybe gitlab-ci`) | `GITLAB_TOKEN` | [Review on GitLab](docs/how-to/review-on-gitlab.md) |
 | Gitea | Gitea Actions (same container) | `GITEA_TOKEN` | [Review on Gitea](docs/how-to/review-on-gitea.md) |
+| Azure DevOps | Azure Pipelines job (`lgtmaybe azure-pipelines`) | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) |
 | None | `lgtmaybe review` on your local diff | n/a | [Install the CLI](docs/how-to/install-the-cli.md) |
 
 The review is the same everywhere: same lenses, same reflection pass, same
 findings. What differs is what each host's API can do with the result:
 
-| | GitHub | GitLab | Gitea |
-|---|---|---|---|
-| Inline comments + summary | ✅ | ✅ | ✅ |
-| Slash commands | ✅ | ✅ | ✅ |
-| Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API |
-| Incremental re-review | ✅ | not yet | ✗ no compare diff |
-| Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key |
+| | GitHub | GitLab | Gitea | Azure DevOps |
+|---|---|---|---|---|
+| Inline comments + summary | ✅ | ✅ | ✅ | ✅ |
+| Slash commands | ✅ | ✅ | ✅ | ✗ |
+| Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API | not yet |
+| Incremental re-review | ✅ | not yet | ✗ no compare diff | not yet |
+| Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key | ✗ use an API key |
 
 ## Documentation
 
@@ -192,6 +195,7 @@ the docs root.
 - [Post as lgtmaybe[bot]](docs/how-to/post-as-a-github-app.md)
 - [Review on GitLab](docs/how-to/review-on-gitlab.md)
 - [Review on Gitea](docs/how-to/review-on-gitea.md)
+- [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md)
 - [Review with OpenAI](docs/how-to/review-with-openai.md)
 - [Review with Claude (Anthropic)](docs/how-to/review-with-anthropic.md)
 - [Review with OpenRouter](docs/how-to/review-with-openrouter.md)
@@ -280,7 +284,8 @@ instead.
 
 ### Not on GitHub?
 
-lgtmaybe runs the same review on GitLab and Gitea. Only the wiring changes:
+lgtmaybe runs the same review on GitLab, Gitea and Azure DevOps. Only the wiring
+changes:
 
 - **GitLab:** a CI job running `lgtmaybe gitlab-ci`, gated on merge request
   pipelines. See [Review on GitLab](docs/how-to/review-on-gitlab.md) and
@@ -289,8 +294,12 @@ lgtmaybe runs the same review on GitLab and Gitea. Only the wiring changes:
   reimplements the same runtime. See
   [Review on Gitea](docs/how-to/review-on-gitea.md) and
   [`examples/gitea/`](examples/gitea/).
+- **Azure DevOps:** an Azure Pipelines job running `lgtmaybe azure-pipelines`,
+  added as a build validation branch policy. See
+  [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) and
+  [`examples/azure-devops/`](examples/azure-devops/).
 
-Keyless cloud auth is a GitHub Actions feature, so on GitLab and Gitea use an
+Keyless cloud auth is a GitHub Actions feature, so on the other hosts use an
 API-key provider, or `ollama` against a runner-local model for zero cost.
 
 By default, reviews post as `github-actions[bot]`. To post as
