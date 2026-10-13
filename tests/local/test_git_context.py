@@ -523,3 +523,34 @@ def test_user_diff_config_does_not_change_the_patch_shape(
     assert ctx.changed_files == expected
     assert "+    return 2" in ctx.diff
     assert "\x1b[" not in ctx.diff
+
+
+@pytest.mark.parametrize("mode", ["branch", "working", "uncommitted"])
+def test_a_textconv_filter_cannot_rewrite_the_patch_content(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    """Porcelain `git diff` runs `diff.<driver>.textconv` by default, so a user's
+    filter rewrote the hunk lines the review saw, untracked files included."""
+    if mode == "branch":
+        (repo / "app.py").write_text("def f():\n    return 2\n")
+        _git(repo, "commit", "-am", "change")
+    else:
+        (repo / "app.py").write_text("def f():\n    return 2\n")
+    (repo / "new.py").write_text("x = 1\n")
+    # Untracked, so it never shows up as a changed file itself.
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("*.py diff=shout\n")
+
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "diff.shout.textconv")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "tr a-z A-Z <")
+
+    ctx = local_pr_context(
+        base="main" if mode == "branch" else None,
+        working=mode == "working",
+        uncommitted=mode == "uncommitted",
+        cwd=repo,
+    )
+
+    assert "+    return 2" in ctx.diff
+    assert "RETURN" not in ctx.diff

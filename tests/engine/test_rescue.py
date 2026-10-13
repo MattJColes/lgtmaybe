@@ -256,6 +256,9 @@ class TestRescueWave:
         # And the rescue's answer was actually kept: a rescue that made the call
         # and discarded the response would satisfy everything above.
         assert any(f.path == "a.py" for f in findings)
+        # Every piece failed in the main wave, so only the rescue can record the
+        # split — and with it the notice that the batch went out in pieces.
+        assert "reviewed in smaller pieces" in summary
 
     def test_the_rescue_re_runs_only_the_piece_that_failed(self) -> None:
         """A rescued split must not re-send the oversized whole batch.

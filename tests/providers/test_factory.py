@@ -780,22 +780,35 @@ class TestInputBudget:
         assert built.input_budget() == 8192 - 1024
 
     @pytest.mark.parametrize("num_ctx", [8192, 16384])
-    def test_a_window_the_output_ceiling_fills_still_gets_a_budget(
-        self, num_ctx: int, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_a_window_the_output_ceiling_fills_still_gets_a_budget(self, num_ctx: int) -> None:
         """The default 16,384-token ceiling leaves nothing of an 8k or 16k
         window. Answering None there reads as "no opinion", and the engine keeps
         its 100k default — 100k-token batches into an 8k window. A small window
-        is the case the fit exists for, so it still gets a positive cap."""
+        is the case the fit exists for, so it still gets a positive cap.
+
+        The provider logger does not propagate to root (caplog only saw it when
+        an earlier test had touched it), so a handler is attached directly.
+        """
+        from lgtmaybe.providers import litellm_provider
+
         built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=num_ctx)
         assert built.default_opts["max_tokens"] >= num_ctx
 
-        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+        records: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = records.append  # type: ignore[method-assign]
+        litellm_provider._log.addHandler(handler)
+        try:
             budget = built.input_budget()
+        finally:
+            litellm_provider._log.removeHandler(handler)
 
         assert budget is not None
         assert 0 < budget <= num_ctx
-        assert any("max_tokens" in r.getMessage() for r in caplog.records)
+        warning = next(r for r in records if "max_tokens" in r.getMessage())
+        # The numbers ride as fields JsonFormatter writes onto the line.
+        assert warning.max_tokens == built.default_opts["max_tokens"]
+        assert warning.window == num_ctx
 
     def test_hosted_budget_comes_from_the_model_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import litellm
