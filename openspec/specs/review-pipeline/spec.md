@@ -112,6 +112,11 @@ interrupt first, and a run with no failures SHALL cost no extra calls.
   cost. A reply that could not be parsed may still be reformatted once by a
   DIFFERENT request (see "An unparseable reply is reformatted once")
 
+#### Scenario: a split piece fails on the provider
+- **WHEN** an oversized batch was split and a piece failed on the provider
+- **THEN** the rescue re-runs only the pieces that failed that way, never the
+  oversized whole batch nor the pieces that answered
+
 #### Scenario: the re-run fails too
 - **WHEN** the rescue attempt fails as well
 - **THEN** the round reports itself incomplete, naming the lens it lost, and no
