@@ -1,11 +1,11 @@
 ---
-description: Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
+description: Review pull requests with Claude (Anthropic) in lgtmaybe - API-key setup, Claude model choice, and Action or local usage.
 ---
 
 # Review with Claude (Anthropic)
 
 Anthropic is a key-based provider: add an `ANTHROPIC_API_KEY` and pick a Claude
-model. No OIDC, no endpoint to configure.
+model. There is no OIDC and no endpoint to configure.
 
 ## Contents
 
@@ -16,7 +16,7 @@ model. No OIDC, no endpoint to configure.
 - [Want it through a gateway instead?](#want-it-through-a-gateway-instead)
 - [Persist non-secret defaults](#persist-non-secret-defaults)
 
-## Get an API key
+## Get an API Key
 
 Create a key in the [Anthropic Console](https://console.anthropic.com/). In your
 repository, add it as an Actions secret named `ANTHROPIC_API_KEY`
@@ -35,12 +35,12 @@ Copy [`examples/workflows/review-anthropic.yml`][wf] to
     api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-That review runs on `pull_request_target`, so the secret is available while PR
-code is **never** checked out. lgtmaybe only reads the diff via the API. See
+The workflow runs on `pull_request_target`, so the secret is available, but PR
+code is never checked out: lgtmaybe reads the diff through the API. See
 [Use as a GitHub Action](use-as-github-action.md) for the full workflow,
 including [who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
 
-## Run locally
+## Run Locally
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -48,26 +48,34 @@ export ANTHROPIC_API_KEY=sk-ant-...
 lgtmaybe review --provider anthropic --model claude-sonnet-4-6
 ```
 
-You can pass the key inline with `--api-key sk-ant-...` instead of the env var.
-The key is read from the environment or the flag and is **never persisted** to
-config.
+You can pass the key with `--api-key sk-ant-...` instead of the env var. Either
+way, the key is never persisted to config.
 
-## Choosing the model
+## Choosing the Model
 
 Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
-strong default. Reach for an Opus-class model when you want the deepest review
-and are happy to pay more, or a Haiku-class model to cut cost on smaller PRs.
+strong default. Use an Opus-class model (such as `claude-opus-4-8`) for the
+deepest review at a higher price, or a Haiku-class model to cut cost on smaller
+PRs.
 
-## Want it through a gateway instead?
+Under the default `fast` preset, a Sonnet or Opus review model has its
+reflection (false-positive audit) pass run on `claude-haiku-4-5`, so your key
+needs access to that model too. Set `reflect_model` to choose a different
+auditor.
 
-If you route Claude through OpenRouter or a Bedrock/Vertex deployment rather than
-the Anthropic API directly, use that provider instead:
+## Want It Through a Gateway Instead?
 
-- [OpenRouter](review-with-openrouter.md) — `anthropic/claude-sonnet-4-6`
+If you reach Claude through OpenRouter, Bedrock or Vertex rather than the
+Anthropic API, use that provider instead:
+
+- [OpenRouter](review-with-openrouter.md): `anthropic/claude-sonnet-4-6`
 - [Bedrock (keyless OIDC)](review-with-bedrock-oidc.md)
 - [Vertex (keyless WIF)](review-with-vertex-wif.md)
 
-## Persist non-secret defaults
+## Persist Non-Secret Defaults
+
+Provider and model are not secrets, so they can live in `.lgtmaybe.yml`. The key
+stays in the environment.
 
 ```yaml
 provider: anthropic
@@ -75,6 +83,6 @@ model: claude-sonnet-4-6
 ```
 
 With that file in place, `lgtmaybe review` needs no flags. See
-[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every knob.
+[Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every setting.
 
 [wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-anthropic.yml

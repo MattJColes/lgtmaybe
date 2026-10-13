@@ -4,7 +4,7 @@
 
 ## Tutorial
 
-- [Getting started](https://lgtmaybe.coles.codes/tutorial/getting-started/): Run your first lgtmaybe pull-request review locally with ollama — no API keys, no GitHub token, and no pull request required.
+- [Getting started](https://lgtmaybe.coles.codes/tutorial/getting-started/): Run your first lgtmaybe review locally with ollama, with no API keys, no GitHub token, and no pull request.
 
 ## How-to
 
@@ -12,36 +12,36 @@
 - [Choose a review model](https://lgtmaybe.coles.codes/how-to/choose-a-review-model/): Choose a cloud or local lgtmaybe review model using measured breadth, precision, false-positive, clean-change, and long-diff results.
 - [Use as a GitHub Action](https://lgtmaybe.coles.codes/how-to/use-as-github-action/): Add lgtmaybe as a GitHub Action to review every pull request automatically with inline comments and a summary.
 - [Post as lgtmaybe[bot]](https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/): Post lgtmaybe reviews as lgtmaybe[bot] with the public App, or use a self-managed GitHub App.
-- [Review on Gitea](https://lgtmaybe.coles.codes/how-to/review-on-gitea/)
-- [Review on GitLab](https://lgtmaybe.coles.codes/how-to/review-on-gitlab/)
-- [Review with OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI — add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
-- [Review with Claude (Anthropic)](https://lgtmaybe.coles.codes/how-to/review-with-anthropic/): Review pull requests with Claude (Anthropic) in lgtmaybe — API-key setup, Claude model choice, and Action or local usage.
+- [Review on Gitea](https://lgtmaybe.coles.codes/how-to/review-on-gitea/): Post lgtmaybe reviews to Gitea pull requests from Gitea Actions - token scopes, the workflow, and which GitHub features Gitea cannot serve.
+- [Review on GitLab](https://lgtmaybe.coles.codes/how-to/review-on-gitlab/): Post lgtmaybe reviews to GitLab merge requests from GitLab CI with the gitlab-ci command - token, job setup, and how it differs from GitHub.
+- [Review with OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI - add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.
+- [Review with Claude (Anthropic)](https://lgtmaybe.coles.codes/how-to/review-with-anthropic/): Review pull requests with Claude (Anthropic) in lgtmaybe - API-key setup, Claude model choice, and Action or local usage.
 - [Review with OpenRouter](https://lgtmaybe.coles.codes/how-to/review-with-openrouter/): Use OpenRouter as the lgtmaybe backend to reach many model vendors through one OpenAI-compatible API key.
 - [Review with z.ai (GLM)](https://lgtmaybe.coles.codes/how-to/review-with-zai/): Configure lgtmaybe to review pull requests with z.ai GLM models through litellm's native zai route.
-- [Review with Bedrock OIDC](https://lgtmaybe.coles.codes/how-to/review-with-bedrock-oidc/): Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC — no static AWS credentials stored in repository secrets.
-- [Review with Vertex WIF](https://lgtmaybe.coles.codes/how-to/review-with-vertex-wif/): Run lgtmaybe on Google Vertex AI with keyless Workload Identity Federation — no service-account JSON in secrets.
+- [Review with Bedrock OIDC](https://lgtmaybe.coles.codes/how-to/review-with-bedrock-oidc/): Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC - no static AWS credentials stored in repository secrets.
+- [Review with Vertex WIF](https://lgtmaybe.coles.codes/how-to/review-with-vertex-wif/): Run lgtmaybe on Google Vertex AI with keyless Workload Identity Federation - no service-account JSON in secrets.
 - [Review with Azure OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-azure/): Review pull requests with Azure OpenAI in lgtmaybe using keyless GitHub OIDC federated to Entra, or an API key.
-- [Run locally with ollama](https://lgtmaybe.coles.codes/how-to/run-locally-with-ollama/): Run lgtmaybe entirely locally with an ollama model — zero API cost, zero egress, no keys, and code never leaves your machine.
-- [Other OpenAI-compatible servers](https://lgtmaybe.coles.codes/how-to/use-a-custom-openai-compatible-endpoint/): Point lgtmaybe at any OpenAI-compatible server — vLLM, llama.cpp, LM Studio, DeepSeek — with --api-base; the key is optional.
-- [Configure .lgtmaybe.yml](https://lgtmaybe.coles.codes/how-to/configure-lgtmaybe-yml/): Configure lgtmaybe with a .lgtmaybe.yml file — provider, model, severity floor, lenses, caps, and other non-secret defaults.
-- [Add a custom review lens](https://lgtmaybe.coles.codes/how-to/add-a-custom-lens/): Add a custom review lens to lgtmaybe — a bring-your-own skill file that runs alongside the nine built-in lenses.
-- [Scope instructions to a directory](https://lgtmaybe.coles.codes/how-to/scope-review-instructions-to-a-directory/): Scope review instructions and reference files to part of a monorepo with directory_rules — strict on payments/**, lenient on tests/**, with an architecture doc read before src/**.
+- [Run locally with ollama](https://lgtmaybe.coles.codes/how-to/run-locally-with-ollama/): Run lgtmaybe entirely locally with an ollama model - zero API cost, zero egress, no keys, and code never leaves your machine.
+- [Other OpenAI-compatible servers](https://lgtmaybe.coles.codes/how-to/use-a-custom-openai-compatible-endpoint/): Point lgtmaybe at any OpenAI-compatible server - vLLM, llama.cpp, LM Studio, DeepSeek - with --api-base; the key is optional.
+- [Configure .lgtmaybe.yml](https://lgtmaybe.coles.codes/how-to/configure-lgtmaybe-yml/): Configure lgtmaybe with a .lgtmaybe.yml file - provider, model, severity floor, lenses, caps, and other non-secret defaults.
+- [Add a custom review lens](https://lgtmaybe.coles.codes/how-to/add-a-custom-lens/): Add a custom review lens to lgtmaybe - a bring-your-own skill file that runs alongside the built-in lenses.
+- [Scope instructions to a directory](https://lgtmaybe.coles.codes/how-to/scope-review-instructions-to-a-directory/): Scope review instructions and reference files to part of a monorepo with directory_rules - strict on payments/**, lenient on tests/**, and an architecture doc read before src/**.
 - [Calibrate reviews to your project](https://lgtmaybe.coles.codes/how-to/calibrate-reviews-to-your-project/): Tell lgtmaybe what kind of project it is reviewing with the project block, so a prototype gets fewer nits and a regulated service gets a stricter bar on data handling and risk.
-- [Generate a change overview](https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/): Post a change overview on a pull request — a description, a High Impact Areas call-out, and Mermaid diagrams of the structure and run-time flow — as a GitHub comment, or print it from the CLI.
+- [Generate a change overview](https://lgtmaybe.coles.codes/how-to/generate-a-change-diagram/): Post a change overview on a pull request - a description, Risk of Change, a High Impact Areas call-out, and Mermaid diagrams of the structure and run-time flow - as a GitHub comment, or print it from the CLI.
 - [Fix findings with an AI agent](https://lgtmaybe.coles.codes/how-to/fix-findings-with-an-ai-agent/): Turn lgtmaybe findings into instructions an AI coding agent can apply, for a local review-and-fix loop before you push.
-- [Reduce review cost](https://lgtmaybe.coles.codes/how-to/reduce-review-cost/): Measure what a lgtmaybe review actually spends, then cut it — triage, static analysis, prompt caching, narrower lenses, and a hard token ceiling.
+- [Reduce review cost](https://lgtmaybe.coles.codes/how-to/reduce-review-cost/): Measure what a lgtmaybe review actually spends, then cut it - triage, static analysis, prompt caching, narrower lenses, and a hard token ceiling.
 - [Releasing](https://lgtmaybe.coles.codes/how-to/releasing/): Maintainer guide to publishing lgtmaybe with release-please, PyPI, GHCR, Homebrew, a Windows executable, and winget.
 
 ## Reference
 
 - [Configuration](https://lgtmaybe.coles.codes/reference/config/): Complete lgtmaybe configuration reference — every ReviewConfig field, enum, and JSON schema, generated from the pydantic models.
-- [Profile output](https://lgtmaybe.coles.codes/reference/profile/): The --profile table and --profile-json payload — every column, what a dash means, and the machine-readable shape to parse instead.
+- [Profile output](https://lgtmaybe.coles.codes/reference/profile/): The --profile table and --profile-json payload - every column, the summary lines, what a dash means, and the machine-readable shape to parse instead.
 
 ## Explanation
 
-- [What gets reviewed](https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/): What lgtmaybe reviews and how it bounds the work — only changed lines, padded with surrounding context, never your whole repo.
+- [What gets reviewed](https://lgtmaybe.coles.codes/explanation/what-gets-reviewed/): What lgtmaybe reviews and how it bounds the work - only changed lines, padded with surrounding context, never your whole repo.
 - [Risk of change](https://lgtmaybe.coles.codes/explanation/risk-of-change/): How lgtmaybe sizes a pull request's risk of change - low, medium, high or critical - from blast radius, sensitive paths, size and tests, with no model call.
-- [Architecture](https://lgtmaybe.coles.codes/explanation/architecture/): lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
-- [Auth model](https://lgtmaybe.coles.codes/explanation/auth-model/): How lgtmaybe authenticates to each provider — keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
+- [Architecture](https://lgtmaybe.coles.codes/explanation/architecture/): lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-lens fan-out.
+- [Auth model](https://lgtmaybe.coles.codes/explanation/auth-model/): How lgtmaybe authenticates to each provider - keyless OIDC/WIF for cloud, ambient credentials, API keys only where unavoidable.
 - [Data and privacy](https://lgtmaybe.coles.codes/explanation/data-and-privacy/): What lgtmaybe sends to model providers, including optional context and specs, and how it redacts secrets before egress.
-- [Trust and cost](https://lgtmaybe.coles.codes/explanation/trust-and-cost/): How lgtmaybe's trigger gate and cost model work — who can start a review, and why opening it wide is a cost not a security choice.
+- [Trust and cost](https://lgtmaybe.coles.codes/explanation/trust-and-cost/): How lgtmaybe's trigger gate and cost model work - who can start a review, and why opening it wide is a cost decision, not a security one.
