@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import TypeVar
 
 from .findings import finding_fingerprint, finding_identity
 from .models import ReviewFinding
+
+_T = TypeVar("_T")
 
 # The hidden per-finding ids stamped into every inline comment we post, and read
 # back on a re-run to tell "already reported" from "new". Never search a comment
@@ -74,6 +77,21 @@ def last_match(pattern: re.Pattern[str], body: str | None) -> str | None:
     """
     found: list[str] = pattern.findall(body or "")
     return found[-1] if found else None
+
+
+def code_span(path: str, *, table: bool = False) -> str:
+    """*path* as one inert inline code span.
+
+    Filenames are attacker-chosen on a fork PR (git allows a newline in one) and
+    some paths are model-written, so the raw value could end the span or the
+    paragraph and render a live heading or link after it. Whitespace runs
+    collapse to one space, backticks are stripped, and with *table* a ``|`` is
+    escaped — inside a table row it ends the cell even within a code span.
+    """
+    text = " ".join(path.split()).replace("`", "")
+    if table:
+        text = text.replace("|", r"\|")
+    return f"`{text}`"
 
 
 def finding_badge(f: ReviewFinding) -> str:
@@ -293,6 +311,31 @@ def current_finding_keys(findings: list[ReviewFinding]) -> set[str]:
         keys.add(finding_fingerprint(f.path, f.title))
         keys.add(finding_identity(f))
     return keys
+
+
+def unposted(
+    candidates: list[tuple[_T, ReviewFinding]], posted: list[set[str]]
+) -> list[tuple[_T, ReviewFinding]]:
+    """The candidates whose finding is not already among *posted*, in order.
+
+    *posted* holds one id set per comment we already posted (see each adapter's
+    ``_existing_finding_keys`` — which must count only comments the posting
+    identity wrote, since anyone can type a hidden id). A candidate matches a
+    comment sharing **either** id, so a reworded finding still dedupes on its
+    prose-free identity. Matching is **one-for-one**: an identity is not unique
+    within a file (two identical flagged lines share one), so each posted comment
+    absorbs at most one candidate and an N+1th occurrence still posts.
+    """
+    unmatched = list(posted)
+    fresh: list[tuple[_T, ReviewFinding]] = []
+    for item, finding in candidates:
+        keys = current_finding_keys([finding])
+        already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
+        if already is None:
+            fresh.append((item, finding))
+        else:
+            unmatched.pop(already)  # consumed — it can't absorb a second candidate
+    return fresh
 
 
 def render_inline_body(f: ReviewFinding) -> str:

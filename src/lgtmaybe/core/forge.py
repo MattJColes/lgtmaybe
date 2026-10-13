@@ -46,23 +46,24 @@ class PRLocator:
     scheme: str = "https"
 
 
-# One pattern per forge, discriminated by the segment before the number. GitHub
-# and Gitea differ only in singular/plural ("pull" vs "pulls"), so Gitea is
-# matched first — its pattern is the more specific of the two. GitLab's ``/-/``
+# One pattern per forge, discriminated by the segment before the number and
+# matched against the URL *path* from its start — the host comes from the URL
+# itself, so a path segment can never be mistaken for one. GitHub and Gitea
+# differ only in singular/plural ("pull" vs "pulls"). GitLab's ``/-/``
 # separator is what makes an arbitrarily nested group path unambiguous.
 _URL_PATTERNS: tuple[tuple[Forge, re.Pattern[str]], ...] = (
-    (
-        Forge.gitlab,
-        re.compile(r"(?P<host>[^/]+)/(?P<repo>.+?)/-/merge_requests/(?P<number>\d+)"),
-    ),
-    (
-        Forge.gitea,
-        re.compile(r"(?P<host>[^/]+)/(?P<repo>[^/]+/[^/]+)/pulls/(?P<number>\d+)"),
-    ),
-    (
-        Forge.github,
-        re.compile(r"(?P<host>[^/]+)/(?P<repo>[^/]+/[^/]+)/pull/(?P<number>\d+)"),
-    ),
+    (Forge.gitlab, re.compile(r"/(?P<repo>.+?)/-/merge_requests/(?P<number>\d+)(?:/|$)")),
+    (Forge.gitea, re.compile(r"/(?P<repo>[^/]+/[^/]+)/pulls/(?P<number>\d+)(?:/|$)")),
+    (Forge.github, re.compile(r"/(?P<repo>[^/]+/[^/]+)/pull/(?P<number>\d+)(?:/|$)")),
+)
+
+# The GitHub gateway always calls api.github.com, so a GitHub-shaped URL on any
+# other host would send GITHUB_TOKEN to github.com for a repo nobody named.
+_GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
+
+GHES_UNSUPPORTED = (
+    "GitHub Enterprise Server is not supported; "
+    "run lgtmaybe on GitHub.com, GitLab, Gitea, or Azure DevOps."
 )
 
 # Azure DevOps is told apart by its ``/_git/<repo>/pullrequest/<id>`` tail, and
@@ -144,13 +145,14 @@ def parse_pr_url(pr_url: str) -> PRLocator:
     azure = _parse_azure_devops(parsed.netloc, parsed.path, parsed.scheme)
     if azure is not None:
         return azure
-    stripped = f"{parsed.netloc}{parsed.path}"
     for forge, pattern in _URL_PATTERNS:
-        match = pattern.search(stripped)
-        if match is not None:
+        match = pattern.match(parsed.path)
+        if match is not None and parsed.netloc:
+            if forge is Forge.github and parsed.netloc.lower() not in _GITHUB_HOSTS:
+                raise ValueError(f"{GHES_UNSUPPORTED} ({pr_url!r} is not on github.com.)")
             return PRLocator(
                 forge=forge,
-                host=match["host"],
+                host=parsed.netloc,
                 repo=match["repo"],
                 number=int(match["number"]),
                 scheme=parsed.scheme,

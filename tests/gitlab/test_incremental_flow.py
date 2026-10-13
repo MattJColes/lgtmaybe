@@ -59,6 +59,7 @@ def _discussion(thread_id: str, path: str, fingerprint: str) -> dict[str, Any]:
                 "body": f"old finding\n<!-- lgtmaybe-finding:{fingerprint} -->",
                 "resolved": False,
                 "position": {"new_path": path, "new_line": 2, "head_sha": LAST},
+                "author": BOT,
             }
         ],
     }
@@ -135,7 +136,7 @@ def _stub_mr(*, commits: list[dict[str, Any]] | None = None, notes_sha: str = LA
         )
     )
     summary = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
-    respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+    note = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
     resolves = {}
     for thread in ("thread-app", "thread-other"):
         respx.post(f"{MR_URL}/discussions/{thread}/notes").mock(
@@ -144,7 +145,7 @@ def _stub_mr(*, commits: list[dict[str, Any]] | None = None, notes_sha: str = LA
         resolves[thread] = respx.put(f"{MR_URL}/discussions/{thread}").mock(
             return_value=httpx.Response(200, json={})
         )
-    return {"compare": compare, "summary": summary, **resolves}
+    return {"compare": compare, "summary": summary, "note": note, **resolves}
 
 
 def _gateway() -> GitLabGateway:
@@ -244,10 +245,13 @@ def test_a_failure_notice_never_moves_the_watermark() -> None:
 
     _post_failure(gateway, RuntimeError("boom"))
 
-    body = _summary_body(routes["summary"])
-    assert "review failed" in body
-    assert HEAD not in body
-    assert body.endswith(f"<!-- lgtmaybe-reviewed:{LAST} -->")
+    # The completed summary at LAST is the record of what WAS reviewed (its
+    # demoted findings and watermark), so the notice never overwrites it; a
+    # note of its own discloses the failure instead.
+    assert not routes["summary"].called
+    notice = _summary_body(routes["note"])
+    assert "review failed" in notice
+    assert "lgtmaybe-reviewed" not in notice
 
 
 @respx.mock

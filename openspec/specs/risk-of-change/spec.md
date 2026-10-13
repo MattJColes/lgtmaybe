@@ -42,7 +42,7 @@ unassessed one - and the PR's own importers are already visible in its diff. Fiv
 least `medium`, and twenty or more to at least `high`. A changed file matching
 any `risk.core_paths` glob SHALL raise the verdict to at least `high` whatever
 its importer count. Each file that raises the level SHALL be named with its
-count. Paths are rendered as inline code with backticks stripped.
+count. Paths are rendered as one-line inline code with backticks stripped.
 <!-- anchor: risk.blast-radius -->
 
 #### Scenario: a widely imported module changes

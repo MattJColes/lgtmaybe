@@ -78,12 +78,18 @@ forcing a full re-review), `/improve`, `/ask <q>` replying in-thread from a
 task-specific answer object, `/describe` upserting a standalone structured
 description, and `/diagram` upserting the change overview (description, high
 impact areas, and Mermaid diagrams rendered locally from structured graph
-data) — all dispatched to the same engine and provider stack.
+data) — all dispatched to the same engine and provider stack. A command SHALL
+run only for a commenter the gateway confirms has write access; anyone else's
+(or an unverifiable one) is ignored, exit zero, with no model call.
 <!-- anchor: cli.slash -->
 
 #### Scenario: reviewer comments /review full
 - **WHEN** the comment body is `/review full`
 - **THEN** a full review runs, bypassing triage and incremental scoping
+
+#### Scenario: a drive-by commenter types /review
+- **WHEN** the commenter has no write access to the repository
+- **THEN** the command is ignored with a log line and nothing is posted
 
 #### Scenario: reviewer asks a question
 - **WHEN** the comment body is `/ask <question>` and the provider returns a valid answer object
@@ -212,7 +218,9 @@ whole worktree vs the merge-base, `--uncommitted` for edits vs HEAD, with
 commit subjects feeding the intent lens. Both worktree modes include untracked
 files (`.gitignore` honoured) as new-file patches, since `git diff` never
 reports them; branch mode reviews committed history only. Paths are resolved
-against the worktree's top level, not the caller's directory.
+against the worktree's top level, not the caller's directory. An empty diff
+SHALL make no model call and print no LGTM; it exits non-zero, naming
+`--base`, when no default base existed and the comparison fell back to HEAD.
 <!-- anchor: cli.local-context -->
 
 #### Scenario: developer reviews before pushing
@@ -431,6 +439,10 @@ The supplied GitHub Actions starter workflows SHALL rely on the automatic change
 - **WHEN** a `synchronize` event replaces or follows the pull request's `opened`
   review while the automatic overview is enabled
 - **THEN** the surviving run posts or updates the change overview
+
+#### Scenario: Gitea reports a push as synchronized
+- **WHEN** a Gitea Actions event payload carries `"action": "synchronized"`
+- **THEN** the overview refreshes exactly as on GitHub's `synchronize`
 
 #### Scenario: A new head completes
 - **WHEN** a non-partial review and required diagram both post for the current head

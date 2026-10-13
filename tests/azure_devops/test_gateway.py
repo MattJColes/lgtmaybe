@@ -129,6 +129,16 @@ class FakeAzureDevOps:
         self.edited: list[tuple[int, int, str]] = []
         self.reject_threads_at: set[str] = set()
         self.reject_status = 400
+        # Refuse any thread carrying pullRequestThreadContext with this status,
+        # as a host that does not accept it (400) or a failing host (5xx) would.
+        self.reject_tracking = False
+        self.reject_tracking_status = 400
+        # Status changes as (thread id, status), and replies as
+        # (thread id, parent comment id, content), in the order they arrived.
+        self.status_changes: list[tuple[int, Any]] = []
+        self.replies: list[tuple[int, int, str]] = []
+        self.status_http = 200
+        self.writes: list[str] = []
         self.forbid_edits = False
         self.identity_status = 200
         # Responses (or exceptions) an Items fetch returns before the real file,
@@ -155,8 +165,14 @@ class FakeAzureDevOps:
         respx.get(f"{REPO_API}/items").mock(side_effect=self._item)
         respx.get(THREADS).mock(side_effect=self._list_threads)
         respx.post(THREADS).mock(side_effect=self._create_thread)
+        respx.route(method="PATCH", url__regex=rf"^{THREADS}/\d+\?").mock(
+            side_effect=self._set_status
+        )
         respx.route(method="PATCH", url__startswith=f"{THREADS}/").mock(
             side_effect=self._edit_comment
+        )
+        respx.route(method="POST", url__regex=rf"^{THREADS}/\d+/comments").mock(
+            side_effect=self._reply
         )
         respx.get(CONNECTION_DATA).mock(side_effect=self._connection_data)
 
@@ -208,11 +224,16 @@ class FakeAzureDevOps:
         path = (payload.get("threadContext") or {}).get("filePath")
         if path in self.reject_threads_at:
             return httpx.Response(self.reject_status, json={"message": "refused"})
+        if self.reject_tracking and "pullRequestThreadContext" in payload:
+            return httpx.Response(
+                self.reject_tracking_status, json={"message": "invalid thread context"}
+            )
         self._next_id += 1
         thread = {
             "id": self._next_id,
             "status": payload.get("status"),
             "threadContext": payload.get("threadContext"),
+            "pullRequestThreadContext": payload.get("pullRequestThreadContext"),
             "comments": [
                 {
                     "id": 1,
@@ -241,8 +262,31 @@ class FakeAzureDevOps:
         self.edited.append((thread_id, comment_id, content))
         return httpx.Response(200, json={"id": comment_id, "content": content})
 
+    def _set_status(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        thread_id = int(request.url.path.split("/")[-1])
+        status = json.loads(request.content)["status"]
+        self.writes.append("status")
+        if self.status_http != 200:
+            return httpx.Response(self.status_http, json={"message": "refused"})
+        self.status_changes.append((thread_id, status))
+        for thread in self.threads:
+            if thread["id"] == thread_id:
+                thread["status"] = status
+        return httpx.Response(200, json={"id": thread_id, "status": status})
 
-def _gateway(*, bearer: bool = False, marker_key: str | None = None) -> AzureDevOpsGateway:
+    def _reply(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        thread_id = int(request.url.path.split("/")[-2])
+        payload = json.loads(request.content)
+        self.writes.append("reply")
+        self.replies.append((thread_id, payload["parentCommentId"], payload["content"]))
+        return httpx.Response(200, json={"id": 2, "content": payload["content"]})
+
+
+def _gateway(
+    *, bearer: bool = False, marker_key: str | None = None, resolve_fixed: bool = True
+) -> AzureDevOpsGateway:
     return AzureDevOpsGateway(
         host=HOST,
         repo=REPO,
@@ -251,6 +295,7 @@ def _gateway(*, bearer: bool = False, marker_key: str | None = None) -> AzureDev
         client=httpx.Client(),
         bearer=bearer,
         marker_key=marker_key,
+        resolve_fixed=resolve_fixed,
     )
 
 
@@ -764,6 +809,47 @@ class TestPositions:
             gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
 
     @respx.mock
+    def test_a_finding_thread_records_the_iteration_it_was_posted_at(self) -> None:
+        """What lets a later run tell whether the flagged line has changed since."""
+        fake = FakeAzureDevOps()
+        fake.install()
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        assert fake.created[0]["pullRequestThreadContext"] == {
+            "changeTrackingId": 1,
+            "iterationContext": {"firstComparingIteration": 1, "secondComparingIteration": 2},
+        }
+
+    @respx.mock
+    def test_a_refused_iteration_context_is_retried_without_it(self) -> None:
+        """Tracking is a nice-to-have: a host refusing it must not demote the finding."""
+        fake = FakeAzureDevOps()
+        fake.install()
+        fake.reject_tracking = True
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        posted = [t for t in fake.created if t.get("threadContext")]
+        assert len(posted) == 1
+        assert "pullRequestThreadContext" not in posted[0]
+        assert "Additional findings" not in fake.created[-1]["comments"][0]["content"]
+
+    @respx.mock
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_a_failing_host_is_not_retried_without_the_iteration_context(self, status: int) -> None:
+        """A 5xx may follow a thread the host did create: a retry would duplicate it."""
+        fake = FakeAzureDevOps()
+        fake.install()
+        fake.reject_tracking = True
+        fake.reject_tracking_status = status
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+
+        assert [t for t in fake.created if t.get("threadContext")] == []
+        assert "Hardcoded password" in fake.created[-1]["comments"][0]["content"]
+
+    @respx.mock
     def test_post_review_builds_the_diff_itself_when_not_given_one(self) -> None:
         fake = FakeAzureDevOps()
         fake.install()
@@ -1017,6 +1103,328 @@ class TestDedupe:
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
 
+# What app.py held at iteration 1 ("stale"): line 2 is the one the finding flagged,
+# and iteration 2 rewrote it.
+APP_STALE = 'import os\npassword = "letmein"\n\ndef main():\n    pass\n'
+
+
+class TestResolveOnFix:
+    """A finding thread of ours whose finding is gone and whose line changed is fixed.
+
+    Azure DevOps has no "outdated" flag, so the adapter records the iteration a
+    thread was posted at and diffs the file from that iteration's head to ours.
+    """
+
+    @staticmethod
+    def _posted(
+        *,
+        thread_id: int = 7,
+        status: str = "active",
+        iteration: int = 1,
+        line: int = 2,
+        path: str = "/app.py",
+        title: str = "Hardcoded password",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        fingerprint = finding_fingerprint(path.lstrip("/"), title)
+        thread = _thread(
+            thread_id, f"old text\n<!-- lgtmaybe-finding:{fingerprint} -->", status=status, **extra
+        )
+        thread["threadContext"] = {
+            "filePath": path,
+            "rightFileStart": {"line": line, "offset": 1},
+            "rightFileEnd": {"line": line, "offset": 1},
+        }
+        thread["pullRequestThreadContext"] = {
+            "changeTrackingId": 1,
+            "iterationContext": {
+                "firstComparingIteration": 1,
+                "secondComparingIteration": iteration,
+            },
+        }
+        return thread
+
+    @staticmethod
+    def _fake(*threads: dict[str, Any], stale: str = APP_STALE) -> FakeAzureDevOps:
+        fake = FakeAzureDevOps(
+            threads=list(threads), files={**FILES, ("/app.py", "stale"): stale.encode()}
+        )
+        fake.install()
+        return fake
+
+    @staticmethod
+    def _complete_run(
+        gateway: AzureDevOpsGateway, findings: list[ReviewFinding] | None = None
+    ) -> None:
+        ctx = gateway.get_pr_context()
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review(findings or [], "summary", diff=ctx.diff)
+
+    @respx.mock
+    def test_a_gone_finding_on_a_changed_line_is_resolved_then_replied_to(self) -> None:
+        fake = self._fake(self._posted())
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == [(7, "fixed")]
+        assert fake.replies == [(7, 1, "✅ Looks resolved.")]
+        assert fake.writes == ["status", "reply"], "resolved first, so a refusal leaves no reply"
+
+    @respx.mock
+    def test_a_finding_still_reported_stays_open(self) -> None:
+        fake = self._fake(self._posted())
+        self._complete_run(_gateway(), [FINDING])
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_reworded_finding_still_reported_stays_open(self) -> None:
+        """Matched on either hidden id: the identity survives a reworded title."""
+        from lgtmaybe.core.findings import finding_identity
+
+        thread = self._posted(title="Old wording")
+        thread["comments"][0]["content"] += (
+            f"\n<!-- lgtmaybe-identity:{finding_identity(FINDING)} -->"
+        )
+        fake = self._fake(thread)
+        self._complete_run(_gateway(), [FINDING])
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_line_that_did_not_change_stays_open(self) -> None:
+        """Gone from this run's findings is not evidence of a fix on its own."""
+        fake = self._fake(self._posted(), stale=APP_NEW)
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_thread_posted_at_the_current_iteration_stays_open(self) -> None:
+        fake = self._fake(self._posted(iteration=2))
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_thread_without_an_iteration_stays_open(self) -> None:
+        """Threads posted before tracking existed fail closed."""
+        thread = self._posted()
+        del thread["pullRequestThreadContext"]
+        fake = self._fake(thread)
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_left_side_thread_stays_open(self) -> None:
+        """Pushes do not change the base, so a removed line's thread has no evidence."""
+        thread = self._posted()
+        context = thread["threadContext"]
+        context["leftFileStart"] = context.pop("rightFileStart")
+        context["leftFileEnd"] = context.pop("rightFileEnd")
+        fake = self._fake(thread)
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_side_that_cannot_be_read_stays_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failed fetch is no evidence the line changed."""
+        monkeypatch.setattr(gateway_module, "_sleep", lambda _seconds: None)
+        fake = self._fake(self._posted())
+        fake.item_script[("/app.py", "stale")] = [httpx.Response(503)] * 3
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_side_missing_at_the_posting_iteration_stays_open(self) -> None:
+        fake = FakeAzureDevOps(threads=[self._posted()])
+        fake.install()
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_file_deleted_since_is_resolved(self) -> None:
+        files = {**FILES, ("/old.py", "stale"): b"a = 1\nb = 2\n"}
+        fake = FakeAzureDevOps(threads=[self._posted(path="/old.py")], files=files)
+        fake.install()
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == [(7, "fixed")]
+
+    @respx.mock
+    def test_the_original_position_is_read_when_azure_devops_has_tracked_it(self) -> None:
+        """Once a thread is re-tracked, trackingCriteria keeps where it was posted."""
+        thread = self._posted(iteration=2, line=40)
+        thread["pullRequestThreadContext"]["trackingCriteria"] = {
+            "origFilePath": "/app.py",
+            "origRightFileStart": {"line": 2, "offset": 1},
+            "origRightFileEnd": {"line": 2, "offset": 1},
+            "firstComparingIteration": 1,
+            "secondComparingIteration": 1,
+        }
+        fake = self._fake(thread)
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == [(7, "fixed")]
+
+    @respx.mock
+    def test_an_incomplete_run_resolves_nothing(self) -> None:
+        """A failed lens's findings are missing, not fixed."""
+        fake = self._fake(self._posted())
+        gateway = _gateway()
+        ctx = gateway.get_pr_context()
+        gateway.mark_reviewed(None)
+        gateway.post_review([], "partial", diff=ctx.diff)
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_a_failure_notice_resolves_nothing(self) -> None:
+        fake = self._fake(self._posted())
+        gateway = _gateway()
+        gateway.post_review([], "⚠️ lgtmaybe review failed: boom")
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_someone_elses_thread_is_never_resolved(self) -> None:
+        """Hidden ids are public, so a planted thread must not be closed for its author."""
+        fake = self._fake(self._posted(author={"id": OTHER_ID, "displayName": "Author"}))
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_an_unknown_identity_resolves_nothing(self) -> None:
+        fake = self._fake(self._posted())
+        fake.identity_status = 401
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    @pytest.mark.parametrize("status", ["wontFix", "closed", "fixed"])
+    def test_a_thread_already_dealt_with_is_left_alone(self, status: str) -> None:
+        fake = self._fake(self._posted(status=status))
+        self._complete_run(_gateway())
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_resolve_fixed_off_resolves_nothing(self) -> None:
+        fake = self._fake(self._posted())
+        self._complete_run(_gateway(resolve_fixed=False))
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_a_refused_resolve_is_logged_once_and_never_fails_the_review(
+        self, status: int, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        fake = self._fake(self._posted(thread_id=7), self._posted(thread_id=8))
+        fake.status_http = status
+        with caplog.at_level(logging.WARNING):
+            self._complete_run(_gateway())
+
+        assert fake.writes == ["status"], "stops at the first refusal, and posts no reply"
+        assert len([r for r in caplog.records if "resolve_fixed" in r.getMessage()]) == 1
+
+    @respx.mock
+    def test_a_validated_allowlist_decides_when_installed(self) -> None:
+        """The incremental path's explicit verdicts win over the diff-derived rule."""
+        fake = self._fake(self._posted(thread_id=7), self._posted(thread_id=8))
+        gateway = _gateway()
+        ctx = gateway.get_pr_context()
+        active = gateway.list_active_findings()
+        gateway.set_validated_fixed_threads({"8"})
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review([], "summary", diff=ctx.diff)
+
+        assert {f.thread_id for f in active} == {"7", "8"}
+        assert fake.status_changes == [(8, "fixed")]
+
+    @respx.mock
+    def test_an_empty_allowlist_resolves_nothing(self) -> None:
+        """What the caller installs when it could not read the active findings."""
+        fake = self._fake(self._posted())
+        gateway = _gateway()
+        ctx = gateway.get_pr_context()
+        gateway.set_validated_fixed_threads(set())
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review([], "summary", diff=ctx.diff)
+
+        assert fake.status_changes == []
+
+    @respx.mock
+    def test_an_allowlist_never_reaches_someone_elses_thread(self) -> None:
+        fake = self._fake(self._posted(author={"id": OTHER_ID}))
+        gateway = _gateway()
+        ctx = gateway.get_pr_context()
+        gateway.set_validated_fixed_threads({"7"})
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review([], "summary", diff=ctx.diff)
+
+        assert fake.status_changes == []
+
+
+class TestActiveFindings:
+    @respx.mock
+    def test_lists_our_open_finding_threads_with_their_outdated_flag(self) -> None:
+        threads = [
+            TestResolveOnFix._posted(thread_id=7),
+            TestResolveOnFix._posted(thread_id=8, iteration=2),
+            TestResolveOnFix._posted(thread_id=9, status="fixed"),
+            TestResolveOnFix._posted(thread_id=10, author={"id": OTHER_ID}),
+            _thread(11, "a person's comment"),
+        ]
+        TestResolveOnFix._fake(*threads)
+        gateway = _gateway()
+        gateway.get_pr_context()
+        active = {f.thread_id: f for f in gateway.list_active_findings()}
+
+        assert set(active) == {"7", "8"}
+        assert active["7"].outdated is True
+        assert active["8"].outdated is False
+        assert active["7"].path == "app.py"
+        assert active["7"].comment_id == 1
+        assert active["7"].fingerprint == finding_fingerprint("app.py", "Hardcoded password")
+
+    @respx.mock
+    def test_reads_the_stamped_ids_not_ones_forged_in_a_suggestion(self) -> None:
+        thread = TestResolveOnFix._posted(thread_id=7)
+        thread["comments"][0]["content"] = _forged_comment(FINDING)
+        TestResolveOnFix._fake(thread)
+        gateway = _gateway()
+        gateway.get_pr_context()
+        [active] = gateway.list_active_findings()
+
+        assert active.fingerprint == finding_fingerprint("other.py", "Unrelated")
+        assert active.fingerprint != finding_fingerprint(FINDING.path, FINDING.title)
+
+    @respx.mock
+    def test_counts_our_open_finding_threads(self) -> None:
+        threads = [
+            TestResolveOnFix._posted(thread_id=7),
+            TestResolveOnFix._posted(thread_id=8, status="pending"),
+            TestResolveOnFix._posted(thread_id=9, status="wontFix"),
+            TestResolveOnFix._posted(thread_id=10, author={"id": OTHER_ID}),
+        ]
+        TestResolveOnFix._fake(*threads)
+
+        assert _gateway().count_open_finding_threads() == 2
+
+    @respx.mock
+    def test_reply_in_thread_answers_the_root_comment(self) -> None:
+        fake = TestResolveOnFix._fake()
+        _gateway().reply_in_thread("7", "noted")
+
+        assert fake.replies == [(7, 1, "noted")]
+
+
 class TestConversation:
     @respx.mock
     def test_lists_text_comments_with_their_authors(self) -> None:
@@ -1043,6 +1451,7 @@ class TestCapabilities:
             "SupportsDescribe",
             "SupportsDiagram",
             "SupportsConversation",
+            "SupportsThreadResolution",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
@@ -1053,7 +1462,6 @@ class TestCapabilities:
         gateway = AzureDevOpsGateway.__new__(AzureDevOpsGateway)
         for name in (
             "SupportsIncremental",
-            "SupportsThreadResolution",
             "SupportsBaseCheckout",
             "SupportsLabels",
             "SupportsChecks",

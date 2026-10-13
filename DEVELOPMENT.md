@@ -101,7 +101,8 @@ merge-base, so changes that landed on mainline in the meantime are ignored.
 
 `--base` chooses what mainline is. It defaults to the **remote primary branch**,
 resolved as `origin/HEAD` → `origin/main` → `origin/master` → local `main` →
-local `master` (→ `HEAD`, an empty comparison, when none exist):
+local `master` (→ `HEAD`, an empty comparison, when none exist — the command
+then stops without a model call and exits non-zero, asking for `--base`):
 
 ```bash
 uv run lgtmaybe review --base main      # diff against your LOCAL main

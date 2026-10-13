@@ -17,7 +17,8 @@ incomplete marker — never a silent LGTM. A call skipped past either soft
 whole-review ceiling — the deadline (`max_review_seconds`) or the billable-token
 budget (`max_review_tokens`, off by default) — counts as a failed call, so the
 ceilings are contributors to that notice rather than its only source. Any
-stage failure surfaces to the caller.
+stage failure surfaces to the caller, as does reviewable code that no
+configured lens could run over (e.g. `categories: [spec]` with no matching spec).
 <!-- anchor: engine.review -->
 
 #### Scenario: a lens call fails
@@ -112,6 +113,11 @@ interrupt first, and a run with no failures SHALL cost no extra calls.
   cost. A reply that could not be parsed may still be reformatted once by a
   DIFFERENT request (see "An unparseable reply is reformatted once")
 
+#### Scenario: a split piece fails on the provider
+- **WHEN** an oversized batch was split and a piece failed on the provider
+- **THEN** the rescue re-runs only the pieces that failed that way, never the
+  oversized whole batch nor the pieces that answered
+
 #### Scenario: the re-run fails too
 - **WHEN** the rescue attempt fails as well
 - **THEN** the round reports itself incomplete, naming the lens it lost, and no
@@ -178,12 +184,25 @@ not prove a broken schema mode.
 ### Requirement: Findings merge and dedupe across lenses
 
 After the fan-out, findings SHALL be merged and de-duplicated keyed on
-path/line/side, so overlapping lenses never post the same comment twice.
+path/line/side, so overlapping lenses never post the same comment twice. The
+merge SHALL run after suppression and the evidence gate, so a copy those drop
+never displaces its location's surviving finding. Scan findings SHALL also be
+keyed on their title, so distinct tool hits never merge with each other or with
+a model finding.
 <!-- anchor: engine.dedupe -->
 
 #### Scenario: two lenses flag the same line
 - **WHEN** security and correctness both return a finding on one line
 - **THEN** a single finding survives the merge
+
+#### Scenario: the winning copy is gated
+- **WHEN** a critical finding with no failure scenario and an evidenced medium
+  finding share a line
+- **THEN** the evidenced finding survives, and the review is not reported clean
+
+#### Scenario: two advisories at one lockfile line
+- **WHEN** osv-scanner reports two advisories, both at line 1 of `uv.lock`
+- **THEN** both findings survive the merge
 
 ### Requirement: Line anchoring never trusts model arithmetic
 
@@ -566,8 +585,14 @@ network rule registry. Paths MUST be canonical forward-slash repository
 paths. On Windows the scrubbed environment MUST pass through process-critical
 system variables while pinning user config and profile directories to the temp
 root. A tool that is not installed is skipped, and any tool failure degrades to
-no output from that tool rather than failing the review.
+no output from that tool rather than failing the review. No tool MAY take its
+config, ignore files or inline ignore pragmas from the PR-authored corpus.
 <!-- anchor: engine.static-analysis -->
+
+#### Scenario: a PR adds a scanner config that hides its own bug
+- **WHEN** a PR adds `sgconfig.yml`, `.ignore`, `.bandit`, `.semgrepignore`,
+  `zizmor.yml`, `.gitleaks.toml` or `osv-scanner.toml` beside a flagged line
+- **THEN** the tool still reports that line, including under `.github/`
 
 #### Scenario: a rules-driven tool has no rules
 - **WHEN** static analysis runs a rules-driven tool for which no rules exist,

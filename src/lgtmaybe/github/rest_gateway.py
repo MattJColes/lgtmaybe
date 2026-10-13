@@ -36,6 +36,7 @@ from lgtmaybe.core.comment import (
     split_stamped_ids,
     stamped_ids,
     strip_markers,
+    unposted,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -68,9 +69,12 @@ _GRAPHQL_URL = "https://api.github.com/graphql"
 
 # The superset of review-thread fields used across one run. Fetching them once
 # is cheaper than paging the same connection separately for each consumer.
+# ``viewerDidAuthor`` is how a thread is known to be ours: GitHub answers it for
+# the token's own identity, where a login compare would have to reconcile REST's
+# ``name[bot]`` with GraphQL's bare ``name`` for an App.
 _THREAD_NODE_FIELDS = """
 id isResolved isOutdated path
-comments(first:1){ nodes{ body databaseId
+comments(first:1){ nodes{ body databaseId viewerDidAuthor
   reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } }
 } }
 """
@@ -133,9 +137,22 @@ def _head_ref(meta: dict[str, Any]) -> str:
 
 
 def _first_comment(node: dict[str, Any]) -> dict[str, Any]:
-    """A review thread's opening comment, or ``{}`` when it has none."""
+    """A review thread's opening comment when WE wrote it, else ``{}``.
+
+    Every thread consumer — resolve-on-fix, follow-up validation, the open-thread
+    count, 👎 learning — reads our hidden ids off this comment. Anyone can type
+    those ids (the identity is a prose-free hash), so a thread someone else
+    opened is treated exactly like one with no comments: never ours.
+    """
     comments = node.get("comments", {}).get("nodes", [])
-    return comments[0] if comments else {}
+    first = comments[0] if comments else {}
+    return first if first.get("viewerDidAuthor") is True else {}
+
+
+def _authored_by(item: dict[str, Any], login: str) -> bool:
+    """Whether a REST review or comment payload was written by *login*."""
+    user = item.get("user")
+    return isinstance(user, dict) and user.get("login") == login
 
 
 def _diff_refusal_reason(resp: httpx.Response) -> str:
@@ -278,12 +295,15 @@ class RestGitHubGateway:
         # Fetch unified diff
         diff = self._fetch_pr_diff()
 
-        # Fetch paginated files list
-        changed_files = [
-            item["filename"]
+        # Fetch paginated files list. A deleted file stays a changed file but has
+        # no head text, so it never joins a content fetch (a guaranteed 404 each).
+        files = [
+            item
             for resp in self._paginate(f"{self._pr_api}/files?per_page=100")
             for item in resp.json()
         ]
+        changed_files = [item["filename"] for item in files]
+        present = [item["filename"] for item in files if item.get("status") != "removed"]
 
         # Fetch head-revision text of reviewable files so the engine can pad hunks
         # with surrounding context. Read-only API fetch — never a checkout — and
@@ -294,13 +314,13 @@ class RestGitHubGateway:
         # disclosure metadata. It shares nothing with the content fetches, so it
         # rides the same pool rather than sitting in front of them: on the common
         # single-page PR the whole count hides inside the file-fetch latency.
-        reviewable = [path for path in changed_files if is_reviewable(path)]
+        reviewable = [path for path in present if is_reviewable(path)]
         # Dependency manifests for the vulnerability scanner. Lockfiles are not
         # reviewable, so they are fetched separately and kept out of
         # `file_contents` — see PRContext.scan_contents. Only fetched when
         # something will actually read them.
         scannable = (
-            [path for path in changed_files if is_scannable_manifest(path)]
+            [path for path in present if is_scannable_manifest(path)]
             if self._scan_manifests
             else []
         )
@@ -344,8 +364,9 @@ class RestGitHubGateway:
     ) -> None:
         """Post (or update) a single review with batched inline comments.
 
-        A completed review at a new commit gets a fresh native summary; reruns
-        at that commit update it in-place. Older summaries retain their history.
+        A completed review at a new commit gets a fresh native summary carrying
+        its not-yet-posted inline comments in the same single POST; reruns at
+        that commit update it in-place. Older summaries retain their history.
 
         The ``diff`` parameter is optional; when omitted the method fetches just
         the PR diff (one ``.diff``-Accept GET — never the full ``get_pr_context``
@@ -380,19 +401,22 @@ class RestGitHubGateway:
 
         reviews_url = f"{self._pr_api}/reviews"
 
-        if existing is not None:
-            new_commit = self._reviewed_sha is not None and existing[2] != self._reviewed_sha
+        new_commit = (
+            existing is not None
+            and self._reviewed_sha is not None
+            and existing[2] != self._reviewed_sha
+        )
+        if existing is not None and not new_commit:
             # Update the existing review body (inline comments cannot be changed
             # through this endpoint, but the summary is updated).
             update_url = f"{reviews_url}/{existing[0]}"
-            if not new_commit:
-                resp = self._client.put(
-                    update_url,
-                    headers=self._json_headers,
-                    json={"body": body},
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
+            resp = self._client.put(
+                update_url,
+                headers=self._json_headers,
+                json={"body": body},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
             # The review-update endpoint can't add inline comments, so post the
             # NEW findings (fingerprints not already on the PR) as individual
             # review comments — otherwise a re-run's fresh findings would only
@@ -405,35 +429,23 @@ class RestGitHubGateway:
                 inline, self._reviewed_sha or self._anchor_sha()
             )
             if rejected:
-                body = build_body([*demoted, *rejected])
-            if new_commit:
-                # Publish completion only after required inline writes succeed.
-                resp = self._post(
-                    reviews_url,
-                    headers=self._json_headers,
-                    json={
-                        "body": body,
-                        "event": "COMMENT",
-                        "comments": [],
-                        "commit_id": self._reviewed_sha,
-                    },
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
-            elif rejected:
                 resp = self._client.put(
                     update_url,
                     headers=self._json_headers,
-                    json={"body": body},
+                    json={"body": build_body([*demoted, *rejected])},
                     timeout=_TIMEOUT,
                 )
                 resp.raise_for_status()
-            # A re-run: any of our prior conversations whose finding is now gone
-            # (and whose code changed) is fixed — collapse it. Best-effort, so a
-            # GraphQL hiccup never fails an otherwise-successful review.
-            if self._resolve_fixed:
-                self._resolve_fixed_threads(findings)
         else:
+            # A first post, or a completed review at a new commit: a fresh native
+            # review, which (unlike the update endpoint) carries inline comments —
+            # so a re-run's new findings ride this ONE post rather than one
+            # content-creating call (and notification) each, which GitHub's
+            # secondary rate limit cuts off part-way on a PR with many findings.
+            # A re-run first drops what we already posted, one-for-one. Comments
+            # and completion land atomically: a failed post publishes neither.
+            if new_commit and inline:
+                comments = [c for c, _f in unposted(inline, self._existing_finding_keys())]
             payload: dict[str, Any] = {
                 "body": body,
                 "event": "COMMENT",
@@ -447,7 +459,9 @@ class RestGitHubGateway:
                 json=payload,
                 timeout=_TIMEOUT,
             )
-            if resp.status_code == 422 and inline:
+            if resp.status_code == 422 and comments:
+                # One bad position refuses the whole review; the per-comment path
+                # isolates it (and dedupes again, one-for-one, from scratch).
                 rejected = self._post_new_inline_comments(
                     inline, self._reviewed_sha or self._anchor_sha()
                 )
@@ -460,6 +474,11 @@ class RestGitHubGateway:
                     timeout=_TIMEOUT,
                 )
             resp.raise_for_status()
+        # A re-run: any of our prior conversations whose finding is now gone
+        # (and whose code changed) is fixed — collapse it. Best-effort, so a
+        # GraphQL hiccup never fails an otherwise-successful review.
+        if existing is not None and self._resolve_fixed:
+            self._resolve_fixed_threads(findings)
         self._existing_review_entry = None
         self._existing_review_done = False
 
@@ -569,12 +588,19 @@ class RestGitHubGateway:
         self, body: str, marker: str, *, preserve: re.Pattern[str] | None = None
     ) -> None:
         """Post *body* as an issue comment stamped with *marker*, or edit the
-        existing comment carrying that marker in place."""
+        existing comment carrying that marker in place.
+
+        Only a comment the posting actor wrote is edited: anyone can paste our
+        marker, and editing theirs would 403 (failing the run) or write into
+        their comment. An unknown actor edits nothing — a new comment is the
+        safe failure."""
         stamped = f"{body}\n\n{marker}"
         url = f"{self._issue_api}/comments"
+        login = self._login_or_none()
         for resp in self._paginate(f"{url}?per_page=100"):
             for comment in resp.json():
-                if marker in (comment.get("body") or ""):
+                ours = login is not None and _authored_by(comment, login)
+                if ours and marker in (comment.get("body") or ""):
                     if preserve is not None and preserve.search(stamped) is None:
                         # The last stamp: ours is always appended after the body.
                         previous = list(preserve.finditer(comment.get("body") or ""))
@@ -702,11 +728,8 @@ class RestGitHubGateway:
             for resp in self._paginate(url):
                 for comment in resp.json():
                     body = comment.get("body") or ""
-                    user = comment.get("user")
-                    if (
-                        self._diagram_marker not in body
-                        or not isinstance(user, dict)
-                        or user.get("login") != self._posting_login
+                    if self._diagram_marker not in body or not _authored_by(
+                        comment, self._viewer_login()
                     ):
                         continue
                     return last_match(_DIAGRAMMED_MARKER, body)
@@ -777,7 +800,8 @@ class RestGitHubGateway:
         """Read our unresolved finding roots for explicit follow-up validation."""
         active: list[ActiveFinding] = []
         for node in self._walk_review_threads(
-            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+            "id isResolved isOutdated path "
+            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
         ):
             if node.get("isResolved"):
                 continue
@@ -864,15 +888,9 @@ class RestGitHubGateway:
         """
         if not inline:
             return []
-        unmatched = self._existing_finding_keys()
         url = f"{self._pr_api}/comments"
         rejected: list[ReviewFinding] = []
-        for comment, finding in inline:
-            keys = finding_keys(comment.get("body", ""))
-            already = next((i for i, e in enumerate(unmatched) if e & keys), None)
-            if already is not None:
-                unmatched.pop(already)  # consumed — it can't absorb a second candidate
-                continue
+        for comment, finding in unposted(inline, self._existing_finding_keys()):
             if head_sha is None:
                 _log.warning(
                     "no head SHA to anchor a new inline comment at %s:%s:%s — "
@@ -928,13 +946,21 @@ class RestGitHubGateway:
         lines. Only the active marker families are collected, so a thread
         collapsed by resolve-on-fix (its markers rewritten into the resolved
         families) stops suppressing — a finding that comes back posts again.
+
+        Only comments the posting actor wrote count: the identity id is a
+        prose-free hash a PR author can compute and paste ahead of the line it
+        names. An unknown actor counts nothing — a duplicate, never a hidden
+        finding.
         """
+        login = self._login_or_none()
+        if login is None:
+            return []
         url = f"{self._pr_api}/comments?per_page=100"
         posted: list[set[str]] = []
         for resp in self._paginate(url):
             for item in resp.json():
                 keys = finding_keys(item.get("body", "") or "")
-                if keys:
+                if keys and _authored_by(item, login):
                     posted.append(keys)
         return posted
 
@@ -1082,17 +1108,10 @@ class RestGitHubGateway:
         """
         if self._existing_review_done:
             return self._existing_review_entry
-        if self._posting_login is None:
-            data = self._graphql("query { viewer { login } }", {})
-            viewer = data.get("viewer") if isinstance(data, dict) else None
-            login = viewer.get("login") if isinstance(viewer, dict) else None
-            if not isinstance(login, str) or not login.strip():
-                raise RuntimeError("GitHub did not identify the authenticated posting actor")
-            self._posting_login = login
+        login = self._viewer_login()
         for resp in self._paginate(f"{self._pr_api}/reviews?per_page=100"):
             for review in resp.json():
-                user = review.get("user")
-                if not isinstance(user, dict) or user.get("login") != self._posting_login:
+                if not _authored_by(review, login):
                     continue
                 body: str = review.get("body", "") or ""
                 if self._marker in body and (
@@ -1108,6 +1127,29 @@ class RestGitHubGateway:
                     )
         self._existing_review_done = True
         return self._existing_review_entry
+
+    def _viewer_login(self) -> str:
+        """The authenticated posting actor's REST login, resolved once per run.
+
+        Raises when GitHub will not say: a caller that would otherwise *reuse*
+        something on the strength of authorship must not guess.
+        """
+        if self._posting_login is None:
+            data = self._graphql("query { viewer { login } }", {})
+            viewer = data.get("viewer") if isinstance(data, dict) else None
+            login = viewer.get("login") if isinstance(viewer, dict) else None
+            if not isinstance(login, str) or not login.strip():
+                raise RuntimeError("GitHub did not identify the authenticated posting actor")
+            self._posting_login = login
+        return self._posting_login
+
+    def _login_or_none(self) -> str | None:
+        """``_viewer_login``, failing closed to None: nothing then counts as ours."""
+        try:
+            return self._viewer_login()
+        except Exception as exc:  # noqa: BLE001 — fail closed (see callers)
+            _log.warning("could not identify the posting actor: %s", exc)
+            return None
 
     # ------------------------------------------------------------------
     # Auto-resolve fixed conversations (GraphQL — the REST review API can't
@@ -1229,7 +1271,9 @@ class RestGitHubGateway:
         """
         open_threads = 0
         try:
-            for node in self._walk_review_threads("isResolved comments(first:1){ nodes{ body } }"):
+            for node in self._walk_review_threads(
+                "isResolved comments(first:1){ nodes{ body viewerDidAuthor } }"
+            ):
                 if node.get("isResolved"):
                     continue
                 if finding_keys(_first_comment(node).get("body", "") or ""):
@@ -1254,7 +1298,8 @@ class RestGitHubGateway:
 
         fixed: list[tuple[str, int | None, str]] = []
         for node in self._walk_review_threads(
-            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+            "id isResolved isOutdated path "
+            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
         ):
             if node.get("isResolved"):
                 continue
@@ -1353,7 +1398,7 @@ class RestGitHubGateway:
         left a ``THUMBS_DOWN`` reaction: a thread whose opening comment carries
         one of our hidden finding markers AND was downvoted by at least one
         write-access user contributes its fingerprint. On a public repo anyone
-        can react, so an unprivileged 👎 is ignored (see ``_has_repo_write``).
+        can react, so an unprivileged 👎 is ignored (see ``has_repo_write``).
 
         The 👎 reaction is the ONLY learning signal — a resolved thread already
         means "fixed" (handled by resolve-on-fix), never a suppress. Reads only
@@ -1363,7 +1408,7 @@ class RestGitHubGateway:
         """
         downvoted: set[str] = set()
         for node in self._walk_review_threads(
-            "comments(first:1){ nodes{ body "
+            "comments(first:1){ nodes{ body viewerDidAuthor "
             "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
         ):
             first = _first_comment(node)
@@ -1380,16 +1425,18 @@ class RestGitHubGateway:
             # Only an authorised (write+) reviewer's 👎 counts — on a public
             # repo anyone can react, and an unprivileged reaction must never
             # suppress a finding.
-            if any(self._has_repo_write(login) for login in logins):
+            if any(self.has_repo_write(login) for login in logins):
                 downvoted.add(fingerprint)
         return downvoted
 
-    def _has_repo_write(self, login: str) -> bool:
+    def has_repo_write(self, login: str) -> bool:
         """Whether *login* has write (or higher) access to the repo.
 
-        Feedback learning only trusts a 👎 from someone who can push. Fails
-        closed — any lookup error (including a 404 for a non-collaborator) means
-        "not authorised", so an unverifiable reactor never suppresses a finding.
+        Feedback learning only trusts a 👎 from someone who can push, and a slash
+        command only runs for one (``cli.execute_comment``). Fails closed — any
+        lookup error (including a 404 for a non-collaborator) means "not
+        authorised", so an unverifiable user never suppresses a finding or runs
+        a command.
         Cached per run since a PR's downvoters repeat across threads.
         """
         cached = self._perm_cache.get(login)
@@ -1405,7 +1452,7 @@ class RestGitHubGateway:
             resp.raise_for_status()
             # The legacy `permission` field collapses maintain→write, triage→read.
             allowed = resp.json().get("permission") in {"admin", "write"}
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
             _log.warning("permission check for %s failed: %s", login, exc)
         self._perm_cache[login] = allowed
         return allowed

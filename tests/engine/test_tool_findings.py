@@ -83,6 +83,18 @@ def test_anchor_is_the_corpus_line() -> None:
     assert finding.anchor == "x = 1"
 
 
+def test_anchor_counts_lines_on_newline_only() -> None:
+    """Tools number lines by ``\\n``, as ``core/diffparse`` does; ``splitlines``
+    also breaks on a form feed, so a ``^L`` page break shifted every anchor below
+    it onto the wrong source line."""
+    corpus = {"src/app.py": "import os\n\x0c\nx = 1\n"}
+
+    (finding,) = tool_review_findings([_finding(line=3)], corpus)
+
+    assert finding.anchor == "x = 1"
+    assert tool_review_findings([_finding(line=4)], corpus) == []
+
+
 def test_anchor_is_redacted_so_it_matches_the_redacted_diff() -> None:
     """Not just safety — anchoring does not work without it.
 

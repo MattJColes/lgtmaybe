@@ -27,6 +27,7 @@ import re
 from collections.abc import Iterable, Sequence
 from typing import get_args
 
+from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import HighImpactKind, HighImpactResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
@@ -83,7 +84,9 @@ _PATH_RES: dict[str, re.Pattern[str]] = {
         # docs/authoring.md, and the floor cannot be vetoed by the model — so a
         # substring hit becomes a Security call-out on every ordinary overview.
         r"(?<![a-z0-9])auth(?:n|z|entication|orization|orize|orisation)?(?![a-z0-9])"
-        r"|login|password|passwd|credential|secret|crypto|permission|oauth|saml"
+        # `login` likewise: unbounded it matches BlogIndex.tsx and DialogInput.tsx.
+        r"|(?<![a-z0-9])logins?(?![a-z0-9])"
+        r"|password|passwd|credential|secret|crypto|permission|oauth|saml"
         r"|firewall|security[_-]?group|\.pem$|csrf|openssl"
         # `ssl` inside classloader, `tls` inside subtitles, `cors` inside records.
         r"|(?<![a-z0-9])(?:token|session|acl|iam|sso|jwt|rbac|tls|ssl|cors)(?![a-z0-9])",
@@ -126,6 +129,8 @@ _PATH_RES: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
 }
+
+_CAMEL_HUMP = re.compile(r"([a-z0-9])([A-Z])")
 
 _HIGH_IMPACT_SYSTEM = """\
 You are a staff engineer triaging a pull request for blast radius. You are NOT \
@@ -191,10 +196,15 @@ def path_signals(changed_files: Sequence[str]) -> dict[str, list[str]]:
     Deterministic and free: no model call, no file contents — just the paths
     the PR already carries. Areas keep taxonomy order, and a file may raise
     several (a workflow that deploys is infrastructure and supply chain).
+
+    Each path is also tried with its camelCase humps split by ``_``, so the
+    word-bounded tokens see ``authMiddleware.ts`` and ``LoginForm.tsx`` as the
+    words they are; the original path is what gets reported.
     """
+    probes = {path: (path, _CAMEL_HUMP.sub(r"\1_\2", path)) for path in changed_files}
     signals: dict[str, list[str]] = {}
     for area, pattern in _PATH_RES.items():
-        matched = [path for path in changed_files if pattern.search(path)]
+        matched = [path for path in changed_files if any(map(pattern.search, probes[path]))]
         if matched:
             signals[area] = matched
     return signals
@@ -314,9 +324,5 @@ def _reported_lines(result: HighImpactResult, changed: set[str]) -> list[str]:
 
 
 def _paths(paths: Iterable[str], changed: set[str]) -> str:
-    """Render *paths* as inline code, backticks stripped.
-
-    Filenames are attacker-chosen on a fork PR, so a path carrying a backtick
-    must not be able to close its own code span.
-    """
-    return ", ".join(f"`{path.replace('`', '')}`" for path in paths if path in changed)
+    """Render the changed ones of *paths* as inert inline code spans."""
+    return ", ".join(code_span(path) for path in paths if path in changed)

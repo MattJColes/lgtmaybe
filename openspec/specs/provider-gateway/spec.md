@@ -39,7 +39,9 @@ creds for bedrock/vertex/azure), then an API key from flag/env; ollama needs
 neither; openai-compatible needs an `api_base` with the key optional
 (placeholder when absent). Vertex ambient credential probing MUST prefer
 `CLOUDSDK_CONFIG`, then use `%APPDATA%\gcloud` on Windows or
-`~/.config/gcloud` on POSIX. Static cloud keys (AWS keys, service-account JSON)
+`~/.config/gcloud` on POSIX, then defer to google-auth's own chain. Keyless
+Azure MUST hand litellm a refreshing token provider, not one fetched token.
+Static cloud keys (AWS keys, service-account JSON)
 are never accepted or required; exhaustion fails with a clear "how to auth
 this provider" message.
 <!-- anchor: provider.credentials -->
@@ -56,6 +58,14 @@ this provider" message.
 #### Scenario: Vertex uses an explicit gcloud location
 - **WHEN** `CLOUDSDK_CONFIG` is set
 - **THEN** that directory is checked before the platform default
+
+#### Scenario: Vertex on a GCP runtime
+- **WHEN** only metadata-server credentials exist (GCE, GKE, Cloud Run)
+- **THEN** ambient Vertex authentication is detected
+
+#### Scenario: keyless Azure has no ambient credential
+- **WHEN** no key is supplied and `DefaultAzureCredential` finds no credential
+- **THEN** the run fails at start-up with the keyless guidance and the SDK's detail
 
 ### Requirement: Completion calls retry, fall back, cache, and time out
 
@@ -195,8 +205,8 @@ either spelling of the field it becomes: the Anthropic layer's
 degrade a refusal of the tool shape litellm rewrote the schema into on the
 caller's behalf — a tool-field refusal arriving while a `response_format` is in
 flight with no tool of the adapter's own on the request, and the caller holding
-none either. `drop_params` cannot cover any of these — the capability map says
-the param is supported, so the refusal is only visible in the error. Each
+none either — and a refused `prompt_cache_key`. `drop_params` strips none of
+these, so the refusal is only visible in the error. Each
 outcome SHALL be remembered for THAT MODEL's later calls only, and losing the
 schema SHALL be announced once — silently, it reads as a model that stopped
 honouring it. litellm's stdout banner SHALL be suppressed.
@@ -333,6 +343,8 @@ The adapter SHALL expose `input_budget()`: ollama's `num_ctx` when it sends
 one, else the `max_input_tokens` litellm's model map records for the resolved
 model string, less the output ceiling the adapter will send; None when the map
 has no entry or no window, so an unknown model never shrinks a budget. A
+ceiling that fills the whole window SHALL cap the budget at half the window,
+with a warning naming both, never None. A
 prompt the backend refuses for its window SHALL be raised as
 `ProviderInputTooLarge` — never retried in place, never stamped unrecoverable,
 and handed to a caller that owns the remedy exactly as a truncation is.
@@ -341,6 +353,10 @@ and handed to a caller that owns the remedy exactly as a truncation is.
 #### Scenario: an ollama model
 - **WHEN** the factory sent `num_ctx` and a finite `max_tokens`
 - **THEN** the budget is their difference, whatever the map says of the model
+
+#### Scenario: the output ceiling fills the window
+- **WHEN** `max_tokens` is at least `num_ctx` (8192 under the default 16,384)
+- **THEN** the budget is half the window and a warning names both numbers
 
 #### Scenario: the backend refuses the prompt
 - **WHEN** litellm raises `ContextWindowExceededError`

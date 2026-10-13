@@ -56,9 +56,9 @@ The summary SHALL be posted as a merge request note carrying the hidden marker,
 upserted in place on a re-run, with disjoint marker families for the summary,
 the description, and the diagram. Findings whose hidden ids are already present
 on the merge request SHALL NOT be posted again. Only a note the token's own user
-wrote SHALL be edited or have its stamps carried forward; anyone can post a note
-carrying the marker, so a note by anyone else is ignored and, with no own note,
-a fresh one is posted.
+wrote SHALL count for dedupe, active findings, 👎 feedback, or be edited or have
+its stamps carried forward; anyone can post a note carrying a marker, so a note
+by anyone else is ignored and, with no own note, a fresh one is posted.
 <!-- anchor: gitlab.upsert -->
 
 #### Scenario: a re-run edits rather than duplicates

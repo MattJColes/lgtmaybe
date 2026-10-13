@@ -36,7 +36,6 @@ from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
     REVIEWED_MARKER,
-    current_finding_keys,
     finding_keys,
     last_match,
     marker,
@@ -45,6 +44,7 @@ from lgtmaybe.core.comment import (
     render_inline_body,
     stamped_ids,
     strip_markers,
+    unposted,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -259,16 +259,7 @@ class GitLabGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable, diff or "")
 
         if inline:
-            unmatched = self._existing_finding_keys()
-            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-            for position, finding in inline:
-                keys = current_finding_keys([finding])
-                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
-                if already is None:
-                    new_inline.append((position, finding))
-                else:
-                    unmatched.pop(already)
-            inline = new_inline
+            inline = unposted(inline, self._existing_finding_keys())
         for position, finding in inline:
             if not self._post_discussion(position, render_inline_body(finding)):
                 demoted.append(finding)
@@ -427,12 +418,12 @@ class GitLabGateway:
             if not notes:
                 continue
             first = notes[0]
-            if first.get("resolved"):
-                continue
+            if first.get("resolved") or not self._is_ours(first):
+                continue  # resolved, or someone else's discussion
             body = first.get("body") or ""
             fingerprint, identity = stamped_ids(body)
             if fingerprint is None and identity is None:
-                continue  # someone else's discussion
+                continue  # one of our replies elsewhere, not a finding
             position = first.get("position") or {}
             active.append(
                 ActiveFinding(
@@ -473,6 +464,7 @@ class GitLabGateway:
                     for d in self._discussions()
                     if (notes := d.get("notes") or [])
                     and not notes[0].get("resolved")
+                    and self._is_ours(notes[0])
                     and finding_keys(notes[0].get("body") or "")
                 ]
             )
@@ -542,8 +534,8 @@ class GitLabGateway:
             first = notes[0]
             fingerprint, _identity = stamped_ids(first.get("body"))
             note_id = first.get("id")
-            if fingerprint is None or not isinstance(note_id, int):
-                continue  # not one of ours
+            if fingerprint is None or not isinstance(note_id, int) or not self._is_ours(first):
+                continue  # not one of ours: anyone can paste our fingerprint
             candidates.append((note_id, fingerprint))
         if not candidates:
             return set()
@@ -660,8 +652,22 @@ class GitLabGateway:
             except Exception as exc:  # noqa: BLE001 — resolving never fails a review
                 _log.warning("resolving thread %s failed: %s", thread_id, exc)
 
+    def _is_ours(self, note: dict[str, Any]) -> bool:
+        """Whether a note was written by the token's own user.
+
+        Hidden ids are plain text anyone can type, so only our own notes count.
+        An unknown identity fails closed: dedupe treats nothing as posted (a
+        duplicate, never a hidden finding) and no thread is ours to resolve.
+        """
+        user_id = self._posting_user()
+        return user_id is not None and (note.get("author") or {}).get("id") == user_id
+
     def _existing_finding_keys(self) -> list[set[str]]:
-        """Hidden finding ids grouped by posted comment for one-for-one dedupe."""
+        """Hidden finding ids grouped by posted comment for one-for-one dedupe.
+
+        Only notes the posting identity wrote count: the identity id is a
+        prose-free hash an MR author can compute and paste ahead of the line.
+        """
         keys: list[set[str]] = []
         try:
             for discussion in self._discussions():
@@ -669,7 +675,7 @@ class GitLabGateway:
                 if notes and notes[0].get("resolved"):
                     continue
                 for note in notes:
-                    if found := finding_keys(note.get("body") or ""):
+                    if self._is_ours(note) and (found := finding_keys(note.get("body") or "")):
                         keys.append(found)
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing discussions failed: %s", exc)

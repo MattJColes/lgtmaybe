@@ -18,17 +18,21 @@ for why it matters.
 
 1. **Create a token.** Sign in as a dedicated account with write access to the
    reviewed repository only. In Gitea, go to *Settings → Applications → Access
-   Tokens* and create a token with the `write:repository` and `write:issue`
-   scopes. Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
+   Tokens* and create a token with the `write:repository`, `write:issue` and
+   `read:user` scopes (`read:user` lets lgtmaybe tell its own comments apart). Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
    Gitea refuses secret names that start with `GITEA_` or `GITHUB_`, and the
    example maps this secret to the `GITEA_TOKEN` variable lgtmaybe reads.
 
-    You need both. `write:repository` also covers reading, and Gitea files the
+    You need all three. `write:repository` also covers reading, and Gitea files the
     review endpoint lgtmaybe posts inline comments through
     (`POST /pulls/{index}/reviews`) and the commit-status endpoint under the
     *repository* category, not *issue*, so a token with only `read:repository`
     is refused on the one call the setup exists to make. `write:issue` covers
-    the summary comment and the PR labels.
+    the summary comment and the PR labels. `read:user` lets lgtmaybe ask Gitea
+    who the token is (`GET /user`): only comments that identity wrote count as
+    lgtmaybe's, so nobody else can edit the summary through us or paste a hidden
+    id that hides a finding. Without it every re-run posts a fresh summary and
+    re-posts its findings rather than trusting comments it cannot attribute.
 
 2. **Add a provider key.** Add the API key for whichever model you want as a
    second secret, for example `ANTHROPIC_API_KEY`. Use a key with a spend
@@ -67,6 +71,12 @@ finding rules, the change overview comment, PR labels (only labels that already
 exist in the repository; lgtmaybe does not create them), the `fail_on` merge gate
 (as a commit status), and the `/review`, `/improve`, `/ask`, `/describe` and
 `/diagram` slash commands.
+
+A slash command runs only for a commenter with write access to the repository.
+Gitea's workflow `if:` cannot read the commenter's role the way GitHub's
+`author_association` does, so lgtmaybe checks it itself through the collaborator
+permission API. Anyone else's command is ignored with a log line, exits
+successfully, and makes no model call.
 
 These are unavailable on Gitea, and lgtmaybe skips them rather than failing:
 

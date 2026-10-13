@@ -46,8 +46,8 @@ findings SHALL remain in the body. Other posting failures SHALL remain fatal.
 
 #### Scenario: the reviewed commit advances
 - **WHEN** the latest matching review has a different native commit
-- **THEN** a fresh summary is posted at the actual reviewed commit after required
-  inline writes succeed, while old summaries remain intact
+- **THEN** one fresh review at the reviewed commit carries the summary and the
+  unposted inline comments, while old summaries remain intact
 
 #### Scenario: an incomplete run re-runs on the same PR
 - **WHEN** the summary carries the hidden incomplete marker and the body update
@@ -78,8 +78,11 @@ SHALL match on either. The fingerprint alone cannot key them: it hashes model
 prose, and a model rewords the same finding between runs. An identity is not
 unique within a file — two findings from one lens on identical source lines
 share one — so re-run dedupe SHALL match candidates to posted comments
-one-for-one rather than by set membership. Every reader SHALL take a comment's
-ids only from the block appended after its suggestion fence
+one-for-one rather than by set membership. Only comments and threads the posting
+identity wrote SHALL count — the identity has no secret, so anyone can paste it —
+and an unidentifiable posting identity counts none (a duplicate, never a hidden
+finding); marked comments are upserted under the same rule. Every reader SHALL
+take a comment's ids only from the block appended after its suggestion fence
 (`core/comment.stamped_ids`): the suggestion is posted verbatim, so an id inside
 it is the model's, not ours.
 <!-- anchor: github.fingerprint -->
@@ -96,6 +99,10 @@ it is the model's, not ours.
 #### Scenario: a second occurrence of an identical line
 - **WHEN** a re-run flags one more occurrence than is already posted
 - **THEN** the extra occurrence posts rather than being absorbed by its twin
+
+#### Scenario: someone else posts our id first
+- **WHEN** a PR author's comment carries the identity of a finding not yet made
+- **THEN** the finding still posts, and their comment is never edited
 
 #### Scenario: a suggestion carries a forged finding id
 - **WHEN** a posted comment's suggestion carries another finding's ids
@@ -157,6 +164,8 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 #### Scenario: a review run fails
 - **WHEN** posting fails after review
 - **THEN** the watermark does not move, so nothing is skipped next run
+- **AND** a completed summary is left intact — the failure notice posts only as
+  a PR comment rather than overwriting it
 
 #### Scenario: a finding body carries a forged watermark
 - **WHEN** a demoted or broad finding's text contains `<!-- lgtmaybe-reviewed:<sha> -->`

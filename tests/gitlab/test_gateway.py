@@ -25,6 +25,10 @@ TOKEN = "glpat-test"
 PROJECT = "group%2Fsub%2Fproject"
 API = f"https://{HOST}/api/v4/projects/{PROJECT}"
 MR_URL = f"{API}/merge_requests/{MR_IID}"
+# The user conftest's identity fixture answers for `GET /api/v4/user`; GitLab
+# ownership is decided by user id.
+BOT = "lgtmaybe-bot"
+BOT_ID = 99
 
 DIFF = """diff --git a/app.py b/app.py
 index 111..222 100644
@@ -283,6 +287,7 @@ class TestPostReview:
                                 "body": f"old\n<!-- lgtmaybe-finding:{already} -->",
                                 "resolved": False,
                                 "position": {"new_path": "app.py"},
+                                "author": {"id": BOT_ID},
                             }
                         ],
                     }
@@ -317,6 +322,7 @@ class TestPostReview:
                             {
                                 "body": f"old\n<!-- lgtmaybe-finding:{already} -->",
                                 "resolved": False,
+                                "author": {"id": BOT_ID},
                             }
                         ]
                     }
@@ -414,6 +420,7 @@ class TestThreadResolution:
                     "resolved": False,
                     "resolvable": True,
                     "position": {"new_path": "app.py"},
+                    "author": {"id": BOT_ID},
                 }
             ],
         },
@@ -508,6 +515,157 @@ class TestThreadResolution:
             return_value=httpx.Response(200, json=self.DISCUSSIONS)
         )
         assert _gateway().count_open_finding_threads() == 1
+
+
+def _whoami(monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -> list[httpx.Request]:
+    """Answer `GET /api/v4/user` with *response*, recording each lookup."""
+    original = httpx.Client.send
+    lookups: list[httpx.Request] = []
+
+    def send(client: httpx.Client, request: httpx.Request, **kwargs: object) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/v4/user":
+            lookups.append(request)
+            response.request = request
+            return response
+        return original(client, request, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+    return lookups
+
+
+def _discussion(thread_id: str, body: str, author: str) -> dict:
+    return {
+        "id": thread_id,
+        "notes": [
+            {
+                "id": 1,
+                "body": body,
+                "resolved": False,
+                "position": {"new_path": "app.py"},
+                "author": {"id": BOT_ID if author == BOT else 4321},
+            }
+        ],
+    }
+
+
+class TestAuthorship:
+    """Hidden ids and markers count only on notes the posting identity wrote.
+
+    The identity id is a prose-free hash of path, lens and anchor, so an MR
+    author can compute it, post it in a discussion of their own, and then push
+    the line it describes — the finding would never be posted.
+    """
+
+    @respx.mock
+    def test_a_forged_id_in_someone_elses_discussion_does_not_hide_a_finding(self) -> None:
+        from lgtmaybe.core.findings import finding_identity
+
+        forged = f"nice <!-- lgtmaybe-identity:{finding_identity(FINDING)} -->"
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(200, json=[_discussion("d1", forged, "mr-author")])
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={})
+        )
+
+        gateway = _gateway()
+        gateway._diff_refs = MR_DETAIL["diff_refs"]
+        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+
+        assert created.called, "a stranger's copy of our id must not suppress the finding"
+
+    @respx.mock
+    def test_someone_elses_discussion_is_neither_active_nor_counted(self) -> None:
+        body = "<!-- lgtmaybe-finding:aaaaaaaaaaaa -->"
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(
+                200,
+                json=[_discussion("theirs", body, "mr-author"), _discussion("ours", body, BOT)],
+            )
+        )
+        gateway = _gateway()
+
+        assert [f.thread_id for f in gateway.list_active_findings()] == ["ours"]
+        assert gateway.count_open_finding_threads() == 1
+
+    @respx.mock
+    def test_someone_elses_note_carrying_our_marker_is_never_edited(self) -> None:
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": 99, "body": "lol <!-- lgtmaybe -->", "author": {"id": 4321}},
+                    {"id": 55, "body": "old\n\n<!-- lgtmaybe -->", "author": {"id": BOT_ID}},
+                ],
+            )
+        )
+        theirs = respx.put(f"{MR_URL}/notes/99").mock(return_value=httpx.Response(403, json={}))
+        ours = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
+
+        _gateway().post_review([], "👍 LGTM!", diff=DIFF)
+
+        assert not theirs.called, "their note is not ours to edit"
+        assert ours.called, "our own summary is still edited in place"
+
+    @respx.mock
+    def test_an_unknown_posting_identity_re_posts_rather_than_hides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fail closed: with no login to compare, nothing on the MR counts as ours."""
+        from lgtmaybe.core.findings import finding_identity
+
+        _whoami(monkeypatch, httpx.Response(401))
+        ours = f"<!-- lgtmaybe-identity:{finding_identity(FINDING)} -->"
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(200, json=[_discussion("d1", ours, BOT)])
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": 55, "body": "<!-- lgtmaybe -->", "author": {"id": BOT_ID}}]
+            )
+        )
+        edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
+        create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+        created = respx.post(f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(201, json={})
+        )
+
+        gateway = _gateway()
+        gateway._diff_refs = MR_DETAIL["diff_refs"]
+        gateway.post_review([FINDING], "1 finding", diff=DIFF)
+
+        assert created.called, "a duplicate is better than a hidden finding"
+        assert create.called and not edit.called, "never edit a note we can't prove is ours"
+
+    @respx.mock
+    def test_the_posting_identity_is_looked_up_once_per_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lookups = _whoami(monkeypatch, httpx.Response(200, json={"id": BOT_ID}))
+        respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
+            return_value=httpx.Response(
+                200, json=[_discussion("d1", "<!-- lgtmaybe-finding:a -->", BOT)]
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": 55, "body": "<!-- lgtmaybe -->", "author": {"id": BOT_ID}}]
+            )
+        )
+        respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
+        gateway = _gateway()
+
+        gateway.count_open_finding_threads()
+        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+
+        assert len(lookups) == 1
 
 
 class TestConversation:
@@ -729,6 +887,7 @@ class TestForgedFindingIds:
                             {
                                 "id": 9,
                                 "body": _forged_comment(FINDING),
+                                "author": {"id": BOT_ID},
                                 "resolved": False,
                                 "position": {"new_path": "other.py"},
                             }

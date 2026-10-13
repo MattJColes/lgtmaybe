@@ -31,9 +31,9 @@ from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
 from lgtmaybe.core.diffparse import split_by_file
-from lgtmaybe.core.forge import Forge, PRLocator, token_env_vars
+from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
-from lgtmaybe.core.logging import get_logger
+from lgtmaybe.core.logging import get_logger, register_secret
 from lgtmaybe.core.models import (
     PRContext,
     Provider,
@@ -50,6 +50,7 @@ from lgtmaybe.core.ports import (
     SupportsBaseCheckout,
     SupportsConversation,
     SupportsFileContents,
+    SupportsPermissions,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
@@ -65,7 +66,7 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
+from lgtmaybe.local import _default_base, local_file_reader, local_pr_context, local_repo_root
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -103,6 +104,24 @@ SKIPPED_MARKER = "<!-- lgtmaybe-skipped -->"
 # Distinct from 1 (the review itself failed, a ClickException) and 2 (a click
 # usage error), so a script can tell "found something" from "could not review".
 FAIL_ON_EXIT_CODE = 3
+
+
+#: Forge spellings of a pull-request event action that differ from GitHub's.
+#: Gitea Actions writes a push to the PR into the event payload as its own
+#: ``api.HookIssueSynchronized`` ("synchronized"); it converts that to
+#: GitHub's name only when matching a workflow's ``types:``, never in the
+#: payload itself.
+_EVENT_ACTION_ALIASES = {"synchronized": "synchronize"}
+
+
+def pr_event_action(event: dict[str, Any]) -> str:
+    """The pull-request event's ``action``, in GitHub's spelling.
+
+    Read once here so every comparison downstream (the overview gate, auto
+    incremental) sees one name for a push, whichever forge sent it.
+    """
+    action = str(event.get("action") or "")
+    return _EVENT_ACTION_ALIASES.get(action, action)
 
 
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
@@ -261,6 +280,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         pr_number=located.number,
         token=token,
         marker_key=_marker_key(cfg),
+        resolve_fixed=cfg.resolve_fixed,
         scheme=located.scheme,
         bearer=_azure_devops_token_is_bearer(),
     ),
@@ -426,7 +446,7 @@ def build_provider_engine(
         cfg.model,
         api_key=auth.api_key,
         api_base=auth.api_base,
-        azure_ad_token=auth.azure_ad_token,
+        azure_ad_token_provider=auth.azure_ad_token_provider,
         # Same precedence as `api_base` above: the invocation (CLI flag / Action
         # input) overrides what the repo's config asked for.
         fallback_model=runtime.fallback_model or cfg.fallback_model,
@@ -471,6 +491,7 @@ def build_review_context(
             "automatically)."
         )
     _token_var, token = picked
+    register_secret(token)
 
     github = build_gateway(located, token, cfg)
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
@@ -846,6 +867,10 @@ def run_local_review(
         cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
     )
     ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    # An empty diff has nothing to review: no model call, and never a 👍 LGTM.
+    # Checked after the provider is built so a config error still surfaces first.
+    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+        return [], nothing
     return engine.review(ctx, cfg)
 
 
@@ -934,14 +959,47 @@ def execute_local_diagram(
     """
     from lgtmaybe.engine.overview import build_overview
 
+    ctx = _local_context(base=base, working=working, uncommitted=uncommitted)
+    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+        click.echo(nothing)
+        return
     try:
         _engine, provider = build_provider_engine(cfg, runtime)
-        ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
         body = build_overview(ctx, cfg, provider)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
     click.echo(flatten_details(body))
+
+
+def _local_context(*, base: str | None, working: bool, uncommitted: bool) -> PRContext:
+    """The local diff's context, with git failures surfaced as a clean CLI error."""
+    try:
+        return local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _no_local_changes(ctx: PRContext, *, base: str | None, uncommitted: bool) -> str | None:
+    """What to say when the local diff is empty, or None when there is a diff.
+
+    An empty comparison has nothing to review, so it costs no model call and is
+    never reported as 👍 LGTM. When no base was given and none of the default
+    branches exists, the base falls back to HEAD — a comparison with itself, so
+    the emptiness says nothing about the change and the command fails, naming
+    the flag that fixes it. A real base with no diff is a clean exit.
+    """
+    if ctx.diff.strip():
+        return None
+    if uncommitted:
+        return "no uncommitted changes vs HEAD — nothing to review"
+    resolved = base or _default_base(None)
+    if base is None and resolved == "HEAD":
+        raise click.ClickException(
+            "no changes vs HEAD — found no origin/HEAD, origin/main, origin/master, "
+            "main or master to compare against; pass --base <branch>"
+        )
+    return f"no changes vs {resolved} — nothing to review; pass --base <branch> to compare another"
 
 
 def _build_context_or_fail(
@@ -1047,6 +1105,17 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
 
     github, engine, provider = _build_context_or_fail(cfg, runtime)
 
+    # Anyone can comment on a public PR, and a command spends the model, so it
+    # runs only for someone who can push. Checked here, not just in the example
+    # workflows' `if:` — a workflow without that gate (Gitea's cannot read
+    # author_association) must not hand the reviewer to a stranger. Fails closed:
+    # no login, or an adapter that cannot tell, is not authorised.
+    author = (event.get("comment", {}).get("user") or {}).get("login") or ""
+    if not (author and isinstance(github, SupportsPermissions) and github.has_repo_write(author)):
+        _log.warning("slash command ignored: no write access", extra={"author": author})
+        click.echo(f"/{parsed.name} ignored: {author or 'the commenter'} has no write access.")
+        return
+
     try:
         dispatch(parsed, github=github, engine=engine, provider=provider, cfg=cfg)
     except DiffUnavailable as exc:
@@ -1089,7 +1158,11 @@ def _post_failure(github: ReviewGateway, exc: Exception) -> None:
 
 
 def _post_notice(github: ReviewGateway, notice: str) -> None:
-    """Post a findings-free notice as the review body AND a PR comment; never raise."""
+    """Post a findings-free notice as the review body AND a PR comment; never raise.
+
+    The body write is skipped when it would overwrite a completed (watermarked)
+    summary; the comment alone then carries the notice.
+    """
     try:
         # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next
@@ -1097,7 +1170,13 @@ def _post_notice(github: ReviewGateway, notice: str) -> None:
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
             mark_reviewed(None)
-        github.post_review([], notice)
+        # A summary carrying a watermark is the record of the last head that WAS
+        # reviewed — its demoted findings and the watermark itself. Writing the
+        # notice over it erased both; the PR comment below discloses the
+        # failure instead, and the watermark stays where that success left it.
+        last_reviewed = getattr(github, "last_reviewed_sha", None)
+        if last_reviewed is None or last_reviewed() is None:
+            github.post_review([], notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.
@@ -1132,10 +1211,7 @@ def _change_url(repo: str, number: int) -> str:
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
     if os.environ.get("GITHUB_API_URL", "").rstrip("/").endswith("/api/v3"):
-        raise click.ClickException(
-            "GitHub Enterprise Server is not supported; run lgtmaybe on GitHub.com, "
-            "GitLab, or Gitea."
-        )
+        raise click.ClickException(GHES_UNSUPPORTED)
     return f"{server}/{repo}/pulls/{number}"
 
 
@@ -1402,6 +1478,7 @@ __all__ = [
     "execute_review",
     "graceful_interrupt",
     "main",
+    "pr_event_action",
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",

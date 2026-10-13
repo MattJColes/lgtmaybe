@@ -641,6 +641,82 @@ class TestLocalReviewErrors:
         assert result.exit_code != 0
 
 
+class TestLocalEmptyDiff:
+    """An empty comparison must never cost model calls or print 👍 LGTM."""
+
+    @staticmethod
+    def _repo(path, branch: str) -> None:  # type: ignore[no-untyped-def]
+        import subprocess
+
+        def git(*args: str) -> None:
+            subprocess.run(["git", *args], cwd=path, check=True, capture_output=True)
+
+        git("init", "-b", branch)
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "Test")
+        git("config", "commit.gpgsign", "false")
+        (path / "app.py").write_text("x = eval(input())\n")
+        git("add", "app.py")
+        git("commit", "-m", "base")
+
+    @staticmethod
+    def _forbid_model_calls(monkeypatch) -> list[str]:  # type: ignore[no-untyped-def]
+        import lgtmaybe.cli as cli_module
+        import lgtmaybe.engine.overview as overview_module
+
+        called: list[str] = []
+
+        class _Engine:
+            def review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+                called.append("review")
+                return [], "👍 LGTM!"
+
+        monkeypatch.setattr(cli_module, "build_provider", lambda *a, **k: FakeProvider())
+        monkeypatch.setattr(cli_module, "LLMReviewEngine", lambda provider, **kwargs: _Engine())
+        monkeypatch.setattr(
+            overview_module, "build_overview", lambda *a, **k: called.append("diagram") or ""
+        )
+        return called
+
+    @pytest.mark.parametrize("command", ["review", "diagram"])
+    def test_the_head_fallback_base_fails_and_names_the_flag(self, command, monkeypatch, tmp_path):  # type: ignore[no-untyped-def]
+        """No origin/HEAD, origin/main, origin/master, main or master: the base
+        falls back to HEAD, which compares the branch with itself."""
+        self._repo(tmp_path, "trunk")
+        called = self._forbid_model_calls(monkeypatch)
+
+        result = CliRunner().invoke(main, [command, "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code != 0
+        assert "no changes vs HEAD" in result.output
+        assert "--base" in result.output
+        assert "LGTM" not in result.output
+        assert called == []
+
+    @pytest.mark.parametrize("command", ["review", "diagram"])
+    def test_a_real_base_with_no_changes_exits_cleanly(self, command, monkeypatch, tmp_path):  # type: ignore[no-untyped-def]
+        self._repo(tmp_path, "main")
+        called = self._forbid_model_calls(monkeypatch)
+
+        result = CliRunner().invoke(main, [command, "--provider", "ollama", "--model", "llama3"])
+
+        assert result.exit_code == 0, result.output
+        assert "no changes vs main" in result.output
+        assert "LGTM" not in result.output
+        assert called == []
+
+    def test_json_output_stays_parseable(self, monkeypatch, tmp_path):  # type: ignore[no-untyped-def]
+        self._repo(tmp_path, "main")
+        self._forbid_model_calls(monkeypatch)
+
+        result = CliRunner().invoke(
+            main, ["review", "--provider", "ollama", "--model", "llama3", "--json"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout) == []
+
+
 class TestConfigPathOption:
     """An explicit --config path must exist; the default stays lenient."""
 
@@ -713,6 +789,27 @@ class TestBuildReviewContext:
         assert isinstance(github, RestGitHubGateway)
         assert isinstance(engine, LLMReviewEngine)
 
+    @pytest.mark.parametrize(
+        ("url", "token_var"),
+        [
+            ("https://github.com/org/repo/pull/7", "GITHUB_TOKEN"),
+            ("https://gitlab.example.com/group/proj/-/merge_requests/7", "GITLAB_TOKEN"),
+            ("https://gitea.example.com/org/repo/pulls/7", "GITEA_TOKEN"),
+        ],
+    )
+    def test_the_forge_token_is_redacted_from_logs(self, monkeypatch, url, token_var):
+        import logging
+
+        from lgtmaybe.core.logging import JsonFormatter
+
+        monkeypatch.setenv(token_var, "forge-token-0123456789")
+        cfg = _default_cfg(provider="ollama", model="llama3")
+
+        build_review_context(cfg, RuntimeOptions(pr_url=url))
+
+        record = logging.makeLogRecord({"msg": "auth: forge-token-0123456789"})
+        assert "forge-token-0123456789" not in JsonFormatter().format(record)
+
     def test_requires_github_token(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         cfg = _default_cfg(provider="ollama", model="llama3")
@@ -768,12 +865,12 @@ class TestBuildReviewContext:
         assert provider.fallback_model == "ollama_chat/from-flag"
 
     def test_azure_keyless_ad_token_threads_to_provider(self, monkeypatch):
-        """Keyless azure resolves an ambient AD token and threads it to litellm."""
+        """Keyless azure resolves an ambient AD token provider and threads it to litellm."""
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
         monkeypatch.delenv("AZURE_API_KEY", raising=False)
         monkeypatch.setattr(
-            "lgtmaybe.providers.credentials._default_azure_token",
-            lambda: "ad-token-from-oidc",
+            "lgtmaybe.providers.credentials._default_azure_token_provider",
+            lambda: lambda: "ad-token-from-oidc",
         )
         cfg = _default_cfg(provider="azure", model="my-deployment")
         runtime = RuntimeOptions(
@@ -783,7 +880,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.default_opts.get("azure_ad_token") == "ad-token-from-oidc"
+        assert provider.default_opts["azure_ad_token_provider"]() == "ad-token-from-oidc"
         assert "api_key" not in provider.default_opts
 
 
@@ -862,7 +959,7 @@ class TestDiffUnavailable:
             lambda cfg, runtime: (github, FakeEngine(FakeProvider()), FakeProvider()),
         )
         event = {
-            "comment": {"body": command},
+            "comment": {"body": command, "user": {"login": "maintainer"}},
             "issue": {"number": 7, "pull_request": {}},
             "repository": {"full_name": "owner/repo"},
         }

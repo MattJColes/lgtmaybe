@@ -21,6 +21,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
+from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
@@ -70,6 +71,7 @@ from .injection import (
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
 from .prompt import (
+    CODE_HEALTH_GROUP,
     FAST_GROUPS,
     build_correctness_block,
     build_custom_lens_block,
@@ -137,12 +139,18 @@ _log = get_logger(__name__)
 # last one was a named-but-empty set two hundred lines away, which read as a
 # policy it no longer had.
 _DEFAULT_MAX_WORKERS = 6
+# The fast preset's `code-health` group id is gated too: a finding stamped with
+# it carried no member category, so it cannot prove it is one of the exempt
+# members (complexity, ponytail) rather than a gated one (performance,
+# deprecation). An attributed exempt member keeps its own category and stays
+# exempt. `artefacts` holds only exempt members, so it needs no entry.
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
         ReviewCategory.security.value,
         ReviewCategory.correctness.value,
         ReviewCategory.deprecation.value,
         ReviewCategory.performance.value,
+        CODE_HEALTH_GROUP.id,
     }
 )
 
@@ -292,7 +300,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"(file cap {cfg.max_files}). Raise max_files to review them all."
         )
     if state.oversized:
-        listed = ", ".join(f"`{path}`" for path in state.oversized[:10])
+        listed = ", ".join(code_span(path) for path in state.oversized[:10])
         more = ", …" if len(state.oversized) > 10 else ""
         notices.append(
             f"📄 Skipped {len(state.oversized)} oversized file{_plural(len(state.oversized))} "
@@ -300,7 +308,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "Raise `max_file_diff_lines` (0 disables) to review them."
         )
     if state.skipped_by_triage:
-        listed = ", ".join(f"`{path}`" for path in state.skipped_by_triage[:10])
+        listed = ", ".join(code_span(path) for path in state.skipped_by_triage[:10])
         more = ", …" if len(state.skipped_by_triage) > 10 else ""
         notices.append(
             f"🔎 Triage skipped {len(state.skipped_by_triage)} low-risk "
@@ -308,7 +316,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "(`/review full` reviews everything)."
         )
     if state.spec_unfit:
-        listed = ", ".join(f"`{root}`" for root in state.spec_unfit)
+        listed = ", ".join(code_span(root) for root in state.spec_unfit)
         count = len(state.spec_unfit)
         budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
         outcome = (
@@ -651,6 +659,26 @@ class _PayloadReason(_RetryableReason):
     __slots__ = ()
 
 
+class _PiecesReason(_RetryableReason):
+    """A split whose pieces faltered on the provider: the rescue re-runs just those.
+
+    Re-running the call that split would replay the original whole batch — the
+    payload :class:`_PayloadReason` already knows cannot work, another full
+    timeout or ``max_tokens`` bill — and then every piece again, the ones that
+    answered included (observed as whole, a, b, whole, a, b). So the split hands
+    the rescue wave the only retry worth paying for: :attr:`retry`, the failed
+    pieces alone. A plain attribute, because a ``str`` subtype cannot carry a
+    non-empty ``__slots__``.
+    """
+
+    retry: Callable[[], _LensOutcome]
+
+
+def _provider_side(reason: str | None) -> bool:
+    """True when a split piece failed on the provider, not on its own size."""
+    return _rescuable(reason) and not isinstance(reason, _PayloadReason)
+
+
 class _ReasoningBoundReason(str):
     """A truncation whose ceiling went on thought, not on the answer.
 
@@ -842,7 +870,8 @@ def _lens_messages(
 
 
 class ReviewIncompleteError(Exception):
-    """Every review call failed (timeout or unparseable output) — no usable result.
+    """No usable result: every review call failed (timeout or unparseable
+    output), or no lens could run over a diff that had code to review.
 
     Raised instead of silently reporting a clean review, so the CLI surfaces a
     failure (non-zero exit / failure comment) rather than a false 👍 LGTM.
@@ -1100,6 +1129,19 @@ class LLMReviewEngine:
             total_files = len(file_patches)
             capped_files = False
 
+        # 2c. Fail loud when there is code to review but no lens to review it:
+        #     every configured lens was skipped (intent with nothing stated, spec
+        #     with no matching specification) or none was configured. Zero calls
+        #     would otherwise slip past 5b's "every call failed" guard and post
+        #     👍 LGTM over a diff nothing looked at.
+        if file_patches and not lenses:
+            raise ReviewIncompleteError(
+                "review incomplete — no review lens could run for the configured "
+                "categories (intent needs a stated intent; spec needs a committed "
+                "specification matching this change). Add another category to "
+                "`categories`, or remove the override to run the default set."
+            )
+
         # 3b. Static-analysis grounding (default off): deterministic tool
         #     findings over the reviewed files' head texts, fed to each batch's
         #     lens calls as untrusted hints to confirm or discard. Guarded here
@@ -1345,11 +1387,10 @@ class LLMReviewEngine:
 
         reviewed_diff = "\n".join(patch for _, patch in file_patches)
 
-        # 5c. Deterministic findings join the model's here — after the fan-out so
-        #     the model's copy of a shared finding wins the dedupe tie below, and
-        #     before snapping so they get re-anchored, deduped, suppressed and
-        #     rule-filtered by exactly the same stages. Reflection is the one
-        #     stage they skip; see step 8.
+        # 5c. Deterministic findings join the model's here — before snapping so
+        #     they get re-anchored, suppressed and rule-filtered by exactly the
+        #     same stages. Dedupe never merges them with a model finding (see
+        #     `_dedupe`), and reflection is the one stage they skip; see step 8.
         all_findings = all_findings + scan_findings
 
         # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
@@ -1373,30 +1414,38 @@ class LLMReviewEngine:
             _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
         all_findings = scoped
 
-        # 7. Merge: a finding can surface under more than one lens (a shell
-        #    injection is both a security and a correctness issue), so collapse
-        #    duplicates before reflecting.
-        with profiler.stage("dedupe"):
-            all_findings = _dedupe(all_findings)
-
-        # 7b. Suppression: drop findings a team has marked known-fine — by
-        #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
-        #     ignore` pragma on/above the flagged line. Done before reflection so a
-        #     suppressed finding costs no reflection tokens and never posts.
+        # 7. Suppression: drop findings a team has marked known-fine — by
+        #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
+        #    ignore` pragma on/above the flagged line. Done before reflection so a
+        #    suppressed finding costs no reflection tokens and never posts.
+        #
+        #    This and the evidence gate (7b) run BEFORE the merge (7c): dedupe
+        #    keeps one finding per location, so a copy these filters would drop
+        #    could otherwise win its location and take the line's real finding
+        #    down with it.
         with profiler.stage("suppress"):
-            before_suppress = len(all_findings)
-            all_findings = apply_suppressions(
+            unsuppressed = apply_suppressions(
                 all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
             )
-            suppressed = before_suppress - len(all_findings)
+            # Counted per location, as the merge would collapse them, so several
+            # lenses' copies of one dismissed finding read as one suppression.
+            unsuppressed_ids = {id(f) for f in unsuppressed}
+            suppressed = len(_dedupe([f for f in all_findings if id(f) not in unsuppressed_ids]))
+            all_findings = unsuppressed
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
 
-        # 7c. Evidence gate: built-in defect findings must name a concrete way
+        # 7b. Evidence gate: built-in defect findings must name a concrete way
         #     the changed code fails. Category is engine-stamped, so lowering the
         #     model-selected severity cannot bypass this check.
         with profiler.stage("failure_scenario"):
             all_findings = _filter_missing_failure_scenarios(all_findings)
+
+        # 7c. Merge: a finding can surface under more than one lens (a shell
+        #     injection is both a security and a correctness issue), so collapse
+        #     duplicates before reflecting.
+        with profiler.stage("dedupe"):
+            all_findings = _dedupe(all_findings)
 
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
@@ -1599,11 +1648,17 @@ class LLMReviewEngine:
             extra={"calls": len(retrying), "lenses": [calls[i].lens_id for i in retrying]},
         )
         merged = list(outcomes)
+
+        def rerun(index: int) -> _LensOutcome:
+            # A split's failed pieces, never the oversized whole — see _PiecesReason.
+            error = outcomes[index][1]
+            return error.retry() if isinstance(error, _PiecesReason) else calls[index].task()
+
         width = min(len(retrying), _RESCUE_WORKERS)
         with ThreadPoolExecutor(max_workers=width, thread_name_prefix="lgtmaybe-rescue") as pool:
             # map() yields in submission order, so the merge stays deterministic
             # however the calls interleave.
-            rescued = list(pool.map(lambda i: calls[i].task(), retrying))
+            rescued = list(pool.map(rerun, retrying))
         for index, (findings, error) in zip(retrying, rescued, strict=True):
             first_findings, _ = merged[index]
             merged[index] = (first_findings + findings, error)
@@ -2007,8 +2062,9 @@ class LLMReviewEngine:
         #   original oversized request is the "identical request against an
         #   identical budget" the adapter refuses to repeat, at twice the calls.
         # - A piece that failed on the PROVIDER — a capacity 429, a 5xx, a stalled
-        #   connection — says nothing about size. Its marker travels on, because
-        #   one more go after the wave has drained is exactly what it needs.
+        #   connection — says nothing about size. One more go after the wave has
+        #   drained is exactly what it needs — for THAT piece alone, which is
+        #   what :class:`_PiecesReason` hands the rescue wave.
         #
         # Collapsing the two is the bug this replaces: every split failure was
         # reported plain, so a transient blip inside a piece silently forfeited
@@ -2023,9 +2079,26 @@ class LLMReviewEngine:
         # own failure, which is what the notice should name), while retryability
         # is a property of ANY piece having faltered provider-side.
         last = errors[-1]
-        if any(_rescuable(e) and not isinstance(e, _PayloadReason) for e in errors):
-            return findings, _RetryableReason(last)
-        return findings, str(last)
+        flaky = [piece for piece, (_, e) in zip(pieces, outcomes, strict=True) if _provider_side(e)]
+        if not flaky:
+            return findings, str(last)
+        settled = [e for e in errors if not _provider_side(e)]
+
+        def retry() -> _LensOutcome:
+            # Serial: this runs on a rescue worker, and that wave is narrow on
+            # purpose (see _RESCUE_WORKERS). Plain errors out — the rescue is
+            # one wave, so its outcome is never rescued again.
+            again = [review_piece(piece) for piece in flaky]
+            if any(error is None for _, error in again):
+                self._split_batches.add(batch_num)
+            remaining = settled + [error for _, error in again if error is not None]
+            return [f for found, _ in again for f in found], (
+                str(remaining[-1]) if remaining else None
+            )
+
+        reason = _PiecesReason(last)
+        reason.retry = retry
+        return findings, reason
 
     def _retry_lower_effort(
         self,
@@ -3286,10 +3359,17 @@ def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
     1. Highest severity wins.
     2. On a tie: the finding with the longer body wins (more context is more useful).
     3. On a further tie: the first in input order wins (stable, provider-independent).
+
+    Scan findings are keyed on their title (`tool: rule`) too, so distinct tool
+    hits never merge with each other or with a model finding: osv-scanner puts
+    every advisory at line 1, and a model copy that won a scanner's location
+    could then be dropped by reflection — which scan findings skip — taking the
+    deterministic hit with it.
     """
-    best: dict[tuple[str, int, str], ReviewFinding] = {}
+    best: dict[tuple[str, int, str, str | None], ReviewFinding] = {}
     for finding in findings:
-        key = (finding.path, finding.line, finding.side)
+        scan_title = finding.title if _is_scan_finding(finding) else None
+        key = (finding.path, finding.line, finding.side, scan_title)
         existing = best.get(key)
         if existing is None:
             best[key] = finding

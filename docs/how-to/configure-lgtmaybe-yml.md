@@ -683,7 +683,8 @@ Adds labels derived from the finished review, with no extra model calls:
 
 - `review-effort/1` to `review-effort/5`: a size estimate from the changed lines.
 - `possible-security-issue`: a high or critical finding was posted by the
-  security lens or by a security scanner (gitleaks, bandit, semgrep).
+  security lens or by a security scanner (gitleaks, bandit, semgrep, zizmor,
+  osv-scanner).
 - `consider-splitting`: the diff spans many unrelated top-level directories.
 - `risk/<level>`: the [risk of change](../explanation/risk-of-change.md)
   verdict, when `risk` is on. Only one level is applied at a time.
@@ -762,8 +763,12 @@ they stay open (see
 [What the public App cannot do](use-as-github-action.md#what-the-public-app-cannot-do)).
 GitLab has no
 "outdated" signal, so there lgtmaybe resolves only threads its re-run validated
-as fixed. Gitea's API can't resolve threads, and the local CLI has no
-conversations, so both ignore this.
+as fixed. Azure DevOps has no "outdated" signal either, so lgtmaybe compares
+the file at the iteration it posted the thread against the file now. It marks
+the thread *Resolved* only when the finding is no longer reported **and** the
+flagged line changed, and never after a run that failed or finished only
+partly. Gitea's API can't resolve
+threads, and the local CLI has no conversations, so both ignore this.
 
 ```yaml
 resolve_fixed: false   # leave fixed conversations open for manual resolution

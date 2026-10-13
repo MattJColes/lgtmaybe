@@ -725,6 +725,7 @@ class LiteLLMProvider:
         *,
         model: str = "",
         fallback_model: str | None = None,
+        route: str = "",
         effort_override_supported: bool = True,
         effort_levels: frozenset[str] | None = None,
         default_effort: str | None = None,
@@ -734,6 +735,12 @@ class LiteLLMProvider:
             raise TypeError("prompt_cache was removed; prompt caching is always enabled")
         self.model = model
         self.fallback_model = fallback_model
+        # The litellm route prefix the factory resolved `model` under (e.g.
+        # "anthropic"), so a caller naming a different slot's raw model — the
+        # triage or reflect model — is routed the same way. Empty for a
+        # directly-built instance, which keeps its pinned model (see
+        # `_resolve_model`).
+        self._route = route
         # Whether this model's capability entry will actually carry a
         # `reasoning_effort` we invent for a step-down retry. Defaults True and
         # is only ever set False when litellm's map POSITIVELY omits the param:
@@ -852,6 +859,12 @@ class LiteLLMProvider:
         subtracted, because the backends reserve it: prompt plus ``max_tokens``
         must fit the window. None when the map has never heard of the model or
         records no window for it — "no opinion", so the engine keeps its default.
+
+        A ceiling that fills the whole window (ollama's ``num_ctx`` 8192 under
+        the default 16,384 ``max_tokens``) is a misconfiguration, not "no
+        opinion": answering None there let the engine keep its 100k default and
+        send 100k-token batches into an 8k window. Half the window is the cap
+        instead, with a warning naming both numbers.
         """
         window: Any = self.default_opts.get("num_ctx")
         if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
@@ -860,7 +873,14 @@ class LiteLLMProvider:
             return None
         ceiling = self.default_opts.get("max_tokens")
         reserve = ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) else 0
-        return max(0, window - max(0, reserve)) or None
+        spare = int(window) - max(0, reserve)
+        if spare > 0:
+            return spare
+        _log.warning(
+            "max_tokens fills the model's context window; capping the prompt at half of it",
+            extra={"max_tokens": reserve, "window": window},
+        )
+        return int(window) // 2
 
     def _disable_response_format(self, model: str, why: str) -> None:
         """Record — and announce — that *model* will not take the schema.
@@ -991,7 +1011,21 @@ class LiteLLMProvider:
         the one ``_call`` looks up — a factory-built provider carries the
         prefixed litellm string, and the engine only knows ``cfg.model``.
         """
-        self._demote_schema(self.model or model, why)
+        self._demote_schema(self._resolve_model(model), why)
+
+    def _resolve_model(self, model: str) -> str:
+        """The litellm model string a caller's raw *model* names.
+
+        One instance serves the triage, review and reflect slots on one route,
+        and each caller passes its slot's raw ``cfg`` name. A factory-built
+        provider routes that name exactly as the factory routed the primary, so
+        the primary's own name lands on the pinned string and a different slot's
+        model is the one actually called. No name — or no route, on an instance
+        built without the factory — keeps the pinned model.
+        """
+        if model and self._route:
+            return f"{self._route}/{model}"
+        return self.model or model
 
     def sends_response_format(self, model: str) -> bool:
         """Whether a call for *model* would actually carry the schema.
@@ -1005,7 +1039,7 @@ class LiteLLMProvider:
 
         Keyed as ``complete`` resolves the model, like ``drop_response_format``.
         """
-        return (self.model or model) not in self._schema_dropped
+        return self._resolve_model(model) not in self._schema_dropped
 
     def schema_dropped(self) -> bool:
         """Whether any model lost ``response_format`` during this run.
@@ -1159,11 +1193,11 @@ class LiteLLMProvider:
         # requests, so one param serves both; drop_params strips it elsewhere.
         if "prompt_cache_key" not in merged:
             merged["prompt_cache_key"] = _prefix_cache_key(messages)
-        # A factory-built provider carries the resolved litellm model string
-        # (e.g. "ollama/qwen3:27b"); prefer it over the caller's raw cfg.model.
-        # An explicit override outranks both: it is the caller naming a model
-        # this adapter resolved for it, which is the escalation below run early.
-        effective_model = model_override or self.model or model
+        # The caller's raw cfg name, routed as the factory routed the primary
+        # (see `_resolve_model`). An explicit override outranks it: it is the
+        # caller naming a model this adapter resolved for it, which is the
+        # escalation below run early.
+        effective_model = model_override or self._resolve_model(model)
         try:
             return self._complete_with_retry(messages, effective_model, **merged)
         except Exception as exc:
@@ -1379,10 +1413,11 @@ class LiteLLMProvider:
     def _drop_rejected_param(self, exc: Exception, model: str, kwargs: dict[str, Any]) -> bool:
         """Strip the one request param *exc* says this model won't take.
 
-        Three params are sent for review quality rather than necessity —
-        ``temperature`` (determinism), ``reasoning_effort`` (a thinking budget)
-        and ``response_format`` (structured output) — and a model that refuses
-        any of them would otherwise fail the whole review over a preference.
+        Four params are sent for review quality rather than necessity —
+        ``temperature`` (determinism), ``reasoning_effort`` (a thinking budget),
+        ``prompt_cache_key`` (a cache-routing hint) and ``response_format``
+        (structured output) — and a model that refuses any of them would
+        otherwise fail the whole review over a preference.
         The refusals are permanent 400s, so the recovery is to drop the param
         and re-send; ``kwargs`` is the dict every later retry of this call
         reuses, so the drop sticks for them too. The effort is judged before
@@ -1402,6 +1437,13 @@ class LiteLLMProvider:
             kwargs.pop("temperature")
             self._rejected_params.setdefault(model, set()).add("temperature")
             self._mark_temperature_dropped(model, "rejected")
+            return True
+        # Sent on every call (see `complete`), and drop_params leaves it on the
+        # `openai/` route, so a strict OpenAI-compatible server ("Extra inputs
+        # are not permitted") would otherwise refuse every lens of the review.
+        if "prompt_cache_key" in kwargs and _rejects_field(exc, "prompt_cache_key"):
+            kwargs.pop("prompt_cache_key")
+            self._rejected_params.setdefault(model, set()).add("prompt_cache_key")
             return True
         # Before the schema branch, deliberately: a refused reasoning effort
         # arrives naming `output_config.effort`, which the schema matcher below

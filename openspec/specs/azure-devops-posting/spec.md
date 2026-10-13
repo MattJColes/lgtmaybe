@@ -150,7 +150,9 @@ the first comment of a live, non-`fixed` thread written by the token's own
 identity (`connectionData`'s `authenticatedUser.id`, resolved once), consuming
 each id once. A thread by anyone else SHALL NOT suppress a finding, and when the
 identity cannot be read no thread SHALL. A won't-fix or closed thread of ours
-SHALL keep suppressing its finding; a fixed one SHALL NOT.
+SHALL keep suppressing its finding; a fixed one SHALL NOT. Here and for
+resolve-on-fix, a comment's ids SHALL be read only from the block appended
+after its suggestion, never from the suggestion itself.
 <!-- anchor: azure-devops.dedupe -->
 
 #### Scenario: a fixed finding returns
@@ -193,14 +195,40 @@ treated as Azure Repos.
 - **WHEN** `BUILD_REPOSITORY_PROVIDER` is unset and the other variables are present
 - **THEN** the pull request URL is built as for Azure Repos
 
+### Requirement: Fixed finding threads are resolved over REST
+
+With `resolve_fixed` on, the adapter SHALL set to `fixed`, then reply in, each
+open (`active` or `pending`) finding thread whose root comment the token's own
+identity wrote, when neither of its hidden ids was produced this run and its
+line has changed since it was posted; a validated allowlist, when installed,
+SHALL decide instead. Azure DevOps has no outdated flag, so each finding thread
+SHALL be created with a `pullRequestThreadContext` naming the iteration it was
+posted at (retried once without it only on a 400), and the line SHALL count as
+changed only when the diff from that iteration's head to ours replaces or
+removes it, or the file is gone; `trackingCriteria`'s original position SHALL
+win once present. A thread with no recorded iteration, a left-side thread, or
+any read failure SHALL stay open. Nothing SHALL be resolved unless
+`mark_reviewed` named the fetched head, so a partial run or a failure notice
+resolves nothing. A 401 or 403 SHALL stop resolving with one warning, and
+resolving SHALL never fail the review.
+<!-- anchor: azure-devops.resolve -->
+
+#### Scenario: a fixed finding
+- **WHEN** a complete run no longer reports a finding whose line changed since its thread was posted
+- **THEN** the thread is set to `fixed` and then replied to
+
+#### Scenario: someone else's thread
+- **WHEN** a thread carrying a finding id was opened by another identity
+- **THEN** it is never resolved
+
 ### Requirement: Unbuilt capabilities are not claimed
 
-The adapter SHALL declare file contents, description, diagram, and conversation
-reading, and SHALL NOT claim incremental review, thread resolution, labels,
+The adapter SHALL declare file contents, description, diagram, conversation
+reading, and thread resolution, and SHALL NOT claim incremental review, labels,
 checks, feedback, or base checkout, so the caller degrades to a full review
 without them.
 <!-- anchor: azure-devops.capabilities -->
 
-#### Scenario: thread resolution is probed
-- **WHEN** a caller checks the adapter for thread resolution
-- **THEN** the check fails and resolve-on-fix is skipped
+#### Scenario: incremental review is probed
+- **WHEN** a caller checks the adapter for incremental review
+- **THEN** the check fails and every run is a full review

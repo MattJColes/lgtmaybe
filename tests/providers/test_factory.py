@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -93,19 +96,38 @@ class TestBuildProvider:
         assert provider.default_opts.get("api_base") == "https://my-resource.openai.azure.com"
         assert provider.model == "azure/gpt-4o"
 
-    def test_build_provider_azure_keyless_carries_ad_token(self) -> None:
+    def test_build_provider_azure_keyless_carries_ad_token_provider(self) -> None:
+        """Keyless azure hands litellm a token PROVIDER, called per request, so a
+        review that outlives one Entra token (~an hour) is not 401'd mid-run."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
         from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+        def token_provider() -> str:
+            return "ad-token-xyz"
 
         provider = build_provider(
             Provider.azure,
             "gpt-4o",
             api_base="https://my-resource.openai.azure.com",
-            azure_ad_token="ad-token-xyz",
+            azure_ad_token_provider=token_provider,
         )
         assert isinstance(provider, LiteLLMProvider)
-        assert provider.default_opts.get("azure_ad_token") == "ad-token-xyz"
         assert provider.default_opts.get("api_base") == "https://my-resource.openai.azure.com"
         assert "api_key" not in provider.default_opts
+        assert "azure_ad_token" not in provider.default_opts
+
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="[]"))],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+        with patch("litellm.completion", return_value=response) as mock_completion:
+            provider.complete([{"role": "user", "content": "hi"}], model="gpt-4o")
+
+        sent = mock_completion.call_args.kwargs["azure_ad_token_provider"]
+        assert sent() == "ad-token-xyz", "litellm must get a callable that fetches per request"
+        assert "azure_ad_token" not in mock_completion.call_args.kwargs
 
     def test_build_provider_openai_compatible_carries_key_and_base(self) -> None:
         from lgtmaybe.providers.litellm_provider import LiteLLMProvider
@@ -757,6 +779,24 @@ class TestInputBudget:
         built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=8192, max_tokens=1024)
         assert built.input_budget() == 8192 - 1024
 
+    @pytest.mark.parametrize("num_ctx", [8192, 16384])
+    def test_a_window_the_output_ceiling_fills_still_gets_a_budget(
+        self, num_ctx: int, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The default 16,384-token ceiling leaves nothing of an 8k or 16k
+        window. Answering None there reads as "no opinion", and the engine keeps
+        its 100k default — 100k-token batches into an 8k window. A small window
+        is the case the fit exists for, so it still gets a positive cap."""
+        built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=num_ctx)
+        assert built.default_opts["max_tokens"] >= num_ctx
+
+        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+            budget = built.input_budget()
+
+        assert budget is not None
+        assert 0 < budget <= num_ctx
+        assert any("max_tokens" in r.getMessage() for r in caplog.records)
+
     def test_hosted_budget_comes_from_the_model_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import litellm
 
@@ -790,3 +830,83 @@ class TestInputBudget:
         monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": None})
         built = build_provider(Provider.openai, "gpt-5", api_key="k")
         assert built.input_budget() is None
+
+
+def _models_called(provider: Any, *models: str) -> tuple[list[str], list[str | None]]:
+    """The model litellm received for each ``complete(model=...)``, and the
+    model each ``ProviderResult`` reports."""
+    seen: list[str] = []
+
+    def side_effect(*_args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["model"])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=10),
+        )
+
+    with patch("litellm.completion", side_effect=side_effect):
+        reported = [
+            provider.complete([{"role": "user", "content": "a"}], model=m).model for m in models
+        ]
+    return seen, reported
+
+
+class TestCallerNamedModelSlots:
+    """One factory-built provider serves the triage, review and reflect slots,
+    and each caller names its slot's model on ``complete``. The factory pins the
+    resolved primary string, so a named model that differs from the primary has
+    to be routed the same way and actually called — swapped back for the
+    primary, ``reflect_model`` and ``triage_model`` were silently inert."""
+
+    def test_a_reflect_or_triage_model_reaches_litellm_on_the_primary_s_route(self) -> None:
+        provider = build_provider(Provider.anthropic, "claude-opus-4-1", api_key="sk-test")
+
+        seen, reported = _models_called(provider, "claude-haiku-4-5", "claude-sonnet-4-5")
+
+        assert seen == ["anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5"]
+        assert reported == seen, "the result must name the model actually called"
+
+    def test_the_primary_or_no_model_keeps_the_resolved_primary(self) -> None:
+        provider = build_provider(Provider.ollama, "qwen3:27b")
+
+        seen, reported = _models_called(provider, "qwen3:27b", "")
+
+        assert seen == ["ollama_chat/qwen3:27b", "ollama_chat/qwen3:27b"]
+        assert reported == seen
+
+
+class TestCredentialsNeverReachALogLine:
+    """``core/logging`` redacts registered values; the factory is where keys arrive."""
+
+    @staticmethod
+    def _logged(text: str) -> str:
+        from lgtmaybe.core.logging import JsonFormatter
+
+        return JsonFormatter().format(logging.makeLogRecord({"msg": text}))
+
+    def test_the_api_key_is_redacted(self) -> None:
+        build_provider(Provider.openai, "gpt-4o", api_key="sk-live-0123456789abcdef")
+
+        assert "sk-live-0123456789abcdef" not in self._logged("sent sk-live-0123456789abcdef")
+
+    def test_each_refreshed_azure_ad_token_is_redacted(self) -> None:
+        tokens = iter(["eyJfirst", "eyJsecond"])
+        built = build_provider(
+            Provider.azure,
+            "gpt-4o",
+            api_base="https://x.openai.azure.com",
+            azure_ad_token_provider=lambda: next(tokens),
+        )
+        fetch = built.default_opts["azure_ad_token_provider"]
+
+        assert (fetch(), fetch()) == ("eyJfirst", "eyJsecond")
+        logged = self._logged("bearer eyJfirst then eyJsecond")
+        assert "eyJfirst" not in logged
+        assert "eyJsecond" not in logged
+
+    def test_the_keyless_placeholder_is_not_a_secret(self) -> None:
+        from lgtmaybe.providers.factory import OPENAI_COMPATIBLE_PLACEHOLDER_KEY as placeholder
+
+        build_provider(Provider.openai_compatible, "m", api_base="http://x", api_key=placeholder)
+
+        assert placeholder in self._logged(f"key {placeholder}")

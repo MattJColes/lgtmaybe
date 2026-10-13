@@ -128,6 +128,58 @@ class TestActionRouting:
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronize", auto="true")
         assert called == [True]
 
+    def test_auto_diagram_posts_on_gitea_synchronized(self, tmp_path, monkeypatch):
+        """Gitea Actions reports a push to the PR as ``synchronized``; the
+        overview must refresh on it exactly as on GitHub's ``synchronize``."""
+        called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronized", auto="true")
+        assert called == [True]
+
+    def test_auto_diagram_off_holds_on_gitea_synchronized(self, tmp_path, monkeypatch):
+        called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronized", auto="false")
+        assert called == []
+
+    @pytest.mark.parametrize(
+        ("action", "expected"),
+        [("synchronize", True), ("synchronized", True), ("opened", False)],
+    )
+    def test_auto_incremental_resolves_from_the_event_action(
+        self, tmp_path, monkeypatch, action, expected
+    ):
+        """incremental=None (auto) turns on for a push on either forge's
+        spelling, and stays off for an open."""
+        import lgtmaybe.cli as cli_module
+
+        github = FakeGitHub()
+        seen: list[bool | None] = []
+
+        def _build(cfg, runtime):
+            seen.append(cfg.incremental)
+            return github, FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", _build)
+        monkeypatch.setattr(
+            cli_module,
+            "run_diagram",
+            lambda github, provider, cfg, ctx=None, completed_sha=None: None,
+        )
+        event = _write_event(
+            tmp_path,
+            {
+                "action": action,
+                "repository": {"full_name": "org/repo"},
+                "pull_request": {"number": 3},
+            },
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+
+        result = CliRunner().invoke(main, ["action"])
+
+        assert result.exit_code == 0, result.output
+        assert seen == [expected]
+
     def test_auto_diagram_on_by_default(self, tmp_path, monkeypatch):
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="opened", auto="")
         assert called == [True]
@@ -293,7 +345,7 @@ class TestActionRouting:
         event = _write_event(
             tmp_path,
             {
-                "comment": {"body": "/review"},
+                "comment": {"body": "/review", "user": {"login": "maintainer"}},
                 "issue": {"number": 9, "pull_request": {"url": "x"}},
                 "repository": {"full_name": "org/repo"},
             },

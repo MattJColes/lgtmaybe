@@ -1346,12 +1346,22 @@ It is created **closed**, so it never holds a merge on its own. A finding whose
 thread is already open, or marked *Won't fix* or *Closed*, is not posted again;
 a finding whose thread was marked *Resolved* and that comes back is.
 
+On a later run, a finding thread lgtmaybe opened is marked *Resolved*, with a
+`✅ Looks resolved.` reply, when the finding is no longer reported **and** the
+line it was posted on has changed since. Azure DevOps has no "this code moved"
+flag, so lgtmaybe records the iteration each thread was posted at and compares
+the file then with the file now. Threads anyone else opened are never touched,
+and nothing is resolved after a run that failed or finished only partly. The
+token needs the same *Contribute to pull requests* permission it already uses
+to post. Set `resolve_fixed: false` in `.lgtmaybe.yml` to resolve threads by
+hand. A thread posted by an earlier lgtmaybe version may carry no iteration,
+and one that doesn't stays open for a person to resolve.
+
 These are not available yet:
 
 | Not available | Why | What happens instead |
 |---|---|---|
 | Incremental review | Not built yet | Every run is a full review |
-| Resolve-on-fix | Not built yet; Azure DevOps threads can be resolved over REST | Fixed findings' threads stay open for a human to resolve |
 | Slash commands (`/review`, `/ask`, …) | `azure-pipelines` reviews the pull request; nothing routes comments to it | Queue the build again to review again |
 | Change overview comment | `azure-pipelines` runs the review only | No description or diagram thread is posted |
 | PR labels and the `fail_on` merge gate | Not built yet in the Azure DevOps adapter | No labels or pull request status are set |
@@ -1417,17 +1427,21 @@ for why it matters.
 
 1. **Create a token.** Sign in as a dedicated account with write access to the
    reviewed repository only. In Gitea, go to *Settings → Applications → Access
-   Tokens* and create a token with the `write:repository` and `write:issue`
-   scopes. Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
+   Tokens* and create a token with the `write:repository`, `write:issue` and
+   `read:user` scopes (`read:user` lets lgtmaybe tell its own comments apart). Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
    Gitea refuses secret names that start with `GITEA_` or `GITHUB_`, and the
    example maps this secret to the `GITEA_TOKEN` variable lgtmaybe reads.
 
-    You need both. `write:repository` also covers reading, and Gitea files the
+    You need all three. `write:repository` also covers reading, and Gitea files the
     review endpoint lgtmaybe posts inline comments through
     (`POST /pulls/{index}/reviews`) and the commit-status endpoint under the
     *repository* category, not *issue*, so a token with only `read:repository`
     is refused on the one call the setup exists to make. `write:issue` covers
-    the summary comment and the PR labels.
+    the summary comment and the PR labels. `read:user` lets lgtmaybe ask Gitea
+    who the token is (`GET /user`): only comments that identity wrote count as
+    lgtmaybe's, so nobody else can edit the summary through us or paste a hidden
+    id that hides a finding. Without it every re-run posts a fresh summary and
+    re-posts its findings rather than trusting comments it cannot attribute.
 
 2. **Add a provider key.** Add the API key for whichever model you want as a
    second secret, for example `ANTHROPIC_API_KEY`. Use a key with a spend
@@ -1466,6 +1480,12 @@ finding rules, the change overview comment, PR labels (only labels that already
 exist in the repository; lgtmaybe does not create them), the `fail_on` merge gate
 (as a commit status), and the `/review`, `/improve`, `/ask`, `/describe` and
 `/diagram` slash commands.
+
+A slash command runs only for a commenter with write access to the repository.
+Gitea's workflow `if:` cannot read the commenter's role the way GitHub's
+`author_association` does, so lgtmaybe checks it itself through the collaborator
+permission API. Anyone else's command is ignored with a log line, exits
+successfully, and makes no model call.
 
 These are unavailable on Gitea, and lgtmaybe skips them rather than failing:
 
@@ -2519,7 +2539,8 @@ credentials; lgtmaybe ignores `--api-key` for it.
 
 **`vertex requires ambient GCP credentials`**: lgtmaybe found no sign of GCP
 credentials (`GOOGLE_APPLICATION_CREDENTIALS`, a project variable such as
-`GOOGLE_CLOUD_PROJECT` or `VERTEXAI_PROJECT`, or the ADC file gcloud writes). Run `gcloud auth application-default login`, set
+`GOOGLE_CLOUD_PROJECT` or `VERTEXAI_PROJECT`, the ADC file gcloud writes, or
+metadata-server credentials, which need the `google-auth` package). Run `gcloud auth application-default login`, set
 `GOOGLE_APPLICATION_CREDENTIALS`, or (in CI) check the WIF inputs.
 
 **`UNAUTHENTICATED`**: ADC credentials are missing or expired. Run
@@ -4026,7 +4047,8 @@ Adds labels derived from the finished review, with no extra model calls:
 
 - `review-effort/1` to `review-effort/5`: a size estimate from the changed lines.
 - `possible-security-issue`: a high or critical finding was posted by the
-  security lens or by a security scanner (gitleaks, bandit, semgrep).
+  security lens or by a security scanner (gitleaks, bandit, semgrep, zizmor,
+  osv-scanner).
 - `consider-splitting`: the diff spans many unrelated top-level directories.
 - `risk/<level>`: the [risk of change](../explanation/risk-of-change.md)
   verdict, when `risk` is on. Only one level is applied at a time.
@@ -4105,8 +4127,12 @@ they stay open (see
 [What the public App cannot do](use-as-github-action.md#what-the-public-app-cannot-do)).
 GitLab has no
 "outdated" signal, so there lgtmaybe resolves only threads its re-run validated
-as fixed. Gitea's API can't resolve threads, and the local CLI has no
-conversations, so both ignore this.
+as fixed. Azure DevOps has no "outdated" signal either, so lgtmaybe compares
+the file at the iteration it posted the thread against the file now. It marks
+the thread *Resolved* only when the finding is no longer reported **and** the
+flagged line changed, and never after a run that failed or finished only
+partly. Gitea's API can't resolve
+threads, and the local CLI has no conversations, so both ignore this.
 
 ```yaml
 resolve_fixed: false   # leave fixed conversations open for manual resolution
@@ -8382,9 +8408,11 @@ deprecation), and artefacts (tests, documentation). The same four run on every
 provider; worker count changes only how they are scheduled. `preset: full` runs
 each category as its own call, with a worked example of its own finding type.
 
-Their findings are merged and de-duplicated. Security, correctness,
-deprecation, and performance findings without a concrete `failure_scenario` are
-dropped. A self-reflection pass then audits the rest and drops low-confidence
+Security, correctness, deprecation, and performance findings without a concrete
+`failure_scenario` are dropped, as are `fast` code-health findings the model left
+unattributed (any of them may be a performance or deprecation one), and the rest
+are merged and de-duplicated. A
+self-reflection pass then audits the rest and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 
 The reviewer only sees the diff and some surrounding context: a *slice* of the
@@ -8472,8 +8500,10 @@ normally.
 
 On **GitLab** the same thing happens over plain REST. On **Gitea** it does not
 happen at all: Gitea has no thread-resolution API, so finding comments stay open
-for a human to close. On **Azure DevOps** it is not built yet, so finding
-threads also stay open.
+for a human to close. On **Azure DevOps** the thread is set to *Resolved*.
+Azure DevOps has no "outdated" flag, so lgtmaybe records the iteration each
+finding thread was posted at and compares the file then against the file now.
+It only resolves threads its own token opened, and only after a complete run.
 
 ### How Each Host Posts
 
@@ -8484,7 +8514,7 @@ The findings are identical everywhere. What each host's API allows is not:
 | Inline comments | one batched review | one discussion per finding | one batched review | one thread per finding |
 | Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place | a general thread, edited in place |
 | Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids it posted itself, once the token's identity is known |
-| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
+| Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | ✅ REST |
 | Incremental review of new commits | ✅ | ✅ | ✗ no compare diff | not yet |
 | Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ | not yet |
 
@@ -8514,7 +8544,9 @@ silently: any error is posted back to the PR as a short comment.
 `lgtmaybe review` runs the same pipeline over your local `git` diff and prints
 the findings. It posts nothing and needs no GitHub token. By default it diffs
 the current branch against the remote primary branch (`origin/HEAD`, falling
-back to `origin/main`/`origin/master`, then a local `main`/`master`).
+back to `origin/main`/`origin/master`, then a local `main`/`master`). An empty
+diff makes no model call; when none of those branches exists it exits non-zero
+and asks for `--base`.
 
 - `--working` reviews the whole worktree (branch commits plus uncommitted
   edits) against that same base.
@@ -8760,6 +8792,7 @@ cannot do instead of failing at run time.
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsPermissions`: only writers run slash commands | ✅ | ✗ no slash commands | ✅ | ✗ no slash commands |
 | `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
@@ -8815,8 +8848,8 @@ predefined `SYSTEM_*` and `BUILD_*` variables.
 The engine runs a pipeline of composable stages:
 
 ```
-fetch → redact → compress → prompt → parse → re-anchor → merge/dedupe
-      → suppress → evidence gate → reflect → filter → post
+fetch → redact → compress → prompt → parse → re-anchor → suppress
+      → evidence gate → merge/dedupe → reflect → filter → post
 ```
 
 The prompt/parse stage fans out, one concurrent model call per review lens,
@@ -8833,7 +8866,7 @@ flowchart TD
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    anchor --> dedupe["merge / dedupe"] --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+    anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
 The four lens calls shown are the default `fast` grouping, and the same four run
@@ -8909,21 +8942,25 @@ matches the PR) and any custom lenses join the same fan-out.
    `high`) and is then demoted to the review body instead of posted on a
    guessed line.
 
-5. **merge/dedupe**: findings from every lens are merged and de-duplicated
-   (`_dedupe`, keyed on path/line/side).
-
-6. **suppress**: findings a team has marked known-fine are dropped before they
+5. **suppress**: findings a team has marked known-fine are dropped before they
    cost any reflection tokens: fingerprints in `ignore_fingerprints`, a
    `# lgtmaybe: ignore` pragma on (or just above) the flagged line, and findings
-   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). A 👎 never
-   suppresses a high or critical security finding.
+   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). Neither a 👎
+   nor a pragma (which the PR's author writes) suppresses a high or critical
+   security finding; only `ignore_fingerprints` in trusted config can.
 
-7. **evidence gate**: security, correctness, deprecation and performance
+6. **evidence gate**: security, correctness, deprecation and performance
    findings must carry a concrete `failure_scenario`: the trigger, the changed
    behaviour, and the observable impact. The rule applies regardless of the
    severity the model chose, so lowering a finding to `low` cannot bypass it.
    Gap and maintainability findings (tests, documentation, complexity) do not
-   need a runtime failure.
+   need a runtime failure; a fast-preset code-health finding the model left
+   unattributed does, since it may be a performance or deprecation one.
+
+7. **merge/dedupe**: findings from every lens are merged and de-duplicated
+   (`_dedupe`, keyed on path/line/side; scan findings on their title too, so
+   distinct tool hits never merge). It runs after the two filters above, so a
+   copy they would drop never displaces the finding that shares its line.
 
 8. **reflect**: a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings, scores each 0-10, and drops the ones it marks
@@ -9208,16 +9245,19 @@ When lgtmaybe starts, it resolves credentials for the selected provider:
 2. **Vertex** checks for ambient GCP credentials first: Workload Identity
    Federation, Application Default Credentials from
    `gcloud auth application-default login`, or a project set in the
-   environment. If there are none, lgtmaybe fails immediately with a message
+   environment. Failing those, it asks `google-auth`, which also finds the
+   metadata-server credentials of GCE, GKE Workload Identity, Cloud Run and
+   Cloud Build. If there are none, lgtmaybe fails immediately with a message
    explaining how to authenticate. It never falls back to a key.
 3. **Azure** always needs the resource endpoint (`AZURE_API_BASE` or
    `--api-base`). It uses a key when one is supplied (`AZURE_API_KEY` or
    `--api-key`). Otherwise it goes keyless and mints an Entra token from
    ambient credentials: GitHub OIDC federation in CI, or `az login` or a
-   managed identity locally. Keyless needs the `azure-identity` package
-   (`pip install 'lgtmaybe[azure]'`; the Action image includes it). With
-   neither a key nor an ambient credential, lgtmaybe fails with a message
-   naming both options.
+   managed identity locally. The token is refreshed as it nears expiry, so a
+   review that runs past an hour keeps working. Keyless needs the
+   `azure-identity` package (`pip install 'lgtmaybe[azure]'`; the Action image
+   includes it). With neither a key nor an ambient credential, lgtmaybe fails
+   at start-up with a message naming both options and the SDK's own reason.
 4. **ollama** needs no credentials. `--api-base` points it at the server and
    defaults to `http://localhost:11434`.
 5. **zai** (GLM / Zhipu AI) needs `ZAI_API_KEY` or `--api-key`. Without an
@@ -9266,7 +9306,7 @@ the change-request URL:
 |---|---|---|
 | GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is enough |
 | GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
-| Gitea | `GITEA_TOKEN` | A token with `write:repository` and `write:issue` |
+| Gitea | `GITEA_TOKEN` | A token with `write:repository`, `write:issue` and `read:user` |
 | Azure DevOps | `AZURE_DEVOPS_TOKEN`, else `SYSTEM_ACCESSTOKEN` | A personal access token with Code (Read & write) scope, or the pipeline's own token with *Contribute to pull requests* granted to the build service |
 
 These are always tokens. There is no keyless path to a code host, and lgtmaybe
@@ -9397,10 +9437,12 @@ text, and any fetched file context. Recognised formats include:
   (`xoxb-…`), npm tokens (`npm_…`), and PyPI tokens (`pypi-…`).
 - **JSON Web Tokens**: `eyJ….eyJ….…` and five-part encrypted JWEs, as whole
   tokens, since the payload can carry claims and PII.
-- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks.
+- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks, encrypted ones
+  included.
 - **Generic credentials**: `api_key` / `secret_key` / `access_token` / `token`
   assignments with a value of 16 or more characters, quoted `password` /
-  `passwd` / `passphrase` / `pwd` literals, `Authorization: Bearer/Basic …`
+  `passwd` / `passphrase` / `pwd` literals (the key may be quoted too, as in
+  JSON), `Authorization: Bearer/Basic …`
   headers, passwords in connection-string URLs (`scheme://user:secret@host`),
   and Azure storage or Cosmos connection-string keys (`AccountKey=…` /
   `SharedAccessKey=…`).
@@ -9641,7 +9683,11 @@ gate. To change the policy, edit the list:
 - **Tighten to admins**: keep just `OWNER` (and `MEMBER` for your org).
 
 The gate lives in your workflow YAML, not in the action's code, so the policy
-is entirely yours.
+for automatic PR reviews is entirely yours. Slash commands have one floor the
+YAML cannot lower: lgtmaybe runs a command only when the commenter has write
+access to the repository, and ignores anyone else's with a log line and no
+model call. So opening the comment arm to everyone, or adding `CONTRIBUTOR`,
+changes who triggers a run, not who can spend the model through one.
 
 The slash-command half of the comment arm saves runner time rather than
 tokens. `issue_comment` fires on every comment on every pull request. Without

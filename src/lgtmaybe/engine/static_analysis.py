@@ -17,6 +17,12 @@ Sandboxing posture:
 - subprocesses get a **scrubbed environment** (PATH plus process-critical
   Windows variables when applicable; no proxy vars or cloud credentials;
   user profile/config roots pinned inside the sandbox) and a hard timeout;
+- the corpus is PR-authored, so no tool may take its config, ignore files or
+  inline ignore pragmas from it: each argv pins a sandbox-owned config outside
+  the corpus and switches ignore-file discovery and inline pragmas off, and the
+  two files no flag can override are withheld from the corpus (see
+  `_WITHHELD_NAMES`). Two pragmas have no off switch: mypy's `# type: ignore`
+  and ast-grep's `ast-grep-ignore`;
 - semgrep always runs against LOCAL rules — the bundled MIT pack by default,
   or `semgrep_rules` — never its registry configs (``--config auto``), which
   fetch over the network;
@@ -237,7 +243,9 @@ def run_static_analysis(file_contents: dict[str, str], cfg: ReviewConfig) -> lis
         tempfile.TemporaryDirectory(prefix="lgtmaybe-sa-", ignore_cleanup_errors=True) as tmp,
         tempfile.TemporaryDirectory(prefix="lgtmaybe-report-", ignore_cleanup_errors=True) as rpt,
     ):
-        root = Path(tmp)
+        # Resolved: tools report resolved paths, so on a symlinked temp dir
+        # (macOS's /var -> /private/var) an unresolved root never relativises.
+        root = Path(tmp).resolve()
         report_dir = Path(rpt)
         written = _write_corpus(root, file_contents)
         if not written:
@@ -388,7 +396,9 @@ def _corpus_line(finding: ToolFinding, file_contents: dict[str, str]) -> str | N
     text = file_contents.get(finding.path)
     if text is None:
         return None
-    lines = text.splitlines()
+    # On "\n" alone, as tools number lines and core/diffparse splits them —
+    # splitlines() also breaks on a form feed, shifting every anchor below one.
+    lines = text.removesuffix("\n").split("\n") if text else []
     if not 1 <= finding.line <= len(lines):
         _log.info(
             "scan finding points outside the fetched text — dropping",
@@ -416,6 +426,26 @@ def format_hints(findings: list[ToolFinding]) -> str:
     )
 
 
+# PR files a tool would read as its own config and that no flag can switch off:
+# semgrep always honours a root `.semgrepignore`, and gitleaks reads the scanned
+# dir's `.gitleaksignore` even beside `--gitleaks-ignore-path`. Every other
+# tool's config is pinned in its argv (see `_pin`); these are kept out of the
+# corpus instead — the model still reviews them in the diff.
+_WITHHELD_NAMES = frozenset({".semgrepignore", ".gitleaksignore"})
+
+
+def _pin(report_dir: Path, name: str, text: str) -> str:
+    """Write a sandbox-owned tool config into *report_dir*; return its path.
+
+    The corpus is PR-authored, and every tool discovers config from the tree it
+    scans — a PR could otherwise switch off the very rule that flags it. The
+    report dir is never scanned, so a config pinned there is ours alone.
+    """
+    path = report_dir / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
 def _write_corpus(root: Path, file_contents: dict[str, str]) -> list[str]:
     """Write the fetched file texts under *root*, refusing paths that escape it.
 
@@ -428,6 +458,9 @@ def _write_corpus(root: Path, file_contents: dict[str, str]) -> list[str]:
         rel = Path(path)
         if rel.anchor or ".." in rel.parts:
             _log.warning("skipping unsafe static-analysis path", extra={"path": path})
+            continue
+        if rel.name in _WITHHELD_NAMES:
+            _log.info("withholding tool config from the corpus", extra={"path": path})
             continue
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -474,10 +507,30 @@ def _run_tool(
             "json",
             "--exit-zero",
             "--no-cache",
+            # --isolated drops config files but not ignore files: a PR-added
+            # `.ignore` would still hide the files it names.
+            "--no-respect-gitignore",
+            # A `# noqa` in the corpus is the PR waving its own finding through.
+            "--ignore-noqa",
             ".",
         ]
     elif tool is StaticAnalysisTool.bandit:
-        argv = [binary, "-f", "json", "-q", "-r", "."]
+        argv = [
+            binary,
+            "-f",
+            "json",
+            "-q",
+            # Without --ini bandit adopts any `.bandit` it finds in the corpus.
+            "--ini",
+            _pin(report_dir, "bandit.ini", "[bandit]\n"),
+            # Empty, replacing the default exclude list: its ".git" entry is a
+            # substring match, so it silently skipped everything under .github/.
+            "--exclude=",
+            # Likewise an inline `# nosec`.
+            "--ignore-nosec",
+            "-r",
+            ".",
+        ]
     elif tool is StaticAnalysisTool.mypy:
         # The corpus holds only the CHANGED files, so everything they import is
         # absent by construction. Without these flags mypy reports one error per
@@ -486,12 +539,10 @@ def _run_tool(
         # it chasing sibling modules that were never fetched. What survives is
         # exactly what it can prove from a single file's own text — which is where
         # the unguarded-Optional bugs live.
-        mypy_config = report_dir / "mypy.ini"
-        mypy_config.write_text("[mypy]\n", encoding="utf-8")
         argv = [
             binary,
             "--config-file",
-            str(mypy_config),
+            _pin(report_dir, "mypy.ini", "[mypy]\n"),
             "--output",
             "json",
             "--ignore-missing-imports",
@@ -521,6 +572,12 @@ def _run_tool(
             "json",
             "--report-path",
             str(report),
+            # The default rules, never a PR-added `.gitleaks.toml`, and no inline
+            # `gitleaks:allow` — a secret the PR waves through itself is still a
+            # committed secret. (`.gitleaksignore` is withheld from the corpus.)
+            "--config",
+            _pin(report_dir, "gitleaks.toml", "[extend]\nuseDefault = true\n"),
+            "--ignore-gitleaks-allow",
         ]
     elif tool is StaticAnalysisTool.osv_scanner:
         # --offline-vulnerabilities uses a LOCAL database only. Never
@@ -538,6 +595,12 @@ def _run_tool(
             # The corpus is loose files, not a resolvable project: without this
             # osv tries to resolve transitive dependencies, which needs network.
             "--no-resolve",
+            # An empty config overrides every PR-added `osv-scanner.toml`, whose
+            # IgnoredVulns / PackageOverrides would hide advisories; --no-ignore
+            # stops a `.gitignore` from hiding the manifest itself.
+            "--config",
+            _pin(report_dir, "osv-scanner.toml", ""),
+            "--no-ignore",
             ".",
         ]
     elif tool is StaticAnalysisTool.ast_grep:
@@ -549,12 +612,42 @@ def _run_tool(
             return []
         # Deliberately a copy of scripts/check_spec_drift.py's invocation rather
         # than an import: that script lives outside the package and importing it
-        # would put a dev tool on the runtime import path. Keep the two in step.
-        argv = [binary, "scan", "--rule", str(Path(rules).resolve()), "--json=compact", "."]
+        # would put a dev tool on the runtime import path. Keep the two in step —
+        # except the config pin and --no-ignore flags below, which exist because
+        # this corpus is PR-authored; the drift script scans our own repo.
+        argv = [
+            binary,
+            "scan",
+            "--rule",
+            str(Path(rules).resolve()),
+            # Our own root config, or a PR-added `sgconfig.yml` is adopted —
+            # one `languageGlobs` entry re-types every .py file and blinds it.
+            "-c",
+            _pin(report_dir, "sgconfig.yml", "ruleDirs: []\n"),
+            # Hidden dirs (.github/) are skipped by default and `.ignore` files
+            # are honoured; the corpus is exactly the files under review.
+            "--no-ignore=hidden",
+            "--no-ignore=dot",
+            "--json=compact",
+            ".",
+        ]
     elif tool is StaticAnalysisTool.zizmor:
         # --offline forbids the online audits that resolve actions against the
         # GitHub API; --no-progress keeps the machine-readable output clean.
-        argv = [binary, "--format", "json", "--no-progress", "--offline", "."]
+        # --no-config / --no-ignores: a PR-added zizmor.yml or an inline
+        # `# zizmor: ignore[...]` must not disable the audit of that PR's
+        # workflows; --collect=all stops a `.gitignore` from hiding them.
+        argv = [
+            binary,
+            "--format",
+            "json",
+            "--no-progress",
+            "--offline",
+            "--no-config",
+            "--no-ignores",
+            "--collect=all",
+            ".",
+        ]
     else:  # semgrep
         # Unset now means the bundled MIT pack, not "skip". Before, semgrep sat
         # out every review unless someone configured rules, which nobody did —
@@ -573,6 +666,8 @@ def _run_tool(
             # one puts it there — and semgrep would then honour it and silently
             # skip the very files under review.
             "--no-git-ignore",
+            # And an inline `# nosemgrep` / `# nosem`.
+            "--disable-nosem",
             "--config",
             str(semgrep_rules),
             ".",
