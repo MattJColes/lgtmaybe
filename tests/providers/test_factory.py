@@ -7,7 +7,12 @@ import logging
 import pytest
 
 from lgtmaybe.core.models import Provider
-from lgtmaybe.providers.factory import build_provider, litellm_model_string, resolve_max_tokens
+from lgtmaybe.providers.factory import (
+    build_provider,
+    declared_effort_capability,
+    litellm_model_string,
+    resolve_max_tokens,
+)
 
 
 class TestLiteLLMModelString:
@@ -553,6 +558,115 @@ def test_build_provider_defaults_to_capable_when_the_map_is_silent() -> None:
     provider = build_provider(Provider.openai, "gpt-5.5", api_key="k")
 
     assert provider._effort_override_supported is True
+
+
+class TestDeclaredEffortCapability:
+    """Which efforts litellm's map says a model takes, and its default — read
+    once in the factory, which holds the route prefix the map keys on."""
+
+    def test_flags_resolve_to_the_accepted_set(self) -> None:
+        levels, default = declared_effort_capability(Provider.openai, "gpt-5.5")
+
+        assert levels is not None
+        assert "minimal" not in levels
+        assert {"none", "low", "medium", "high"} <= levels
+        assert default is None
+
+    def test_the_default_is_read_alongside(self) -> None:
+        levels, default = declared_effort_capability(Provider.openai, "gpt-5.1")
+
+        assert default == "none"
+        assert levels is not None and "none" in levels
+
+    def test_a_prefixed_entry_is_found_under_its_route(self) -> None:
+        levels, _ = declared_effort_capability(Provider.azure, "gpt-5")
+
+        assert levels is not None and "none" not in levels
+
+    def test_an_unknown_model_declares_nothing(self) -> None:
+        assert declared_effort_capability(Provider.openai, "no-such-model-xyz") == (None, None)
+
+    def test_a_mapped_model_with_no_effort_metadata_declares_nothing(self) -> None:
+        """Most of the map omits `supports_reasoning` rather than setting it
+        false; reading that silence as "accepts nothing" would take the lever
+        away from exactly the models the map has not caught up with."""
+        assert declared_effort_capability(Provider.openai, "gpt-4o") == (None, None)
+
+    def test_a_resolver_failure_declares_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from litellm.router_utils import reasoning_effort_capability as capability
+
+        def boom(*_a: object, **_k: object) -> None:
+            raise RuntimeError("internal API moved")
+
+        monkeypatch.setattr(capability, "resolve_supported_reasoning_efforts", boom)
+        monkeypatch.setattr(capability, "declared_reasoning_efforts", boom)
+
+        assert declared_effort_capability(Provider.openai, "gpt-5.5") == (None, None)
+
+    def test_a_missing_resolver_module_declares_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import sys
+
+        monkeypatch.setitem(sys.modules, "litellm.router_utils.reasoning_effort_capability", None)
+
+        assert declared_effort_capability(Provider.openai, "gpt-5.5") == (None, None)
+
+
+class TestBuildProviderStepsWithinTheDeclaredSet:
+    def test_a_model_without_minimal_steps_from_low_to_off(self) -> None:
+        provider = build_provider(Provider.openai, "gpt-5.5", api_key="k", reasoning_effort="low")
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "none"}
+
+    def test_a_model_without_off_gets_no_switch(self) -> None:
+        provider = build_provider(
+            Provider.azure, "gpt-5", api_key="k", api_base="https://x", reasoning_effort="low"
+        )
+
+        assert provider.disable_reasoning() is None
+
+    def test_a_default_already_at_the_bottom_steps_nowhere(self) -> None:
+        provider = build_provider(Provider.openai, "gpt-5.1", api_key="k")
+
+        assert provider.lower_reasoning_effort() is None
+
+    def test_an_unknown_model_keeps_todays_ladder(self) -> None:
+        provider = build_provider(
+            Provider.openai, "no-such-model-xyz", api_key="k", reasoning_effort="low"
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
+        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
+
+    def test_a_resolver_failure_keeps_todays_ladder(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from litellm.router_utils import reasoning_effort_capability as capability
+
+        def boom(*_a: object, **_k: object) -> None:
+            raise RuntimeError("internal API moved")
+
+        monkeypatch.setattr(capability, "resolve_supported_reasoning_efforts", boom)
+        monkeypatch.setattr(capability, "declared_reasoning_efforts", boom)
+        provider = build_provider(Provider.openai, "gpt-5.5", api_key="k", reasoning_effort="low")
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
+
+    def test_healthy_request_opts_are_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The capability set steers the retry only: the opts every healthy call
+        is sent with are byte-identical whether the map declared it or not."""
+        from litellm.router_utils import reasoning_effort_capability as capability
+
+        declared = build_provider(Provider.openai, "gpt-5.5", api_key="k", reasoning_effort="low")
+
+        def boom(*_a: object, **_k: object) -> None:
+            raise RuntimeError("internal API moved")
+
+        monkeypatch.setattr(capability, "declared_reasoning_efforts", boom)
+        silent = build_provider(Provider.openai, "gpt-5.5", api_key="k", reasoning_effort="low")
+
+        assert declared._effort_levels is not None
+        assert silent._effort_levels is None
+        assert declared.default_opts == silent.default_opts
 
 
 class TestClaudeThinkingSampling:
