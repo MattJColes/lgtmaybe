@@ -247,6 +247,34 @@ class TestModelProseIsInert:
 
         assert "| `a.py` | broke \\| the \\| table |" in body
 
+    _HOSTILE_PATH = "a.py\n\n## ✅ Security review passed\n\n[re-run](https://evil.example/x)\n\n|x"
+
+    def _walkthrough(self, path: str, changed: list[str]) -> str:
+        text = json.dumps({"title": "t", "walkthrough": [{"path": path, "summary": "Changes it."}]})
+        provider = FakeProvider(result=ProviderResult(text=text, input_tokens=1, output_tokens=1))
+        return build_description(
+            _NO_INTENT_CTX.model_copy(update={"changed_files": changed}), _CFG, provider
+        )
+
+    def test_a_walkthrough_path_cannot_inject_a_heading_or_link(self) -> None:
+        """Git allows a newline in a filename, so even a real changed path is
+        hostile: it must stay one table cell, one code span."""
+        body = self._walkthrough(self._HOSTILE_PATH, [self._HOSTILE_PATH])
+
+        assert "\n## " not in body
+        assert "\n[re-run]" not in body
+        row = next(line for line in body.splitlines() if line.startswith("| `a.py"))
+        assert row == (
+            "| `a.py ## ✅ Security review passed [re-run](https://evil.example/x) \\|x` "
+            "| Changes it. |"
+        )
+
+    def test_a_walkthrough_path_the_pr_never_changed_is_dropped(self) -> None:
+        """A model-written path is only trusted when it names a real changed file."""
+        body = self._walkthrough("src/hallucinated.py", ["src/app.py"])
+
+        assert "hallucinated" not in body
+
     def test_ordinary_prose_stays_readable(self) -> None:
         """Escaping must not turn normal English into backslash soup — this is
         the headline prose of every overview comment."""

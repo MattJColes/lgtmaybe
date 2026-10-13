@@ -21,6 +21,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
+from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
@@ -299,7 +300,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"(file cap {cfg.max_files}). Raise max_files to review them all."
         )
     if state.oversized:
-        listed = ", ".join(f"`{path}`" for path in state.oversized[:10])
+        listed = ", ".join(code_span(path) for path in state.oversized[:10])
         more = ", …" if len(state.oversized) > 10 else ""
         notices.append(
             f"📄 Skipped {len(state.oversized)} oversized file{_plural(len(state.oversized))} "
@@ -307,7 +308,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "Raise `max_file_diff_lines` (0 disables) to review them."
         )
     if state.skipped_by_triage:
-        listed = ", ".join(f"`{path}`" for path in state.skipped_by_triage[:10])
+        listed = ", ".join(code_span(path) for path in state.skipped_by_triage[:10])
         more = ", …" if len(state.skipped_by_triage) > 10 else ""
         notices.append(
             f"🔎 Triage skipped {len(state.skipped_by_triage)} low-risk "
@@ -315,7 +316,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             "(`/review full` reviews everything)."
         )
     if state.spec_unfit:
-        listed = ", ".join(f"`{root}`" for root in state.spec_unfit)
+        listed = ", ".join(code_span(root) for root in state.spec_unfit)
         count = len(state.spec_unfit)
         budget = cfg.max_input_tokens // _SPEC_BUDGET_DIVISOR
         outcome = (

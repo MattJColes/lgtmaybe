@@ -32,6 +32,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
+from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.diffparse import changed_line_count, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -157,13 +158,8 @@ def _is_code(path: str) -> bool:
     )
 
 
-def _clean(path: str) -> str:
-    """A path safe inside a Markdown code span — filenames are attacker-chosen."""
-    return path.replace("`", "")
-
-
 def _code(paths: Iterable[str]) -> str:
-    return ", ".join(f"`{_clean(path)}`" for path in paths)
+    return ", ".join(code_span(path) for path in paths)
 
 
 def default_scanner(binary: str, rules: str, root: Path) -> str | None:
@@ -351,10 +347,10 @@ def _blast_radius(
         if level is None:
             continue
         if core:
-            text = f"`{_clean(path)}` is a configured core path"
+            text = f"{code_span(path)} is a configured core path"
             text += f", imported by {count} file{'s' if count != 1 else ''}" if count else ""
         else:
-            text = f"`{_clean(path)}` is imported by {count} files"
+            text = f"{code_span(path)} is imported by {count} files"
         reason = RiskReason(factor="blast_radius", key="blast_radius", level=level, text=text)
         ranked.append((count, reason))
     ranked.sort(key=lambda pair: -pair[0])
