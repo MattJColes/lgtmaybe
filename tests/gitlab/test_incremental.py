@@ -415,6 +415,31 @@ class TestWatermarkReading:
 
         assert _gateway().last_reviewed_sha() == LAST
 
+    @respx.mock
+    @pytest.mark.parametrize("order", ["oldest-first", "newest-first"])
+    def test_the_newest_of_two_own_notes_wins(self, order: str) -> None:
+        """Two own summary notes in one family: the newer one (higher id) is the record,
+        whichever order GitLab lists them in."""
+        older, newer = _summary_note(LAST, note_id=10), _summary_note(HEAD, note_id=20)
+        _stub_notes([older, newer] if order == "oldest-first" else [newer, older])
+        _stub_user()
+
+        assert _gateway().last_reviewed_sha() == HEAD
+
+    @respx.mock
+    def test_an_upsert_edits_the_newest_note_in_its_family(self) -> None:
+        """The note written to is the one read back, so the two never diverge."""
+        _stub_notes([_summary_note(LAST, note_id=10), _summary_note(LAST, note_id=20)])
+        older = respx.put(f"{MR_URL}/notes/10").mock(return_value=httpx.Response(200, json={}))
+        newer = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(200, json={}))
+        gateway = _gateway()
+
+        gateway.mark_reviewed(HEAD)
+        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+
+        assert newer.called
+        assert not older.called
+
 
 class TestCompletedHead:
     def _diagram_note(self, sha: str | None, author: dict[str, Any] = BOT) -> dict[str, Any]:
@@ -455,6 +480,14 @@ class TestCompletedHead:
     def test_an_identity_failure_is_not_completion(self) -> None:
         _stub_notes([_summary_note(LAST), self._diagram_note(LAST)])
         _stub_user(status=500)
+
+        assert _gateway().last_completed_sha(diagram_required=True) is None
+
+    @respx.mock
+    def test_a_summary_by_someone_else_is_not_completion(self) -> None:
+        """Our diagram note alone proves nothing: the review it follows must be ours."""
+        _stub_notes([_summary_note(LAST, author=HUMAN), self._diagram_note(LAST)])
+        _stub_user()
 
         assert _gateway().last_completed_sha(diagram_required=True) is None
 
@@ -598,6 +631,28 @@ class TestOutdatedSignal:
 
         assert self._active([_finding_discussion("thread-a", "app.py", head=LAST)]) == {
             "thread-a": False
+        }
+
+    @respx.mock
+    def test_the_line_before_a_pure_insertion_is_not_outdated(self) -> None:
+        """``@@ -2,0 +3,2 @@`` inserts after old line 2 and covers no old line at all."""
+        _stub_compare(_comparison(diffs=[_entry("app.py", "@@ -2,0 +3,2 @@\n+x\n+y\n")]))
+
+        assert self._active([_finding_discussion("thread-a", "app.py", line=2, head=LAST)]) == {
+            "thread-a": False
+        }
+
+    @respx.mock
+    @pytest.mark.parametrize("note_path", ["app.py", "was.py"], ids=["new-path", "old-path"])
+    def test_a_rename_hunk_covering_the_line_is_outdated(self, note_path: str) -> None:
+        renamed = {
+            **_entry("app.py", "@@ -1,3 +1,3 @@\n a\n-b\n+c\n d\n", renamed_file=True),
+            "old_path": "was.py",
+        }
+        _stub_compare(_comparison(diffs=[renamed]))
+
+        assert self._active([_finding_discussion("thread-a", note_path, head=LAST)]) == {
+            "thread-a": True
         }
 
     @respx.mock

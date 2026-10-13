@@ -51,8 +51,12 @@ the review.
 
 GitLab re-positions a diff note onto each new head while its line survives,
 so a note still positioned at an older head is a candidate. It is outdated
-when a hunk of the straight diff from that head to ours covers its new-side
-line, or its file was deleted. This is hunk-level, close to GitHub's
+when a hunk of the straight diff from that head to ours spans its new-side
+line on the old side, or its file was deleted. A pure insertion
+(`@@ -5,0 +6,2 @@`) spans no old line, so it outdates none: counting the line
+before it would loosen the resolve gate. The note's path is matched against
+both `old_path` and `new_path`, so a rename does not hide a change. This is
+hunk-level, close to GitHub's
 `isOutdated`, and fails closed. Without it, validation downgraded every
 "fixed" verdict on GitLab and nothing could resolve.
 

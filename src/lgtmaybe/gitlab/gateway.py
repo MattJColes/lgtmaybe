@@ -236,6 +236,20 @@ class GitLabGateway:
         replied to and resolved afterwards — never before, so a failure part-way
         through leaves the record honest rather than closing a finding that was
         never re-stated.
+
+        The summary note carries the incremental-review watermark, under three
+        rules:
+
+        - Any ``<!-- lgtmaybe-reviewed:<sha> -->`` already in the summary or the
+          demoted/broad findings is stripped. That text includes model prose,
+          and a forged marker there must never become the watermark.
+        - A new ``<!-- lgtmaybe-reviewed:<sha> -->`` is appended only when the
+          orchestrator called ``mark_reviewed(sha)`` on the success path. A
+          failure notice or partial run calls ``mark_reviewed(None)`` and can
+          never stamp the new head.
+        - An unmarked post carries forward the watermark already on the note it
+          edits. The note is edited in place, so leaving it out would erase the
+          record of commits that were reviewed; carrying it never moves it.
         """
         if diff is None and findings:
             diff = self._fetch_mr_diff()
@@ -708,11 +722,11 @@ class GitLabGateway:
         return int(note_id) if note_id is not None else None
 
     def _family_note(self, family: str) -> dict[str, Any] | None:
-        """The note an upsert in ``family`` would edit, or None."""
-        for note in self._notes():
-            if family in (note.get("body") or ""):
-                return note
-        return None
+        """The note an upsert in ``family`` would edit: the newest, or None.
+
+        The newest, so the note written is the one ``_own_note`` reads back.
+        """
+        return _newest([note for note in self._notes() if family in (note.get("body") or "")])
 
     def _carried_marker(self, family: str, pattern: re.Pattern[str]) -> str | None:
         """The stamp already on the note an upsert in ``family`` will edit.
@@ -737,6 +751,8 @@ class GitLabGateway:
         Resolves the token's identity only when a candidate exists, so a merge
         request with no such note costs no extra request. An identity that
         cannot be established yields None: no note is trusted without it.
+        "Newest" is decided by note id, not list position, so the answer does
+        not depend on the order GitLab returns the notes in.
         """
         candidates = [
             note
@@ -749,9 +765,8 @@ class GitLabGateway:
         user_id = self._posting_user()
         if user_id is None:
             return None
-        return next(
-            (note for note in candidates if (note.get("author") or {}).get("id") == user_id),
-            None,
+        return _newest(
+            [note for note in candidates if (note.get("author") or {}).get("id") == user_id]
         )
 
     def _posting_user(self) -> int | None:
@@ -789,7 +804,10 @@ class GitLabGateway:
         GitLab re-positions a note onto each new head while its line survives,
         so a note still positioned at an older head is one whose code moved. It
         is outdated when a hunk of the straight diff from that head to ours
-        covers its new-side line, or its file was deleted. Fails closed: an
+        covers its new-side line (an old-side line the hunk actually spans, so a
+        pure insertion next to the line does not count), or its file was
+        deleted. The note's path is matched against both sides of a rename.
+        Fails closed: an
         unknown head, a LEFT-side note (pushes do not change the base), a
         withheld patch, or any compare failure all read as not outdated, so
         nothing is resolved without evidence.
@@ -806,13 +824,18 @@ class GitLabGateway:
         if not isinstance(diffs, list):
             return False
         for entry in diffs:
-            if not isinstance(entry, dict) or entry.get("old_path") != path:
+            if not isinstance(entry, dict) or path not in (
+                entry.get("old_path"),
+                entry.get("new_path"),
+            ):
                 continue
             if entry.get("deleted_file"):
                 return True
             for raw in (entry.get("diff") or "").split("\n"):
                 hunk = parse_hunk_header(raw)
-                if hunk and hunk.old_start <= line < hunk.old_start + max(hunk.old_len, 1):
+                # A zero-length old side (``@@ -5,0 +6,2 @@``) is a pure
+                # insertion: it spans no old line, so it outdates none.
+                if hunk and hunk.old_start <= line < hunk.old_start + hunk.old_len:
                     return True
         return False
 
@@ -899,6 +922,22 @@ class GitLabGateway:
             limit=_PAGE_LIMIT,
             timeout=_TIMEOUT,
         )
+
+
+def _newest(notes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The newest note, by id (ids grow monotonically), or None.
+
+    Independent of list order, which differs with the notes endpoint's ``sort``
+    parameter. A note without an integer id ranks below any with one; ties keep
+    the later list position.
+    """
+    if not notes:
+        return None
+    ranked = [
+        (note_id if isinstance(note_id := note.get("id"), int) else -1, index)
+        for index, note in enumerate(notes)
+    ]
+    return notes[max(ranked)[1]]
 
 
 def _last_match(pattern: re.Pattern[str], note: dict[str, Any] | None) -> str | None:

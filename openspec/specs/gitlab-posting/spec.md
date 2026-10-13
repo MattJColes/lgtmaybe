@@ -69,9 +69,11 @@ has explicitly validated as fixed, via the discussion resolve endpoint — GitLa
 needs no GraphQL for this, unlike GitHub. With no validated allowlist installed,
 nothing SHALL be resolved. GitLab exposes no "the lines moved" flag, so the
 adapter SHALL derive one: a discussion is outdated when a hunk of the straight
-diff from the head it is positioned at to the current head covers its new-side
-line, or its file was deleted; an unknown head, a LEFT-side note, or any compare
-failure reads as not outdated. On an incremental run only discussions on files
+diff from the head it is positioned at to the current head spans its new-side
+line on the hunk's old side (a pure insertion beside the line does not count),
+matching the note's path against both sides of a rename, or its file was
+deleted; an unknown head, a LEFT-side note, or any compare failure reads as not
+outdated. On an incremental run only discussions on files
 the increment re-reviewed SHALL be resolved. Resolving SHALL never fail the
 review.
 <!-- anchor: gitlab.resolve -->
