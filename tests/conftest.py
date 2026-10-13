@@ -101,6 +101,16 @@ def _isolate_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
 
 @pytest.fixture(autouse=True)
+def _isolate_user_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep tests independent of the developer's ~/.config/lgtmaybe/config.yml.
+
+    There is no built-in provider, so a real user config would silently supply
+    one and turn a "nothing configured" test green (or a configured one red).
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+
+
+@pytest.fixture(autouse=True)
 def _authenticated_posting_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """The HTTP fixture token belongs to Actions unless a test owns its identity boundary."""
     import json
