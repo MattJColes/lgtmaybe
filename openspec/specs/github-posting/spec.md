@@ -156,6 +156,8 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 #### Scenario: a review run fails
 - **WHEN** posting fails after review
 - **THEN** the watermark does not move, so nothing is skipped next run
+- **AND** a completed summary is left intact — the failure notice posts only as
+  a PR comment rather than overwriting it
 
 #### Scenario: a finding body carries a forged watermark
 - **WHEN** a demoted or broad finding's text contains `<!-- lgtmaybe-reviewed:<sha> -->`
