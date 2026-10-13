@@ -9,6 +9,8 @@ unrelated top-level directories. Config-gated (``pr_labels``, default off).
 
 from __future__ import annotations
 
+import pytest
+
 from lgtmaybe.core.models import PRContext, ReviewFinding, Severity
 from lgtmaybe.engine.labels import compute_labels
 
@@ -118,6 +120,14 @@ def test_a_leaked_secret_earns_the_security_label() -> None:
     )
 
     assert SECURITY_LABEL in compute_labels([finding], ctx)
+
+
+@pytest.mark.parametrize("category", ["scan:zizmor", "scan:osv-scanner"])
+def test_a_high_workflow_or_dependency_scanner_hit_earns_the_security_label(
+    category: str,
+) -> None:
+    """A zizmor template injection or an osv-scanner CVE is a security issue."""
+    assert "possible-security-issue" in compute_labels([_finding(category, Severity.high)], _ctx())
 
 
 def test_a_risk_verdict_earns_exactly_one_risk_label() -> None:

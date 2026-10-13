@@ -399,6 +399,9 @@ class TestAmbiguousPathTokens:
             "src/classloader.py",
             "web/subtitles.ts",
             "docs/records.md",
+            # `login` inside a word.
+            "src/pages/BlogIndex.tsx",
+            "src/components/DialogInput.tsx",
         ],
     )
     def test_ordinary_paths_are_not_security_signals(self, path: str) -> None:
@@ -416,6 +419,12 @@ class TestAmbiguousPathTokens:
             "infra/tls.tf",
             "config/openssl.cnf",
             "api/cors.py",
+            # camelCase is a word boundary too; the original path comes back.
+            "src/components/LoginForm.tsx",
+            "src/middleware/authMiddleware.ts",
+            "src/AuthProvider.tsx",
+            "web/authService.js",
+            "api/logins.py",
         ],
     )
     def test_real_security_paths_still_signal(self, path: str) -> None:
