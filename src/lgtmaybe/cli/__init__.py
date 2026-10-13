@@ -66,7 +66,7 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
+from lgtmaybe.local import _default_base, local_file_reader, local_pr_context, local_repo_root
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -848,6 +848,10 @@ def run_local_review(
         cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
     )
     ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    # An empty diff has nothing to review: no model call, and never a 👍 LGTM.
+    # Checked after the provider is built so a config error still surfaces first.
+    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+        return [], nothing
     return engine.review(ctx, cfg)
 
 
@@ -936,14 +940,47 @@ def execute_local_diagram(
     """
     from lgtmaybe.engine.overview import build_overview
 
+    ctx = _local_context(base=base, working=working, uncommitted=uncommitted)
+    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+        click.echo(nothing)
+        return
     try:
         _engine, provider = build_provider_engine(cfg, runtime)
-        ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
         body = build_overview(ctx, cfg, provider)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
     click.echo(flatten_details(body))
+
+
+def _local_context(*, base: str | None, working: bool, uncommitted: bool) -> PRContext:
+    """The local diff's context, with git failures surfaced as a clean CLI error."""
+    try:
+        return local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _no_local_changes(ctx: PRContext, *, base: str | None, uncommitted: bool) -> str | None:
+    """What to say when the local diff is empty, or None when there is a diff.
+
+    An empty comparison has nothing to review, so it costs no model call and is
+    never reported as 👍 LGTM. When no base was given and none of the default
+    branches exists, the base falls back to HEAD — a comparison with itself, so
+    the emptiness says nothing about the change and the command fails, naming
+    the flag that fixes it. A real base with no diff is a clean exit.
+    """
+    if ctx.diff.strip():
+        return None
+    if uncommitted:
+        return "no uncommitted changes vs HEAD — nothing to review"
+    resolved = base or _default_base(None)
+    if base is None and resolved == "HEAD":
+        raise click.ClickException(
+            "no changes vs HEAD — found no origin/HEAD, origin/main, origin/master, "
+            "main or master to compare against; pass --base <branch>"
+        )
+    return f"no changes vs {resolved} — nothing to review; pass --base <branch> to compare another"
 
 
 def _build_context_or_fail(

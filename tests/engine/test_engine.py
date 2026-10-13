@@ -1110,6 +1110,26 @@ def test_intent_category_skipped_when_nothing_is_stated() -> None:
     assert "intent — does the change" not in _all_text(calls[0]).lower()
 
 
+@pytest.mark.parametrize(
+    "categories",
+    [[ReviewCategory.intent], [ReviewCategory.spec], []],
+    ids=["intent-without-intent", "spec-without-spec", "no-categories"],
+)
+def test_a_review_no_lens_could_run_is_incomplete_not_clean(
+    categories: list[ReviewCategory], tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    """Every configured lens skipped means nothing reviewed the diff; that must
+    fail loud rather than post 👍 LGTM over an `eval(input())`."""
+    ctx = _CTX.model_copy(update={"diff": "@@ -1 +1,2 @@\n old\n+eval(input())\n"})
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", categories=categories)
+
+    with pytest.raises(ReviewIncompleteError, match="no review lens"):
+        LLMReviewEngine(provider, workspace_root=tmp_path).review(ctx, cfg)
+
+    assert provider.calls == []
+
+
 def test_non_intent_categories_do_not_carry_the_intent_block() -> None:
     """Only the intent lens pays the intent-block tokens (and injection surface)."""
     provider = _provider_for([_HIGH], reflection_keeps_all=True)
