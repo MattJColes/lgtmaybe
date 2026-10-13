@@ -4033,7 +4033,8 @@ Adds labels derived from the finished review, with no extra model calls:
 
 - `review-effort/1` to `review-effort/5`: a size estimate from the changed lines.
 - `possible-security-issue`: a high or critical finding was posted by the
-  security lens or by a security scanner (gitleaks, bandit, semgrep).
+  security lens or by a security scanner (gitleaks, bandit, semgrep, zizmor,
+  osv-scanner).
 - `consider-splitting`: the diff spans many unrelated top-level directories.
 - `risk/<level>`: the [risk of change](../explanation/risk-of-change.md)
   verdict, when `risk` is on. Only one level is applied at a time.

@@ -6,7 +6,8 @@ findings the review already produced. Four labels:
 - ``review-effort/1``–``5`` — a size estimate from the changed-line count, so
   reviewers can gauge a PR at a glance;
 - ``possible-security-issue`` — a high/critical security finding posted this
-  run, from the security lens or from a secret/SAST scanner;
+  run, from the security lens or from a secret, SAST, workflow or dependency
+  scanner;
 - ``consider-splitting`` — the diff sprawls across many unrelated top-level
   directories, a hint that it bundles several themes;
 - ``risk/<level>`` — the risk-of-change verdict (``engine/risk.py``), when the
@@ -37,7 +38,14 @@ from lgtmaybe.core.models import (
 # category, and a mypy error is not a security issue.
 _SECURITY_SCAN_CATEGORIES: frozenset[str] = frozenset(
     f"{_SCAN_CATEGORY_PREFIX}{tool.value}"
-    for tool in (StaticAnalysisTool.gitleaks, StaticAnalysisTool.bandit, StaticAnalysisTool.semgrep)
+    for tool in (
+        StaticAnalysisTool.gitleaks,
+        StaticAnalysisTool.bandit,
+        StaticAnalysisTool.semgrep,
+        # Workflow template injection and known-vulnerable dependencies.
+        StaticAnalysisTool.zizmor,
+        StaticAnalysisTool.osv_scanner,
+    )
 )
 
 # Changed-line thresholds for effort scores 2..5 (score 1 = below the first).
