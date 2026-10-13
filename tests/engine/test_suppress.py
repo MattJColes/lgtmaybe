@@ -55,6 +55,36 @@ def test_pragma_on_preceding_line_suppresses() -> None:
     assert apply_suppressions([f], _CFG, contents) == []
 
 
+def test_pragma_cannot_suppress_high_severity_security_finding() -> None:
+    """The pragma is read from the PR head, which a fork PR's author writes, so it
+    must not hide a serious vulnerability — the same carve-out the 👎 channel has."""
+    finding = _finding(line=3, title="Command injection").model_copy(
+        update={"severity": Severity.critical, "category": "security"}
+    )
+    contents = {"a.py": "import os\n# lgtmaybe: ignore\nos.system(request.args['cmd'])\n"}
+
+    assert apply_suppressions([finding], _CFG, contents) == [finding]
+
+
+def test_pragma_still_suppresses_medium_security_finding() -> None:
+    finding = _finding(line=2).model_copy(update={"category": "security"})
+    contents = {"a.py": "import os\nx = eval(data)  # lgtmaybe: ignore\n"}
+
+    assert apply_suppressions([finding], _CFG, contents) == []
+
+
+def test_config_fingerprint_still_suppresses_critical_security_finding() -> None:
+    """An explicit ignore_fingerprints entry is trusted maintainer config."""
+    finding = _finding(title="Command injection").model_copy(
+        update={"severity": Severity.critical, "category": "security"}
+    )
+    cfg = _CFG.model_copy(
+        update={"ignore_fingerprints": [finding_fingerprint(finding.path, finding.title)]}
+    )
+
+    assert apply_suppressions([finding], cfg, {}) == []
+
+
 def test_unrelated_finding_not_suppressed() -> None:
     f = _finding(line=2, title="Different issue")
     contents = {"a.py": "import os\nx = eval(data)\ny = 1\n"}

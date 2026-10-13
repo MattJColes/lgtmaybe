@@ -1114,7 +1114,8 @@ class ReviewConfig(_Strict):
     # pattern. Each entry is a finding_fingerprint(path, title) hex id (surfaced in
     # the inline comment's hidden marker). Findings matching one are dropped before
     # reflection and posting. Set it in .lgtmaybe.yml; an inline `# lgtmaybe: ignore`
-    # comment on (or just above) a flagged line suppresses that finding too.
+    # comment on (or just above) a flagged line suppresses that finding too, unless
+    # it is a high/critical security finding (the pragma is PR-authored text).
     ignore_fingerprints: list[str] = Field(default_factory=list)
     # Feedback learning (GitHub posting only): on a re-run, suppress a finding a
     # human reacted 👎 (thumbs-down) to on its inline comment last time. The 👎

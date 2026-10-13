@@ -95,12 +95,18 @@ below it, and an unscored kept finding survives any threshold.
 
 Known-fine findings SHALL be dropped before the reflection pass — ignored
 fingerprints and inline suppression comments — so audit budget is never spent
-on them.
+on them. An inline comment is PR-head text the author writes, so it never
+suppresses a high or critical security finding; only `ignore_fingerprints`
+(trusted config) can.
 <!-- anchor: quality.suppress -->
 
 #### Scenario: a finding was previously dismissed
 - **WHEN** its fingerprint is in `ignore_fingerprints`
 - **THEN** it never reaches reflection or posting
+
+#### Scenario: a PR hides its own vulnerability behind a pragma
+- **WHEN** a `# lgtmaybe: ignore` comment sits on or above a critical security finding
+- **THEN** the finding is still posted
 
 ### Requirement: Downvoted findings are learned and suppressed
 
