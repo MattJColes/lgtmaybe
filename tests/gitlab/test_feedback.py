@@ -34,7 +34,8 @@ def _gateway() -> GitLabGateway:
 
 
 def _discussion(note_id: int, body: str) -> dict[str, Any]:
-    return {"id": f"d{note_id}", "notes": [{"id": note_id, "body": body, "resolved": False}]}
+    note = {"id": note_id, "body": body, "resolved": False, "author": {"id": 99}}
+    return {"id": f"d{note_id}", "notes": [note]}
 
 
 def _ours(note_id: int, fingerprint: str) -> dict[str, Any]:
@@ -88,6 +89,16 @@ class TestDownvotedFingerprints:
         _stub([_ours(1, FP_A)], {1: [_award("thumbsup", 5), _award("eyes", 5)]}, {5: DEVELOPER})
 
         assert _gateway().list_downvoted_fingerprints() == set()
+
+    @respx.mock
+    def test_our_fingerprint_on_someone_elses_note_is_never_read(self) -> None:
+        """Anyone can paste a fingerprint; a developer's 👎 on it must not suppress ours."""
+        forged = _ours(1, FP_A)
+        forged["notes"][0]["author"] = {"id": 4321}
+        routes = _stub([forged], {1: [_award("thumbsdown", 5)]}, {5: DEVELOPER})
+
+        assert _gateway().list_downvoted_fingerprints() == set()
+        assert not routes["award-1"].called
 
     @respx.mock
     def test_a_discussion_that_is_not_ours_is_never_read(self) -> None:
