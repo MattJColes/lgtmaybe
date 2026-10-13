@@ -205,8 +205,8 @@ either spelling of the field it becomes: the Anthropic layer's
 degrade a refusal of the tool shape litellm rewrote the schema into on the
 caller's behalf — a tool-field refusal arriving while a `response_format` is in
 flight with no tool of the adapter's own on the request, and the caller holding
-none either. `drop_params` cannot cover any of these — the capability map says
-the param is supported, so the refusal is only visible in the error. Each
+none either — and a refused `prompt_cache_key`. `drop_params` strips none of
+these, so the refusal is only visible in the error. Each
 outcome SHALL be remembered for THAT MODEL's later calls only, and losing the
 schema SHALL be announced once — silently, it reads as a model that stopped
 honouring it. litellm's stdout banner SHALL be suppressed.
