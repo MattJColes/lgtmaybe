@@ -820,7 +820,9 @@ def execute_local_review(
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if fmt == "json" and INCOMPLETE_MARKER in summary:
+    # json and sarif carry findings only, so the summary that says a lens failed
+    # would otherwise be lost; stderr keeps stdout parseable.
+    if fmt in ("json", "sarif") and INCOMPLETE_MARKER in summary:
         click.echo(summary.replace(INCOMPLETE_MARKER, "").strip(), err=True)
     click.echo(render_findings(findings, summary, fmt=fmt))
     _write_profile_json(runtime)

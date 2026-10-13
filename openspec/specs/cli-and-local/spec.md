@@ -203,7 +203,7 @@ against the worktree's top level, not the caller's directory.
 
 #### Scenario: developer reviews before pushing
 - **WHEN** `lgtmaybe review --working` runs in a repo with no PR
-- **THEN** findings print locally (human/json/agent format); nothing posts
+- **THEN** findings print locally (human/json/agent/sarif format); nothing posts
 
 #### Scenario: developer reviews a file they have not added yet
 - **WHEN** `lgtmaybe review --uncommitted` runs and a new file is untracked
@@ -255,6 +255,27 @@ NOT fail a review that produced findings.
 #### Scenario: the profile path cannot be written
 - **WHEN** writing the profile file fails
 - **THEN** the review still reports its findings
+
+### Requirement: Local findings export as SARIF
+
+`lgtmaybe review --format sarif` SHALL print a deterministic SARIF 2.1.0 log of
+one run, for code-scanning upload. Each lens id is one rule; each finding's
+level folds the Severity scale (critical/high error, medium warning, low/info
+note), and its `partialFingerprints` carry the versioned finding fingerprint
+and identity the forge adapters embed. A result SHALL carry a line region only
+when the line is real in the checked-out file: an unanchored or LEFT-side
+finding names the file alone. A suggestion stays in the property bag, never a
+`fixes` entry, because free text replaces no region. A run that did not
+complete every lens reports `executionSuccessful: false`.
+<!-- anchor: cli.sarif-output -->
+
+#### Scenario: findings uploaded to code scanning
+- **WHEN** a review runs with `--format sarif`
+- **THEN** stdout parses as the SARIF log alone, and a re-run yields the same bytes
+
+#### Scenario: a lens failed mid-review
+- **WHEN** the summary carries the incomplete marker
+- **THEN** the invocation is unsuccessful and the notice goes to stderr
 
 ### Requirement: Config layers merge, secrets never persist
 

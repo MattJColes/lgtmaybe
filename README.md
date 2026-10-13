@@ -73,8 +73,9 @@ explanation, and sometimes a suggested fix:
   finding's conversation once a later run shows it fixed; Gitea cannot. See
   [Where It Posts](#where-it-posts).
 - **On the CLI**, `lgtmaybe review` prints findings without posting them.
-  Choose readable output (the default), JSON (`--json`), or instructions for a
-  coding agent (`--format agent`).
+  Choose readable output (the default), JSON (`--json`), instructions for a
+  coding agent (`--format agent`), or a SARIF log for GitHub code scanning
+  (`--format sarif`).
 
 Slash commands on a pull or merge request: `/review` and `/improve` refresh the
 review, `/ask <question>` answers in the conversation, `/describe` posts a
@@ -211,6 +212,7 @@ the docs root.
 - [Generate a change overview](docs/how-to/generate-a-change-diagram.md)
 - [Fix findings with an AI agent](docs/how-to/fix-findings-with-an-ai-agent.md)
 - [Review before you commit (pre-commit hooks)](docs/how-to/review-before-you-commit.md)
+- [Upload findings as SARIF](docs/how-to/upload-findings-as-sarif.md)
 - [Reduce review cost](docs/how-to/reduce-review-cost.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
 
