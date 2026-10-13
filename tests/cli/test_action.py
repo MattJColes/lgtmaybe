@@ -293,7 +293,7 @@ class TestActionRouting:
         event = _write_event(
             tmp_path,
             {
-                "comment": {"body": "/review"},
+                "comment": {"body": "/review", "user": {"login": "maintainer"}},
                 "issue": {"number": 9, "pull_request": {"url": "x"}},
                 "repository": {"full_name": "org/repo"},
             },

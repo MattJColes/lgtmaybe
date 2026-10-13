@@ -37,7 +37,9 @@ concurrency:
 jobs:
   review:
     # The issue_comment arm fires on every comment on every pull request, so
-    # require a slash command in the body before claiming a runner.
+    # require a slash command in the body before claiming a runner. Gitea has
+    # no author_association, so lgtmaybe itself ignores a command from anyone
+    # without write access to the repository (no model call).
     if: >-
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request &&
