@@ -73,3 +73,58 @@ class TestMRUrlFromCIEnv:
 
         with pytest.raises(Exception, match="CI_PROJECT_PATH"):
             mr_url_from_ci_env()
+
+
+class TestGitLabCIIncrementalDefault:
+    """GitLab CI has no ``synchronize`` action to key on, so auto means "incremental
+    whenever a watermark exists": the first pipeline has none and runs a full
+    review, every later push reviews only its commits. An explicit setting — the
+    config file, the flag, or ``LGTMAYBE_INCREMENTAL`` on a manual pipeline (the
+    GitLab spelling of ``/review full``) — always wins."""
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, args: list[str]):
+        from click.testing import CliRunner
+
+        from lgtmaybe.cli import commands
+        from lgtmaybe.cli.commands import main
+
+        _set(monkeypatch)
+        monkeypatch.delenv("LGTMAYBE_INCREMENTAL", raising=False)
+        seen: list = []
+        monkeypatch.setattr(commands, "execute_review", lambda cfg, runtime, **kw: seen.append(cfg))
+        result = CliRunner().invoke(
+            main, ["gitlab-ci", "--provider", "ollama", "--model", "llama3", *args]
+        )
+        assert result.exit_code == 0, result.output
+        return seen[0]
+
+    def test_unset_resolves_to_incremental(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._run(monkeypatch, []).incremental is True
+
+    def test_the_flag_forces_a_full_review(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._run(monkeypatch, ["--no-incremental"]).incremental is False
+
+    def test_a_pipeline_variable_forces_a_full_review(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from click.testing import CliRunner
+
+        from lgtmaybe.cli import commands
+        from lgtmaybe.cli.commands import main
+
+        _set(monkeypatch)
+        monkeypatch.setenv("LGTMAYBE_INCREMENTAL", "false")
+        seen: list = []
+        monkeypatch.setattr(commands, "execute_review", lambda cfg, runtime, **kw: seen.append(cfg))
+        result = CliRunner().invoke(main, ["gitlab-ci", "--provider", "ollama", "--model", "m"])
+
+        assert result.exit_code == 0, result.output
+        assert seen[0].incremental is False
+
+    def test_the_config_file_wins_over_auto(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        config = tmp_path / "lgtmaybe.yml"
+        config.write_text("incremental: false\n", encoding="utf-8")
+
+        assert self._run(monkeypatch, ["--config", str(config)]).incremental is False

@@ -105,7 +105,8 @@ on them.
 ### Requirement: Downvoted findings are learned and suppressed
 
 When `learn_feedback` is on, a finding an authorised reviewer reacted 👎 to SHALL
-be suppressed on the next run — its fingerprint is read from GitHub each run and
+be suppressed on the next run — its fingerprint is read from the forge each run
+(reactions on GitHub, award emoji on GitLab) and
 carried on `PRContext.feedback_downvotes` into the suppression pass. A high or
 critical security finding is never suppressed this way, so a downvote can never
 hide a serious vulnerability. Best-effort: a gateway without the capability or
