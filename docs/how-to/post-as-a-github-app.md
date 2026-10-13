@@ -100,7 +100,8 @@ The public App intentionally has no `Checks: write` permission, so
 `github_identity: lgtmaybe` cannot be combined with `fail_on`. When lgtmaybe
 must create a merge gate, keep the default `github_identity: actions` and grant
 the workflow `checks: write`, or use a self-managed App with `Checks: write`.
-For the same reason the public App cannot resolve fixed conversations; see
+The public App also cannot resolve fixed conversations: GitHub refuses
+`resolveReviewThread` for it, so those threads stay open. See
 [What the public App cannot do](use-as-github-action.md#what-the-public-app-cannot-do).
 
 ## Use your own GitHub App

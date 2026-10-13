@@ -93,7 +93,7 @@ can request a second reviewer when the latest review summary carries
     PR: ${{ github.event.pull_request.number }}
   run: |
     latest=$(gh pr view "$PR" --json reviews \
-      --jq '[.reviews[].body | select(contains("lgtmaybe-risk:"))] | last // ""')
+      --jq '[.reviews[].body // "" | select(contains("lgtmaybe-risk:"))] | last // ""')
     if grep -q 'lgtmaybe-risk:critical' <<<"$latest"; then
       gh pr edit "$PR" --add-reviewer my-org/platform-leads
     fi

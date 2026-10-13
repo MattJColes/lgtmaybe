@@ -752,7 +752,11 @@ closed just because nearby lines moved. Set it to `false` to resolve
 conversations by hand.
 
 GitHub resolves threads through its GraphQL API; the default `GITHUB_TOKEN` with
-`pull-requests: write`, which posting already needs, is enough. GitLab has no
+`pull-requests: write`, which posting already needs, is enough. The public
+`lgtmaybe[bot]` App cannot resolve threads, so under `github_identity: lgtmaybe`
+they stay open (see
+[What the public App cannot do](use-as-github-action.md#what-the-public-app-cannot-do)).
+GitLab has no
 "outdated" signal, so there lgtmaybe resolves only threads its re-run validated
 as fixed. Gitea's API can't resolve threads, and the local CLI has no
 conversations, so both ignore this.
