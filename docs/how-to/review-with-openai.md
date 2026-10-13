@@ -54,8 +54,10 @@ the key is never persisted to config.
 ## Choosing the Model
 
 Use any chat model your key can access, named as you would send it to the
-OpenAI API (litellm's native form): `gpt-5.5` for the strongest reviews, or a
-smaller model to cut cost.
+OpenAI API (litellm's native form): `gpt-5.5` or one of the newer GPT-6 models
+(`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`), or a smaller model to cut cost.
+[Choose a review model](choose-a-review-model.md) has measured results for the
+GPT-6 family.
 
 Under the default `fast` preset, a `gpt-5*` review model has its reflection
 (false-positive audit) pass run on `gpt-5-mini`, so your key needs access to
