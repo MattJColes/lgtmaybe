@@ -49,6 +49,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
+| `project` | ProjectProfile | No | — |  |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
@@ -338,6 +339,50 @@ The canonical machine-readable schemas. These are the source of truth for provid
         }
       },
       "title": "FindingRuleMatch",
+      "type": "object"
+    },
+    "ProjectProfile": {
+      "additionalProperties": false,
+      "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of a code change at ``medium``), and an explicitly\nconfigured setting always wins. All three fields also render one short\ntrusted paragraph in the shared review preamble. Empty (the default) is\nbyte-identical to a review without the feature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
+      "properties": {
+        "domain": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "notes": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Notes",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "enum": [
+                "prototype",
+                "production",
+                "regulated"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        }
+      },
+      "title": "ProjectProfile",
       "type": "object"
     },
     "Provider": {
@@ -887,6 +932,9 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "$ref": "#/$defs/ReviewPreset",
       "default": "fast"
     },
+    "project": {
+      "$ref": "#/$defs/ProjectProfile"
+    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },
@@ -1339,7 +1387,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
             "area",
             "size",
             "untested",
-            "scope"
+            "scope",
+            "profile"
           ],
           "title": "Factor",
           "type": "string"

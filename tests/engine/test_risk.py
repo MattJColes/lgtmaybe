@@ -324,6 +324,36 @@ def test_a_core_path_is_at_least_high(tmp_path: Path) -> None:
     assert "`src/shared/clock.py` is a configured core path, imported by 2 files" in _texts(result)
 
 
+def test_a_regulated_project_floors_a_code_change_at_medium(tmp_path: Path) -> None:
+    root = _write(tmp_path, {"app/view.py": ""})
+    cfg = make_cfg(project={"stage": "regulated"})
+    result = assess_risk(_ctx(("app/view.py", 3)), cfg, root)
+    assert result.level == "medium"
+    assert "regulated workload" in _texts(result)
+
+
+def test_a_regulated_project_leaves_docs_and_tests_low(tmp_path: Path) -> None:
+    cfg = make_cfg(project={"stage": "regulated"})
+    result = assess_risk(_ctx(("README.md", 3), ("tests/test_x.py", 3)), cfg, tmp_path)
+    assert result.level == "low"
+
+
+def test_a_regulated_core_path_is_high_not_critical(tmp_path: Path) -> None:
+    root = _write(tmp_path, {"src/shared/__init__.py": "", "src/shared/clock.py": ""})
+    cfg = make_cfg(project={"stage": "regulated"}, risk=RiskConfig(core_paths=["src/shared/**"]))
+    result = assess_risk(_ctx(("src/shared/clock.py", 1)), cfg, root)
+    assert result.level == "high"
+
+
+@pytest.mark.parametrize("stage", [None, "prototype", "production"])
+def test_other_stages_add_no_risk_reason(tmp_path: Path, stage: str | None) -> None:
+    root = _write(tmp_path, {"app/view.py": ""})
+    cfg = make_cfg(project={"stage": stage})
+    result = assess_risk(_ctx(("app/view.py", 3)), cfg, root)
+    assert result.level == "low"
+    assert "regulated workload" not in _texts(result)
+
+
 def test_reasons_rank_by_level_then_factor(tmp_path: Path) -> None:
     root = _python_workspace(tmp_path, 6)
     ctx = _ctx(("src/pkg/core.py", 60), ("infra/main.tf", 1))

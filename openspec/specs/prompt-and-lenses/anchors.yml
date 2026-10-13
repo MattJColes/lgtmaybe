@@ -75,3 +75,9 @@ prompt.spec-lens:
       kind: function_definition
       has: { field: name, regex: '^build_spec_text$' }
     files: [src/lgtmaybe/engine/**/*.py]
+
+prompt.project-profile:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^project_context$' }
+  files: [src/lgtmaybe/engine/prompt.py]

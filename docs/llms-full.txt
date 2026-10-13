@@ -2739,6 +2739,7 @@ automatic where the provider supports it.
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
   - [directory_rules](#directory_rules)
+  - [project](#project)
 - [CLI flag overrides](#cli-flag-overrides)
 
 ## Full example
@@ -3529,6 +3530,42 @@ silently. Both the instructions and the context text are **trusted config** — 
 [Scope review instructions to a directory](scope-review-instructions-to-a-directory.md).
 
 Default: no rules.
+
+### project
+
+Tell the reviewer what kind of project this is, so a weekend prototype and a
+regulated payments service don't get the same review.
+
+```yaml
+project:
+  stage: regulated        # prototype | production | regulated
+  domain: payments        # a short label, up to 80 characters
+  notes: |                # up to 1,000 characters
+    PCI-scoped card flows live under payments/. Most traffic is batch.
+```
+
+`stage` changes defaults deterministically. A setting you configure yourself
+always wins over the stage.
+
+| Stage | Default it changes | Review guidance |
+|---|---|---|
+| `prototype` | `min_severity` defaults to `medium` instead of `low` | Report correctness and security, skip hardening, observability and docs polish |
+| `production` | none | The standard bar |
+| `regulated` | Any PR that changes code is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
+
+All three fields also render one short paragraph in the system prompt every
+lens shares, so it's cached once per run rather than paid per lens. Leave the
+block out and the prompt is byte-identical to a review without it. Like
+`directory_rules`, this is trusted config: on `pull_request_target` it comes
+from the base branch, never the PR head.
+
+lgtmaybe deliberately doesn't read `AGENTS.md`, `CLAUDE.md` or `SOUL.md` for
+this. Those files are written for coding agents (build commands, style rules,
+personas), most of their text is noise to a reviewer, and the larger ones don't
+fit the context-file budget anyway. If you want one of them in front of the
+reviewer regardless, name it in a `directory_rules` entry's `context_files`.
+
+Default: no profile.
 
 ## CLI flag overrides
 
@@ -4947,6 +4984,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `num_ctx` | integer / null | No | `null` | Num Ctx |
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
+| `project` | ProjectProfile | No | — |  |
 | `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
@@ -5236,6 +5274,50 @@ The canonical machine-readable schemas. These are the source of truth for provid
         }
       },
       "title": "FindingRuleMatch",
+      "type": "object"
+    },
+    "ProjectProfile": {
+      "additionalProperties": false,
+      "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of a code change at ``medium``), and an explicitly\nconfigured setting always wins. All three fields also render one short\ntrusted paragraph in the shared review preamble. Empty (the default) is\nbyte-identical to a review without the feature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
+      "properties": {
+        "domain": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "notes": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Notes",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "enum": [
+                "prototype",
+                "production",
+                "regulated"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        }
+      },
+      "title": "ProjectProfile",
       "type": "object"
     },
     "Provider": {
@@ -5785,6 +5867,9 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "$ref": "#/$defs/ReviewPreset",
       "default": "fast"
     },
+    "project": {
+      "$ref": "#/$defs/ProjectProfile"
+    },
     "provider": {
       "$ref": "#/$defs/Provider"
     },
@@ -6237,7 +6322,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
             "area",
             "size",
             "untested",
-            "scope"
+            "scope",
+            "profile"
           ],
           "title": "Factor",
           "type": "string"

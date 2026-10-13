@@ -228,6 +228,33 @@ class RiskConfig(_Strict):
     core_paths: list[str] = Field(default_factory=list)
 
 
+ProjectStage = Literal["prototype", "production", "regulated"]
+
+
+class ProjectProfile(_Strict):
+    """What the repository is, so a review can be calibrated to the workload.
+
+    A weekend prototype and a regulated payments service should not get the
+    same review. ``stage`` sets defaults for existing settings (a prototype
+    raises the ``min_severity`` default to ``medium``; a regulated workload
+    floors the risk verdict of a code change at ``medium``), and an explicitly
+    configured setting always wins. All three fields also render one short
+    trusted paragraph in the shared review preamble. Empty (the default) is
+    byte-identical to a review without the feature.
+
+    Structured on purpose: reading AGENTS.md or similar wholesale brings
+    coding-agent instructions the reviewer has no use for, and usually more
+    text than the context budget takes.
+    """
+
+    stage: ProjectStage | None = None
+    # A short label: "payments", "healthcare", "internal tooling".
+    domain: str | None = Field(default=None, max_length=80)
+    # Free text the reviewer should know. Capped so it stays a paragraph in
+    # the preamble every lens call carries; a longer value fails validation.
+    notes: str = Field(default="", max_length=1000)
+
+
 class ReviewFinding(_Strict):
     """A single inline review comment the model wants to post."""
 
@@ -760,7 +787,7 @@ class RiskReason(_Strict):
     backtick-stripped.
     """
 
-    factor: Literal["blast_radius", "area", "size", "untested", "scope"]
+    factor: Literal["blast_radius", "area", "size", "untested", "scope", "profile"]
     key: str
     level: RiskLevel
     text: str
@@ -1057,6 +1084,10 @@ class ReviewConfig(_Strict):
     # reasons, on the summary line, in the change overview and (with
     # `pr_labels`) as a `risk/<level>` label. See `RiskConfig`.
     risk: RiskConfig = Field(default=RiskConfig())
+    # What the repository is (stage, domain, notes) — calibrates defaults and
+    # adds one trusted paragraph to the review preamble. See `ProjectProfile`.
+    # YAML-only, like directory_rules.
+    project: ProjectProfile = Field(default_factory=ProjectProfile)
     # Two-stage triage routing: when set, this cheap model runs FIRST over the
     # compressed per-file diffs, skipping files that plainly need no review
     # (pure formatting, trivial renames, generated content that slipped the
@@ -1191,6 +1222,13 @@ class ReviewConfig(_Strict):
     # identical request. A re-run that works marks the model, so later calls
     # skip the schema instead of failing the same way.
     retry_without_schema: bool = True
+
+    @model_validator(mode="after")
+    def _apply_project_stage(self) -> ReviewConfig:
+        # Only a default moves: a floor the user set is theirs, whatever the stage.
+        if self.project.stage == "prototype" and "min_severity" not in self.model_fields_set:
+            self.min_severity = Severity.medium
+        return self
 
     @model_validator(mode="after")
     def _lens_ids_are_unique(self) -> ReviewConfig:

@@ -52,7 +52,8 @@
             "area",
             "size",
             "untested",
-            "scope"
+            "scope",
+            "profile"
           ],
           "title": "Factor",
           "type": "string"

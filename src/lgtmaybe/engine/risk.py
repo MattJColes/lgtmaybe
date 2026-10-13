@@ -71,7 +71,14 @@ _UNTESTED_CODE_LINES = 50
 _HIGH_AREAS = frozenset({"infrastructure", "security", "data_migration", "backup_and_recovery"})
 
 # Reasons of equal level rank in this order: the most specific signal first.
-_FACTOR_ORDER = {"blast_radius": 0, "area": 1, "size": 2, "untested": 3, "scope": 4}
+_FACTOR_ORDER = {
+    "blast_radius": 0,
+    "area": 1,
+    "size": 2,
+    "untested": 3,
+    "profile": 4,
+    "scope": 5,
+}
 
 _PY_EXTS = (".py",)
 _JS_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
@@ -240,6 +247,14 @@ def _assess(
                 level="medium",
                 text=f"{code_lines} changed lines of code with no test file changed",
             )
+        )
+
+    if cfg.project.stage == "regulated":
+        # A floor, not a bump: `medium` so a code change is never waved through
+        # as low, and never `high`, which would make every other high reason
+        # `critical` via the two-distinct-highs rule.
+        reasons.append(
+            RiskReason(factor="profile", key="profile", level="medium", text="regulated workload")
         )
 
     level = _level(reasons)
