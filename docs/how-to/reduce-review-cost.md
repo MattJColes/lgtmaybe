@@ -396,7 +396,9 @@ the bound fires, the highest-severity findings are kept and the summary names
 the lens and how many were dropped:
 
 ```
-⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped). …
+⚠️ Bounded a lens to the top 50 findings by severity: `intent` (269 dropped). A lens
+returning many more findings than this is usually restating one claim across many
+lines. Raise max_findings_per_lens to keep them all.
 ```
 
 The notice usually points to a problem with the model, not a bound set too

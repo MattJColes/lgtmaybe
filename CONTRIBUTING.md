@@ -45,8 +45,8 @@ uv run mypy                  # types (strict)
 uv run pytest -q             # tests
 ```
 
-`pytest` treats `DeprecationWarning` (and `EncodingWarning`) as an error, so
-using a deprecated API fails the suite. Fix the call, or, if the warning comes
+`pytest` treats `DeprecationWarning`, `PendingDeprecationWarning` and
+`EncodingWarning` as errors, so using a deprecated API fails the suite. Fix the call, or, if the warning comes
 from a third-party library we don't control, add a narrow `ignore` to
 `filterwarnings` in `pyproject.toml`. Outdated-version and CVE checks run **in
 the background** (Dependabot and the `audit` workflow), not in this per-PR gate:
