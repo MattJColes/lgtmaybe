@@ -8524,7 +8524,9 @@ silently: any error is posted back to the PR as a short comment.
 `lgtmaybe review` runs the same pipeline over your local `git` diff and prints
 the findings. It posts nothing and needs no GitHub token. By default it diffs
 the current branch against the remote primary branch (`origin/HEAD`, falling
-back to `origin/main`/`origin/master`, then a local `main`/`master`).
+back to `origin/main`/`origin/master`, then a local `main`/`master`). An empty
+diff makes no model call; when none of those branches exists it exits non-zero
+and asks for `--base`.
 
 - `--working` reviews the whole worktree (branch commits plus uncommitted
   edits) against that same base.

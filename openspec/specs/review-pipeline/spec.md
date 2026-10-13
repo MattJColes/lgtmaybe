@@ -17,7 +17,8 @@ incomplete marker — never a silent LGTM. A call skipped past either soft
 whole-review ceiling — the deadline (`max_review_seconds`) or the billable-token
 budget (`max_review_tokens`, off by default) — counts as a failed call, so the
 ceilings are contributors to that notice rather than its only source. Any
-stage failure surfaces to the caller.
+stage failure surfaces to the caller, as does reviewable code that no
+configured lens could run over (e.g. `categories: [spec]` with no matching spec).
 <!-- anchor: engine.review -->
 
 #### Scenario: a lens call fails

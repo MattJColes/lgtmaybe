@@ -870,7 +870,8 @@ def _lens_messages(
 
 
 class ReviewIncompleteError(Exception):
-    """Every review call failed (timeout or unparseable output) — no usable result.
+    """No usable result: every review call failed (timeout or unparseable
+    output), or no lens could run over a diff that had code to review.
 
     Raised instead of silently reporting a clean review, so the CLI surfaces a
     failure (non-zero exit / failure comment) rather than a false 👍 LGTM.
@@ -1127,6 +1128,19 @@ class LLMReviewEngine:
 
             total_files = len(file_patches)
             capped_files = False
+
+        # 2c. Fail loud when there is code to review but no lens to review it:
+        #     every configured lens was skipped (intent with nothing stated, spec
+        #     with no matching specification) or none was configured. Zero calls
+        #     would otherwise slip past 5b's "every call failed" guard and post
+        #     👍 LGTM over a diff nothing looked at.
+        if file_patches and not lenses:
+            raise ReviewIncompleteError(
+                "review incomplete — no review lens could run for the configured "
+                "categories (intent needs a stated intent; spec needs a committed "
+                "specification matching this change). Add another category to "
+                "`categories`, or remove the override to run the default set."
+            )
 
         # 3b. Static-analysis grounding (default off): deterministic tool
         #     findings over the reviewed files' head texts, fed to each batch's
