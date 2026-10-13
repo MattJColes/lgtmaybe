@@ -256,6 +256,71 @@ class TestReviewCommandLocal:
         assert seen == {"max_files": 7, "recursive": False}
 
 
+class TestReviewFailOnLocal:
+    """`review --fail-on` turns the local review into a gate (e.g. a pre-commit hook).
+
+    The FakeProvider's canned finding is `low`, so `--fail-on low` trips the gate
+    and `--fail-on medium` does not.
+    """
+
+    _ARGS = ("review", "--provider", "ollama", "--model", "llama3")
+
+    def test_exits_with_the_gate_code_when_a_finding_meets_the_threshold(self, monkeypatch):
+        from lgtmaybe.cli import FAIL_ON_EXIT_CODE
+
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(main, [*self._ARGS, "--fail-on", "low"])
+
+        assert result.exit_code == FAIL_ON_EXIT_CODE, result.output
+        # The findings still print: the gate explains itself, it doesn't hide them.
+        assert "canned finding" in result.stdout
+        assert "1 finding(s) at or above low" in result.stderr
+
+    def test_gate_code_is_distinct_from_errors_and_usage_errors(self):
+        from lgtmaybe.cli import FAIL_ON_EXIT_CODE
+
+        # 1 = ClickException (a failed review), 2 = click UsageError.
+        assert FAIL_ON_EXIT_CODE not in (0, 1, 2)
+
+    def test_exits_zero_when_nothing_meets_the_threshold(self, monkeypatch):
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(main, [*self._ARGS, "--fail-on", "medium"])
+
+        assert result.exit_code == 0, result.output
+        assert "canned finding" in result.stdout
+
+    def test_json_stdout_stays_parseable_when_the_gate_trips(self, monkeypatch):
+        from lgtmaybe.cli import FAIL_ON_EXIT_CODE
+
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(main, [*self._ARGS, "--json", "--fail-on", "low"])
+
+        assert result.exit_code == FAIL_ON_EXIT_CODE, result.output
+        assert json.loads(result.stdout)[0]["title"] == "canned finding"
+
+    def test_config_file_fail_on_does_not_gate_the_local_review(self, monkeypatch, tmp_path):
+        """A repo's `fail_on` is the Action's merge gate; only the explicit flag
+        gates a local run, so configuring CI never changes a plain local review."""
+        _patch_local(monkeypatch)
+        cfg_file = tmp_path / "lgtmaybe.yml"
+        cfg_file.write_text("provider: ollama\nmodel: llama3\nfail_on: low\n")
+
+        result = CliRunner().invoke(main, [*self._ARGS, "--config", str(cfg_file)])
+
+        assert result.exit_code == 0, result.output
+
+    def test_a_review_error_still_exits_one(self, monkeypatch):
+        _patch_local(monkeypatch, engine=_BoomEngine())
+
+        result = CliRunner().invoke(main, [*self._ARGS, "--fail-on", "low"])
+
+        assert result.exit_code == 1, result.output
+        assert "provider exploded" in result.output
+
+
 class TestDiagramCommand:
     def _patch_diagram_provider(self, monkeypatch):
         import lgtmaybe.cli as cli_module

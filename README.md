@@ -124,7 +124,9 @@ local `git` diff and prints the findings. `lgtmaybe diagram` takes the same
 flags and prints the change overview: what the change is, its high-impact
 areas, and a picture of the components it touches and the flow it alters. Run
 `review` then `diagram` before opening a pull request. See
-[Generate a change overview](docs/how-to/generate-a-change-diagram.md).
+[Generate a change overview](docs/how-to/generate-a-change-diagram.md). To run
+the review from your Git hooks on every push, use the
+[pre-commit hooks](docs/how-to/review-before-you-commit.md).
 
 `lgtmaybe --help` lists every command with usage examples, and
 `lgtmaybe review --help` shows every option. To post reviews on real pull
@@ -208,6 +210,7 @@ the docs root.
 - [Calibrate reviews to your project](docs/how-to/calibrate-reviews-to-your-project.md)
 - [Generate a change overview](docs/how-to/generate-a-change-diagram.md)
 - [Fix findings with an AI agent](docs/how-to/fix-findings-with-an-ai-agent.md)
+- [Review before you commit (pre-commit hooks)](docs/how-to/review-before-you-commit.md)
 - [Reduce review cost](docs/how-to/reduce-review-cost.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
 
