@@ -1,81 +1,80 @@
 ---
-description: Post a change overview on a pull request — a description, a High Impact Areas call-out, and Mermaid diagrams of the structure and run-time flow — as a GitHub comment, or print it from the CLI.
+description: Post a change overview on a pull request - a description, Risk of Change, a High Impact Areas call-out, and Mermaid diagrams of the structure and run-time flow - as a GitHub comment, or print it from the CLI.
 ---
 
-# Generate a change overview
+# Generate a Change Overview
 
 lgtmaybe can post a **change overview** on a pull request: what the change is,
 what is risky about it, and what it touches. It is one comment, updated in
-place, that a reviewer reads before the diff. A separate concern from the
-review — the review finds bugs in the lines it reads, the overview describes the
+place, for a reviewer to read before the diff. It is separate from the review:
+the review finds bugs in the lines it reads, and the overview describes the
 change as a whole.
 
 ## Contents
 
-- [What you get](#what-you-get)
+- [What You Get](#what-you-get)
 - [High Impact Areas](#high-impact-areas)
-- [Structure and sequence](#structure-and-sequence)
+- [Structure and Sequence](#structure-and-sequence)
 - [On GitHub: `/diagram` and `auto_diagram`](#on-github-diagram-and-auto_diagram)
 - [Locally: `lgtmaybe diagram`](#locally-lgtmaybe-diagram)
-- [Why Mermaid (and what the ASCII is for)](#why-mermaid-and-what-the-ascii-is-for)
-- [See also](#see-also)
+- [Why Mermaid (and What the ASCII Is For)](#why-mermaid-and-what-the-ascii-is-for)
+- [See Also](#see-also)
 
-## What you get
+## What You Get
 
-Three focused model calls, run concurrently, plus one deterministic section,
-compose one comment in reading order:
+Three model calls, run concurrently, plus one deterministic section make up one
+comment, in reading order:
 
-1. a **description** — a suggested title, the change type, a short summary, a
-   per-file walkthrough, and a "does it do what it says" check when the PR
-   states an intent (`auto_describe`);
-2. **Risk of Change** — the change's `low` to `critical` verdict and every
-   reason behind it, computed without a model call (`risk`; see
-   [Risk of Change](../explanation/risk-of-change.md));
-3. **[High Impact Areas](#high-impact-areas)** — the changes a reviewer must not
-   miss, in a bold-titled section (`high_impact`);
-4. up to two **diagrams**, each in two renderings — a **Mermaid flowchart** of
-   the structure, a **Mermaid sequence diagram** of the run-time flow when the
-   change alters one, and a **plain-text rendering** of each, which is what
-   shows in a terminal and serves as the fallback if the Mermaid can't be
-   rendered.
+1. **The description head** (`auto_describe`): a suggested title, the change
+   type, and a short summary.
+2. **Risk of Change** (`risk`): the change's `low` to `critical` verdict and
+   every reason behind it, computed without a model call. See
+   [Risk of Change](../explanation/risk-of-change.md).
+3. **[High Impact Areas](#high-impact-areas)** (`high_impact`): the changes a
+   reviewer must not miss.
+4. **The description detail** (`auto_describe`): a per-file walkthrough, and a
+   "does it do what it says?" check when the PR states an intent.
+5. **Up to two diagrams**: a Mermaid flowchart of the structure and, when the
+   change alters one, a Mermaid sequence diagram of the run-time flow. Each
+   comes with a plain-text rendering, which is what a terminal shows and the
+   fallback if the Mermaid can't be rendered.
 
-Three calls rather than one because a single prompt doing three jobs does all
-three worse. They run at the same time, so the overview costs about as much
-wall-clock as its slowest call rather than the sum of the three. Each section
-has its own switch, and the description and High Impact Areas sections are
+The description, High Impact Areas and diagrams are three calls rather than one
+because a single prompt doing three jobs does all three worse. They run at the
+same time, so the overview takes about as long as its slowest call. Each
+section has its own switch. The description and High Impact Areas are
 best-effort: if one of those calls fails, its slot says so and the rest of the
 comment still posts.
 
-GitHub renders both Mermaid diagrams natively inside the comment — no image, no
-external hosting.
+GitHub renders both Mermaid diagrams natively inside the comment, with no image
+and no external hosting.
 
-The flowchart is intentionally sparse: it uses at most six nodes, short
-relationship labels, and Mermaid's automatic layout. Changed elements are
-marked in their labels (`(new)` / `(changed)`), keeping labels and arrows clear
-of neighbouring cards. Because GitHub's renderer offers zoom buttons but no
-full-screen, the diagram is followed by an **⛶ Open full screen** link that
-renders the same diagram alone in a browser tab, with pan and zoom, on
-[mermaid.live](https://mermaid.live). The source travels compressed in the URL
-fragment, decoded in your browser, so nothing is sent anywhere until you click.
-The diagram also stays honest about the diff being only a slice of the
-codebase: relationships inferred from imports rather than shown in the diff
-are called out in the notes.
+The flowchart is deliberately sparse: at most six components, short
+relationship labels, and Mermaid's automatic layout. Changed components are
+marked `(new)` or `(changed)` in their labels. GitHub's renderer offers zoom
+buttons but no full screen, so each diagram is followed by an **⛶ Open full
+screen** link that opens the same diagram alone on
+[mermaid.live](https://mermaid.live), with pan and zoom. The diagram source
+travels compressed in the URL fragment and is decoded in your browser, so
+nothing is sent anywhere until you click. Relationships the model inferred
+rather than saw in the diff are called out in a note under the diagrams,
+because the diff is only a slice of the codebase.
 
-Here is what the posted comment looks like for a PR that puts a Redis cache in
-front of a user service — the Mermaid renders in place, with the ASCII tucked
-in a collapsible "Text version" underneath:
+Here is the posted comment for a PR that puts a Redis cache in front of a user
+service. The Mermaid renders in place, with each text rendering tucked in a
+collapsible "Text version" underneath:
 
 > ## Cache user lookups in Redis
-
+>
 > **Change type:** feature
-
+>
 > User reads now check Redis before PostgreSQL, and successful database reads
 > populate the cache for later requests.
 
 > ### **Risk of Change: Critical**
 >
-> - touches infrastructure: `infra/redis.tf`, `ops/backup_retention.tf`
-> - touches backup and recovery: `ops/backup_retention.tf`
+> - touches infrastructure: `infra/redis.tf`
+> - touches backup and recovery: `ops/backup_retention.yaml`
 
 > ### **High Impact Areas**
 >
@@ -85,20 +84,28 @@ in a collapsible "Text version" underneath:
 > - **Availability** — Cache on the user read path (`api/users.py`). User reads
 >   now depend on Redis, so a Redis outage takes reads down with it. _Check:_
 >   confirm a Redis error falls back to the database.
-> - **Backup and recovery** — touched: `ops/backup_retention.tf` (not assessed
+> - **Backup and recovery** — touched: `ops/backup_retention.yaml` (not assessed
 >   by the model)
+
+> ### Walkthrough
+>
+> | File | Change |
+> |---|---|
+> | `api/users.py` | Reads through the Redis cache before querying PostgreSQL |
+> | `infra/redis.tf` | Adds an ElastiCache Redis cluster |
+> | `ops/backup_retention.yaml` | Excludes the cache from nightly backups |
 
 > ### Structure
 
 ```mermaid
 flowchart LR
-    client["Client"]
-    api["User API<br/>Python<br/>serves user reads"]
-    cache["Redis cache<br/>Redis<br/>caches rows (new)"]
-    db["User DB<br/>PostgreSQL"]
-    client -->|requests| api
-    api -->|checks| cache
-    api -->|on miss| db
+    n0["Client"]
+    n1["User API<br/>Python<br/>serves user reads<br/>(changed)"]
+    n2["Redis cache<br/>Redis<br/>caches user rows<br/>(new)"]
+    n3["User DB<br/>PostgreSQL"]
+    n0 -->|"requests"| n1
+    n1 -->|"checks"| n2
+    n1 -->|"on miss"| n3
 ```
 
 > [⛶ Open full screen](https://mermaid.live)&nbsp; *(the real link carries the
@@ -108,9 +115,9 @@ flowchart LR
 <summary>Text version</summary>
 
 ```
-[Client] --> [User API] --check--> [Redis cache] (new)
-                  |
-                  +--miss--> [User DB]
+[Client] --requests--> [User API Python (changed)]
+[User API Python (changed)] --checks--> [Redis cache Redis (new)]
+[User API Python (changed)] --on miss--> [User DB PostgreSQL]
 ```
 
 </details>
@@ -119,16 +126,16 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    participant client as Client
-    participant api as User API (changed)
-    participant cache as Redis cache (new)
-    participant db as User DB
-    client->>api: GET /users/{id}
-    api->>cache: read cached row
-    cache-->>api: miss
-    api->>db: SELECT user
-    api->>cache: store row, 60s TTL
-    api-->>client: user JSON
+    participant n0 as Client
+    participant n1 as User API (changed)
+    participant n2 as Redis cache (new)
+    participant n3 as User DB
+    n0->>n1: GET /users/{id}
+    n1->>n2: read cached row
+    n2-->>n1: miss
+    n1->>n3: SELECT user
+    n1->>n2: store row, 60s TTL
+    n1-->>n0: user JSON
 ```
 
 <details>
@@ -145,15 +152,15 @@ sequenceDiagram
 
 </details>
 
-> *The User DB link is inferred from an import, not shown in the diff.*
+> The User DB link is inferred from an import, not shown in the diff.
 
 ## High Impact Areas
 
 A review reads the changed lines and tells you what is wrong in them. It cannot
 tell you that halving a node count removes your peak headroom, or that the PR
-quietly shortened a backup retention policy. **High Impact Areas** asks the
-other question — *what could this change break beyond itself?* — and answers it
-in one bold-titled section at the top of the overview.
+quietly shortened a backup retention policy. **High Impact Areas** asks a
+different question, *what could this change break beyond itself?*, and answers
+it in one section near the top of the overview.
 
 Ten areas are checked:
 
@@ -170,28 +177,29 @@ Ten areas are checked:
 | **Cost** | Autoscaling limits, instance types, provisioned capacity, storage classes, quotas |
 | **Compliance** | PII or privacy handling, audit trails, data residency, licence changes |
 
-Each call-out names the area, a short headline, the files it comes from, the
-blast radius, and the one thing a reviewer should verify.
+Each call-out names the area, a short headline, the files involved, the blast
+radius, and the one thing a reviewer should verify. A call-out the model rates
+`medium` or `critical` shows that severity next to the area name; `high` is the
+unmarked default. Files the model names that the PR never changed are dropped.
 
-### The path floor
+### The Path Floor
 
 The model is not the only source. Before the call, lgtmaybe matches the PR's
-changed **paths** against deterministic patterns per area — `*.tf`,
-`.github/workflows/`, `alembic/`, anything named for backups or retention,
-lockfiles, and so on. Those matches do two jobs:
+changed paths against fixed patterns per area: `*.tf`, `.github/workflows/`,
+`alembic/`, anything named for backups or retention, lockfiles, and so on.
+Those matches do two jobs:
 
-- they are sent to the model as untrusted hints, saying *where* to look (never
-  that anything is wrong);
-- they **floor** the output. An area whose files the model said nothing about is
-  still listed, marked `(not assessed by the model)`, so a weak model cannot
-  make your Terraform change invisible.
+- They are sent to the model as untrusted hints, saying where to look (never
+  that anything is wrong).
+- They floor the output. A matched file the model said nothing about under
+  that area is still listed, marked `(not assessed by the model)`, so a weak
+  model cannot make your Terraform change invisible.
 
-The floor is also the fallback: if the call fails or returns nothing usable, the
-section renders the path signals alone under a "model assessment unavailable"
-note. It degrades — it never disappears.
+The floor is also the fallback. If the call fails or returns nothing usable,
+the section shows the path matches alone under a "Model assessment unavailable"
+note. It degrades; it never disappears.
 
-When nothing qualifies, the section says so and names what it checked, rather
-than silently vanishing:
+When nothing qualifies, the section says so and names what it checked:
 
 > ### **High Impact Areas**
 >
@@ -199,7 +207,7 @@ than silently vanishing:
 > migrations, backups and recovery, compatibility, observability, dependencies,
 > cost, compliance.
 
-### Turning it off
+### Turning It Off
 
 The section is on by default. To drop it and its model call:
 
@@ -207,50 +215,50 @@ The section is on by default. To drop it and its model call:
 high_impact: false
 ```
 
-The description section has its own switch, `auto_describe: false`. With both
-off, the comment is just the diagrams, and costs one call.
+The description has its own switch, `auto_describe: false`, and Risk of Change
+has `risk: {enabled: false}`. With all three off, the comment is just the
+diagrams and costs one call.
 
-## Structure and sequence
+## Structure and Sequence
 
 The two diagrams answer different questions, which is why lgtmaybe draws both:
 
 | | Answers | Best on |
 |---|---|---|
-| **Flowchart** (structure) | What does this change touch, and what talks to what? | Structural PRs — a component added, a dependency introduced, a service split |
-| **Sequence** | What happens at run time, in what order, and where did that change? | Behavioural PRs — a retry added, an ordering fixed, a signal now handled |
+| **Flowchart** (structure) | What does this change touch, and what talks to what? | Structural PRs: a component added, a dependency introduced, a service split |
+| **Sequence** | What happens at run time, in what order, and where did that change? | Behavioural PRs: a retry added, an ordering fixed, a signal now handled |
 
-Most pull requests are behavioural, and structure alone under-describes them: a
+Most pull requests are behavioural, and structure alone under-describes them. A
 PR that fixes terminal restoration on `SIGTERM` might touch two files and draw
-three boxes, while its sequence diagram — signal, flag set, loop exit, guard
-dropped, terminal restored — *is* the explanation of the fix. A PR that puts a
+three boxes, while its sequence diagram (signal, flag set, loop exit, guard
+dropped, terminal restored) *is* the explanation of the fix. A PR that puts a
 cache in front of a service is the opposite: the new box is the headline, and
 the flow shows how a request now reaches it.
 
-The sequence view is **omitted entirely** when the change has no meaningful
-run-time flow — documentation, configuration, formatting — rather than inventing
-one. Both diagrams share one model call, one PR comment, and the same
-six-component budget; the sequence view adds at most eight ordered steps.
+The sequence view is omitted when the change has no meaningful run-time flow
+(documentation, configuration, formatting) rather than invented. Both diagrams
+come from one model call and share the same six-component budget. The sequence
+view adds at most eight ordered steps.
 
 ## On GitHub: `/diagram` and `auto_diagram`
 
-Comment **`/diagram`** on a pull request to post (or update in place) the change
-overview. It's an idempotent upsert — re-running edits the same comment instead
-of stacking new ones. (`/describe` still posts a description as its own separate
-comment, for when that is all you want.)
+Comment **`/diagram`** on a pull request to post the change overview, or update
+it in place. Re-running edits the same comment instead of stacking new ones.
+(`/describe` still posts the description alone as its own comment, for when
+that is all you want.)
 
-`auto_diagram` is **on by default** — no workflow input or `.lgtmaybe.yml`
-needed — so the overview posts automatically when a PR is opened or reopened and
-refreshes after later pushes, keeping every section current with the head
-commit. To opt out of the whole comment, set it in your workflow:
+`auto_diagram` is on by default, with no workflow input or `.lgtmaybe.yml`
+needed. The overview posts when a PR is opened or reopened and refreshes after
+each push, so every section tracks the head commit. To opt out of the whole
+comment, set the input in your workflow:
 
 ```yaml
       - uses: MattJColes/lgtmaybe@v2
         with:
           provider: anthropic
           model: claude-sonnet-4-6
+          api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           auto_diagram: "false"
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
 or in `.lgtmaybe.yml`:
@@ -260,41 +268,40 @@ auto_diagram: false
 ```
 
 The automatic overview stands back when the pull request already diagrams the
-change: a fenced `mermaid` block in the PR description, or in any comment
-lgtmaybe didn't post itself (yours, a teammate's, or another review bot's
-walkthrough).
-The review still runs and its summary names where the existing diagram lives.
-Once lgtmaybe has posted its own overview on a PR it keeps refreshing that one,
-so it never goes stale. Comment `/diagram` to post the overview anyway — slash
-commands skip the check. Gitea runs the same check through the shared Action
-entrypoint. (The `gitlab-ci` command posts no automatic overview yet.)
+change: a fenced `mermaid` block in the PR description, or in any comment that
+is not this setup's own overview (yours, a teammate's, another review bot's
+walkthrough, or another lgtmaybe setup's overview). The review still runs, and
+its summary says where the existing diagram lives. Once lgtmaybe has posted its
+own overview on a PR, it keeps refreshing that one so it never goes stale.
+Comment `/diagram` to post the overview anyway; slash commands skip the check.
+Gitea runs the same check through the shared Action entrypoint. The
+`gitlab-ci` command posts no automatic overview yet.
 
-The description and High Impact Areas sections are best-effort: a failure there
-is logged, leaves a visible note in its slot, and never blocks the rest. The
-diagram itself is a required completion step, so a failed diagram leaves the
-commit un-finished and the next run redoes it rather than silently skipping it.
+The description and High Impact Areas are best-effort: a failure is logged,
+leaves a visible note in its slot, and never blocks the rest. The diagram is a
+required completion step, so a failed diagram leaves the commit unfinished and
+the next run redoes it rather than skipping it.
 
 ## Locally: `lgtmaybe diagram`
 
-`lgtmaybe diagram` prints the change overview of your local changes — no GitHub
-involved:
+`lgtmaybe diagram` prints the change overview of your local changes, with no
+GitHub involved:
 
 ```console
 $ lgtmaybe diagram --provider ollama --model llama3
 ```
 
-It diffs your branch against the base (the same base resolution as `lgtmaybe
-review`; `--base` overrides, `--working` includes uncommitted edits,
-`--uncommitted` reviews only the working-tree edits). The output is the same
-body the `/diagram` comment carries — description, Risk of Change, High Impact
-Areas, then each
-diagram's Mermaid source and its text rendering — with one adaptation: a
-terminal renders no HTML, so the collapsible "Text version" wrapper is flattened
-into a plain labelled section:
+It diffs your branch against the base using the same base resolution as
+`lgtmaybe review`: `--base` overrides it, `--working` includes uncommitted
+edits, and `--uncommitted` uses only the working-tree edits. The output is the
+same body the `/diagram` comment carries (description, Risk of Change, High
+Impact Areas, walkthrough, then each diagram's Mermaid source, full-screen link
+and text rendering), with one change: a terminal renders no HTML, so the
+collapsible "Text version" wrapper becomes a plain labelled section. An excerpt:
 
 ````console
 $ lgtmaybe diagram --provider ollama --model llama3
-
+...
 ### Sequence
 
 ```mermaid
@@ -306,6 +313,8 @@ sequenceDiagram
     n0->>n0: backs off 200ms
 ```
 
+[⛶ Open full screen](https://mermaid.live/view#pako:…)
+
 Text version:
 
 ```
@@ -315,35 +324,34 @@ Text version:
 ```
 ````
 
-The Mermaid source stays in the output on purpose: your terminal can't draw it,
-but it is what you paste into a GitHub comment,
+The Mermaid source stays in the output on purpose. Your terminal can't draw
+it, but you can paste it into a GitHub comment,
 [mermaid.live](https://mermaid.live), or a Markdown file to render it.
 
-## Why Mermaid (and what the ASCII is for)
+## Why Mermaid (and What the ASCII Is For)
 
-GitHub renders **Mermaid** natively in comments and Markdown — both flowcharts
-and sequence diagrams — so a `mermaid` fence renders in the comment with no
+GitHub renders **Mermaid** natively in comments and Markdown, both flowcharts
+and sequence diagrams, so a `mermaid` fence renders in the comment with no
 image to generate or host. That matters for a `pull_request_target` reviewer:
 hosting an image would mean committing a file or calling an external service,
-neither of which fits a fork-safe, idempotently-updated comment.
+and neither fits a fork-safe comment that is updated in place.
 
-A terminal, though, can't render Mermaid — which is exactly why each diagram
-also comes as **plain text**. In the GitHub comment that text sits in a
-collapsible "Text version" block, out of the way of the rendered diagram; in the
-terminal the same block is flattened to a labelled section, because HTML tags
-are noise in a shell. Either way the text is what you actually read without a
-renderer, and it doubles as the fallback body, so a reviewer never sees a red
-"unable to render" box if a diagram comes back malformed.
+A terminal can't render Mermaid, which is why each diagram also comes as plain
+text. In the GitHub comment that text sits in a collapsible "Text version"
+block, out of the way of the rendered diagram. In the terminal the same block
+becomes a labelled section, because HTML tags are noise in a shell. Either way
+the text is what you read without a renderer, and it is the fallback if a
+diagram fails to render.
 
-The model never writes Mermaid. It returns typed graph data — components,
-relationships, ordered steps — and lgtmaybe renders the syntax itself, escaping
-every label, so a diff that tries to smuggle diagram source or markup into a
-label can't reach the fence.
+The model never writes Mermaid. It returns typed graph data (components,
+relationships, ordered steps), and lgtmaybe renders the syntax itself, escaping
+every label. A diff that tries to smuggle diagram source or markup into a label
+can't reach the fence.
 
 D2 isn't used because GitHub doesn't render it in Markdown, so it would show as
-source anyway.
+source.
 
-## See also
+## See Also
 
 - [Configure `.lgtmaybe.yml`](configure-lgtmaybe-yml.md)
 - [Use as a GitHub Action](use-as-github-action.md)

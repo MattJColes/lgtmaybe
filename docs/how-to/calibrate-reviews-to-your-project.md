@@ -25,7 +25,7 @@ at, and lgtmaybe adjusts both its defaults and the model's guidance to match.
 
 ```yaml
 provider: bedrock
-model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+model: us.anthropic.claude-sonnet-4-6
 
 project:
   stage: regulated
@@ -41,8 +41,7 @@ project:
 | `domain` | no | A short label, up to 80 characters: `payments`, `healthcare`, `internal tooling`. |
 | `notes` | no | Free text the reviewer should know, up to 1,000 characters. A longer value fails validation instead of being cut short. |
 
-Every field is optional. Leave the block out and the review is exactly what it
-was without it.
+Every field is optional. Leave the block out and the review is unchanged.
 
 ## Pick a Stage
 
@@ -52,8 +51,8 @@ was without it.
 | `production` | none | Hold the change to the standard review bar. |
 | `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](../explanation/risk-of-change.md), with a "regulated workload" reason | Where the domain makes them material, rate data handling, auditability, access control and personal-data exposure one severity step higher. |
 
-`production` changes no settings. It's there so a team can say so explicitly,
-and so the guidance paragraph has a stage to name alongside `domain` and
+`production` changes no settings. It lets a team state the stage explicitly,
+and gives the guidance paragraph a stage to name alongside `domain` and
 `notes`.
 
 The `regulated` risk floor stops at `medium` on purpose. Two distinct `high`
@@ -102,8 +101,9 @@ Notes from the maintainers: PCI-scoped card flows live under payments/. ...
 ```
 
 Because it sits in the shared prompt, providers with prompt caching pay for it
-once per run rather than once per lens. The reflection pass, the description,
-High Impact Areas and the diagrams don't see it.
+once per run rather than once per lens. Only the review lenses see it: the
+reflection pass and the change overview (description, High Impact Areas and
+diagrams) do not.
 
 The stage's settings changes are deterministic. Whether the guidance paragraph
 shifts the severities a given model reports depends on the model, and isn't
@@ -112,14 +112,15 @@ measured by the eval harness yet.
 ## Why Not Read AGENTS.md?
 
 Many repositories already have an `AGENTS.md`, `CLAUDE.md` or `SOUL.md`, and
-reading one automatically looks like a shortcut. lgtmaybe deliberately doesn't:
+reading one automatically looks like a shortcut. lgtmaybe deliberately doesn't,
+for three reasons:
 
 - Those files are written for coding agents: build commands, test runners,
   style rules, personas. Little of it tells a reviewer how strict to be, and
   all of it costs tokens on every call.
-- Context files share an eighth of `max_input_tokens` (12,500 tokens by
-  default), and a file over budget is skipped whole. The repositories with the
-  most thorough agent docs are the ones whose file wouldn't fit.
+- Context files share an eighth of `max_input_tokens` (12,500 tokens at the
+  default of 100,000), and a file over budget is skipped whole. The repositories
+  with the most thorough agent docs are the ones whose file wouldn't fit.
 - A stage maps to settings changes that behave the same way every run. Free
   prose can't do that.
 
@@ -134,10 +135,10 @@ directory_rules:
 ## Security: the Profile Is Trusted Configuration
 
 The paragraph enters the system prompt as trusted content, so it must never come
-from a pull request's author. It doesn't: on the recommended
-`pull_request_target` trigger, `.lgtmaybe.yml` is read from the checked-out
-base branch, never the PR head. `notes` and `domain` still have delimiter
-tokens neutralised, so nothing in them can close a prompt block early.
+from a pull request's author. On the recommended `pull_request_target` trigger,
+`.lgtmaybe.yml` is read from the checked-out base branch, never the PR head.
+lgtmaybe still neutralises prompt delimiters in `notes` and `domain`, so nothing
+in them can close a prompt block early.
 
 ## See Also
 
