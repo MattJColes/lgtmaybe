@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -790,3 +793,46 @@ class TestInputBudget:
         monkeypatch.setattr(litellm, "get_model_info", lambda model: {"max_input_tokens": None})
         built = build_provider(Provider.openai, "gpt-5", api_key="k")
         assert built.input_budget() is None
+
+
+def _models_called(provider: Any, *models: str) -> tuple[list[str], list[str | None]]:
+    """The model litellm received for each ``complete(model=...)``, and the
+    model each ``ProviderResult`` reports."""
+    seen: list[str] = []
+
+    def side_effect(*_args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["model"])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=10),
+        )
+
+    with patch("litellm.completion", side_effect=side_effect):
+        reported = [
+            provider.complete([{"role": "user", "content": "a"}], model=m).model for m in models
+        ]
+    return seen, reported
+
+
+class TestCallerNamedModelSlots:
+    """One factory-built provider serves the triage, review and reflect slots,
+    and each caller names its slot's model on ``complete``. The factory pins the
+    resolved primary string, so a named model that differs from the primary has
+    to be routed the same way and actually called — swapped back for the
+    primary, ``reflect_model`` and ``triage_model`` were silently inert."""
+
+    def test_a_reflect_or_triage_model_reaches_litellm_on_the_primary_s_route(self) -> None:
+        provider = build_provider(Provider.anthropic, "claude-opus-4-1", api_key="sk-test")
+
+        seen, reported = _models_called(provider, "claude-haiku-4-5", "claude-sonnet-4-5")
+
+        assert seen == ["anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5"]
+        assert reported == seen, "the result must name the model actually called"
+
+    def test_the_primary_or_no_model_keeps_the_resolved_primary(self) -> None:
+        provider = build_provider(Provider.ollama, "qwen3:27b")
+
+        seen, reported = _models_called(provider, "qwen3:27b", "")
+
+        assert seen == ["ollama_chat/qwen3:27b", "ollama_chat/qwen3:27b"]
+        assert reported == seen

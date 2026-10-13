@@ -461,6 +461,7 @@ def build_provider(
     return LiteLLMProvider(
         model=resolved_model,
         fallback_model=resolved_fallback,
+        route=_PREFIXES[provider],
         effort_override_supported=effort_supported,
         effort_levels=effort_levels,
         default_effort=default_effort,
