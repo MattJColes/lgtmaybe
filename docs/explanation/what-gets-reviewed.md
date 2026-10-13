@@ -394,7 +394,7 @@ configurable in `.lgtmaybe.yml` (see
 | `max_review_seconds` | 3600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
 | `categories` | all nine | Which review lenses to run; an explicit list overrides the preset grouping and runs those lenses one call each. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
-| `min_severity` | `low` | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
+| `min_severity` | `low` (`medium` for a [`prototype` project](../how-to/calibrate-reviews-to-your-project.md)) | Drops findings below the chosen floor (`info` → `low` → `medium` → `high` → `critical`); `low` keeps everything except pure-`info` narration. |
 | `include_paths` / `exclude_paths` | — | Glob filters to focus the review. |
 
 > These bound a **single run**, not the number of runs. On a public repo, anyone

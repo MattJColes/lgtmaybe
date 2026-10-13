@@ -16,7 +16,9 @@ import json
 from dataclasses import dataclass
 from functools import lru_cache
 
-from lgtmaybe.core.models import CustomLens, ReviewCategory
+from lgtmaybe.core.models import CustomLens, ProjectProfile, ReviewCategory
+
+from .injection import neutralise
 
 _SHARED_HEADER = """\
 You are an expert code reviewer. Review a pull-request diff and report real, actionable \
@@ -1022,8 +1024,53 @@ def retrieval_rules(retrieval: bool) -> str:
     return _RETRIEVAL_RULES if retrieval else ""
 
 
+# One sentence per stage. Fixed wording rather than model-facing config, so a
+# stage means the same thing in every repository that sets it.
+_STAGE_GUIDANCE = {
+    "prototype": (
+        "This is a prototype: report correctness and security problems, and skip "
+        "hardening, observability, scalability and documentation polish it does not "
+        "need yet."
+    ),
+    "production": (
+        "This is production software: hold it to the standard review bar described above."
+    ),
+    "regulated": (
+        "This is a regulated workload: where the domain makes them material, rate data "
+        "handling, auditability, access control and personal-data exposure one severity "
+        "step higher than you otherwise would."
+    ),
+}
+
+
+def project_context(profile: ProjectProfile) -> str:
+    """The project paragraph for the shared preamble, or ``""`` when unset.
+
+    Trusted configuration (it comes from ``.lgtmaybe.yml``, read from the base
+    on ``pull_request_target``), but the free text is still neutralised — the
+    same treatment ``directory.build_directory_block`` gives instructions — so
+    it can never forge a delimiter in the blocks that follow it.
+    """
+    lines: list[str] = []
+    if profile.stage is not None:
+        lines.append(_STAGE_GUIDANCE[profile.stage])
+    if profile.domain:
+        lines.append(f"Domain: {neutralise(profile.domain.strip())}.")
+    if profile.notes.strip():
+        lines.append(f"Notes from the maintainers: {neutralise(profile.notes.strip())}")
+    if not lines:
+        return ""
+    return (
+        "\n## Project context\n"
+        "From the reviewer configuration (trusted). Calibrate what you report and how "
+        "severe you rate it to this project:\n" + "\n".join(lines) + "\n"
+    )
+
+
 @lru_cache(maxsize=16)
-def build_shared_preamble(language: str | None = None, retrieval: bool = False) -> str:
+def build_shared_preamble(
+    language: str | None = None, retrieval: bool = False, project: str = ""
+) -> str:
     """The lens-independent system prompt for the split (cache-shaped) layout.
 
     Everything common to every lens — role, severity rubric, output contract,
@@ -1041,8 +1088,12 @@ def build_shared_preamble(language: str | None = None, retrieval: bool = False) 
     *retrieval* (constant within a run too) adds the one-round deferral ask — see
     :func:`retrieval_rules`. Off (the default) the result is byte-identical to a
     build without the feature.
+
+    *project* is the rendered :func:`project_context` paragraph (a string so the
+    cache key stays hashable); empty adds nothing.
     """
-    return f"{_localised_header(language)}\n{_SHARED_RULES}{retrieval_rules(retrieval)}\n"
+    rules = f"{_SHARED_RULES}{retrieval_rules(retrieval)}{project}"
+    return f"{_localised_header(language)}\n{rules}\n"
 
 
 # Lead-in for the lens block: the diff (untrusted data) is above, these

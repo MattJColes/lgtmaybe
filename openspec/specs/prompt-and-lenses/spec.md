@@ -242,3 +242,24 @@ changes, which come from its head text.
   against the specs that did fit — rather than skipping silently like a no-match
 - **AND** a selected spec that lost the shared budget to a higher-ranked one is
   logged, not reported: it could have fit, so the notice's advice would be wrong
+
+### Requirement: A project profile calibrates the review
+
+A configured `project` profile SHALL render one trusted paragraph at the end of
+the shared preamble: fixed guidance for its `stage` (prototype, production,
+regulated), its `domain`, and its `notes` with delimiters neutralised. An empty
+profile SHALL add nothing. A `prototype` stage SHALL raise the `min_severity`
+default to `medium`, and a floor the user configured SHALL win over it.
+<!-- anchor: prompt.project-profile -->
+
+#### Scenario: no profile configured
+- **WHEN** `project` is left out of the config
+- **THEN** the shared preamble is byte-identical to a build without the feature
+
+#### Scenario: a regulated payments service
+- **WHEN** `project` sets `stage: regulated` and `domain: payments`
+- **THEN** every lens call's system prompt carries the same paragraph naming both
+
+#### Scenario: a prototype with an explicit floor
+- **WHEN** `stage` is `prototype` and `min_severity: low` is configured
+- **THEN** the floor stays `low`
