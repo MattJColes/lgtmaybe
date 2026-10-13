@@ -184,12 +184,22 @@ It is created **closed**, so it never holds a merge on its own. A finding whose
 thread is already open, or marked *Won't fix* or *Closed*, is not posted again;
 a finding whose thread was marked *Resolved* and that comes back is.
 
+On a later run, a finding thread lgtmaybe opened is marked *Resolved*, with a
+`✅ Looks resolved.` reply, when the finding is no longer reported **and** the
+line it was posted on has changed since. Azure DevOps has no "this code moved"
+flag, so lgtmaybe records the iteration each thread was posted at and compares
+the file then with the file now. Threads anyone else opened are never touched,
+and nothing is resolved after a run that failed or finished only partly. The
+token needs the same *Contribute to pull requests* permission it already uses
+to post. Set `resolve_fixed: false` in `.lgtmaybe.yml` to resolve threads by
+hand. A thread posted by an earlier lgtmaybe version may carry no iteration,
+and one that doesn't stays open for a person to resolve.
+
 These are not available yet:
 
 | Not available | Why | What happens instead |
 |---|---|---|
 | Incremental review | Not built yet | Every run is a full review |
-| Resolve-on-fix | Not built yet; Azure DevOps threads can be resolved over REST | Fixed findings' threads stay open for a human to resolve |
 | Slash commands (`/review`, `/ask`, …) | `azure-pipelines` reviews the pull request; nothing routes comments to it | Queue the build again to review again |
 | Change overview comment | `azure-pipelines` runs the review only | No description or diagram thread is posted |
 | PR labels and the `fail_on` merge gate | Not built yet in the Azure DevOps adapter | No labels or pull request status are set |

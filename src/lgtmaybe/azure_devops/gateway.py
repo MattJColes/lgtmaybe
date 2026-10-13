@@ -22,10 +22,16 @@ differences are load bearing:
    with an empty user name; the pipeline's own ``System.AccessToken`` as a
    bearer token. Neither is ever logged or put in a URL.
 
-Deliberately absent, and not claimed: incremental review, thread resolution,
-labels, commit statuses, 👎 feedback, and base-branch checkout. The Azure DevOps
-API could serve most of them; they are "not yet", and the CLI runs a full
-review without them.
+Resolve-on-fix is offered, though Azure DevOps has no "the lines moved" flag
+on a thread. Each finding thread records the iteration it was posted at
+(``pullRequestThreadContext``), and a later run diffs the file from that
+iteration's head to its own to tell whether the flagged line changed. Only our
+own identity's threads are ever resolved, and only after a complete run.
+
+Deliberately absent, and not claimed: incremental review, labels, commit
+statuses, 👎 feedback, and base-branch checkout. The Azure DevOps API could
+serve most of them; they are "not yet", and the CLI runs a full review without
+them.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ import base64
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any
 from urllib.parse import quote
@@ -42,6 +49,8 @@ import httpx
 
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
+    FINDING_MARKER,
+    IDENTITY_MARKER,
     current_finding_keys,
     finding_keys,
     marker,
@@ -58,7 +67,7 @@ from lgtmaybe.core.diff import (
 )
 from lgtmaybe.core.diffbuild import binary_file_patch, file_patch, has_unsafe_path_chars
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReviewFinding
+from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
 from lgtmaybe.core.ports import DiffUnavailable
 
 _log = get_logger(__name__)
@@ -104,6 +113,16 @@ _NOTE_STATUS = "closed"
 # A resolved finding that comes back is reported again (as on GitLab); a thread
 # the author marked won't-fix, by-design, or closed stays dismissed.
 _FIXED_STATUSES = frozenset({"fixed", 2})
+
+# The statuses a finding thread is still open in: active, and pending (which
+# Azure DevOps offers as "waiting for the author"). Everything else is dealt with.
+_OPEN_STATUSES = frozenset({"active", 1, "pending", 6})
+
+# Written into a thread after it is resolved, so the trail explains itself.
+_RESOLVED_REPLY = "✅ Looks resolved."
+
+# Azure DevOps numbers a thread's comments from 1, so its root comment is 1.
+_ROOT_COMMENT_ID = 1
 
 # Change types arrive as a comma-separated flag string ("rename, edit"), or as
 # the integer flags they serialise from. The values are Azure DevOps'
@@ -156,6 +175,7 @@ class AzureDevOpsGateway:
         client:    Injected httpx.Client; a default is created if omitted.
         bearer:    Send ``token`` as a bearer token (System.AccessToken) rather
                    than as basic auth (a personal access token).
+        resolve_fixed: Whether to resolve our finding threads once they are fixed.
     """
 
     def __init__(
@@ -168,6 +188,7 @@ class AzureDevOpsGateway:
         marker_key: str | None = None,
         scheme: str = "https",
         bearer: bool = False,
+        resolve_fixed: bool = True,
     ) -> None:
         parts = repo.split("/")
         if len(parts) != 3 or not all(parts):
@@ -206,6 +227,19 @@ class AzureDevOpsGateway:
         # Changed files a side of which could not be fetched; named in the
         # summary so the review never reads as covering them.
         self._unread: list[str] = []
+        self._resolve_fixed = resolve_fixed
+        # Set by mark_reviewed on a complete run only; resolve-on-fix waits for it.
+        self._reviewed_sha: str | None = None
+        self._latest_iteration_id: int | None = None
+        # Each iteration's head commit, so a thread's posting iteration can be
+        # turned into the file text it was posted against.
+        self._iteration_commits: dict[int, str] = {}
+        # Each changed file's changeTrackingId, which ties a thread to the file
+        # across iterations in Azure DevOps' own UI.
+        self._tracking_ids: dict[str, int] = {}
+        self._texts_at: dict[tuple[str, str], _Text] = {}
+        self._active_findings: list[ActiveFinding] | None = None
+        self._validated_fixed_thread_ids: set[str] | None = None
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -235,8 +269,10 @@ class AzureDevOpsGateway:
                 "from the target branch's."
             )
         self._head_sha = head_sha
+        iteration_id = iteration.get("id")
+        self._latest_iteration_id = iteration_id if isinstance(iteration_id, int) else None
 
-        changes = self._iteration_changes(iteration.get("id"))
+        changes = self._iteration_changes(iteration_id)
         texts = self._fetch_sides(changes, base_sha, head_sha)
         patches: list[str] = []
         file_contents: dict[str, str] = {}
@@ -307,7 +343,8 @@ class AzureDevOpsGateway:
 
         Findings already carrying one of our hidden ids on an unresolved thread
         are skipped, so a re-run adds only what is new. A thread Azure DevOps
-        rejects is demoted into the summary rather than lost.
+        rejects is demoted into the summary rather than lost. Last, our finding
+        threads that are now fixed are resolved, after everything else posted.
         """
         if diff is None and findings:
             diff = self._diff if self._diff is not None else self.get_pr_context().diff
@@ -328,7 +365,7 @@ class AzureDevOpsGateway:
                     unmatched.pop(already)
             inline = new_inline
         for context, finding in inline:
-            if not self._post_finding_thread(context, render_inline_body(finding)):
+            if not self._post_finding_thread(context, finding.path, render_inline_body(finding)):
                 demoted.append(finding)
 
         body = (
@@ -336,6 +373,8 @@ class AzureDevOpsGateway:
             f"{render_unread_files(self._unread)}\n\n{self._marker}"
         )
         self._upsert(body, self._marker, threads)
+        if self._resolve_fixed:
+            self._resolve_fixed_threads(findings, threads)
 
     def post_issue_comment(self, body: str) -> None:
         """Open a standalone general thread on the pull request."""
@@ -394,6 +433,47 @@ class AzureDevOpsGateway:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled
 
+    def mark_reviewed(self, head_sha: str | None) -> None:
+        """Record that this run reviewed ``head_sha`` completely (None: it did not).
+
+        No watermark is written, since incremental review is not offered. It is
+        the gate for resolve-on-fix: a partial run or a failure notice is missing
+        findings, not reporting them fixed, so neither may resolve a thread.
+        """
+        self._reviewed_sha = head_sha
+
+    def list_active_findings(self) -> list[ActiveFinding]:
+        """Our own open finding threads, keyed by their hidden ids."""
+        active = [
+            self._active_finding(thread, root, outdated=self._is_outdated(thread))
+            for thread, root in self._open_finding_threads(self._threads())
+        ]
+        self._active_findings = active
+        return active
+
+    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
+        """Install the allowlist of threads confirmed fixed and safe to resolve."""
+        self._validated_fixed_thread_ids = set(thread_ids)
+
+    def reply_in_thread(self, thread_id: str, body: str) -> None:
+        """Reply to the comment that opened an existing thread."""
+        resp = self._client.post(
+            f"{self._pr_api}/threads/{thread_id}/comments",
+            headers=self._headers,
+            params={"api-version": _API_VERSION},
+            json={"parentCommentId": _ROOT_COMMENT_ID, "content": body, "commentType": "text"},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+
+    def count_open_finding_threads(self) -> int:
+        """How many of our finding threads are still open. Never fails the review."""
+        try:
+            return len(self._open_finding_threads(self._threads()))
+        except Exception as exc:  # noqa: BLE001 (disclosure metadata only)
+            _log.warning("counting open finding threads failed: %s", exc)
+            return 0
+
     # ------------------------------------------------------------------
     # Internals: context
     # ------------------------------------------------------------------
@@ -406,6 +486,12 @@ class AzureDevOpsGateway:
                 f"Pull request {self._repo}!{self._pr_number} has no iterations: "
                 "unexpected Azure DevOps API response."
             )
+        self._iteration_commits = {
+            it["id"]: commit
+            for it in iterations
+            if isinstance(it.get("id"), int)
+            and isinstance(commit := (it.get("sourceRefCommit") or {}).get("commitId"), str)
+        }
         latest: dict[str, Any] = max(iterations, key=lambda it: int(it.get("id") or 0))
         return latest
 
@@ -428,10 +514,14 @@ class AzureDevOpsGateway:
                 "short of a change this large rather than review part of it."
             )
         changes: list[_Change] = []
+        self._tracking_ids = {}
         for entry in entries:
             change = _describe_change(entry)
             if change is not None:
                 changes.append(change)
+                tracking_id = entry.get("changeTrackingId")
+                if isinstance(tracking_id, int):
+                    self._tracking_ids[change.path] = tracking_id
         return changes
 
     def _fetch_sides(
@@ -625,28 +715,63 @@ class AzureDevOpsGateway:
             inline.append((context, f))
         return inline, demoted, broad
 
-    def _post_finding_thread(self, context: dict[str, Any], body: str) -> bool:
+    def _post_finding_thread(self, context: dict[str, Any], path: str, body: str) -> bool:
         """Open one positioned finding thread; False when Azure DevOps refuses it.
 
         Best-effort per finding, so one unplaceable finding never takes the rest
         of the review down with it. A 401/403 is not about one finding: the token
         cannot write threads at all, so it fails loudly like the fetch and upsert
         paths rather than burying every finding in the summary.
+
+        The thread records the iteration it was posted at, which resolve-on-fix
+        needs later. That record is a nice-to-have, so a thread refused with 400
+        (the host rejecting the payload) is tried once more without it before
+        the finding is demoted. Nothing else is retried: after a timeout or a
+        5xx the host may already have created the thread, and a second attempt
+        would duplicate it.
         """
-        try:
-            self._create_thread(body, status=_FINDING_STATUS, context=context)
-            return True
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (401, 403):
-                raise
-            _log.warning("posting a finding thread failed: %s", exc)
-            return False
-        except Exception as exc:  # noqa: BLE001 (one rejected position is not fatal)
-            _log.warning("posting a finding thread failed: %s", exc)
-            return False
+        tracking = self._tracking_context(path)
+        for attempt in (tracking, None) if tracking is not None else (None,):
+            try:
+                self._create_thread(body, status=_FINDING_STATUS, context=context, tracking=attempt)
+                return True
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (401, 403):
+                    raise
+                _log.warning("posting a finding thread failed: %s", exc)
+                if exc.response.status_code != 400:
+                    return False
+            except Exception as exc:  # noqa: BLE001 (one rejected position is not fatal)
+                _log.warning("posting a finding thread failed: %s", exc)
+                return False
+        return False
+
+    def _tracking_context(self, path: str) -> dict[str, Any] | None:
+        """The ``pullRequestThreadContext`` tying a new thread to this iteration.
+
+        Iteration 1 to the latest is the "all changes" comparison, which is the
+        merge-base diff the findings were made against. None before the context
+        has been fetched: the thread is then posted untracked, and never resolved.
+        """
+        if self._latest_iteration_id is None:
+            return None
+        tracking: dict[str, Any] = {
+            "iterationContext": {
+                "firstComparingIteration": 1,
+                "secondComparingIteration": self._latest_iteration_id,
+            }
+        }
+        if (tracking_id := self._tracking_ids.get(path)) is not None:
+            tracking["changeTrackingId"] = tracking_id
+        return tracking
 
     def _create_thread(
-        self, content: str, *, status: str, context: dict[str, Any] | None = None
+        self,
+        content: str,
+        *,
+        status: str,
+        context: dict[str, Any] | None = None,
+        tracking: dict[str, Any] | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "comments": [{"parentCommentId": 0, "content": content, "commentType": "text"}],
@@ -654,6 +779,8 @@ class AzureDevOpsGateway:
         }
         if context is not None:
             payload["threadContext"] = context
+        if tracking is not None:
+            payload["pullRequestThreadContext"] = tracking
         resp = self._client.post(
             f"{self._pr_api}/threads",
             headers=self._headers,
@@ -720,6 +847,178 @@ class AzureDevOpsGateway:
             if found := finding_keys(root.get("content") or ""):
                 keys.append(found)
         return keys
+
+    # ------------------------------------------------------------------
+    # Internals: resolve-on-fix
+    # ------------------------------------------------------------------
+
+    def _resolve_fixed_threads(
+        self, findings: list[ReviewFinding], threads: list[dict[str, Any]]
+    ) -> None:
+        """Resolve, then reply in, each of our finding threads that is now fixed.
+
+        Only after a complete run of the head this adapter fetched. Resolving
+        comes before the reply, so a refused resolve leaves no "Looks resolved."
+        on a thread that stays open. A 401 or 403 is the identity's, not the
+        thread's, so the first one stops the rest. Never fails the review.
+        """
+        if self._reviewed_sha is None or self._reviewed_sha != self._head_sha:
+            return
+        try:
+            fixed = self._fixed_thread_ids(findings, threads)
+        except Exception as exc:  # noqa: BLE001 (resolving never fails a review)
+            _log.warning("finding fixed threads failed: %s", exc)
+            return
+        for thread_id in fixed:
+            try:
+                resp = self._client.patch(
+                    f"{self._pr_api}/threads/{thread_id}",
+                    headers=self._headers,
+                    params={"api-version": _API_VERSION},
+                    json={"status": "fixed"},
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (401, 403):
+                    _log.warning(
+                        "resolving threads is not permitted for this identity, so they stay "
+                        "open. Grant it 'Contribute to pull requests', or set "
+                        "resolve_fixed: false to stop trying. (%s)",
+                        exc,
+                    )
+                    return
+                _log.warning("resolving thread %s failed: %s", thread_id, exc)
+                continue
+            except Exception as exc:  # noqa: BLE001 (one thread never blocks the rest)
+                _log.warning("resolving thread %s failed: %s", thread_id, exc)
+                continue
+            try:
+                self.reply_in_thread(thread_id, _RESOLVED_REPLY)
+            except Exception as exc:  # noqa: BLE001 (nothing depends on the reply)
+                _log.warning("replying in resolved thread %s failed: %s", thread_id, exc)
+
+    def _fixed_thread_ids(
+        self, findings: list[ReviewFinding], threads: list[dict[str, Any]]
+    ) -> list[str]:
+        """Our open finding threads whose finding is gone and whose line changed.
+
+        A validated allowlist, when the caller installed one, decides instead,
+        and an empty one resolves nothing: the caller installs that when it
+        could not read the active findings. Gone means neither hidden id was
+        produced this run, so a reworded finding still counts as reported. The
+        line check is only paid for gone findings.
+        """
+        own = self._open_finding_threads(threads)
+        if self._validated_fixed_thread_ids is not None:
+            allowed = self._validated_fixed_thread_ids
+            return [str(thread.get("id")) for thread, _ in own if str(thread.get("id")) in allowed]
+        current = current_finding_keys(findings)
+        return [
+            str(thread.get("id"))
+            for thread, root in own
+            if not finding_keys(root.get("content") or "") & current and self._is_outdated(thread)
+        ]
+
+    def _open_finding_threads(
+        self, threads: list[dict[str, Any]]
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        """``(thread, root comment)`` of each open finding thread our identity opened.
+
+        Hidden ids are public, so a thread anyone else opened is never ours to
+        resolve; with the identity unknown, none is.
+        """
+        identity = self._own_identity()
+        if identity is None:
+            return []
+        out: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for thread in threads:
+            if thread.get("isDeleted") or thread.get("status") not in _OPEN_STATUSES:
+                continue
+            root = _root_comment(thread)
+            if root is None or _author_id(root) != identity:
+                continue
+            if finding_keys(root.get("content") or ""):
+                out.append((thread, root))
+        return out
+
+    @staticmethod
+    def _active_finding(
+        thread: dict[str, Any], root: dict[str, Any], *, outdated: bool
+    ) -> ActiveFinding:
+        body = root.get("content") or ""
+        fingerprint = FINDING_MARKER.search(body)
+        identity = IDENTITY_MARKER.search(body)
+        comment_id = root.get("id")
+        return ActiveFinding(
+            thread_id=str(thread.get("id")),
+            comment_id=comment_id if isinstance(comment_id, int) else None,
+            path=_repo_path((thread.get("threadContext") or {}).get("filePath")) or "",
+            body=body,
+            fingerprint=fingerprint.group(1) if fingerprint else None,
+            identity=identity.group(1) if identity else None,
+            outdated=outdated,
+        )
+
+    def _is_outdated(self, thread: dict[str, Any]) -> bool:
+        """Whether the line a finding thread was posted on has changed since.
+
+        The thread's posting iteration names the commit it was placed against;
+        the file is read there and at our head, and the line is outdated when the
+        change between them replaced or removed it, or the file is gone. Once
+        Azure DevOps has re-tracked a thread onto a later iteration, its
+        ``trackingCriteria`` keeps the original position, so that wins.
+
+        Fails closed: no recorded iteration, a left-side thread (pushes do not
+        change the base), an unreadable side, or any error all read as not
+        outdated, so nothing is resolved without evidence.
+        """
+        try:
+            pr_context = thread.get("pullRequestThreadContext") or {}
+            original = pr_context.get("trackingCriteria") or {}
+            context = thread.get("threadContext") or {}
+            iteration = original.get("secondComparingIteration") or (
+                pr_context.get("iterationContext") or {}
+            ).get("secondComparingIteration")
+            start = original.get("origRightFileStart") or context.get("rightFileStart") or {}
+            path = _repo_path(original.get("origFilePath") or context.get("filePath"))
+            line = start.get("line")
+            posted_at = (
+                self._iteration_commits.get(iteration) if isinstance(iteration, int) else None
+            )
+            head = self._head_sha
+            if not head or not posted_at or posted_at == head or not path:
+                return False
+            if not isinstance(line, int) or line < 1:
+                return False
+            before = self._text_at(path, posted_at)
+            if not isinstance(before, str):
+                return False
+            after = self._text_at(path, head)
+            if after is None:
+                return True  # the file is gone from the head
+            if not isinstance(after, str):
+                return False
+            old_lines = before.split("\n")
+            if line > len(old_lines):
+                return False
+            matcher = SequenceMatcher(None, old_lines, after.split("\n"), autojunk=False)
+            return any(
+                tag in ("replace", "delete") and i1 < line <= i2
+                for tag, i1, i2, _j1, _j2 in matcher.get_opcodes()
+            )
+        except Exception as exc:  # noqa: BLE001 (fail closed: leave the thread open)
+            _log.warning("telling whether thread %s is outdated failed: %s", thread.get("id"), exc)
+            return False
+
+    def _text_at(self, path: str, commit: str) -> _Text:
+        """A file's text at ``commit``, read once per run."""
+        if commit == self._head_sha and path in self._head_texts:
+            return self._head_texts[path]
+        key = (path, commit)
+        if key not in self._texts_at:
+            self._texts_at[key] = self._fetch_text(path, commit, _MAX_DIFF_BYTES)
+        return self._texts_at[key]
 
     def _own_identity(self) -> str | None:
         """The id of the identity the token authenticates as, resolved once.
