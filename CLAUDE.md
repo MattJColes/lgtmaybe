@@ -118,8 +118,15 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
   and when the identity is unknown tries every marked thread and lets the
   host's author check (403) decide. `PRLocator.repo` is `org/project/repo` (decoded). Token:
   `AZURE_DEVOPS_TOKEN` (PAT, basic) else `SYSTEM_ACCESSTOKEN` (bearer)
-  (`forge.token_env_vars`). Incremental, thread resolution, labels, checks and
-  feedback are unbuilt and unclaimed.
+  (`forge.token_env_vars`). Resolve-on-fix sets our own open finding threads
+  to `fixed` (then replies) when the finding is gone and the line changed. ADO
+  has no outdated flag, so each finding thread is posted with a
+  `pullRequestThreadContext` naming its iteration (retried without it if
+  refused with 400), and `_is_outdated` diffs the file from that iteration's head to
+  ours (`trackingCriteria`'s original position wins once ADO re-tracks it). It
+  is gated on `mark_reviewed(head)`, so a partial run or failure notice
+  resolves nothing. Incremental, labels, checks and feedback are unbuilt and
+  unclaimed.
 - **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
   the same env contract; only `GITHUB_SERVER_URL` differs, and
   `cli._change_url` reads it). GitLab CI has neither an event payload nor

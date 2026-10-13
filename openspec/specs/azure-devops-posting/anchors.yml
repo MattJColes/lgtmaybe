@@ -46,6 +46,12 @@ azure-devops.pipelines:
     has: { field: name, regex: '^pr_url_from_pipelines_env$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+azure-devops.resolve:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_resolve_fixed_threads$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
 azure-devops.capabilities:
   rule:
     kind: class_definition
