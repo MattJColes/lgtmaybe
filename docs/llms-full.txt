@@ -1333,7 +1333,11 @@ iteration, lists the files it changes against the merge base, fetches each
 file's text before and after, and builds the diff itself. Lockfiles, vendored
 and binary files are listed as changed but never fetched, and a file side over
 1 MB is treated like a binary. A pull request changing more than 300 files is
-not reviewed; lgtmaybe says so instead of reviewing part of it.
+not reviewed; lgtmaybe says so instead of reviewing part of it. The same goes
+when Azure DevOps reports no merge base for the pull request. A file Azure
+DevOps keeps throttling or failing to return is retried, then left out on its
+own and named under **Files not reviewed** in the summary; a 401 or 403 fails
+the review, since that means the token is wrong.
 
 Each finding is its own comment thread on the changed line, left **active** so
 a "resolve all comments" branch policy can hold the merge until someone deals
@@ -8267,7 +8271,7 @@ The findings are identical everywhere. What each host's API allows is not:
 |---|---|---|---|---|
 | Inline comments | one batched review | one discussion per finding | one batched review | one thread per finding |
 | Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place | a general thread, edited in place |
-| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids already posted |
+| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids it posted itself, once the token's identity is known |
 | Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | Incremental review of new commits | ✅ | not yet | ✗ no compare diff | not yet |
 
@@ -8543,8 +8547,8 @@ cannot do instead of failing at run time.
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | `SupportsIncremental`: review only new commits | ✅ | not yet | ✗ no compare diff | not yet |
-| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ | ✗ |
-| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | ✗ |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ | not yet |
+| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
 `tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
 and the GitLab, Gitea and Azure DevOps tests assert those adapters do **not**
