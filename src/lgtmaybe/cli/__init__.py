@@ -98,6 +98,12 @@ _log = get_logger(__name__)
 # and the run said so rather than failing or passing.
 SKIPPED_MARKER = "<!-- lgtmaybe-skipped -->"
 
+# Exit status of a LOCAL `review --fail-on <severity>` when a finding is at or
+# above the threshold — what lets a pre-commit / pre-push hook block on findings.
+# Distinct from 1 (the review itself failed, a ClickException) and 2 (a click
+# usage error), so a script can tell "found something" from "could not review".
+FAIL_ON_EXIT_CODE = 3
+
 
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
     """Whether the action run should post or refresh the change overview.
@@ -794,12 +800,17 @@ def execute_local_review(
     working: bool,
     uncommitted: bool = False,
     fmt: str,
+    fail_on: Severity | None = None,
 ) -> None:
     """Review the local git diff and print findings — no GitHub involvement.
 
     Builds the provider straight from config/runtime (no token, no gateway),
     runs the engine over the local diff, and prints the result. Any failure
     surfaces as a clean CLI error — there is no PR to post a notice to.
+
+    With *fail_on* (the explicit ``--fail-on`` flag, never the config file's
+    ``fail_on``, which is the Action's merge gate) the run exits
+    ``FAIL_ON_EXIT_CODE`` after printing when any finding is at or above it.
     """
     profiler.reset()
     try:
@@ -833,6 +844,12 @@ def execute_local_review(
         # than only under --profile (whose table already ends with this line —
         # hence the elif). stderr keeps --json / --agent output pipeable.
         click.echo(profiler.render_total(), err=True)
+    if fail_on is not None:
+        conclusion, title, _check_summary = _fail_on_check(findings, fail_on)
+        if conclusion == "failure":
+            # stderr: stdout is the deliverable (and may be --json).
+            click.echo(f"lgtmaybe: {title} (--fail-on)", err=True)
+            sys.exit(FAIL_ON_EXIT_CODE)
 
 
 def _write_profile_json(runtime: RuntimeOptions) -> None:
@@ -1320,6 +1337,7 @@ def config_cmd() -> None:
 from lgtmaybe.cli import commands as _commands  # noqa: E402,F401
 
 __all__ = [
+    "FAIL_ON_EXIT_CODE",
     "RuntimeOptions",
     "action_inputs",
     "build_provider_engine",

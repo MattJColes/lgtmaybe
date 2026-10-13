@@ -100,6 +100,7 @@ nav:
           - Calibrate reviews to your project: how-to/calibrate-reviews-to-your-project.md
           - Generate a change overview: how-to/generate-a-change-diagram.md
           - Fix findings with an AI agent: how-to/fix-findings-with-an-ai-agent.md
+          - Review before you commit: how-to/review-before-you-commit.md
           - Reduce review cost: how-to/reduce-review-cost.md
       - Maintainers:
           - Releasing: how-to/releasing.md
