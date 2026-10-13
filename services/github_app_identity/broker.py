@@ -298,7 +298,7 @@ class HttpGitHubAppClient:
     @retry(
         retry=retry_if_exception_type((httpx.TransportError, _RetryableGitHubRead)),
         stop=stop_after_attempt(3),
-        wait=wait_exponential_jitter(initial=0.1, max=1.0),
+        wait=wait_exponential_jitter(multiplier=0.1, max=1.0),
         reraise=True,
     )
     def _get(self, path: str, *, token: str) -> httpx.Response:
