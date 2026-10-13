@@ -607,6 +607,11 @@ coding agent can read and apply, for a local review-and-fix loop. See
 `lgtmaybe mcp` serves both shapes to a coding agent as MCP tool calls; see
 [Use from a coding agent over MCP](../how-to/use-from-a-coding-agent-over-mcp.md).
 
+`--format sarif` prints a SARIF 2.1.0 log for GitHub code scanning or an IDE
+SARIF viewer: one rule per lens, the severity folded onto SARIF's three levels,
+and the finding's fingerprint and identity as `partialFingerprints`. See
+[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
+
 ## See Also
 
 - [Getting Started](../tutorial/getting-started.md): run your first review
