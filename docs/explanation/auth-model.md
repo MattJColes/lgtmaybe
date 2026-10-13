@@ -65,16 +65,19 @@ When lgtmaybe starts, it resolves credentials for the selected provider:
 2. **Vertex** checks for ambient GCP credentials first: Workload Identity
    Federation, Application Default Credentials from
    `gcloud auth application-default login`, or a project set in the
-   environment. If there are none, lgtmaybe fails immediately with a message
+   environment. Failing those, it asks `google-auth`, which also finds the
+   metadata-server credentials of GCE, GKE Workload Identity, Cloud Run and
+   Cloud Build. If there are none, lgtmaybe fails immediately with a message
    explaining how to authenticate. It never falls back to a key.
 3. **Azure** always needs the resource endpoint (`AZURE_API_BASE` or
    `--api-base`). It uses a key when one is supplied (`AZURE_API_KEY` or
    `--api-key`). Otherwise it goes keyless and mints an Entra token from
    ambient credentials: GitHub OIDC federation in CI, or `az login` or a
-   managed identity locally. Keyless needs the `azure-identity` package
-   (`pip install 'lgtmaybe[azure]'`; the Action image includes it). With
-   neither a key nor an ambient credential, lgtmaybe fails with a message
-   naming both options.
+   managed identity locally. The token is refreshed as it nears expiry, so a
+   review that runs past an hour keeps working. Keyless needs the
+   `azure-identity` package (`pip install 'lgtmaybe[azure]'`; the Action image
+   includes it). With neither a key nor an ambient credential, lgtmaybe fails
+   at start-up with a message naming both options and the SDK's own reason.
 4. **ollama** needs no credentials. `--api-base` points it at the server and
    defaults to `http://localhost:11434`.
 5. **zai** (GLM / Zhipu AI) needs `ZAI_API_KEY` or `--api-key`. Without an

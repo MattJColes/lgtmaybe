@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -25,18 +26,42 @@ def _ambient_absent() -> bool:
     return False
 
 
-def _stub_azure_identity(
-    monkeypatch: pytest.MonkeyPatch,
-    credential: type[object],
-    unavailable_error: type[Exception],
-) -> None:
+class _ClientAuthenticationError(Exception):
+    """Stands in for ``azure.core.exceptions.ClientAuthenticationError``."""
+
+
+class _CredentialUnavailableError(_ClientAuthenticationError):
+    """azure-identity's subclass — raised by ONE credential in the chain, never by
+    ``DefaultAzureCredential`` itself, which wraps the whole chain's failure in the
+    base class."""
+
+
+def _stub_azure_identity(monkeypatch: pytest.MonkeyPatch, credential: type[object]) -> None:
+    """Install fake ``azure.identity`` / ``azure.core.exceptions`` modules.
+
+    The real exception hierarchy is mirrored, and ``get_bearer_token_provider``
+    behaves like the real one as far as the resolver can see: a callable that asks
+    the credential for a token each time it is called.
+    """
     azure = ModuleType("azure")
     identity = ModuleType("azure.identity")
-    identity.CredentialUnavailableError = unavailable_error  # type: ignore[attr-defined]
+    core = ModuleType("azure.core")
+    exceptions = ModuleType("azure.core.exceptions")
+    exceptions.ClientAuthenticationError = _ClientAuthenticationError  # type: ignore[attr-defined]
+    identity.CredentialUnavailableError = _CredentialUnavailableError  # type: ignore[attr-defined]
     identity.DefaultAzureCredential = credential  # type: ignore[attr-defined]
+
+    def get_bearer_token_provider(cred: Any, *scopes: str) -> Any:
+        return lambda: cred.get_token(*scopes).token
+
+    identity.get_bearer_token_provider = get_bearer_token_provider  # type: ignore[attr-defined]
     azure.identity = identity  # type: ignore[attr-defined]
+    azure.core = core  # type: ignore[attr-defined]
+    core.exceptions = exceptions  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "azure", azure)
     monkeypatch.setitem(sys.modules, "azure.identity", identity)
+    monkeypatch.setitem(sys.modules, "azure.core", core)
+    monkeypatch.setitem(sys.modules, "azure.core.exceptions", exceptions)
 
 
 class TestBedrock:
@@ -184,37 +209,53 @@ class TestZai:
 
 
 class TestAzure:
-    def test_default_token_returns_none_when_azure_credentials_are_unavailable(
+    def test_no_ambient_credential_fails_with_the_keyless_guidance(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        class CredentialUnavailableError(Exception):
-            pass
+        """DefaultAzureCredential raises the BASE ClientAuthenticationError when no
+        credential in its chain works — the guidance must still be reached, with
+        the chain's own detail (the AADSTS code) kept beside it."""
+        monkeypatch.delenv("AZURE_API_KEY", raising=False)
 
-        class UnavailableCredential:
-            def get_token(self, scope: str) -> None:
-                raise CredentialUnavailableError("no ambient credential")
+        class NoCredential:
+            def get_token(self, scope: str) -> Any:
+                raise _ClientAuthenticationError(
+                    "DefaultAzureCredential failed to retrieve a token. "
+                    "AADSTS700213: no matching federated identity"
+                )
 
-        _stub_azure_identity(monkeypatch, UnavailableCredential, CredentialUnavailableError)
+        _stub_azure_identity(monkeypatch, NoCredential)
 
-        assert credentials._default_azure_token() is None
+        with pytest.raises(ValueError, match="AZURE_API_KEY") as exc_info:
+            resolve_credentials(Provider.azure, api_base="https://my-resource.openai.azure.com")
+        msg = str(exc_info.value)
+        assert "id-token: write" in msg
+        assert "federated credential" in msg
+        assert "AADSTS700213" in msg
 
-    def test_default_token_preserves_azure_authentication_failure(
+    def test_keyless_token_is_refreshed_per_request_not_fetched_once(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        class CredentialUnavailableError(Exception):
-            pass
+        """An Entra token lasts ~an hour and a review can outlast it: what reaches
+        litellm is a provider it calls for a fresh token, not one fixed string."""
+        monkeypatch.delenv("AZURE_API_KEY", raising=False)
+        issued = iter(["token-1", "token-2", "token-3"])
 
-        class ClientAuthenticationError(Exception):
-            pass
+        class RotatingCredential:
+            def get_token(self, scope: str) -> Any:
+                assert scope == "https://cognitiveservices.azure.com/.default"
+                return SimpleNamespace(token=next(issued))
 
-        class MisconfiguredCredential:
-            def get_token(self, scope: str) -> None:
-                raise ClientAuthenticationError("AADSTS700213: no matching federated identity")
+        _stub_azure_identity(monkeypatch, RotatingCredential)
 
-        _stub_azure_identity(monkeypatch, MisconfiguredCredential, CredentialUnavailableError)
+        config = resolve_credentials(
+            Provider.azure, api_base="https://my-resource.openai.azure.com"
+        )
 
-        with pytest.raises(ClientAuthenticationError, match="AADSTS700213"):
-            credentials._default_azure_token()
+        assert config.azure_ad_token_provider is not None
+        # The up-front probe spent token-1, so missing creds fail at start-up.
+        assert config.azure_ad_token_provider() == "token-2"
+        assert config.azure_ad_token_provider() == "token-3"
 
     def test_azure_with_api_key_and_base_resolves(self) -> None:
         config = resolve_credentials(
@@ -224,7 +265,7 @@ class TestAzure:
         )
         assert config.api_key == "azure-secret"
         assert config.api_base == "https://my-resource.openai.azure.com"
-        assert config.azure_ad_token is None
+        assert config.azure_ad_token_provider is None
 
     def test_azure_reads_key_and_base_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("AZURE_API_KEY", "env-secret")
@@ -250,7 +291,8 @@ class TestAzure:
             azure_token_provider=lambda: "ad-token-xyz",
         )
         assert config.api_key is None
-        assert config.azure_ad_token == "ad-token-xyz"
+        assert config.azure_ad_token_provider is not None
+        assert config.azure_ad_token_provider() == "ad-token-xyz"
         assert config.api_base == "https://my-resource.openai.azure.com"
 
     def test_azure_key_mode_preferred_over_keyless(self) -> None:
@@ -266,21 +308,7 @@ class TestAzure:
             azure_token_provider=_must_not_run,
         )
         assert config.api_key == "azure-secret"
-        assert config.azure_ad_token is None
-
-    def test_azure_no_key_and_no_ambient_creds_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("AZURE_API_KEY", raising=False)
-        with pytest.raises(ValueError, match="azure") as exc_info:
-            resolve_credentials(
-                Provider.azure,
-                api_base="https://my-resource.openai.azure.com",
-                azure_token_provider=lambda: None,
-            )
-        msg = str(exc_info.value)
-        assert "AZURE_API_KEY" in msg
-        assert "OIDC" in msg or "keyless" in msg.lower()
+        assert config.azure_ad_token_provider is None
 
 
 class TestOpenAICompatible:
@@ -360,8 +388,49 @@ def _clear(monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], home: str) -
     monkeypatch.setenv("USERPROFILE", home)
 
 
+def _stub_google_auth(monkeypatch: pytest.MonkeyPatch, default: Any) -> None:
+    """Install a fake ``google.auth`` whose ``default()`` is ``default``."""
+    google = ModuleType("google")
+    auth = ModuleType("google.auth")
+    auth.default = default  # type: ignore[attr-defined]
+    google.auth = auth  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "google", google)
+    monkeypatch.setitem(sys.modules, "google.auth", auth)
+
+
 class TestDefaultGcpProbe:
     """The real ambient-GCP probe must recognise the documented local Vertex setup."""
+
+    @pytest.fixture(autouse=True)
+    def _no_google_auth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # google-auth is the vertex extra: absent unless a test installs a fake,
+        # so a developer's real GCP login can never answer for the probe.
+        monkeypatch.setitem(sys.modules, "google.auth", None)
+
+    def test_metadata_server_credentials_are_detected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """GCE / GKE Workload Identity / Cloud Run set no env var and write no ADC
+        file; google.auth finds them on the metadata server, so defer to it."""
+        _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
+        monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "empty"))
+        _stub_google_auth(monkeypatch, lambda: (object(), "metadata-project"))
+
+        assert _default_gcp_probe() is True
+        assert resolve_credentials(Provider.vertex).api_key is None
+
+    def test_google_auth_finding_nothing_is_absent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
+        monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "empty"))
+
+        def no_credentials() -> Any:
+            raise RuntimeError("DefaultCredentialsError: could not find credentials")
+
+        _stub_google_auth(monkeypatch, no_credentials)
+
+        assert _default_gcp_probe() is False
 
     def test_vertexai_project_alone_is_detected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path

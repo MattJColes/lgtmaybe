@@ -96,19 +96,37 @@ class TestBuildProvider:
         assert provider.default_opts.get("api_base") == "https://my-resource.openai.azure.com"
         assert provider.model == "azure/gpt-4o"
 
-    def test_build_provider_azure_keyless_carries_ad_token(self) -> None:
+    def test_build_provider_azure_keyless_carries_ad_token_provider(self) -> None:
+        """Keyless azure hands litellm a token PROVIDER, called per request, so a
+        review that outlives one Entra token (~an hour) is not 401'd mid-run."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
         from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+        def token_provider() -> str:
+            return "ad-token-xyz"
 
         provider = build_provider(
             Provider.azure,
             "gpt-4o",
             api_base="https://my-resource.openai.azure.com",
-            azure_ad_token="ad-token-xyz",
+            azure_ad_token_provider=token_provider,
         )
         assert isinstance(provider, LiteLLMProvider)
-        assert provider.default_opts.get("azure_ad_token") == "ad-token-xyz"
         assert provider.default_opts.get("api_base") == "https://my-resource.openai.azure.com"
         assert "api_key" not in provider.default_opts
+        assert "azure_ad_token" not in provider.default_opts
+
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="[]"))],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+        )
+        with patch("litellm.completion", return_value=response) as mock_completion:
+            provider.complete([{"role": "user", "content": "hi"}], model="gpt-4o")
+
+        assert mock_completion.call_args.kwargs["azure_ad_token_provider"] is token_provider
+        assert "azure_ad_token" not in mock_completion.call_args.kwargs
 
     def test_build_provider_openai_compatible_carries_key_and_base(self) -> None:
         from lgtmaybe.providers.litellm_provider import LiteLLMProvider

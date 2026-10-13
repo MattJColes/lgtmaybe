@@ -123,7 +123,8 @@ credentials; lgtmaybe ignores `--api-key` for it.
 
 **`vertex requires ambient GCP credentials`**: lgtmaybe found no sign of GCP
 credentials (`GOOGLE_APPLICATION_CREDENTIALS`, a project variable such as
-`GOOGLE_CLOUD_PROJECT` or `VERTEXAI_PROJECT`, or the ADC file gcloud writes). Run `gcloud auth application-default login`, set
+`GOOGLE_CLOUD_PROJECT` or `VERTEXAI_PROJECT`, the ADC file gcloud writes, or
+metadata-server credentials, which need the `google-auth` package). Run `gcloud auth application-default login`, set
 `GOOGLE_APPLICATION_CREDENTIALS`, or (in CI) check the WIF inputs.
 
 **`UNAUTHENTICATED`**: ADC credentials are missing or expired. Run
