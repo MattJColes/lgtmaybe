@@ -1139,7 +1139,11 @@ def _post_failure(github: ReviewGateway, exc: Exception) -> None:
 
 
 def _post_notice(github: ReviewGateway, notice: str) -> None:
-    """Post a findings-free notice as the review body AND a PR comment; never raise."""
+    """Post a findings-free notice as the review body AND a PR comment; never raise.
+
+    The body write is skipped when it would overwrite a completed (watermarked)
+    summary; the comment alone then carries the notice.
+    """
     try:
         # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next
@@ -1147,7 +1151,13 @@ def _post_notice(github: ReviewGateway, notice: str) -> None:
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
             mark_reviewed(None)
-        github.post_review([], notice)
+        # A summary carrying a watermark is the record of the last head that WAS
+        # reviewed — its demoted findings and the watermark itself. Writing the
+        # notice over it erased both; the PR comment below discloses the
+        # failure instead, and the watermark stays where that success left it.
+        last_reviewed = getattr(github, "last_reviewed_sha", None)
+        if last_reviewed is None or last_reviewed() is None:
+            github.post_review([], notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.
