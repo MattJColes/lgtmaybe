@@ -760,6 +760,24 @@ class TestInputBudget:
         built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=8192, max_tokens=1024)
         assert built.input_budget() == 8192 - 1024
 
+    @pytest.mark.parametrize("num_ctx", [8192, 16384])
+    def test_a_window_the_output_ceiling_fills_still_gets_a_budget(
+        self, num_ctx: int, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The default 16,384-token ceiling leaves nothing of an 8k or 16k
+        window. Answering None there reads as "no opinion", and the engine keeps
+        its 100k default — 100k-token batches into an 8k window. A small window
+        is the case the fit exists for, so it still gets a positive cap."""
+        built = build_provider(Provider.ollama, "qwen3:8b", num_ctx=num_ctx)
+        assert built.default_opts["max_tokens"] >= num_ctx
+
+        with caplog.at_level(logging.WARNING, logger="lgtmaybe.providers.litellm_provider"):
+            budget = built.input_budget()
+
+        assert budget is not None
+        assert 0 < budget <= num_ctx
+        assert any("max_tokens" in r.getMessage() for r in caplog.records)
+
     def test_hosted_budget_comes_from_the_model_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import litellm
 
