@@ -333,6 +333,8 @@ The adapter SHALL expose `input_budget()`: ollama's `num_ctx` when it sends
 one, else the `max_input_tokens` litellm's model map records for the resolved
 model string, less the output ceiling the adapter will send; None when the map
 has no entry or no window, so an unknown model never shrinks a budget. A
+ceiling that fills the whole window SHALL cap the budget at half the window,
+with a warning naming both, never None. A
 prompt the backend refuses for its window SHALL be raised as
 `ProviderInputTooLarge` — never retried in place, never stamped unrecoverable,
 and handed to a caller that owns the remedy exactly as a truncation is.
@@ -341,6 +343,10 @@ and handed to a caller that owns the remedy exactly as a truncation is.
 #### Scenario: an ollama model
 - **WHEN** the factory sent `num_ctx` and a finite `max_tokens`
 - **THEN** the budget is their difference, whatever the map says of the model
+
+#### Scenario: the output ceiling fills the window
+- **WHEN** `max_tokens` is at least `num_ctx` (8192 under the default 16,384)
+- **THEN** the budget is half the window and a warning names both numbers
 
 #### Scenario: the backend refuses the prompt
 - **WHEN** litellm raises `ContextWindowExceededError`

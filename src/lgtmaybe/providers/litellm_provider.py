@@ -859,6 +859,12 @@ class LiteLLMProvider:
         subtracted, because the backends reserve it: prompt plus ``max_tokens``
         must fit the window. None when the map has never heard of the model or
         records no window for it — "no opinion", so the engine keeps its default.
+
+        A ceiling that fills the whole window (ollama's ``num_ctx`` 8192 under
+        the default 16,384 ``max_tokens``) is a misconfiguration, not "no
+        opinion": answering None there let the engine keep its 100k default and
+        send 100k-token batches into an 8k window. Half the window is the cap
+        instead, with a warning naming both numbers.
         """
         window: Any = self.default_opts.get("num_ctx")
         if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
@@ -867,7 +873,14 @@ class LiteLLMProvider:
             return None
         ceiling = self.default_opts.get("max_tokens")
         reserve = ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) else 0
-        return max(0, window - max(0, reserve)) or None
+        spare = int(window) - max(0, reserve)
+        if spare > 0:
+            return spare
+        _log.warning(
+            "max_tokens fills the model's context window; capping the prompt at half of it",
+            extra={"max_tokens": reserve, "window": window},
+        )
+        return int(window) // 2
 
     def _disable_response_format(self, model: str, why: str) -> None:
         """Record — and announce — that *model* will not take the schema.
