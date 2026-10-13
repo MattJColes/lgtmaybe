@@ -620,6 +620,7 @@ def _finding_discussion(thread_id: str, path: str, *, line: int = 2, head: str =
                 "body": f"finding\n<!-- lgtmaybe-finding:{thread_id[-1] * 12} -->",
                 "resolved": False,
                 "position": {"new_path": path, "new_line": line, "head_sha": head},
+                "author": BOT,
             }
         ],
     }

@@ -440,9 +440,11 @@ deprecation), and artefacts (tests, documentation). The same four run on every
 provider; worker count changes only how they are scheduled. `preset: full` runs
 each category as its own call, with a worked example of its own finding type.
 
-Their findings are merged and de-duplicated. Security, correctness,
-deprecation, and performance findings without a concrete `failure_scenario` are
-dropped. A self-reflection pass then audits the rest and drops low-confidence
+Security, correctness, deprecation, and performance findings without a concrete
+`failure_scenario` are dropped, as are `fast` code-health findings the model left
+unattributed (any of them may be a performance or deprecation one), and the rest
+are merged and de-duplicated. A
+self-reflection pass then audits the rest and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 
 The reviewer only sees the diff and some surrounding context: a *slice* of the
@@ -574,7 +576,9 @@ silently: any error is posted back to the PR as a short comment.
 `lgtmaybe review` runs the same pipeline over your local `git` diff and prints
 the findings. It posts nothing and needs no GitHub token. By default it diffs
 the current branch against the remote primary branch (`origin/HEAD`, falling
-back to `origin/main`/`origin/master`, then a local `main`/`master`).
+back to `origin/main`/`origin/master`, then a local `main`/`master`). An empty
+diff makes no model call; when none of those branches exists it exits non-zero
+and asks for `--base`.
 
 - `--working` reviews the whole worktree (branch commits plus uncommitted
   edits) against that same base.

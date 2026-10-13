@@ -1427,17 +1427,21 @@ for why it matters.
 
 1. **Create a token.** Sign in as a dedicated account with write access to the
    reviewed repository only. In Gitea, go to *Settings → Applications → Access
-   Tokens* and create a token with the `write:repository` and `write:issue`
-   scopes. Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
+   Tokens* and create a token with the `write:repository`, `write:issue` and
+   `read:user` scopes (`read:user` lets lgtmaybe tell its own comments apart). Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
    Gitea refuses secret names that start with `GITEA_` or `GITHUB_`, and the
    example maps this secret to the `GITEA_TOKEN` variable lgtmaybe reads.
 
-    You need both. `write:repository` also covers reading, and Gitea files the
+    You need all three. `write:repository` also covers reading, and Gitea files the
     review endpoint lgtmaybe posts inline comments through
     (`POST /pulls/{index}/reviews`) and the commit-status endpoint under the
     *repository* category, not *issue*, so a token with only `read:repository`
     is refused on the one call the setup exists to make. `write:issue` covers
-    the summary comment and the PR labels.
+    the summary comment and the PR labels. `read:user` lets lgtmaybe ask Gitea
+    who the token is (`GET /user`): only comments that identity wrote count as
+    lgtmaybe's, so nobody else can edit the summary through us or paste a hidden
+    id that hides a finding. Without it every re-run posts a fresh summary and
+    re-posts its findings rather than trusting comments it cannot attribute.
 
 2. **Add a provider key.** Add the API key for whichever model you want as a
    second secret, for example `ANTHROPIC_API_KEY`. Use a key with a spend
@@ -4043,7 +4047,8 @@ Adds labels derived from the finished review, with no extra model calls:
 
 - `review-effort/1` to `review-effort/5`: a size estimate from the changed lines.
 - `possible-security-issue`: a high or critical finding was posted by the
-  security lens or by a security scanner (gitleaks, bandit, semgrep).
+  security lens or by a security scanner (gitleaks, bandit, semgrep, zizmor,
+  osv-scanner).
 - `consider-splitting`: the diff spans many unrelated top-level directories.
 - `risk/<level>`: the [risk of change](../explanation/risk-of-change.md)
   verdict, when `risk` is on. Only one level is applied at a time.
@@ -8403,9 +8408,11 @@ deprecation), and artefacts (tests, documentation). The same four run on every
 provider; worker count changes only how they are scheduled. `preset: full` runs
 each category as its own call, with a worked example of its own finding type.
 
-Their findings are merged and de-duplicated. Security, correctness,
-deprecation, and performance findings without a concrete `failure_scenario` are
-dropped. A self-reflection pass then audits the rest and drops low-confidence
+Security, correctness, deprecation, and performance findings without a concrete
+`failure_scenario` are dropped, as are `fast` code-health findings the model left
+unattributed (any of them may be a performance or deprecation one), and the rest
+are merged and de-duplicated. A
+self-reflection pass then audits the rest and drops low-confidence
 findings, so the model's first guesses are filtered before anything is posted.
 
 The reviewer only sees the diff and some surrounding context: a *slice* of the
@@ -8537,7 +8544,9 @@ silently: any error is posted back to the PR as a short comment.
 `lgtmaybe review` runs the same pipeline over your local `git` diff and prints
 the findings. It posts nothing and needs no GitHub token. By default it diffs
 the current branch against the remote primary branch (`origin/HEAD`, falling
-back to `origin/main`/`origin/master`, then a local `main`/`master`).
+back to `origin/main`/`origin/master`, then a local `main`/`master`). An empty
+diff makes no model call; when none of those branches exists it exits non-zero
+and asks for `--base`.
 
 - `--working` reviews the whole worktree (branch commits plus uncommitted
   edits) against that same base.
@@ -8839,8 +8848,8 @@ predefined `SYSTEM_*` and `BUILD_*` variables.
 The engine runs a pipeline of composable stages:
 
 ```
-fetch → redact → compress → prompt → parse → re-anchor → merge/dedupe
-      → suppress → evidence gate → reflect → filter → post
+fetch → redact → compress → prompt → parse → re-anchor → suppress
+      → evidence gate → merge/dedupe → reflect → filter → post
 ```
 
 The prompt/parse stage fans out, one concurrent model call per review lens,
@@ -8857,7 +8866,7 @@ flowchart TD
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    anchor --> dedupe["merge / dedupe"] --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+    anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
 The four lens calls shown are the default `fast` grouping, and the same four run
@@ -8933,22 +8942,25 @@ matches the PR) and any custom lenses join the same fan-out.
    `high`) and is then demoted to the review body instead of posted on a
    guessed line.
 
-5. **merge/dedupe**: findings from every lens are merged and de-duplicated
-   (`_dedupe`, keyed on path/line/side).
-
-6. **suppress**: findings a team has marked known-fine are dropped before they
+5. **suppress**: findings a team has marked known-fine are dropped before they
    cost any reflection tokens: fingerprints in `ignore_fingerprints`, a
    `# lgtmaybe: ignore` pragma on (or just above) the flagged line, and findings
    a reviewer reacted 👎 to on an earlier run (`learn_feedback`). Neither a 👎
    nor a pragma (which the PR's author writes) suppresses a high or critical
    security finding; only `ignore_fingerprints` in trusted config can.
 
-7. **evidence gate**: security, correctness, deprecation and performance
+6. **evidence gate**: security, correctness, deprecation and performance
    findings must carry a concrete `failure_scenario`: the trigger, the changed
    behaviour, and the observable impact. The rule applies regardless of the
    severity the model chose, so lowering a finding to `low` cannot bypass it.
    Gap and maintainability findings (tests, documentation, complexity) do not
-   need a runtime failure.
+   need a runtime failure; a fast-preset code-health finding the model left
+   unattributed does, since it may be a performance or deprecation one.
+
+7. **merge/dedupe**: findings from every lens are merged and de-duplicated
+   (`_dedupe`, keyed on path/line/side; scan findings on their title too, so
+   distinct tool hits never merge). It runs after the two filters above, so a
+   copy they would drop never displaces the finding that shares its line.
 
 8. **reflect**: a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings, scores each 0-10, and drops the ones it marks
@@ -9294,7 +9306,7 @@ the change-request URL:
 |---|---|---|
 | GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is enough |
 | GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
-| Gitea | `GITEA_TOKEN` | A token with `write:repository` and `write:issue` |
+| Gitea | `GITEA_TOKEN` | A token with `write:repository`, `write:issue` and `read:user` |
 | Azure DevOps | `AZURE_DEVOPS_TOKEN`, else `SYSTEM_ACCESSTOKEN` | A personal access token with Code (Read & write) scope, or the pipeline's own token with *Contribute to pull requests* granted to the build service |
 
 These are always tokens. There is no keyless path to a code host, and lgtmaybe

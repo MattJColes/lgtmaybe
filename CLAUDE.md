@@ -353,8 +353,10 @@ pattern, event bus, plugin framework.
      never moves it) and reviews only the compare-API diff of the commits since
      (`rest_gateway.compare_diff`, read-only). Falls back to a full review on
      no-watermark / force-push (compare not "ahead") / same head / API failure.
-     New findings post as individual review comments (fingerprint-deduped —
-     the review-update endpoint can't add inline comments); resolve-on-fix is
+     New findings ride the new commit's one native review (deduped against
+     our own already-posted ids; a 422 falls back to one comment each); a
+     same-commit re-run posts them as individual review comments, because the
+     review-update endpoint can't add inline comments; resolve-on-fix is
      scoped to the increment's files (`set_incremental_scope`) so an
      un-re-reviewed finding is never spuriously resolved; LEFT-side findings
      are dropped (their line numbers are relative to the last-reviewed head,

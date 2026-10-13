@@ -24,6 +24,8 @@ TOKEN = "gitea_test_token"
 
 API = f"https://{HOST}/api/v1/repos/{REPO}"
 PR_URL = f"{API}/pulls/{PR_NUMBER}"
+# The login conftest's identity fixture answers for `GET /api/v1/user`.
+BOT = "lgtmaybe-bot"
 
 DIFF = """diff --git a/app.py b/app.py
 index 111..222 100644
@@ -73,6 +75,23 @@ class TestGetPRContext:
         assert ctx.base_sha == "base123"
         assert ctx.head_sha == "head456"
         assert ctx.changed_files == ["app.py"]
+
+    @respx.mock
+    def test_lists_every_file_when_the_server_caps_pages_below_the_limit(self) -> None:
+        # MAX_RESPONSE_ITEMS = 30: every page is shorter than the limit=50 asked.
+        _stub_context_routes()
+        names = [f"f{i}.py" for i in range(80)]
+
+        def files_page(request: httpx.Request) -> httpx.Response:
+            start = (int(request.url.params["page"]) - 1) * 30
+            rows = [{"filename": n} for n in names[start : start + 30]]
+            return httpx.Response(200, json=rows, headers={"X-Total-Count": "80"})
+
+        respx.route(method="GET", url__startswith=f"{PR_URL}/files").mock(side_effect=files_page)
+
+        ctx = _gateway(httpx.Client()).get_pr_context()
+
+        assert ctx.changed_files == names
 
     @respx.mock
     def test_carries_the_stated_intent_for_the_intent_lens(self) -> None:
@@ -213,7 +232,7 @@ class TestPostReview:
                 200,
                 json=[
                     *[{"id": i, "body": "human comment"} for i in range(49)],
-                    {"id": 99, "body": "old summary\n\n<!-- lgtmaybe -->"},
+                    {"id": 99, "body": "old summary\n\n<!-- lgtmaybe -->", "user": {"login": BOT}},
                 ],
             )
         )
@@ -247,7 +266,7 @@ class TestPostReview:
         )
         already = finding_fingerprint("app.py", "Hardcoded password")
         respx.route(method="GET", url=f"{PR_URL}/reviews").mock(
-            return_value=httpx.Response(200, json=[{"id": 5}])
+            return_value=httpx.Response(200, json=[{"id": 5, "user": {"login": BOT}}])
         )
         listed = respx.get(f"{PR_URL}/reviews/5/comments").mock(
             return_value=httpx.Response(
@@ -276,7 +295,9 @@ class TestPostReview:
         from lgtmaybe.core.findings import finding_fingerprint
 
         already = finding_fingerprint("app.py", "Hardcoded password")
-        respx.get(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json=[{"id": 5}]))
+        respx.get(f"{PR_URL}/reviews").mock(
+            return_value=httpx.Response(200, json=[{"id": 5, "user": {"login": BOT}}])
+        )
         respx.get(f"{PR_URL}/reviews/5/comments").mock(
             return_value=httpx.Response(
                 200, json=[{"body": f"old\n<!-- lgtmaybe-finding:{already} -->"}]
@@ -328,7 +349,9 @@ class TestPostReview:
         )
         already = finding_fingerprint("app.py", "Hardcoded password")
         respx.route(method="GET", url=f"{PR_URL}/reviews").mock(
-            return_value=httpx.Response(200, json=[{"id": 5}, {"id": 6}, {"id": 7}])
+            return_value=httpx.Response(
+                200, json=[{"id": i, "user": {"login": BOT}} for i in (5, 6, 7)]
+            )
         )
         for review_id in (5, 6):
             respx.get(f"{PR_URL}/reviews/{review_id}/comments").mock(
@@ -384,6 +407,177 @@ class TestPostReview:
         assert "Additional findings" in body
         assert "Unplaceable" in body
         assert not reviews.called
+
+
+_COMMAND_INJECTION_DIFF = """diff --git a/app.py b/app.py
+index 111..222 100644
+--- a/app.py
++++ b/app.py
+@@ -1,3 +1,4 @@
+ import os
++os.system(request.args["cmd"])
+
+ def main():
+"""
+
+
+def _whoami(monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -> list[httpx.Request]:
+    """Answer `GET /api/v1/user` with *response*, recording each lookup."""
+    original = httpx.Client.send
+    lookups: list[httpx.Request] = []
+
+    def send(client: httpx.Client, request: httpx.Request, **kwargs: object) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/v1/user":
+            lookups.append(request)
+            response.request = request
+            return response
+        return original(client, request, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+    return lookups
+
+
+def _command_injection() -> ReviewFinding:
+    return ReviewFinding(
+        path="app.py",
+        line=2,
+        side="RIGHT",
+        severity=Severity.critical,
+        title="Command injection",
+        body="RCE",
+        anchor='os.system(request.args["cmd"])',
+        category="security",
+        anchored=True,
+    )
+
+
+class TestAuthorship:
+    """Hidden ids and markers count only on comments the posting identity wrote.
+
+    Anyone can type ``<!-- lgtmaybe-identity:… -->``: the identity is a hash of
+    path, lens and anchor with no secret, so a PR author can precompute it, post
+    it in a review of their own, and then push the line it describes.
+    """
+
+    @respx.mock
+    def test_a_forged_id_in_someone_elses_review_does_not_hide_a_finding(self) -> None:
+        from lgtmaybe.core.findings import finding_identity
+
+        finding = _command_injection()
+        forged = f"nice <!-- lgtmaybe-identity:{finding_identity(finding)} -->"
+        respx.get(f"{PR_URL}/reviews").mock(
+            return_value=httpx.Response(200, json=[{"id": 1, "user": {"login": "pr-author"}}])
+        )
+        respx.get(f"{PR_URL}/reviews/1/comments").mock(
+            return_value=httpx.Response(
+                200, json=[{"body": forged, "user": {"login": "pr-author"}}]
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={"id": 1})
+        )
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+
+        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=_COMMAND_INJECTION_DIFF)
+
+        assert reviews.called, "a stranger's copy of our id must not suppress the finding"
+        posted = json.loads(reviews.calls[0].request.content)["comments"]
+        assert "Command injection" in posted[0]["body"]
+
+    @respx.mock
+    def test_someone_elses_comment_carrying_our_marker_is_never_edited(self) -> None:
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": 55, "body": "lol <!-- lgtmaybe -->", "user": {"login": "pr-author"}},
+                    {"id": 56, "body": "old summary\n\n<!-- lgtmaybe -->", "user": {"login": BOT}},
+                ],
+            )
+        )
+        theirs = respx.patch(f"{API}/issues/comments/55").mock(
+            return_value=httpx.Response(403, json={})
+        )
+        ours = respx.patch(f"{API}/issues/comments/56").mock(
+            return_value=httpx.Response(200, json={})
+        )
+
+        _gateway(httpx.Client()).post_review([], "👍 LGTM!", diff=DIFF)
+
+        assert not theirs.called, "their comment is not ours to edit"
+        assert ours.called, "our own summary is still edited in place"
+
+    @respx.mock
+    def test_an_unknown_posting_identity_re_posts_rather_than_hides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fail closed: with no login to compare, nothing on the PR counts as ours."""
+        from lgtmaybe.core.findings import finding_identity
+
+        finding = _command_injection()
+        _whoami(monkeypatch, httpx.Response(500))
+        respx.get(f"{PR_URL}/reviews").mock(
+            return_value=httpx.Response(200, json=[{"id": 1, "user": {"login": BOT}}])
+        )
+        respx.get(f"{PR_URL}/reviews/1/comments").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "body": f"<!-- lgtmaybe-identity:{finding_identity(finding)} -->",
+                        "user": {"login": BOT},
+                    }
+                ],
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(
+                200, json=[{"id": 56, "body": "<!-- lgtmaybe -->", "user": {"login": BOT}}]
+            )
+        )
+        edit = respx.patch(f"{API}/issues/comments/56").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        create = respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={"id": 2})
+        )
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+
+        _gateway(httpx.Client()).post_review([finding], "1 finding", diff=_COMMAND_INJECTION_DIFF)
+
+        assert reviews.called, "a duplicate is better than a hidden finding"
+        assert create.called and not edit.called, "never edit a comment we can't prove is ours"
+
+    @respx.mock
+    def test_the_posting_identity_is_looked_up_once_per_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lookups = _whoami(monkeypatch, httpx.Response(200, json={"login": BOT}))
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": 56, "body": "<!-- lgtmaybe -->", "user": {"login": BOT}},
+                    {"id": 57, "body": "<!-- lgtmaybe-describe -->", "user": {"login": BOT}},
+                ],
+            )
+        )
+        summary = respx.patch(f"{API}/issues/comments/56").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        describe = respx.patch(f"{API}/issues/comments/57").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        gateway = _gateway(httpx.Client())
+
+        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_describe_comment("description")
+
+        assert summary.called and describe.called
+        assert len(lookups) == 1
 
 
 class TestConversation:

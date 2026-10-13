@@ -33,7 +33,7 @@ from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview,
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
-from lgtmaybe.core.logging import get_logger
+from lgtmaybe.core.logging import get_logger, register_secret
 from lgtmaybe.core.models import (
     PRContext,
     Provider,
@@ -66,7 +66,7 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
+from lgtmaybe.local import _default_base, local_file_reader, local_pr_context, local_repo_root
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -491,6 +491,7 @@ def build_review_context(
             "automatically)."
         )
     _token_var, token = picked
+    register_secret(token)
 
     github = build_gateway(located, token, cfg)
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a
@@ -866,6 +867,10 @@ def run_local_review(
         cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
     )
     ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    # An empty diff has nothing to review: no model call, and never a 👍 LGTM.
+    # Checked after the provider is built so a config error still surfaces first.
+    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+        return [], nothing
     return engine.review(ctx, cfg)
 
 
@@ -954,14 +959,47 @@ def execute_local_diagram(
     """
     from lgtmaybe.engine.overview import build_overview
 
+    ctx = _local_context(base=base, working=working, uncommitted=uncommitted)
+    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+        click.echo(nothing)
+        return
     try:
         _engine, provider = build_provider_engine(cfg, runtime)
-        ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
         body = build_overview(ctx, cfg, provider)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
     click.echo(flatten_details(body))
+
+
+def _local_context(*, base: str | None, working: bool, uncommitted: bool) -> PRContext:
+    """The local diff's context, with git failures surfaced as a clean CLI error."""
+    try:
+        return local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _no_local_changes(ctx: PRContext, *, base: str | None, uncommitted: bool) -> str | None:
+    """What to say when the local diff is empty, or None when there is a diff.
+
+    An empty comparison has nothing to review, so it costs no model call and is
+    never reported as 👍 LGTM. When no base was given and none of the default
+    branches exists, the base falls back to HEAD — a comparison with itself, so
+    the emptiness says nothing about the change and the command fails, naming
+    the flag that fixes it. A real base with no diff is a clean exit.
+    """
+    if ctx.diff.strip():
+        return None
+    if uncommitted:
+        return "no uncommitted changes vs HEAD — nothing to review"
+    resolved = base or _default_base(None)
+    if base is None and resolved == "HEAD":
+        raise click.ClickException(
+            "no changes vs HEAD — found no origin/HEAD, origin/main, origin/master, "
+            "main or master to compare against; pass --base <branch>"
+        )
+    return f"no changes vs {resolved} — nothing to review; pass --base <branch> to compare another"
 
 
 def _build_context_or_fail(
@@ -1120,7 +1158,11 @@ def _post_failure(github: ReviewGateway, exc: Exception) -> None:
 
 
 def _post_notice(github: ReviewGateway, notice: str) -> None:
-    """Post a findings-free notice as the review body AND a PR comment; never raise."""
+    """Post a findings-free notice as the review body AND a PR comment; never raise.
+
+    The body write is skipped when it would overwrite a completed (watermarked)
+    summary; the comment alone then carries the notice.
+    """
     try:
         # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next
@@ -1128,7 +1170,13 @@ def _post_notice(github: ReviewGateway, notice: str) -> None:
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
             mark_reviewed(None)
-        github.post_review([], notice)
+        # A summary carrying a watermark is the record of the last head that WAS
+        # reviewed — its demoted findings and the watermark itself. Writing the
+        # notice over it erased both; the PR comment below discloses the
+        # failure instead, and the watermark stays where that success left it.
+        last_reviewed = getattr(github, "last_reviewed_sha", None)
+        if last_reviewed is None or last_reviewed() is None:
+            github.post_review([], notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.

@@ -268,6 +268,17 @@ def test_security_plus_data_migration_is_critical(tmp_path: Path) -> None:
     assert assess_risk(ctx, _cfg(), tmp_path).level == "critical"
 
 
+def test_a_word_containing_login_is_not_a_security_area(tmp_path: Path) -> None:
+    ctx = _ctx(("src/pages/BlogIndex.tsx", 1), ("migrations/0042_drop.sql", 1))
+    assert assess_risk(ctx, _cfg(), tmp_path).level == "high", "migration alone, not critical"
+
+
+def test_a_camel_case_auth_file_is_a_security_area(tmp_path: Path) -> None:
+    result = assess_risk(_ctx(("src/middleware/authMiddleware.ts", 1)), _cfg(), tmp_path)
+    assert result.level == "high"
+    assert "touches security: `src/middleware/authMiddleware.ts`" in _texts(result)
+
+
 def test_a_medium_area_raises_to_medium(tmp_path: Path) -> None:
     result = assess_risk(_ctx(("pyproject.toml", 1)), _cfg(), tmp_path)
     assert result.level == "medium"
@@ -365,6 +376,12 @@ def test_reasons_rank_by_level_then_factor(tmp_path: Path) -> None:
 def test_backticks_in_paths_are_stripped(tmp_path: Path) -> None:
     result = assess_risk(_ctx(("infra/`x`.tf", 1)), _cfg(), tmp_path)
     assert _texts(result) == ["touches infrastructure: `infra/x.tf`"]
+
+
+def test_a_newline_in_a_path_cannot_inject_a_heading(tmp_path: Path) -> None:
+    """Git allows a newline in a filename; the reason must stay one line."""
+    result = assess_risk(_ctx(("infra/x\n\n## Approved\n\n.tf", 1)), _cfg(), tmp_path)
+    assert _texts(result) == ["touches infrastructure: `infra/x ## Approved .tf`"]
 
 
 @pytest.mark.parametrize(

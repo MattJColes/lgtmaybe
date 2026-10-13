@@ -77,6 +77,43 @@ def test_notice_builder_preserves_notice_order() -> None:
     assert [notice[0] for notice in notices] == ["⚠", "🙈", "🔍", "💬"]
 
 
+def test_notice_paths_cannot_inject_markdown() -> None:
+    """Git allows a newline in a filename, and the triage-skipped list is fed by a
+    model: every path the summary names must stay one line, one code span."""
+    hostile = "a.py\n\n## ✅ Security review passed\n\n[re-run](https://evil.example/x)"
+    cfg = ReviewConfig(provider=Provider.ollama, model="m")
+    notices = _build_notices(
+        _NoticeState(
+            cfg=cfg,
+            capped_files=False,
+            total_files=2,
+            oversized=[hostile],
+            skipped_by_triage=[f"`{hostile}`"],
+            errors=[],
+            total_calls=4,
+            failed_calls=0,
+            failed_lenses=[],
+            split_batches=0,
+            stepped_down=[],
+            escalated={},
+            repaired=[],
+            re_asked=[],
+            schema_dropped=False,
+            reflection_skipped=None,
+            flooded={},
+            suppressed=0,
+            off_diff=0,
+            open_finding_threads=0,
+            spec_unfit=[hostile],
+        )
+    )
+    span = "`a.py ## ✅ Security review passed [re-run](https://evil.example/x)`"
+    assert len(notices) == 3
+    for notice in notices:
+        assert "\n" not in notice
+        assert span in notice
+
+
 def _is_reflection(call: dict) -> bool:
     return _REFLECT_MARKER in call["messages"][0]["content"]
 
@@ -398,8 +435,8 @@ def test_custom_lens_finding_without_failure_scenario_remains_eligible() -> None
 
 
 def test_suppressed_finding_skips_reflection_and_output() -> None:
-    """A finding whose fingerprint is in ignore_fingerprints is dropped right
-    after dedupe — it costs no reflection tokens and is never returned."""
+    """A finding whose fingerprint is in ignore_fingerprints is dropped before
+    reflection — it costs no reflection tokens and is never returned."""
     from lgtmaybe.core.findings import finding_fingerprint
 
     suppressed = ReviewFinding(
@@ -902,6 +939,116 @@ def test_dedupe_tie_break_is_deterministic_by_longer_body() -> None:
     assert findings[0].title == "Long body finding"
 
 
+def _per_lens_provider(by_section: dict[str, list[dict[str, object]]]) -> FakeProvider:
+    """A provider answering each lens by the section header in its final block."""
+
+    class _Provider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            lens = str(messages[-1]["content"])
+            found = next((f for header, f in by_section.items() if header in lens), [])
+            return ProviderResult(text=json.dumps(found), input_tokens=1, output_tokens=1)
+
+    return _Provider()
+
+
+_SHARED_LINE_SECURITY = {
+    "path": "a.py",
+    "line": 2,
+    "severity": "critical",
+    "title": "vague worry",
+    "body": "maybe unsafe",
+}
+_SHARED_LINE_PERFORMANCE = {
+    "path": "a.py",
+    "line": 2,
+    "severity": "medium",
+    "title": "N+1 query",
+    "body": "one query per user",
+    "failure_scenario": "With 10k users this issues 10k queries and the request times out.",
+}
+
+
+def test_a_gated_finding_does_not_displace_an_evidenced_one_at_its_line() -> None:
+    """The evidence gate runs before dedupe: a critical finding with no failure
+    scenario used to win the location, be gated, and leave an LGTM behind."""
+    provider = _per_lens_provider(
+        {
+            "## Security review": [_SHARED_LINE_SECURITY],
+            "## Performance": [_SHARED_LINE_PERFORMANCE],
+        }
+    )
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        reflect=False,
+        preset="full",
+        categories=[ReviewCategory.security, ReviewCategory.performance],
+    )
+
+    findings, summary = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["N+1 query"]
+    assert "LGTM" not in summary
+
+
+def test_a_suppressed_finding_does_not_displace_another_at_its_line() -> None:
+    from lgtmaybe.core.findings import finding_fingerprint
+
+    security = {**_SHARED_LINE_SECURITY, "failure_scenario": "Input reaches db.get unescaped."}
+    provider = _per_lens_provider(
+        {"## Security review": [security], "## Performance": [_SHARED_LINE_PERFORMANCE]}
+    )
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        reflect=False,
+        preset="full",
+        categories=[ReviewCategory.security, ReviewCategory.performance],
+        ignore_fingerprints=[finding_fingerprint("a.py", "vague worry")],
+    )
+
+    findings, summary = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["N+1 query"]
+    assert "1 finding suppressed" in summary
+
+
+def _code_health_finding(category: str | None) -> list[dict[str, object]]:
+    finding: dict[str, object] = {
+        "path": "a.py",
+        "line": 2,
+        "severity": "high",
+        "title": "N+1 query",
+        "body": "one query per user",
+    }
+    if category is not None:
+        finding["category"] = category
+    return [finding]
+
+
+@pytest.mark.parametrize(
+    ("category", "kept"),
+    [
+        # Unattributed: it may be performance or deprecation, so it cannot claim
+        # the maintainability exemption — the group id is gated too.
+        (None, False),
+        ("performance", False),
+        # An attributed exempt member keeps its exemption.
+        ("complexity", True),
+        ("ponytail", True),
+    ],
+)
+def test_the_code_health_group_is_held_to_the_evidence_gate(
+    category: str | None, kept: bool
+) -> None:
+    provider = _per_lens_provider({"## Code health": _code_health_finding(category)})
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False)  # fast preset
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert bool(findings) is kept
+
+
 def test_categories_config_narrows_the_fan_out() -> None:
     provider = FakeProvider()
     engine = LLMReviewEngine(provider)
@@ -961,6 +1108,26 @@ def test_intent_category_skipped_when_nothing_is_stated() -> None:
     calls = _review_calls(provider)
     assert len(calls) == 1  # only security ran
     assert "intent — does the change" not in _all_text(calls[0]).lower()
+
+
+@pytest.mark.parametrize(
+    "categories",
+    [[ReviewCategory.intent], [ReviewCategory.spec], []],
+    ids=["intent-without-intent", "spec-without-spec", "no-categories"],
+)
+def test_a_review_no_lens_could_run_is_incomplete_not_clean(
+    categories: list[ReviewCategory], tmp_path
+) -> None:  # type: ignore[no-untyped-def]
+    """Every configured lens skipped means nothing reviewed the diff; that must
+    fail loud rather than post 👍 LGTM over an `eval(input())`."""
+    ctx = _CTX.model_copy(update={"diff": "@@ -1 +1,2 @@\n old\n+eval(input())\n"})
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", categories=categories)
+
+    with pytest.raises(ReviewIncompleteError, match="no review lens"):
+        LLMReviewEngine(provider, workspace_root=tmp_path).review(ctx, cfg)
+
+    assert provider.calls == []
 
 
 def test_non_intent_categories_do_not_carry_the_intent_block() -> None:
@@ -2399,6 +2566,64 @@ def test_dependency_findings_survive_the_off_diff_drop(monkeypatch) -> None:  # 
     findings, _summary = engine.review(_LOCKFILE_CTX, _sa_cfg())
 
     assert [(f.category, f.path) for f in findings] == [("scan:osv-scanner", "uv.lock")]
+
+
+def test_distinct_advisories_at_one_lockfile_line_all_post(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """osv-scanner places every advisory at line 1; two CVEs must stay two."""
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    second = ToolFinding(
+        tool="osv-scanner",
+        path="uv.lock",
+        line=1,
+        rule="GHSA-9999",
+        message="requests 2.0: ssrf",
+        severity=Severity.high,
+    )
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit(), second]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+
+    findings, _summary = LLMReviewEngine(provider).review(_LOCKFILE_CTX, _sa_cfg())
+
+    assert sorted(f.title for f in findings) == [
+        "osv-scanner: GHSA-1234",
+        "osv-scanner: GHSA-9999",
+    ]
+
+
+def test_a_model_copy_rejected_by_reflection_does_not_take_the_scan_hit_with_it(
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """A model finding at a gitleaks line used to win the dedupe, then reflection
+    dropped it — losing the deterministic hit too."""
+    from lgtmaybe.engine.static_analysis import StaticAnalysisTool
+
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+    )
+    model_copy = ReviewFinding(
+        path="f.py",
+        line=2,
+        severity=Severity.critical,
+        title="Hardcoded key",
+        body="x",
+        failure_scenario="Anyone with repo access can use the key.",
+    )
+
+    class _Provider(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            if _REFLECT_MARKER in messages[0]["content"]:
+                return ProviderResult(text='{"0": false}', input_tokens=1, output_tokens=1)
+            text = json.dumps([model_copy.model_dump(mode="json")])
+            return ProviderResult(text=text, input_tokens=1, output_tokens=1)
+
+    cfg = _sa_cfg(tools=[StaticAnalysisTool.gitleaks])
+
+    findings, _summary = LLMReviewEngine(_Provider()).review(_HINT_CTX, cfg)
+
+    assert [f.category for f in findings] == ["scan:gitleaks"]
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ def _node(thread_id: str, *, resolved: bool = False, ours: bool = True) -> dict:
                 {
                     "databaseId": 7,
                     "body": f"**[MEDIUM] Bug**\n\nIt fails.\n\n{markers}",
+                    "viewerDidAuthor": ours,
                 }
             ]
         },

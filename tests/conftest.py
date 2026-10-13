@@ -95,6 +95,14 @@ def _isolate_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_registered_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test's fixture key (``"k"``) must not redact every later test's log line."""
+    from lgtmaybe.core import logging as lgtmaybe_logging
+
+    monkeypatch.setattr(lgtmaybe_logging, "_secrets", set(lgtmaybe_logging._secrets))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep tests independent of files in the developer's checkout."""
     monkeypatch.chdir(tmp_path)
@@ -112,7 +120,13 @@ def _isolate_user_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
 @pytest.fixture(autouse=True)
 def _authenticated_posting_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The HTTP fixture token belongs to Actions unless a test owns its identity boundary."""
+    """The HTTP fixture token belongs to the bot unless a test owns its identity boundary.
+
+    GitHub's token is Actions' (``github-actions[bot]``); Gitea's and GitLab's
+    ``/user`` lookups answer ``lgtmaybe-bot`` (GitLab: user id 99, unless the test
+    mocks the route itself), so a fixture comment is "ours" only when it names
+    that author.
+    """
     import json
 
     import httpx
@@ -128,6 +142,17 @@ def _authenticated_posting_identity(monkeypatch: pytest.MonkeyPatch) -> None:
             return httpx.Response(
                 200, json={"data": {"viewer": {"login": "github-actions[bot]"}}}, request=request
             )
+        if request.method == "GET" and request.url.path == "/api/v1/user":
+            return httpx.Response(200, json={"login": "lgtmaybe-bot"}, request=request)
+        if request.method == "GET" and request.url.path == "/api/v4/user":
+            # A test that mocks this route itself (respx) answers it; otherwise
+            # the default identity does.
+            try:
+                return original(client, request, **kwargs)
+            except Exception:  # noqa: BLE001 — unmocked or unreachable: use the default
+                return httpx.Response(
+                    200, json={"id": 99, "username": "lgtmaybe-bot"}, request=request
+                )
         return original(client, request, **kwargs)
 
     monkeypatch.setattr(httpx.Client, "send", send)
