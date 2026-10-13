@@ -113,12 +113,17 @@ Every inline finding SHALL be posted as an `active` thread whose
 `rightFileEnd` range for the new side or `leftFileStart`/`leftFileEnd` for the
 old side. A finding SHALL be demoted into the summary when it is not confidently
 anchored, does not land on a commentable diff line, or Azure DevOps rejects its
-thread.
+thread. A 401 or 403 on a finding thread SHALL fail the review instead: the
+token cannot write threads, which is not one unplaceable finding.
 <!-- anchor: azure-devops.positions -->
 
 #### Scenario: a removed line
 - **WHEN** a finding carries side LEFT
 - **THEN** its thread sets `leftFileStart` and no right-file range
+
+#### Scenario: the token cannot write threads
+- **WHEN** creating a finding thread answers 401 or 403
+- **THEN** the review fails rather than demoting every finding into the summary
 
 ### Requirement: The summary lives in an edited general thread
 

@@ -629,11 +629,18 @@ class AzureDevOpsGateway:
         """Open one positioned finding thread; False when Azure DevOps refuses it.
 
         Best-effort per finding, so one unplaceable finding never takes the rest
-        of the review down with it.
+        of the review down with it. A 401/403 is not about one finding: the token
+        cannot write threads at all, so it fails loudly like the fetch and upsert
+        paths rather than burying every finding in the summary.
         """
         try:
             self._create_thread(body, status=_FINDING_STATUS, context=context)
             return True
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (401, 403):
+                raise
+            _log.warning("posting a finding thread failed: %s", exc)
+            return False
         except Exception as exc:  # noqa: BLE001 (one rejected position is not fatal)
             _log.warning("posting a finding thread failed: %s", exc)
             return False

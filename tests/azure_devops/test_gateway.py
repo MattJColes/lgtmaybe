@@ -128,6 +128,7 @@ class FakeAzureDevOps:
         self.created: list[dict[str, Any]] = []
         self.edited: list[tuple[int, int, str]] = []
         self.reject_threads_at: set[str] = set()
+        self.reject_status = 400
         self.forbid_edits = False
         self.identity_status = 200
         # Responses (or exceptions) an Items fetch returns before the real file,
@@ -206,7 +207,7 @@ class FakeAzureDevOps:
         payload = json.loads(request.content)
         path = (payload.get("threadContext") or {}).get("filePath")
         if path in self.reject_threads_at:
-            return httpx.Response(400, json={"message": "bad position"})
+            return httpx.Response(self.reject_status, json={"message": "refused"})
         self._next_id += 1
         thread = {
             "id": self._next_id,
@@ -747,6 +748,20 @@ class TestPositions:
         summary = fake.created[-1]["comments"][0]["content"]
         assert "Additional findings" in summary
         assert "Hardcoded password" in summary
+
+    @respx.mock
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_an_auth_failure_on_a_finding_thread_fails_the_review(self, status: int) -> None:
+        """A token that cannot write threads is wrong, not one unplaceable finding:
+        demoting every finding into the summary would bury them behind a 'success'."""
+        fake = FakeAzureDevOps()
+        fake.install()
+        fake.reject_threads_at.add("/app.py")
+        fake.reject_status = status
+        gateway = _gateway()
+
+        with pytest.raises(httpx.HTTPStatusError):
+            gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
 
     @respx.mock
     def test_post_review_builds_the_diff_itself_when_not_given_one(self) -> None:
