@@ -75,6 +75,21 @@ def last_match(pattern: re.Pattern[str], body: str | None) -> str | None:
     return found[-1] if found else None
 
 
+def code_span(path: str, *, table: bool = False) -> str:
+    """*path* as one inert inline code span.
+
+    Filenames are attacker-chosen on a fork PR (git allows a newline in one) and
+    some paths are model-written, so the raw value could end the span or the
+    paragraph and render a live heading or link after it. Whitespace runs
+    collapse to one space, backticks are stripped, and with *table* a ``|`` is
+    escaped — inside a table row it ends the cell even within a code span.
+    """
+    text = " ".join(path.split()).replace("`", "")
+    if table:
+        text = text.replace("|", r"\|")
+    return f"`{text}`"
+
+
 def finding_badge(f: ReviewFinding) -> str:
     """The provenance suffix for a finding's title line: lens, then confidence.
 

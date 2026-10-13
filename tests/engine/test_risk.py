@@ -378,6 +378,12 @@ def test_backticks_in_paths_are_stripped(tmp_path: Path) -> None:
     assert _texts(result) == ["touches infrastructure: `infra/x.tf`"]
 
 
+def test_a_newline_in_a_path_cannot_inject_a_heading(tmp_path: Path) -> None:
+    """Git allows a newline in a filename; the reason must stay one line."""
+    result = assess_risk(_ctx(("infra/x\n\n## Approved\n\n.tf", 1)), _cfg(), tmp_path)
+    assert _texts(result) == ["touches infrastructure: `infra/x ## Approved .tf`"]
+
+
 @pytest.mark.parametrize(
     ("path", "test", "doc"),
     [
