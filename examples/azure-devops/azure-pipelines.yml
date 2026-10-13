@@ -1,42 +1,27 @@
-# Copy into your Azure Repos repository (for example as azure-pipelines.yml),
-# create a pipeline from it, then add that pipeline as a Build validation branch
-# policy on the target branch (Project settings -> Repositories -> Policies).
-# Azure Repos runs pull request builds from the branch policy; YAML `pr:`
-# triggers only apply to GitHub and Bitbucket repositories.
+# Copy into the Azure Repos repository you want reviewed (for example as
+# azure-pipelines.yml), create a pipeline from it, then add that pipeline as a
+# Build validation branch policy on the target branch (Project settings ->
+# Repositories -> Policies). Azure Repos runs pull request builds from the
+# branch policy; YAML `pr:` triggers only apply to GitHub and Bitbucket.
 #
-# Azure Pipelines has no event payload, so lgtmaybe reads the pull request from
-# the predefined SYSTEM_* and BUILD_* variables and takes its configuration from
-# ordinary flags and environment.
-#
-# Auth to Azure DevOps uses the job's own token, System.AccessToken, mapped into
-# the environment below. Grant the project's build service identity
-# ("<Project> Build Service (<Org>)") "Contribute to pull requests" on the
-# repository (Project settings -> Repositories -> Security). To post as a named
-# user instead, store a personal access token with Code (Read & write) scope as
-# the secret variable AZURE_DEVOPS_TOKEN and map that instead.
-#
-# Add the model key as a secret pipeline variable, e.g. ANTHROPIC_API_KEY.
-# Secret variables are never exposed to scripts unless mapped under `env:`.
+# Why this file holds no steps: Azure Pipelines runs a pull request build from
+# the YAML in the pull request itself. Anyone who can open a pull request could
+# rewrite a step here and read every secret it maps. So the job that holds the
+# model key lives in lgtmaybe-review.yml, in a separate repository only trusted
+# people can push to, and this file only extends it. A "Required template"
+# check on the variable group holding the key refuses any run that does not
+# extend that exact template. See docs/how-to/review-on-azure-devops.md.
 
 trigger: none
 
-pool:
-  vmImage: ubuntu-latest
+resources:
+  repositories:
+    # The protected template repository: <project>/<repository>, with branch
+    # policies on main so nobody can change the template without review.
+    - repository: trusted
+      type: git
+      name: Platform/pipeline-templates
+      ref: refs/heads/main
 
-steps:
-  # lgtmaybe never checks out or executes pull request code; it reads the diff
-  # through the API, so the job does not need the repository at all.
-  - checkout: none
-
-  - script: |
-      docker run --rm \
-        -e SYSTEM_COLLECTIONURI -e SYSTEM_TEAMPROJECT \
-        -e BUILD_REPOSITORY_NAME -e BUILD_REPOSITORY_PROVIDER \
-        -e SYSTEM_PULLREQUEST_PULLREQUESTID \
-        -e SYSTEM_ACCESSTOKEN -e ANTHROPIC_API_KEY \
-        ghcr.io/mattjcoles/lgtmaybe:v2 \
-        azure-pipelines --provider anthropic --model claude-sonnet-4-6
-    displayName: lgtmaybe review
-    env:
-      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-      ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+extends:
+  template: lgtmaybe-review.yml@trusted

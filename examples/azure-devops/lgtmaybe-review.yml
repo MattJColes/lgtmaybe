@@ -1,0 +1,43 @@
+# Commit this to the protected template repository (Platform/pipeline-templates
+# in azure-pipelines.yml), not to the repository being reviewed. It is the only
+# place the model key is mapped, so it must sit behind branch policies that only
+# trusted people can satisfy.
+#
+# Setup, once:
+#   1. Library -> Variable groups: create `lgtmaybe-secrets` holding the model
+#      key as a secret (here ANTHROPIC_API_KEY; use a key with a spend limit).
+#   2. On that variable group, Approvals and checks -> Required template: name
+#      this repository, ref refs/heads/main, and path lgtmaybe-review.yml. A
+#      pipeline that does not extend exactly this template is refused the key.
+#   3. Grant the project's build service identity ("<Project> Build Service
+#      (<Org>)") "Contribute to pull requests" on the reviewed repository, and
+#      nothing broader. lgtmaybe posts with the job's own System.AccessToken.
+#
+# The template takes no parameters on purpose: a parameter is a way for the
+# PR-editable pipeline to inject steps into the job that holds the secrets.
+
+jobs:
+  - job: lgtmaybe
+    displayName: lgtmaybe review
+    pool:
+      vmImage: ubuntu-latest
+    variables:
+      - group: lgtmaybe-secrets
+    steps:
+      # lgtmaybe never checks out or executes pull request code; it reads the
+      # change through the API, so the job does not need the repository at all.
+      - checkout: none
+
+      - script: |
+          docker run --rm \
+            -e SYSTEM_COLLECTIONURI -e SYSTEM_TEAMPROJECT \
+            -e BUILD_REPOSITORY_NAME -e BUILD_REPOSITORY_PROVIDER \
+            -e SYSTEM_PULLREQUEST_PULLREQUESTID \
+            -e SYSTEM_ACCESSTOKEN -e ANTHROPIC_API_KEY \
+            ghcr.io/mattjcoles/lgtmaybe:v2 \
+            azure-pipelines --provider anthropic --model claude-sonnet-4-6
+        displayName: lgtmaybe review
+        env:
+          # Secrets reach a script only when mapped here.
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+          ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
