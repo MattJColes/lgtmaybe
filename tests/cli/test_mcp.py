@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, get_args
 
@@ -236,7 +239,8 @@ class TestMcpCommand:
         pytest.importorskip("mcp.server.mcpserver")
         import lgtmaybe.cli.mcp_server as mcp_server
 
-        monkeypatch.chdir(Path.cwd())  # restore the cwd the -C flag moves
+        # Record the current cwd, so monkeypatch undoes the chdir that -C makes.
+        monkeypatch.chdir(Path.cwd())
         served: list[LocalReviewTools] = []
         monkeypatch.setattr(mcp_server, "serve", served.append)
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -371,7 +375,8 @@ class TestInProcessServer:
         assert result.is_error is False
         assert "canned finding" in result.content[0].text
 
-    def test_failure_is_a_tool_error_and_the_server_lives_on(self, monkeypatch) -> None:
+    @pytest.mark.parametrize("tool", ["review_changes", "review_instructions"])
+    def test_failure_is_a_tool_error_and_the_server_lives_on(self, monkeypatch, tool) -> None:
         from mcp import Client
 
         from lgtmaybe.cli.mcp_server import build_server
@@ -386,7 +391,7 @@ class TestInProcessServer:
 
         async def go() -> Any:
             async with Client(server) as client:
-                failed = await client.call_tool("review_changes", {})
+                failed = await client.call_tool(tool, {})
                 listed = await client.list_tools()
                 return failed, listed
 
@@ -414,32 +419,38 @@ _HANDSHAKE = [
 
 
 def _spawn(tmp_path: Path) -> subprocess.Popen[bytes]:
+    """Start the server outside any repository; its stderr goes to a file.
+
+    A file rather than a pipe: nothing reads stderr until the end, and a pipe
+    nobody drains can fill and stall the server.
+    """
     env = dict(os.environ)
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
     env["APPDATA"] = str(tmp_path / "appdata")
     env.pop("LGTMAYBE_API_KEY", None)
     repo = tmp_path / "not-a-repo"
     repo.mkdir()
-    return subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "lgtmaybe",
-            "mcp",
-            "--provider",
-            "openai",
-            "--model",
-            "gpt-4o",
-            "--api-key",
-            "sk-test-not-real",
-            "-C",
-            str(repo),
-        ],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-    )
+    with (tmp_path / "stderr.log").open("wb") as stderr:
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "lgtmaybe",
+                "mcp",
+                "--provider",
+                "openai",
+                "--model",
+                "gpt-4o",
+                "--api-key",
+                "sk-test-not-real",
+                "-C",
+                str(repo),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            env=env,
+        )
 
 
 def _send(proc: subprocess.Popen[bytes], message: dict[str, Any]) -> None:
@@ -448,15 +459,66 @@ def _send(proc: subprocess.Popen[bytes], message: dict[str, Any]) -> None:
     proc.stdin.flush()
 
 
+_EOF = b""
+
+
+class _LineReader:
+    """Read a pipe's lines on a daemon thread, so every read has a timeout.
+
+    A bare ``readline()`` blocks until the server writes, so a hung server
+    would hang CI; here it fails the test instead.
+    """
+
+    def __init__(self, stream: Any) -> None:
+        self._lines: queue.Queue[bytes] = queue.Queue()
+        threading.Thread(target=self._pump, args=(stream,), daemon=True).start()
+
+    def _pump(self, stream: Any) -> None:
+        for line in iter(stream.readline, _EOF):
+            self._lines.put(line)
+        self._lines.put(_EOF)
+
+    def next(self, timeout: float) -> bytes:
+        """The next line, or ``_EOF`` at end of stream; fails the test on timeout."""
+        try:
+            return self._lines.get(timeout=max(timeout, 0.0))
+        except queue.Empty:
+            pytest.fail(f"the MCP server wrote nothing for {timeout:.0f}s")
+
+    def until_eof(self, timeout: float) -> list[bytes]:
+        """Every remaining line, up to end of stream."""
+        deadline = time.monotonic() + timeout
+        lines: list[bytes] = []
+        while (line := self.next(deadline - time.monotonic())) != _EOF:
+            lines.append(line)
+        return lines
+
+
+@pytest.fixture
+def server_proc(tmp_path: Path) -> Iterator[subprocess.Popen[bytes]]:
+    """The spawned server, killed at teardown if a failed test left it running."""
+    proc = _spawn(tmp_path)
+    try:
+        yield proc
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=30)
+
+
 class TestStdioProcess:
     @pytest.fixture(autouse=True)
     def _sdk(self) -> None:
         pytest.importorskip("mcp.server.mcpserver")
 
-    def test_stdout_carries_only_json_rpc_and_errors_are_tool_errors(self, tmp_path) -> None:
+    def test_stdout_carries_only_json_rpc_and_errors_are_tool_errors(
+        self, server_proc, tmp_path
+    ) -> None:
         """A failing review (no git repo) comes back as an MCP tool error, and
         every byte the process writes to stdout is a JSON-RPC message."""
-        proc = _spawn(tmp_path)
+        proc = server_proc
+        assert proc.stdout is not None and proc.stdin is not None
+        reader = _LineReader(proc.stdout)
         for message in _HANDSHAKE:
             _send(proc, message)
         _send(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
@@ -469,20 +531,18 @@ class TestStdioProcess:
                 "params": {"name": "review_changes", "arguments": {"mode": "branch"}},
             },
         )
-        # Collect replies until the call answers; communicate() then closes
-        # stdin, which ends the server.
-        assert proc.stdout is not None
+        # Collect replies until the call answers, then close stdin, which ends
+        # the server, and collect whatever it wrote on the way out.
         lines: list[bytes] = []
         deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            line = proc.stdout.readline()
-            if not line:
-                break
+        while (line := reader.next(deadline - time.monotonic())) != _EOF:
             lines.append(line)
             if b'"id":3' in line.replace(b" ", b""):
                 break
-        rest, stderr = proc.communicate(timeout=60)
-        lines.extend(rest.splitlines(keepends=True))
+        proc.stdin.close()
+        lines.extend(reader.until_eof(timeout=60))
+        proc.wait(timeout=60)
+        stderr = (tmp_path / "stderr.log").read_bytes()
 
         lines = [line for line in lines if line.strip()]
         messages = [json.loads(line) for line in lines]  # any non-JSON line fails here
@@ -496,18 +556,18 @@ class TestStdioProcess:
         assert b"sk-test-not-real" not in stderr
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
-    def test_sigterm_stops_the_server(self, tmp_path) -> None:
+    def test_sigterm_stops_the_server(self, server_proc) -> None:
         """The CLI's graceful-interrupt handler turns the first SIGTERM into a
         review wind-down; a server must stop on it instead, or the agent that
         launched it cannot shut it down."""
-        proc = _spawn(tmp_path)
-        _send(proc, _HANDSHAKE[0])
+        proc = server_proc
         assert proc.stdout is not None
-        assert json.loads(proc.stdout.readline())["id"] == 1
+        reader = _LineReader(proc.stdout)
+        _send(proc, _HANDSHAKE[0])
+        assert json.loads(reader.next(timeout=60))["id"] == 1
 
         proc.send_signal(signal.SIGTERM)
         try:
             proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
-            proc.kill()
             pytest.fail("the MCP server ignored SIGTERM")

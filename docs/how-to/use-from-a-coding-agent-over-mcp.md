@@ -50,8 +50,11 @@ claude mcp add lgtmaybe -- lgtmaybe mcp \
 
 Claude Code starts the server in the project directory, so the review sees that
 repository. Add `--scope project` to write the entry to the repository's
-`.mcp.json` and share it with your team (it holds the command and flags only,
-never a key).
+`.mcp.json` and share it with your team. The entry stores the command and every
+flag exactly as you typed them, so never pass `--api-key` to `claude mcp add` or
+write it into `.mcp.json`: the key would sit in a file you commit. Supply API
+keys through environment variables instead (see
+[Credentials and Config](#credentials-and-config)).
 
 Then ask the agent for a review in plain words, for example:
 
@@ -91,7 +94,7 @@ full review per call.
 | Tool | Returns |
 | --- | --- |
 | `review_changes` | The findings as JSON, in the same shape as `lgtmaybe review --format json`, plus the `summary` line and `incomplete` (true when some review calls did not finish, so the findings may be partial). |
-| `review_instructions` | The findings as plain-text correction instructions, the same text as `lgtmaybe review --format agent`. |
+| `review_instructions` | The findings as plain-text correction instructions, the same text as `lgtmaybe review --format agent` except for the closing line, which tells the agent to call the `review_instructions` tool again (not to run `lgtmaybe review`) to confirm its fixes. |
 
 | Argument | Meaning |
 | --- | --- |

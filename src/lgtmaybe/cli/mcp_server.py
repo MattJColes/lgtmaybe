@@ -27,7 +27,7 @@ import signal
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeVar, get_args
 
 import click
 from pydantic import Field
@@ -40,6 +40,8 @@ from lgtmaybe.engine import INCOMPLETE_MARKER, request_interrupt
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
+
+_T = TypeVar("_T")
 
 #: Which local changes a tool call reviews; the ``review`` command's three modes.
 ReviewMode = Literal["branch", "working", "uncommitted"]
@@ -198,16 +200,20 @@ def build_server(tools: LocalReviewTools) -> MCPServer:
     # Open-world: the model it calls is outside this process.
     annotations = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 
+    def as_tool_error(call: Callable[[], _T]) -> _T:
+        """Run one tool call, turning a review failure into the SDK's tool error."""
+        try:
+            return call()
+        except ReviewToolError as exc:
+            raise ToolError(str(exc)) from exc
+
     def review_changes(
         mode: _ModeArg = "branch",
         base: _BaseArg = None,
         min_severity: _SeverityArg = None,
         preset: _PresetArg = None,
     ) -> dict[str, Any]:
-        try:
-            return tools.review_changes(mode, base, min_severity, preset)
-        except ReviewToolError as exc:
-            raise ToolError(str(exc)) from exc
+        return as_tool_error(lambda: tools.review_changes(mode, base, min_severity, preset))
 
     def review_instructions(
         mode: _ModeArg = "branch",
@@ -215,10 +221,7 @@ def build_server(tools: LocalReviewTools) -> MCPServer:
         min_severity: _SeverityArg = None,
         preset: _PresetArg = None,
     ) -> str:
-        try:
-            return tools.review_instructions(mode, base, min_severity, preset)
-        except ReviewToolError as exc:
-            raise ToolError(str(exc)) from exc
+        return as_tool_error(lambda: tools.review_instructions(mode, base, min_severity, preset))
 
     server.add_tool(
         review_changes,
