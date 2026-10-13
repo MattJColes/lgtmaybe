@@ -218,7 +218,9 @@ whole worktree vs the merge-base, `--uncommitted` for edits vs HEAD, with
 commit subjects feeding the intent lens. Both worktree modes include untracked
 files (`.gitignore` honoured) as new-file patches, since `git diff` never
 reports them; branch mode reviews committed history only. Paths are resolved
-against the worktree's top level, not the caller's directory.
+against the worktree's top level, not the caller's directory. An empty diff
+SHALL make no model call and print no LGTM; it exits non-zero, naming
+`--base`, when no default base existed and the comparison fell back to HEAD.
 <!-- anchor: cli.local-context -->
 
 #### Scenario: developer reviews before pushing
