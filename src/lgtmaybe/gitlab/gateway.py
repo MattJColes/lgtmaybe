@@ -274,9 +274,10 @@ class GitLabGateway:
             if not self._post_discussion(position, render_inline_body(finding)):
                 demoted.append(finding)
 
-        # A watermark is only ever the one appended below: model prose reaches
-        # the summary and the demoted findings, so any marker inside it is
-        # stripped rather than left for a reader to mistake for ours.
+        # A watermark is only ever the one appended below, so any in the
+        # content is stripped rather than left for a reader to mistake for
+        # ours. Only that family: the summary carries the engine's own lenses
+        # and risk markers, and finding prose is already stripped of every one.
         content = strip_markers(
             f"{summary}{render_demoted(demoted)}{render_broad(broad)}", REVIEWED_MARKER
         )

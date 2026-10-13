@@ -362,9 +362,10 @@ class RestGitHubGateway:
         comments = [comment for comment, _finding in inline]
 
         def build_body(demoted_findings: list[ReviewFinding]) -> str:
-            # A watermark is only ever the one appended below: model prose
-            # reaches the demoted and broad sections, so any marker in the
+            # A watermark is only ever the one appended below, so any in the
             # content is stripped rather than left for a reader to take as ours.
+            # Only that family: the summary carries the engine's own lenses and
+            # risk markers, and finding prose is already stripped of every one.
             content = strip_markers(
                 f"{summary}{render_demoted(demoted_findings)}{render_broad(broad)}",
                 _REVIEWED_MARKER,
