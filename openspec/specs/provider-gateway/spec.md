@@ -306,8 +306,10 @@ The adapter SHALL record, per model, a configured `temperature` that did not
 reach the model — stripped by litellm's `drop_params` before the request, or
 refused by the model and re-sent without it — and expose it as
 `temperature_dropped()`, adapter-only and feature-detected like
-`schema_dropped()`; the engine SHALL then name it in the review summary,
-because the determinism default is what makes a review reproducible. The strip
+`schema_dropped()`; the engine SHALL then render a `temperature not sent`
+segment on the summary line beside the model (`{temperature}` in
+`summary_template`), because the determinism default is what makes a review
+reproducible — a segment, never a notice, so a clean review keeps its LGTM. The strip
 SHALL be judged by mapping the request params through litellm's own
 `get_optional_params` with and without the temperature (the effort included,
 since the gpt-5 rule turns on it), never by predicting it from a capability
@@ -318,8 +320,8 @@ nothing.
 #### Scenario: a Bedrock model that takes no sampling params
 - **WHEN** `temperature: 0.0` is configured for a Converse model flagged
   `supports_sampling_params: false`
-- **THEN** the request is unchanged, and the summary says the temperature never
-  reached the model so the review may not be reproducible
+- **THEN** the request is unchanged, and the summary line carries
+  `temperature not sent` beside the model — a clean review still opens with LGTM
 
 #### Scenario: a route that takes the temperature
 - **WHEN** the route forwards the configured temperature

@@ -3406,8 +3406,11 @@ Default: no rules.
 
 Custom template for the review summary line, for teams matching a house
 style. Placeholders: `{count}` (findings posted), `{provider}`, `{model}`,
-`{version}` (the lgtmaybe release that produced the review). A template that
-fails to format falls back to the built-in line.
+`{version}` (the lgtmaybe release that produced the review), `{risk}` (the
+risk-of-change verdict, empty when off) and `{temperature}` (`temperature not
+sent` when the model's route dropped the configured temperature, so the review
+may not be reproducible; empty otherwise). A template that fails to format falls
+back to the built-in line.
 
 ```yaml
 summary_template: "🤖 {count} finding(s) · {model} · lgtmaybe {version}"

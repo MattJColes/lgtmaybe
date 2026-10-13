@@ -281,9 +281,6 @@ class _NoticeState:
     # the spec lens ran at all (against the specs that did fit).
     spec_unfit: list[str] = field(default_factory=list)
     spec_reviewed: bool = False
-    # A configured temperature litellm stripped, or the model refused — the
-    # review may not be reproducible (see `_TEMPERATURE_DROP_NOTE`).
-    temperature_dropped: bool = False
 
 
 def _build_notices(state: _NoticeState) -> list[str]:
@@ -375,8 +372,6 @@ def _build_notices(state: _NoticeState) -> list[str]:
         )
     if state.failed_calls and state.schema_dropped:
         notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
-    if state.temperature_dropped:
-        notices.append(f"🎲 {_TEMPERATURE_DROP_NOTE}")
     if state.split_batches:
         plural = _plural(state.split_batches, many="es")
         was = _plural(state.split_batches, "was", "were")
@@ -1468,7 +1463,9 @@ class LLMReviewEngine:
 
                 filtered = apply_finding_rules(filtered, cfg)
 
-        summary_line = _summary_line(len(filtered), cfg, risk)
+        summary_line = _summary_line(
+            len(filtered), cfg, risk, temperature_dropped=self._temperature_dropped()
+        )
         profiler.record_returned_findings(len(filtered))
 
         notices = _build_notices(
@@ -1497,7 +1494,6 @@ class LLMReviewEngine:
                 self_talk=dict(self._self_talk),
                 spec_unfit=list(spec_context.unfit),
                 spec_reviewed=clean_spec is not None,
-                temperature_dropped=self._temperature_dropped(),
             )
         )
         # Which lenses completed, on every summary shape — hidden, so it costs
@@ -2738,15 +2734,24 @@ def _stamp_categories(findings: list[ReviewFinding], lens: _Lens) -> list[Review
     return clamp_to_category_ceiling(stamped)
 
 
-def _summary_line(count: int, cfg: ReviewConfig, risk: RiskAssessment | None = None) -> str:
+def _summary_line(
+    count: int,
+    cfg: ReviewConfig,
+    risk: RiskAssessment | None = None,
+    *,
+    temperature_dropped: bool = False,
+) -> str:
     """The review summary line: the user's template, or the built-in default.
 
     A template that fails to format (unknown placeholder, stray brace) is
     logged and falls back to the default — a cosmetic option must never fail
-    a review. ``{risk}`` renders the risk-of-change segment (empty when off).
+    a review. ``{risk}`` renders the risk-of-change segment (empty when off);
+    ``{temperature}`` likewise renders ``temperature not sent`` when the
+    configured temperature never reached the model, and nothing otherwise.
     """
     version = package_version()
     segment = risk_segment(risk) if risk is not None else ""
+    temperature = _TEMPERATURE_SEGMENT if temperature_dropped else ""
     if cfg.summary_template:
         try:
             return cfg.summary_template.format(
@@ -2755,6 +2760,7 @@ def _summary_line(count: int, cfg: ReviewConfig, risk: RiskAssessment | None = N
                 model=cfg.model,
                 version=version,
                 risk=segment,
+                temperature=temperature,
             )
         except (KeyError, IndexError, ValueError) as exc:
             _log.warning(
@@ -2763,9 +2769,10 @@ def _summary_line(count: int, cfg: ReviewConfig, risk: RiskAssessment | None = N
             )
     plural = _plural(count)
     risk_part = f" · {segment}" if segment else ""
+    temperature_part = f" · {temperature}" if temperature else ""
     return (
-        f"{count} finding{plural}{risk_part} · provider {cfg.provider} · model {cfg.model} "
-        f"· lgtmaybe {version}"
+        f"{count} finding{plural}{risk_part} · provider {cfg.provider} · model {cfg.model}"
+        f"{temperature_part} · lgtmaybe {version}"
     )
 
 
@@ -2971,15 +2978,13 @@ _SCHEMA_DROP_NOTE = (
     "above. The provider log names which model and why."
 )
 
-# Shown on every summary it applies to, failures or not: unlike a dropped
-# schema it explains nothing that went wrong — it qualifies what went right. The
+# A summary-line segment beside the model, never a notice: unlike a dropped
+# schema it explains nothing that went wrong, it qualifies the result — the
 # `temperature: 0.0` default is what makes a review reproducible, and litellm's
 # `drop_params` takes it away without a word on routes that refuse sampling
-# params (and the model's own refusal, retried without it, is just as quiet).
-_TEMPERATURE_DROP_NOTE = (
-    "The configured `temperature` never reached the model — its route does not "
-    "accept one — so this review may not be reproducible. The provider log names the model."
-)
+# params. As a notice it would cost the LGTM on every clean review of a common
+# setup (gpt-5.x with reasoning on); the provider log names the model and why.
+_TEMPERATURE_SEGMENT = "temperature not sent"
 
 
 def _response_digest(text: str) -> str:
