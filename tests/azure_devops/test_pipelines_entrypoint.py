@@ -135,3 +135,16 @@ class TestTokenSelection:
     def test_no_token_names_both_variables(self, monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(ValueError, match="AZURE_DEVOPS_TOKEN or SYSTEM_ACCESSTOKEN"):
             self._gateway(monkeypatch)
+
+
+class TestResolveFixedSetting:
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_the_gateway_honours_resolve_fixed(
+        self, monkeypatch: pytest.MonkeyPatch, enabled: bool
+    ) -> None:
+        """One setting across forges: resolve_fixed: false must stop Azure DevOps too."""
+        monkeypatch.setenv("AZURE_DEVOPS_TOKEN", "pat")
+        cfg = ReviewConfig(provider="ollama", model="llama3", resolve_fixed=enabled)
+        gateway = build_review_context(cfg, RuntimeOptions(pr_url=PR_URL))[0]
+
+        assert gateway._resolve_fixed is enabled  # type: ignore[attr-defined]

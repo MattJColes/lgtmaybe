@@ -762,8 +762,10 @@ they stay open (see
 [What the public App cannot do](use-as-github-action.md#what-the-public-app-cannot-do)).
 GitLab has no
 "outdated" signal, so there lgtmaybe resolves only threads its re-run validated
-as fixed. Gitea's API can't resolve threads, and the local CLI has no
-conversations, so both ignore this.
+as fixed. Azure DevOps has no "outdated" signal either, so lgtmaybe compares
+the file at the iteration it posted the thread against the file now, and marks
+the thread *Resolved* when the flagged line changed. Gitea's API can't resolve
+threads, and the local CLI has no conversations, so both ignore this.
 
 ```yaml
 resolve_fixed: false   # leave fixed conversations open for manual resolution
