@@ -1,8 +1,9 @@
 """Output formatting for the local commands.
 
-``render_findings`` turns engine findings into one of three text shapes:
-``human`` (a readable listing), ``json`` (a machine-readable array), or
-``agent`` (correction instructions an AI coding agent can read and apply).
+``render_findings`` turns engine findings into one of four text shapes:
+``human`` (a readable listing), ``json`` (a machine-readable array), ``agent``
+(correction instructions an AI coding agent can read and apply), or ``sarif``
+(a SARIF 2.1.0 log for code-scanning upload, see ``render_sarif``).
 
 ``flatten_details`` adapts a body written for a GitHub comment — the change
 diagram — to a terminal, which renders no HTML.
@@ -12,8 +13,12 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import quote
 
-from lgtmaybe.core.models import ReviewFinding
+from lgtmaybe.core.findings import finding_fingerprint, finding_identity
+from lgtmaybe.core.models import ReviewFinding, Severity
+from lgtmaybe.core.version import package_version
+from lgtmaybe.engine import INCOMPLETE_MARKER
 
 # The summary is written for a GitHub comment, so it can carry hidden markers
 # (the incomplete-run flag). They mean nothing to a terminal — strip them rather
@@ -52,11 +57,14 @@ def render_findings(findings: list[ReviewFinding], summary: str, *, fmt: str = "
     """Format findings for the local CLI.
 
     ``fmt`` selects the output: ``human`` (a readable listing + summary),
-    ``json`` (a machine-readable array), or ``agent`` (directive correction
-    instructions for an AI coding agent to read and apply).
+    ``json`` (a machine-readable array), ``agent`` (directive correction
+    instructions for an AI coding agent to read and apply), or ``sarif`` (a
+    SARIF 2.1.0 log; the summary only decides whether the run was complete).
     """
     if fmt == "json":
         return json.dumps([f.model_dump(mode="json") for f in findings])
+    if fmt == "sarif":
+        return render_sarif(findings, complete=INCOMPLETE_MARKER not in summary)
     summary = _HIDDEN_MARKER_RE.sub("", summary).strip()
     if fmt == "agent":
         return _render_agent(findings, summary)
@@ -96,3 +104,122 @@ def _render_agent(findings: list[ReviewFinding], summary: str) -> str:
         "`lgtmaybe review` to confirm they are resolved."
     )
     return "\n".join(lines)
+
+
+# SARIF 2.1.0 (OASIS). The schema URL is the canonical errata01 one; consumers
+# (GitHub code scanning, GitLab, IDE viewers) key on `version`, not the URL.
+SARIF_SCHEMA = (
+    "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
+)
+_INFORMATION_URI = "https://lgtmaybe.coles.codes/"
+
+# SARIF has three result levels (plus "none"), so the five-step Severity scale
+# folds onto them. Keyed by every member and guarded by a test that compares the
+# keys to the enum, so a new Severity cannot silently fall through.
+SARIF_LEVELS: dict[Severity, str] = {
+    Severity.critical: "error",
+    Severity.high: "error",
+    Severity.medium: "warning",
+    Severity.low: "note",
+    Severity.info: "note",
+}
+
+# The rule for a finding with no engine-stamped lens id (legacy inputs only).
+_FALLBACK_RULE = "review"
+
+# Versioned keys, as SARIF recommends for partialFingerprints: if either id's
+# derivation ever changes, the key changes with it, so a consumer never matches
+# an old hash against a new one. Both are the hidden ids the forge adapters embed
+# in posted comments, and neither contains model prose.
+_FINGERPRINT_KEY = "lgtmaybeFingerprint/v1"
+_IDENTITY_KEY = "lgtmaybeIdentity/v1"
+
+
+def render_sarif(findings: list[ReviewFinding], *, complete: bool = True) -> str:
+    """Render findings as a SARIF 2.1.0 log with one run, deterministically.
+
+    One rule per distinct lens id, sorted, so the rule table does not depend on
+    finding order. A finding gets a ``region`` only when its line is real in the
+    file the consumer has checked out: an unanchored finding's line is a guess,
+    and a LEFT-side line numbers the old file. Either way the result still names
+    the file. A suggestion is free text with no region it replaces, so it cannot
+    be a SARIF ``fixes`` entry; it travels in the result's property bag instead.
+
+    ``complete`` is False when not every lens call finished: the run's invocation
+    then reports ``executionSuccessful: false`` with a warning notification, so a
+    partial log is never mistaken for a clean bill of health.
+    """
+    rule_ids = sorted({f.category or _FALLBACK_RULE for f in findings})
+    rule_index = {rule_id: i for i, rule_id in enumerate(rule_ids)}
+    invocation: dict[str, object] = {"executionSuccessful": complete}
+    if not complete:
+        invocation["toolExecutionNotifications"] = [
+            {
+                "level": "warning",
+                "message": {"text": "Not every review lens completed; results may be incomplete."},
+            }
+        ]
+    log = {
+        "$schema": SARIF_SCHEMA,
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "lgtmaybe",
+                        "version": package_version(),
+                        "informationUri": _INFORMATION_URI,
+                        "rules": [_sarif_rule(rule_id) for rule_id in rule_ids],
+                    }
+                },
+                "invocations": [invocation],
+                "results": [_sarif_result(f, rule_index) for f in findings],
+            }
+        ],
+    }
+    # ASCII-escaped like the json format: a redirect on a non-UTF-8 console
+    # (Windows' locale default) still writes a file every consumer decodes.
+    return json.dumps(log, indent=2)
+
+
+def _sarif_rule(rule_id: str) -> dict[str, object]:
+    return {
+        "id": rule_id,
+        "shortDescription": {"text": f"lgtmaybe {rule_id} review lens"},
+        "helpUri": _INFORMATION_URI,
+    }
+
+
+def _sarif_uri(path: str) -> str:
+    """A repo-relative path as a relative URI reference: forward slashes, and
+    every character a URI cannot carry literally (spaces, ``#``, ``?``, ``%``,
+    non-ASCII) percent-encoded."""
+    return quote(path.replace("\\", "/").lstrip("/"), safe="/")
+
+
+def _sarif_result(finding: ReviewFinding, rule_index: dict[str, int]) -> dict[str, object]:
+    rule_id = finding.category or _FALLBACK_RULE
+    physical: dict[str, object] = {
+        "artifactLocation": {"uri": _sarif_uri(finding.path), "uriBaseId": "%SRCROOT%"}
+    }
+    if finding.anchored and finding.side == "RIGHT":
+        physical["region"] = {"startLine": finding.line}
+    properties: dict[str, object] = {"severity": finding.severity.value}
+    if finding.confidence is not None:
+        properties["confidence"] = finding.confidence
+    if finding.suggestion is not None:
+        properties["suggestion"] = finding.suggestion
+    if not finding.anchored:
+        properties["anchored"] = False
+    return {
+        "ruleId": rule_id,
+        "ruleIndex": rule_index[rule_id],
+        "level": SARIF_LEVELS[finding.severity],
+        "message": {"text": f"{finding.title}\n\n{finding.body}"},
+        "locations": [{"physicalLocation": physical}],
+        "partialFingerprints": {
+            _FINGERPRINT_KEY: finding_fingerprint(finding.path, finding.title),
+            _IDENTITY_KEY: finding_identity(finding),
+        },
+        "properties": properties,
+    }

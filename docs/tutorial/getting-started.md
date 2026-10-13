@@ -125,6 +125,10 @@ lgtmaybe review --json
 agent can read and apply, for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
+`--format sarif` prints a SARIF 2.1.0 log you can upload to GitHub code
+scanning or open in an IDE. See
+[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
+
 ## Step 6: See the Whole Change
 
 `lgtmaybe diagram` sends the same local diff to three concurrent model calls and

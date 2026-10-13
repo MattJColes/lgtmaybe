@@ -18,8 +18,8 @@ change. The JSON payload carries a `schema_version` so you can pin against it.
 ## Which Stream the Table Uses
 
 The table goes to **stdout** for a human-format review, and to **stderr** when
-the findings themselves are machine-readable (`--format json`, `--format agent`
-or `--json`), so stdout stays parseable. Without `--profile`, a local review
+the findings themselves are machine-readable (`--format json`, `--format agent`,
+`--format sarif` or `--json`), so stdout stays parseable. Without `--profile`, a local review
 still prints its `tokens:` footer, always to stderr.
 
 `--profile-json` writes to a **file**, so it never collides with either stream.

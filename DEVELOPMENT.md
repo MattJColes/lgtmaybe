@@ -123,7 +123,7 @@ plain `--help` shows only the everyday ones):
 | `--base <ref>` | Diff against `<ref>` (default: the remote primary branch, resolved as above) |
 | `--working` | Review the whole worktree (branch commits plus uncommitted edits) against the base |
 | `--uncommitted` | Review only uncommitted working-tree edits, vs HEAD (mutually exclusive with `--working`) |
-| `--json` / `--format agent` | Machine-readable output (a JSON array, or correction instructions for an AI agent) |
+| `--json` / `--format agent` / `--format sarif` | Machine-readable output (a JSON array, correction instructions for an AI agent, or a SARIF 2.1.0 log) |
 | `--min-severity medium` | Only show findings at or above a severity |
 | `--max-files 10` | Cap how many changed files are reviewed |
 | `--timeout 120` | Per-request timeout in seconds; raise it for slow local models |

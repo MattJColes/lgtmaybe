@@ -405,10 +405,11 @@ local_diff_options = _stack(
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["human", "json", "agent"]),
+    type=click.Choice(["human", "json", "agent", "sarif"]),
     default=None,
-    help="Output format: human listing (default), json array, or agent "
-    "(correction instructions for an AI coding agent to read and apply).",
+    help="Output format: human listing (default), json array, agent "
+    "(correction instructions for an AI coding agent to read and apply), or "
+    "sarif (a SARIF 2.1.0 log for GitHub code scanning or any SARIF viewer).",
 )
 @click.option(
     "--json",
