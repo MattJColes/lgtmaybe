@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
-from lgtmaybe.core.logging import get_logger
+from lgtmaybe.core.logging import get_logger, register_secret
 from lgtmaybe.core.models import Provider
 
 if TYPE_CHECKING:
@@ -408,12 +408,25 @@ def build_provider(
     if ceiling is not None:
         opts["max_tokens"] = ceiling
 
+    # Every key reaches the provider through here, so this is where it is kept
+    # out of log lines. The keyless placeholder is not a secret.
+    if api_key != OPENAI_COMPATIBLE_PLACEHOLDER_KEY:
+        register_secret(api_key)
+
     if api_key is not None:
         opts["api_key"] = api_key
 
     # Keyless Azure: an Azure AD bearer-token provider instead of a static key.
     if azure_ad_token_provider is not None:
-        opts["azure_ad_token_provider"] = azure_ad_token_provider
+        fetch_token = azure_ad_token_provider
+
+        def _registered_token() -> str:
+            # Each refresh is a new bearer token, so each one is registered.
+            token = fetch_token()
+            register_secret(token)
+            return token
+
+        opts["azure_ad_token_provider"] = _registered_token
 
     is_ollama = provider is Provider.ollama
     if is_ollama:

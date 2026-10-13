@@ -95,6 +95,14 @@ def _isolate_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_registered_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test's fixture key (``"k"``) must not redact every later test's log line."""
+    from lgtmaybe.core import logging as lgtmaybe_logging
+
+    monkeypatch.setattr(lgtmaybe_logging, "_secrets", set(lgtmaybe_logging._secrets))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep tests independent of files in the developer's checkout."""
     monkeypatch.chdir(tmp_path)

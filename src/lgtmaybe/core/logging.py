@@ -29,7 +29,8 @@ def register_secret(value: str | None) -> None:
 
 
 def _redact(text: str) -> str:
-    for secret in _secrets:
+    # A snapshot: a refreshed token can be registered from another thread.
+    for secret in tuple(_secrets):
         text = text.replace(secret, "***REDACTED***")
     return text
 

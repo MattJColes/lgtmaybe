@@ -125,7 +125,8 @@ class TestBuildProvider:
         with patch("litellm.completion", return_value=response) as mock_completion:
             provider.complete([{"role": "user", "content": "hi"}], model="gpt-4o")
 
-        assert mock_completion.call_args.kwargs["azure_ad_token_provider"] is token_provider
+        sent = mock_completion.call_args.kwargs["azure_ad_token_provider"]
+        assert sent() == "ad-token-xyz", "litellm must get a callable that fetches per request"
         assert "azure_ad_token" not in mock_completion.call_args.kwargs
 
     def test_build_provider_openai_compatible_carries_key_and_base(self) -> None:
@@ -872,3 +873,40 @@ class TestCallerNamedModelSlots:
 
         assert seen == ["ollama_chat/qwen3:27b", "ollama_chat/qwen3:27b"]
         assert reported == seen
+
+
+class TestCredentialsNeverReachALogLine:
+    """``core/logging`` redacts registered values; the factory is where keys arrive."""
+
+    @staticmethod
+    def _logged(text: str) -> str:
+        from lgtmaybe.core.logging import JsonFormatter
+
+        return JsonFormatter().format(logging.makeLogRecord({"msg": text}))
+
+    def test_the_api_key_is_redacted(self) -> None:
+        build_provider(Provider.openai, "gpt-4o", api_key="sk-live-0123456789abcdef")
+
+        assert "sk-live-0123456789abcdef" not in self._logged("sent sk-live-0123456789abcdef")
+
+    def test_each_refreshed_azure_ad_token_is_redacted(self) -> None:
+        tokens = iter(["eyJfirst", "eyJsecond"])
+        built = build_provider(
+            Provider.azure,
+            "gpt-4o",
+            api_base="https://x.openai.azure.com",
+            azure_ad_token_provider=lambda: next(tokens),
+        )
+        fetch = built.default_opts["azure_ad_token_provider"]
+
+        assert (fetch(), fetch()) == ("eyJfirst", "eyJsecond")
+        logged = self._logged("bearer eyJfirst then eyJsecond")
+        assert "eyJfirst" not in logged
+        assert "eyJsecond" not in logged
+
+    def test_the_keyless_placeholder_is_not_a_secret(self) -> None:
+        from lgtmaybe.providers.factory import OPENAI_COMPATIBLE_PLACEHOLDER_KEY as placeholder
+
+        build_provider(Provider.openai_compatible, "m", api_base="http://x", api_key=placeholder)
+
+        assert placeholder in self._logged(f"key {placeholder}")
