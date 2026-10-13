@@ -475,3 +475,51 @@ def test_repo_name_falls_back_to_the_directory_name_outside_a_repo(tmp_path: Pat
     from lgtmaybe.local import _repo_name
 
     assert _repo_name(tmp_path) == tmp_path.name
+
+
+# ---------------------------------------------------------------------------
+# The user's git config cannot reshape the diff we parse
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("diff.noprefix", "true"),
+        ("diff.mnemonicPrefix", "true"),  # working mode renders `c/a.py w/a.py`
+        ("color.diff", "always"),
+        ("diff.external", "true"),  # an external diff tool replaces the patch
+    ],
+)
+@pytest.mark.parametrize("mode", ["branch", "working", "uncommitted"])
+def test_user_diff_config_does_not_change_the_patch_shape(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, key: str, value: str, mode: str
+) -> None:
+    """Every changed path parses out of the patch whatever the user's ~/.gitconfig says.
+
+    The parser reads `a/<path> b/<path>` headers of plain text; a prefix, colour
+    or external-diff setting used to leave ``changed_files`` empty, which left
+    every finding unanchored.
+    """
+    if mode == "branch":
+        (repo / "app.py").write_text("def f():\n    return 2\n")
+        _git(repo, "commit", "-am", "change")
+    else:
+        (repo / "app.py").write_text("def f():\n    return 2\n")
+    (repo / "new.py").write_text("x = 1\n")  # untracked: the --no-index path
+
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", key)
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", value)
+
+    ctx = local_pr_context(
+        base="main" if mode == "branch" else None,
+        working=mode == "working",
+        uncommitted=mode == "uncommitted",
+        cwd=repo,
+    )
+
+    expected = ["app.py"] if mode == "branch" else ["app.py", "new.py"]
+    assert ctx.changed_files == expected
+    assert "+    return 2" in ctx.diff
+    assert "\x1b[" not in ctx.diff
