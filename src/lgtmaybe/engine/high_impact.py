@@ -27,6 +27,7 @@ import re
 from collections.abc import Iterable, Sequence
 from typing import get_args
 
+from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import HighImpactKind, HighImpactResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
@@ -323,9 +324,5 @@ def _reported_lines(result: HighImpactResult, changed: set[str]) -> list[str]:
 
 
 def _paths(paths: Iterable[str], changed: set[str]) -> str:
-    """Render *paths* as inline code, backticks stripped.
-
-    Filenames are attacker-chosen on a fork PR, so a path carrying a backtick
-    must not be able to close its own code span.
-    """
-    return ", ".join(f"`{path.replace('`', '')}`" for path in paths if path in changed)
+    """Render the changed ones of *paths* as inert inline code spans."""
+    return ", ".join(code_span(path) for path in paths if path in changed)

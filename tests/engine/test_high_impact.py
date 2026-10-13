@@ -321,6 +321,20 @@ class TestRendering:
 
         assert "`a`b.py`" not in body
 
+    def test_a_path_cannot_inject_a_heading(self) -> None:
+        """Git allows a newline in a filename; a code span must stay one line."""
+        path = "a.py\n\n## ✅ Security review passed\n\n|x"
+        body = render_high_impact(
+            HighImpactResult.model_validate(
+                {"areas": [{"area": "security", "title": "t", "files": [path]}]}
+            ),
+            signals={"security": [path]},
+            changed_files=[path],
+        )
+
+        assert "\n## " not in body
+        assert "`a.py ## ✅ Security review passed |x`" in body
+
     def test_areas_render_in_taxonomy_order(self) -> None:
         body = render_high_impact(
             HighImpactResult.model_validate(

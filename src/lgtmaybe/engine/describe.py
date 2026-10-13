@@ -20,6 +20,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from lgtmaybe.core.comment import code_span
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import DescribeResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
@@ -90,7 +91,9 @@ def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClien
         task_suffix=_TASK_SUFFIX,
         result_model=DescribeResult,
         wanted=lambda data: isinstance(data.get("title"), str) and bool(data["title"]),
-        render=lambda desc, has_intent: render_description(desc, has_intent=has_intent),
+        render=lambda desc, has_intent: render_description(
+            _changed_only(desc, ctx), has_intent=has_intent
+        ),
         label="describe",
     )
 
@@ -115,7 +118,18 @@ def describe_result(
         wanted=lambda data: isinstance(data.get("title"), str) and bool(data["title"]),
         label="describe",
     )
-    return parsed, has_intent
+    return (_changed_only(parsed, ctx) if parsed is not None else None), has_intent
+
+
+def _changed_only(desc: DescribeResult, ctx: PRContext) -> DescribeResult:
+    """*desc* without walkthrough rows for files the PR never changed.
+
+    The path is model-written: a hallucinated one would sit in the overview
+    looking like part of the change. High Impact Areas drops them the same way.
+    """
+    changed = set(ctx.changed_files)
+    rows = [entry for entry in desc.walkthrough if entry.path in changed]
+    return desc.model_copy(update={"walkthrough": rows})
 
 
 def structured_comment(
@@ -281,9 +295,8 @@ def render_description_detail(desc: DescribeResult, *, has_intent: bool) -> str:
         for entry in desc.walkthrough:
             # A bare pipe in either cell ends the column early and mangles the
             # rest of the row, so it is escaped along with the block openers.
-            path = entry.path.replace("`", "")
             summary = prose_text(entry.summary).replace("|", r"\|")
-            lines.append(f"| `{path}` | {summary} |")
+            lines.append(f"| {code_span(entry.path, table=True)} | {summary} |")
     if has_intent and desc.intent_check:
         if lines:
             lines.append("")
