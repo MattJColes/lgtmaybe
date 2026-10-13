@@ -605,6 +605,11 @@ $ lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localh
 coding agent can read and apply, for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
+`--format sarif` prints a SARIF 2.1.0 log for GitHub code scanning or an IDE
+SARIF viewer: one rule per lens, the severity folded onto SARIF's three levels,
+and the finding's fingerprint and identity as `partialFingerprints`. See
+[Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
+
 ## See Also
 
 - [Getting Started](../tutorial/getting-started.md): run your first review

@@ -157,6 +157,33 @@ class TestReviewCommandLocal:
         assert "canned finding" in result.output
         assert "apply" in result.output.lower()
 
+    def test_format_sarif_outputs_only_a_sarif_log_on_stdout(self, monkeypatch):
+        """`review --format sarif` prints a SARIF 2.1.0 log and nothing else."""
+        _patch_local(monkeypatch)
+
+        result = CliRunner().invoke(
+            main,
+            ["review", "--provider", "ollama", "--model", "llama3", "--format", "sarif"],
+        )
+
+        assert result.exit_code == 0, result.output
+        log = json.loads(result.stdout)
+        assert log["version"] == "2.1.0"
+        assert "canned finding" in log["runs"][0]["results"][0]["message"]["text"]
+
+    def test_format_sarif_reports_incomplete_review_on_stderr(self, monkeypatch):
+        _patch_local(monkeypatch, _IncompleteEngine(FakeProvider()))
+
+        result = CliRunner().invoke(
+            main,
+            ["review", "--provider", "ollama", "--model", "llama3", "--format", "sarif"],
+        )
+
+        assert result.exit_code == 0, result.output
+        log = json.loads(result.stdout)
+        assert log["runs"][0]["invocations"][0]["executionSuccessful"] is False
+        assert "results may be incomplete" in result.stderr
+
     def test_does_not_require_github_token(self, monkeypatch):
         """The local review must work with no GITHUB_TOKEN in the environment."""
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
