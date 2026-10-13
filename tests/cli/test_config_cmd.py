@@ -278,3 +278,53 @@ def test_init_azure_asks_for_the_endpoint_and_deployment(
         "model": "my-deployment",
         "api_base": "https://res.openai.azure.com",
     }
+
+
+def test_init_drops_a_stale_api_base_when_the_new_provider_needs_none(
+    cfg_home: Path, monkeypatch: pytest.MonkeyPatch, client: _Client
+) -> None:
+    """A base kept from an earlier setup would be sent to the new provider."""
+    from lgtmaybe.config import store
+
+    store.save({"provider": "ollama", "model": "q", "api_base": "http://gpu-box:11434"})
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    _detected(monkeypatch, detect.Detection(Provider.anthropic, "ANTHROPIC_API_KEY"))
+
+    result = CliRunner().invoke(main, ["config", "init"], input="\n\n")
+
+    assert result.exit_code == 0, result.output
+    assert _written() == {"provider": "anthropic", "model": "claude-sonnet-4-6"}
+
+
+def test_init_verification_treats_truncation_as_success(
+    cfg_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reasoning model may spend the whole tiny budget thinking: it still answered."""
+    from lgtmaybe.core.ports import ProviderTruncated
+
+    truncating = _Client(error=ProviderTruncated("ran out of output tokens"))
+    monkeypatch.setattr(cli_module, "build_provider", lambda *_a, **_k: truncating)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    _detected(monkeypatch, detect.Detection(Provider.openai, "OPENAI_API_KEY"))
+
+    result = CliRunner().invoke(main, ["config", "init"], input="\n\n")
+
+    assert result.exit_code == 0, result.output
+    assert "OK: the model answered." in result.output
+    assert _written() == {"provider": "openai", "model": "gpt-5.5"}
+
+
+def test_init_azure_with_the_endpoint_in_the_environment_skips_the_prompt(
+    cfg_home: Path, monkeypatch: pytest.MonkeyPatch, client: _Client
+) -> None:
+    """The resolver reads AZURE_API_BASE itself, so init neither asks nor stores it."""
+    monkeypatch.setenv("AZURE_API_BASE", "https://res.openai.azure.com")
+    _detected(monkeypatch)
+
+    result = CliRunner().invoke(
+        main, ["config", "init", "--no-verify"], input="azure\nmy-deployment\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "endpoint" not in result.output
+    assert _written() == {"provider": "azure", "model": "my-deployment"}
