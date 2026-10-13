@@ -1,32 +1,64 @@
 """Tests for the .lgtmaybe.yml config loader.
 
-Precedence: CLI inputs > repo config file > defaults.
+Precedence: CLI inputs > repo config file > user config. There is no built-in
+provider or model: with neither set by any layer, loading fails clearly.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from lgtmaybe.config.loader import load_config
+from lgtmaybe.config.loader import ProviderNotConfigured, load_config
 
 
-def test_empty_file_yields_defaults(tmp_path):
-    """An empty YAML file produces a valid ReviewConfig with ollama defaults."""
+def test_empty_file_without_provider_is_not_configured(tmp_path):
+    """An empty YAML file names no provider, and there is no built-in guess
+    (the old ollama/llama3 default failed for most users deep in the run)."""
     cfg_file = tmp_path / ".lgtmaybe.yml"
     cfg_file.write_text("")
 
-    cfg = load_config(config_path=cfg_file)
+    with pytest.raises(ProviderNotConfigured) as excinfo:
+        load_config(config_path=cfg_file)
+
+    assert excinfo.value.missing == ("provider", "model")
+
+
+def test_missing_file_without_provider_is_not_configured(tmp_path):
+    """No config anywhere: a clear, catchable error rather than a guess."""
+    with pytest.raises(ProviderNotConfigured, match="No provider configured"):
+        load_config(config_path=tmp_path / ".lgtmaybe.yml")
+
+
+def test_not_configured_is_a_value_error(tmp_path):
+    """Callers that already turn loader ValueErrors into clean CLI errors keep
+    doing so without a new except clause."""
+    with pytest.raises(ValueError, match="lgtmaybe config init"):
+        load_config(config_path=tmp_path / ".lgtmaybe.yml")
+
+
+def test_provider_without_model_names_the_model(tmp_path):
+    """A provider alone is not enough, and the error says which half is missing."""
+    with pytest.raises(ProviderNotConfigured, match="No model configured") as excinfo:
+        load_config(config_path=tmp_path / ".lgtmaybe.yml", provider="ollama")
+
+    assert excinfo.value.missing == ("model",)
+
+
+def test_blank_provider_counts_as_unset(tmp_path):
+    """An empty string (a blank Action input or YAML value) is not a provider."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("provider: ''\nmodel: ''\n")
+
+    with pytest.raises(ProviderNotConfigured):
+        load_config(config_path=cfg_file)
+
+
+def test_flags_alone_configure_the_provider(tmp_path):
+    """--provider/--model with no file at all is a complete configuration."""
+    cfg = load_config(config_path=tmp_path / ".lgtmaybe.yml", provider="ollama", model="m")
 
     assert cfg.provider == "ollama"
-    assert cfg.model == "llama3"
-
-
-def test_missing_file_yields_defaults(tmp_path):
-    """A missing config file produces working defaults without error."""
-    cfg = load_config(config_path=tmp_path / ".lgtmaybe.yml")
-
-    assert cfg.provider == "ollama"
-    assert cfg.model == "llama3"
+    assert cfg.model == "m"
 
 
 def test_file_values_are_applied(tmp_path):
@@ -195,12 +227,12 @@ def test_non_mapping_default_config_is_ignored(tmp_path):
     """Without config_required (the default ./.lgtmaybe.yml probe), a non-mapping
     file is skipped leniently, as before."""
     cfg_file = tmp_path / "list.yml"
-    cfg_file.write_text("- provider: ollama\n")
+    cfg_file.write_text("- provider: openai\n")
 
-    cfg = load_config(config_path=cfg_file)
+    cfg = load_config(config_path=cfg_file, provider="ollama", model="m")
 
     assert cfg.provider == "ollama"
-    assert cfg.model == "llama3"
+    assert cfg.model == "m"
 
 
 def test_unknown_key_in_yaml_raises(tmp_path):
@@ -406,6 +438,7 @@ def test_project_profile_loads_from_file(tmp_path):
     """A `project:` block calibrates the review; a prototype raises the floor."""
     cfg_file = tmp_path / ".lgtmaybe.yml"
     cfg_file.write_text(
+        "provider: openai\nmodel: gpt-4o\n"
         "project:\n  stage: prototype\n  domain: internal tooling\n  notes: Demo only.\n"
     )
 
@@ -420,7 +453,7 @@ def test_project_profile_loads_from_file(tmp_path):
 def test_cli_severity_floor_beats_the_project_default(tmp_path):
     """An explicitly supplied min_severity is never overridden by the stage."""
     cfg_file = tmp_path / ".lgtmaybe.yml"
-    cfg_file.write_text("project:\n  stage: prototype\n")
+    cfg_file.write_text("provider: openai\nmodel: gpt-4o\nproject:\n  stage: prototype\n")
 
     cfg = load_config(config_path=cfg_file, min_severity="low")
 

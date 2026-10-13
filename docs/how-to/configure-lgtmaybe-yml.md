@@ -87,8 +87,10 @@ Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
 provider: anthropic
 ```
 
-If neither the file nor a flag sets `provider` and `model`, lgtmaybe falls back
-to `ollama` with `llama3`.
+There is no built-in provider or model. If no flag, no `.lgtmaybe.yml` and no
+user config (written by `lgtmaybe config init`) sets both, lgtmaybe stops before
+doing any work and tells you how to configure one. In the GitHub Action, set the
+`provider` and `model` inputs instead.
 
 ### model
 

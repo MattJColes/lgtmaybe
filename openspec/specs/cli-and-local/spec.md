@@ -240,12 +240,22 @@ specific wins), and the user-level store persists only non-secret defaults —
 API keys stay in the environment, never written to disk. An explicitly chosen
 config path (`--config` / the Action's `config_path`) must exist and parse to
 a mapping — a typo'd path fails loudly rather than silently running with
-defaults; the default `.lgtmaybe.yml` probe stays lenient when absent.
+defaults; the default `.lgtmaybe.yml` probe stays lenient when absent. There
+is no built-in provider or model: when no layer sets both, loading fails
+before any diff or model work with a two-line pointer phrased for the
+entrypoint (`config init` locally, the `provider`/`model` inputs in the
+Action, flags or `.lgtmaybe.yml` for `gitlab-ci` / `comment`).
 <!-- anchor: cli.config -->
 
 #### Scenario: user tries to persist a key
 - **WHEN** `lgtmaybe config set` targets an API key
 - **THEN** it is refused; keys are read from env/flags at run time only
+
+#### Scenario: nothing configured on a fresh install
+- **WHEN** `lgtmaybe review` runs with no flag, repo file, or user config
+  naming a provider and model
+- **THEN** it exits non-zero at once, pointing at `lgtmaybe config init` or
+  `--provider`/`--model`, and never guesses a model
 
 ### Requirement: The Action selects GitHub identity explicitly
 
