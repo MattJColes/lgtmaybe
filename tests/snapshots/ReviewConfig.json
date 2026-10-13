@@ -179,7 +179,7 @@
     },
     "ProjectProfile": {
       "additionalProperties": false,
-      "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of a code change at ``medium``), and an explicitly\nconfigured setting always wins. All three fields also render one short\ntrusted paragraph in the shared review preamble. Empty (the default) is\nbyte-identical to a review without the feature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
+      "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of any change that isn't only docs and tests at\n``medium``), and an explicitly configured setting always wins. All three\nfields also render one short trusted paragraph in the shared review\npreamble. Empty (the default) is byte-identical to a review without the\nfeature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
       "properties": {
         "domain": {
           "anyOf": [

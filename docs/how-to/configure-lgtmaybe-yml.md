@@ -863,7 +863,7 @@ always wins over the stage.
 |---|---|---|
 | `prototype` | `min_severity` defaults to `medium` instead of `low` | Report correctness and security, skip hardening, observability and docs polish |
 | `production` | none | The standard bar |
-| `regulated` | Any PR that changes code is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
+| `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
 
 All three fields also render one short paragraph in the system prompt every
 lens shares, so it's cached once per run rather than paid per lens. Leave the

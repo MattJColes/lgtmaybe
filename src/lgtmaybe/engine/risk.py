@@ -250,7 +250,7 @@ def _assess(
         )
 
     if cfg.project.stage == "regulated":
-        # A floor, not a bump: `medium` so a code change is never waved through
+        # A floor, not a bump: `medium` so a change is never waved through
         # as low, and never `high`, which would make every other high reason
         # `critical` via the two-distinct-highs rule.
         reasons.append(

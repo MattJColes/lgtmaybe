@@ -36,8 +36,9 @@ followed by a reflection pass. They can contain:
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
 - **A project paragraph**, if the `project` block is set: its stage
-  guidance, `domain` and `notes`, exactly as written in `.lgtmaybe.yml`. Don't
-  put anything in `notes` you wouldn't send to the model provider.
+  guidance, `domain` and `notes`, as written in `.lgtmaybe.yml` with delimiter
+  tokens neutralised. Don't put anything in `notes` you wouldn't send to the
+  model provider.
 - **Configured instructions and reference files**, if `directory_rules` is
   set. Reference files come from the trusted base-branch workspace, are
   bounded, and are redacted before model calls.

@@ -3553,7 +3553,7 @@ always wins over the stage.
 |---|---|---|
 | `prototype` | `min_severity` defaults to `medium` instead of `low` | Report correctness and security, skip hardening, observability and docs polish |
 | `production` | none | The standard bar |
-| `regulated` | Any PR that changes code is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
+| `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
 
 All three fields also render one short paragraph in the system prompt every
 lens shares, so it's cached once per run rather than paid per lens. Leave the
@@ -3926,7 +3926,7 @@ was without it.
 |---|---|---|
 | `prototype` | [`min_severity`](configure-lgtmaybe-yml.md#min_severity) defaults to `medium` instead of `low` | Report correctness and security problems, and skip hardening, observability, scalability and documentation polish it doesn't need yet. |
 | `production` | none | Hold the change to the standard review bar. |
-| `regulated` | Any PR that changes code is at least `medium` [risk](../explanation/risk-of-change.md), with a "regulated workload" reason | Where the domain makes them material, rate data handling, auditability, access control and personal-data exposure one severity step higher. |
+| `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](../explanation/risk-of-change.md), with a "regulated workload" reason | Where the domain makes them material, rate data handling, auditability, access control and personal-data exposure one severity step higher. |
 
 `production` changes no settings. It's there so a team can say so explicitly,
 and so the guidance paragraph has a stage to name alongside `domain` and
@@ -5429,7 +5429,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "ProjectProfile": {
       "additionalProperties": false,
-      "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of a code change at ``medium``), and an explicitly\nconfigured setting always wins. All three fields also render one short\ntrusted paragraph in the shared review preamble. Empty (the default) is\nbyte-identical to a review without the feature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
+      "description": "What the repository is, so a review can be calibrated to the workload.\n\nA weekend prototype and a regulated payments service should not get the\nsame review. ``stage`` sets defaults for existing settings (a prototype\nraises the ``min_severity`` default to ``medium``; a regulated workload\nfloors the risk verdict of any change that isn't only docs and tests at\n``medium``), and an explicitly configured setting always wins. All three\nfields also render one short trusted paragraph in the shared review\npreamble. Empty (the default) is byte-identical to a review without the\nfeature.\n\nStructured on purpose: reading AGENTS.md or similar wholesale brings\ncoding-agent instructions the reviewer has no use for, and usually more\ntext than the context budget takes.",
       "properties": {
         "domain": {
           "anyOf": [
@@ -8043,8 +8043,9 @@ followed by a reflection pass. They can contain:
 - A **system prompt** — the fixed instructions that tell the model to return
   structured JSON findings.
 - **A project paragraph**, if the `project` block is set: its stage
-  guidance, `domain` and `notes`, exactly as written in `.lgtmaybe.yml`. Don't
-  put anything in `notes` you wouldn't send to the model provider.
+  guidance, `domain` and `notes`, as written in `.lgtmaybe.yml` with delimiter
+  tokens neutralised. Don't put anything in `notes` you wouldn't send to the
+  model provider.
 - **Configured instructions and reference files**, if `directory_rules` is
   set. Reference files come from the trusted base-branch workspace, are
   bounded, and are redacted before model calls.

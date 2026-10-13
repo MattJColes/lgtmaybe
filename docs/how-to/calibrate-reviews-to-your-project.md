@@ -50,7 +50,7 @@ was without it.
 |---|---|---|
 | `prototype` | [`min_severity`](configure-lgtmaybe-yml.md#min_severity) defaults to `medium` instead of `low` | Report correctness and security problems, and skip hardening, observability, scalability and documentation polish it doesn't need yet. |
 | `production` | none | Hold the change to the standard review bar. |
-| `regulated` | Any PR that changes code is at least `medium` [risk](../explanation/risk-of-change.md), with a "regulated workload" reason | Where the domain makes them material, rate data handling, auditability, access control and personal-data exposure one severity step higher. |
+| `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](../explanation/risk-of-change.md), with a "regulated workload" reason | Where the domain makes them material, rate data handling, auditability, access control and personal-data exposure one severity step higher. |
 
 `production` changes no settings. It's there so a team can say so explicitly,
 and so the guidance paragraph has a stage to name alongside `domain` and

@@ -237,10 +237,11 @@ class ProjectProfile(_Strict):
     A weekend prototype and a regulated payments service should not get the
     same review. ``stage`` sets defaults for existing settings (a prototype
     raises the ``min_severity`` default to ``medium``; a regulated workload
-    floors the risk verdict of a code change at ``medium``), and an explicitly
-    configured setting always wins. All three fields also render one short
-    trusted paragraph in the shared review preamble. Empty (the default) is
-    byte-identical to a review without the feature.
+    floors the risk verdict of any change that isn't only docs and tests at
+    ``medium``), and an explicitly configured setting always wins. All three
+    fields also render one short trusted paragraph in the shared review
+    preamble. Empty (the default) is byte-identical to a review without the
+    feature.
 
     Structured on purpose: reading AGENTS.md or similar wholesale brings
     coding-agent instructions the reviewer has no use for, and usually more
