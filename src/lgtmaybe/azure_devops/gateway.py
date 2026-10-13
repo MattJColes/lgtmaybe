@@ -31,6 +31,7 @@ review without them.
 from __future__ import annotations
 
 import base64
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
@@ -47,6 +48,7 @@ from lgtmaybe.core.comment import (
     render_broad,
     render_demoted,
     render_inline_body,
+    render_unread_files,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -80,6 +82,18 @@ _MAX_DIFF_FILES = 300
 # routinely larger (a package-lock.json), so they get their own ceiling.
 _MAX_DIFF_BYTES = 1_000_000
 _MAX_SCAN_BYTES = 8_000_000
+# All manifests together: a few large lockfiles, not 300 of them, held at once.
+# Manifests past this are skipped and logged; scanning is supplementary.
+_MAX_SCAN_TOTAL_BYTES = 32_000_000
+
+# Azure DevOps throttles readily, so an Items fetch answering 429 or 5xx, or
+# timing out, is retried a bounded number of times before only that file is
+# given up on. A server-supplied Retry-After is honoured up to a small cap, so
+# one throttled file cannot stall the review for minutes.
+_FETCH_ATTEMPTS = 3
+_RETRY_BACKOFF = 1.0
+_MAX_RETRY_AFTER = 10.0
+_sleep = time.sleep
 
 # Finding threads are left open for the author to resolve; every other thread
 # (summary, description, notices) is created closed, so it never holds a merge
@@ -97,6 +111,14 @@ _FIXED_STATUSES = frozenset({"fixed", 2})
 # GitInterfaces.ts): None 0, Add 1, Edit 2, Encoding 4, Rename 8, Delete 16,
 # Undelete 32. Encoding (4) is deliberately absent: it changes no lines.
 _CHANGE_FLAGS = {1: "add", 2: "edit", 8: "rename", 16: "delete", 32: "undelete"}
+
+
+class _FetchFailed(Exception):
+    """An Items fetch that still failed after its retries (not an auth failure)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class _Unreadable(Enum):
@@ -181,6 +203,9 @@ class AzureDevOpsGateway:
         self._diff: str | None = None
         self._head_texts: dict[str, str] = {}
         self._scan_manifests = False
+        # Changed files a side of which could not be fetched; named in the
+        # summary so the review never reads as covering them.
+        self._unread: list[str] = []
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -194,13 +219,20 @@ class AzureDevOpsGateway:
         meta = self._get_json(self._pr_api)
         iteration = self._latest_iteration()
         head_sha = (iteration.get("sourceRefCommit") or {}).get("commitId")
-        base_sha = (iteration.get("commonRefCommit") or {}).get("commitId") or (
-            iteration.get("targetRefCommit") or {}
-        ).get("commitId")
-        if not base_sha or not head_sha:
+        base_sha = (iteration.get("commonRefCommit") or {}).get("commitId")
+        if not head_sha:
             raise RuntimeError(
-                f"Pull request {self._repo}!{self._pr_number} has no source or merge-base "
-                "commit on its latest iteration: unexpected Azure DevOps API response."
+                f"Pull request {self._repo}!{self._pr_number} has no source commit on its "
+                "latest iteration: unexpected Azure DevOps API response."
+            )
+        if not base_sha:
+            # Never fall back to the target branch head: it carries changes
+            # other merged pull requests made, so findings would anchor on lines
+            # this one never touched.
+            raise DiffUnavailable(
+                "Azure DevOps reports no merge base (commonRefCommit) for this pull "
+                "request's latest iteration, so its own changes cannot be told apart "
+                "from the target branch's."
             )
         self._head_sha = head_sha
 
@@ -248,18 +280,7 @@ class AzureDevOpsGateway:
         self._diff = "".join(patches)
         self._head_texts = dict(file_contents)
 
-        scan_contents: dict[str, str] = {}
-        if self._scan_manifests:
-            manifests = [
-                c.new_path
-                for c in changes
-                if c.new_path is not None and is_scannable_manifest(c.new_path)
-            ]
-            with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
-                fetched = pool.map(
-                    lambda p: (p, self._fetch_text(p, head_sha, _MAX_SCAN_BYTES)), manifests
-                )
-                scan_contents = {path: text for path, text in fetched if isinstance(text, str)}
+        scan_contents = self._fetch_scan_contents(changes, head_sha) if self._scan_manifests else {}
 
         return PRContext(
             diff=self._diff,
@@ -310,7 +331,10 @@ class AzureDevOpsGateway:
             if not self._post_finding_thread(context, render_inline_body(finding)):
                 demoted.append(finding)
 
-        body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
+        body = (
+            f"{summary}{render_demoted(demoted)}{render_broad(broad)}"
+            f"{render_unread_files(self._unread)}\n\n{self._marker}"
+        )
         self._upsert(body, self._marker, threads)
 
     def post_issue_comment(self, body: str) -> None:
@@ -413,25 +437,118 @@ class AzureDevOpsGateway:
     def _fetch_sides(
         self, changes: list[_Change], base_sha: str, head_sha: str
     ) -> dict[tuple[str, str], _Text]:
-        """Both sides of every reviewable file, fetched concurrently."""
-        wanted: list[tuple[str, str]] = []
+        """Both sides of every reviewable file, fetched concurrently.
+
+        A side that still fails after its retries degrades only its own file:
+        it renders as unreadable (never a fabricated diff), is logged with its
+        path, side and reason, and is named in the summary. An auth failure is
+        not a per-file problem and propagates.
+        """
+        wanted: list[tuple[str, str, str]] = []
+        self._unread = []
         for change in changes:
             if not is_reviewable(change.path):
                 continue  # named in the diff, never fetched
             if change.old_path is not None:
-                wanted.append((change.old_path, base_sha))
+                wanted.append((change.old_path, base_sha, "old"))
             if change.new_path is not None:
-                wanted.append((change.new_path, head_sha))
+                wanted.append((change.new_path, head_sha, "new"))
+        owner = {
+            (path, commit): change.path
+            for change in changes
+            for path, commit in ((change.old_path, base_sha), (change.new_path, head_sha))
+            if path is not None
+        }
+
+        def fetch(key: tuple[str, str, str]) -> _Text:
+            path, commit, side = key
+            try:
+                return self._fetch_text(path, commit, _MAX_DIFF_BYTES)
+            except _FetchFailed as exc:
+                _log.warning(
+                    "the %s side of %r could not be fetched (%s); not reviewing it",
+                    side,
+                    path,
+                    exc.reason,
+                )
+                self._unread.append(owner[path, commit])
+                return _Unreadable.blob
+
         with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
-            fetched = pool.map(
-                lambda key: self._fetch_text(key[0], key[1], _MAX_DIFF_BYTES), wanted
-            )
-            return dict(zip(wanted, fetched, strict=True))
+            fetched = list(pool.map(fetch, wanted))
+        # Concurrent appends land in completion order; report in change order.
+        order = {change.path: i for i, change in enumerate(changes)}
+        self._unread = sorted(set(self._unread), key=order.__getitem__)
+        return {
+            (path, commit): text for (path, commit, _), text in zip(wanted, fetched, strict=True)
+        }
+
+    def _fetch_scan_contents(self, changes: list[_Change], head_sha: str) -> dict[str, str]:
+        """Head text of changed dependency manifests, within two byte ceilings.
+
+        Each manifest may be up to ``_MAX_SCAN_BYTES``, and all of them
+        together up to ``_MAX_SCAN_TOTAL_BYTES``; a manifest past either is
+        skipped and logged. Fetched one at a time so the total stays bounded
+        while it is read. Scanning is supplementary, so a manifest that cannot
+        be fetched is skipped rather than failing the review.
+        """
+        remaining = _MAX_SCAN_TOTAL_BYTES
+        out: dict[str, str] = {}
+        for change in changes:
+            path = change.new_path
+            if path is None or not is_scannable_manifest(path):
+                continue
+            limit = min(_MAX_SCAN_BYTES, remaining)
+            try:
+                text = self._fetch_text(path, head_sha, limit) if limit > 0 else _Unreadable.blob
+            except _FetchFailed as exc:
+                _log.warning("skipping manifest %r for scanning (%s)", path, exc.reason)
+                continue
+            if isinstance(text, str):
+                out[path] = text
+                remaining -= len(text.encode("utf-8"))
+            elif text is not None:
+                _log.warning(
+                    "skipping manifest %r for scanning: binary, or past the %d-byte ceiling",
+                    path,
+                    limit,
+                )
+        return out
 
     def _fetch_text(self, path: str, commit: str, limit: int) -> _Text:
         """One file's text at ``commit``: None when absent, ``_Unreadable`` when
         binary or over ``limit`` bytes (the body is streamed and abandoned there,
-        so an oversized file never lands in memory)."""
+        so an oversized file never lands in memory).
+
+        429, 5xx, timeouts and dropped connections are retried up to ``_FETCH_ATTEMPTS`` times and
+        then raise ``_FetchFailed``. 401/403 raise ``httpx.HTTPStatusError``
+        straight away: Azure Repos has no per-file read permission, so either
+        means the token itself is wrong, and the review must fail loudly.
+        """
+        reason = "no attempt made"
+        for attempt in range(1, _FETCH_ATTEMPTS + 1):
+            delay = _RETRY_BACKOFF * attempt
+            try:
+                return self._fetch_text_once(path, commit, limit)
+            except httpx.TransportError as exc:  # a timeout, or a dropped connection
+                reason = (
+                    "timed out"
+                    if isinstance(exc, httpx.TimeoutException)
+                    else f"transport error ({type(exc).__name__})"
+                )
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status in (401, 403):
+                    raise
+                reason = f"HTTP {status}"
+                if status != 429 and status < 500:
+                    raise _FetchFailed(reason) from exc
+                delay = _retry_after(exc.response, delay)
+            if attempt < _FETCH_ATTEMPTS:
+                _sleep(delay)
+        raise _FetchFailed(f"{reason} after {_FETCH_ATTEMPTS} attempts")
+
+    def _fetch_text_once(self, path: str, commit: str, limit: int) -> _Text:
         params = {
             "api-version": _API_VERSION,
             "path": f"/{path}",
@@ -546,8 +663,12 @@ class AzureDevOpsGateway:
         marker someone else planted is never an edit target. When the identity
         is unknown every marked thread is a candidate: Azure DevOps lets only a
         comment's author edit it, so another author's comment answers 403 and
-        the next is tried. A 403 or 404 never fails the review; with nothing
-        editable, a new thread is opened.
+        the next is tried.
+
+        A 403 or 404 on an edit moves on to the next candidate, and when none
+        is left a new thread is opened. Any other failed edit raises: that is
+        deliberate, so a token that has lost its rights (401) or a host fault
+        surfaces as a failed review instead of a quietly duplicated summary.
         """
         candidates = _find_root_comments(self._threads() if threads is None else threads, family)
         identity = self._own_identity()
@@ -631,6 +752,15 @@ class AzureDevOpsGateway:
         resp.raise_for_status()
         payload = resp.json()
         return payload if isinstance(payload, dict) else {}
+
+
+def _retry_after(response: httpx.Response, default: float) -> float:
+    """Seconds a throttled response asks us to wait, capped; ``default`` if unsaid."""
+    try:
+        seconds = float(response.headers["Retry-After"])
+    except (KeyError, ValueError):
+        return default
+    return max(0.0, min(seconds, _MAX_RETRY_AFTER))
 
 
 def _segment(value: str) -> str:

@@ -178,7 +178,7 @@ findings. What differs is what each host's API can do with the result:
 | | GitHub | GitLab | Gitea | Azure DevOps |
 |---|---|---|---|---|
 | Inline comments + summary | ✅ | ✅ | ✅ | ✅ |
-| Slash commands | ✅ | ✅ | ✅ | ✗ |
+| Slash commands | ✅ | ✅ | ✅ | not yet |
 | Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API | not yet |
 | Incremental re-review | ✅ | not yet | ✗ no compare diff | not yet |
 | Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key | ✗ use an API key |

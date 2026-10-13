@@ -41,6 +41,20 @@ changed-line contract every lens depends on).
   did not happen instead of truncating silently.
 - A path holding a control character is left out and logged: a newline in a
   filename chosen by the PR author would otherwise forge diff header lines.
+- No merge base (`commonRefCommit`) raises `DiffUnavailable`. Falling back to
+  the target branch head would pull in other merged pull requests' changes and
+  anchor findings on lines this one never touched.
+- Azure DevOps throttles readily, so an Items fetch answering 429 or 5xx, or
+  timing out, is retried three times, honouring `Retry-After` up to 10 seconds.
+  A side that still fails degrades only its file to a binary patch, logged and
+  named in the summary under "Files not reviewed" (`core.comment`). A 401 or
+  403 fails the review: Azure Repos has no per-file read permission, so it
+  means the token is wrong, not the file.
+- Dependency manifests for scanning are read one at a time, up to 8 MB each and
+  32 MB together; any past either ceiling is skipped and logged.
+- `connectionData` is sent without `api-version`: it is a collection-level
+  endpoint outside the versioned Git API, and no version string for it could
+  be confirmed.
 
 ### D3. Threads, with explicit statuses
 

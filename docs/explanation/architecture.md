@@ -84,8 +84,8 @@ cannot do instead of failing at run time.
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | `SupportsIncremental`: review only new commits | ✅ | not yet | ✗ no compare diff | not yet |
-| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ | ✗ |
-| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | ✗ |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ | not yet |
+| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
 `tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
 and the GitLab, Gitea and Azure DevOps tests assert those adapters do **not**

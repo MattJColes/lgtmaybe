@@ -253,15 +253,27 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
 }
 
 
+def _forge_token(forge: Forge) -> tuple[str, str] | None:
+    """``(variable, token)`` for the first of ``forge``'s token variables that is set.
+
+    The one place token precedence is decided: ``build_review_context`` reads
+    the token from it, and the Azure DevOps builder reads which variable won.
+    """
+    for var in token_env_vars(forge):
+        if value := os.environ.get(var):
+            return var, value
+    return None
+
+
 def _azure_devops_token_is_bearer() -> bool:
     """Whether the Azure DevOps token in play is the pipeline's own.
 
-    ``build_review_context`` prefers ``AZURE_DEVOPS_TOKEN`` (a personal access
-    token, sent as basic auth) and falls back to ``SYSTEM_ACCESSTOKEN`` (the
-    job's OAuth token, sent as a bearer token), so the scheme follows from
-    which of the two is set.
+    A personal access token (``AZURE_DEVOPS_TOKEN``) is sent as basic auth; the
+    job's OAuth token (``SYSTEM_ACCESSTOKEN``) as a bearer token. Which one is
+    in play is whichever ``_forge_token`` picked, never re-derived here.
     """
-    return not os.environ.get("AZURE_DEVOPS_TOKEN") and bool(os.environ.get("SYSTEM_ACCESSTOKEN"))
+    picked = _forge_token(Forge.azure_devops)
+    return picked is not None and picked[0] == "SYSTEM_ACCESSTOKEN"
 
 
 def gateway_builder(
@@ -437,13 +449,14 @@ def build_review_context(
             f"{', '.join(sorted(_GATEWAY_BUILDERS))} so far."
         )
 
-    token_vars = token_env_vars(located.forge)
-    token = next((value for var in token_vars if (value := os.environ.get(var))), None)
-    if not token:
+    picked = _forge_token(located.forge)
+    if picked is None:
         raise ValueError(
-            f"{' or '.join(token_vars)} is required to fetch the change and post the review. "
-            "Set it in the environment (the GitHub Action provides it automatically)."
+            f"{' or '.join(token_env_vars(located.forge))} is required to fetch the change "
+            "and post the review. Set it in the environment (the GitHub Action provides it "
+            "automatically)."
         )
+    _token_var, token = picked
 
     github = build_gateway(located, token, cfg)
     # Wire the gateway's read-only file fetcher so the reflection pass can resolve a

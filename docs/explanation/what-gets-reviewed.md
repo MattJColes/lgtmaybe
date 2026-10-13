@@ -541,7 +541,7 @@ The findings are identical everywhere. What each host's API allows is not:
 |---|---|---|---|---|
 | Inline comments | one batched review | one discussion per finding | one batched review | one thread per finding |
 | Summary | the review body, edited in place | a note, edited in place | an issue comment, edited in place | a general thread, edited in place |
-| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids already posted |
+| Avoiding duplicates on a re-run | skips ids already posted | skips ids already posted | skips ids already posted | skips ids it posted itself, once the token's identity is known |
 | Auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | Incremental review of new commits | ✅ | not yet | ✗ no compare diff | not yet |
 

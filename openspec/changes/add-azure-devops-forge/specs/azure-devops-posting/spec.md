@@ -26,11 +26,11 @@ other host (Azure DevOps Server).
 <!-- anchor: azure-devops.context -->
 
 `get_pr_context` SHALL diff the latest iteration's changes against the merge
-base (`commonRefCommit`), reading each side through the Items API only.
-Unreviewable files SHALL NOT be fetched; they, oversized sides, and non-UTF-8
-text SHALL appear as hunkless binary patches. A path holding a control
-character SHALL be left out, and a change list past the file cap SHALL raise
-`DiffUnavailable`.
+base (`commonRefCommit`) through the Items API only, raising `DiffUnavailable`
+when the merge base is missing or the file cap is passed. Unreviewable files
+SHALL NOT be fetched; they, oversized sides, and non-UTF-8 text SHALL appear as
+hunkless binary patches. Control-character paths SHALL be left out, and a
+rename without a usable `originalPath` SHALL be diffed as an edit in place.
 
 #### Scenario: a lockfile changes
 - **WHEN** `package-lock.json` is in the change list
@@ -41,8 +41,47 @@ character SHALL be left out, and a change list past the file cap SHALL raise
 - **THEN** the review is disclosed as not run rather than run on part of the change
 
 #### Scenario: an iteration without commits
-- **WHEN** the latest iteration names no source or merge-base commit
+- **WHEN** the latest iteration names no source commit
 - **THEN** the adapter raises rather than reviewing an empty diff
+
+#### Scenario: no merge base
+- **WHEN** the latest iteration has a target commit but no `commonRefCommit`
+- **THEN** `DiffUnavailable` names the missing merge base and nothing is diffed against the target
+
+#### Scenario: a rename without its old path
+- **WHEN** a rename entry has no `originalPath`
+- **THEN** the new path is read at both commits, and a 404 at the merge base is logged
+
+### Requirement: A file that cannot be fetched degrades alone
+<!-- anchor: azure-devops.fetch -->
+
+Each Items fetch SHALL be retried a bounded number of times when it answers 429
+or 5xx, times out, or drops its connection, honouring `Retry-After` up to a
+cap. A side that still fails SHALL render its file as a hunkless binary patch,
+never a fabricated diff, logged with path, side and reason, and named in the
+summary under "Files not reviewed". A 401 or 403 SHALL fail the review: Azure
+Repos has no per-file read permission, so it means the token is wrong.
+
+#### Scenario: a throttled file
+- **WHEN** a fetch answers 429 with `Retry-After: 2` and then succeeds
+- **THEN** the adapter waits two seconds and diffs the file normally
+
+#### Scenario: a file that never comes back
+- **WHEN** every attempt at one file answers 503
+- **THEN** only that file is shown as binary and named in the summary; the rest are reviewed
+
+### Requirement: Dependency manifests are read within byte ceilings
+<!-- anchor: azure-devops.scan -->
+
+With `set_scan_manifests(True)`, `get_pr_context` SHALL put the head text of
+each changed dependency manifest in `scan_contents`, up to 8 MB per manifest
+and 32 MB across all of them, reading them one at a time. A manifest past
+either ceiling, binary, or failing to fetch SHALL be skipped and logged, never
+failing the review.
+
+#### Scenario: the aggregate ceiling is reached
+- **WHEN** a second lockfile would take the total past 32 MB
+- **THEN** it is left out of `scan_contents` and named in the log
 
 ### Requirement: Rendered diffs agree with the shared parser
 <!-- anchor: azure-devops.render -->
@@ -75,12 +114,11 @@ thread.
 <!-- anchor: azure-devops.upsert -->
 
 The summary, description, and diagram SHALL each be a `closed` general thread
-whose first comment carries its own hidden marker family and is edited in place
-on a re-run. Only threads whose first comment the token's own identity wrote
-SHALL be edit targets; when the identity is unknown, the host's author check
-decides. An edit refused with 403 or 404 SHALL move on to the next candidate,
-and a new thread SHALL be posted when none can be edited, never failing the
-review.
+whose first comment carries its own marker family and is edited in place on a
+re-run. Only our own identity's threads SHALL be edit targets; with the
+identity unknown, the host's author check decides. A 403 or 404 SHALL move on
+to the next candidate, then to a new thread; any other failed edit SHALL fail
+the review, so an auth error surfaces.
 
 #### Scenario: a re-run
 - **WHEN** a review runs twice on the same pull request
@@ -114,7 +152,9 @@ SHALL keep suppressing its finding; a fixed one SHALL NOT.
 The adapter SHALL send `AZURE_DEVOPS_TOKEN` as basic auth with an empty user
 name, and otherwise `SYSTEM_ACCESSTOKEN` as a bearer token, preferring the
 former when both are set. Tokens SHALL travel only in the `Authorization` header,
-never in a URL or a log line, and every request SHALL pin `api-version=7.1`.
+never in a URL or a log line. Every request to the versioned Git and pull
+request APIs SHALL pin `api-version=7.1`; `connectionData`, a collection-level
+endpoint with no confirmed version string, SHALL be sent without one.
 
 #### Scenario: only the pipeline token is set
 - **WHEN** `SYSTEM_ACCESSTOKEN` is set and `AZURE_DEVOPS_TOKEN` is not
@@ -127,11 +167,16 @@ The `azure-pipelines` command SHALL build the pull request URL from
 `SYSTEM_COLLECTIONURI`, `SYSTEM_TEAMPROJECT`, `BUILD_REPOSITORY_NAME`, and
 `SYSTEM_PULLREQUEST_PULLREQUESTID`, naming whichever is missing, and SHALL
 refuse a build of a repository whose `BUILD_REPOSITORY_PROVIDER` is not Azure
-Repos.
+Repos. An unset or empty provider, which only a manual run produces, SHALL be
+treated as Azure Repos.
 
 #### Scenario: a CI build that is not for a pull request
 - **WHEN** `SYSTEM_PULLREQUEST_PULLREQUESTID` is unset
 - **THEN** the command fails naming that variable and the build validation policy
+
+#### Scenario: the command is run by hand
+- **WHEN** `BUILD_REPOSITORY_PROVIDER` is unset and the other variables are present
+- **THEN** the pull request URL is built as for Azure Repos
 
 ### Requirement: Unbuilt capabilities are not claimed
 <!-- anchor: azure-devops.capabilities -->

@@ -51,3 +51,15 @@ azure-devops.capabilities:
     kind: class_definition
     has: { field: name, regex: '^AzureDevOpsGateway$' }
   files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.fetch:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fetch_text$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]
+
+azure-devops.scan:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fetch_scan_contents$' }
+  files: [src/lgtmaybe/azure_devops/**/*.py]

@@ -171,7 +171,11 @@ iteration, lists the files it changes against the merge base, fetches each
 file's text before and after, and builds the diff itself. Lockfiles, vendored
 and binary files are listed as changed but never fetched, and a file side over
 1 MB is treated like a binary. A pull request changing more than 300 files is
-not reviewed; lgtmaybe says so instead of reviewing part of it.
+not reviewed; lgtmaybe says so instead of reviewing part of it. The same goes
+when Azure DevOps reports no merge base for the pull request. A file Azure
+DevOps keeps throttling or failing to return is retried, then left out on its
+own and named under **Files not reviewed** in the summary; a 401 or 403 fails
+the review, since that means the token is wrong.
 
 Each finding is its own comment thread on the changed line, left **active** so
 a "resolve all comments" branch policy can hold the merge until someone deals

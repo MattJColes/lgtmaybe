@@ -130,6 +130,9 @@ class FakeAzureDevOps:
         self.reject_threads_at: set[str] = set()
         self.forbid_edits = False
         self.identity_status = 200
+        # Responses (or exceptions) an Items fetch returns before the real file,
+        # consumed in order per (path, commit).
+        self.item_script: dict[tuple[str, str], list[httpx.Response | Exception]] = {}
         self.identity_calls = 0
         self.requests: list[httpx.Request] = []
         self._next_id = 1000
@@ -184,6 +187,12 @@ class FakeAzureDevOps:
         assert params["versionDescriptor.versionType"] == "commit"
         key = (params["path"], params["versionDescriptor.version"])
         self.item_requests.append(key)
+        script = self.item_script.get(key)
+        if script:
+            outcome = script.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
         if key not in self.files:
             return httpx.Response(404, json={"message": "not found"})
         return httpx.Response(200, content=self.files[key])
@@ -310,11 +319,15 @@ class TestTokenHandling:
         _gateway().post_review([FINDING], "1 finding", diff=_gateway().get_pr_context().diff)
 
         assert fake.requests
+        identity = [r for r in fake.requests if r.url.path.endswith("/_apis/connectionData")]
+        assert len(identity) == 1
+        # connectionData is a collection-level endpoint outside the versioned Git
+        # API; no version string for it could be confirmed, so none is sent.
+        assert "api-version" not in identity[0].url.params
         for request in fake.requests:
-            if request.url.path.endswith("/connectionData"):
-                continue  # an organisation-level endpoint, not the versioned git API
-            assert request.url.params["api-version"] == "7.1"
             assert TOKEN not in str(request.url)
+            if request not in identity:
+                assert request.url.params["api-version"] == "7.1"
 
     @respx.mock
     def test_a_failure_never_echoes_the_token(self, caplog: pytest.LogCaptureFixture) -> None:
@@ -509,6 +522,26 @@ class TestGetPRContext:
             _gateway().get_pr_context()
 
     @respx.mock
+    def test_a_missing_merge_base_is_disclosed_not_diffed_against_the_target(self) -> None:
+        """The target head carries other PRs' changes; diffing against it misplaces findings."""
+        iterations = {
+            "value": [
+                {
+                    "id": 2,
+                    "sourceRefCommit": {"commitId": HEAD_SHA},
+                    "targetRefCommit": {"commitId": "target789"},
+                }
+            ]
+        }
+        fake = FakeAzureDevOps()
+        fake.install()
+        respx.get(f"{PR_API}/iterations").mock(return_value=httpx.Response(200, json=iterations))
+
+        with pytest.raises(DiffUnavailable, match="merge base"):
+            _gateway().get_pr_context()
+        assert not fake.item_requests
+
+    @respx.mock
     def test_dependency_manifests_are_fetched_for_scanning_when_asked(self) -> None:
         FakeAzureDevOps().install()
         gateway = _gateway()
@@ -516,6 +549,29 @@ class TestGetPRContext:
         ctx = gateway.get_pr_context()
 
         assert ctx.scan_contents == {"package-lock.json": '{"lockfileVersion": 3}\n'}
+
+    @respx.mock
+    def test_manifests_stop_at_the_aggregate_ceiling(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setattr(gateway_module, "_MAX_SCAN_TOTAL_BYTES", 30)
+        changes = [
+            {"changeType": "edit", "item": {"path": "/package-lock.json"}},
+            {"changeType": "edit", "item": {"path": "/web/package-lock.json"}},
+        ]
+        files = {
+            **FILES,
+            ("/package-lock.json", HEAD_SHA): b'{"lockfileVersion": 3}\n',
+            ("/web/package-lock.json", HEAD_SHA): b'{"lockfileVersion": 3}\n',
+        }
+        FakeAzureDevOps(changes=changes, files=files).install()
+        caplog.set_level(logging.WARNING)
+        gateway = _gateway()
+        gateway.set_scan_manifests(True)
+        ctx = gateway.get_pr_context()
+
+        assert list(ctx.scan_contents) == ["package-lock.json"]
+        assert any("web/package-lock.json" in r.getMessage() for r in caplog.records)
 
     @respx.mock
     def test_file_contents_reads_head_text_after_the_context_fetch(self) -> None:
@@ -539,6 +595,95 @@ class TestGetPRContext:
 
         assert gateway.get_file_contents("lib/util.py") == "def helper():\n    return 1\n"
         assert ("/lib/util.py", HEAD_SHA) in fake.item_requests
+
+
+class TestFetchResilience:
+    """One file that will not come back must not cost the whole review."""
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch: pytest.MonkeyPatch) -> list[float]:
+        slept: list[float] = []
+        monkeypatch.setattr(gateway_module, "_sleep", slept.append)
+        return slept
+
+    @respx.mock
+    def test_throttling_is_retried_honouring_retry_after(self, _no_sleep: list[float]) -> None:
+        fake = FakeAzureDevOps(changes=CHANGES[:1])
+        fake.install()
+        fake.item_script[("/app.py", HEAD_SHA)] = [
+            httpx.Response(429, headers={"Retry-After": "2"}),
+        ]
+        ctx = _gateway().get_pr_context()
+
+        assert '+password = "hunter2"' in ctx.diff
+        assert _no_sleep == [2.0]
+
+    @respx.mock
+    def test_a_long_retry_after_is_capped(self, _no_sleep: list[float]) -> None:
+        fake = FakeAzureDevOps(changes=CHANGES[:1])
+        fake.install()
+        fake.item_script[("/app.py", HEAD_SHA)] = [
+            httpx.Response(429, headers={"Retry-After": "3600"}),
+        ]
+        _gateway().get_pr_context()
+
+        assert _no_sleep == [gateway_module._MAX_RETRY_AFTER]
+
+    @respx.mock
+    def test_a_transient_server_error_and_a_timeout_are_retried(self) -> None:
+        fake = FakeAzureDevOps(changes=CHANGES[:1])
+        fake.install()
+        fake.item_script[("/app.py", HEAD_SHA)] = [
+            httpx.Response(503),
+            httpx.ReadTimeout("slow"),
+        ]
+        ctx = _gateway().get_pr_context()
+
+        assert '+password = "hunter2"' in ctx.diff
+
+    @respx.mock
+    def test_a_file_that_never_comes_back_degrades_alone(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        fake = FakeAzureDevOps(changes=CHANGES[:2])
+        fake.install()
+        fake.item_script[("/app.py", HEAD_SHA)] = [
+            httpx.Response(503) for _ in range(gateway_module._FETCH_ATTEMPTS)
+        ]
+        caplog.set_level(logging.WARNING)
+        ctx = _gateway().get_pr_context()
+
+        assert "Binary files a/app.py and b/app.py differ" in ctx.diff
+        assert '+password = "hunter2"' not in ctx.diff, "no fabricated diff"
+        assert "+print('hi')" in ctx.diff, "the other file is still reviewed"
+        assert "app.py" not in ctx.file_contents
+        message = next(r.getMessage() for r in caplog.records if "app.py" in r.getMessage())
+        assert "new" in message and "503" in message
+
+    @respx.mock
+    def test_an_unfetched_file_is_named_in_the_summary(self) -> None:
+        fake = FakeAzureDevOps(changes=CHANGES[:2])
+        fake.install()
+        fake.item_script[("/app.py", BASE_SHA)] = [
+            httpx.Response(500) for _ in range(gateway_module._FETCH_ATTEMPTS)
+        ]
+        gateway = _gateway()
+        gateway.post_review([], "0 findings", diff=gateway.get_pr_context().diff)
+
+        summary = fake.created[-1]["comments"][0]["content"]
+        assert "could not be read" in summary
+        assert "`app.py`" in summary
+        assert summary.endswith("<!-- lgtmaybe -->")
+
+    @respx.mock
+    def test_an_auth_failure_on_a_file_fails_loudly(self) -> None:
+        """Azure Repos has no per-file read permission, so 401/403 means a bad token."""
+        fake = FakeAzureDevOps(changes=CHANGES[:2])
+        fake.install()
+        fake.item_script[("/app.py", BASE_SHA)] = [httpx.Response(403)]
+
+        with pytest.raises(httpx.HTTPStatusError):
+            _gateway().get_pr_context()
 
 
 class TestPositions:

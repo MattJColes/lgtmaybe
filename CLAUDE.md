@@ -101,13 +101,16 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
   serves no unified diff, so the adapter reads the latest iteration's changes
   against the merge base, fetches both sides via the Items API (unreviewable
   files never fetched, >1 MB sides shown as binary, >300 files raise
-  `DiffUnavailable`), and renders the diff with host-neutral
-  `core/diffbuild.py` so the shared parser reads it unchanged. Each finding is
-  an active thread positioned by `threadContext`; summary/describe/diagram are
-  closed general threads edited in place; de-dupe and the upsert trust only
-  live threads whose root comment the token's own identity wrote
-  (`connectionData` `authenticatedUser.id`; unknown identity = trust nothing),
-  and `fixed` threads never suppress. `PRLocator.repo` is `org/project/repo` (decoded). Token:
+  `DiffUnavailable`, as does a missing merge base; 429/5xx/timeouts retry, then
+  only that file degrades to binary and is named in the summary; 401/403 fail
+  loudly), and renders the diff with host-neutral `core/diffbuild.py` so the
+  shared parser reads it unchanged. Each finding is an active thread positioned
+  by `threadContext`; summary/describe/diagram are closed general threads edited
+  in place. Identity is `connectionData` `authenticatedUser.id`: de-dupe trusts
+  only live, non-`fixed` threads whose root comment that identity wrote, and
+  trusts none when it is unknown; the upsert edits only our own marked threads,
+  and when the identity is unknown tries every marked thread and lets the
+  host's author check (403) decide. `PRLocator.repo` is `org/project/repo` (decoded). Token:
   `AZURE_DEVOPS_TOKEN` (PAT, basic) else `SYSTEM_ACCESSTOKEN` (bearer)
   (`forge.token_env_vars`). Incremental, thread resolution, labels, checks and
   feedback are unbuilt and unclaimed.

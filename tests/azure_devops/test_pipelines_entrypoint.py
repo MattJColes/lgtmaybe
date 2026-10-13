@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -61,7 +62,7 @@ class TestPRUrlFromPipelinesEnv:
         """A CI build has no pull request id; that is a pipeline setup mistake."""
         _set(monkeypatch, SYSTEM_PULLREQUEST_PULLREQUESTID=None)
 
-        with pytest.raises(Exception, match="SYSTEM_PULLREQUEST_PULLREQUESTID"):
+        with pytest.raises(click.ClickException, match="SYSTEM_PULLREQUEST_PULLREQUESTID"):
             pr_url_from_pipelines_env()
 
     @pytest.mark.parametrize(
@@ -72,7 +73,7 @@ class TestPRUrlFromPipelinesEnv:
     ) -> None:
         _set(monkeypatch, **{missing: None})
 
-        with pytest.raises(Exception, match=missing):
+        with pytest.raises(click.ClickException, match=missing):
             pr_url_from_pipelines_env()
 
     def test_a_github_repository_is_pointed_at_the_action(
@@ -81,7 +82,7 @@ class TestPRUrlFromPipelinesEnv:
         """Azure Pipelines can build GitHub repos, but those PRs live on GitHub."""
         _set(monkeypatch, BUILD_REPOSITORY_PROVIDER="GitHub")
 
-        with pytest.raises(Exception, match="GitHub Action"):
+        with pytest.raises(click.ClickException, match="GitHub Action"):
             pr_url_from_pipelines_env()
 
     @pytest.mark.parametrize("provider", [None, ""])

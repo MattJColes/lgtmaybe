@@ -166,6 +166,30 @@ def render_broad(broad: list[ReviewFinding]) -> str:
     return "\n".join(lines)
 
 
+def render_unread_files(paths: list[str]) -> str:
+    """Name changed files the adapter could not read, as a summary body section.
+
+    For hosts that serve no diff and fetch each file themselves: a file that
+    never came back reaches the model as "changed, not shown", and the reader
+    must be told the same rather than take the review as covering it. Paths
+    are chosen by the PR author, so backticks are replaced to keep each one
+    inside its code span. Returns "" when every file was read.
+    """
+    unique = list(dict.fromkeys(paths))
+    if not unique:
+        return ""
+    lines = [
+        "",
+        "",
+        "### Files not reviewed",
+        "",
+        "_These files changed but could not be read from the host, so they were not reviewed:_",
+        "",
+    ]
+    lines += [f"- `{path.replace('`', chr(39))}`" for path in unique]
+    return "\n".join(lines)
+
+
 def finding_keys(body: str) -> set[str]:
     """Every active hidden id carried by a comment body (fingerprint + identity).
 
