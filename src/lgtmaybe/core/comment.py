@@ -38,6 +38,43 @@ def defang_fences(text: str) -> str:
     return text.replace("```", f"`{_ZWSP}`{_ZWSP}`")
 
 
+# Any hidden lgtmaybe marker, of every family: the summary, describe and diagram
+# upsert markers, the completion watermarks, the lenses/risk/incomplete gates
+# and the per-finding ids. Model prose must never carry one (``strip_markers``).
+_ANY_MARKER = re.compile(r"<!--\s*lgtmaybe.*?-->", re.DOTALL)
+
+
+def strip_markers(text: str, pattern: re.Pattern[str] = _ANY_MARKER) -> str:
+    """Remove every hidden lgtmaybe marker (or every ``pattern`` match) from text.
+
+    Our markers are plain HTML comments, and on a fork PR the model writing a
+    finding can be steered by the diff it reads. A marker in a finding lands in
+    the posted body, where a reader would take it for one the adapter stamped:
+    a completion watermark naming a commit the attacker pushes later (the next
+    run skips it as reviewed), a lenses list a posting gate trusts, another
+    setup's summary marker, or another finding's id. Repeated until nothing
+    matches, so stripping an inner marker cannot splice an outer one together.
+    """
+    while (stripped := pattern.sub("", text)) != text:
+        text = stripped
+    return text
+
+
+def model_prose(text: str) -> str:
+    """Model prose made safe to render: fences defanged, hidden markers removed."""
+    return defang_fences(strip_markers(text))
+
+
+def last_match(pattern: re.Pattern[str], body: str | None) -> str | None:
+    """The last capture of ``pattern`` in ``body``, or None.
+
+    The last, because every adapter appends its own stamp after the prose it
+    posts: an earlier match can only be one that rode in on that prose.
+    """
+    found: list[str] = pattern.findall(body or "")
+    return found[-1] if found else None
+
+
 def finding_badge(f: ReviewFinding) -> str:
     """The provenance suffix for a finding's title line: lens, then confidence.
 
@@ -122,8 +159,8 @@ def find_existing_overview(
 def finding_bullet(f: ReviewFinding) -> str:
     """One finding as a Markdown list item — shared by both body sections."""
     return (
-        f"- **[{f.severity.upper()}{finding_badge(f)}] {defang_fences(f.title)}** "
-        f"(`{f.path}`) — {defang_fences(f.body)}"
+        f"- **[{f.severity.upper()}{finding_badge(f)}] {model_prose(f.title)}** "
+        f"(`{f.path}`) — {model_prose(f.body)}"
     )
 
 
@@ -233,8 +270,8 @@ def render_inline_body(f: ReviewFinding) -> str:
     rewords the same finding. Either one matching means "already posted".
     """
     body = (
-        f"**[{f.severity.upper()}{finding_badge(f)}] {defang_fences(f.title)}**"
-        f"\n\n{defang_fences(f.body)}"
+        f"**[{f.severity.upper()}{finding_badge(f)}] {model_prose(f.title)}**"
+        f"\n\n{model_prose(f.body)}"
     )
     if f.suggestion is not None:
         body += f"\n\n```suggestion\n{defang_fences(f.suggestion)}\n```"
