@@ -142,7 +142,8 @@ lgtmaybe ran its pipeline over your local diff:
 2. **Filter:** skipped generated files, binaries, and lockfiles, and redacted
    anything that looked like a secret.
 3. **Review:** sent four concurrent model calls (security, correctness, code
-   health, and tests/documentation), each asking for findings as JSON.
+   health, and artefacts for tests and documentation), each asking for findings
+   as JSON.
 4. **Parse and anchor:** validated each reply against the findings schema and
    pinned every finding to the changed line it quotes.
 5. **Reflect:** asked the model to audit its own findings and dropped the ones

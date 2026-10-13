@@ -79,7 +79,9 @@ litellm reads the project and region from these variables:
 In the Action, the authentication step sets the project for you. The Action
 forwards only `GOOGLE_*` and `CLOUDSDK_*` variables (plus `AWS_*`, `AZURE_*` and
 its own `INPUT_*`) into its container, so `VERTEXAI_*` variables set in your
-workflow do not reach lgtmaybe there.
+workflow do not reach lgtmaybe there. The Action therefore always uses
+litellm's default region, `us-central1`; to use another region, run the CLI in
+a workflow step with `VERTEXAI_LOCATION` set instead.
 
 ## Available Vertex AI Models
 

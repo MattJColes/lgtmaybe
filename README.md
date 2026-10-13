@@ -39,8 +39,8 @@ model call. See [Data and Privacy](docs/explanation/data-and-privacy.md) for
 what is sent to a provider and how prompt injection is handled.
 
 **Fast by default.** The `fast` preset covers all nine built-in categories in
-four model calls: security, correctness, code health, and tests/documentation.
-`--preset full` runs each category separately for a deeper audit. A committed
+four model calls: security, correctness, code health, and artefacts (tests and
+documentation). `--preset full` runs each category separately for a deeper audit. A committed
 spec that matches the change adds one spec-review call. All calls share one
 concurrency limit, and providers that support prompt caching reuse the diff
 prefix. Add `--profile` to see time and token use.
