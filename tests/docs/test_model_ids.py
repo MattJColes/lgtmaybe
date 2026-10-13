@@ -86,6 +86,7 @@ def _from_shell(text: str) -> Iterator[tuple[str, str]]:
 
 def _table_ids(text: str, heading: str) -> Iterator[str]:
     """Backticked ids in the table under *heading* (one Markdown section)."""
+    assert heading in text, f"model table heading {heading!r} not found; update this test"
     section = text.split(heading, 1)[1].split("\n## ", 1)[0]
     for row in section.splitlines():
         if row.startswith("|"):
@@ -126,8 +127,20 @@ def _named_models() -> list[tuple[str, Provider, str]]:
 
 
 def _in_model_map(provider: Provider, model: str) -> bool:
+    """The routed key, or the bare key when the bare entry belongs to the same
+    provider — litellm's own lookup strips the route prefix but checks the
+    entry's ``litellm_provider``, so a bare key owned by another provider (a
+    vertex id answered by anthropic's entry) would resolve here and not there.
+    """
     routed = litellm_model_string(provider, model)
-    return routed in litellm.model_cost or model in litellm.model_cost
+    if routed in litellm.model_cost:
+        return True
+    entry = litellm.model_cost.get(model)
+    owner = entry.get("litellm_provider") if isinstance(entry, dict) else None
+    route = routed.split("/", 1)[0]
+    return isinstance(owner, str) and (
+        owner == route or owner.startswith((f"{route}_", f"{route}-"))
+    )
 
 
 _NAMED = _named_models()
@@ -158,3 +171,12 @@ def test_documented_model_id_is_in_litellm_map(where: str, provider: Provider, m
         f"{litellm_model_string(provider, model)!r} does not map. Update the doc to an id "
         "litellm knows (litellm-native form for that platform)."
     )
+
+
+def test_a_bare_key_owned_by_another_provider_does_not_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(litellm.model_cost, "claude-test-only", {"litellm_provider": "anthropic"})
+
+    assert _in_model_map(Provider.anthropic, "claude-test-only")
+    assert not _in_model_map(Provider.vertex, "claude-test-only")
