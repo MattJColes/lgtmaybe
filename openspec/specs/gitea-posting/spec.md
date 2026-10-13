@@ -27,7 +27,9 @@ A Gitea review object cannot be edited after submission, so the summary SHALL be
 posted as an ordinary issue comment carrying the hidden marker, upserted in
 place on a re-run, while the review object carries only inline comments. Each
 comment family — summary, description, diagram — SHALL use a disjoint marker so
-updating one never clobbers another.
+updating one never clobbers another. Only a comment the posting identity
+(`GET /api/v1/user`) wrote SHALL be edited; when that identity is unknown a new
+comment is posted instead.
 <!-- anchor: gitea.upsert -->
 
 #### Scenario: a re-run edits rather than duplicates
@@ -37,8 +39,9 @@ updating one never clobbers another.
 ### Requirement: Findings are de-duplicated before posting
 
 Because a submitted review cannot be amended, the adapter SHALL read the hidden
-finding ids already present in its earlier review comments and drop any finding
-matching one before posting. Failure to read them SHALL be non-fatal — a
+finding ids already present in the reviews the posting identity wrote and drop
+any finding matching one before posting — anyone can paste a hidden id, so
+another author's copy SHALL NOT suppress a finding. Failure to read them SHALL be non-fatal — a
 duplicated comment is a better outcome than a failed review.
 <!-- anchor: gitea.dedupe -->
 

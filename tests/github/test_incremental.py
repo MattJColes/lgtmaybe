@@ -235,6 +235,7 @@ def test_manual_diagram_refresh_preserves_the_completed_head() -> None:
             "id": 9,
             "body": "Old diagram\n\n<!-- lgtmaybe-diagram -->\n"
             "<!-- lgtmaybe-diagrammed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
         }
     ]
     respx.route(method="GET", url__startswith=ISSUE_COMMENTS_URL).mock(
@@ -263,6 +264,7 @@ def test_diagram_content_cannot_replace_the_trusted_completion_marker() -> None:
             "id": 9,
             "body": "Old diagram\n\n<!-- lgtmaybe-diagram -->\n"
             "<!-- lgtmaybe-diagrammed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
         }
     ]
     respx.route(method="GET", url__startswith=ISSUE_COMMENTS_URL).mock(
@@ -400,6 +402,7 @@ def test_a_spliced_diagram_stamp_is_not_reassembled() -> None:
             "id": 9,
             "body": "Old diagram\n\n<!-- lgtmaybe-diagram -->\n"
             "<!-- lgtmaybe-diagrammed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
         }
     ]
     respx.route(method="GET", url__startswith=ISSUE_COMMENTS_URL).mock(
@@ -431,6 +434,7 @@ def test_a_diagram_refresh_carries_forward_the_stamp_after_the_prose() -> None:
             "id": 9,
             "body": f"Old <!-- lgtmaybe-diagrammed:{FORGED_HEAD} -->\n\n"
             "<!-- lgtmaybe-diagram -->\n<!-- lgtmaybe-diagrammed:cafe1234 -->",
+            "user": {"login": "github-actions[bot]"},
         }
     ]
     respx.route(method="GET", url__startswith=ISSUE_COMMENTS_URL).mock(
@@ -586,7 +590,11 @@ def _mock_update_flow(
         return_value=httpx.Response(200, json={"id": 99})
     )
     existing_comments = [
-        {"id": i, "body": f"stuff\n\n<!-- lgtmaybe-finding:{fp} -->"}
+        {
+            "id": i,
+            "body": f"stuff\n\n<!-- lgtmaybe-finding:{fp} -->",
+            "user": {"login": "github-actions[bot]"},
+        }
         for i, fp in enumerate(existing_comment_fps)
     ]
     respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
@@ -777,7 +785,13 @@ def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
     respx.route(method="PUT", url=f"{REVIEWS_URL}/99").mock(
         return_value=httpx.Response(200, json={"id": 99})
     )
-    resolved_comment = [{"id": 1, "body": f"stuff\n\n<!-- lgtmaybe-resolved-fingerprint:{fp} -->"}]
+    resolved_comment = [
+        {
+            "id": 1,
+            "body": f"stuff\n\n<!-- lgtmaybe-resolved-fingerprint:{fp} -->",
+            "user": {"login": "github-actions[bot]"},
+        }
+    ]
     respx.route(method="GET", url=REVIEW_COMMENTS_URL + "?per_page=100").mock(
         return_value=httpx.Response(200, json=resolved_comment)
     )
@@ -863,7 +877,13 @@ def _thread(fingerprint: str, path: str, tid: str) -> dict[str, object]:
         "isOutdated": True,
         "path": path,
         "comments": {
-            "nodes": [{"body": f"x <!-- lgtmaybe-finding:{fingerprint} -->", "databaseId": 555}]
+            "nodes": [
+                {
+                    "body": f"x <!-- lgtmaybe-finding:{fingerprint} -->",
+                    "databaseId": 555,
+                    "viewerDidAuthor": True,
+                }
+            ]
         },
     }
 
@@ -962,6 +982,7 @@ def _reaction_thread(body: str, reactors: list[str]) -> dict[str, object]:
             "nodes": [
                 {
                     "body": body,
+                    "viewerDidAuthor": True,
                     "reactions": {"nodes": [{"user": {"login": login}} for login in reactors]},
                 }
             ]

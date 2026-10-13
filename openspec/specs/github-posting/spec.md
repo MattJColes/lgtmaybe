@@ -78,7 +78,10 @@ SHALL match on either. The fingerprint alone cannot key them: it hashes model
 prose, and a model rewords the same finding between runs. An identity is not
 unique within a file — two findings from one lens on identical source lines
 share one — so re-run dedupe SHALL match candidates to posted comments
-one-for-one rather than by set membership.
+one-for-one rather than by set membership. Only comments and threads the posting
+identity wrote SHALL count — the identity has no secret, so anyone can paste it —
+and an unidentifiable posting identity counts none (a duplicate, never a hidden
+finding); marked comments are upserted under the same rule.
 <!-- anchor: github.fingerprint -->
 
 #### Scenario: same finding, next run
@@ -93,6 +96,10 @@ one-for-one rather than by set membership.
 #### Scenario: a second occurrence of an identical line
 - **WHEN** a re-run flags one more occurrence than is already posted
 - **THEN** the extra occurrence posts rather than being absorbed by its twin
+
+#### Scenario: someone else posts our id first
+- **WHEN** a PR author's comment carries the identity of a finding not yet made
+- **THEN** the finding still posts, and their comment is never edited
 
 ### Requirement: Unanchored findings are demoted, never guessed
 

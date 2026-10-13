@@ -162,7 +162,12 @@ class _FakePR:
 
     # -- inline review comments -----------------------------------------
     def list_comments(self, request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=[{"body": b} for b in self.inline_bodies])
+        return httpx.Response(
+            200,
+            json=[
+                {"body": b, "user": {"login": "github-actions[bot]"}} for b in self.inline_bodies
+            ],
+        )
 
     def create_comment(self, request: httpx.Request) -> httpx.Response:
         self.inline_bodies.append(json.loads(request.content)["body"])
@@ -347,7 +352,11 @@ class _ResolveGraphQL:
                 "isResolved": False,
                 "isOutdated": self._outdated,
                 "path": "src/app.py",
-                "comments": {"nodes": [{"body": self._thread_body, "databaseId": 555}]},
+                "comments": {
+                    "nodes": [
+                        {"body": self._thread_body, "databaseId": 555, "viewerDidAuthor": True}
+                    ]
+                },
             }
             return httpx.Response(
                 200,

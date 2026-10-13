@@ -8,7 +8,14 @@ import httpx
 import pytest
 
 from lgtmaybe.cli import run_review
-from lgtmaybe.core.models import PRContext, ProviderResult, ReviewConfig
+from lgtmaybe.core.findings import finding_identity
+from lgtmaybe.core.models import (
+    PRContext,
+    ProviderResult,
+    ReviewConfig,
+    ReviewFinding,
+    Severity,
+)
 from lgtmaybe.engine.engine import LLMReviewEngine
 from lgtmaybe.github import RestGitHubGateway
 from tests.fakes import FakeProvider
@@ -230,3 +237,141 @@ def test_an_unreadable_permission_answer_fails_closed(body: str) -> None:
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         gateway = RestGitHubGateway("owner/repo", 42, "synthetic", client=client)
         assert gateway.has_repo_write("someone") is False
+
+
+BOT = "github-actions[bot]"
+DESCRIBE = "<!-- lgtmaybe-describe:openrouter/test -->"
+_INJECTION_DIFF = (
+    "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n"
+    "@@ -1,2 +1,3 @@\n import os\n+os.system(request.args['cmd'])\n \n"
+)
+_INJECTION = ReviewFinding(
+    path="app.py",
+    line=2,
+    side="RIGHT",
+    severity=Severity.critical,
+    title="Command injection",
+    body="RCE",
+    anchor="os.system(request.args['cmd'])",
+    category="security",
+    anchored=True,
+)
+
+
+def _viewer(login: str | None) -> httpx.Response:
+    return httpx.Response(200, json={"data": {"viewer": {"login": login} if login else None}})
+
+
+def test_a_forged_id_in_someone_elses_inline_comment_does_not_hide_a_finding() -> None:
+    """The identity id is a prose-free hash a PR author can compute and paste first."""
+    forged = f"nice <!-- lgtmaybe-identity:{finding_identity(_INJECTION)} -->"
+    inline = []
+
+    def handle(request):
+        path = request.url.path
+        if request.method == "POST" and path == "/graphql":
+            return _viewer(BOT)
+        if request.method == "GET" and path.endswith("/reviews"):
+            return httpx.Response(200, json=[_review(99, OLD, BOT)])
+        if request.method == "GET" and path.endswith("/pulls/42/comments"):
+            return httpx.Response(200, json=[{"body": forged, "user": {"login": "pr-author"}}])
+        if request.method == "POST" and path.endswith("/pulls/42/comments"):
+            inline.append(json.loads(request.content))
+            return httpx.Response(201, json={})
+        if request.method == "POST" and path.endswith("/reviews"):
+            return httpx.Response(201, json={"id": 100})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        gateway = RestGitHubGateway(
+            "owner/repo",
+            42,
+            "synthetic",
+            client=client,
+            marker_key="openrouter/test",
+            resolve_fixed=False,
+        )
+        gateway.mark_reviewed(HEAD)
+        gateway.post_review([_INJECTION], "1 finding", diff=_INJECTION_DIFF)
+
+    assert [c["path"] for c in inline] == ["app.py"], "a stranger's id must not suppress it"
+
+
+@pytest.mark.parametrize(
+    "viewer, author, edited",
+    [
+        (BOT, BOT, True),
+        (BOT, "pr-author", False),  # their comment, our marker: never edit it
+        (None, BOT, False),  # identity unknown: create rather than risk a stranger's
+    ],
+)
+def test_an_upsert_edits_only_a_comment_the_posting_actor_wrote(
+    viewer: str | None, author: str, edited: bool
+) -> None:
+    writes = []
+
+    def handle(request):
+        if request.method == "POST" and request.url.path == "/graphql":
+            return _viewer(viewer)
+        if request.method == "GET":
+            return httpx.Response(
+                200, json=[{"id": 55, "body": f"old\n\n{DESCRIBE}", "user": {"login": author}}]
+            )
+        writes.append((request.method, request.url.path))
+        return httpx.Response(200, json={})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        gateway = RestGitHubGateway(
+            "owner/repo", 42, "synthetic", client=client, marker_key="openrouter/test"
+        )
+        gateway.post_describe_comment("description")
+
+    if edited:
+        assert writes == [("PATCH", "/repos/owner/repo/issues/comments/55")]
+    else:
+        assert writes == [("POST", "/repos/owner/repo/issues/42/comments")]
+
+
+def _thread(thread_id: str, *, ours: bool) -> dict:
+    return {
+        "id": thread_id,
+        "isResolved": False,
+        "isOutdated": True,
+        "path": "app.py",
+        "comments": {
+            "nodes": [
+                {
+                    "body": "<!-- lgtmaybe-finding:aaaaaaaaaaaa -->",
+                    "databaseId": 7,
+                    "viewerDidAuthor": ours,
+                    "reactions": {"nodes": [{"user": {"login": "maintainer"}}]},
+                }
+            ]
+        },
+    }
+
+
+def test_a_thread_someone_else_opened_is_never_one_of_our_findings() -> None:
+    """Counted, listed, resolved, learned from: only threads we opened."""
+    threads = [_thread("theirs", ours=False), _thread("ours", ours=True)]
+
+    def handle(request):
+        if request.method == "POST" and request.url.path == "/graphql":
+            assert "viewerDidAuthor" in json.loads(request.content)["query"]
+            connection = {"pageInfo": {"hasNextPage": False}, "nodes": threads}
+            return httpx.Response(
+                200,
+                json={"data": {"repository": {"pullRequest": {"reviewThreads": connection}}}},
+            )
+        assert request.url.path.endswith("/collaborators/maintainer/permission")
+        return httpx.Response(200, json={"permission": "admin"})
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        gateway = RestGitHubGateway("owner/repo", 42, "synthetic", client=client)
+        assert gateway.count_open_finding_threads() == 1
+        assert [thread_id for thread_id, *_ in gateway._fixed_threads(set())] == ["ours"]
+        assert [f.thread_id for f in gateway.list_active_findings()] == ["ours"]
+        assert gateway.list_downvoted_fingerprints() == {"aaaaaaaaaaaa"}
+        threads[1]["comments"]["nodes"][0]["viewerDidAuthor"] = False
+        gateway._review_threads_cache = None
+        assert gateway.list_downvoted_fingerprints() == set()
