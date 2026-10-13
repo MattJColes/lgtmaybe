@@ -118,10 +118,10 @@ def _named_models() -> list[tuple[str, Provider, str]]:
             found.add((where, provider, model))
 
     bedrock = (_ROOT / "docs/how-to/review-with-bedrock-oidc.md").read_text(encoding="utf-8")
-    for model in _table_ids(bedrock, "## Choosing a Bedrock model ID"):
+    for model in _table_ids(bedrock, "## Choosing a Bedrock Model ID"):
         found.add(("docs/how-to/review-with-bedrock-oidc.md (table)", Provider.bedrock, model))
     vertex = (_ROOT / "docs/how-to/review-with-vertex-wif.md").read_text(encoding="utf-8")
-    for model in _table_ids(vertex, "## Available Vertex AI models"):
+    for model in _table_ids(vertex, "## Available Vertex AI Models"):
         found.add(("docs/how-to/review-with-vertex-wif.md (table)", Provider.vertex, model))
     return sorted(found, key=lambda item: (item[0], item[1].value, item[2]))
 

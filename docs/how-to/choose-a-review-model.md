@@ -4,24 +4,24 @@ description: Choose a cloud or local lgtmaybe review model using measured breadt
 
 # Choose a Review Model
 
-**Start with `google/gemini-3.8-flash` on OpenRouter.** On the 24 September
-2026 benchmark using lgtmaybe 2.8.5, it led the 11 tested models on both
-small, varied changes (60.9%) and large Python diffs (71.4%). Its breadth
-result is fully adjudicated. It still flagged findings on seven of nine clean
-changes, so check its output before acting on it.
+**Start with `google/gemini-3.8-flash` on OpenRouter.** In the 24 September
+2026 benchmark on lgtmaybe 2.8.5, it led the 11 tested models on both small,
+varied changes (60.9%) and large Python diffs (71.4%), and its breadth result
+is fully adjudicated. It still flagged findings on seven of nine clean changes,
+so check its output before acting on it.
 
 ```bash
+export OPENROUTER_API_KEY=...
 lgtmaybe review --provider openrouter --model google/gemini-3.8-flash
 ```
 
-If large diffs matter more than small changes, `openai/gpt-6-luna` was second
-on long horizon (64.6%) and completed those five cases in 440 seconds of
-aggregate review time, against Gemini's 798. Its breadth recall was much
-lower (42.9% against 62.9%), so it is not the default for everyday review.
+If large diffs matter more than small changes, consider `openai/gpt-6-luna`. It
+was second on long horizon (64.6%) and finished those five cases in 440 seconds
+of total review time, against Gemini's 798. Its breadth recall was much lower
+(42.9% against 62.9%), so it is not the everyday default.
 
-These are recommendations from a synthetic corpus, not a guarantee for your
-repository. Try the candidates on recent pull requests before choosing a team
-default. See [Review with OpenRouter](review-with-openrouter.md) for setup.
+These recommendations come from a synthetic corpus, not your repository. Try
+the candidates on recent pull requests before choosing a team default. See [Review with OpenRouter](review-with-openrouter.md) for setup.
 
 ## What the Suites Measure
 
@@ -32,16 +32,16 @@ default. See [Review with OpenRouter](review-with-openrouter.md) for setup.
 - **Long horizon:** Four increasingly large Python changes with eight planted
   bugs each, plus one large clean change. Each model reviews the suite once.
 
-The suites use different cases. **Compare scores within a suite, never across
-suites.** Score is closed-world F0.5, which weights precision more than recall,
-scaled by the share of review calls that returned parseable findings
-(completeness). An unmatched finding counts as a false positive even if it
-might be useful on real code. A provisional breadth score has a small number
-of findings awaiting human adjudication.
+The suites use different cases, so **compare scores within a suite, never
+across suites.** Score is closed-world F0.5, which weights precision above
+recall, multiplied by completeness: the share of review calls that returned
+parseable findings. An unmatched finding counts as a false positive even if it
+might be useful on real code. A provisional breadth score still has a few
+findings awaiting human adjudication.
 
 ## Cloud Models Tested on lgtmaybe 2.8.5
 
-### Small changes: breadth
+### Small Changes: Breadth
 
 | Model | Score | Recall | Precision | False positives | Clean pass |
 |---|---:|---:|---:|---:|---:|
@@ -62,7 +62,7 @@ the share of nine clean changes on which the model returned no findings. Opus's
 perfect precision and clean pass came from finding almost none of the planted
 bugs. Astra's score was limited in part by 45.3% completeness.
 
-### Large diffs: long horizon
+### Large Diffs: Long Horizon
 
 | Model | Score | Recall | Precision | False positives |
 |---|---:|---:|---:|---:|
@@ -79,17 +79,18 @@ bugs. Astra's score was limited in part by 45.3% completeness.
 | `anthropic/claude-opus-5.5` | 0.0% | 0.0% | 100.0% | 0 |
 
 Kimi found all 32 planted bugs but added 53 false positives. The low scores
-for Qwen Flash and Xiaomi also reflect completeness below 50%: many review
-calls produced no parseable findings. The [benchmark results][results] show
+for Qwen Flash and Xiaomi also reflect completeness below 50%: many of their
+review calls produced no parseable findings. The [benchmark results][results] show
 per-case recall, token use, truncation, and wall time.
 
 ## Local Models
 
-The published local runs use older lgtmaybe versions and have not been repeated
-on 2.8.5. `nvidia/Qwen3.6-35B-A3B-NVFP4` remains the strongest local option
-with canonical runs on both suites in that historical set: 48.2% breadth on
-2.2.0 and 43.8% long horizon on 2.1.4. Treat those as a starting point for a
-local trial, not a current comparison with the cloud table above.
+The published local runs used older lgtmaybe versions and have not been
+repeated on 2.8.5. Among local models with canonical runs on both suites,
+`nvidia/Qwen3.6-35B-A3B-NVFP4` is the strongest: 48.2% breadth on 2.2.0 and
+43.8% long horizon on 2.1.4. Treat those numbers as a starting point for a
+local trial, not a comparison with the cloud tables above. The example below
+reaches it through a local OpenAI-compatible server such as vLLM:
 
 ```bash
 lgtmaybe review \
@@ -98,7 +99,7 @@ lgtmaybe review \
   --api-base http://127.0.0.1:8000/v1
 ```
 
-See [Run locally with Ollama](run-locally-with-ollama.md) for hardware guidance
+See [Run locally with ollama](run-locally-with-ollama.md) for hardware guidance
 and [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md)
 for vLLM, llama.cpp, and LM Studio setup.
 
@@ -106,9 +107,10 @@ for vLLM, llama.cpp, and LM Studio setup.
 
 The [benchmark repository][bench] holds the live leaderboard, [complete
 results][results], reproducible commands, and append-only raw results. Older
-runs remain there for historical comparison; their model versions, lgtmaybe
-versions, and sometimes review profiles differ. This page uses the 22
-canonical runs from 24 September 2026 for its cloud recommendations.
+runs stay there for historical comparison, but their model versions, lgtmaybe
+versions, and sometimes review profiles differ. The cloud recommendations on
+this page use the 22 canonical runs from 24 September 2026 (11 models, two
+suites).
 
 The corpus is synthetic and does not measure provider price, availability,
 data handling, or performance on your codebase. No run in this cohort has an

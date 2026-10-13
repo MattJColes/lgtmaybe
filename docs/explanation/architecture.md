@@ -1,19 +1,19 @@
 ---
-description: lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-category lens fan-out.
+description: lgtmaybe's hexagonal ports-and-adapters architecture, the review pipeline stages, and the per-lens fan-out.
 ---
 
 # Architecture
 
-lgtmaybe is built on **hexagonal architecture** (ports and adapters). The core
-never imports from the adapters; adapters implement abstract ports defined in
-`core/ports.py`. This lets the parallel build tracks evolve independently and
-lets tests swap in fakes without patching.
+lgtmaybe uses a **hexagonal architecture** (ports and adapters). The core
+defines the ports in `core/ports.py` and never imports an adapter; adapters
+implement those ports. Tests swap in fakes without patching, and a new model
+backend or code host plugs in without touching the engine.
 
-## Ports and adapters
+## Ports and Adapters
 
 ```mermaid
 flowchart TB
-    subgraph core["core — never imports an adapter"]
+    subgraph core["core - never imports an adapter"]
         ports["ports.py<br/>ProviderClient · ReviewGateway · ReviewEngine"]
         models["models.py<br/>ReviewConfig · ReviewFinding · ProviderResult · PRContext"]
     end
@@ -23,38 +23,38 @@ flowchart TB
     gitea["gitea/<br/>Gitea REST adapter"] -- implements --> ports
 ```
 
-Two independent axes meet at these ports: which **model** reviews the code
+Two independent choices meet at these ports: which **model** reviews the code
 (`ProviderClient`) and which **code host** the review is posted to
 (`ReviewGateway`). Any combination works, because neither side knows about the
 other.
 
-**`core/ports.py`** — the seam. Three abstract base classes:
+`core/ports.py` defines three structural protocols (`typing.Protocol`). An
+adapter satisfies one by having the right methods; it never inherits from it.
 
-- `ProviderClient` — one method: `complete(messages, model)` returns a
-  `ProviderResult` (text + token usage).
-- `ReviewGateway` — `get_pr_context()` fetches the change diff and metadata;
-  `post_review()` posts batched inline comments and a summary;
-  `post_issue_comment()` posts a standalone comment (used by `/ask` and as the
-  describe/diagram fallback). These three are the whole required surface, so a
-  new forge adapter can be useful long before it is complete; richer behaviour
-  (file reads, incremental review, thread resolution, labels, checks, feedback)
-  is declared by an optional `Supports*` capability protocol that callers probe
-  for and skip when absent.
-- `ReviewEngine` — `review(ctx, cfg)` returns `(findings, summary)`.
+- `ProviderClient` has one method: `complete(messages, model, **opts)` returns
+  a `ProviderResult` (text plus token usage).
+- `ReviewGateway` has three. `get_pr_context()` fetches the change diff and
+  metadata. `post_review(findings, summary)` posts batched inline comments and
+  a summary. `post_issue_comment(body)` posts a standalone comment (used by
+  `/ask`, by failure notices, and as the describe/diagram fallback).
+- `ReviewEngine` has `review(ctx, cfg)`, which returns `(findings, summary)`.
+  The engine takes a `PRContext` and never sees a gateway, which is why the
+  local CLI can build a `PRContext` from `git` with no code host at all.
 
-The ports were frozen in the foundation step. Other tracks (providers, github,
-engine, CLI) build against these stable signatures. Changing a port requires
-consensus across all tracks.
+The ports are frozen: the providers, forge adapters, engine and CLI all build
+against these signatures, so change one only deliberately. (`GitHubGateway`
+survives as an alias of `ReviewGateway` for adapters written before lgtmaybe
+supported more than one host.)
 
-## Code hosts (forges)
+## Code Hosts (Forges)
 
-lgtmaybe calls a code host a **forge** internally, to keep it distinct from a
-model *provider* — the two are separate choices. `core/forge.py` holds
-everything host-specific outside the adapters themselves: a `Forge` enum, a
-`PRLocator` (forge + host + repo + number) parsed from a change-request URL, and
-the environment variable each host's token lives in.
+Internally lgtmaybe calls a code host a **forge**, to keep it distinct from a
+model *provider*. `core/forge.py` holds the host-specific logic that lives
+outside the adapters: a `Forge` enum, a `PRLocator` (forge, host, repo, number)
+parsed from a change-request URL, and the environment variable that holds each
+host's token.
 
-A URL is all lgtmaybe needs to work out the rest:
+The URL is all lgtmaybe needs:
 
 | URL shape | Forge | Token |
 |---|---|---|
@@ -62,75 +62,77 @@ A URL is all lgtmaybe needs to work out the rest:
 | `gitlab.com/group/sub/project/-/merge_requests/42` | GitLab | `GITLAB_TOKEN` |
 | `gitea.example.com/org/repo/pulls/42` | Gitea | `GITEA_TOKEN` |
 
-The host is carried, not assumed, because self-hosted GitLab and Gitea are the
-normal case. `cli._GATEWAY_BUILDERS` maps the resolved forge to its adapter.
+The host is parsed from the URL rather than assumed, because self-hosted GitLab
+and Gitea are the normal case. `cli._GATEWAY_BUILDERS` maps the resolved forge
+to its adapter.
 
-### Required surface vs optional capabilities
+### Required Surface vs Optional Capabilities
 
 `ReviewGateway` is deliberately three methods. Everything richer is an optional
-`Supports*` protocol that a caller probes for and skips when absent, so an
-adapter can be useful long before it is complete — and, more importantly, so it
-can be **honest** about what its host genuinely cannot do rather than failing at
-run time.
+`Supports*` protocol that the CLI probes for and skips when absent. An adapter
+is useful long before it is complete, and it can be honest about what its host
+cannot do instead of failing at run time.
 
 | Capability | GitHub | GitLab | Gitea |
 |---|---|---|---|
-| `SupportsFileContents` — read head text for context | ✅ | ✅ | ✅ |
-| `SupportsDescribe` / `SupportsDiagram` — upserted comments | ✅ | ✅ | ✅ |
+| `SupportsFileContents`: read head text for context | ✅ | ✅ | ✅ |
+| `SupportsDescribe` / `SupportsDiagram`: upserted comments | ✅ | ✅ | ✅ |
+| `SupportsConversation`: read existing comments | ✅ | ✅ | ✅ |
 | `SupportsLabels` | ✅ | ✅ | ✅ |
-| `SupportsChecks` — check run / commit status | ✅ | ✅ | ✅ |
-| `SupportsThreadResolution` — auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
-| `SupportsIncremental` — review only new commits | ✅ | not yet | ✗ no compare diff |
-| `SupportsBaseCheckout` — clone base for symbol lookup | ✅ | ✗ | ✗ |
+| `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ |
+| `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API |
+| `SupportsIncremental`: review only new commits | ✅ | not yet | ✗ no compare diff |
+| `SupportsFeedback`: learn from 👎 reactions | ✅ | ✗ | ✗ |
+| `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ |
 
-A test asserts the GitHub adapter satisfies every declared capability, and that
-the others do **not** claim the ones their host cannot serve — which is what
-stops the list drifting into fiction.
+`tests/test_ports.py` asserts the GitHub adapter satisfies every capability,
+and the GitLab and Gitea tests assert those adapters do **not** claim what
+their host cannot serve. That keeps this table honest.
 
-### Where the hosts genuinely differ
+### Where the Hosts Differ
 
-Gitea is nearly a copy of GitHub; GitLab is not.
+Gitea is close to GitHub; GitLab is not.
 
-- **GitHub** batches every inline comment into one review object it can later
-  edit, and resolves threads over GraphQL.
-- **Gitea** mirrors GitHub's API, but a submitted review is **immutable**. So
-  the summary lives in an ordinary issue comment (which can be edited) and
-  findings are de-duplicated *before* posting, by reading the hidden ids already
+- **GitHub** batches every inline comment into one review object and resolves
+  threads over GraphQL.
+- **Gitea** mirrors GitHub's API, but a submitted review is immutable. So the
+  summary lives in an ordinary issue comment (which can be edited), and
+  findings are de-duplicated *before* posting by reading the hidden ids already
   on the pull request.
-- **GitLab** has no batched review object at all: each finding is its own
+- **GitLab** has no batched review object. Each finding is its own
   **discussion**, positioned by old/new path and line plus the merge request's
   `base_sha`/`start_sha`/`head_sha`. Threads resolve over plain REST.
 
-lgtmaybe keeps GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
-it at each adapter's boundary — `new_position`/`old_position` on Gitea,
+lgtmaybe uses GitHub's `RIGHT`/`LEFT` side vocabulary internally and translates
+it at each adapter's boundary: `new_position`/`old_position` on Gitea,
 `new_line`/`old_line` on GitLab.
 
 ### Entrypoints
 
-GitHub and Gitea share one entrypoint: Gitea Actions reimplements the GitHub
-Actions runtime, so the same `action` command and the same container work on
-both. The only variable that differs is `GITHUB_SERVER_URL`, which Gitea points
-at your own instance.
+GitHub and Gitea share one entrypoint. Gitea Actions reimplements the GitHub
+Actions runtime, so the same `action` command and container work on both. The
+only variable that differs is `GITHUB_SERVER_URL`, which Gitea points at your
+own instance.
 
-GitLab CI has neither an event payload file nor an `INPUT_*` convention, so it
-gets its own `gitlab-ci` command that reads GitLab's predefined `CI_*`
-variables. Everything downstream — locator, gateway registry, engine — is
-shared.
+GitLab CI has neither an event payload file nor `INPUT_*` variables, so it gets
+its own `gitlab-ci` command that reads GitLab's predefined `CI_*` variables.
+Everything downstream (locator, gateway registry, engine) is shared.
 
-## Review pipeline
+## Review Pipeline
 
-The engine executes a pipeline of composable stages in sequence:
+The engine runs a pipeline of composable stages:
 
 ```
-fetch → compress → prompt → parse → re-anchor → merge/dedupe → evidence gate → reflect → filter → post
+fetch → redact → compress → prompt → parse → re-anchor → merge/dedupe
+      → suppress → evidence gate → reflect → filter → post
 ```
 
-The prompt/parse stage is where the pipeline fans out — one concurrent model
-call per review lens — before the findings funnel back into a single stream:
+The prompt/parse stage fans out, one concurrent model call per review lens,
+before the findings funnel back into a single stream:
 
 ```mermaid
 flowchart TD
-    fetch["fetch<br/>diff via API — never a checkout"] --> compress["compress<br/>skip generated files · pad context · batch to budget"]
+    fetch["fetch<br/>diff via API, never a checkout"] --> compress["redact + compress<br/>skip generated files · pad context · batch to budget"]
     compress --> security["security lens"]
     compress --> correctness["correctness lens<br/>+ stated intent"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
@@ -139,303 +141,310 @@ flowchart TD
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    anchor --> dedupe["merge / dedupe"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+    anchor --> dedupe["merge / dedupe"] --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-(The four lens calls shown are the `fast` grouping, and they are the same four
-on every provider — worker count decides only whether they overlap. The `full`
-preset fans out one call per category, and custom lenses join the same fan-out.)
+The four lens calls shown are the default `fast` grouping, and the same four run
+on every provider; worker count decides only whether they overlap. The `full`
+preset fans out one call per category. A spec lens (when a committed spec
+matches the PR) and any custom lenses join the same fan-out.
 
-1. **fetch** — `ReviewGateway.get_pr_context()` retrieves the change diff and
-   metadata from the forge's API. No change code is checked out or executed.
-   The diff is treated as untrusted input throughout.
+1. **fetch**: `ReviewGateway.get_pr_context()` retrieves the change diff and
+   metadata from the forge's API. No change code is checked out or executed,
+   and the diff is treated as untrusted input throughout.
 
-2. **compress** — the diff is filtered to remove generated files, lockfiles,
-   minified assets, and vendored code. Path filters from `ReviewConfig` are
-   applied. Each remaining hunk is then padded with surrounding context lines
-   from the head revision of the file (fetched by the gateway, never a
-   checkout), capped by `context_lines` and the remaining token budget. The
-   result is batched to fit `max_input_tokens` (and, when `recursive` is on, an
-   over-budget single file is walked hunk-by-hunk rather than sent whole). The
-   expanded diff is for the model only — inline-comment positions are always
-   rebuilt from the **real** diff at post time, so a finding on an added context
+2. **redact + compress**: secrets are redacted from the diff before anything
+   else sees it. Generated files, lockfiles, minified assets and vendored code
+   are skipped, then the `include_paths` / `exclude_paths` filters and the
+   `max_file_diff_lines` and `max_files` caps apply. Each remaining hunk is
+   padded with surrounding lines from the file's head revision (fetched by the
+   gateway, never a checkout), capped by `context_lines` and the token budget.
+   The result is batched to fit `max_input_tokens`; when that is left at its
+   default, it is first capped at what the model's context window can take. With `recursive`
+   on (the default), a single file over budget is walked hunk by hunk instead of
+   sent whole. The padded diff is for the model only: inline-comment positions
+   are rebuilt from the **real** diff at post time, so a finding on a padding
    line maps to nothing and is dropped rather than mis-posted.
 
-3. **prompt + parse** — this stage **fans out one model call per review
-   lens**. The `preset` decides the lens set. `fast` (the default) covers all
-   nine categories in **four calls**, one per concern: security, correctness
-   (with stated intent when present), merged code health (performance/
-   complexity/ponytail/deprecation), and artefacts (tests/documentation). The
-   same four run on every provider — worker count changes only how they are
-   scheduled. `full` runs one call per category. Every
-   (batch, lens) task shares **one `ThreadPoolExecutor`** over the sync
-   provider port, sized by `max_concurrency` (default 6 for every provider,
-   local included), so batches never wait on each other.
+3. **prompt + parse**: this stage **fans out one model call per review lens**,
+   and `preset` decides the lens set. `fast` (the default) covers all nine
+   everyday categories in **four calls**, one per concern: security,
+   correctness (with stated intent when present), code health (performance,
+   complexity, ponytail, deprecation), and artefacts (tests, documentation).
+   `full` runs one call per category. Every (batch, lens) task shares **one
+   `ThreadPoolExecutor`** over the synchronous provider port, sized by
+   `max_concurrency` (default 6 for every provider, local included), so batches
+   never wait on each other.
 
-   Each call is shaped as a shared cacheable prefix —
-   a lens-independent system preamble, then the wrapped diff — followed by
-   the lens-specific instruction as the final user block. On routes that
-   take an explicit cache breakpoint (anthropic, bedrock Claude/Nova, vertex
-   Claude and Gemini, zai GLM, and openrouter's claude/gemini/glm/minimax
-   families)
-   the prefix is marked with `cache_control`; on backends that cache
-   automatically (OpenAI, Azure, DeepSeek) the identical prefix is enough on
-   its own. On cache-capable routes, every call after a batch's first reads the
-   preamble-plus-diff prefix from cache. Unsupported routes use the merged-message
-   fallback and do not promise cache reads. On big diffs, a warm-up primer runs
-   the first lens alone so a concurrent wave doesn't all miss it.
+   Each call is shaped as a shared cacheable prefix (a lens-independent system
+   preamble, then the wrapped diff) followed by the lens-specific instructions
+   as the final user block. On routes that take an explicit cache breakpoint
+   (anthropic, bedrock Claude/Nova, vertex Claude and Gemini, zai GLM, and
+   openrouter's claude/gemini/glm/minimax families) the prefix is marked with
+   `cache_control`. Backends that cache automatically (OpenAI, Azure, DeepSeek)
+   need no marker. On a cache-capable route, every call after a batch's first
+   reads the preamble and diff from cache; other routes get the blocks merged
+   into one plain message and make no caching promise. On big diffs a warm-up
+   primer runs the first lens alone, so a concurrent first wave doesn't pay for
+   several cache writes.
 
-   Each lens's focused structured prompt requests JSON output with
-   the `ReviewFinding` schema (`path`, `line`, `side`, `severity`, `title`,
-   `body`, `failure_scenario`, `suggestion`, `anchor`) and carries
-   prompt-injection defense instructions. Each response is parsed and validated against
-   `ReviewFinding` using Pydantic; parse errors are logged and surfaced in
-   the summary rather than silently discarded.
+   Each lens prompt asks for JSON matching the `ReviewFinding` schema (`path`,
+   `line`, `side`, `severity`, `title`, `body`, `failure_scenario`,
+   `suggestion`, `anchor`) and carries prompt-injection defence instructions.
+   Each response is parsed and validated with Pydantic. A reply that does not
+   parse is sent back once for repair (`repair_unparseable`, default on); a call
+   that still fails is named in the summary's incomplete-results notice rather
+   than silently discarded.
 
-   With `mid_review_retrieval` on (default **off**), a lens gets a third option
+   With `mid_review_retrieval` on (default **off**), a lens has a third option
    besides asserting or hedging a cross-file claim: **ask to read the code**.
-   Alongside its findings it may answer `needs` — the file paths or symbols it
-   must see — and the engine fetches them through the same read-only, redacting
-   boundary reflection's deferral uses (never a checkout), then re-runs *that one
-   lens* with the text appended to its own uncached block. The shared prefix is
-   untouched, so the batch's other lenses still read it from cache. Bounded to
-   **one hop**: the re-run cannot defer again, at most five files inside a quarter
-   of `max_input_tokens` are fetched, and a deferral arriving past the review
-   deadline or token budget is skipped with the usual incomplete-results notice.
-   Both calls' findings are merged, so a deferral can only add findings. The cost
-   is up to one extra model call per (batch, lens) — which is why it ships off.
+   Alongside its findings it may return `needs`, the file paths or symbols it
+   must see. The engine fetches them through the same read-only, redacting
+   boundary reflection uses (never a checkout), then re-runs *that one lens*
+   with the text added to its own uncached block. The shared prefix is
+   untouched, so the batch's other lenses still read it from cache. It is
+   bounded to **one hop**: the re-run cannot defer again, it fetches at most
+   five files within a quarter of `max_input_tokens`, and a deferral that
+   arrives past the review deadline or token budget is skipped with the usual
+   incomplete-results notice. Both calls' findings are merged, so a deferral
+   can only add findings. The cost is up to one extra model call per (batch,
+   lens), which is why it ships off.
 
-4. **re-anchor** — `_snap_findings` rebinds each finding's `line` to the real
-   changed line whose content matches the finding's verbatim `anchor`, rather
-   than trusting the model's line arithmetic. A finding whose anchor matches
-   nothing is marked `anchored=False` and later demoted to the review body
-   instead of being posted on a guessed line.
+4. **re-anchor**: `_snap_findings` rebinds each finding's `line` to the changed
+   line whose content matches the finding's verbatim `anchor`, rather than
+   trusting the model's line arithmetic. A finding whose anchor matches nothing
+   is marked `anchored=False`; it must clear `unanchored_min_severity` (default
+   `high`) and is then demoted to the review body instead of posted on a
+   guessed line.
 
-5. **merge/dedupe** — findings from every lens are merged and de-duplicated
+5. **merge/dedupe**: findings from every lens are merged and de-duplicated
    (`_dedupe`, keyed on path/line/side).
 
-6. **evidence gate** — security, correctness, deprecation, and performance
-   findings must carry a concrete `failure_scenario`: the trigger, changed
-   behaviour, and observable impact. The engine applies this rule regardless
-   of model-selected severity, so lowering a finding to `low` cannot bypass it.
-   Gap and maintainability findings remain eligible without a runtime failure.
+6. **suppress**: findings a team has marked known-fine are dropped before they
+   cost any reflection tokens: fingerprints in `ignore_fingerprints`, a
+   `# lgtmaybe: ignore` pragma on (or just above) the flagged line, and findings
+   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). A 👎 never
+   suppresses a high or critical security finding.
 
-7. **reflect** — a self-reflection pass (`engine/reflect.py`) asks the provider
-   to audit its own findings and drops the ones it marks low-confidence
-   (keep-all safe default when the verdict can't be parsed; skippable with
-   `--no-reflect`). It also tries to disprove each claimed failure scenario
-   against the diff and grounded file text. When the auditor would drop a finding *only* because it
-   can't see code outside the diff, it **defers** by naming what it needs — a
-   file path or a **symbol**. A path is fetched read-only
-   (`get_file_contents`). A symbol is located by **ast-grep**
-   (`engine/astgrep.py`), which structurally searches a corpus — the local
-   worktree for the CLI, or a read-only shallow clone of the trusted **base**
-   branch for the GitHub path — for the file that *defines* it. That file is
-   then fetched through the same read-only boundary, and the auditor re-judges
+7. **evidence gate**: security, correctness, deprecation and performance
+   findings must carry a concrete `failure_scenario`: the trigger, the changed
+   behaviour, and the observable impact. The rule applies regardless of the
+   severity the model chose, so lowering a finding to `low` cannot bypass it.
+   Gap and maintainability findings (tests, documentation, complexity) do not
+   need a runtime failure.
+
+8. **reflect**: a self-reflection pass (`engine/reflect.py`) asks the provider
+   to audit its own findings, scores each 0-10, and drops the ones it marks
+   low-confidence (plus any below `min_confidence`). If the verdict can't be
+   parsed, every finding is kept. `--no-reflect` skips the pass. The auditor
+   also tries to disprove each claimed failure scenario against the diff and
+   the grounded file text.
+
+   When the auditor would drop a finding *only* because it can't see code
+   outside the diff, it **defers** by naming what it needs: a file path or a
+   **symbol**. A path is fetched read-only (`get_file_contents`). A symbol is
+   located by **ast-grep** (`engine/astgrep.py`), which structurally searches a
+   corpus for the file that *defines* it: the local worktree for the CLI, or a
+   read-only shallow clone of the trusted **base** branch on GitHub. That file
+   is fetched through the same read-only boundary, and the auditor re-judges
    with the real definition in front of it instead of guessing about an unseen
    guard or base class.
 
    This stays inside the fork-safety model: ast-grep only *parses* the corpus
    (never executes it), and the base clone is never the PR head. Symbol
    resolution needs the bundled `ast-grep` binary and a corpus; without either
-   it degrades to the path-only fetch (`--no-symbol-resolution` disables it
-   entirely). It is bounded by the same hop/file caps as the path fetch.
+   it falls back to the path-only fetch, and `--no-symbol-resolution` disables
+   it. It is bounded by the same hop and file caps as the path fetch.
 
-8. **filter** — findings below `min_severity` are dropped.
+9. **filter**: findings below `min_severity` are dropped, then any
+   `finding_rules` (drop or re-grade by path, lens, title or severity) apply.
 
-9. **post** — findings are batched into a single GitHub review request.
-   The summary comment is updated idempotently using a hidden marker, so
-   re-running lgtmaybe on the same PR does not create duplicate comments. Each
-   inline comment is stamped with a hidden per-finding fingerprint; on a re-run,
-   conversations whose finding is gone and whose thread GitHub marks outdated are
-   replied to and resolved (`resolve_fixed`, default on). Resolving a review
-   thread is the one operation the REST review API can't do, so this step uses
-   GitHub's GraphQL API — best-effort, so a failure never blocks the review.
+10. **post**: findings are posted as one batched review on GitHub (per-host
+    differences are in [What gets reviewed](what-gets-reviewed.md#how-each-host-posts)).
+    A hidden marker identifies lgtmaybe's summary: a re-run at the same commit
+    edits it in place, and a completed review at a new commit posts a fresh
+    summary, leaving the older ones as history. Each inline comment carries two
+    hidden per-finding ids, so a re-run never re-posts a finding it already
+    made. On a re-run, conversations whose finding is gone **and** whose thread
+    GitHub marks outdated are replied to and resolved (`resolve_fixed`, default
+    on). The REST review API can't resolve a thread, so this step uses GitHub's
+    GraphQL API. It is best-effort: a failure never blocks the review.
 
-## Provider strategy and factory
+## Provider Strategy and Factory
 
 Provider selection uses the **strategy pattern**: `--provider` picks a
-`ProviderClient` strategy; a small factory constructs it. litellm normalises
-all providers to one `completion()` call shape, so the factory is small and the
-engine is provider-agnostic.
+`ProviderClient` strategy, and a small factory (`providers/factory.py`) builds
+it. litellm normalises every provider to one `completion()` call, so the
+factory stays small and the engine stays provider-agnostic.
 
-Credential resolution uses a **chain of responsibility**: each provider knows
-how to locate its own credentials (ambient cloud creds, env var API key, or
-none for ollama). lgtmaybe never stores or logs credentials.
+Credential resolution is a **chain of responsibility**
+(`providers/credentials.py`): each provider knows how to find its own
+credentials (an API key, ambient cloud credentials, or none for ollama).
+lgtmaybe never stores or logs credentials.
 
-## Reliability: retries, timeouts, and concurrency
+## Reliability: Retries, Timeouts and Concurrency
 
 The provider wrapper (`LiteLLMProvider`) and the engine cooperate so a flaky
-network recovers but a dead-end failure surfaces fast:
+network recovers but a dead-end failure surfaces fast.
 
-- **Retries are classified, not blanket.** Transient failures — capacity rate
-  limits (`429 rate_limit_exceeded`), the provider's own connect/read timeouts,
-  connection errors (e.g. an
-  ollama server still warming up), 5xx — are retried with **exponential backoff
-  and jitter** (up to four attempts). **Permanent** failures are *not* retried:
-  bad credentials (`AuthenticationError`), malformed/unsupported requests
+- **Retries are classified, not blanket.** Transient failures are retried with
+  exponential backoff and jitter, up to four attempts: capacity rate limits
+  (`429 rate_limit_exceeded`), the provider's own connect/read timeouts,
+  connection errors (such as an ollama server still warming up), and 5xx
+  responses. **Permanent** failures are not retried: bad credentials
+  (`AuthenticationError`), malformed or unsupported requests
   (`BadRequestError`, including content-policy blocks), unknown models
-  (`NotFoundError`), denied permissions, and **quota/billing** rate limits
-  (`429 insufficient_quota` — "you exceeded your current quota"). Retrying a
-  quota error can never succeed; stacked across every lens it only turns an
-  instant "out of credit" into many minutes of wasted runner time, so lgtmaybe
-  raises it immediately. An optional `fallback_model` is still tried once.
+  (`NotFoundError`), denied permissions, and **quota/billing** limits
+  (`429 insufficient_quota`). A quota error can never succeed on retry; across
+  every lens it would only turn an instant "out of credit" into many minutes of
+  wasted runner time, so lgtmaybe raises it immediately. An optional
+  `fallback_model` is still tried once.
 
 - **A blown wall clock is permanent too.** When a call outlives lgtmaybe's own
-  per-request timeout (below), the retry would re-send the identical messages to
-  the identical model against the identical budget — it can only fail the same
-  way and cost another full timeout doing it. So the wall timeout is raised after
-  one attempt, and the failure reports how many attempts it burned (the count
-  rides home on failures as well as successes, so a budget-burning call never
-  reads as one that was never retried). The `fallback_model` — a genuinely
-  different request — still gets its turn, with a fresh budget.
+  per-request timeout, a retry would send the identical request to the
+  identical model against the identical budget, and fail the same way after
+  another full timeout. So the wall timeout is raised after one attempt, and
+  the failure reports how many attempts it used. The `fallback_model` is a
+  different request, so it still gets its turn with a fresh budget.
 
 - **Retried smaller, not repeated.** A wall timeout says something about the
-  *payload*, not the provider, and the payload is the one thing the engine can
-  change. So the batch is split and its pieces reviewed instead — halved by file,
-  or by hunk when the batch is a single file — each piece with its own fresh
-  budget. That keeps a slow lens from discarding the whole batch's review, and it
-  is the only retry a blown budget can benefit from. Bounded to **one** level: a
-  piece that times out again just fails, so a model that cannot answer at any
-  size can't cascade through the review budget. The summary says when a batch had
-  to be shrunk — a silent split would hide that every run is at the edge of what
-  the model finishes in time.
+  *payload*, and the payload is the one thing the engine can change. So the
+  batch is split (halved by file, or by hunk for a single-file batch) and each
+  piece is reviewed with a fresh budget. A slow lens no longer discards the
+  whole batch's review. The split goes **one** level deep: a piece that times
+  out again just fails, so a model that cannot answer at any size can't cascade
+  through the review budget. The summary says when a batch had to be shrunk,
+  because a silent split would hide that every run is at the edge of what the
+  model can finish in time.
 
 - **A second model is the last remedy for a truncation, not the first.** A
   truncated lens has two remedies that stay on the model you chose: shrink the
-  payload (the split above) when the *answer* outgrew the ceiling, and lower
-  `reasoning_effort` when the *thinking* did. Both are cheap and both act on
-  what the token counts actually said went wrong. Switching to `fallback_model`
-  says nothing about the failure — it re-sends the same request at the same
-  ceiling and hopes a second model finishes it — so it runs only after the aimed
-  remedy has been tried and failed, once, for the whole batch rather than once
-  per split piece. Every other failure the adapter still rescues by itself, and
-  either way the summary names the lens and the model that answered it: a review
-  the primary could not finish must not read like one it did.
+  payload (the split above) when the *answer* outgrew the output ceiling, and
+  lower `reasoning_effort` when the *thinking* did. Both are cheap, and both act
+  on what the token counts say went wrong. Switching to `fallback_model` says
+  nothing about the failure: it re-sends the same request at the same ceiling
+  and hopes a second model finishes it. So it runs only after the targeted
+  remedy has failed, once for the whole batch rather than once per split piece.
+  The adapter still rescues every other kind of failure itself, and either way
+  the summary names the lens and the model that answered it. A review the
+  primary model could not finish must not read like one it did.
 
-  This is also the routing rule to reach for before one keyed on diff size.
-  Truncation does not track size — measured here, a fifteen-line diff truncates
-  at the same ceiling as a large multi-file one, because the ceiling goes on
-  thinking — so a size threshold spends the strong model on the diffs that were
-  already fine. A fallback is keyed on the failure itself and costs the second
-  model nothing until one happens.
+  Reach for this rule before routing on diff size. Truncation does not track
+  size: in our measurements a fifteen-line diff truncated at the same ceiling as
+  a large multi-file one, because the ceiling goes on thinking. A size threshold
+  spends the strong model on diffs that were already fine; a fallback keyed on
+  the failure costs nothing until one happens.
 
-- **A rate limit waits on its own, much slower ladder.** The general ladder
-  starts at a tenth of a second, which is right for a blip — a connection reset,
-  an ollama server warming up — because the condition is gone by the time the
-  next request lands. A capacity 429 is not a blip: the gateways that meter an
-  API key meter it *per minute*, so a ladder that fits all four attempts inside a
-  few seconds lands all four in the same window, where they can only fail
-  identically. Rate limits therefore back off on a 5s–60s ladder instead, and
-  prefer the server's own **`Retry-After`** when it sends one (in either RFC
-  form, clamped at 120s so a gateway asking for an hour can't eat the run's wall
-  clock). Both ladders stay inside the same 2.5× retry budget below — which is
-  weighed against the *upcoming* wait, so a backoff that would blow the budget
-  ends the call instead of being slept.
+- **A rate limit waits on its own, slower ladder.** The general ladder starts at
+  a tenth of a second, which suits a blip such as a connection reset. A capacity
+  429 is not a blip: gateways that meter an API key meter it *per minute*, so a
+  ladder that fits four attempts into a few seconds lands them all in the same
+  window, where they fail identically. Rate limits therefore back off on a
+  20s-60s ladder, and prefer the server's own **`Retry-After`** when it sends one
+  (in either RFC form, clamped at 120s so a gateway asking for an hour can't eat
+  the run's wall clock). Both ladders stay inside the 2.5× retry budget below,
+  which is checked against the *upcoming* wait, so a backoff that would exceed
+  the budget ends the call instead of sleeping.
 
 - **A call that failed on the provider gets one more go.** Once the fan-out has
   drained, the calls that failed *provider-side* are re-run once, in a narrow
-  pool of their own. This is the difference between a review and a partial one:
-  a single flaky call used to void the whole round's verdict, and the findings
-  that lens would have made were lost until somebody re-ran by hand. Nothing
-  else is left alone, because a second attempt would repeat the same failure at
-  full price: unparseable output returns the same unparseable answer at
-  temperature 0, a truncation runs to the same output ceiling, a batch already
-  retried by the split (below) has had the one retry that can help, a dead key
-  or spent quota cannot resolve itself mid-review, and a ceiling you set is not
-  a fault to retry past. Every rescue re-checks the deadline, the
-  token budget and the interrupt first, and a healthy run costs **zero** extra
-  calls.
+  pool of their own. Without this, a single flaky call voided that lens's
+  findings for the round until somebody re-ran by hand. Nothing else is
+  re-run, because a second attempt would repeat the same failure at full price:
+  unparseable output returns the same answer at temperature 0, a truncation
+  hits the same ceiling, a batch the split already retried has had the one retry
+  that can help, a dead key or spent quota won't fix itself mid-review, and a
+  ceiling you set is not a fault to retry past. Every rescue re-checks the
+  deadline, the token budget and the interrupt first, and a healthy run costs
+  **zero** extra calls.
 
 - **One retry layer.** litellm's own internal retry loop is disabled
-  (`num_retries=0`) so failures aren't ground through two stacked backoff layers
-  — lgtmaybe owns the retry policy in one place.
+  (`num_retries=0`), so failures aren't ground through two stacked backoff
+  layers. lgtmaybe owns the retry policy in one place.
 
 - **Per-request timeout and a shared retry budget.** Every model call carries a
-  timeout: 600s for direct cloud providers, 1800s for the ones that may front a
-  slow model — ollama and openai-compatible (local servers) and openrouter (a
-  gateway to arbitrary models, including slow reasoning ones) — overridable via
-  `timeout` / `--timeout`. All attempts for
-  one call additionally share a wall-clock budget of **2.5× that timeout**, so
-  a flaky model can't burn four full timeouts plus backoff per lens. The
-  posting workflows additionally set a job-level `timeout-minutes` so a wedged
-  run can't hold a runner for GitHub's six-hour default — set above
-  `max_review_seconds`, so the soft deadline (which still posts partial
-  findings) fires before the runner is killed. If the runner does cut the job
-  short — a blown `timeout-minutes`, or `cancel-in-progress` on a new push — the
+  timeout: 600s for direct cloud providers, and 1800s for providers that may
+  front a slow model: ollama, openai-compatible (local servers) and openrouter
+  (a gateway to arbitrary models, including slow reasoning ones). For ollama
+  and openai-compatible the default is multiplied by the fan-out width, because
+  a single-slot local server queues the other calls while their clocks run.
+  `timeout` / `--timeout` overrides all of this. All attempts for one call share
+  a wall-clock budget of **2.5× the timeout**, so a flaky model can't burn four
+  full timeouts plus backoff per lens. lgtmaybe's own workflows also set a
+  job-level `timeout-minutes` (75) above `max_review_seconds`, so the soft
+  deadline (which still posts partial findings) fires before the runner kills
+  the job; do the same in yours. If the runner does cut the job short, the
   CLI's signal handler is the backstop (below).
 
-- **A whole-review deadline.** `max_review_seconds` (default 3600, `0` disables)
-  is a soft ceiling on the run: once it passes, queued model calls are skipped
-  — in-flight ones finish and their findings post — and the summary carries an
-  explicit incomplete-results notice. It can never produce a silent LGTM: a
-  run where every call failed or was skipped still fails loud.
+- **A whole-review deadline.** `max_review_seconds` (default 3600, `0`
+  disables) is a soft ceiling on the run. Once it passes, queued model calls are
+  skipped, in-flight ones finish and their findings post, and the summary
+  carries an explicit incomplete-results notice. It can never produce a silent
+  LGTM: a run where every call failed or was skipped still fails loudly.
 
 - **A termination signal does the same thing.** The CLI installs a
   SIGINT/SIGTERM handler that sets the deadline's state, so a job the runner
   cancels or times out stops dispatching model calls and posts what it already
-  has, with a notice naming the interruption, instead of dying with nothing on
-  the PR. The handler is installed by the CLI entrypoint only (importing
-  lgtmaybe as a library never touches your signal handlers), and it restores the
-  previous handler as it fires — a second signal still kills the process.
+  has, with a notice naming the interruption. Only the CLI entrypoint installs
+  the handler (importing lgtmaybe as a library never touches your signal
+  handlers), and it restores the previous handler as it fires, so a second
+  signal still kills the process.
 
-- **Incompleteness is visible on the PR, not just in the log.** The notice above
-  is not specific to the deadline: *any* failed lens call (a per-call timeout, a
-  provider error, unparseable output) raises it — naming the lenses it lost and
-  why, since a missing security lens and a missing documentation lens are the
-  same count and very different news — and the engine stamps a hidden
-  `<!-- lgtmaybe-incomplete -->` marker alongside it. Because a re-run can only
-  update the *first* run's review body in place — a silent edit, while this run's
-  new findings arrive as individual review comments GitHub wraps in bodyless
-  reviews — an incomplete run also posts the notice as its own PR comment. A
-  half-complete review must never look like a clean one. A review that failed
-  outright posts its failure notice the same way. The summary also carries a
-  hidden `<!-- lgtmaybe-lenses:… -->` list of the lenses that completed every
-  call, so a gate that wants "every lens ran" can require the set it expects
-  instead of inferring it from the absence of a notice — a lens that never ran
-  leaves none to find. A matched spec that did not fit the spec budget is named
-  the same way, because a spec lens that should have run and did not is a gap,
-  not a no-match.
+- **Incompleteness is visible on the PR, not just in the log.** *Any* failed
+  lens call (a per-call timeout, a provider error, unparseable output) raises
+  the incomplete-results notice, naming the lenses it lost and why: a missing
+  security lens and a missing documentation lens are the same count and very
+  different news. The engine also stamps a hidden `<!-- lgtmaybe-incomplete -->`
+  marker. Because later findings arrive as separate review comments while the
+  first run's summary is only edited in place, an incomplete run also posts the
+  notice as its own PR comment, and so does a review that failed outright. The
+  summary also carries a hidden `<!-- lgtmaybe-lenses:… -->` list of the lenses
+  that completed every call, so a gate that wants "every lens ran" can require
+  the set it expects instead of inferring it from the absence of a notice. A
+  matched spec that did not fit the spec budget is named the same way, because
+  a spec lens that should have run and did not is a gap, not a no-match.
 
 - **A diff the host will not serve is a review that did not happen.** GitHub
-  answers the diff request with 406 once a PR passes 300 files or 20,000
-  lines, and lgtmaybe reads PR content through that API only — never a
-  checkout — so there is nothing to review and no retry that changes it. That
-  run posts a "not reviewed" notice quoting GitHub's reason, with a hidden
-  `<!-- lgtmaybe-skipped -->` marker, stamps nothing complete, and exits
-  zero: not a failure (a red job for a PR the reviewer could never look at
-  only teaches people to ignore red jobs), and never an LGTM. The fix is a
-  smaller PR; no reviewer setting moves the host's limit.
+  answers the diff request with 406 once a PR passes 300 files or 20,000 lines.
+  lgtmaybe reads PR content through that API only, never a checkout, so there is
+  nothing to review and no retry will change it. The run posts a "not reviewed"
+  notice quoting GitHub's reason with a hidden `<!-- lgtmaybe-skipped -->`
+  marker, stamps nothing complete, and exits zero. It is not a failure (a red
+  job for a PR the reviewer could never read only teaches people to ignore red
+  jobs), and it is never an LGTM. The fix is a smaller PR; no reviewer setting
+  moves the host's limit.
 
 - **One global fan-out pool.** Every (batch, lens) call runs through a single
-  `ThreadPoolExecutor` sized by `max_concurrency` — default **6 workers** for
-  hosted providers (an extra worker can cut a full-latency wave off the wall
-  clock — see the formula below — but the fan-out is *one* API key, and past
-  some width the burst
-  rate-limits itself against a per-minute-metered gateway; raise it if your rate
-  tier is generous), and the same **6** for local
-  providers. Local used to be pinned to 1 because a default ollama serves one
-  request at a time — but that is a property of the *server*, not a reason to cap
-  the client: a server that can batch was capped for nothing, and one that cannot
-  loses nothing by having work queued for it (ollama queues up to
-  `OLLAMA_MAX_QUEUE` rather than failing). What decides local throughput is
-  `OLLAMA_NUM_PARALLEL` / llama.cpp's `-np` / vLLM's batching, and raising those
-  costs memory per slot — see
-  [running locally](../how-to/run-locally-with-ollama.md). Drop this to 1 for a
-  very slow local model, where six queued calls could each wait out the timeout. Flattening
-  the pool across batches means wall time is `ceil(batches × lenses / workers)`
-  call-latencies rather than `batches × ceil(lenses / workers)`.
+  `ThreadPoolExecutor` sized by `max_concurrency`, default **6 workers** for
+  every provider. An extra worker can cut a full-latency wave off the wall
+  clock, but the fan-out shares *one* API key, and past some width the burst
+  rate-limits itself against a gateway that meters per minute. Raise it if your
+  rate tier is generous.
 
-## Dependency injection
+  Local providers get the same 6. A default ollama serves one request at a
+  time, but that is a property of the *server*: one that can batch would be
+  capped for nothing, and one that can't loses nothing by having work queued
+  (ollama queues up to `OLLAMA_MAX_QUEUE` rather than failing). Local
+  throughput is decided by `OLLAMA_NUM_PARALLEL`, llama.cpp's `-np` or vLLM's
+  batching, and raising those costs memory per slot; see
+  [running locally](../how-to/run-locally-with-ollama.md). Drop
+  `max_concurrency` to 1 for a very slow local model, where six queued calls
+  could each wait out the timeout. Because the pool is shared across batches,
+  wall time is `ceil(batches × lenses / workers)` call-latencies rather than
+  `batches × ceil(lenses / workers)`.
 
-The engine receives its ports by injection. In production the CLI wires real
-adapters; in tests `tests/fakes/` provides drop-in fakes. No monkey-patching or
-`unittest.mock` is needed at the engine level.
+## Dependency Injection
 
-## Why not a plugin framework or event bus
+The engine receives its ports by injection: `LLMReviewEngine` takes a
+`ProviderClient` (plus optional file-fetch and symbol-resolver callables), and
+`review()` takes a `PRContext`. In production the CLI wires the real adapters;
+in tests the fakes in `tests/fakes/` (`FakeProvider`, `FakeGitHub`,
+`FakeEngine`) drop in directly, so swapping a port never needs patching.
 
-Both were considered and explicitly skipped. The current set of providers fits
-cleanly in a strategy + factory; a plugin registry would add indirection with no
+## Why Not a Plugin Framework or Event Bus
+
+Both were considered and skipped. The current providers fit cleanly in a
+strategy and factory, and a plugin registry would add indirection with no
 present benefit. An event bus would complicate the linear pipeline without
-enabling any feature the product needs. These can be revisited if a concrete
+enabling any feature the product needs. Either can be revisited if a concrete
 requirement arises.

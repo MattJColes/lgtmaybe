@@ -1,11 +1,11 @@
 ---
-description: Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC — no static AWS credentials stored in repository secrets.
+description: Run lgtmaybe on AWS Bedrock with keyless GitHub OIDC - no static AWS credentials stored in repository secrets.
 ---
 
-# Review with AWS Bedrock (keyless OIDC)
+# Review with AWS Bedrock (Keyless OIDC)
 
-Use this guide to run lgtmaybe with **AWS Bedrock** using GitHub's OIDC token
-— no static AWS credentials stored in secrets.
+Use this guide to run lgtmaybe with AWS Bedrock using GitHub's OIDC token, so no
+static AWS credentials are stored in secrets.
 
 ## Contents
 
@@ -16,26 +16,26 @@ Use this guide to run lgtmaybe with **AWS Bedrock** using GitHub's OIDC token
 - [Running locally with ambient AWS credentials](#running-locally-with-ambient-aws-credentials)
 - [Troubleshooting](#troubleshooting)
 
-## How it works
+## How It Works
 
-GitHub Actions issues a short-lived OIDC token. AWS STS exchanges that token
-for temporary IAM credentials scoped to a role you control. The action performs
-that exchange for you (pass `aws_role_arn`) and lgtmaybe picks up the ambient
-credentials automatically — no `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY`
-in your secrets.
+GitHub Actions issues a short-lived OIDC token. AWS STS exchanges it for
+temporary credentials for an IAM role you control. Pass `aws_role_arn` and the
+Action performs that exchange for you; lgtmaybe then picks up the credentials
+through the standard AWS credential chain. There is no `AWS_ACCESS_KEY_ID` or
+`AWS_SECRET_ACCESS_KEY` in your secrets.
 
-## One-time AWS setup
+## One-Time AWS Setup
 
-This is the human-only part — do it once in your AWS account:
+Do this once in your AWS account:
 
-1. Create an IAM **OIDC identity provider** for `token.actions.githubusercontent.com`.
-2. Create an IAM **role** with a trust policy scoped to your repo
-   (`repo:<org>/lgtmaybe:*`).
+1. Create an IAM OIDC identity provider for `token.actions.githubusercontent.com`.
+2. Create an IAM role with a trust policy scoped to your repository
+   (`repo:<org>/<repo>:*`).
 3. Attach the least-privilege policy below.
 4. Confirm the models you want are enabled in the target region (model access
-   request in the Bedrock console).
-5. Note the **role ARN** (e.g. `arn:aws:iam::123456789012:role/lgtmaybe-bedrock`)
-   — it becomes the `aws_role_arn` action input. No static key is ever stored.
+   in the Bedrock console).
+5. Note the role ARN (e.g. `arn:aws:iam::123456789012:role/lgtmaybe-bedrock`).
+   It becomes the `aws_role_arn` Action input.
 
 The role needs only:
 
@@ -53,72 +53,57 @@ The role needs only:
 }
 ```
 
-**Both ARNs are required for the recommended inference-profile model ids**
-(the `us.`/`eu.`/`apac.`-prefixed ids below). A cross-region inference profile
-fans the call out to the foundation model in several regions, so the role needs
-`bedrock:InvokeModel*` on **both** the `inference-profile/*` ARN **and** the
-underlying `foundation-model/*` ARN. Granting only one of them still fails with
-`AccessDeniedException`. A bare `anthropic.…` model id needs only the
-`foundation-model/*` ARN, but most current Claude models are invocable only
-through an inference profile — see the model table below.
+Both ARNs are required for the recommended inference-profile model IDs (the
+`us.`/`eu.`/`apac.`-prefixed IDs below). A cross-region inference profile routes
+the call to the foundation model in several regions, so the role needs
+`bedrock:InvokeModel*` on both the `inference-profile/*` ARN and the underlying
+`foundation-model/*` ARN. Granting only one still fails with
+`AccessDeniedException`. A bare `anthropic.…` model ID needs only the
+`foundation-model/*` ARN, but most current Claude models can only be invoked
+through an inference profile (see the model table below).
 
-Scope each `Resource` to specific model / inference-profile ARNs for tighter
-least-privilege once it works, e.g.
+Once it works, scope each `Resource` to specific model and inference-profile
+ARNs for tighter least privilege, e.g.
 `arn:aws:bedrock:*:<account-id>:inference-profile/us.anthropic.claude-opus-5-5*`
 and `arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-5-5*`.
 
-## Workflow example
+## Workflow Example
 
-The action assumes the role for you — no separate `configure-aws-credentials`
-step needed. Store the role ARN in an `AWS_ROLE_ARN` secret.
+Copy [`examples/workflows/review-bedrock.yml`][wf] to
+`.github/workflows/lgtmaybe.yml` and store the role ARN in an `AWS_ROLE_ARN`
+secret. The Action assumes the role itself, so you need no separate
+`configure-aws-credentials` step, but the workflow must grant `id-token: write`
+so GitHub will mint the OIDC token:
 
 ```yaml
-name: lgtmaybe
-
-on:
-  pull_request_target:
-  issue_comment:
-    types: [created]
-
 permissions:
-  id-token: write          # required for the OIDC token exchange (keyless)
-  pull-requests: write     # required to post review comments
   contents: read
-
-jobs:
-  review:
-    # Only trusted authors (repo owner / org member / collaborator) can trigger
-    # a review, so fork PRs and drive-by comments cannot spend your provider
-    # budget. A maintainer can still opt in to an external PR with /review.
-    if: >-
-      (github.event_name == 'pull_request_target' &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
-      (github.event.issue.pull_request &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
-       (contains(github.event.comment.body, '/review') ||
-        contains(github.event.comment.body, '/improve') ||
-        contains(github.event.comment.body, '/ask') ||
-        contains(github.event.comment.body, '/describe') ||
-        contains(github.event.comment.body, '/diagram')))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: MattJColes/lgtmaybe@v2
-        with:
-          provider: bedrock
-          model: us.anthropic.claude-sonnet-4-6
-          aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
-          aws_region: us-east-1
+  pull-requests: write
+  id-token: write # required for the OIDC token exchange (keyless auth)
 ```
 
-## Choosing a Bedrock model ID
+The review step is:
 
-The `model` must be a **Bedrock** model identifier. Bedrock hosts Anthropic
-Claude, Amazon Nova/Titan, Meta Llama, Mistral, Cohere, OpenAI GPT and others,
-each under Bedrock's own id — `openai.gpt-6-sol`, not OpenAI's `gpt-6-sol`. An
-id written for another provider's API is rejected with
-`The provided model identifier is invalid`. Use one of the Claude ids below
-(prefixed with a cross-region inference profile — see the note):
+```yaml
+- uses: MattJColes/lgtmaybe@v2
+  with:
+    provider: bedrock
+    model: us.anthropic.claude-sonnet-4-6
+    aws_role_arn: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+```
+
+`aws_region` defaults to `us-east-1`. The example also carries the
+trusted-author guard described in
+[who can trigger a review](use-as-github-action.md#who-can-trigger-a-review).
+
+## Choosing a Bedrock Model ID
+
+The `model` must be a Bedrock model identifier. Bedrock hosts Anthropic Claude,
+Amazon Nova, Meta Llama, Mistral, Cohere, OpenAI GPT and others, each under
+Bedrock's own ID: `openai.gpt-6-sol`, not OpenAI's `gpt-6-sol`. An ID written
+for another provider's API is rejected with
+`The provided model identifier is invalid`. Use one of the Claude IDs below:
 
 | Model | Inference-profile ID (recommended) | Base model ID |
 |---|---|---|
@@ -127,26 +112,27 @@ id written for another provider's API is rejected with
 | Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | `anthropic.claude-haiku-4-5-20251001-v1:0` |
 
 Haiku 4.5 keeps its dated `-20251001-v1:0` suffix on Bedrock; unlike Opus 5.5
-and Sonnet 4.6, it has no undated `anthropic.claude-haiku-4-5` id.
+and Sonnet 4.6, it has no undated `anthropic.claude-haiku-4-5` ID.
 
 On Bedrock, Claude Opus 4.7 and later (Opus 5.5 included) take lgtmaybe's
-findings schema as a forced tool call rather than native structured output —
+findings schema as a forced tool call rather than native structured output.
 litellm picks that route from its model map, so there is nothing to configure.
 
-**Prefer the inference-profile form.** Most current Claude models on Bedrock are
-invocable only through a cross-region inference profile, not via on-demand
-throughput on the bare model id — so a bare id often fails with the same
+Prefer the inference-profile form. Most current Claude models on Bedrock can
+only be invoked through a cross-region inference profile, not with on-demand
+throughput on the bare model ID, so a bare ID often fails with the same
 `invalid model identifier` (or `on-demand throughput isn't supported`) error.
-Prefix with your geography: `us.` (US), `eu.` (Europe) or `apac.` (Asia
-Pacific), or the narrower `au.` / `jp.`, matching `aws_region` — or `global.` to
-let Bedrock route the call to any commercial region. Use the bare `anthropic.…`
-id only where on-demand access to that model is enabled in your region.
+Prefix the ID with the geography that matches `aws_region`: `us.` (US), `eu.`
+(Europe) or `apac.` (Asia Pacific), or the narrower `au.` / `jp.`. A `global.`
+prefix lets Bedrock route the call to any commercial region. Use the bare
+`anthropic.…` ID only where on-demand access to that model is enabled in your
+region.
 
-## Running locally with ambient AWS credentials
+## Running Locally with Ambient AWS Credentials
 
-If your local shell has AWS credentials (via `~/.aws`, SSO, or an assumed role),
-you can review your current branch's changes with Bedrock. Bedrock signing needs
-`boto3`, so install the extra (the Action image already bundles it):
+If your shell has AWS credentials (from `~/.aws`, SSO, or an assumed role), you
+can review your current branch with Bedrock. Bedrock request signing needs
+`boto3`, so install the `bedrock` extra (the Action image already bundles it):
 
 ```bash
 pip install 'lgtmaybe[bedrock]'
@@ -156,57 +142,57 @@ lgtmaybe review \
   --model us.anthropic.claude-sonnet-4-6
 ```
 
-lgtmaybe does not require or accept a static API key for Bedrock.
+Bedrock always uses the AWS credential chain; lgtmaybe ignores `--api-key` for
+it.
 
 > **`No matching distribution found for lgtmaybe[bedrock]`** (`from versions:
-> none`) — this is not a packaging problem; the `bedrock` extra is published on
-> PyPI. It means `pip` found no version compatible with your environment. The
-> usual cause is an interpreter older than the required **Python 3.11+** (check
-> with `python --version`); install under 3.11+ (e.g. via `pipx`/`uv`). If your
-> Python is fine, your `pip` can't reach PyPI — check your network/proxy or
+> none`): this is not a packaging problem, because the `bedrock` extra is
+> published on PyPI. `pip` found no version compatible with your environment.
+> The usual cause is a Python older than the required 3.11 (check with
+> `python --version`), so install under 3.11 or later (e.g. with `pipx` or `uv`).
+> If your Python is fine, `pip` can't reach PyPI: check your network, proxy or
 > `--index-url`.
 
 ## Troubleshooting
 
-**`ExpiredTokenException`** — the OIDC exchange failed or the role session
-expired. Check that `id-token: write` permission is present in the workflow and
-that the IAM trust policy references the correct GitHub repository.
+**`ExpiredTokenException`**: the OIDC exchange failed or the role session
+expired. Check that the workflow grants `id-token: write` and that the IAM trust
+policy names the correct GitHub repository.
 
-**`AccessDeniedException`** — the role lacks `bedrock:InvokeModel` for the
+**`AccessDeniedException`**: the role lacks `bedrock:InvokeModel` for the
 selected model, or the model is not enabled in the Bedrock console for your
-account and region. For an inference-profile id (`us.`/`eu.`/`apac.`-prefixed),
-the policy must also allow the `inference-profile/*` ARN, not just
+account and region. For an inference-profile ID (`us.`/`eu.`/`apac.`-prefixed),
+the policy must allow the `inference-profile/*` ARN as well as
 `foundation-model/*`.
 
+**`The provided model identifier is invalid`**: the `model` is not a Bedrock
+model ID. Either it is another provider's name (such as `gpt-6-sol` or
+`claude-sonnet-4-6`; Bedrock's are `openai.gpt-6-sol` and
+`us.anthropic.claude-sonnet-4-6`), so pick an ID from the table above, or the
+model needs a cross-region inference profile, so prefix it with
+`us.`/`eu.`/`apac.` (e.g. `us.anthropic.claude-sonnet-4-6`) instead of using the
+bare `anthropic.…` ID.
+
 **`output_config.format: Extra inputs are not permitted`**, **`outputConfig`**,
-or a `toolConfig` / "doesn't support tool choice" refusal — the model's Converse
-route doesn't accept the structured-output shape lgtmaybe asks for, and Bedrock
-rejects the whole request with a 400. No action is needed: enforcement degrades
-one rung at a time rather than being switched off. A rejected `response_format`
-is re-sent as the *same* schema through the mechanism Converse does implement —
-a forced tool call, whose arguments are the findings — and the rest of the lens
-fan-out uses that shape straight away. Only a route that refuses the tool too
-falls back to prompt-instructed JSON (the prompt asks for JSON anyway and the
-parser is lenient); that fallback is logged as a warning naming the model and
-the reason. If you're on a build from before this (the symptom is every lens
-failing at once, and the review reporting `every review call failed`), upgrade,
-or pass `--no-structured-output` / set `structured_output: false` as a stopgap.
+or a `toolConfig` / "doesn't support tool choice" refusal: the model's Converse
+route doesn't accept the structured-output shape lgtmaybe sent, and Bedrock
+rejected the request with a 400. No action is needed. lgtmaybe re-sends the same
+schema as a forced tool call (which Converse does implement) and the rest of the
+lens fan-out uses that shape straight away. Only a route that refuses the tool
+call too falls back to prompt-instructed JSON, which the lenient parser still
+reads; that fallback is logged as a warning naming the model and the reason. If
+every lens fails at once with `every review call failed` on an older lgtmaybe,
+upgrade, or pass `--no-structured-output` (`structured_output: false`) as a
+stopgap.
 
-**Every review comes back unstructured after one odd reply** — an empty reply,
-or one that parsed to something that wasn't findings, is evidence against the
-mechanism in play, not against enforcement. It now steps the model down to the
-forced tool call and keeps the schema; only a second such reply gives it up. On
-a build from before this, one blip on one lens cost enforcement for every later
-call of the run. The provider log names what happened:
+**Structured output stepped down after an odd reply**: an empty reply, or one
+that parsed to something other than findings, moves the model one rung down to
+the forced tool call and keeps the schema. Only a second such reply gives the
+schema up. The provider log says which happened:
 `structured output stepped down to a forced tool call` is the middle rung and
-costs you nothing, while `structured output disabled for this model` is the
-floor and carries a `reason` (`empty-response`, `unparseable-output`,
-`tool-rejected`, `internal-tool-rejected`) worth reading.
+costs nothing, while `structured output disabled for this model` is the floor
+and carries a `reason` (such as `rejected`, `empty-response`,
+`unparseable-output`, `tool-rejected` or `internal-tool-rejected`) worth
+reading.
 
-**`The provided model identifier is invalid`** — the `model` is not a Bedrock
-model id. Two common causes: (1) it's another provider's name such as
-`gpt-6-sol` or `claude-sonnet-4-6` — Bedrock names its models its own way
-(`openai.gpt-6-sol`, `us.anthropic.claude-sonnet-4-6`), so pick an id from the
-table above; (2) the model needs a cross-region inference profile — prefix with
-`us.`/`eu.`/`apac.` (e.g. `us.anthropic.claude-sonnet-4-6`) rather than the bare
-`anthropic.…` id.
+[wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-bedrock.yml
