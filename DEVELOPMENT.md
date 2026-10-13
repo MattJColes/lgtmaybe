@@ -115,7 +115,8 @@ One case needs an explicit `--base`: you have an `origin` remote but haven't
 fetched, so the remote-tracking refs are **stale**. Pass `--base main` to use
 your local mainline, or `git fetch` first.
 
-Useful flags for local iteration (full list: `uv run lgtmaybe review --help`):
+Useful flags for local iteration (full list: `uv run lgtmaybe review --help-all`;
+plain `--help` shows only the everyday ones):
 
 | Flag | What it does |
 |---|---|
@@ -151,7 +152,7 @@ API calls, so you pay for the tokens:
 ### Inspecting Config
 
 ```bash
-uv run lgtmaybe config init        # interactively write ~/.config/lgtmaybe/config.yml
+uv run lgtmaybe config init        # detect + verify a provider/model, write ~/.config/lgtmaybe/config.yml
 uv run lgtmaybe config show        # print that user-level config
 uv run lgtmaybe config get <key>   # print one value
 uv run lgtmaybe config set <key> <value>
@@ -159,6 +160,10 @@ uv run lgtmaybe config path        # where the file lives (honours $XDG_CONFIG_H
 ```
 
 API keys are never written to this file; they stay in your environment.
+`config init` makes one tiny model call to check the provider and model before
+it writes; `--no-verify` skips it. With no provider or model from any layer,
+`review` and `diagram` stop at once with a pointer to `config init`: there is
+no built-in default.
 
 ### Debugging a Local Run
 

@@ -271,6 +271,28 @@ Action, flags or `.lgtmaybe.yml` for `gitlab-ci` / `comment`).
 - **THEN** it exits non-zero at once, pointing at `lgtmaybe config init` or
   `--provider`/`--model`, and never guesses a model
 
+### Requirement: First-run setup detects, then verifies
+
+`lgtmaybe config init` SHALL detect provider API keys, cheaply visible ambient
+cloud credentials, and a running ollama (with its pulled models) before
+asking anything, offer the strongest detection as the default, validate the
+provider against the enum, and suggest a current model from a table kept in
+step with the how-to guides. Unless `--no-verify` is given, it SHALL make one
+tiny completion through the review's own credential resolver and provider
+factory before writing, so a bad key or model fails during setup with the
+same "how to auth" message a review would show. Only provider, model and
+api_base are written; keys stay in the environment.
+<!-- anchor: cli.config-init -->
+
+#### Scenario: a machine with a running ollama
+- **WHEN** `config init` runs and ollama answers `/api/tags`
+- **THEN** two Enter presses confirm ollama and a pulled model, the model is
+  checked, and the file path and `lgtmaybe review` are printed
+
+#### Scenario: a wrong API key
+- **WHEN** the verification call fails
+- **THEN** init exits non-zero with the provider's error and writes nothing
+
 ### Requirement: The Action selects GitHub identity explicitly
 
 The GitHub Action SHALL default to the built-in workflow token and perform the

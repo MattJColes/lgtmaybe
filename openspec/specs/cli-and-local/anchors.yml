@@ -84,6 +84,16 @@ cli.config:
       has: { field: name, regex: '^set_key$' }
     files: [src/lgtmaybe/config/**/*.py]
 
+cli.config-init:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^config_init$' }
+    files: [src/lgtmaybe/cli/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^detect$' }
+    files: [src/lgtmaybe/config/detect.py]
+
 cli.github-identity:
   rule:
     kind: function_definition

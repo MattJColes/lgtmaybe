@@ -918,8 +918,8 @@ lgtmaybe review \
   --min-severity high
 ```
 
-Most single-value settings have a flag; run `lgtmaybe review --help` for the
-list. List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
+Most single-value settings have a flag; run `lgtmaybe review --help-all` for
+the list (`--help` alone shows only the everyday ones). List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
 `categories`, `finding_rules`, `extra_lenses`, `lens_paths`, `directory_rules`,
 `project`, `spec_paths`, `risk.core_paths` and the `static_analysis` sub-keys.
 The `--static-analysis` and `--risk` flags switch those features on or off and

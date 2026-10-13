@@ -9,6 +9,7 @@ register onto the ``main`` / ``config`` groups defined there.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,6 +22,7 @@ from lgtmaybe.cli import (
     _RUNTIME_INPUTS,
     RuntimeOptions,
     action_inputs,
+    build_provider_engine,
     config_cmd,
     execute_comment,
     execute_local_diagram,
@@ -32,9 +34,11 @@ from lgtmaybe.cli import (
     resolve_auto_incremental,
     should_auto_diagram,
 )
-from lgtmaybe.config import store
+from lgtmaybe.config import detect, store
 from lgtmaybe.config.loader import LOCAL_SETUP_HINT, ProviderNotConfigured, load_config
 from lgtmaybe.core.models import Provider, ReviewConfig, ReviewPreset, Severity
+from lgtmaybe.core.ports import ProviderTruncated
+from lgtmaybe.providers.factory import DEFAULT_OLLAMA_BASE
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -742,17 +746,141 @@ def config_set(key: str, value: str) -> None:
     click.echo(f"{key} = {coerced}")
 
 
-@config_cmd.command("init")
-def config_init() -> None:
-    """Interactively create the config file."""
-    provider = click.prompt("Provider", default="ollama")
-    model = click.prompt("Model", default="llama3")
-    api_base = click.prompt("API base (blank for none)", default="", show_default=False)
+#: Generous enough for ollama to load a model cold, short enough that a stuck
+#: endpoint does not leave the wizard hanging for the review-sized default.
+_VERIFY_TIMEOUT = 180
+
+#: Where each provider that needs an endpoint reads it from the environment.
+_BASE_ENV: dict[Provider, str] = {
+    Provider.azure: "AZURE_API_BASE",
+    Provider.openai_compatible: "OPENAI_COMPATIBLE_API_BASE",
+}
+
+
+def _parse_provider(value: str) -> Provider:
+    """A provider from its listed number or its name; re-prompts on anything else."""
+    text = value.strip()
+    providers = list(Provider)
+    if text.isdigit() and 1 <= int(text) <= len(providers):
+        return providers[int(text) - 1]
     try:
-        store.set_key("provider", provider)
-        store.set_key("model", model)
-        if api_base.strip():
-            store.set_key("api_base", api_base)
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        return Provider(text)
+    except ValueError:
+        names = ", ".join(p.value for p in providers)
+        raise click.BadParameter(f"unknown provider {text!r}; choose one of: {names}") from None
+
+
+def _choose_provider(found: list[detect.Detection]) -> tuple[Provider, detect.Detection | None]:
+    """Offer the strongest detection; fall back to the numbered list."""
+    if found:
+        if len(found) > 1:
+            click.echo("Detected:")
+            for item in found:
+                click.echo(f"  {item.provider.value}: {item.reason}")
+        first = found[0]
+        if click.confirm(f"Found {first.reason} - use {first.provider.value}?", default=True):
+            return first.provider, first
+    else:
+        click.echo("No provider API key, cloud credentials or running ollama detected.")
+    for number, provider in enumerate(Provider, start=1):
+        click.echo(f"  {number}. {provider.value}")
+    chosen: Provider = click.prompt("Provider (number or name)", value_proc=_parse_provider)
+    return chosen, next((item for item in found if item.provider is chosen), None)
+
+
+def _choose_api_base(
+    provider: Provider, found: detect.Detection | None
+) -> tuple[str | None, tuple[str, ...]]:
+    """The endpoint to store (None = the provider's own default), plus any
+    models a running ollama there has pulled."""
+    if provider is Provider.ollama:
+        if found is not None:
+            return None, found.models
+        base: str = click.prompt("ollama API base", default=DEFAULT_OLLAMA_BASE)
+        base = base.strip().rstrip("/")
+        models = detect.ollama_models(base)
+        if models is None:
+            click.echo(f"No ollama answered at {base}; start it with `ollama serve`.")
+        return (None if base == DEFAULT_OLLAMA_BASE else base), models or ()
+    env_var = _BASE_ENV.get(provider)
+    if env_var is None or os.environ.get(env_var):
+        # Not needed, or the resolver will read it from the environment itself.
+        return None, ()
+    hint = (
+        "https://<resource>.openai.azure.com"
+        if provider is Provider.azure
+        else "an OpenAI /v1 base URL, e.g. http://localhost:8000/v1"
+    )
+    entered: str = click.prompt(f"{provider.value} endpoint ({hint})")
+    return entered.strip(), ()
+
+
+def _choose_model(provider: Provider, pulled: tuple[str, ...]) -> str:
+    """Prompt for the model, defaulting to a current suggestion when there is one."""
+    if provider is Provider.ollama:
+        if pulled:
+            click.echo(f"Pulled models: {', '.join(pulled)}")
+        else:
+            click.echo(
+                "No pulled models found; pull one first, e.g. "
+                f"`ollama pull {detect.SUGGESTED_MODELS[Provider.ollama]}`."
+            )
+    label = {
+        Provider.azure: "Deployment name",
+        Provider.openai_compatible: "Model (the name the server serves)",
+    }.get(provider, "Model")
+    suggested = detect.suggest_model(provider, pulled)
+    model: str = click.prompt(label, default=suggested) if suggested else click.prompt(label)
+    return model.strip()
+
+
+def _verify_setup(provider: Provider, model: str, api_base: str | None) -> None:
+    """One tiny completion through the review's own credential + provider path,
+    so a bad key or model fails now, with the same "how to auth" message."""
+    click.echo(f"Checking {provider.value} / {model} with one short request...")
+    cfg = ReviewConfig(provider=provider, model=model, api_base=api_base, timeout=_VERIFY_TIMEOUT)
+    # The review's structured INFO logs would interleave with the prompts.
+    logging.disable(logging.INFO)
+    try:
+        _engine, client = build_provider_engine(cfg, RuntimeOptions(api_base=api_base))
+        client.complete([{"role": "user", "content": "Reply with the single word: ok"}], model)
+    except ProviderTruncated:
+        pass  # It answered: a reasoning model may spend the budget thinking.
+    except Exception as exc:
+        raise click.ClickException(
+            f"{exc}\nNothing was written. Fix the above and rerun `lgtmaybe config init`, "
+            "or pass --no-verify to write the config without checking."
+        ) from exc
+    finally:
+        logging.disable(logging.NOTSET)
+    click.echo("OK: the model answered.")
+
+
+@config_cmd.command("init")
+@click.option(
+    "--verify/--no-verify",
+    default=True,
+    help="Check the provider and model with one tiny completion before writing "
+    "(default on; --no-verify writes without a model call)",
+)
+def config_init(verify: bool) -> None:
+    """Detect your credentials and a running ollama, then write the config file.
+
+    API keys are never written: they stay in your environment.
+    """
+    provider, found = _choose_provider(detect.detect())
+    api_base, pulled = _choose_api_base(provider, found)
+    model = _choose_model(provider, pulled)
+    if verify:
+        _verify_setup(provider, model, api_base)
+
+    data = store.load()
+    data.update(provider=provider.value, model=model)
+    if api_base:
+        data["api_base"] = api_base
+    else:
+        # A base kept from an earlier setup would be sent to the new provider.
+        data.pop("api_base", None)
+    store.save(data)
     click.echo(f"Wrote {store.user_config_path()}")
+    click.echo("Next: lgtmaybe review")
