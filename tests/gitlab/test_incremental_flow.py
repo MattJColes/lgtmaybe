@@ -59,6 +59,7 @@ def _discussion(thread_id: str, path: str, fingerprint: str) -> dict[str, Any]:
                 "body": f"old finding\n<!-- lgtmaybe-finding:{fingerprint} -->",
                 "resolved": False,
                 "position": {"new_path": path, "new_line": 2, "head_sha": LAST},
+                "author": BOT,
             }
         ],
     }

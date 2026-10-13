@@ -36,6 +36,7 @@ from lgtmaybe.core.comment import (
     render_demoted,
     render_inline_body,
     strip_markers,
+    unposted,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -68,9 +69,12 @@ _GRAPHQL_URL = "https://api.github.com/graphql"
 
 # The superset of review-thread fields used across one run. Fetching them once
 # is cheaper than paging the same connection separately for each consumer.
+# ``viewerDidAuthor`` is how a thread is known to be ours: GitHub answers it for
+# the token's own identity, where a login compare would have to reconcile REST's
+# ``name[bot]`` with GraphQL's bare ``name`` for an App.
 _THREAD_NODE_FIELDS = """
 id isResolved isOutdated path
-comments(first:1){ nodes{ body databaseId
+comments(first:1){ nodes{ body databaseId viewerDidAuthor
   reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } }
 } }
 """
@@ -133,9 +137,22 @@ def _head_ref(meta: dict[str, Any]) -> str:
 
 
 def _first_comment(node: dict[str, Any]) -> dict[str, Any]:
-    """A review thread's opening comment, or ``{}`` when it has none."""
+    """A review thread's opening comment when WE wrote it, else ``{}``.
+
+    Every thread consumer — resolve-on-fix, follow-up validation, the open-thread
+    count, 👎 learning — reads our hidden ids off this comment. Anyone can type
+    those ids (the identity is a prose-free hash), so a thread someone else
+    opened is treated exactly like one with no comments: never ours.
+    """
     comments = node.get("comments", {}).get("nodes", [])
-    return comments[0] if comments else {}
+    first = comments[0] if comments else {}
+    return first if first.get("viewerDidAuthor") is True else {}
+
+
+def _authored_by(item: dict[str, Any], login: str) -> bool:
+    """Whether a REST review or comment payload was written by *login*."""
+    user = item.get("user")
+    return isinstance(user, dict) and user.get("login") == login
 
 
 def _diff_refusal_reason(resp: httpx.Response) -> str:
@@ -569,12 +586,19 @@ class RestGitHubGateway:
         self, body: str, marker: str, *, preserve: re.Pattern[str] | None = None
     ) -> None:
         """Post *body* as an issue comment stamped with *marker*, or edit the
-        existing comment carrying that marker in place."""
+        existing comment carrying that marker in place.
+
+        Only a comment the posting actor wrote is edited: anyone can paste our
+        marker, and editing theirs would 403 (failing the run) or write into
+        their comment. An unknown actor edits nothing — a new comment is the
+        safe failure."""
         stamped = f"{body}\n\n{marker}"
         url = f"{self._issue_api}/comments"
+        login = self._login_or_none()
         for resp in self._paginate(f"{url}?per_page=100"):
             for comment in resp.json():
-                if marker in (comment.get("body") or ""):
+                ours = login is not None and _authored_by(comment, login)
+                if ours and marker in (comment.get("body") or ""):
                     if preserve is not None and preserve.search(stamped) is None:
                         # The last stamp: ours is always appended after the body.
                         previous = list(preserve.finditer(comment.get("body") or ""))
@@ -702,11 +726,8 @@ class RestGitHubGateway:
             for resp in self._paginate(url):
                 for comment in resp.json():
                     body = comment.get("body") or ""
-                    user = comment.get("user")
-                    if (
-                        self._diagram_marker not in body
-                        or not isinstance(user, dict)
-                        or user.get("login") != self._posting_login
+                    if self._diagram_marker not in body or not _authored_by(
+                        comment, self._viewer_login()
                     ):
                         continue
                     return last_match(_DIAGRAMMED_MARKER, body)
@@ -777,7 +798,8 @@ class RestGitHubGateway:
         """Read our unresolved finding roots for explicit follow-up validation."""
         active: list[ActiveFinding] = []
         for node in self._walk_review_threads(
-            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+            "id isResolved isOutdated path "
+            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
         ):
             if node.get("isResolved"):
                 continue
@@ -865,15 +887,9 @@ class RestGitHubGateway:
         """
         if not inline:
             return []
-        unmatched = self._existing_finding_keys()
         url = f"{self._pr_api}/comments"
         rejected: list[ReviewFinding] = []
-        for comment, finding in inline:
-            keys = finding_keys(comment.get("body", ""))
-            already = next((i for i, e in enumerate(unmatched) if e & keys), None)
-            if already is not None:
-                unmatched.pop(already)  # consumed — it can't absorb a second candidate
-                continue
+        for comment, finding in unposted(inline, self._existing_finding_keys()):
             if head_sha is None:
                 _log.warning(
                     "no head SHA to anchor a new inline comment at %s:%s:%s — "
@@ -929,13 +945,21 @@ class RestGitHubGateway:
         lines. Only the active marker families are collected, so a thread
         collapsed by resolve-on-fix (its markers rewritten into the resolved
         families) stops suppressing — a finding that comes back posts again.
+
+        Only comments the posting actor wrote count: the identity id is a
+        prose-free hash a PR author can compute and paste ahead of the line it
+        names. An unknown actor counts nothing — a duplicate, never a hidden
+        finding.
         """
+        login = self._login_or_none()
+        if login is None:
+            return []
         url = f"{self._pr_api}/comments?per_page=100"
         posted: list[set[str]] = []
         for resp in self._paginate(url):
             for item in resp.json():
                 keys = finding_keys(item.get("body", "") or "")
-                if keys:
+                if keys and _authored_by(item, login):
                     posted.append(keys)
         return posted
 
@@ -1083,17 +1107,10 @@ class RestGitHubGateway:
         """
         if self._existing_review_done:
             return self._existing_review_entry
-        if self._posting_login is None:
-            data = self._graphql("query { viewer { login } }", {})
-            viewer = data.get("viewer") if isinstance(data, dict) else None
-            login = viewer.get("login") if isinstance(viewer, dict) else None
-            if not isinstance(login, str) or not login.strip():
-                raise RuntimeError("GitHub did not identify the authenticated posting actor")
-            self._posting_login = login
+        login = self._viewer_login()
         for resp in self._paginate(f"{self._pr_api}/reviews?per_page=100"):
             for review in resp.json():
-                user = review.get("user")
-                if not isinstance(user, dict) or user.get("login") != self._posting_login:
+                if not _authored_by(review, login):
                     continue
                 body: str = review.get("body", "") or ""
                 if self._marker in body and (
@@ -1109,6 +1126,29 @@ class RestGitHubGateway:
                     )
         self._existing_review_done = True
         return self._existing_review_entry
+
+    def _viewer_login(self) -> str:
+        """The authenticated posting actor's REST login, resolved once per run.
+
+        Raises when GitHub will not say: a caller that would otherwise *reuse*
+        something on the strength of authorship must not guess.
+        """
+        if self._posting_login is None:
+            data = self._graphql("query { viewer { login } }", {})
+            viewer = data.get("viewer") if isinstance(data, dict) else None
+            login = viewer.get("login") if isinstance(viewer, dict) else None
+            if not isinstance(login, str) or not login.strip():
+                raise RuntimeError("GitHub did not identify the authenticated posting actor")
+            self._posting_login = login
+        return self._posting_login
+
+    def _login_or_none(self) -> str | None:
+        """``_viewer_login``, failing closed to None: nothing then counts as ours."""
+        try:
+            return self._viewer_login()
+        except Exception as exc:  # noqa: BLE001 — fail closed (see callers)
+            _log.warning("could not identify the posting actor: %s", exc)
+            return None
 
     # ------------------------------------------------------------------
     # Auto-resolve fixed conversations (GraphQL — the REST review API can't
@@ -1230,7 +1270,9 @@ class RestGitHubGateway:
         """
         open_threads = 0
         try:
-            for node in self._walk_review_threads("isResolved comments(first:1){ nodes{ body } }"):
+            for node in self._walk_review_threads(
+                "isResolved comments(first:1){ nodes{ body viewerDidAuthor } }"
+            ):
                 if node.get("isResolved"):
                     continue
                 if FINDING_MARKER.search(_first_comment(node).get("body", "")):
@@ -1255,7 +1297,8 @@ class RestGitHubGateway:
 
         fixed: list[tuple[str, int | None, str]] = []
         for node in self._walk_review_threads(
-            "id isResolved isOutdated path comments(first:1){ nodes{ body databaseId } }"
+            "id isResolved isOutdated path "
+            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
         ):
             if node.get("isResolved"):
                 continue
@@ -1355,7 +1398,7 @@ class RestGitHubGateway:
         """
         downvoted: set[str] = set()
         for node in self._walk_review_threads(
-            "comments(first:1){ nodes{ body "
+            "comments(first:1){ nodes{ body viewerDidAuthor "
             "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
         ):
             first = _first_comment(node)

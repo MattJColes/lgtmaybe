@@ -120,7 +120,13 @@ def _isolate_user_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
 @pytest.fixture(autouse=True)
 def _authenticated_posting_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The HTTP fixture token belongs to Actions unless a test owns its identity boundary."""
+    """The HTTP fixture token belongs to the bot unless a test owns its identity boundary.
+
+    GitHub's token is Actions' (``github-actions[bot]``); Gitea's and GitLab's
+    ``/user`` lookups answer ``lgtmaybe-bot`` (GitLab: user id 99, unless the test
+    mocks the route itself), so a fixture comment is "ours" only when it names
+    that author.
+    """
     import json
 
     import httpx
@@ -136,6 +142,17 @@ def _authenticated_posting_identity(monkeypatch: pytest.MonkeyPatch) -> None:
             return httpx.Response(
                 200, json={"data": {"viewer": {"login": "github-actions[bot]"}}}, request=request
             )
+        if request.method == "GET" and request.url.path == "/api/v1/user":
+            return httpx.Response(200, json={"login": "lgtmaybe-bot"}, request=request)
+        if request.method == "GET" and request.url.path == "/api/v4/user":
+            # A test that mocks this route itself (respx) answers it; otherwise
+            # the default identity does.
+            try:
+                return original(client, request, **kwargs)
+            except Exception:  # noqa: BLE001 — unmocked or unreachable: use the default
+                return httpx.Response(
+                    200, json={"id": 99, "username": "lgtmaybe-bot"}, request=request
+                )
         return original(client, request, **kwargs)
 
     monkeypatch.setattr(httpx.Client, "send", send)

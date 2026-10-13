@@ -36,12 +36,12 @@ import httpx
 
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
-    current_finding_keys,
     finding_keys,
     marker,
     render_broad,
     render_demoted,
     render_inline_body,
+    unposted,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -90,6 +90,7 @@ class GiteaGateway:
     ) -> None:
         self._repo = repo
         self._pr_number = pr_number
+        self._user_api = f"{scheme}://{host}/api/v1/user"
         self._api = f"{scheme}://{host}/api/v1/repos/{repo}"
         self._pr_api = f"{self._api}/pulls/{pr_number}"
         self._issue_api = f"{self._api}/issues/{pr_number}"
@@ -105,6 +106,9 @@ class GiteaGateway:
         self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
         self._scan_manifests = False
+        # The posting identity's login, looked up once (see _posting_login).
+        self._login: str | None = None
+        self._login_done = False
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -181,16 +185,7 @@ class GiteaGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
 
         if inline:
-            unmatched = self._existing_finding_keys()
-            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-            for comment, finding in inline:
-                keys = current_finding_keys([finding])
-                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
-                if already is None:
-                    new_inline.append((comment, finding))
-                else:
-                    unmatched.pop(already)
-            inline = new_inline
+            inline = unposted(inline, self._existing_finding_keys())
 
         if inline:
             resp = self._client.post(
@@ -350,8 +345,39 @@ class GiteaGateway:
             inline.append((comment, f))
         return inline, demoted, broad
 
+    def _posting_login(self) -> str | None:
+        """The login this token posts as, looked up once; None when Gitea won't say.
+
+        Hidden ids and markers are plain text anyone can type, so only a comment
+        this identity wrote may count as ours. None makes every caller fail
+        closed: dedupe treats nothing as posted (a duplicate, never a hidden
+        finding) and an upsert creates rather than edits a stranger's comment.
+        """
+        if not self._login_done:
+            self._login_done = True
+            try:
+                login = self._get_json(self._user_api).get("login")
+            except Exception as exc:  # noqa: BLE001 — fail closed, see above
+                _log.warning(
+                    "looking up the posting identity failed (does the token have the "
+                    "read:user scope?): %s",
+                    exc,
+                )
+            else:
+                self._login = login if isinstance(login, str) and login else None
+        return self._login
+
+    def _is_ours(self, item: dict[str, Any]) -> bool:
+        """Whether a review or comment was written by the posting identity."""
+        login = self._posting_login()
+        return login is not None and (item.get("user") or {}).get("login") == login
+
     def _existing_finding_keys(self) -> list[set[str]]:
         """Every hidden finding id already posted on this PR by us.
+
+        Only reviews the posting identity wrote are read: anyone can paste our
+        hidden ids (the identity is a prose-free hash a PR author can compute),
+        and counting theirs would let them hide a finding before it is made.
 
         Best-effort: a failure here means a duplicate comment, which is far
         better than failing the whole review.
@@ -367,7 +393,7 @@ class GiteaGateway:
             review_ids = [
                 review["id"]
                 for review in self._paginate(f"{self._pr_api}/reviews")
-                if review.get("id") is not None
+                if review.get("id") is not None and self._is_ours(review)
             ]
             with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS) as pool:
                 for comments in pool.map(
@@ -400,9 +426,13 @@ class GiteaGateway:
         resp.raise_for_status()
 
     def _find_comment(self, family: str) -> int | None:
-        """The id of our existing comment in ``family``, or None."""
+        """The id of our existing comment in ``family``, or None.
+
+        Ours means written by the posting identity — a stranger's comment that
+        carries our marker is never edited (it would 403, or worse, succeed).
+        """
         for comment in self._list(f"{self._issue_api}/comments"):
-            if family in (comment.get("body") or ""):
+            if family in (comment.get("body") or "") and self._is_ours(comment):
                 comment_id = comment.get("id")
                 return int(comment_id) if comment_id is not None else None
         return None

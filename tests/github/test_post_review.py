@@ -599,7 +599,7 @@ def _thread(
         "id": tid,
         "isResolved": resolved,
         "isOutdated": outdated,
-        "comments": {"nodes": [{"body": body, "databaseId": comment_id}]},
+        "comments": {"nodes": [{"body": body, "databaseId": comment_id, "viewerDidAuthor": True}]},
     }
 
 
@@ -888,7 +888,11 @@ def test_post_describe_comment_creates_with_marker() -> None:
 def test_post_describe_comment_updates_existing_in_place() -> None:
     existing = [
         {"id": 7, "body": "unrelated comment"},
-        {"id": 9, "body": f"old description\n\n{DESCRIBE_MARKER}"},
+        {
+            "id": 9,
+            "body": f"old description\n\n{DESCRIBE_MARKER}",
+            "user": {"login": "github-actions[bot]"},
+        },
     ]
     respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
         return_value=httpx.Response(200, json=existing)
@@ -967,7 +971,11 @@ def test_post_diagram_comment_creates_with_marker() -> None:
 def test_post_diagram_comment_updates_existing_in_place() -> None:
     existing = [
         {"id": 7, "body": f"old description\n\n{DESCRIBE_MARKER}"},
-        {"id": 9, "body": f"old diagram\n\n{DIAGRAM_MARKER}"},
+        {
+            "id": 9,
+            "body": f"old diagram\n\n{DIAGRAM_MARKER}",
+            "user": {"login": "github-actions[bot]"},
+        },
     ]
     respx.route(method="GET", url__startswith=COMMENTS_URL).mock(
         return_value=httpx.Response(200, json=existing)
@@ -1457,7 +1465,10 @@ def test_forbidden_resolve_is_attempted_once_per_run() -> None:
 
 
 def _open_thread(body: str, *, resolved: bool = False) -> dict:
-    return {"isResolved": resolved, "comments": {"nodes": [{"body": body}]}}
+    return {
+        "isResolved": resolved,
+        "comments": {"nodes": [{"body": body, "viewerDidAuthor": True}]},
+    }
 
 
 def _count_threads_page(nodes: list[dict]) -> httpx.Response:
@@ -1902,7 +1913,15 @@ def test_new_native_summary_preserves_one_for_one_inline_dedupe() -> None:
     )
     fp = finding_fingerprint(FINDINGS[0].path, FINDINGS[0].title)
     respx.get(REVIEW_COMMENTS_URL + "?per_page=100").mock(
-        return_value=httpx.Response(200, json=[{"body": f"<!-- lgtmaybe-finding:{fp} -->"}])
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "body": f"<!-- lgtmaybe-finding:{fp} -->",
+                    "user": {"login": "github-actions[bot]"},
+                }
+            ],
+        )
     )
     inline = respx.post(REVIEW_COMMENTS_URL).mock(
         return_value=httpx.Response(201, json={"id": 200})
