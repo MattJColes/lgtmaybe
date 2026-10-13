@@ -722,3 +722,26 @@ class TestTemperatureReach:
 
         assert provider.temperature_dropped()
         assert lookup.call_count == 2, "with and without the temperature, once"
+
+    def test_a_changed_reasoning_effort_re_derives_the_answer(self) -> None:
+        """The effort is part of the memo key: the gpt-5 rule keeps the
+        temperature at `none` and drops it at anything else, and the step-down
+        retries change the effort mid-run. A memo keyed on the model alone would
+        reuse the `none` answer for the `high` call and miss the drop.
+
+        `none` first, deliberately: once a model is flagged the flag is sticky
+        and no later call looks again, so a `high`-then-`none` order would
+        never reach the second lookup.
+        """
+        real = litellm.get_optional_params
+        with (
+            patch("litellm.get_optional_params", side_effect=real) as lookup,
+            patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
+        ):
+            provider = LiteLLMProvider(model="openai/gpt-5.5", temperature=0.0)
+            provider.complete(self._MESSAGES, "ignored", reasoning_effort="none")
+            assert not provider.temperature_dropped(), "`none` keeps the temperature"
+            provider.complete(self._MESSAGES, "ignored", reasoning_effort="high")
+
+        assert lookup.call_count == 4, "both lookups, once per effort"
+        assert provider.temperature_dropped(), "`high` drops it"
