@@ -239,7 +239,10 @@ def render_unread_files(paths: list[str]) -> str:
 # fingerprint, then the identity (absent on a body that predates it), then
 # nothing but whitespace. Anchored to the end of the body because the text
 # before it includes the suggestion, which is posted verbatim and so can carry
-# any marker a steered model wrote into it.
+# any marker a steered model wrote into it. Only ``render_inline_body`` writes
+# these bodies and no forge appends to them; a body someone later edits to
+# carry text after the block stops reading as ours, which costs a re-post of
+# its finding, never a skipped one.
 _STAMPED_IDS = re.compile(rf"{FINDING_MARKER.pattern}(?:\s*{IDENTITY_MARKER.pattern})?\s*\Z")
 
 

@@ -585,4 +585,5 @@ class TestForgedFindingIds:
         _gateway(httpx.Client()).post_review([finding], "1 finding", diff=DIFF)
 
         assert reviews.called, "the forged id suppressed a finding never posted"
-        assert json.loads(reviews.calls[0].request.content)["comments"]
+        posted = json.loads(reviews.calls[0].request.content)["comments"]
+        assert any("Hardcoded password" in c["body"] for c in posted)

@@ -15,6 +15,7 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 import respx
 
 from lgtmaybe.core.comment import render_inline_body
@@ -603,3 +604,12 @@ def test_a_quoted_id_alone_does_not_make_a_thread_ours() -> None:
 
     assert _gateway().count_open_finding_threads() == 0
     assert _gateway().list_active_findings() == []
+
+
+def test_resolving_a_comment_without_a_trailing_stamp_raises() -> None:
+    """A body whose ids are not the trailing block would PATCH back unchanged,
+    leaving its finding suppressed; failing lets the caller reopen the thread."""
+    body = f"{_ids_of(RUN_1[0])}\n\nedited afterwards"
+
+    with pytest.raises(RuntimeError, match="trailing id block"):
+        _gateway()._mark_comment_resolved(1, body)

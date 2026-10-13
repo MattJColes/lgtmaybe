@@ -1313,6 +1313,10 @@ class RestGitHubGateway:
         # what a reader applies with one click, and buys nothing, since ids
         # anywhere but the trailing block are never read.
         prose, ids = split_stamped_ids(body)
+        if not ids:
+            # Nothing to retire: a PATCH would put the body back unchanged and
+            # leave the finding suppressed, so fail and let the caller reopen.
+            raise RuntimeError("the resolved comment carries no trailing id block to rewrite")
         rewritten = prose + ids.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
             _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
         )
