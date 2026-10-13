@@ -153,7 +153,9 @@ The engine SHALL require a non-blank `failure_scenario` for security,
 correctness, deprecation, and performance findings before reflection and SHALL
 apply the rule regardless of model-selected severity. Tests, documentation,
 complexity, intent, ponytail, and custom-lens findings SHALL remain eligible
-without one.
+without one. A fast-preset finding the model left unattributed carries the
+`code-health` group id and SHALL be gated too, since it cannot show it belongs
+to an exempt member.
 <!-- anchor: quality.failure-scenario -->
 
 #### Scenario: model lowers severity to avoid evidence
