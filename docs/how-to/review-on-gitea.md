@@ -11,9 +11,17 @@ comments differs.
 
 ## Set It Up
 
-1. **Create a token.** In Gitea, go to *Settings → Applications → Access Tokens*
-   and create a token with the `write:repository` and `write:issue` scopes. Add
-   it to your repository as a secret named `GITEA_TOKEN`.
+The example workflow needs Gitea 1.21 or later, for the `pull_request_target`
+trigger. Read
+[Security: Who Can Change the Workflow](#security-who-can-change-the-workflow)
+for why it matters.
+
+1. **Create a token.** Sign in as a dedicated account with write access to the
+   reviewed repository only. In Gitea, go to *Settings → Applications → Access
+   Tokens* and create a token with the `write:repository` and `write:issue`
+   scopes. Add it to your repository as a secret named `LGTMAYBE_GITEA_TOKEN`.
+   Gitea refuses secret names that start with `GITEA_` or `GITHUB_`, and the
+   example maps this secret to the `GITEA_TOKEN` variable lgtmaybe reads.
 
     You need both. `write:repository` also covers reading, and Gitea files the
     review endpoint lgtmaybe posts inline comments through
@@ -23,7 +31,8 @@ comments differs.
     the summary comment and the PR labels.
 
 2. **Add a provider key.** Add the API key for whichever model you want as a
-   second secret, for example `ANTHROPIC_API_KEY`.
+   second secret, for example `ANTHROPIC_API_KEY`. Use a key with a spend
+   limit.
 
 3. **Add the workflow.** Copy
    [`examples/gitea/lgtmaybe.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/gitea/lgtmaybe.yml)
@@ -74,9 +83,44 @@ IDs already on the pull request and does not post the same finding twice. The
 summary lives in an ordinary comment, which is editable, so it updates in place
 on each run.
 
-## Fork Safety
+## Security: Who Can Change the Workflow
 
-Gitea has no `pull_request_target`, so the `pull_request` event runs with the
-repository's secrets. The safety rule still holds for the same reason as on
-GitHub: lgtmaybe never checks out or executes pull-request code. It reads the
-diff through the API and treats every byte of it as untrusted input.
+A `pull_request` run in Gitea Actions takes its workflow file from the pull
+request's own head commit. A pull request from a branch in the same repository
+runs whatever workflow it contains, with the repository's secrets, so anyone who
+can push a branch could rewrite the review job and send the model key and the
+token to a server of their choosing. A pull request from a fork also runs its
+own workflow, but Gitea passes it no repository or organisation secrets, only
+the automatic job token, so lgtmaybe cannot review it.
+
+`pull_request_target`, available from Gitea 1.21, takes the workflow from the
+base branch instead, as on GitHub, and gives it the repository's secrets for
+pull requests from forks too. That is why the example uses it, and why it is the
+same trade-off as on GitHub: lgtmaybe never checks out or executes pull-request
+code. It reads the diff through the API and treats every byte of it as
+untrusted input. The `issue_comment` arm always runs the workflow from the
+default branch, so a pull request cannot change that either. Gitea still treats
+a comment on a fork's pull request as a fork run and passes it no secrets, so
+slash commands work only on pull requests from branches in the repository.
+
+What `pull_request_target` does not cover:
+
+- **Anyone with write access can still read the secrets.** Repository and
+  organisation secrets reach every workflow run in the repository, including a
+  `push` workflow on a branch someone has just pushed, with no pull request
+  involved. Give write access only to people trusted with the secrets, and take
+  other contributions as pull requests from forks.
+- **Gitea before 1.21 has no `pull_request_target`.** There, switch the example
+  to `pull_request` only if everyone who can push a branch is trusted with the
+  secrets. Pull requests from forks are not reviewed, because their runs get no
+  secrets.
+- **A fork's pull request starts a paid review without approval.** On an
+  instance with open registration, anyone can open one. Use a model key with a
+  spend limit.
+
+Keep the token narrow too. A Gitea access token works on every repository its
+owner can reach, which is why step 1 creates it on a dedicated account with
+write access to the reviewed repository only, and gives it only the two scopes
+lgtmaybe needs. Do not use `secrets.GITEA_TOKEN` in its place: that name always
+resolves to the automatic job token, because Gitea refuses a secret of your own
+with that name.

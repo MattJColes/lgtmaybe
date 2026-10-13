@@ -11,17 +11,30 @@ comments differs.
 
 ## Set It Up
 
+A merge request pipeline runs the CI configuration from the merge request's own
+source branch, so where the job lives decides who can read its secrets. Read
+[Security: Who Can Change the Pipeline](#security-who-can-change-the-pipeline)
+before choosing where it goes.
+
 1. **Create a token.** In your project, go to *Settings → Access Tokens* and
-   create a project access token with the `api` scope and at least the Developer
-   role. Add it under *Settings → CI/CD → Variables* as `GITLAB_TOKEN`, masked.
+   create a project access token with the `api` scope, the Developer role and an
+   expiry date. Add it under *Settings → CI/CD → Variables* as `GITLAB_TOKEN`,
+   masked, with **Environment scope** set to `lgtmaybe`.
 
 2. **Add a provider key.** Add the API key for whichever model you want as a
-   second masked variable, for example `ANTHROPIC_API_KEY`.
+   second masked variable scoped to the `lgtmaybe` environment, for example
+   `ANTHROPIC_API_KEY`. Use a key with a spend limit.
 
 3. **Add the job.** Copy
    [`examples/gitlab/.gitlab-ci.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/gitlab/.gitlab-ci.yml)
    into your repository, or merge its `lgtmaybe` job into your existing
-   pipeline.
+   pipeline. If not everyone who can push a branch is trusted with the secrets,
+   put it in a separate configuration project instead, as described under
+   [Keep the Pipeline Configuration Outside the Project](#keep-the-pipeline-configuration-outside-the-project).
+
+The job names the environment `lgtmaybe` with `action: access`. That is what
+lets it read the variables scoped to that environment, without recording a
+deployment, while the pipeline's other jobs never receive them.
 
 The job runs `python -m lgtmaybe gitlab-ci`, which finds the merge request from
 GitLab's predefined variables (`CI_SERVER_URL` or `CI_SERVER_HOST`,
@@ -117,8 +130,125 @@ These are not available:
 | Symbol resolution | No base-branch clone in the GitLab adapter | Reflection judges cross-file findings without the symbol's definition |
 | Keyless cloud auth | The OIDC/WIF exchange is built into the GitHub composite action | Use an API key, or `ollama` |
 
-## Fork Safety
+## Security: Who Can Change the Pipeline
 
-lgtmaybe never checks out or executes merge request code. It reads the diff
-through the API and treats every byte of it as untrusted input, which is why the
-example job sets `GIT_STRATEGY: none` and does not clone the repository at all.
+A merge request pipeline runs the `.gitlab-ci.yml` from the merge request's
+source branch, not from the target branch. This is the opposite of GitHub's
+`pull_request_target`, where the base branch's workflow runs, and GitLab has no
+equivalent. Anyone who can push a branch to the project (the Developer role and
+above) can therefore edit the `lgtmaybe` job, keep its variables, and send the
+model key and `GITLAB_TOKEN` to a server of their choosing. A branch pipeline
+gives them the same access without opening a merge request at all.
+`GIT_STRATEGY: none` does not help: the YAML itself is the part they control.
+
+So a job in the reviewed project's own CI configuration is only safe when
+everyone who can push a branch there is already trusted with both secrets. For a
+team where that holds, the setup above is enough. Otherwise, choose one of the
+setups below. Each has a cost, and none of them is as simple as
+`pull_request_target`.
+
+Scoping the variables to the `lgtmaybe` environment is worth doing either way,
+but it is not a defence against this. It keeps the secrets away from jobs that
+never ask for them, such as a compromised test tool, and a job the merge request
+controls can still name the environment.
+
+### Merge Requests from Forks
+
+A merge request from a fork is safe by default. Its pipeline runs in the fork,
+with the fork's CI configuration and the fork's variables, and never receives
+the parent project's variables. Keep it that way:
+
+- Do not use **Run pipeline** on a fork's merge request in the parent project.
+  That runs the fork's CI configuration in the parent project with all of the
+  parent's variables, which hands the fork's author your secrets. GitLab shows a
+  warning before it does this.
+- To remove the option, disable `ci_allow_fork_pipelines_to_run_in_parent_project`
+  with the [projects API](https://docs.gitlab.com/api/projects/#update-a-project).
+
+The cost is that lgtmaybe does not review fork merge requests: their pipelines
+have no key.
+
+### Protected Variables
+
+Marking `GITLAB_TOKEN` and the model key **Protected** keeps them out of every
+pipeline on an unprotected branch, so pushing a branch no longer reveals them.
+A merge request pipeline receives protected variables only when all of these
+hold (the setting below arrived in GitLab 18.1):
+
+- the project allows it, under *Settings → CI/CD → Variables → Access protected
+  resources in merge request pipelines*;
+- both the source and target branches are protected, and in the same project;
+- the user who starts the pipeline can push or merge to the target branch.
+
+A merge request pipeline from a fork never receives them.
+
+The cost: lgtmaybe then reviews only merge requests between protected branches,
+opened by people who could already change the pipeline there. A merge request
+from an ordinary feature branch gets no token and the job fails. To skip the job
+there instead, extend its rule:
+
+```yaml
+rules:
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
+```
+
+### Keep the Pipeline Configuration Outside the Project
+
+This works on every GitLab tier. In the reviewed project, set *Settings → CI/CD →
+General pipelines → CI/CD configuration file* to a file in a separate project,
+for example `.gitlab-ci.yml@my-group/ci-config` (append `:branch-name` to pin a
+branch). Every pipeline in the reviewed project, merge request and branch
+pipelines alike, then runs that file, so no commit to the reviewed project can
+change a job. Changing the setting needs the Maintainer role. Protect the
+configuration project's default branch and give write access only to people
+trusted with the secrets.
+
+The variables stay unprotected, so merge requests from feature branches are
+reviewed. What it costs:
+
+- That file is now the project's whole pipeline, so the project's build and test
+  jobs must live there too. Do not `include` the reviewed project's own CI files
+  from it: a file read at the merge request's commit is the merge request's to
+  edit, and its jobs could name the `lgtmaybe` environment.
+- Those build and test jobs still run the merge request's code. Keep both
+  variables scoped to the `lgtmaybe` environment so those jobs never receive
+  them, and keep that environment out of every job but the review.
+- Do not let a job that runs merge request code share a shell-executor runner
+  with the review job. There, jobs run as the same user on the same host, and
+  one can read another's environment.
+- Keep *Settings → CI/CD → Variables → Minimum role to use pipeline variables*
+  at Maintainer or above (the self-managed default), or `no_one_allowed` (the
+  default for new projects on GitLab.com). A pipeline variable outranks a
+  project variable, so anyone who can set one can change the review job's
+  environment. `AZURE_API_BASE`, for example, tells lgtmaybe where to send the
+  key when the job passes no `--api-base`.
+
+### Pipeline Execution Policies
+
+A [pipeline execution policy](https://docs.gitlab.com/user/application_security/policies/pipeline_execution_policies/)
+(GitLab Ultimate) can add the `lgtmaybe` job to every pipeline from a separate
+security policy project, so a merge request cannot change that job. On its own
+it does not keep the secrets safe. Unless the policy replaces the project's
+configuration entirely (`override_project_ci`), the project's own
+`.gitlab-ci.yml` still runs from the merge request's branch, and its jobs
+receive the same project and group variables, or can name the `lgtmaybe`
+environment to get them. A policy that does replace the configuration has the
+same costs as the previous section.
+
+### Tokens and Keys
+
+Whichever setup you choose, assume a secret can leak and limit what it is worth:
+
+- Make `GITLAB_TOKEN` a project access token on this project only, with the
+  `api` scope (posting discussions needs it; `read_api` cannot), the Developer
+  role and nothing higher, and a short expiry. On GitLab.com, project access
+  tokens need Premium or Ultimate. On the Free tier, use a personal access token
+  of a dedicated account that is a Developer of this project alone. A leaked
+  token can post as lgtmaybe, including a summary note whose watermark makes
+  the next incremental run skip the commits before it.
+- Use a model key with a spend limit, so a leaked key has a ceiling.
+
+lgtmaybe itself never checks out or executes merge request code. It reads the
+diff through the API and treats every byte of it as untrusted input, which is
+why the example job sets `GIT_STRATEGY: none` and does not clone the repository
+at all.

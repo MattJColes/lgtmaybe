@@ -1,16 +1,32 @@
-# Copy into your GitLab repo at .gitlab-ci.yml (or include it from one).
+# Copy into your GitLab repo at .gitlab-ci.yml (or include it from one), or
+# into a separate, protected configuration project (see below).
 #
 # GitLab CI has no event payload file and no INPUT_* convention, so lgtmaybe
 # reads the merge request from GitLab's own predefined variables and takes its
 # configuration from ordinary flags, environment, and .lgtmaybe.yml.
 #
-# Two CI/CD variables to add under Settings -> CI/CD -> Variables:
+# Read "Security: Who Can Change the Pipeline" in docs/how-to/review-on-gitlab.md
+# before choosing where this file lives. A merge request pipeline runs the CI
+# configuration from the merge request's own source branch, so anyone who can
+# push a branch to this project can rewrite this job and send both variables
+# below anywhere they like. Keeping this file in the reviewed project is only
+# safe when everyone with the Developer role or above is already trusted with
+# them. Otherwise point Settings -> CI/CD -> General pipelines -> CI/CD
+# configuration file at a copy in a separate project only trusted people can
+# change, for example `.gitlab-ci.yml@my-group/ci-config`.
 #
-#   GITLAB_TOKEN      a project access token with `api` scope, so lgtmaybe can
-#                     read the merge request and post the review. Mark it
-#                     Masked; it does not need to be Protected unless your
-#                     merge request pipelines only run on protected branches.
-#   ANTHROPIC_API_KEY (or whichever provider you use) — Masked.
+# Two CI/CD variables to add under Settings -> CI/CD -> Variables, both Masked
+# and both with Environment scope `lgtmaybe`, so only this job receives them:
+#
+#   GITLAB_TOKEN      a project access token with the `api` scope, the Developer
+#                     role and an expiry date, so lgtmaybe can read the merge
+#                     request and post the review.
+#   ANTHROPIC_API_KEY (or whichever provider you use), with a spend limit.
+#
+# Do not mark them Protected unless you only want merge requests between
+# protected branches reviewed: a protected variable never reaches a merge
+# request pipeline whose source branch is unprotected, so the job fails there
+# for want of a token. That is the trade-off, not a fix.
 #
 # Keyless cloud auth (Bedrock, Vertex, Azure) is a GitHub Actions feature; on
 # GitLab use an API key, or `ollama` against a runner-local model.
@@ -24,6 +40,13 @@ lgtmaybe:
   # rule.
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  # The variables above are scoped to this environment, so other jobs in the
+  # pipeline (tests that run the merge request's code, third-party tools) never
+  # receive them. `access` reads the environment's variables without recording a
+  # deployment.
+  environment:
+    name: lgtmaybe
+    action: access
   script:
     - python -m lgtmaybe gitlab-ci --provider anthropic --model claude-sonnet-4-6
   variables:

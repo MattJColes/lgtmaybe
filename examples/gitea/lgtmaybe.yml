@@ -1,22 +1,32 @@
 # Copy into your Gitea repo at .gitea/workflows/lgtmaybe.yml
 #
 # Gitea Actions reimplements the GitHub Actions runtime, so lgtmaybe's container
-# runs unchanged. Two things differ from the GitHub examples:
+# runs unchanged. Three things to know:
 #
-#   * There is no `pull_request_target`. Gitea runs `pull_request` with the
-#     repository's secrets, so the same fork-safety rule applies for the same
-#     reason: lgtmaybe never checks out or executes pull-request code, it only
-#     reads the diff through the API.
-#   * The token variable is GITEA_TOKEN, and lgtmaybe reads GITHUB_SERVER_URL
-#     (which Gitea sets to your own instance) to know which host to post to.
+#   * The trigger is `pull_request_target` (Gitea 1.21 and later), never
+#     `pull_request`. A `pull_request` run takes its workflow file from the pull
+#     request's own head commit, so a pull request from a branch in this
+#     repository could rewrite this job and send its secrets anywhere.
+#     `pull_request_target` takes the workflow from the base branch instead, as
+#     on GitHub, and lgtmaybe never checks out or executes pull-request code:
+#     it only reads the diff through the API.
+#   * Gitea refuses secret names starting with GITEA_ or GITHUB_, and
+#     `secrets.GITEA_TOKEN` is the automatic job token. Store your own token as
+#     LGTMAYBE_GITEA_TOKEN; the step maps it to the GITEA_TOKEN variable lgtmaybe
+#     reads. lgtmaybe reads GITHUB_SERVER_URL (which Gitea sets to your own
+#     instance) to know which host to post to.
+#   * Repository secrets reach every workflow run in the repository, so anyone
+#     with write access can read them from a workflow on their own branch. Give
+#     write access only to people trusted with these secrets.
 #
-# Add an API key secret for whichever model provider you use. Cloud providers
-# with keyless OIDC (Bedrock, Vertex, Azure) are GitHub-only for now — on Gitea
-# use an API key, or ollama for a fully local review.
+# Add an API key secret for whichever model provider you use, with a spend
+# limit. Cloud providers with keyless OIDC (Bedrock, Vertex, Azure) are
+# GitHub-only for now; on Gitea use an API key, or ollama for a fully local
+# review.
 name: lgtmaybe
 
 on:
-  pull_request:
+  pull_request_target:
   issue_comment:
     types: [created]
 
@@ -29,7 +39,7 @@ jobs:
     # The issue_comment arm fires on every comment on every pull request, so
     # require a slash command in the body before claiming a runner.
     if: >-
-      github.event_name == 'pull_request' ||
+      github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request &&
        (contains(github.event.comment.body, '/review') ||
         contains(github.event.comment.body, '/improve') ||
@@ -43,7 +53,7 @@ jobs:
       - name: Review
         run: python -m lgtmaybe action
         env:
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.LGTMAYBE_GITEA_TOKEN }}
           INPUT_PROVIDER: anthropic
           INPUT_MODEL: claude-sonnet-4-6
           INPUT_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
