@@ -19,8 +19,8 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"AKIA[0-9A-Z]{16}"),
     # OpenAI keys: sk- followed by at least 20 word chars
     re.compile(r"sk-[A-Za-z0-9\-_]{20,}"),
-    # GitHub tokens: ghp_, gho_, ghs_, ghr_, ght_ followed by at least 20 word chars
-    re.compile(r"gh[poshrt]_[A-Za-z0-9]{20,}"),
+    # GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_, ght_ followed by at least 20 word chars
+    re.compile(r"gh[pousrt]_[A-Za-z0-9]{20,}"),
     # GitHub fine-grained PATs: github_pat_ followed by base62/underscore
     re.compile(r"github_pat_[A-Za-z0-9_]{22,}"),
     # Slack tokens: xoxb-/xoxp-/xoxa-/xoxr-/xoxs- bot/user/app tokens
@@ -49,10 +49,23 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
 # preserving: hunk expansion and diff hunk headers index into the redacted text
 # by line number, so collapsing an N-line block into one placeholder desyncs
 # (and can crash) everything downstream that counts lines.
+#
+# The body is matched line by line: each line is an optional diff marker and
+# indent, then one unbroken base64 run or a `Proc-Type:`/`DEK-Info:` header. A
+# character class over the whole body admitted letters and spaces, so fake
+# markers could still hide ordinary code (`import os`) from the reviewer; and an
+# unbounded `.*?` rescanned to end of text from every unterminated header. Lines
+# may be split by real newlines, JSON/YAML-escaped `\n`, or (one-line keys in
+# env files) a space before another long base64 run. Atomic groups keep every
+# step linear on attacker input.
+_PEM_KIND = r"(?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?"
+_PEM_SEP = r"(?:(?>[ \t]*)(?:\r?\n|(?:\\r)?\\n)|(?>[ \t]+)(?=[A-Za-z0-9+/=]{16}))"
+_PEM_INDENT = r"(?>[ \t]*)(?:[+-](?>[ \t]*))?"
+_PEM_LINE = _PEM_INDENT + r"(?:(?>[A-Za-z0-9+/=]+)|(?:Proc-Type|DEK-Info):[^\n\\]*)?"
 _PEM_PATTERN = re.compile(
-    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"
-    r".*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
-    re.DOTALL,
+    rf"-----BEGIN {_PEM_KIND}PRIVATE KEY-----"
+    rf"(?:{_PEM_SEP}{_PEM_LINE})*?(?:{_PEM_SEP})?{_PEM_INDENT}"
+    rf"-----END {_PEM_KIND}PRIVATE KEY-----"
 )
 
 
@@ -68,13 +81,16 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
         r"(?i)(?:api[_\-]?key|api[_\-]?secret|secret[_\-]?access[_\-]?key|"
         r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|token)"
-        r'\s*[=:]\s*["\']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})["\']?'
+        r'["\']?\s*[=:]\s*["\']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})["\']?'
     ),
     # Quoted password / passphrase literals: password = "hunter2" (value ≥ 4 chars).
-    # Quotes required so we don't swallow prose like "password reset".
+    # Quotes required so we don't swallow prose like "password reset"; the key may
+    # be quoted too (JSON). The value never crosses a line end: an unterminated
+    # quote must not swallow the following diff lines up to the next quote. An
+    # escaped quote is part of the value, not its end, or the tail would leak.
     re.compile(
-        r"(?i)(?:password|passwd|passphrase|pwd)\s*[=:]\s*"
-        r"(?P<q>[\"'])(?P<secret>[^\"']{4,})(?P=q)"
+        r"(?i)(?:password|passwd|passphrase|pwd)[\"']?\s*[=:]\s*"
+        r"(?P<q>[\"'])(?P<secret>(?:[^\"'\n\\]|\\.){4,})(?P=q)"
     ),
     # Authorization headers carrying a Bearer/Basic credential. Tolerates a quoted
     # key and a quoted value, e.g. JSON `"Authorization": "Bearer <token>"`.

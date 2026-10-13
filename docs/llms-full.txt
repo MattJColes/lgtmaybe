@@ -1467,6 +1467,12 @@ exist in the repository; lgtmaybe does not create them), the `fail_on` merge gat
 (as a commit status), and the `/review`, `/improve`, `/ask`, `/describe` and
 `/diagram` slash commands.
 
+A slash command runs only for a commenter with write access to the repository.
+Gitea's workflow `if:` cannot read the commenter's role the way GitHub's
+`author_association` does, so lgtmaybe checks it itself through the collaborator
+permission API. Anyone else's command is ignored with a log line, exits
+successfully, and makes no model call.
+
 These are unavailable on Gitea, and lgtmaybe skips them rather than failing:
 
 | Not available | Why | What happens instead |
@@ -2519,7 +2525,8 @@ credentials; lgtmaybe ignores `--api-key` for it.
 
 **`vertex requires ambient GCP credentials`**: lgtmaybe found no sign of GCP
 credentials (`GOOGLE_APPLICATION_CREDENTIALS`, a project variable such as
-`GOOGLE_CLOUD_PROJECT` or `VERTEXAI_PROJECT`, or the ADC file gcloud writes). Run `gcloud auth application-default login`, set
+`GOOGLE_CLOUD_PROJECT` or `VERTEXAI_PROJECT`, the ADC file gcloud writes, or
+metadata-server credentials, which need the `google-auth` package). Run `gcloud auth application-default login`, set
 `GOOGLE_APPLICATION_CREDENTIALS`, or (in CI) check the WIF inputs.
 
 **`UNAUTHENTICATED`**: ADC credentials are missing or expired. Run
@@ -8760,6 +8767,7 @@ cannot do instead of failing at run time.
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsPermissions`: only writers run slash commands | ✅ | ✗ no slash commands | ✅ | ✗ no slash commands |
 | `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
@@ -8915,8 +8923,9 @@ matches the PR) and any custom lenses join the same fan-out.
 6. **suppress**: findings a team has marked known-fine are dropped before they
    cost any reflection tokens: fingerprints in `ignore_fingerprints`, a
    `# lgtmaybe: ignore` pragma on (or just above) the flagged line, and findings
-   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). A 👎 never
-   suppresses a high or critical security finding.
+   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). Neither a 👎
+   nor a pragma (which the PR's author writes) suppresses a high or critical
+   security finding; only `ignore_fingerprints` in trusted config can.
 
 7. **evidence gate**: security, correctness, deprecation and performance
    findings must carry a concrete `failure_scenario`: the trigger, the changed
@@ -9208,16 +9217,19 @@ When lgtmaybe starts, it resolves credentials for the selected provider:
 2. **Vertex** checks for ambient GCP credentials first: Workload Identity
    Federation, Application Default Credentials from
    `gcloud auth application-default login`, or a project set in the
-   environment. If there are none, lgtmaybe fails immediately with a message
+   environment. Failing those, it asks `google-auth`, which also finds the
+   metadata-server credentials of GCE, GKE Workload Identity, Cloud Run and
+   Cloud Build. If there are none, lgtmaybe fails immediately with a message
    explaining how to authenticate. It never falls back to a key.
 3. **Azure** always needs the resource endpoint (`AZURE_API_BASE` or
    `--api-base`). It uses a key when one is supplied (`AZURE_API_KEY` or
    `--api-key`). Otherwise it goes keyless and mints an Entra token from
    ambient credentials: GitHub OIDC federation in CI, or `az login` or a
-   managed identity locally. Keyless needs the `azure-identity` package
-   (`pip install 'lgtmaybe[azure]'`; the Action image includes it). With
-   neither a key nor an ambient credential, lgtmaybe fails with a message
-   naming both options.
+   managed identity locally. The token is refreshed as it nears expiry, so a
+   review that runs past an hour keeps working. Keyless needs the
+   `azure-identity` package (`pip install 'lgtmaybe[azure]'`; the Action image
+   includes it). With neither a key nor an ambient credential, lgtmaybe fails
+   at start-up with a message naming both options and the SDK's own reason.
 4. **ollama** needs no credentials. `--api-base` points it at the server and
    defaults to `http://localhost:11434`.
 5. **zai** (GLM / Zhipu AI) needs `ZAI_API_KEY` or `--api-key`. Without an
@@ -9397,10 +9409,12 @@ text, and any fetched file context. Recognised formats include:
   (`xoxb-…`), npm tokens (`npm_…`), and PyPI tokens (`pypi-…`).
 - **JSON Web Tokens**: `eyJ….eyJ….…` and five-part encrypted JWEs, as whole
   tokens, since the payload can carry claims and PII.
-- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks.
+- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks, encrypted ones
+  included.
 - **Generic credentials**: `api_key` / `secret_key` / `access_token` / `token`
   assignments with a value of 16 or more characters, quoted `password` /
-  `passwd` / `passphrase` / `pwd` literals, `Authorization: Bearer/Basic …`
+  `passwd` / `passphrase` / `pwd` literals (the key may be quoted too, as in
+  JSON), `Authorization: Bearer/Basic …`
   headers, passwords in connection-string URLs (`scheme://user:secret@host`),
   and Azure storage or Cosmos connection-string keys (`AccountKey=…` /
   `SharedAccessKey=…`).
@@ -9641,7 +9655,11 @@ gate. To change the policy, edit the list:
 - **Tighten to admins**: keep just `OWNER` (and `MEMBER` for your org).
 
 The gate lives in your workflow YAML, not in the action's code, so the policy
-is entirely yours.
+for automatic PR reviews is entirely yours. Slash commands have one floor the
+YAML cannot lower: lgtmaybe runs a command only when the commenter has write
+access to the repository, and ignores anyone else's with a log line and no
+model call. So opening the comment arm to everyone, or adding `CONTRIBUTOR`,
+changes who triggers a run, not who can spend the model through one.
 
 The slash-command half of the comment arm saves runner time rather than
 tokens. `issue_comment` fires on every comment on every pull request. Without

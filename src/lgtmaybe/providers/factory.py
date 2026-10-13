@@ -14,7 +14,7 @@ litellm model-string conventions:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from lgtmaybe.core.logging import get_logger
@@ -367,7 +367,7 @@ def build_provider(
     *,
     api_key: str | None = None,
     api_base: str | None = None,
-    azure_ad_token: str | None = None,
+    azure_ad_token_provider: Callable[[], str] | None = None,
     fallback_model: str | None = None,
     timeout: int | None = None,
     concurrency: int = 1,
@@ -411,9 +411,9 @@ def build_provider(
     if api_key is not None:
         opts["api_key"] = api_key
 
-    # Keyless Azure: an Azure AD bearer token instead of a static key.
-    if azure_ad_token is not None:
-        opts["azure_ad_token"] = azure_ad_token
+    # Keyless Azure: an Azure AD bearer-token provider instead of a static key.
+    if azure_ad_token_provider is not None:
+        opts["azure_ad_token_provider"] = azure_ad_token_provider
 
     is_ollama = provider is Provider.ollama
     if is_ollama:
@@ -461,6 +461,7 @@ def build_provider(
     return LiteLLMProvider(
         model=resolved_model,
         fallback_model=resolved_fallback,
+        route=_PREFIXES[provider],
         effort_override_supported=effort_supported,
         effort_levels=effort_levels,
         default_effort=default_effort,

@@ -28,6 +28,12 @@ _TIMEOUT = 120
 # turning the quoting off gives us the real bytes.
 _QUOTE_PATH_OFF = ("-c", "core.quotePath=false")
 
+# The patch parser reads plain `a/<path> b/<path>` headers. A user's
+# `diff.noprefix` / `diff.mnemonicPrefix`, `color.diff=always` or `diff.external`
+# reshapes that output, which used to leave `changed_files` empty and every
+# finding unanchored — so every `git diff` we run pins the format explicitly.
+_DIFF_FORMAT = ("--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/")
+
 
 def local_pr_context(
     *,
@@ -82,7 +88,7 @@ def local_pr_context(
         # title — feeding the intent lens. Empty when HEAD sits on the base.
         commit_messages = _commit_subjects(cwd, base_ref)
 
-    diff = _git(cwd, "diff", spec)
+    diff = _git(cwd, "diff", *_DIFF_FORMAT, spec)
     changed_files = [path for path, _patch in split_by_file(diff, []) if path != "unknown"]
 
     # `git diff` only ever reports content git already tracks, so a file you
@@ -195,7 +201,16 @@ def _untracked_patches(cwd: Path | None, paths: list[str]) -> str:
     for path in paths:
         try:
             result = subprocess.run(
-                ["git", *_QUOTE_PATH_OFF, "diff", "--no-index", "--", "/dev/null", path],
+                [
+                    "git",
+                    *_QUOTE_PATH_OFF,
+                    "diff",
+                    *_DIFF_FORMAT,
+                    "--no-index",
+                    "--",
+                    "/dev/null",
+                    path,
+                ],
                 cwd=cwd,
                 capture_output=True,
                 text=True,

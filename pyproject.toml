@@ -163,3 +163,8 @@ ignore_missing_imports = true
 # azure-identity is an optional extra (keyless Azure); it ships no stubs.
 module = ["azure.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# google-auth is an optional extra (Vertex); the ambient-GCP probe imports it lazily.
+module = ["google.*"]
+ignore_missing_imports = true

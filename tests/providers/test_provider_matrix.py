@@ -157,14 +157,15 @@ class TestHybridProviderCredentials:
         cfg = resolve_credentials(provider, api_key="k", api_base=_AZURE_BASE)
         assert cfg.api_key == "k"
         assert cfg.api_base == _AZURE_BASE
-        assert cfg.azure_ad_token is None
+        assert cfg.azure_ad_token_provider is None
 
     def test_keyless_mode_resolves_with_ambient_ad_token(self, provider: Provider) -> None:
         cfg = resolve_credentials(
             provider, api_base=_AZURE_BASE, azure_token_provider=lambda: "ad-token"
         )
         assert cfg.api_key is None
-        assert cfg.azure_ad_token == "ad-token"
+        assert cfg.azure_ad_token_provider is not None
+        assert cfg.azure_ad_token_provider() == "ad-token"
         assert cfg.api_base == _AZURE_BASE
 
     def test_build_provider_threads_the_endpoint(self, provider: Provider) -> None:

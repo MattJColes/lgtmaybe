@@ -16,9 +16,10 @@ import httpx
 import litellm
 import pytest
 
-from lgtmaybe.core.models import ReviewResult, attempts_of, is_unrecoverable
+from lgtmaybe.core.models import Provider, ReviewResult, attempts_of, is_unrecoverable
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
+from lgtmaybe.providers.factory import build_provider
 from lgtmaybe.providers.litellm_provider import (
     _EFFORT_FLOOR,
     _EFFORT_LADDER,
@@ -2324,29 +2325,27 @@ class TestSchemaDropIsVisibleAndScoped:
         review and reflect slots all share it. Scoped to the instance, a
         rejection by ANY of them silently downgrades the rest — a quality
         regression on the strong model triggered by a model it never ran."""
-        primary = "bedrock/us.anthropic.claude-opus-4-8"
-        fallback = "openai/gpt-4o"
+        primary = "us.anthropic.claude-opus-4-8"
+        reflect = "us.anthropic.claude-haiku-4-5"
         seen: list[tuple[str, bool]] = []
 
         def side_effect(*args: Any, **kwargs: Any) -> Any:
             has_rf = "response_format" in kwargs
             seen.append((kwargs["model"], has_rf))
-            if has_rf and kwargs["model"] == primary:
+            if has_rf and kwargs["model"] == f"bedrock/{primary}":
                 raise litellm.BadRequestError(
                     message=self.BEDROCK_400, model=kwargs["model"], llm_provider="bedrock"
                 )
             return _fake_response('{"findings": []}')
 
-        # No pinned model: one instance, two model slots, exactly as the factory
-        # builds it for triage_model / model / reflect_model.
+        # One factory-built instance, two model slots: the review model and the
+        # reflect model, each named by its raw cfg string as the engine does.
         with patch("litellm.completion", side_effect=side_effect):
-            provider = LiteLLMProvider()
+            provider = build_provider(Provider.bedrock, primary)
             provider.complete([{"role": "user", "content": "a"}], primary, response_format={"x": 1})
-            provider.complete(
-                [{"role": "user", "content": "b"}], fallback, response_format={"x": 1}
-            )
+            provider.complete([{"role": "user", "content": "b"}], reflect, response_format={"x": 1})
 
-        assert (fallback, True) in seen, "the second model never rejected anything"
+        assert (f"bedrock/{reflect}", True) in seen, "the second model never rejected anything"
 
     def test_the_drop_is_queryable_for_the_review_notice(self) -> None:
         model = "bedrock/us.anthropic.claude-opus-4-8"

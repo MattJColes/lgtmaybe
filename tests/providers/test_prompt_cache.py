@@ -431,3 +431,34 @@ class TestStickyCacheKey:
             provider.complete(_split_messages(), model, prompt_cache_key="mine")
         assert mock.call_args.kwargs["prompt_cache_key"] == "mine"
         derive.assert_not_called()
+
+    def test_an_endpoint_that_rejects_the_key_is_re_sent_without_it(self) -> None:
+        """A strict OpenAI-compatible server 400s on the unknown field, and
+        drop_params does not strip it on the ``openai/`` route — so without a
+        recovery every lens call is refused and the whole review fails over a
+        cache hint. Dropped and re-sent, and remembered for the model's later
+        calls so the fan-out doesn't each pay the refused round-trip."""
+        import litellm
+
+        model = "openai/my-local-model"
+        seen: list[bool] = []
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            seen.append("prompt_cache_key" in kwargs)
+            if "prompt_cache_key" in kwargs:
+                raise litellm.BadRequestError(
+                    message=(
+                        "OpenAIException - [{'type': 'extra_forbidden', 'loc': "
+                        "('body', 'prompt_cache_key'), 'msg': 'Extra inputs are not permitted'}]"
+                    ),
+                    model=kwargs["model"],
+                    llm_provider="openai",
+                )
+            return _fake_response()
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(model=model)
+            provider.complete(_split_messages(), model)
+            provider.complete(_split_messages(), model)
+
+        assert seen == [True, False, False]

@@ -29,6 +29,8 @@ class FakeGitHub:
         self.replies: list[tuple[str, str]] = []
         # (author, body) comments already on the PR conversation.
         self.conversation: list[tuple[str, str]] = []
+        # Logins with write access — who may run a slash command.
+        self.writers: set[str] = {"maintainer"}
 
     def get_pr_context(self) -> PRContext:
         return self._ctx
@@ -46,6 +48,10 @@ class FakeGitHub:
     def post_describe_comment(self, body: str) -> None:
         """Idempotent PR-description upsert — beyond the frozen port."""
         self.described.append(body)
+
+    def has_repo_write(self, login: str) -> bool:
+        """Write-access check — beyond the frozen port."""
+        return login in self.writers
 
     def list_conversation_comments(self) -> list[tuple[str, str]]:
         """The PR conversation as (author, body) — beyond the frozen port."""

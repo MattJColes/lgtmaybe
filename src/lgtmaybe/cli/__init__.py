@@ -31,7 +31,7 @@ from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
 from lgtmaybe.core.diffparse import split_by_file
-from lgtmaybe.core.forge import Forge, PRLocator, token_env_vars
+from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
@@ -50,6 +50,7 @@ from lgtmaybe.core.ports import (
     SupportsBaseCheckout,
     SupportsConversation,
     SupportsFileContents,
+    SupportsPermissions,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
@@ -444,7 +445,7 @@ def build_provider_engine(
         cfg.model,
         api_key=auth.api_key,
         api_base=auth.api_base,
-        azure_ad_token=auth.azure_ad_token,
+        azure_ad_token_provider=auth.azure_ad_token_provider,
         # Same precedence as `api_base` above: the invocation (CLI flag / Action
         # input) overrides what the repo's config asked for.
         fallback_model=runtime.fallback_model or cfg.fallback_model,
@@ -1065,6 +1066,17 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
 
     github, engine, provider = _build_context_or_fail(cfg, runtime)
 
+    # Anyone can comment on a public PR, and a command spends the model, so it
+    # runs only for someone who can push. Checked here, not just in the example
+    # workflows' `if:` — a workflow without that gate (Gitea's cannot read
+    # author_association) must not hand the reviewer to a stranger. Fails closed:
+    # no login, or an adapter that cannot tell, is not authorised.
+    author = (event.get("comment", {}).get("user") or {}).get("login") or ""
+    if not (author and isinstance(github, SupportsPermissions) and github.has_repo_write(author)):
+        _log.warning("slash command ignored: no write access", extra={"author": author})
+        click.echo(f"/{parsed.name} ignored: {author or 'the commenter'} has no write access.")
+        return
+
     try:
         dispatch(parsed, github=github, engine=engine, provider=provider, cfg=cfg)
     except DiffUnavailable as exc:
@@ -1150,10 +1162,7 @@ def _change_url(repo: str, number: int) -> str:
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"
     if os.environ.get("GITHUB_API_URL", "").rstrip("/").endswith("/api/v3"):
-        raise click.ClickException(
-            "GitHub Enterprise Server is not supported; run lgtmaybe on GitHub.com, "
-            "GitLab, or Gitea."
-        )
+        raise click.ClickException(GHES_UNSUPPORTED)
     return f"{server}/{repo}/pulls/{number}"
 
 

@@ -768,12 +768,12 @@ class TestBuildReviewContext:
         assert provider.fallback_model == "ollama_chat/from-flag"
 
     def test_azure_keyless_ad_token_threads_to_provider(self, monkeypatch):
-        """Keyless azure resolves an ambient AD token and threads it to litellm."""
+        """Keyless azure resolves an ambient AD token provider and threads it to litellm."""
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
         monkeypatch.delenv("AZURE_API_KEY", raising=False)
         monkeypatch.setattr(
-            "lgtmaybe.providers.credentials._default_azure_token",
-            lambda: "ad-token-from-oidc",
+            "lgtmaybe.providers.credentials._default_azure_token_provider",
+            lambda: lambda: "ad-token-from-oidc",
         )
         cfg = _default_cfg(provider="azure", model="my-deployment")
         runtime = RuntimeOptions(
@@ -783,7 +783,7 @@ class TestBuildReviewContext:
 
         _github, _engine, provider = build_review_context(cfg, runtime)
 
-        assert provider.default_opts.get("azure_ad_token") == "ad-token-from-oidc"
+        assert provider.default_opts["azure_ad_token_provider"]() == "ad-token-from-oidc"
         assert "api_key" not in provider.default_opts
 
 
@@ -862,7 +862,7 @@ class TestDiffUnavailable:
             lambda cfg, runtime: (github, FakeEngine(FakeProvider()), FakeProvider()),
         )
         event = {
-            "comment": {"body": command},
+            "comment": {"body": command, "user": {"login": "maintainer"}},
             "issue": {"number": 7, "pull_request": {}},
             "repository": {"full_name": "owner/repo"},
         }

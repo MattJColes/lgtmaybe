@@ -215,3 +215,18 @@ def test_untrusted_latest_marker_cannot_redirect_an_authenticated_summary_update
         gateway.mark_reviewed(HEAD)
         gateway.post_review([], "Authenticated summary")
     assert writes == ["/repos/owner/repo/pulls/42/reviews/99"]
+
+
+@pytest.mark.parametrize(
+    "body", ["<html>rate limited</html>", "[]"], ids=["not-json", "not-an-object"]
+)
+def test_an_unreadable_permission_answer_fails_closed(body: str) -> None:
+    """Every slash command is gated on this answer, so one that is not the
+    expected object means "not authorised", never a crash."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        gateway = RestGitHubGateway("owner/repo", 42, "synthetic", client=client)
+        assert gateway.has_repo_write("someone") is False

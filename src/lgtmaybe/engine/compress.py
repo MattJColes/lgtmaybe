@@ -86,6 +86,22 @@ def count_tokens(text: str) -> int:
     return max(1, len(text) // _FALLBACK_CHARS_PER_TOKEN)
 
 
+def _lines(text: str, *, keepends: bool = False) -> list[str]:
+    """*text* split into lines on ``\\n`` ALONE, exactly as ``core/diffparse`` does.
+
+    Never ``str.splitlines``: it also breaks on form feed, ``\\x1c``-``\\x1e``,
+    ``\\x85`` and U+2028/U+2029, so a ``^L`` page break (common in real source)
+    made one more line here than the parser that binds positions sees — every
+    line below it mislabelled, and ``x\\x0c@@ -1,1 +900,1 @@`` read as a forged
+    hunk header. A ``\\r`` stays on its line, as it does there.
+    """
+    lines = text.removesuffix("\n").split("\n")
+    if not keepends:
+        return lines
+    ends = text.endswith("\n")
+    return [f"{line}\n" if i < len(lines) - 1 or ends else line for i, line in enumerate(lines)]
+
+
 def take_lines(lines: Iterable[str], budget: int) -> list[str]:
     """The longest prefix of *lines* whose token cost stays within *budget*.
 
@@ -114,7 +130,7 @@ def split_patch_into_hunks(patch: str) -> list[str]:
     hunk headers (and therefore line numbers) are preserved, so a finding's
     line/side still binds to the real diff when comments are posted.
     """
-    lines = patch.splitlines(keepends=True)
+    lines = _lines(patch, keepends=True)
     first_hunk = next((i for i, ln in enumerate(lines) if ln.startswith("@@")), None)
     if first_hunk is None:
         return [patch]
@@ -147,7 +163,7 @@ def split_hunk_by_budget(unit: str, max_tokens: int) -> list[str]:
     the budget, is returned whole — there is nothing smaller to cut it into, and
     dropping it would be worse than sending it oversized.
     """
-    lines = unit.splitlines(keepends=True)
+    lines = _lines(unit, keepends=True)
     hunk_at = next((i for i, ln in enumerate(lines) if ln.startswith("@@")), None)
     if hunk_at is None:
         return [unit]
@@ -373,7 +389,7 @@ def expand_hunks(
         return patch
     n_after = max(0, after)
 
-    content_lines = file_content.splitlines()
+    content_lines = _lines(file_content)
     preamble, hunks = _parse_hunks(patch)
     if not hunks:
         return patch
@@ -409,7 +425,7 @@ def _parse_hunks(patch: str) -> tuple[list[str], list[_Hunk]]:
     """Split *patch* into its leading file-header lines and its hunks."""
     preamble: list[str] = []
     hunks: list[_Hunk] = []
-    for line in patch.splitlines():
+    for line in _lines(patch):
         header = parse_hunk_header(line)
         if header is not None:
             hunks.append(_Hunk(header, []))

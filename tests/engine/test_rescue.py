@@ -88,6 +88,58 @@ class _FlakyLens(FakeProvider):
         return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
 
 
+_TWO_FILES = PRContext(
+    diff=(
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+        "@@ -1,1 +1,2 @@\n context\n+one\n"
+        "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n"
+        "@@ -1,1 +1,2 @@\n context\n+two\n"
+    ),
+    changed_files=["a.py", "b.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=1,
+)
+
+
+class _SplitPieces(FakeProvider):
+    """The security lens's whole batch always times out; its pieces may falter.
+
+    Records each security call as ``whole``, ``a`` or ``b`` (which files its diff
+    carries), so a test can assert the real call sequence. *fail* maps a piece
+    to how many times it fails before answering; *exc* to what it raises (a
+    transient provider error by default).
+    """
+
+    def __init__(self, fail: dict[str, int], exc: dict[str, BaseException] | None = None) -> None:
+        super().__init__()
+        self._fail = dict(fail)
+        self._exc = exc or {}
+        self._lock = threading.Lock()
+        self.security: list[str] = []
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        prompt = "\n".join(str(m.get("content", "")) for m in messages)
+        diff = str(messages[1].get("content", ""))
+        with self._lock:
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _SECURITY_MARKER not in prompt:
+                return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+            has_a, has_b = "a/a.py" in diff, "b/b.py" in diff
+            label = "whole" if has_a and has_b else "a" if has_a else "b"
+            self.security.append(label)
+            if label == "whole":
+                raise ProviderWallTimeout("call exceeded 600s (waited 601.2s)")
+            if self._fail.get(label, 0) > 0:
+                self._fail[label] -= 1
+                raise self._exc.get(label, RuntimeError("upstream hiccup"))
+        path = f"{label}.py"
+        return ProviderResult(
+            text=_FINDING_JSON.replace('"a.py"', f'"{path}"'), input_tokens=1, output_tokens=1
+        )
+
+
 class _InterruptOnFirstCall(FakeProvider):
     """Raises the wind-down flag from inside its first completion."""
 
@@ -193,47 +245,46 @@ class TestRescueWave:
         Here the whole batch times out, the split runs, both pieces fail
         transiently — and the lens must still get its one rescue.
         """
-        calls = {"n": 0}
-        lock = threading.Lock()
+        provider = _SplitPieces(fail={"a": 1, "b": 1})
 
-        class _StallsThenFlaky(FakeProvider):
-            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
-                prompt = "\n".join(str(m.get("content", "")) for m in messages)
-                with lock:
-                    self.calls.append({"messages": messages, "model": model, "opts": opts})
-                    if _SECURITY_MARKER not in prompt:
-                        return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
-                    calls["n"] += 1
-                    n = calls["n"]
-                if n == 1:
-                    raise ProviderWallTimeout("call exceeded 600s (waited 601.2s)")
-                if n in (2, 3):  # the two split pieces
-                    raise RuntimeError("upstream hiccup")
-                return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
+        findings, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
 
-        provider = _StallsThenFlaky()
-        two_files = PRContext(
-            diff=(
-                "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
-                "@@ -1,1 +1,2 @@\n context\n+one\n"
-                "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n"
-                "@@ -1,1 +1,2 @@\n context\n+two\n"
-            ),
-            changed_files=["a.py", "b.py"],
-            base_sha="abc",
-            head_sha="def",
-            repo="org/repo",
-            pr_number=1,
-        )
-
-        findings, summary = LLMReviewEngine(provider).review(two_files, _cfg())
-
-        # whole batch, two pieces, then the rescue — which succeeds.
-        assert calls["n"] == 4
+        # whole batch, two pieces, then the rescue — of the two pieces, which
+        # succeed. Never the whole batch again: that payload already timed out.
+        assert provider.security == ["whole", "a", "b", "a", "b"]
         assert "review calls failed" not in summary
         # And the rescue's answer was actually kept: a rescue that made the call
         # and discarded the response would satisfy everything above.
         assert any(f.path == "a.py" for f in findings)
+
+    def test_the_rescue_re_runs_only_the_piece_that_failed(self) -> None:
+        """A rescued split must not re-send the oversized whole batch.
+
+        Re-running the call that split replays the original payload — another
+        full timeout or `max_tokens` bill, the one request `_PayloadReason`
+        knows cannot work — and then every piece again, including the ones that
+        already answered: observed as whole, a, b, whole, a, b. Only the piece
+        that failed on the provider gets the one more go.
+        """
+        provider = _SplitPieces(fail={"a": 1})
+
+        findings, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
+
+        assert provider.security == ["whole", "a", "b", "a"]
+        assert "review calls failed" not in summary
+        assert INCOMPLETE_MARKER not in summary
+        assert {f.path for f in findings if f.category == "security"} == {"a.py", "b.py"}
+
+    def test_a_piece_that_fails_its_rescue_too_stays_failed(self) -> None:
+        """The rescue is one more go, not a loop; a second failure is reported."""
+        provider = _SplitPieces(fail={"a": 2})
+
+        findings, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
+
+        assert provider.security == ["whole", "a", "b", "a"]
+        assert "1 of 2 review calls failed" in summary
+        assert INCOMPLETE_MARKER in summary
+        assert {f.path for f in findings if f.category == "security"} == {"b.py"}
 
     def test_one_provider_failure_among_the_pieces_is_enough(self) -> None:
         """Retryability is a property of ANY piece, the message is the last one.
@@ -242,48 +293,22 @@ class TestRescueWave:
         provider followed by one that ran out of room reports a payload reason
         last, and the provider failure — the case this rescue exists for —
         silently loses its turn behind it.
+
+        The piece that ran out of room again has had the one retry that can
+        help, so it stays failed and the round says so: re-sending the whole
+        batch used to "recover" it by replaying the payload the split exists to
+        avoid.
         """
-        seen = {"n": 0}
-        lock = threading.Lock()
-
-        class _MixedPieceFailures(FakeProvider):
-            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
-                prompt = "\n".join(str(m.get("content", "")) for m in messages)
-                with lock:
-                    self.calls.append({"messages": messages, "model": model, "opts": opts})
-                    if _SECURITY_MARKER not in prompt:
-                        return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
-                    seen["n"] += 1
-                    n = seen["n"]
-                if n == 1:
-                    raise ProviderWallTimeout("call exceeded 600s (waited 601.2s)")
-                # The pieces, in submission order: a.py transiently, then b.py on
-                # size — so the PAYLOAD reason is the one that lands last.
-                if n == 2:
-                    raise RuntimeError("upstream hiccup")
-                if n == 3:
-                    raise ProviderWallTimeout("call exceeded 600s (waited 601.2s)")
-                return ProviderResult(text=_FINDING_JSON, input_tokens=1, output_tokens=1)
-
-        provider = _MixedPieceFailures()
-        two_files = PRContext(
-            diff=(
-                "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
-                "@@ -1,1 +1,2 @@\n context\n+one\n"
-                "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n"
-                "@@ -1,1 +1,2 @@\n context\n+two\n"
-            ),
-            changed_files=["a.py", "b.py"],
-            base_sha="abc",
-            head_sha="def",
-            repo="org/repo",
-            pr_number=1,
+        provider = _SplitPieces(
+            fail={"a": 1, "b": 99},
+            exc={"b": ProviderWallTimeout("call exceeded 600s (waited 601.2s)")},
         )
 
-        _, summary = LLMReviewEngine(provider).review(two_files, _cfg())
+        _, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
 
-        assert seen["n"] == 4  # the rescue still happened
-        assert "review calls failed" not in summary
+        assert provider.security == ["whole", "a", "b", "a"]  # a still rescued
+        assert "1 of 2 review calls failed" in summary
+        assert "600s" in summary  # the failure that stands is the one named
 
     def test_a_truncated_response_is_not_rescued(self) -> None:
         """A blown output ceiling is deterministic, not an outage: the same

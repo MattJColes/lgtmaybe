@@ -78,12 +78,18 @@ forcing a full re-review), `/improve`, `/ask <q>` replying in-thread from a
 task-specific answer object, `/describe` upserting a standalone structured
 description, and `/diagram` upserting the change overview (description, high
 impact areas, and Mermaid diagrams rendered locally from structured graph
-data) — all dispatched to the same engine and provider stack.
+data) — all dispatched to the same engine and provider stack. A command SHALL
+run only for a commenter the gateway confirms has write access; anyone else's
+(or an unverifiable one) is ignored, exit zero, with no model call.
 <!-- anchor: cli.slash -->
 
 #### Scenario: reviewer comments /review full
 - **WHEN** the comment body is `/review full`
 - **THEN** a full review runs, bypassing triage and incremental scoping
+
+#### Scenario: a drive-by commenter types /review
+- **WHEN** the commenter has no write access to the repository
+- **THEN** the command is ignored with a log line and nothing is posted
 
 #### Scenario: reviewer asks a question
 - **WHEN** the comment body is `/ask <question>` and the provider returns a valid answer object
