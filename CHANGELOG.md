@@ -1,5 +1,67 @@
 # Changelog
 
+## [2.12.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.11.1...lgtmaybe-v2.12.0) (2026-10-13)
+
+
+### Features
+
+* **azure-devops:** resolve finding threads once they are fixed ([#725](https://github.com/MattJColes/lgtmaybe/issues/725)) ([8834d94](https://github.com/MattJColes/lgtmaybe/commit/8834d9478ebaf87956936c26fb2f4e9aea5ae408))
+* **azure-devops:** review Azure DevOps Repos pull requests ([#698](https://github.com/MattJColes/lgtmaybe/issues/698)) ([daea409](https://github.com/MattJColes/lgtmaybe/commit/daea409d80513c592fd6fa75d1e639d6cb834fe9))
+* calibrate reviews with a project profile ([#687](https://github.com/MattJColes/lgtmaybe/issues/687)) ([04a3a1c](https://github.com/MattJColes/lgtmaybe/commit/04a3a1cdd07cc4a751acc5bd212f1605a15046fd))
+* **cli:** add --format sarif for code-scanning upload ([#694](https://github.com/MattJColes/lgtmaybe/issues/694)) ([f742b48](https://github.com/MattJColes/lgtmaybe/commit/f742b48d6b85c1cc546903ed0168249c84b96777))
+* **cli:** first-run configuration: detecting config init, progressive help, no llama3 default ([#696](https://github.com/MattJColes/lgtmaybe/issues/696)) ([ac3af9f](https://github.com/MattJColes/lgtmaybe/commit/ac3af9f658a6c97e5312e27c20ae073dfd782f00))
+* **cli:** serve local reviews to coding agents over MCP ([#695](https://github.com/MattJColes/lgtmaybe/issues/695)) ([73a4f42](https://github.com/MattJColes/lgtmaybe/commit/73a4f42d677a8d8ba25aa2d9ebf95fb445a834ff))
+* **gitlab:** incremental re-review and thumbs-down feedback ([#697](https://github.com/MattJColes/lgtmaybe/issues/697)) ([c70fa37](https://github.com/MattJColes/lgtmaybe/commit/c70fa373320ca5dec8bcccc4c8612434a2053008))
+* pre-commit framework hooks and a local --fail-on exit code ([#693](https://github.com/MattJColes/lgtmaybe/issues/693)) ([d6d44da](https://github.com/MattJColes/lgtmaybe/commit/d6d44da8e39e37d8be4d003b449fbe75357c713d))
+* **provider:** say when a configured temperature never reached the model ([#692](https://github.com/MattJColes/lgtmaybe/issues/692)) ([5b315a7](https://github.com/MattJColes/lgtmaybe/commit/5b315a742f91f31d764900332d432d2c2247cf37))
+* **provider:** step reasoning effort only to levels the model accepts ([#690](https://github.com/MattJColes/lgtmaybe/issues/690)) ([f5f5507](https://github.com/MattJColes/lgtmaybe/commit/f5f55077bc38875982be26f822da0c0bd22970e0))
+
+
+### Bug Fixes
+
+* **cli:** refuse non-github.com hosts for GitHub PR URLs ([#707](https://github.com/MattJColes/lgtmaybe/issues/707)) ([dea30fe](https://github.com/MattJColes/lgtmaybe/commit/dea30fee3cfea31b5bbc3b9b4dd258d551c0cc30))
+* **compress:** split diff and file text on newline only ([#713](https://github.com/MattJColes/lgtmaybe/issues/713)) ([2ac53b8](https://github.com/MattJColes/lgtmaybe/commit/2ac53b84900d50c41a7c52a09dd1e8d6b97ffc62))
+* **engine:** a rescued split piece doesn't re-send the oversized whole batch ([#712](https://github.com/MattJColes/lgtmaybe/issues/712)) ([7dd9f69](https://github.com/MattJColes/lgtmaybe/commit/7dd9f698737ac054cb9db16f34e42181307f55c9))
+* **engine:** filter before dedupe, keep distinct scan hits, gate unattributed code-health ([#717](https://github.com/MattJColes/lgtmaybe/issues/717)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **forge:** trust only lgtmaybe's own comments for ids and upserts ([#721](https://github.com/MattJColes/lgtmaybe/issues/721)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **gitea:** don't stop paging at a short page ([#714](https://github.com/MattJColes/lgtmaybe/issues/714)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **gitea:** only collaborators with write access can run slash commands ([#706](https://github.com/MattJColes/lgtmaybe/issues/706)) ([50079e3](https://github.com/MattJColes/lgtmaybe/commit/50079e390101a38ad398ad97f966f549999fa7c8))
+* **gitea:** refresh the overview on a push, which Gitea reports as synchronized ([#701](https://github.com/MattJColes/lgtmaybe/issues/701)) ([944540f](https://github.com/MattJColes/lgtmaybe/commit/944540f10c7e064b27174f93f7ea798b140200e9))
+* **github:** don't overwrite a completed summary when a run fails ([#722](https://github.com/MattJColes/lgtmaybe/issues/722)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **github:** read the last watermark and strip forged ones from model prose ([#699](https://github.com/MattJColes/lgtmaybe/issues/699)) ([0a2dc74](https://github.com/MattJColes/lgtmaybe/commit/0a2dc74aa403ffb04cd77ab63c90db765f849bcc))
+* **local:** don't let a user's textconv filter rewrite the local diff ([#729](https://github.com/MattJColes/lgtmaybe/issues/729)) ([a78f514](https://github.com/MattJColes/lgtmaybe/commit/a78f5144e1e828f8a702f37b6805be87f0952b59))
+* **local:** pin git diff output format against user config ([#708](https://github.com/MattJColes/lgtmaybe/issues/708)) ([e4806e7](https://github.com/MattJColes/lgtmaybe/commit/e4806e71b27a06cbcdf836becdfcd6801da04a24))
+* **logging:** actually redact registered secrets from logs ([#716](https://github.com/MattJColes/lgtmaybe/issues/716)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* never report LGTM when nothing was reviewed ([#720](https://github.com/MattJColes/lgtmaybe/issues/720)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **overview:** render paths as single-line, escaped code spans ([#719](https://github.com/MattJColes/lgtmaybe/issues/719)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **parse:** one invalid finding no longer drops its siblings ([#705](https://github.com/MattJColes/lgtmaybe/issues/705)) ([c08178e](https://github.com/MattJColes/lgtmaybe/commit/c08178e89da5bbf65fa594185018367940d14666))
+* **provider:** drop prompt_cache_key when an endpoint rejects it ([#711](https://github.com/MattJColes/lgtmaybe/issues/711)) ([35f7b09](https://github.com/MattJColes/lgtmaybe/commit/35f7b0904de596070fdfabfab35ad15ef12cd437))
+* **provider:** fit a small context window instead of keeping the 100k default ([#709](https://github.com/MattJColes/lgtmaybe/issues/709)) ([b28da17](https://github.com/MattJColes/lgtmaybe/commit/b28da175fe8b00f1197f2463be95a34a3f4f97ae))
+* **provider:** handle Azure and Vertex ambient auth edge cases ([#710](https://github.com/MattJColes/lgtmaybe/issues/710)) ([6e79063](https://github.com/MattJColes/lgtmaybe/commit/6e79063acb0d85348ab0b45ee2780fe68d880c65))
+* **provider:** honour reflect_model and triage_model ([#702](https://github.com/MattJColes/lgtmaybe/issues/702)) ([4ab4d03](https://github.com/MattJColes/lgtmaybe/commit/4ab4d030631745bead98fa13e034a70665374557))
+* **redact:** stop at line ends, bound the PEM scan, catch quoted keys ([bee1c81](https://github.com/MattJColes/lgtmaybe/commit/bee1c81fea6850590beccc4fe55e2b29043cba8e))
+* **risk:** security path signal matches words, not substrings; label scanner security hits ([#715](https://github.com/MattJColes/lgtmaybe/issues/715)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **static-analysis:** the PR can't reconfigure or blind its own scanners ([#718](https://github.com/MattJColes/lgtmaybe/issues/718)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+* **suppress:** a PR-authored pragma can't hide high/critical security findings ([03d5869](https://github.com/MattJColes/lgtmaybe/commit/03d5869738085188df6fc271e3b4b354f77baced))
+* trust only the finding ids the adapter appends, not ones in a suggestion ([#724](https://github.com/MattJColes/lgtmaybe/issues/724)) ([fee4cb9](https://github.com/MattJColes/lgtmaybe/commit/fee4cb9602771f88042087919b8ac0a937c6fecf))
+
+
+### Performance Improvements
+
+* **github:** post re-run findings in one review; skip deleted files' head text ([#723](https://github.com/MattJColes/lgtmaybe/issues/723)) ([a412155](https://github.com/MattJColes/lgtmaybe/commit/a412155b58f776c2f5499bef2a63896c4d106ecb))
+
+
+### Dependencies
+
+* bump the python-dependencies group across 1 directory with 13 updates ([#686](https://github.com/MattJColes/lgtmaybe/issues/686)) ([4a331ce](https://github.com/MattJColes/lgtmaybe/commit/4a331ce7d1a71baf621696086958d31a7cab2aee))
+
+
+### Documentation
+
+* full clarity and accuracy pass across the docs tree ([#689](https://github.com/MattJColes/lgtmaybe/issues/689)) ([100d087](https://github.com/MattJColes/lgtmaybe/commit/100d0870fc8bab1f8d50fb165094798189d07ced))
+* **gitlab,gitea:** warn that MR/PR pipelines run the request's own CI config ([#700](https://github.com/MattJColes/lgtmaybe/issues/700)) ([98a5d76](https://github.com/MattJColes/lgtmaybe/commit/98a5d7657b9c0abfae5bbe014e37a033495de727))
+* refresh model ids for litellm 1.104 ([#691](https://github.com/MattJColes/lgtmaybe/issues/691)) ([44d9643](https://github.com/MattJColes/lgtmaybe/commit/44d9643c11fab70e540d1394e5608c8c0b376b79))
+
 ## [2.11.1](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.11.0...lgtmaybe-v2.11.1) (2026-10-12)
 
 
