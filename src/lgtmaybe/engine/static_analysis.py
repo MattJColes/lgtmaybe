@@ -388,7 +388,9 @@ def _corpus_line(finding: ToolFinding, file_contents: dict[str, str]) -> str | N
     text = file_contents.get(finding.path)
     if text is None:
         return None
-    lines = text.splitlines()
+    # On "\n" alone, as tools number lines and core/diffparse splits them —
+    # splitlines() also breaks on a form feed, shifting every anchor below one.
+    lines = text.removesuffix("\n").split("\n") if text else []
     if not 1 <= finding.line <= len(lines):
         _log.info(
             "scan finding points outside the fetched text — dropping",

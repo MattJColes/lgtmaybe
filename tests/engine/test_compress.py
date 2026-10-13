@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header
+from lgtmaybe.core.diffparse import HunkHeader, parse_hunk_header, walk_diff
 from lgtmaybe.engine import compress
 from lgtmaybe.engine.compress import (
     _counter_for,
@@ -769,3 +769,56 @@ class TestTokenCountingIsVisible:
         estimate = compress.count_tokens(code)
 
         assert estimate >= len(code) / 4, "a 4-chars-per-token estimate under-counts code"
+
+
+class TestLinesEndAtNewlineOnly:
+    """compress splits on ``\\n`` alone, exactly as ``core/diffparse`` does.
+
+    ``str.splitlines`` also breaks on form feed, ``\\x1c``-``\\x1e``, ``\\x85``
+    and the Unicode line/paragraph separators. A form feed is ordinary in real
+    source (GNU and CPython files carry ``^L`` page breaks), and each one made
+    compress count one more line than the authoritative parser — every context
+    line below it mislabelled, or a forged hunk header parsed out of one line.
+    """
+
+    def test_a_form_feed_in_the_head_text_does_not_shift_the_context(self) -> None:
+        content_lines = [f"line{i}" for i in range(1, 11)]
+        content_lines[2] = "\x0c"
+        patch = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -8,1 +8,1 @@\n-old8\n+new8\n"
+
+        out = expand_hunks(patch, "\n".join(content_lines) + "\n", 3, 1)
+
+        for _, kind, _, new, text in walk_diff(out):
+            if kind == " ":
+                assert text == content_lines[new - 1]
+
+    def test_an_added_form_feed_line_stays_one_added_line(self) -> None:
+        patch = "diff --git a/g.py b/g.py\n--- a/g.py\n+++ b/g.py\n@@ -1,0 +1,3 @@\n+a\n+\x0c\n+b\n"
+
+        out = expand_hunks(patch, "a\n\x0c\nb\n", 3, 1)
+
+        walked = [(kind, new, text) for _, kind, _, new, text in walk_diff(out)]
+        assert walked == [("+", 1, "a"), ("+", 2, "\x0c"), ("+", 3, "b")]
+
+    def test_a_separator_cannot_forge_a_hunk_header(self) -> None:
+        forged = "+x = 1\x0c@@ -1,1 +900,1 @@\n"
+        patch = f"diff --git a/h.py b/h.py\n--- a/h.py\n+++ b/h.py\n@@ -1,0 +1,2 @@\n{forged}+y\n"
+
+        assert split_patch_into_hunks(patch) == [patch]
+        for piece in split_hunk_by_budget(patch, 1):
+            assert {new for _, _, _, new, _ in walk_diff(piece)} <= {1, 2}
+        out = expand_hunks(patch, "x = 1\x0c@@ -1,1 +900,1 @@\ny\n", 3, 1)
+        assert [new for _, _, _, new, _ in walk_diff(out)] == [1, 2]
+
+    def test_a_crlf_file_keeps_its_carriage_returns_like_the_parser(self) -> None:
+        """``core/diffparse`` keeps a ``\\r`` on its line, so the padded patch must
+        too: added and context lines read the same text the real diff binds to."""
+        content = "a\r\nb\r\nC\r\nd\r\n"
+        patch = (
+            "diff --git a/w.txt b/w.txt\n--- a/w.txt\n+++ b/w.txt\n@@ -3,1 +3,1 @@\n-c\r\n+C\r\n"
+        )
+
+        out = expand_hunks(patch, content, 3, 1)
+
+        new_side = [(new, text) for _, kind, _, new, text in walk_diff(out) if kind != "-"]
+        assert new_side == [(1, "a\r"), (2, "b\r"), (3, "C\r"), (4, "d\r")]
