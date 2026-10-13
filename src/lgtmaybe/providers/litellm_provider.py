@@ -726,6 +726,8 @@ class LiteLLMProvider:
         model: str = "",
         fallback_model: str | None = None,
         effort_override_supported: bool = True,
+        effort_levels: frozenset[str] | None = None,
+        default_effort: str | None = None,
         **default_opts: Any,
     ) -> None:
         if "prompt_cache" in default_opts:
@@ -739,6 +741,15 @@ class LiteLLMProvider:
         # that truncate on reasoning, so silence has to mean "try it" or the
         # retry would be withheld from the models it exists for.
         self._effort_override_supported = effort_override_supported
+        # Which efforts litellm's map says this model accepts, and the one it
+        # reasons at by default — the step-down and the off switch only ever
+        # land on a level the model takes, and never on its own default. None
+        # for either means the map said nothing, and the ladder is exactly what
+        # it was before the map described the model: the same fail-open rule as
+        # the flag above, for the same reason. Steers those two retries only;
+        # nothing here reaches a healthy call's request.
+        self._effort_levels = effort_levels
+        self._default_effort = default_effort
         self.default_opts: dict[str, Any] = default_opts
         # Models that have proved they won't take response_format — either by
         # 400ing on it or by decoding it to nothing (see _call). Their later
@@ -1016,6 +1027,15 @@ class LiteLLMProvider:
         byte-identical guarantee is unaffected, because this is consulted ONLY
         after a reasoning-bound truncation: a healthy call never reaches here.
 
+        Where litellm's map declares the efforts this model accepts, the step
+        skips the rungs it refuses — gpt-5.5 takes `none` but not `minimal`, so
+        `low` steps to off — since a refused level is a 400, or under
+        ``drop_params`` the failed request re-sent and billed twice. And where
+        the map knows the model's default, the unconfigured step lands strictly
+        below it: `low` from a model already reasoning at `low` is that same
+        identical request. A model the map does not describe steps exactly as
+        the plain ladder says.
+
         Adapter-only, beyond the frozen ``ProviderClient`` port, and deliberately
         so: the effort lives in one of two provider-shaped places — a flat
         ``reasoning_effort``, or the nested ``reasoning`` object the factory
@@ -1028,9 +1048,8 @@ class LiteLLMProvider:
         resolved, and returned as an override rather than mutated in place: this
         is one retry's request, not a new setting for the rest of the run.
         """
-        return _effort_override(
-            self, lambda current: _EFFORT_FLOOR if current is None else _one_level_lower(current)
-        )
+        levels, default = _effort_capability(self)
+        return _effort_override(self, lambda current: _step_down(current, levels, default))
 
     def disable_reasoning(self) -> dict[str, Any] | None:
         """Per-call opts that switch this provider's reasoning off entirely.
@@ -1047,15 +1066,18 @@ class LiteLLMProvider:
         ``None`` when there is nothing to switch: reasoning already off, or a flat
         route whose capability map would strip the param and re-send the request
         that just failed. ``default`` is not the bottom of anything, so it CAN be
-        switched off — off is a position, not a step down from one.
+        switched off — off is a position, not a step down from one. Also ``None``
+        where litellm's map declares this model's efforts without `none` (azure's
+        gpt-5 cannot think less than `minimal`), and with nothing configured on a
+        model whose map default already is off: either way the request would be
+        refused or would be the one that just failed.
 
         Same shape rules as the step-down (flat ``reasoning_effort``, or the nested
         ``reasoning`` object for OpenRouter), and an override rather than a
         mutation, for the same reasons.
         """
-        return _effort_override(
-            self, lambda current: None if current == _EFFORT_OFF else _EFFORT_OFF
-        )
+        levels, default = _effort_capability(self)
+        return _effort_override(self, lambda current: _switch_off(current, levels, default))
 
     def escalate_model(self) -> str | None:
         """The resolved fallback model, for a caller that owns the escalation.
@@ -1557,7 +1579,9 @@ _EFFORT_LADDER = ("none", "minimal", "low", "medium", "high", "xhigh")
 # `low` rather than `none` or `minimal`: a model whose thinking overran is still
 # a reasoning model, and switching thought off entirely trades a truncated
 # review for a worse one. `low` is also the rung every reasoning route
-# understands, where the two below it are unevenly supported.
+# understands, where the two below it are unevenly supported. Only when litellm's
+# map is silent on the model, though: where it names the default or the accepted
+# set, `_step_down` keeps the floor only if it is below one and inside the other.
 _EFFORT_FLOOR = "low"
 
 # Thinking switched off: the rung below every graded level, and the only one a
@@ -1570,13 +1594,63 @@ _EFFORT_OFF = "none"
 _OPENROUTER_PREFIX = litellm_model_string(Provider.openrouter, "")
 
 
-def _one_level_lower(effort: str) -> str | None:
-    """The rung below *effort*, or None at (or off) the bottom of the ladder."""
+def _one_level_lower(effort: str, levels: frozenset[str] | None = None) -> str | None:
+    """The nearest rung below *effort* that *levels* admits (any rung when the
+    map declared nothing), or None at (or off) the bottom of the ladder."""
     try:
         index = _EFFORT_LADDER.index(effort)
     except ValueError:
         return None
-    return _EFFORT_LADDER[index - 1] if index else None
+    return next(
+        (rung for rung in reversed(_EFFORT_LADDER[:index]) if levels is None or rung in levels),
+        None,
+    )
+
+
+def _effort_capability(provider: Any) -> tuple[frozenset[str] | None, str | None]:
+    """The declared efforts and default *provider* was built with.
+
+    Read with a default because the probes are borrowed unbound onto test fakes
+    that predate both attributes — and a provider that never learnt them is
+    exactly a model the map does not describe.
+    """
+    return getattr(provider, "_effort_levels", None), getattr(provider, "_default_effort", None)
+
+
+def _step_down(
+    current: str | None, levels: frozenset[str] | None, default: str | None
+) -> str | None:
+    """Where :meth:`LiteLLMProvider.lower_reasoning_effort` lands.
+
+    A configured effort steps to the nearest rung below it the model accepts.
+    With nothing configured, a known default sets the bar: the floor if it sits
+    below that default and the model takes it, else the nearest accepted rung
+    under the default — anything at or above it is the request that just
+    failed, or a step UP. With the default unknown, the floor, or failing that
+    the nearest accepted rung under it: rounding up would most likely land on
+    the default itself, and answering None would forfeit the off switch too,
+    which the engine only reaches through a step-down.
+    """
+    if current is not None:
+        return _one_level_lower(current, levels)
+    floor_taken = levels is None or _EFFORT_FLOOR in levels
+    if default in _EFFORT_LADDER:
+        if floor_taken and _EFFORT_LADDER.index(_EFFORT_FLOOR) < _EFFORT_LADDER.index(default):
+            return _EFFORT_FLOOR
+        return _one_level_lower(default, levels)
+    return _EFFORT_FLOOR if floor_taken else _one_level_lower(_EFFORT_FLOOR, levels)
+
+
+def _switch_off(
+    current: str | None, levels: frozenset[str] | None, default: str | None
+) -> str | None:
+    """Where :meth:`LiteLLMProvider.disable_reasoning` lands: off, unless it is
+    already the setting or the model's declared set has no off at all."""
+    if current == _EFFORT_OFF or (current is None and default == _EFFORT_OFF):
+        return None
+    if levels is not None and _EFFORT_OFF not in levels:
+        return None
+    return _EFFORT_OFF
 
 
 def _effort_override(
@@ -1589,7 +1663,9 @@ def _effort_override(
     decided here, once, for both the step-down and the off switch. A module
     function rather than a method because the adapter's two public probes are
     borrowed unbound onto test fakes, which only carry the three attributes read
-    here (``default_opts``, ``model``, ``_effort_override_supported``).
+    here (``default_opts``, ``model``, ``_effort_override_supported``). Which
+    levels the model accepts is *choose*'s business, not this function's (see
+    :func:`_effort_capability`).
     """
     flat = provider.default_opts.get("reasoning_effort")
     if isinstance(flat, str):
