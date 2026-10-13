@@ -295,12 +295,15 @@ class RestGitHubGateway:
         # Fetch unified diff
         diff = self._fetch_pr_diff()
 
-        # Fetch paginated files list
-        changed_files = [
-            item["filename"]
+        # Fetch paginated files list. A deleted file stays a changed file but has
+        # no head text, so it never joins a content fetch (a guaranteed 404 each).
+        files = [
+            item
             for resp in self._paginate(f"{self._pr_api}/files?per_page=100")
             for item in resp.json()
         ]
+        changed_files = [item["filename"] for item in files]
+        present = [item["filename"] for item in files if item.get("status") != "removed"]
 
         # Fetch head-revision text of reviewable files so the engine can pad hunks
         # with surrounding context. Read-only API fetch — never a checkout — and
@@ -311,13 +314,13 @@ class RestGitHubGateway:
         # disclosure metadata. It shares nothing with the content fetches, so it
         # rides the same pool rather than sitting in front of them: on the common
         # single-page PR the whole count hides inside the file-fetch latency.
-        reviewable = [path for path in changed_files if is_reviewable(path)]
+        reviewable = [path for path in present if is_reviewable(path)]
         # Dependency manifests for the vulnerability scanner. Lockfiles are not
         # reviewable, so they are fetched separately and kept out of
         # `file_contents` — see PRContext.scan_contents. Only fetched when
         # something will actually read them.
         scannable = (
-            [path for path in changed_files if is_scannable_manifest(path)]
+            [path for path in present if is_scannable_manifest(path)]
             if self._scan_manifests
             else []
         )
@@ -361,8 +364,9 @@ class RestGitHubGateway:
     ) -> None:
         """Post (or update) a single review with batched inline comments.
 
-        A completed review at a new commit gets a fresh native summary; reruns
-        at that commit update it in-place. Older summaries retain their history.
+        A completed review at a new commit gets a fresh native summary carrying
+        its not-yet-posted inline comments in the same single POST; reruns at
+        that commit update it in-place. Older summaries retain their history.
 
         The ``diff`` parameter is optional; when omitted the method fetches just
         the PR diff (one ``.diff``-Accept GET — never the full ``get_pr_context``
@@ -397,19 +401,22 @@ class RestGitHubGateway:
 
         reviews_url = f"{self._pr_api}/reviews"
 
-        if existing is not None:
-            new_commit = self._reviewed_sha is not None and existing[2] != self._reviewed_sha
+        new_commit = (
+            existing is not None
+            and self._reviewed_sha is not None
+            and existing[2] != self._reviewed_sha
+        )
+        if existing is not None and not new_commit:
             # Update the existing review body (inline comments cannot be changed
             # through this endpoint, but the summary is updated).
             update_url = f"{reviews_url}/{existing[0]}"
-            if not new_commit:
-                resp = self._client.put(
-                    update_url,
-                    headers=self._json_headers,
-                    json={"body": body},
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
+            resp = self._client.put(
+                update_url,
+                headers=self._json_headers,
+                json={"body": body},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
             # The review-update endpoint can't add inline comments, so post the
             # NEW findings (fingerprints not already on the PR) as individual
             # review comments — otherwise a re-run's fresh findings would only
@@ -422,35 +429,23 @@ class RestGitHubGateway:
                 inline, self._reviewed_sha or self._anchor_sha()
             )
             if rejected:
-                body = build_body([*demoted, *rejected])
-            if new_commit:
-                # Publish completion only after required inline writes succeed.
-                resp = self._post(
-                    reviews_url,
-                    headers=self._json_headers,
-                    json={
-                        "body": body,
-                        "event": "COMMENT",
-                        "comments": [],
-                        "commit_id": self._reviewed_sha,
-                    },
-                    timeout=_TIMEOUT,
-                )
-                resp.raise_for_status()
-            elif rejected:
                 resp = self._client.put(
                     update_url,
                     headers=self._json_headers,
-                    json={"body": body},
+                    json={"body": build_body([*demoted, *rejected])},
                     timeout=_TIMEOUT,
                 )
                 resp.raise_for_status()
-            # A re-run: any of our prior conversations whose finding is now gone
-            # (and whose code changed) is fixed — collapse it. Best-effort, so a
-            # GraphQL hiccup never fails an otherwise-successful review.
-            if self._resolve_fixed:
-                self._resolve_fixed_threads(findings)
         else:
+            # A first post, or a completed review at a new commit: a fresh native
+            # review, which (unlike the update endpoint) carries inline comments —
+            # so a re-run's new findings ride this ONE post rather than one
+            # content-creating call (and notification) each, which GitHub's
+            # secondary rate limit cuts off part-way on a PR with many findings.
+            # A re-run first drops what we already posted, one-for-one. Comments
+            # and completion land atomically: a failed post publishes neither.
+            if new_commit and inline:
+                comments = [c for c, _f in unposted(inline, self._existing_finding_keys())]
             payload: dict[str, Any] = {
                 "body": body,
                 "event": "COMMENT",
@@ -464,7 +459,9 @@ class RestGitHubGateway:
                 json=payload,
                 timeout=_TIMEOUT,
             )
-            if resp.status_code == 422 and inline:
+            if resp.status_code == 422 and comments:
+                # One bad position refuses the whole review; the per-comment path
+                # isolates it (and dedupes again, one-for-one, from scratch).
                 rejected = self._post_new_inline_comments(
                     inline, self._reviewed_sha or self._anchor_sha()
                 )
@@ -477,6 +474,11 @@ class RestGitHubGateway:
                     timeout=_TIMEOUT,
                 )
             resp.raise_for_status()
+        # A re-run: any of our prior conversations whose finding is now gone
+        # (and whose code changed) is fixed — collapse it. Best-effort, so a
+        # GraphQL hiccup never fails an otherwise-successful review.
+        if existing is not None and self._resolve_fixed:
+            self._resolve_fixed_threads(findings)
         self._existing_review_entry = None
         self._existing_review_done = False
 

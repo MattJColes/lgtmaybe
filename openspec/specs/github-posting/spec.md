@@ -46,8 +46,8 @@ findings SHALL remain in the body. Other posting failures SHALL remain fatal.
 
 #### Scenario: the reviewed commit advances
 - **WHEN** the latest matching review has a different native commit
-- **THEN** a fresh summary is posted at the actual reviewed commit after required
-  inline writes succeed, while old summaries remain intact
+- **THEN** one fresh review at the reviewed commit carries the summary and the
+  unposted inline comments, while old summaries remain intact
 
 #### Scenario: an incomplete run re-runs on the same PR
 - **WHEN** the summary carries the hidden incomplete marker and the body update
