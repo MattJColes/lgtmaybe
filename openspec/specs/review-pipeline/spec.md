@@ -378,15 +378,15 @@ says nothing about size is not split at all.
 ### Requirement: A reasoning-bound truncation is retried once at a lower effort
 
 A lens whose truncation was reasoning-bound SHALL be re-run once with its
-`reasoning_effort` stepped down one level, merging its findings with the cut
-call's salvage — changing the one variable that can move a thinking budget.
-Exactly one attempt, always downward, never on a payload-bound truncation. With
-no effort configured the step SHALL be to a named floor, so a model reasoning at
-its own default is not the one with no lever; where the route would discard the
-override the original failure SHALL be reported instead of an identical request,
-and that judgement SHALL fail open. The retry SHALL re-check the deadline, token
-budget and interrupt first, and a lens that only answered after stepping down
-SHALL be named in the summary.
+`reasoning_effort` stepped down to the nearest lower level the model accepts
+(per litellm's map; any rung where it is silent), merging its findings with
+the cut call's salvage. Exactly one attempt, always downward, never on a
+payload-bound truncation. With no effort configured the step SHALL be to a named
+floor, kept strictly below the model's default where the map names one; where
+the route would discard the override the original failure SHALL be reported
+instead of an identical request, and every such judgement SHALL fail open. The
+retry SHALL re-check the deadline, token budget and interrupt first, and a lens
+that only answered after stepping down SHALL be named in the summary.
 <!-- anchor: engine.reasoning-step-down -->
 
 #### Scenario: the lower effort fits
@@ -407,8 +407,8 @@ SHALL be named in the summary.
   that just failed, billed twice for one answer
 
 #### Scenario: there is no step to take
-- **WHEN** the configured effort is the lowest rung, or names no position on the
-  ladder at all
+- **WHEN** no level the model accepts sits below the configured effort (or its
+  default), or the effort names no position on the ladder at all
 - **THEN** nothing is retried and nothing is spent
 
 #### Scenario: a ceiling was reached while the first call was finishing
@@ -419,7 +419,8 @@ SHALL be named in the summary.
 
 A step-down retry that spends its ceiling on reasoning again SHALL be re-run
 exactly once with reasoning switched off, before any change of model, and only
-where the provider can express "off" in its own shape. Measured on GLM 5.3
+where the provider can express "off" in its own shape and litellm's map does not
+declare a level set without it. Measured on GLM 5.3
 through OpenRouter: `low` and `minimal` both spent a 12,288-token ceiling on
 thought in 10 retries of 11, and the fallback model then did the same at ten
 times the price — that model treats effort as a switch, and the graded step

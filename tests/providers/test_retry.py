@@ -2443,6 +2443,135 @@ class TestTheFloorRespectsRouteCapability:
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "medium"}
 
 
+class TestTheLadderStepsOnlyToLevelsTheModelAccepts:
+    """litellm's map records which efforts a model takes, and its default.
+
+    A rung the model refuses is either a 400 or — under `drop_params` — the
+    request that just failed, re-sent and billed twice. So where the map
+    declares the set, the step lands on the next level DOWN that the model
+    accepts; where it declares nothing, the ladder is exactly what it was.
+    """
+
+    _NO_MINIMAL = frozenset({"none", "low", "medium", "high", "xhigh"})
+    _NO_OFF = frozenset({"minimal", "low", "medium", "high"})
+
+    def test_an_undeclared_rung_is_skipped_on_the_way_down(self) -> None:
+        """gpt-5.5 takes `none` but not `minimal`: from `low` the next level it
+        accepts is off."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.5", reasoning_effort="low", effort_levels=self._NO_MINIMAL
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "none"}
+
+    def test_no_declared_level_below_steps_nowhere(self) -> None:
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.5",
+            reasoning_effort="low",
+            effort_levels=frozenset({"low", "medium", "high"}),
+        )
+
+        assert provider.lower_reasoning_effort() is None
+
+    def test_the_nested_shape_skips_undeclared_rungs_too(self) -> None:
+        provider = LiteLLMProvider(
+            model="openrouter/openai/gpt-5.5",
+            extra_body={"reasoning": {"effort": "low"}},
+            effort_levels=self._NO_MINIMAL,
+        )
+
+        assert provider.lower_reasoning_effort() == {
+            "extra_body": {"reasoning": {"effort": "none"}}
+        }
+
+    def test_a_model_that_cannot_switch_off_gets_no_switch(self) -> None:
+        provider = LiteLLMProvider(
+            model="azure/gpt-5", reasoning_effort="medium", effort_levels=self._NO_OFF
+        )
+
+        assert provider.disable_reasoning() is None
+
+    def test_a_model_that_can_switch_off_still_does(self) -> None:
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.5", reasoning_effort="medium", effort_levels=self._NO_MINIMAL
+        )
+
+        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
+
+    def test_the_floor_is_kept_when_it_is_below_a_known_default(self) -> None:
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.5", effort_levels=self._NO_MINIMAL, default_effort="medium"
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": _EFFORT_FLOOR}
+
+    def test_a_default_at_the_floor_steps_below_it(self) -> None:
+        """Stepping to `low` from a model already reasoning at `low` re-sends
+        the request that just failed — so the step goes one declared rung
+        under the default instead."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.5", effort_levels=self._NO_MINIMAL, default_effort="low"
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "none"}
+
+    def test_a_default_at_the_bottom_steps_nowhere(self) -> None:
+        """gpt-5.1 reasons at `none` by default: the floor would be a step UP."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.1",
+            effort_levels=frozenset({"none", "low", "medium", "high"}),
+            default_effort="none",
+        )
+
+        assert provider.lower_reasoning_effort() is None
+        assert provider.disable_reasoning() is None
+
+    def test_an_undeclared_floor_under_a_known_default_takes_the_next_rung(self) -> None:
+        provider = LiteLLMProvider(
+            model="openai/kimi",
+            effort_levels=frozenset({"none", "medium", "high"}),
+            default_effort="high",
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "medium"}
+
+    def test_a_known_default_with_no_declared_set_uses_the_whole_ladder(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", default_effort="low")
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
+
+    def test_an_undeclared_floor_with_an_unknown_default_rounds_down(self) -> None:
+        """Rounding UP from the floor would most likely land on the model's own
+        default — the identical request again."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5", effort_levels=frozenset({"minimal", "medium", "high"})
+        )
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
+
+    def test_an_undeclared_model_keeps_todays_ladder(self) -> None:
+        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="low")
+
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
+        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
+
+    def test_a_fake_without_the_capability_attributes_keeps_todays_ladder(self) -> None:
+        """The probes are borrowed unbound onto engine fakes carrying only the
+        three attributes `_effort_override` has always read."""
+        fake = SimpleNamespace(
+            default_opts={"reasoning_effort": "low"},
+            model="openai/x",
+            _effort_override_supported=True,
+        )
+
+        assert LiteLLMProvider.lower_reasoning_effort(fake) == {  # type: ignore[arg-type]
+            "reasoning_effort": "minimal"
+        }
+        assert LiteLLMProvider.disable_reasoning(fake) == {  # type: ignore[arg-type]
+            "reasoning_effort": "none"
+        }
+
+
 class TestOpenAICompatibleToolRejectionWording:
     """The tool-config fallback is matched off the backend's own error prose, and
     every existing test uses Bedrock's wording. vLLM refuses a tool call with
