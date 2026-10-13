@@ -772,10 +772,20 @@ class GitLabGateway:
         )
 
     def _posting_user(self) -> int | None:
-        """The token's own user id, fetched once per run; None when unknown."""
+        """The token's own user id, fetched once per run; None when unknown.
+
+        A failed lookup is "unknown", never an error: the upsert path reaches
+        here too, and a flaky ``/user`` must not stop a summary (least of all a
+        failure notice) from posting. Unknown trusts no note, so the cost is a
+        fresh note this run and a full review next run.
+        """
         if not self._posting_user_done:
             self._posting_user_done = True
-            data = self._get_json(f"{self._root}/user")
+            try:
+                data = self._get_json(f"{self._root}/user")
+            except (httpx.HTTPError, ValueError) as exc:
+                _log.warning("looking up the token's own user failed: %s", exc)
+                data = None
             user_id = data.get("id") if isinstance(data, dict) else None
             self._posting_user_id = user_id if isinstance(user_id, int) else None
         return self._posting_user_id

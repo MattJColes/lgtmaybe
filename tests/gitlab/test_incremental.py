@@ -476,6 +476,45 @@ class TestWatermarkReading:
         assert not planted.called
         assert forged not in json.loads(posted.calls.last.request.content)["body"]
 
+    @respx.mock
+    def test_an_identity_failure_never_stops_the_summary_posting(self) -> None:
+        """A flaky /user must not abort the post, least of all a failure notice:
+        identity unknown means no note is trusted, so a fresh one is posted."""
+        _stub_notes([_summary_note(LAST, note_id=10)])
+        _stub_user(status=500)
+        ours = respx.put(f"{MR_URL}/notes/10").mock(return_value=httpx.Response(200, json={}))
+        posted = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+
+        _gateway().post_review([], "⚠️ lgtmaybe review failed", diff=DIFF)
+
+        assert posted.called
+        assert not ours.called
+        assert "lgtmaybe-reviewed" not in _posted_body(posted)
+
+    @respx.mock
+    def test_an_identity_failure_never_stops_the_description_posting(self) -> None:
+        """The description upsert reaches the identity lookup first, with no read
+        path in front of it to absorb the failure."""
+        _stub_notes([{"id": 12, "body": "old\n\n<!-- lgtmaybe-describe -->", "author": BOT}])
+        _stub_user(status=500)
+        posted = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+
+        _gateway().post_describe_comment("new description")
+
+        assert posted.called
+
+    @respx.mock
+    def test_the_identity_is_fetched_once_per_gateway(self) -> None:
+        _stub_notes([_summary_note(LAST)])
+        user = _stub_user()
+        respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
+        gateway = _gateway()
+
+        gateway.last_reviewed_sha()
+        gateway.post_review([], "summary", diff=DIFF)
+
+        assert user.call_count == 1
+
 
 class TestCompletedHead:
     def _diagram_note(self, sha: str | None, author: dict[str, Any] = BOT) -> dict[str, Any]:
