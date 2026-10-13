@@ -63,6 +63,13 @@ static-analysis = [
     # the odd one out: a Go binary with no wheel, fetched in the Dockerfile.
     "zizmor>=1.5",
 ]
+# `lgtmaybe mcp`: serve the local review to coding agents over the Model
+# Context Protocol (stdio). Optional because only agent users need the SDK and
+# its server stack; the command names this extra when it is missing. Written
+# against the 2.x API (`MCPServer`; 1.x called it `FastMCP`), hence the floor.
+mcp = [
+    "mcp>=2.3,<3",
+]
 
 [project.scripts]
 lgtmaybe = "lgtmaybe.cli:main"
@@ -82,6 +89,9 @@ dev = [
     "cdk-nag>=3,<4",
     "constructs>=10,<11",
     "pyjwt[crypto]>=2.10",
+    # The `mcp` extra, so the MCP server's in-process and stdio round-trip
+    # tests run in the CI gate rather than skipping.
+    "mcp>=2.3,<3",
     "pytest>=8",
     "ruff>=0.5",
     "mypy>=1.10",

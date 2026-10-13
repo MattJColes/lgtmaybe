@@ -36,3 +36,23 @@ def test_build_provider_still_returns_litellm_provider() -> None:
 
     provider = build_provider(Provider.openai, "gpt-4o", api_key="k")
     assert isinstance(provider, LiteLLMProvider)
+
+
+_MCP_CHECK = (
+    "import sys; import lgtmaybe.cli, lgtmaybe.cli.mcp_server; "
+    "sys.exit(1 if any(m == 'mcp' or m.startswith('mcp.') for m in sys.modules) else 0)"
+)
+
+
+def test_importing_cli_does_not_import_the_mcp_sdk() -> None:
+    """The MCP SDK is an optional extra: only `lgtmaybe mcp` may import it."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _MCP_CHECK],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, (
+        "importing lgtmaybe.cli (or its MCP module) pulled in the MCP SDK at module "
+        f"scope — an install without the [mcp] extra would break\nstderr: {proc.stderr}"
+    )

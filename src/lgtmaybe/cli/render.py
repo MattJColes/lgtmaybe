@@ -13,12 +13,16 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 from urllib.parse import quote
 
 from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import INCOMPLETE_MARKER
+
+# How the agent format tells its reader to confirm the fixes, by default.
+_CLI_RERUN = "`lgtmaybe review`"
 
 # The summary is written for a GitHub comment, so it can carry hidden markers
 # (the incomplete-run flag). They mean nothing to a terminal — strip them rather
@@ -53,21 +57,44 @@ def flatten_details(body: str) -> str:
     return "\n".join(lines)
 
 
-def render_findings(findings: list[ReviewFinding], summary: str, *, fmt: str = "human") -> str:
+def strip_hidden_markers(summary: str) -> str:
+    """The summary without its hidden HTML markers, for anything that is not a PR."""
+    return _HIDDEN_MARKER_RE.sub("", summary).strip()
+
+
+def findings_payload(findings: list[ReviewFinding]) -> list[dict[str, Any]]:
+    """The findings as JSON-ready dicts: the ``json`` format's one shape.
+
+    Shared by ``--format json`` and the MCP server's structured result, so an
+    agent reads the same fields whichever way it asked.
+    """
+    return [f.model_dump(mode="json") for f in findings]
+
+
+def render_findings(
+    findings: list[ReviewFinding],
+    summary: str,
+    *,
+    fmt: str = "human",
+    rerun_hint: str = _CLI_RERUN,
+) -> str:
     """Format findings for the local CLI.
 
     ``fmt`` selects the output: ``human`` (a readable listing + summary),
     ``json`` (a machine-readable array), ``agent`` (directive correction
     instructions for an AI coding agent to read and apply), or ``sarif`` (a
     SARIF 2.1.0 log; the summary only decides whether the run was complete).
+    ``rerun_hint`` is how the agent format tells its reader to confirm the
+    fixes: the CLI command by default, the tool name when the reader came in
+    over MCP.
     """
     if fmt == "json":
-        return json.dumps([f.model_dump(mode="json") for f in findings])
+        return json.dumps(findings_payload(findings))
     if fmt == "sarif":
         return render_sarif(findings, complete=INCOMPLETE_MARKER not in summary)
-    summary = _HIDDEN_MARKER_RE.sub("", summary).strip()
+    summary = strip_hidden_markers(summary)
     if fmt == "agent":
-        return _render_agent(findings, summary)
+        return _render_agent(findings, summary, rerun_hint)
 
     lines: list[str] = []
     for f in findings:
@@ -81,7 +108,7 @@ def render_findings(findings: list[ReviewFinding], summary: str, *, fmt: str = "
     return "\n".join(lines)
 
 
-def _render_agent(findings: list[ReviewFinding], summary: str) -> str:
+def _render_agent(findings: list[ReviewFinding], summary: str, rerun_hint: str) -> str:
     """Render findings as correction instructions for an AI agent to apply."""
     if not findings:
         return f"No review findings — nothing to correct. {summary}"
@@ -101,7 +128,7 @@ def _render_agent(findings: list[ReviewFinding], summary: str) -> str:
         lines.append("")
     lines.append(
         f"{len(findings)} finding(s) to address. After applying the fixes, re-run "
-        "`lgtmaybe review` to confirm they are resolved."
+        f"{rerun_hint} to confirm they are resolved."
     )
     return "\n".join(lines)
 

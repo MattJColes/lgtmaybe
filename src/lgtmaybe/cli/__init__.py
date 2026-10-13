@@ -792,6 +792,36 @@ def _validate_prior_findings(
     )
 
 
+def run_local_review(
+    cfg: ReviewConfig,
+    runtime: RuntimeOptions,
+    *,
+    base: str | None,
+    working: bool,
+    uncommitted: bool = False,
+) -> tuple[list[ReviewFinding], str]:
+    """Review the local git diff and RETURN the findings and summary.
+
+    The one engine path behind every local review: the ``review`` command
+    prints what this returns, and the MCP server hands it to a coding agent.
+    Builds the provider straight from config/runtime (no token, no gateway) and
+    resets the profiler, so a long-lived caller measures each review alone.
+    Failures propagate; each caller decides how to surface them.
+    """
+    profiler.reset()
+    # Wire a read-only working-tree reader so reflection can resolve a deferred
+    # verdict against the user's own checkout (safe — their branch, not PR code).
+    fetch_file = local_file_reader()
+    # And let ast-grep resolve a deferred symbol to its defining file by searching
+    # that same worktree — the corpus is already on disk, so no clone is needed.
+    resolve_symbol = build_symbol_resolver(local_repo_root) if cfg.symbol_resolution else None
+    engine, _provider = build_provider_engine(
+        cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
+    )
+    ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    return engine.review(ctx, cfg)
+
+
 def execute_local_review(
     cfg: ReviewConfig,
     runtime: RuntimeOptions,
@@ -804,27 +834,17 @@ def execute_local_review(
 ) -> None:
     """Review the local git diff and print findings — no GitHub involvement.
 
-    Builds the provider straight from config/runtime (no token, no gateway),
-    runs the engine over the local diff, and prints the result. Any failure
-    surfaces as a clean CLI error — there is no PR to post a notice to.
+    Runs ``run_local_review`` and prints the result. Any failure surfaces as a
+    clean CLI error — there is no PR to post a notice to.
 
     With *fail_on* (the explicit ``--fail-on`` flag, never the config file's
     ``fail_on``, which is the Action's merge gate) the run exits
     ``FAIL_ON_EXIT_CODE`` after printing when any finding is at or above it.
     """
-    profiler.reset()
     try:
-        # Wire a read-only working-tree reader so reflection can resolve a deferred
-        # verdict against the user's own checkout (safe — their branch, not PR code).
-        fetch_file = local_file_reader()
-        # And let ast-grep resolve a deferred symbol to its defining file by searching
-        # that same worktree — the corpus is already on disk, so no clone is needed.
-        resolve_symbol = build_symbol_resolver(local_repo_root) if cfg.symbol_resolution else None
-        engine, _provider = build_provider_engine(
-            cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
+        findings, summary = run_local_review(
+            cfg, runtime, base=base, working=working, uncommitted=uncommitted
         )
-        ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
-        findings, summary = engine.review(ctx, cfg)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -1228,6 +1248,7 @@ Examples:
   lgtmaybe review --provider ollama --model qwen3:27b
   lgtmaybe review --format json            Machine-readable findings
   lgtmaybe diagram                         Diagram the components you touched
+  lgtmaybe mcp                             Serve reviews to a coding agent over MCP
   lgtmaybe config init                     One-time provider/model setup
   lgtmaybe review --help                   Detailed help for a command
 \b
@@ -1358,5 +1379,6 @@ __all__ = [
     "render_findings",
     "resolve_auto_incremental",
     "run_describe",
+    "run_local_review",
     "run_review",
 ]

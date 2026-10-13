@@ -608,6 +608,8 @@ $ lgtmaybe review --provider ollama --model qwen3.6:27b --api-base http://localh
 `--format agent` turns the findings into plain correction instructions an AI
 coding agent can read and apply, for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
+`lgtmaybe mcp` serves both shapes to a coding agent as MCP tool calls; see
+[Use from a coding agent over MCP](../how-to/use-from-a-coding-agent-over-mcp.md).
 
 `--format sarif` prints a SARIF 2.1.0 log for GitHub code scanning or an IDE
 SARIF viewer: one rule per lens, the severity folded onto SARIF's three levels,

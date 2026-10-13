@@ -221,6 +221,7 @@ the docs root.
 - [Fix findings with an AI agent](docs/how-to/fix-findings-with-an-ai-agent.md)
 - [Review before you commit (pre-commit hooks)](docs/how-to/review-before-you-commit.md)
 - [Upload findings as SARIF](docs/how-to/upload-findings-as-sarif.md)
+- [Use from a coding agent (MCP)](docs/how-to/use-from-a-coding-agent-over-mcp.md)
 - [Reduce review cost](docs/how-to/reduce-review-cost.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
 
