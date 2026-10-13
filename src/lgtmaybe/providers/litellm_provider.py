@@ -1413,10 +1413,11 @@ class LiteLLMProvider:
     def _drop_rejected_param(self, exc: Exception, model: str, kwargs: dict[str, Any]) -> bool:
         """Strip the one request param *exc* says this model won't take.
 
-        Three params are sent for review quality rather than necessity —
-        ``temperature`` (determinism), ``reasoning_effort`` (a thinking budget)
-        and ``response_format`` (structured output) — and a model that refuses
-        any of them would otherwise fail the whole review over a preference.
+        Four params are sent for review quality rather than necessity —
+        ``temperature`` (determinism), ``reasoning_effort`` (a thinking budget),
+        ``prompt_cache_key`` (a cache-routing hint) and ``response_format``
+        (structured output) — and a model that refuses any of them would
+        otherwise fail the whole review over a preference.
         The refusals are permanent 400s, so the recovery is to drop the param
         and re-send; ``kwargs`` is the dict every later retry of this call
         reuses, so the drop sticks for them too. The effort is judged before
@@ -1436,6 +1437,13 @@ class LiteLLMProvider:
             kwargs.pop("temperature")
             self._rejected_params.setdefault(model, set()).add("temperature")
             self._mark_temperature_dropped(model, "rejected")
+            return True
+        # Sent on every call (see `complete`), and drop_params leaves it on the
+        # `openai/` route, so a strict OpenAI-compatible server ("Extra inputs
+        # are not permitted") would otherwise refuse every lens of the review.
+        if "prompt_cache_key" in kwargs and _rejects_field(exc, "prompt_cache_key"):
+            kwargs.pop("prompt_cache_key")
+            self._rejected_params.setdefault(model, set()).add("prompt_cache_key")
             return True
         # Before the schema branch, deliberately: a refused reasoning effort
         # arrives naming `output_config.effort`, which the schema matcher below
