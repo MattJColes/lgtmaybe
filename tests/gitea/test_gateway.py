@@ -421,6 +421,7 @@ class TestCapabilities:
             "SupportsLabels",
             "SupportsChecks",
             "SupportsConversation",
+            "SupportsPermissions",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
@@ -430,6 +431,29 @@ class TestCapabilities:
 
         gateway = GiteaGateway.__new__(GiteaGateway)
         assert not isinstance(gateway, ports.SupportsThreadResolution)
+
+
+class TestPermissions:
+    """Who may run a slash command: a collaborator with write access, or more."""
+
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("permission", "allowed"),
+        [("owner", True), ("admin", True), ("write", True), ("read", False), ("none", False)],
+    )
+    def test_reads_the_collaborator_permission(self, permission: str, allowed: bool) -> None:
+        respx.get(f"{API}/collaborators/someone/permission").mock(
+            return_value=httpx.Response(200, json={"permission": permission})
+        )
+        assert _gateway(httpx.Client()).has_repo_write("someone") is allowed
+
+    @respx.mock
+    def test_fails_closed_when_the_lookup_fails(self) -> None:
+        """A non-collaborator is a 403/404 here — never a writer."""
+        respx.get(f"{API}/collaborators/stranger/permission").mock(
+            return_value=httpx.Response(403, json={"message": "forbidden"})
+        )
+        assert _gateway(httpx.Client()).has_repo_write("stranger") is False
 
 
 class TestLabels:

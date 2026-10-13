@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from lgtmaybe.cli import main
@@ -282,9 +283,9 @@ class TestDispatch:
         assert "```mermaid" in body
 
 
-def _write_event(tmp_path: Path, body: str) -> Path:
+def _write_event(tmp_path: Path, body: str, *, user: dict | None = None) -> Path:  # type: ignore[type-arg]
     event = {
-        "comment": {"body": body},
+        "comment": {"body": body, "user": {"login": "maintainer"} if user is None else user},
         "issue": {"number": 7, "pull_request": {"url": "x"}},
         "repository": {"full_name": "org/repo"},
     }
@@ -334,6 +335,55 @@ class TestCommentCommand:
         assert github.posted == []
         assert len(github.comments) == 1
         assert "guards against null" in github.comments[0]
+
+    @pytest.mark.parametrize("user", [{"login": "drive-by"}, {}], ids=["no-write", "no-login"])
+    def test_a_commenter_without_write_access_cannot_run_a_command(
+        self, tmp_path, monkeypatch, user
+    ):
+        """Anyone can comment on a public PR; only a writer may spend the model.
+
+        The example workflows gate on author_association, but a workflow edited
+        without that `if:` (or Gitea's, which only checks the body) must not
+        hand a stranger the reviewer — so the command path checks too.
+        """
+
+        class NoCalls(FakeProvider):
+            def complete(self, *args, **kwargs):
+                pytest.fail("an unauthorised command must not call the model")
+
+        github = FakeGitHub()
+        provider = NoCalls()
+        self._patch_build(monkeypatch, github, FakeEngine(provider), provider)
+        event = _write_event(tmp_path, "/ask why the check?", user=user)
+
+        result = CliRunner().invoke(
+            main,
+            ["comment", "--event-path", str(event), "--provider", "ollama", "--model", "llama3"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "write access" in result.output
+        assert github.posted == []
+        assert github.comments == []
+
+    def test_a_gateway_that_cannot_check_access_runs_nothing(self, tmp_path, monkeypatch):
+        """Fail closed: an unverifiable commenter is an unauthorised one."""
+
+        class Unverifiable(FakeGitHub):
+            has_repo_write = None  # type: ignore[assignment]
+
+        github = Unverifiable()
+        provider = FakeProvider()
+        self._patch_build(monkeypatch, github, FakeEngine(provider), provider)
+        event = _write_event(tmp_path, "/review")
+
+        result = CliRunner().invoke(
+            main,
+            ["comment", "--event-path", str(event), "--provider", "ollama", "--model", "llama3"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert github.posted == []
 
     def test_non_command_comment_is_ignored(self, tmp_path, monkeypatch):
         github = FakeGitHub()

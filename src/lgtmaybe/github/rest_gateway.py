@@ -1345,7 +1345,7 @@ class RestGitHubGateway:
         left a ``THUMBS_DOWN`` reaction: a thread whose opening comment carries
         one of our hidden finding markers AND was downvoted by at least one
         write-access user contributes its fingerprint. On a public repo anyone
-        can react, so an unprivileged 👎 is ignored (see ``_has_repo_write``).
+        can react, so an unprivileged 👎 is ignored (see ``has_repo_write``).
 
         The 👎 reaction is the ONLY learning signal — a resolved thread already
         means "fixed" (handled by resolve-on-fix), never a suppress. Reads only
@@ -1372,16 +1372,18 @@ class RestGitHubGateway:
             # Only an authorised (write+) reviewer's 👎 counts — on a public
             # repo anyone can react, and an unprivileged reaction must never
             # suppress a finding.
-            if any(self._has_repo_write(login) for login in logins):
+            if any(self.has_repo_write(login) for login in logins):
                 downvoted.add(match.group(1))
         return downvoted
 
-    def _has_repo_write(self, login: str) -> bool:
+    def has_repo_write(self, login: str) -> bool:
         """Whether *login* has write (or higher) access to the repo.
 
-        Feedback learning only trusts a 👎 from someone who can push. Fails
-        closed — any lookup error (including a 404 for a non-collaborator) means
-        "not authorised", so an unverifiable reactor never suppresses a finding.
+        Feedback learning only trusts a 👎 from someone who can push, and a slash
+        command only runs for one (``cli.execute_comment``). Fails closed — any
+        lookup error (including a 404 for a non-collaborator) means "not
+        authorised", so an unverifiable user never suppresses a finding or runs
+        a command.
         Cached per run since a PR's downvoters repeat across threads.
         """
         cached = self._perm_cache.get(login)
@@ -1397,7 +1399,7 @@ class RestGitHubGateway:
             resp.raise_for_status()
             # The legacy `permission` field collapses maintain→write, triage→read.
             allowed = resp.json().get("permission") in {"admin", "write"}
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
             _log.warning("permission check for %s failed: %s", login, exc)
         self._perm_cache[login] = allowed
         return allowed

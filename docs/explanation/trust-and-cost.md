@@ -93,7 +93,11 @@ gate. To change the policy, edit the list:
 - **Tighten to admins**: keep just `OWNER` (and `MEMBER` for your org).
 
 The gate lives in your workflow YAML, not in the action's code, so the policy
-is entirely yours.
+for automatic PR reviews is entirely yours. Slash commands have one floor the
+YAML cannot lower: lgtmaybe runs a command only when the commenter has write
+access to the repository, and ignores anyone else's with a log line and no
+model call. So opening the comment arm to everyone, or adding `CONTRIBUTOR`,
+changes who triggers a run, not who can spend the model through one.
 
 The slash-command half of the comment arm saves runner time rather than
 tokens. `issue_comment` fires on every comment on every pull request. Without

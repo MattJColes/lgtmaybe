@@ -84,6 +84,7 @@ cannot do instead of failing at run time.
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsPermissions`: only writers run slash commands | ✅ | ✗ no slash commands | ✅ | ✗ no slash commands |
 | `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
@@ -239,8 +240,9 @@ matches the PR) and any custom lenses join the same fan-out.
 6. **suppress**: findings a team has marked known-fine are dropped before they
    cost any reflection tokens: fingerprints in `ignore_fingerprints`, a
    `# lgtmaybe: ignore` pragma on (or just above) the flagged line, and findings
-   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). A 👎 never
-   suppresses a high or critical security finding.
+   a reviewer reacted 👎 to on an earlier run (`learn_feedback`). Neither a 👎
+   nor a pragma (which the PR's author writes) suppresses a high or critical
+   security finding; only `ignore_fingerprints` in trusted config can.
 
 7. **evidence gate**: security, correctness, deprecation and performance
    findings must carry a concrete `failure_scenario`: the trigger, the changed

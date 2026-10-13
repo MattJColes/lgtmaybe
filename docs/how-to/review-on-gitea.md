@@ -68,6 +68,12 @@ exist in the repository; lgtmaybe does not create them), the `fail_on` merge gat
 (as a commit status), and the `/review`, `/improve`, `/ask`, `/describe` and
 `/diagram` slash commands.
 
+A slash command runs only for a commenter with write access to the repository.
+Gitea's workflow `if:` cannot read the commenter's role the way GitHub's
+`author_association` does, so lgtmaybe checks it itself through the collaborator
+permission API. Anyone else's command is ignored with a log line, exits
+successfully, and makes no model call.
+
 These are unavailable on Gitea, and lgtmaybe skips them rather than failing:
 
 | Not available | Why | What happens instead |

@@ -9,9 +9,12 @@ suppressed finding costs no reflection tokens:
   the line immediately above it) in the file's head text suppresses that finding,
   so a developer can silence a known-fine pattern at the source.
 - **Feedback learning** — fingerprints an authorised reviewer reacted 👎 to on a
-  previous run (``PRContext.feedback_downvotes``). Unlike the two above, this
-  channel **never** suppresses a high/critical security finding, so a downvote
-  can't be used to hide a serious vulnerability.
+  previous run (``PRContext.feedback_downvotes``).
+
+The pragma and feedback channels **never** suppress a high/critical security
+finding: the pragma is written by the PR's author and a 👎 by whoever left it, so
+neither can be used to hide a serious vulnerability. Only the config fingerprint,
+a maintainer's decision in trusted config, can.
 """
 
 from __future__ import annotations
@@ -29,12 +32,13 @@ _PRAGMA = re.compile(r"#\s*lgtmaybe:\s*ignore\b", re.IGNORECASE)
 
 
 def _is_protected_security(finding: ReviewFinding) -> bool:
-    """A high/critical security finding is never auto-suppressed by feedback.
+    """A high/critical security finding is never suppressed by feedback or pragma.
 
-    On a public repo a 👎 reaction is only as trustworthy as who left it, so a
-    downvote must never be able to hide a serious vulnerability. An explicit
-    config ``ignore_fingerprints`` dismissal is a deliberate maintainer decision
-    and still applies — this carve-out is for the feedback channel only.
+    On a public repo a 👎 reaction is only as trustworthy as who left it, and an
+    inline pragma is PR-head text a fork's author controls, so neither must be
+    able to hide a serious vulnerability. An explicit config
+    ``ignore_fingerprints`` dismissal is a deliberate maintainer decision and
+    still applies.
     """
     return is_security_finding(finding) and finding.severity >= Severity.high
 
@@ -55,9 +59,13 @@ def _is_suppressed(
     # Config dismissal — unconditional (a maintainer's explicit decision).
     if fingerprint in cfg.ignore_fingerprints:
         return True
-    # Feedback learning — an authorised reviewer's 👎, but never a high/critical
-    # security finding, so a downvote can't hide a serious vulnerability.
-    if fingerprint in feedback_downvotes and not _is_protected_security(finding):
+    # Neither remaining channel may hide a high/critical security finding: a 👎 is
+    # only as trustworthy as who left it, and the pragma is read from the PR head,
+    # which a fork PR's author writes.
+    if _is_protected_security(finding):
+        return False
+    # Feedback learning — an authorised reviewer's 👎.
+    if fingerprint in feedback_downvotes:
         return True
     if not lines:
         return False

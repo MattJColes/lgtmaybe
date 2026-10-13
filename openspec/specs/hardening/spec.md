@@ -84,15 +84,14 @@ placeholder left in the source.
 ### Requirement: Parsing recovers leniently, validates strictly
 
 Model output SHALL be parsed as JSON with repair for common wrappers (fences,
-prose preamble), then validated against the strict finding schema — recovery
-never widens what is accepted, and unparseable output yields an error, not
-invented findings. That error SHALL name WHICH fault it was — a reply that
-never attempted JSON, one whose JSON does not decode, one that decoded to a
-shape that was never findings, one the strict schema refused, an empty reply,
-and one cut off mid-container are six different problems with six different
-fixes. The truncated case in particular SHALL NOT be reported as unparseable.
-Bracket-bearing prose SHALL NOT be reported as malformed JSON: prose is full
-of brackets that were never a container.
+prose preamble), then validated against the strict finding schema one finding
+at a time — recovery never widens what is accepted, an invalid finding is
+dropped (and logged) without its valid siblings, and output with nothing valid
+yields an error, not invented findings. That error SHALL name WHICH fault: no
+JSON attempted, JSON that does not decode, a shape that was never findings, a
+schema refusal, an empty reply, and a cut mid-container are six problems with
+six fixes. The truncated case SHALL NOT be reported as unparseable, nor
+bracket-bearing prose as malformed JSON (its brackets were never a container).
 <!-- anchor: hardening.parse -->
 
 #### Scenario: model wraps JSON in a code fence
