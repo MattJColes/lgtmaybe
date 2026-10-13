@@ -268,6 +268,17 @@ def test_security_plus_data_migration_is_critical(tmp_path: Path) -> None:
     assert assess_risk(ctx, _cfg(), tmp_path).level == "critical"
 
 
+def test_a_word_containing_login_is_not_a_security_area(tmp_path: Path) -> None:
+    ctx = _ctx(("src/pages/BlogIndex.tsx", 1), ("migrations/0042_drop.sql", 1))
+    assert assess_risk(ctx, _cfg(), tmp_path).level == "high", "migration alone, not critical"
+
+
+def test_a_camel_case_auth_file_is_a_security_area(tmp_path: Path) -> None:
+    result = assess_risk(_ctx(("src/middleware/authMiddleware.ts", 1)), _cfg(), tmp_path)
+    assert result.level == "high"
+    assert "touches security: `src/middleware/authMiddleware.ts`" in _texts(result)
+
+
 def test_a_medium_area_raises_to_medium(tmp_path: Path) -> None:
     result = assess_risk(_ctx(("pyproject.toml", 1)), _cfg(), tmp_path)
     assert result.level == "medium"
