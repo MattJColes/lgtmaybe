@@ -267,8 +267,25 @@ model_options = _stack(
     ),
 )
 
+#: The model-call knobs a slow local model needs, for every local command.
+model_call_options = _stack(
+    click.option(
+        "--timeout",
+        default=None,
+        type=int,
+        help="Per-request timeout in seconds for each model call (raise for slow local models)",
+    ),
+    click.option(
+        "--num-ctx",
+        default=None,
+        type=int,
+        help="ollama context window (ollama only; ignored for hosted providers). "
+        "Raise it so a large multi-file diff isn't truncated; default 32768",
+    ),
+)
+
 #: The flags the two local (no-GitHub) commands share: what to diff, and the
-#: model-call knobs a slow local model needs.
+#: model-call knobs above.
 local_diff_options = _stack(
     click.option(
         "--base",
@@ -290,19 +307,7 @@ local_diff_options = _stack(
         help="Use only the uncommitted working-tree edits (vs HEAD); "
         "mutually exclusive with --working",
     ),
-    click.option(
-        "--timeout",
-        default=None,
-        type=int,
-        help="Per-request timeout in seconds for each model call (raise for slow local models)",
-    ),
-    click.option(
-        "--num-ctx",
-        default=None,
-        type=int,
-        help="ollama context window (ollama only; ignored for hosted providers). "
-        "Raise it so a large multi-file diff isn't truncated; default 32768",
-    ),
+    model_call_options,
 )
 
 
@@ -629,6 +634,60 @@ def diagram(
     )
     runtime = _runtime(api_key, api_base, fallback_model)
     execute_local_diagram(cfg, runtime, base=base, working=working, uncommitted=uncommitted)
+
+
+@main.command("mcp")
+@model_options
+@model_call_options
+@click.option(
+    "--directory",
+    "-C",
+    default=None,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Repository to review, as if the server started there (like `git -C`) "
+    "[default: the directory the server starts in]",
+)
+def mcp_command(
+    provider: str | None,
+    model: str | None,
+    fallback_model: str | None,
+    api_key: str | None,
+    api_base: str | None,
+    config_path: str | None,
+    timeout: int | None,
+    num_ctx: int | None,
+    directory: Path | None,
+) -> None:
+    """Serve local reviews to a coding agent over MCP (stdio).
+
+    For Claude Code, Cursor and other Model Context Protocol clients: the agent
+    calls the review_changes tool (findings as JSON) or review_instructions
+    (fixes to apply) instead of running `lgtmaybe review` itself. The flags here
+    apply to every call; config and credentials load as they do for `review`.
+    Needs the MCP SDK: pip install 'lgtmaybe[mcp]'.
+    """
+    from lgtmaybe.cli import mcp_server
+
+    mcp_server.require_sdk()
+    if directory is not None:
+        os.chdir(directory)
+
+    def load_config(**overrides: Any) -> ReviewConfig:
+        return _load_cfg(
+            config_path,
+            user_config_path=store.user_config_path(),
+            provider=provider,
+            model=model,
+            timeout=timeout,
+            num_ctx=num_ctx,
+            **overrides,
+        )
+
+    # Fail at startup on a broken config, where the client shows the error,
+    # rather than on every tool call.
+    load_config()
+    runtime = _runtime(api_key, api_base, fallback_model)
+    mcp_server.serve(mcp_server.LocalReviewTools(load_config, runtime))
 
 
 @main.command()

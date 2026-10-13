@@ -266,6 +266,32 @@ NOT fail a review that produced findings.
 - **WHEN** writing the profile file fails
 - **THEN** the review still reports its findings
 
+### Requirement: Coding agents review over MCP
+
+`lgtmaybe mcp` SHALL serve the local review to Model Context Protocol clients
+over stdio, through the same engine path (`run_local_review`) and config layers
+as `lgtmaybe review`, re-read on every call. Two read-only tools take a diff
+`mode` (branch, working, uncommitted) plus optional `base`, `min_severity` and
+`preset`: `review_changes` returns the `json` format's findings with the summary
+line and an incomplete flag, `review_instructions` the `agent` format. stdout
+SHALL carry only the protocol. A failed review SHALL be a tool error naming the
+reason, never an empty result or a dead server. The SDK is the optional `mcp`
+extra, imported only by the command, which names the extra when it is missing.
+The server SHALL stop on SIGTERM rather than take the CLI's wind-down.
+<!-- anchor: cli.mcp-server -->
+
+#### Scenario: an agent asks for a review of its edits
+- **WHEN** a client calls `review_changes` with `mode: working`
+- **THEN** it receives the findings as data, and stdout held only JSON-RPC
+
+#### Scenario: the server runs outside a repository
+- **WHEN** a tool call cannot build the git context
+- **THEN** the call returns a tool error with the reason and the server serves on
+
+#### Scenario: the extra is not installed
+- **WHEN** `lgtmaybe mcp` runs without the MCP SDK
+- **THEN** it exits non-zero with the `pip install 'lgtmaybe[mcp]'` hint
+
 ### Requirement: Local findings export as SARIF
 
 `lgtmaybe review --format sarif` SHALL print a deterministic SARIF 2.1.0 log of
