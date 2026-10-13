@@ -273,9 +273,9 @@ _RATE_LIMIT_BACKOFF_MAX = 60.0
 # incomplete-results notice) be what handles it.
 _RETRY_AFTER_CEILING = 120.0
 
-_generic_wait = wait_exponential_jitter(initial=0.1, max=5)
+_generic_wait = wait_exponential_jitter(multiplier=0.1, max=5)
 _rate_limit_wait = wait_exponential_jitter(
-    initial=_RATE_LIMIT_BACKOFF_INITIAL, max=_RATE_LIMIT_BACKOFF_MAX
+    multiplier=_RATE_LIMIT_BACKOFF_INITIAL, max=_RATE_LIMIT_BACKOFF_MAX
 )
 
 

@@ -78,6 +78,8 @@ def _validate_key(key: str) -> None:
 
 def _coerce(key: str, value: str) -> Any:
     """Coerce a string value to the field's type, storing enums as plain values."""
-    annotation = ReviewConfig.model_fields[key].annotation
+    # FieldInfo.annotation is typed Optional, but every ReviewConfig field is
+    # annotated (``_validate_key`` has already confirmed the key exists).
+    annotation: Any = ReviewConfig.model_fields[key].annotation
     coerced: Any = TypeAdapter(annotation).validate_strings(value)
     return coerced.value if isinstance(coerced, Enum) else coerced
