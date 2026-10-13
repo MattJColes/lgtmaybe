@@ -35,8 +35,6 @@ import httpx
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
-    FINDING_MARKER,
-    IDENTITY_MARKER,
     REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
@@ -45,6 +43,7 @@ from lgtmaybe.core.comment import (
     render_broad,
     render_demoted,
     render_inline_body,
+    stamped_ids,
     strip_markers,
 )
 from lgtmaybe.core.diff import (
@@ -431,11 +430,9 @@ class GitLabGateway:
             if first.get("resolved"):
                 continue
             body = first.get("body") or ""
-            keys = finding_keys(body)
-            if not keys:
+            fingerprint, identity = stamped_ids(body)
+            if fingerprint is None and identity is None:
                 continue  # someone else's discussion
-            fingerprint = FINDING_MARKER.search(body)
-            identity = IDENTITY_MARKER.search(body)
             position = first.get("position") or {}
             active.append(
                 ActiveFinding(
@@ -443,8 +440,8 @@ class GitLabGateway:
                     comment_id=first.get("id"),
                     path=position.get("new_path") or "",
                     body=body,
-                    fingerprint=fingerprint.group(1) if fingerprint else None,
-                    identity=identity.group(1) if identity else None,
+                    fingerprint=fingerprint,
+                    identity=identity,
                     # GitLab exposes no "the lines moved" flag, so it is derived
                     # from the diff since the note was positioned.
                     outdated=self._is_outdated(position),
@@ -543,11 +540,11 @@ class GitLabGateway:
             if not notes:
                 continue
             first = notes[0]
-            match = FINDING_MARKER.search(first.get("body") or "")
+            fingerprint, _identity = stamped_ids(first.get("body"))
             note_id = first.get("id")
-            if match is None or not isinstance(note_id, int):
+            if fingerprint is None or not isinstance(note_id, int):
                 continue  # not one of ours
-            candidates.append((note_id, match.group(1)))
+            candidates.append((note_id, fingerprint))
         if not candidates:
             return set()
         workers = min(_CONTENT_FETCH_WORKERS, len(candidates))

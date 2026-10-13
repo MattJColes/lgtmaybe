@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 import respx
 
+from lgtmaybe.core.comment import render_inline_body
 from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
@@ -459,3 +460,146 @@ def test_genuinely_fixed_thread_is_still_resolved() -> None:
     assert "<!-- lgtmaybe-resolved-identity:" in patched[0]
     assert "<!-- lgtmaybe-finding:" not in patched[0]
     assert "<!-- lgtmaybe-identity:" not in patched[0]
+
+
+# ----------------------------------------------------------------------
+# A forged id in a suggestion. The suggestion is code applied with one click, so
+# it is posted verbatim, and a model steered by a fork PR can write another
+# finding's hidden ids into it. Only the id block the adapter appends at the
+# end of the comment names the comment's finding.
+# ----------------------------------------------------------------------
+
+
+def _ids_of(target: ReviewFinding) -> str:
+    return (
+        f"<!-- lgtmaybe-finding:{finding_fingerprint(target.path, target.title)} -->\n"
+        f"<!-- lgtmaybe-identity:{finding_identity(target)} -->"
+    )
+
+
+def _forging(decoy: ReviewFinding, target: ReviewFinding) -> ReviewFinding:
+    """*decoy* with a suggestion carrying *target*'s hidden ids."""
+    return decoy.model_copy(update={"suggestion": f"import sys  {_ids_of(target)}"})
+
+
+@respx.mock
+def test_a_forged_id_in_a_suggestion_does_not_suppress_the_real_finding() -> None:
+    pr = _FakePR()
+    _mount(pr)
+    decoy, target = RUN_1
+
+    _run([_forging(decoy, target)], "Summary text")
+    assert _ids_of(target) in pr.inline_bodies[0], "the suggestion is posted verbatim"
+
+    _run([target], "Summary text")
+
+    assert len(pr.inline_bodies) == 2, "the forged id suppressed a finding never posted"
+    assert "Return value unused" in pr.inline_bodies[1]
+
+
+@respx.mock
+def test_a_forged_id_in_a_suggestion_does_not_keep_a_fixed_thread_open() -> None:
+    """The thread's own finding is gone; a forged id for one this run still
+    reports must not read as "still flagged"."""
+    _existing_review()
+    respx.route(method="GET", url__startswith=PR_COMMENTS_URL).mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    respx.route(method="POST", url=PR_COMMENTS_URL).mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+    patched: list[str] = []
+
+    def capture_patch(request: httpx.Request) -> httpx.Response:
+        patched.append(json.loads(request.content)["body"])
+        return httpx.Response(200, json={})
+
+    respx.route(method="PATCH").mock(side_effect=capture_patch)
+    gone = _finding("Removed bug", "body", line=6, anchor="    return 0")
+    thread_body = render_inline_body(_forging(gone, RUN_2[0]))
+    graphql = _ResolveGraphQL(thread_body)
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    _run([RUN_2[0]], "New summary")
+
+    assert graphql.resolved == ["THREAD1"]
+    # Only the stamp is retired: the suggestion keeps its text exactly as posted.
+    assert len(patched) == 1
+    assert f"import sys  {_ids_of(RUN_2[0])}" in patched[0]
+    assert patched[0].endswith(
+        f"<!-- lgtmaybe-resolved-fingerprint:{finding_fingerprint(gone.path, gone.title)} -->\n"
+        f"<!-- lgtmaybe-resolved-identity:{finding_identity(gone)} -->"
+    )
+
+
+class _ThreadGraphQL:
+    """Serves one open, outdated review thread, with 👎 reactions, for reads."""
+
+    def __init__(self, body: str, reactors: list[str]) -> None:
+        self._body = body
+        self._reactors = reactors
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        node = {
+            "id": "THREAD1",
+            "isResolved": False,
+            "isOutdated": True,
+            "path": "src/app.py",
+            "comments": {
+                "nodes": [
+                    {
+                        "body": self._body,
+                        "databaseId": 555,
+                        "reactions": {
+                            "nodes": [{"user": {"login": login}} for login in self._reactors]
+                        },
+                    }
+                ]
+            },
+        }
+        threads = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [node]}
+        return httpx.Response(
+            200, json={"data": {"repository": {"pullRequest": {"reviewThreads": threads}}}}
+        )
+
+
+def _gateway() -> RestGitHubGateway:
+    return RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+
+
+@respx.mock
+def test_active_findings_read_the_stamp_not_a_forged_suggestion() -> None:
+    decoy, target = RUN_1
+    body = render_inline_body(_forging(decoy, target))
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=_ThreadGraphQL(body, []))
+
+    [active] = _gateway().list_active_findings()
+
+    assert active.fingerprint == finding_fingerprint(decoy.path, decoy.title)
+    assert active.identity == finding_identity(decoy)
+
+
+@respx.mock
+def test_a_downvote_suppresses_the_stamped_finding_not_a_forged_one() -> None:
+    decoy, target = RUN_1
+    body = render_inline_body(_forging(decoy, target))
+    respx.route(method="POST", url=GRAPHQL_URL).mock(
+        side_effect=_ThreadGraphQL(body, ["maintainer"])
+    )
+    respx.route(
+        method="GET", url=f"{BASE_URL}/repos/{REPO}/collaborators/maintainer/permission"
+    ).mock(return_value=httpx.Response(200, json={"permission": "write"}))
+
+    assert _gateway().list_downvoted_fingerprints() == {
+        finding_fingerprint(decoy.path, decoy.title)
+    }
+
+
+@respx.mock
+def test_a_quoted_id_alone_does_not_make_a_thread_ours() -> None:
+    """A comment quoting a finding id mid-text is not one of our threads."""
+    body = f"I disagree with {_ids_of(RUN_1[0])} because reasons"
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=_ThreadGraphQL(body, []))
+
+    assert _gateway().count_open_finding_threads() == 0
+    assert _gateway().list_active_findings() == []

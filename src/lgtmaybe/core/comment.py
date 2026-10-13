@@ -16,7 +16,8 @@ from .findings import finding_fingerprint, finding_identity
 from .models import ReviewFinding
 
 # The hidden per-finding ids stamped into every inline comment we post, and read
-# back on a re-run to tell "already reported" from "new".
+# back on a re-run to tell "already reported" from "new". Never search a comment
+# body with these: read its ids through ``stamped_ids`` / ``finding_keys``.
 FINDING_MARKER = re.compile(r"<!-- lgtmaybe-finding:([0-9a-f]+) -->")
 IDENTITY_MARKER = re.compile(r"<!-- lgtmaybe-identity:([0-9a-f]+) -->")
 
@@ -234,15 +235,48 @@ def render_unread_files(paths: list[str]) -> str:
     return "\n".join(lines)
 
 
+# The id block ``render_inline_body`` ends every finding comment with: the
+# fingerprint, then the identity (absent on a body that predates it), then
+# nothing but whitespace. Anchored to the end of the body because the text
+# before it includes the suggestion, which is posted verbatim and so can carry
+# any marker a steered model wrote into it.
+_STAMPED_IDS = re.compile(rf"{FINDING_MARKER.pattern}(?:\s*{IDENTITY_MARKER.pattern})?\s*\Z")
+
+
+def split_stamped_ids(body: str) -> tuple[str, str]:
+    """Split a finding comment into everything before its id block, and the block.
+
+    A body without a trailing id block comes back whole, with ``""`` as the
+    block. Lets a caller rewrite the ids the adapter stamped (resolve-on-fix
+    retiring them) without touching a look-alike inside the suggestion.
+    """
+    match = _STAMPED_IDS.search(body)
+    return (body, "") if match is None else (body[: match.start()], body[match.start() :])
+
+
+def stamped_ids(body: str | None) -> tuple[str | None, str | None]:
+    """The ``(fingerprint, identity)`` the adapter stamped on a finding comment.
+
+    Only the trailing id block counts. A suggestion is code applied with one
+    click, so it is posted exactly as the model wrote it, and a model steered by
+    a fork PR can write another finding's ids into it. Read as this comment's
+    own, a forged id would make a later run skip that finding as already
+    posted, resolve or keep open the wrong thread, or let a 👎 suppress it.
+    """
+    match = _STAMPED_IDS.search(body or "")
+    return (None, None) if match is None else (match.group(1), match.group(2))
+
+
 def finding_keys(body: str) -> set[str]:
-    """Every active hidden id carried by a comment body (fingerprint + identity).
+    """Every active hidden id the adapter stamped on a comment (fingerprint + identity).
 
     Two ids of the same finding, pooled into one set so "have we posted this?" is
     a single intersection. A body predating the identity marker yields just its
     fingerprint, which still matches whenever the title is unchanged — so old
-    conversations keep deduping exactly as they did.
+    conversations keep deduping exactly as they did. Ids anywhere else in the
+    body are ignored (``stamped_ids``).
     """
-    return set(FINDING_MARKER.findall(body)) | set(IDENTITY_MARKER.findall(body))
+    return {key for key in stamped_ids(body) if key}
 
 
 def current_finding_keys(findings: list[ReviewFinding]) -> set[str]:

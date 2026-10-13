@@ -25,8 +25,6 @@ from tenacity import Retrying, retry_if_result, stop_after_attempt
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
-    FINDING_MARKER,
-    IDENTITY_MARKER,
     REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
@@ -35,6 +33,8 @@ from lgtmaybe.core.comment import (
     render_broad,
     render_demoted,
     render_inline_body,
+    split_stamped_ids,
+    stamped_ids,
     strip_markers,
 )
 from lgtmaybe.core.diff import (
@@ -783,8 +783,7 @@ class RestGitHubGateway:
                 continue
             first = _first_comment(node)
             body = first.get("body", "") or ""
-            fingerprint = FINDING_MARKER.search(body)
-            identity = IDENTITY_MARKER.search(body)
+            fingerprint, identity = stamped_ids(body)
             if fingerprint is None and identity is None:
                 continue
             active.append(
@@ -793,8 +792,8 @@ class RestGitHubGateway:
                     comment_id=first.get("databaseId"),
                     path=node.get("path") or "",
                     body=body,
-                    fingerprint=fingerprint.group(1) if fingerprint else None,
-                    identity=identity.group(1) if identity else None,
+                    fingerprint=fingerprint,
+                    identity=identity,
                     outdated=bool(node.get("isOutdated")),
                 )
             )
@@ -1233,7 +1232,7 @@ class RestGitHubGateway:
             for node in self._walk_review_threads("isResolved comments(first:1){ nodes{ body } }"):
                 if node.get("isResolved"):
                     continue
-                if FINDING_MARKER.search(_first_comment(node).get("body", "")):
+                if finding_keys(_first_comment(node).get("body", "") or ""):
                     open_threads += 1
         except Exception as exc:  # noqa: BLE001 — disclosure is never worth a failed review
             _log.warning("counting open finding conversations failed: %s", exc)
@@ -1309,7 +1308,12 @@ class RestGitHubGateway:
         """
         if comment_id is None:
             raise RuntimeError("the resolved finding has no comment id to rewrite")
-        rewritten = body.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
+        # Only the stamped id block is retired. The suggestion above it is code,
+        # posted verbatim, and may quote an id of ours; rewriting it would change
+        # what a reader applies with one click, and buys nothing, since ids
+        # anywhere but the trailing block are never read.
+        prose, ids = split_stamped_ids(body)
+        rewritten = prose + ids.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
             _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
         )
         self._update_review_comment(comment_id, rewritten)
@@ -1359,8 +1363,8 @@ class RestGitHubGateway:
             "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
         ):
             first = _first_comment(node)
-            match = FINDING_MARKER.search(first.get("body", "") or "")
-            if match is None:
+            fingerprint, _identity = stamped_ids(first.get("body", "") or "")
+            if fingerprint is None:
                 continue  # not one of ours (or a thread with no comments)
             reactors = (first.get("reactions") or {}).get("nodes") or []
             logins: set[str] = set()
@@ -1373,7 +1377,7 @@ class RestGitHubGateway:
             # repo anyone can react, and an unprivileged reaction must never
             # suppress a finding.
             if any(self._has_repo_write(login) for login in logins):
-                downvoted.add(match.group(1))
+                downvoted.add(fingerprint)
         return downvoted
 
     def _has_repo_write(self, login: str) -> bool:
