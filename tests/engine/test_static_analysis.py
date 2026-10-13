@@ -21,6 +21,7 @@ the LLM pass or, for a `finding`-mode tool, is redacted and mapped onto findings
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -998,3 +999,303 @@ def test_osv_is_skipped_when_no_manifest_changed(monkeypatch) -> None:  # type: 
 
     assert findings == []
     assert run.calls == []
+
+
+# --- The PR cannot reconfigure or blind its own scanners ---------------------
+#
+# The corpus is PR-authored, and every tool discovers config, ignore files and
+# inline pragmas from the tree it scans. Each argv therefore pins its config to
+# a sandbox-owned file in the REPORT dir (never the corpus) and switches the
+# ignore-file discovery off. The faked runs below prove the argv; the real-binary
+# cases prove each flag actually defeats the attack on the installed version.
+
+_SANDBOX_PINS: dict[StaticAnalysisTool, tuple[dict[str, str], dict[str, str], list[str]]] = {
+    # tool: (files, {pin flag: expected file content, "" = need not exist}, flags)
+    StaticAnalysisTool.ast_grep: (
+        FILES,
+        {"-c": "ruleDirs: []\n"},
+        ["--no-ignore=hidden", "--no-ignore=dot"],
+    ),
+    StaticAnalysisTool.ruff: (
+        FILES,
+        {},
+        ["--isolated", "--no-respect-gitignore", "--ignore-noqa"],
+    ),
+    # An empty --exclude replaces bandit's default list, whose ".git" entry is a
+    # substring match that silently skips every file under .github/.
+    StaticAnalysisTool.bandit: (
+        FILES,
+        {"--ini": "[bandit]\n"},
+        ["--exclude=", "--ignore-nosec"],
+    ),
+    StaticAnalysisTool.semgrep: (FILES, {}, ["--no-git-ignore", "--disable-nosem"]),
+    StaticAnalysisTool.mypy: (FILES, {"--config-file": "[mypy]\n"}, []),
+    StaticAnalysisTool.gitleaks: (
+        FILES,
+        {"--config": "[extend]\nuseDefault = true\n"},
+        ["--ignore-gitleaks-allow"],
+    ),
+    StaticAnalysisTool.zizmor: (
+        WORKFLOW_FILES,
+        {},
+        ["--no-config", "--no-ignores", "--collect=all"],
+    ),
+    StaticAnalysisTool.osv_scanner: (MANIFEST_FILES, {"--config": ""}, ["--no-ignore"]),
+}
+
+
+@pytest.mark.parametrize("tool", list(_SANDBOX_PINS), ids=lambda t: t.value)
+def test_tool_config_is_pinned_outside_the_corpus(monkeypatch, tmp_path: Path, tool) -> None:  # type: ignore[no-untyped-def]
+    files, pins, flags = _SANDBOX_PINS[tool]
+    seen: dict[str, str | None] = {}
+
+    class _Run(_FakeReportRun):
+        def __call__(self, argv: list[str], **kwargs: object) -> SimpleNamespace:
+            args = [str(a) for a in argv]
+            corpus = Path(str(kwargs["cwd"]))
+            for flag in pins:
+                pinned = Path(args[args.index(flag) + 1])
+                assert corpus not in pinned.parents and pinned != corpus, flag
+                # Read while the run is live: the report dir is gone afterwards.
+                seen[flag] = pinned.read_text(encoding="utf-8") if pinned.is_file() else None
+            return super().__call__(argv, **kwargs)
+
+    rules = tmp_path / "rules.yml"
+    rules.write_text("id: no-eval\n", encoding="utf-8")
+    run = _Run("[]")
+    _patch_tools(monkeypatch, run, present={tool.value})
+
+    run_static_analysis(files, _cfg(tools=[tool], ast_grep_rules=str(rules)))
+
+    argv = [str(a) for a in run.calls[0]["argv"]]
+    assert all(flag in argv for flag in flags), argv
+    for flag, content in pins.items():
+        if content:
+            assert seen[flag] == content, flag
+
+
+@pytest.mark.parametrize("name", [".semgrepignore", "src/.gitleaksignore"])
+def test_unpinnable_tool_config_is_never_written_into_the_corpus(tmp_path: Path, name) -> None:  # type: ignore[no-untyped-def]
+    """No flag switches off semgrep's root ``.semgrepignore`` or the scanned dir's
+    ``.gitleaksignore``, so the PR's own copy is withheld from the corpus instead
+    (the model still reviews it)."""
+    written = _write_corpus(tmp_path, {name: "src/\n", "src/app.py": "x = 1\n"})
+
+    assert written == ["src/app.py"]
+    assert not (tmp_path / name).exists()
+
+
+_EVAL = "import os\nx = eval(input())\n"
+_BAD_WORKFLOW = (
+    "name: bad\n"
+    "on: [pull_request_target]\n"
+    "jobs:\n"
+    "  x:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - uses: actions/checkout@v4\n"
+    '      - run: echo "${{ github.event.pull_request.title }}"\n'
+)
+_ZIZMOR_OFF = "rules:\n  template-injection:\n    disable: true\n"
+_PAT = "ghp_012345678901234567890123456789abcdef"
+
+
+def _real(tool: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(shutil.which(tool) is None, reason=f"{tool} not installed")
+
+
+_BLINDING = [
+    pytest.param(
+        StaticAnalysisTool.ast_grep,
+        {"sgconfig.yml": "ruleDirs: []\nlanguageGlobs:\n  html: ['*.py']\n", "src/app.py": _EVAL},
+        "no-eval",
+        id="ast-grep-sgconfig-language-globs",
+        marks=_real("ast-grep"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.ast_grep,
+        {"src/.ignore": "app.py\n", "src/app.py": _EVAL},
+        "no-eval",
+        id="ast-grep-dot-ignore",
+        marks=_real("ast-grep"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.ast_grep,
+        {".github/scripts/app.py": _EVAL},
+        "no-eval",
+        id="ast-grep-hidden-dir",
+        marks=_real("ast-grep"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.ruff,
+        {"src/.ignore": "app.py\n", "src/app.py": _EVAL},
+        "F401",
+        id="ruff-dot-ignore",
+        marks=_real("ruff"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.ruff,
+        {"src/app.py": _EVAL.replace("import os\n", "import os  # noqa\n")},
+        "F401",
+        id="ruff-inline-noqa",
+        marks=_real("ruff"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.bandit,
+        {"src/app.py": _EVAL.replace("input())\n", "input())  # nosec\n")},
+        "B307",
+        id="bandit-inline-nosec",
+        marks=_real("bandit"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.bandit,
+        {".bandit": "[bandit]\nskips = B307\n", "src/app.py": _EVAL},
+        "B307",
+        id="bandit-ini",
+        marks=_real("bandit"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.bandit,
+        {".github/scripts/app.py": _EVAL},
+        "B307",
+        id="bandit-github-dir",
+        marks=_real("bandit"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.semgrep,
+        {".semgrepignore": "src/\n", "src/app.py": _EVAL},
+        "eval",
+        id="semgrepignore",
+        marks=_real("semgrep"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.semgrep,
+        {"src/app.py": _EVAL.replace("input())\n", "input())  # nosemgrep\n")},
+        "eval",
+        id="semgrep-inline-nosem",
+        marks=_real("semgrep"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.zizmor,
+        {"zizmor.yml": _ZIZMOR_OFF, ".github/workflows/bad.yml": _BAD_WORKFLOW},
+        "template-injection",
+        id="zizmor-config",
+        marks=_real("zizmor"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.zizmor,
+        {".github/zizmor.yml": _ZIZMOR_OFF, ".github/workflows/bad.yml": _BAD_WORKFLOW},
+        "template-injection",
+        id="zizmor-github-config",
+        marks=_real("zizmor"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.zizmor,
+        {".gitignore": "*.yml\n", ".github/workflows/bad.yml": _BAD_WORKFLOW},
+        "template-injection",
+        id="zizmor-gitignore",
+        marks=_real("zizmor"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.zizmor,
+        {
+            ".github/workflows/bad.yml": _BAD_WORKFLOW.replace(
+                'title }}"\n', 'title }}" # zizmor: ignore[template-injection]\n'
+            )
+        },
+        "template-injection",
+        id="zizmor-inline-ignore",
+        marks=_real("zizmor"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.gitleaks,
+        {
+            ".gitleaks.toml": '[extend]\nuseDefault = true\n[allowlist]\npaths = ["src"]\n',
+            "src/settings.py": f'TOKEN = "{_PAT}"\n',
+        },
+        "github-pat",
+        id="gitleaks-config",
+        marks=_real("gitleaks"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.gitleaks,
+        {
+            ".gitleaksignore": "src/settings.py:github-pat:1\n",
+            "src/settings.py": f'TOKEN = "{_PAT}"\n',
+        },
+        "github-pat",
+        id="gitleaks-ignore-file",
+        marks=_real("gitleaks"),
+    ),
+    pytest.param(
+        StaticAnalysisTool.gitleaks,
+        {"src/settings.py": f'TOKEN = "{_PAT}"  # gitleaks:allow\n'},
+        "github-pat",
+        id="gitleaks-inline-allow",
+        marks=_real("gitleaks"),
+    ),
+    *(
+        pytest.param(
+            StaticAnalysisTool.osv_scanner,
+            {"requirements.txt": "jinja2==2.4.1\n", **attack},
+            "GHSA-462w-v97r-4m45",
+            id=f"osv-{name}",
+            # Offline only, so a real run needs a seeded local database too.
+            marks=[
+                _real("osv-scanner"),
+                pytest.mark.skipif(
+                    not os.environ.get("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"),
+                    reason="no offline vulnerability database",
+                ),
+            ],
+        )
+        for name, attack in {
+            "config": {
+                "osv-scanner.toml": '[[PackageOverrides]]\nname = "jinja2"\n'
+                'ecosystem = "PyPI"\nignore = true\n'
+            },
+            "gitignore": {".gitignore": "requirements.txt\n"},
+        }.items()
+    ),
+]
+
+
+@pytest.mark.parametrize(("tool", "files", "rule"), _BLINDING)
+def test_the_pr_cannot_blind_its_own_scanner(tmp_path: Path, tool, files, rule) -> None:  # type: ignore[no-untyped-def]
+    rules = tmp_path / "rules.yml"
+    rules.write_text(
+        "id: no-eval\nlanguage: python\nseverity: error\n"
+        "message: eval on untrusted input\nrule:\n  pattern: eval($$$ARGS)\n",
+        encoding="utf-8",
+    )
+
+    findings = run_static_analysis(
+        files, _cfg(tools=[tool], ast_grep_rules=str(rules), min_severity=Severity.info)
+    )
+
+    assert any(rule in f.rule for f in findings), [(f.path, f.rule) for f in findings]
+
+
+def test_findings_are_relativised_under_a_symlinked_temp_dir(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    """macOS's temp dir is a symlink (/var -> /private/var) and tools report the
+    RESOLVED path, so an unresolved corpus root kept absolute temp paths."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks unavailable on this platform")
+    monkeypatch.setattr(static_analysis.tempfile, "tempdir", str(link))
+
+    class _Run(_FakeRun):
+        def __call__(self, argv: list[str], **kwargs: object) -> SimpleNamespace:
+            self.calls.append({"argv": argv, **kwargs})
+            resolved = Path(str(kwargs["cwd"])).resolve().as_posix()
+            return SimpleNamespace(stdout=_ruff_output(resolved), stderr="", returncode=0)
+
+    _patch_tools(monkeypatch, _Run(), present={"ruff"})
+
+    findings = run_static_analysis(FILES, _cfg(tools=[StaticAnalysisTool.ruff]))
+
+    assert [f.path for f in findings] == ["src/app.py"]
