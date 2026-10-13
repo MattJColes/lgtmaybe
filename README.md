@@ -114,11 +114,15 @@ with changes, review the diff against the primary branch:
 ```bash
 pip install lgtmaybe        # or Homebrew/WinGet: see docs/how-to/install-the-cli.md
 
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434
+lgtmaybe config init        # detects ollama or your API key, checks it, saves it
+lgtmaybe review
 ```
+
+`config init` finds a running ollama (and its pulled models) or a provider API
+key in your environment, suggests a current model, checks it with one tiny
+request, and saves the provider and model (never the key). You can skip it and
+pass `--provider ollama --model qwen3.6:27b` instead; with neither, `review`
+stops at once and says so rather than guessing a model.
 
 You need no GitHub token and no pull request: `lgtmaybe review` reads your
 local `git` diff and prints the findings. `lgtmaybe diagram` takes the same
@@ -129,8 +133,9 @@ areas, and a picture of the components it touches and the flow it alters. Run
 the review from your Git hooks on every push, use the
 [pre-commit hooks](docs/how-to/review-before-you-commit.md).
 
-`lgtmaybe --help` lists every command with usage examples, and
-`lgtmaybe review --help` shows every option. To post reviews on real pull
+`lgtmaybe --help` lists every command with usage examples,
+`lgtmaybe review --help` shows the everyday options, and
+`lgtmaybe review --help-all` adds the advanced tuning ones. To post reviews on real pull
 requests, set up the [GitHub Action](#use-as-a-github-action), or on another
 host, [GitLab CI](docs/how-to/review-on-gitlab.md) or
 [Gitea Actions](docs/how-to/review-on-gitea.md).

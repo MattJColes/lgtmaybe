@@ -154,3 +154,102 @@ def test_version_flag_survives_an_uninstalled_checkout(monkeypatch) -> None:
     result = CliRunner().invoke(main, ["--version"])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "lgtmaybe unknown"
+
+
+# --- Progressive disclosure: `review --help` vs `review --help-all` ---------
+
+#: The options a first-time user reaches for; everything else is tuning.
+_COMMON_REVIEW_FLAGS = (
+    "--provider",
+    "--model",
+    "--base",
+    "--working",
+    "--uncommitted",
+    "--format",
+    "--json",
+    "--min-severity",
+    "--full",
+    "--config",
+)
+
+
+def _flag_listed(output: str, flag: str) -> bool:
+    """True when `flag` heads an option row (not merely mentioned in prose)."""
+    return any(
+        line.lstrip().startswith((f"{flag} ", f"{flag},", f"{flag}/")) or line.strip() == flag
+        for line in output.splitlines()
+    )
+
+
+def _advanced_review_flags() -> list[str]:
+    common = set(_COMMON_REVIEW_FLAGS) | {"--help", "--help-all"}
+    return [flag for flag in _options("review") if flag not in common]
+
+
+def test_review_help_shows_only_the_common_options() -> None:
+    result = CliRunner().invoke(main, ["review", "--help"])
+
+    assert result.exit_code == 0, result.output
+    for flag in _COMMON_REVIEW_FLAGS:
+        assert _flag_listed(result.output, flag), flag
+    for flag in _advanced_review_flags():
+        assert not _flag_listed(result.output, flag), flag
+
+
+def test_review_help_fits_one_screen() -> None:
+    result = CliRunner().invoke(main, ["review", "--help"], terminal_width=80)
+
+    assert len(result.output.splitlines()) <= 40, result.output
+
+
+def test_review_help_counts_and_points_at_the_advanced_options() -> None:
+    result = CliRunner().invoke(main, ["review", "--help"])
+
+    advanced = len(_advanced_review_flags())
+    last = result.output.strip().splitlines()[-1]
+    assert f"{advanced} advanced tuning options" in last
+    assert "--help-all" in last
+
+
+def test_review_help_all_shows_every_option() -> None:
+    result = CliRunner().invoke(main, ["review", "--help-all"])
+
+    assert result.exit_code == 0, result.output
+    for flag in _options("review"):
+        assert _flag_listed(result.output, flag), flag
+    assert "Common options" in result.output
+    assert "Advanced options" in result.output
+    assert "advanced tuning options: run" not in result.output
+
+
+def test_advanced_review_options_still_parse(monkeypatch) -> None:
+    """Hiding an option from the short help is rendering only: it still parses."""
+    import lgtmaybe.cli as cli_module
+
+    seen: dict[str, object] = {}
+
+    def _capture(cfg, runtime, **_kwargs):
+        seen["cfg"] = cfg
+        raise RuntimeError("stop after config")
+
+    monkeypatch.setattr(cli_module, "build_provider_engine", _capture)
+    CliRunner().invoke(
+        main,
+        [
+            "review",
+            "--provider",
+            "ollama",
+            "--model",
+            "m",
+            "--num-ctx",
+            "4096",
+            "--no-reflect",
+            "--max-files",
+            "3",
+        ],
+    )
+
+    cfg = seen["cfg"]
+    assert cfg.num_ctx == 4096  # type: ignore[attr-defined]
+    assert cfg.reflect is False  # type: ignore[attr-defined]
+    assert cfg.max_files == 3  # type: ignore[attr-defined]
