@@ -6,6 +6,12 @@ cli.review-command:
     has: { field: name, regex: '^review$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.progressive-help:
+  rule:
+    kind: class_definition
+    has: { field: name, regex: '^ProgressiveHelpCommand$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.run-review:
   rule:
     kind: function_definition

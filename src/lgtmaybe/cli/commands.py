@@ -147,6 +147,78 @@ def _stack(*options: Callable[..., Any]) -> Callable[[F], F]:
     return wrap
 
 
+class ProgressiveHelpCommand(click.Command):
+    """A command whose ``--help`` shows only its everyday options.
+
+    ``common`` names the parameters a first-time user reaches for; every other
+    option is tuning, listed only by ``--help-all`` and summarised in the short
+    help by one trailing line. Rendering only: every option parses exactly the
+    same either way.
+    """
+
+    def __init__(self, *args: Any, common: frozenset[str], **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.common = common | {"help_all"}
+
+    def format_options(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        common: list[tuple[str, str]] = []
+        advanced: list[tuple[str, str]] = []
+        for param in self.get_params(ctx):
+            record = param.get_help_record(ctx)
+            if record is not None:
+                is_common = param.name in self.common or "--help" in param.opts
+                (common if is_common else advanced).append(record)
+        if ctx.meta.get(_HELP_ALL_KEY):
+            for title, records in (("Common options", common), ("Advanced options", advanced)):
+                with formatter.section(title):
+                    formatter.write_dl(records)
+            return
+        with formatter.section("Options"):
+            formatter.write_dl(common)
+        formatter.write_paragraph()
+        formatter.write_text(
+            f"{len(advanced)} advanced tuning options: run `{ctx.command_path} --help-all`"
+        )
+
+
+_HELP_ALL_KEY = "lgtmaybe.help_all"
+
+
+def _show_help_all(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """Eager ``--help-all``: print the full option reference, then exit."""
+    if not value or ctx.resilient_parsing:
+        return
+    ctx.meta[_HELP_ALL_KEY] = True
+    click.echo(ctx.get_help(), color=ctx.color)
+    ctx.exit()
+
+
+help_all_option = click.option(
+    "--help-all",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_show_help_all,
+    help="Show every option, including the advanced tuning ones, and exit.",
+)
+
+#: The options `review --help` shows; the rest wait for `--help-all`.
+_COMMON_REVIEW_OPTIONS = frozenset(
+    {
+        "provider",
+        "model",
+        "base",
+        "working",
+        "uncommitted",
+        "output_format",
+        "as_json",
+        "min_severity",
+        "full_preset",
+        "config_path",
+    }
+)
+
+
 #: The provider/model/credential flags every model-invoking command takes.
 model_options = _stack(
     click.option(
@@ -230,7 +302,7 @@ local_diff_options = _stack(
 )
 
 
-@main.command()
+@main.command(cls=ProgressiveHelpCommand, common=_COMMON_REVIEW_OPTIONS)
 @model_options
 @local_diff_options
 @click.option(
@@ -478,6 +550,7 @@ local_diff_options = _stack(
     help="Print a timing profile at the end of the run: total wall time, "
     "per-stage and per-call tables, and prompt-cache hit totals",
 )
+@help_all_option
 def review(**inputs: Any) -> None:
     """Review local git changes and print findings — no GitHub needed."""
     working = inputs.pop("working")

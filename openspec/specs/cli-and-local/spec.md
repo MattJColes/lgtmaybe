@@ -18,6 +18,20 @@ silent success.
 - **THEN** the run exits non-zero with the error surfaced, and a failure
   comment is posted on the PR
 
+### Requirement: Review help discloses progressively
+
+`lgtmaybe review --help` SHALL list only the everyday options (provider,
+model, base, working, uncommitted, format/json, min-severity, full, config)
+and end with one line counting the advanced tuning options and naming
+`--help-all`, which lists every option under Common and Advanced headings.
+The split is rendering only: every option parses the same either way.
+<!-- anchor: cli.progressive-help -->
+
+#### Scenario: first-time user asks for help
+- **WHEN** `lgtmaybe review --help` runs
+- **THEN** the output fits one screen (about 40 lines) and points at
+  `--help-all` for the rest
+
 ### Requirement: One orchestrator behind every entrypoint
 
 `run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, and `action` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path; explicit `incremental: false` and `/review full` SHALL run a full review.
