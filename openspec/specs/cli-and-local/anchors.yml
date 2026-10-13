@@ -62,6 +62,12 @@ cli.profile-output:
     has: { field: name, regex: '^_write_profile_json$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.sarif-output:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^render_sarif$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
 cli.local-context:
   rule:
     kind: function_definition
