@@ -772,6 +772,13 @@ class LiteLLMProvider:
         # instead of reading a marker the sibling set before it finished.
         self._route_params: dict[str, frozenset[str] | None] = {}
         self._rejected_params: dict[str, set[str]] = {}
+        # Models a configured `temperature` never reached — stripped by litellm
+        # before the request (see `_litellm_drops_temperature`), or refused by
+        # the model and re-sent without it. Keyed by MODEL like the schema sets:
+        # the fallback and the triage/reflect slots share this instance.
+        self._temperature_dropped: set[str] = set()
+        # Memo of the drop lookup, keyed by what decides it (route, value, effort).
+        self._temperature_reach: dict[tuple[str, str, str], bool] = {}
         # Memoized supports-cache-control answers: the review fans out many
         # completions on the same model string, and the capability lookup is a
         # pure function of it. Instance-scoped (not lru_cache) so tests that
@@ -999,6 +1006,44 @@ class LiteLLMProvider:
         question only this one can.
         """
         return bool(self._schema_dropped)
+
+    def temperature_dropped(self) -> bool:
+        """Whether a configured ``temperature`` never reached a model this run.
+
+        Adapter-only and feature-detected, exactly like ``schema_dropped``: the
+        engine reads it to say the review may not be reproducible, which is what
+        the ``temperature: 0.0`` default exists to buy and what a silent drop
+        quietly takes away.
+        """
+        return bool(self._temperature_dropped)
+
+    def _note_temperature_reach(self, model: str, kwargs: Mapping[str, Any]) -> None:
+        """Record whether litellm will strip this request's ``temperature``.
+
+        Read-only on *kwargs*: this discloses, it never changes what is sent.
+        Memoised on the three things the answer depends on, because the lens
+        fan-out sends the same shape many times and the effort can change
+        mid-run (the step-down retries), which can change the answer.
+        """
+        temperature = kwargs.get("temperature")
+        if temperature is None or model in self._temperature_dropped:
+            return
+        effort = kwargs.get("reasoning_effort")
+        key = (model, repr(temperature), repr(effort))
+        if key not in self._temperature_reach:
+            self._temperature_reach[key] = _litellm_drops_temperature(model, temperature, effort)
+        if self._temperature_reach[key]:
+            self._mark_temperature_dropped(model, "route-unsupported")
+
+    def _mark_temperature_dropped(self, model: str, why: str) -> None:
+        """Record — and announce, once per model — a temperature that never arrived."""
+        if model in self._temperature_dropped:
+            return
+        self._temperature_dropped.add(model)
+        _log.warning(
+            "configured temperature not sent to this model — reviews may not be reproducible",
+            extra={"model": model, "reason": why},
+        )
 
     def lower_reasoning_effort(self) -> dict[str, Any] | None:
         """Per-call opts that step this provider's reasoning effort down one level.
@@ -1287,6 +1332,7 @@ class LiteLLMProvider:
         out, so the reported attempt count matches the number of model calls this
         made — including the re-sends below, each a second billed request.
         """
+        self._note_temperature_reach(model, kwargs)
         while True:
             count_request()
             try:
@@ -1333,6 +1379,7 @@ class LiteLLMProvider:
             # own default.
             kwargs.pop("temperature")
             self._rejected_params.setdefault(model, set()).add("temperature")
+            self._mark_temperature_dropped(model, "rejected")
             return True
         # Before the schema branch, deliberately: a refused reasoning effort
         # arrives naming `output_config.effort`, which the schema matcher below
@@ -1780,6 +1827,43 @@ def _supported_params(model: str) -> frozenset[str] | None:
     if supported is None:
         return None
     return frozenset(str(name) for name in supported)
+
+
+def _litellm_drops_temperature(model: str, temperature: Any, effort: Any) -> bool:
+    """Whether litellm will strip *temperature* from a request to *model*.
+
+    Asked of the function litellm's own ``completion()`` uses to build the
+    request params (``get_optional_params``) — once with the temperature, once
+    without — rather than predicted from a capability list. The drop has
+    several shapes a list cannot express: Converse omits the param for models
+    flagged ``supports_sampling_params: false``, but the OpenAI gpt-5 route
+    LISTS it and still discards any non-1 value unless the reasoning effort
+    resolves to ``none`` (explicitly, or as the model's declared default), and
+    the Anthropic route does the same per model. Mapping the real request
+    params follows whatever rule the installed litellm applies. The response
+    cannot answer this instead: its ``_hidden_params["optional_params"]`` holds
+    the caller's pre-mapping values, temperature included, even when the wire
+    request carried none.
+
+    Dropped means BOTH: no ``temperature`` key in the mapped params, and the
+    mapped params identical to a request that never set one — so a route that
+    renames the field (it changed the output) or injects its own value (the key
+    is present) is never flagged. The effort goes in because the gpt-5 rule
+    turns on it; it is the only other request input the drop rules above read.
+    Pure and offline: no request is made. Any failure — an unknown route, a
+    lookup that raises — reports "not dropped": this is disclosure, never a
+    reason a review fails.
+    """
+    try:
+        bare, route, _, _ = litellm.get_llm_provider(model=model)
+        extra = {} if effort is None else {"reasoning_effort": effort}
+        sent = litellm.get_optional_params(
+            model=bare, custom_llm_provider=route, temperature=temperature, **extra
+        )
+        unset = litellm.get_optional_params(model=bare, custom_llm_provider=route, **extra)
+    except Exception:
+        return False
+    return "temperature" not in sent and sent == unset
 
 
 def _mapped_input_window(model: str) -> int | None:

@@ -10,7 +10,7 @@ import contextlib
 import io
 import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import litellm
@@ -610,3 +610,115 @@ class TestRouteSchemaSupportUnderConcurrency:
             (False, False),
             (False, False),
         ]
+
+
+class TestTemperatureReach:
+    """``drop_params`` strips a temperature the route will not take, silently.
+
+    The determinism default is the knob that vanishes that way — on Bedrock
+    Converse models flagged ``supports_sampling_params: false``, on OpenAI
+    gpt-5.x while reasoning is active, on Claude models that removed sampling —
+    so the adapter has to say when what it configured never reached the model.
+    These run against litellm's bundled model map (see ``tests/conftest.py``),
+    because the map is what decides the drop.
+    """
+
+    _MESSAGES: ClassVar[list[Any]] = [{"role": "user", "content": "hi"}]
+
+    def _run(self, model: str, **opts: Any) -> tuple[LiteLLMProvider, list[dict[str, Any]]]:
+        sent: list[dict[str, Any]] = []
+
+        def capture(**kwargs: Any) -> Any:
+            sent.append(kwargs)
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=capture):
+            provider = LiteLLMProvider(model=model, **opts)
+            provider.complete(self._MESSAGES, "ignored")
+        return provider, sent
+
+    def test_a_bedrock_model_without_sampling_params_is_flagged(self) -> None:
+        provider, sent = self._run("bedrock/us.openai.gpt-5.5", temperature=0.0)
+
+        assert provider.temperature_dropped()
+        # Disclosure only: the request still carries exactly what it did before
+        # — litellm is what strips it, and what this adapter hands it is unchanged.
+        assert sent[0]["temperature"] == 0.0
+
+    def test_a_gpt5_model_with_reasoning_active_is_flagged(self) -> None:
+        provider, _ = self._run("openai/gpt-5.5", temperature=0.0)
+        assert provider.temperature_dropped()
+
+    def test_a_gpt5_model_with_reasoning_off_is_not_flagged(self) -> None:
+        """The one condition under which litellm forwards a non-1 temperature."""
+        provider, _ = self._run("openai/gpt-5.5", temperature=0.0, reasoning_effort="none")
+        assert not provider.temperature_dropped()
+
+    def test_a_claude_model_that_removed_sampling_is_flagged(self) -> None:
+        provider, _ = self._run("anthropic/claude-mythos-5", temperature=0.0)
+        assert provider.temperature_dropped()
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "openai/gpt-4o",
+            "anthropic/claude-sonnet-4-5",
+            "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "ollama/qwen3:8b",
+            "vertex_ai/gemini-2.5-pro",
+        ],
+    )
+    def test_a_route_that_takes_the_temperature_is_not_flagged(self, model: str) -> None:
+        provider, sent = self._run(model, temperature=0.0)
+        assert not provider.temperature_dropped()
+        assert sent[0]["temperature"] == 0.0
+
+    def test_no_configured_temperature_is_never_flagged(self) -> None:
+        """Nothing was configured, so nothing was lost."""
+        provider, sent = self._run("bedrock/us.openai.gpt-5.5")
+        assert not provider.temperature_dropped()
+        assert "temperature" not in sent[0]
+
+    def test_a_failed_lookup_is_not_flagged_and_never_fails_the_call(self) -> None:
+        """Instrumentation must never be the reason a review does not run."""
+        with patch("litellm.get_optional_params", side_effect=RuntimeError("map exploded")):
+            provider, sent = self._run("bedrock/us.openai.gpt-5.5", temperature=0.0)
+        assert not provider.temperature_dropped()
+        assert len(sent) == 1
+
+    def test_an_unknown_route_is_not_flagged(self) -> None:
+        provider, _ = self._run("totally-unknown/xyz", temperature=0.0)
+        assert not provider.temperature_dropped()
+
+    def test_a_temperature_the_model_refused_is_flagged(self) -> None:
+        """The other way it goes missing: the route forwards it and the model
+        400s on the value, so the adapter re-sends without it."""
+
+        def reject(**kwargs: Any) -> Any:
+            if "temperature" in kwargs:
+                raise RuntimeError(
+                    "litellm.BadRequestError: Unsupported value: 'temperature' does not "
+                    "support 0 with this model. Only the default (1) value is supported."
+                )
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=reject):
+            provider = LiteLLMProvider(model="openai/gpt-4o", temperature=0.0)
+            provider.complete(self._MESSAGES, "ignored")
+
+        assert provider.temperature_dropped()
+
+    def test_the_lookup_is_paid_once_per_model_not_once_per_lens(self) -> None:
+        """The fan-out sends the same shape many times; the answer is a pure
+        function of the route, the value and the effort."""
+        real = litellm.get_optional_params
+        with (
+            patch("litellm.get_optional_params", side_effect=real) as lookup,
+            patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
+        ):
+            provider = LiteLLMProvider(model="bedrock/us.openai.gpt-5.5", temperature=0.0)
+            for _ in range(5):
+                provider.complete(self._MESSAGES, "ignored")
+
+        assert provider.temperature_dropped()
+        assert lookup.call_count == 2, "with and without the temperature, once"

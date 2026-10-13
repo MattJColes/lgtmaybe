@@ -281,6 +281,9 @@ class _NoticeState:
     # the spec lens ran at all (against the specs that did fit).
     spec_unfit: list[str] = field(default_factory=list)
     spec_reviewed: bool = False
+    # A configured temperature litellm stripped, or the model refused — the
+    # review may not be reproducible (see `_TEMPERATURE_DROP_NOTE`).
+    temperature_dropped: bool = False
 
 
 def _build_notices(state: _NoticeState) -> list[str]:
@@ -372,6 +375,8 @@ def _build_notices(state: _NoticeState) -> list[str]:
         )
     if state.failed_calls and state.schema_dropped:
         notices.append(f"🧩 {_SCHEMA_DROP_NOTE}")
+    if state.temperature_dropped:
+        notices.append(f"🎲 {_TEMPERATURE_DROP_NOTE}")
     if state.split_batches:
         plural = _plural(state.split_batches, many="es")
         was = _plural(state.split_batches, "was", "were")
@@ -861,6 +866,16 @@ class LLMReviewEngine:
         suite growing a method to say "no".
         """
         probe = getattr(self._provider, "schema_dropped", None)
+        return bool(probe()) if callable(probe) else False
+
+    def _temperature_dropped(self) -> bool:
+        """Whether a configured temperature never reached the model this run.
+
+        Feature-detected like ``_schema_dropped``, for the same reason: only the
+        litellm adapter can know, so a provider without the method never reports
+        a drop.
+        """
+        probe = getattr(self._provider, "temperature_dropped", None)
         return bool(probe()) if callable(probe) else False
 
     def __init__(
@@ -1482,6 +1497,7 @@ class LLMReviewEngine:
                 self_talk=dict(self._self_talk),
                 spec_unfit=list(spec_context.unfit),
                 spec_reviewed=clean_spec is not None,
+                temperature_dropped=self._temperature_dropped(),
             )
         )
         # Which lenses completed, on every summary shape — hidden, so it costs
@@ -2953,6 +2969,16 @@ _SCHEMA_DROP_NOTE = (
     "The model refused the structured-output schema partway through this run, so "
     "later calls asked for JSON in the prompt only — a likely cause of the failures "
     "above. The provider log names which model and why."
+)
+
+# Shown on every summary it applies to, failures or not: unlike a dropped
+# schema it explains nothing that went wrong — it qualifies what went right. The
+# `temperature: 0.0` default is what makes a review reproducible, and litellm's
+# `drop_params` takes it away without a word on routes that refuse sampling
+# params (and the model's own refusal, retried without it, is just as quiet).
+_TEMPERATURE_DROP_NOTE = (
+    "The configured `temperature` never reached the model — its route does not "
+    "accept one — so this review may not be reproducible. The provider log names the model."
 )
 
 
