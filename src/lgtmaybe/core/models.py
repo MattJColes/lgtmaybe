@@ -199,9 +199,10 @@ class StaticAnalysisConfig(_Strict):
     # `engine.static_analysis._DEFAULT_MODE`, which routes deterministic-claim
     # tools straight to posting and interpretive ones through the model.
     tool_mode: dict[StaticAnalysisTool, ToolMode] = Field(default_factory=dict)
-    # Local semgrep rules file/dir passed as --config. semgrep is SKIPPED when
-    # unset: its registry configs (`--config auto`) fetch over the network,
-    # which the sandbox forbids.
+    # Local semgrep rules file/dir passed as --config. Unset runs the bundled
+    # MIT rule pack (`static_analysis.bundled_semgrep_rules`) — never the
+    # registry configs (`--config auto`), which fetch over the network the
+    # sandbox forbids.
     semgrep_rules: str | None = None
     # Local ast-grep rule file/dir. ast-grep ships no rules of its own, so it is
     # SKIPPED when unset — this is the deterministic sibling of `extra_lenses`:

@@ -294,11 +294,10 @@ local_diff_options = _stack(
     default=None,
     type=click.IntRange(min=0),
     help="Cap the tokens each model call may generate (any provider; 0 = no cap). "
-    "Unset means ollama gets a finite default ceiling — a local model can otherwise "
-    "decode until the timeout — and every hosted route keeps the model's own. Set it "
-    "on a prepaid route like OpenRouter, which reserves prompt + max_tokens against "
-    "your balance before generating and assumes the model's full ceiling when the "
-    "request omits it",
+    "Unset means ollama, openai-compatible and openrouter get a finite default "
+    "ceiling (16384) — a local model can otherwise decode until the timeout, and "
+    "OpenRouter reserves prompt + max_tokens against a prepaid balance — while "
+    "every other route keeps the model's own",
 )
 @click.option(
     "--reasoning-effort",
@@ -335,9 +334,9 @@ local_diff_options = _stack(
     default=None,
     type=click.IntRange(min=1),
     help="Concurrent review calls across the whole fan-out (all batches and "
-    "lenses share one pool). Default: 8 for cloud providers, 1 for ollama, and "
-    "1 for openai-compatible — a llama.cpp/LM Studio single-slot server wants 1, "
-    "while a vLLM server batches happily at 8; raise it there explicitly",
+    "lenses share one pool). Default: 6 for every provider. Set 1 for a "
+    "single-slot llama.cpp/LM Studio server; raise it on a high rate tier or a "
+    "batching vLLM server",
 )
 @click.option(
     "--max-review-seconds",

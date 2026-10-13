@@ -7,214 +7,230 @@ description: What lgtmaybe sends to model providers, including optional context 
 This page explains what lgtmaybe sends to a model provider, what it redacts
 first, how local mode differs, and how credentials are handled.
 
-## What is sent to the LLM provider
+## What Is Sent to the LLM Provider
 
-lgtmaybe makes four core review calls per diff batch under the default `fast`
-preset, or one per built-in category under `full`. A matching committed spec
-adds a separate spec-review call. Calls share a concurrency limit and are
-followed by a reflection pass. They can contain:
+Under the default `fast` preset, lgtmaybe makes four core review calls per diff
+batch; under `full`, one per built-in category. A matching committed spec adds
+a separate spec-review call, and a reflection pass follows. These calls can
+contain:
 
-- The **compressed PR diff** — the unified diff of changed files, after
-  generated files, lockfiles, minified assets, and vendored code have been
-  stripped.
-- **Surrounding context lines** — a budget-scaled number of unchanged lines
-  immediately above and below each changed hunk, read from the head revision of
-  the **changed files only**. This gives the model the surrounding function and
-  definitions so it makes fewer false-positive findings. The amount is capped by
-  `context_lines` (default 20, `0` disables it) and shrinks as the diff grows;
-  this content is redacted just like the diff. On GitHub, it is fetched
-  read-only via the API. Pull request code is never checked out or executed.
-- **PR metadata** — the repository name, PR number, base and head SHAs, and
-  the list of changed file paths.
-- **The PR's stated intent** — the PR title, description, and the first line of
-  each commit message (on the CLI: the commit names from your local `git log`).
-  This feeds the **intent lens** ("does the PR do what it says?"). It is
-  redacted exactly like the diff, wrapped as untrusted data, and sent **only on
-  the single lens call that carries the intent** (the correctness call under
-  the default `fast` preset, or the dedicated intent lens under `full`) — drop `intent` from `categories` in
-  `.lgtmaybe.yml` and it is never sent at all.
-- A **system prompt** — the fixed instructions that tell the model to return
+- **The PR diff**: the unified diff of changed files, after generated files,
+  lockfiles, minified assets, and vendored code have been skipped. File paths
+  appear in the diff headers, and each batch also lists the PR's changed files
+  its own diff does not show.
+- **Surrounding context lines**: unchanged lines around each changed hunk, read
+  from the head revision of the **changed files only**. They give the model the
+  enclosing function and definitions, which cuts false positives. Each hunk
+  gets up to `context_lines` (default 20, `0` disables it) before it, extended
+  up to the enclosing function or class signature where that can be found, and
+  about a quarter as many after it. The amount shrinks as the diff grows, and
+  the text is redacted like the diff. On GitHub it is fetched read-only through
+  the API; pull request code is never checked out or executed.
+- **The PR's stated intent**: the PR title, description, and the first line of
+  each commit message (on the CLI, the commit subjects from your local
+  `git log`). It feeds the intent check ("does the PR do what it says?"), is
+  redacted like the diff, wrapped as untrusted data, and sent on only one
+  review call: the correctness call under `fast`, or the dedicated intent lens
+  under `full`. The change overview's calls also send it (see below).
+- **A system prompt**: the fixed instructions that tell the model to return
   structured JSON findings.
-- **A project paragraph**, if the `project` block is set: its stage
-  guidance, `domain` and `notes`, as written in `.lgtmaybe.yml` with delimiter
-  tokens neutralised. Don't put anything in `notes` you wouldn't send to the
-  model provider.
-- **Configured instructions and reference files**, if `directory_rules` is
-  set. Reference files come from the trusted base-branch workspace, are
-  bounded, and are redacted before model calls.
+- **A project paragraph**, if the `project` block is set: its stage guidance,
+  `domain` and `notes`, as written in `.lgtmaybe.yml`, with delimiter tokens
+  neutralised. Don't put anything in `notes` you wouldn't send to the model
+  provider.
+- **Configured instructions and reference files**, if `directory_rules` is set.
+  Reference files come from the trusted base-branch workspace, are bounded, and
+  are redacted before model calls.
+- **Static-analysis hints**, if `static_analysis` is enabled: redacted findings
+  from linters run locally over the changed files.
 - **Matching specification text**, when a repository has a supported spec
   workflow and the change matches a committed spec. The spec lens sends a
   bounded, redacted selection from that spec.
 - **Additional file context**, when a review or reflection needs to check a
-  finding against another file. Retrieval is read-only, bounded, and redacted;
+  finding against another file. Retrieval is read-only, bounded, and redacted.
   `mid_review_retrieval` is opt-in.
+
+With `triage_model` set, one extra call sends the same redacted per-file diffs
+to the triage model, on the same provider.
 
 Review calls do not send:
 
 - PR comments or review threads
 - Commit message bodies (only the first line of each message)
+- The repository name, PR number, or commit SHAs
 - Unrequested repository files or the whole repository
 - Committer identity or email addresses
 - Any other data from the repository's git history
 
-The **change overview** (`/diagram`, `auto_diagram`) makes up to three calls —
-description, High Impact Areas, diagrams — using the redacted diff and, when
-present, the redacted stated intent. The High Impact Areas call also sends the **paths** of
-changed files matching its risk patterns, which are already part of the diff it
-sends. No new data flows; the calls only ask the model for a different output.
-The standalone `/describe` comment sends the same inputs again. The diagram comment
-does include an "Open full screen" [mermaid.live](https://mermaid.live) link per
-diagram, whose URL fragment embeds that diagram's source — but that source is the
-already-public, post-redaction comment body, the fragment is decoded
-client-side (browsers never send fragments to a server), and nothing is fetched
-unless a reader clicks the link.
+The **change overview** (`/diagram`, `auto_diagram`) makes up to three calls
+(description, High Impact Areas, diagrams) using the redacted diff and, when
+present, the redacted stated intent. The High Impact Areas call also sends the
+paths of changed files that match its risk patterns, which are already in the
+diff. No new data flows; these calls only ask for a different output. The
+standalone `/describe` comment sends the same inputs again, and `/ask` sends
+your question with the redacted diff.
 
-## Secret redaction before egress
+The overview comment includes an "Open full screen"
+[mermaid.live](https://mermaid.live) link per diagram, whose URL fragment
+embeds that diagram's source. That source is already in the posted comment and
+was built from redacted model output. Browsers decode the fragment client-side
+and never send it to a server, and nothing is fetched unless a reader clicks
+the link.
 
-Before the diff is sent to any external provider, lgtmaybe scans it for
-patterns that resemble secrets and replaces the matched values with
-`[REDACTED]`. The same scrub is applied to the surrounding context lines read
-from changed files and to the stated-intent text (PR title, description, commit
-names). Recognised formats include:
+## Secret Redaction Before Egress
 
-- **Cloud / provider keys** — AWS access key IDs (`AKIA…`), OpenAI keys
-  (`sk-…`), Stripe secret keys (`sk_live_…`), and Google API keys (`AIza…`).
-- **Source-control / chat / registry tokens** — GitHub classic tokens
-  (`ghp_`, `gho_`, …), GitHub fine-grained PATs (`github_pat_…`), Slack tokens
+Before the diff is sent to any provider, lgtmaybe scans it for patterns that
+look like secrets and replaces the matched values with `[REDACTED]`. The same
+scrub applies to the context lines read from changed files, the stated-intent
+text (PR title, description, commit subjects), static-analysis hints, spec
+text, and any fetched file context. Recognised formats include:
+
+- **Cloud and provider keys**: AWS access key IDs (`AKIA…`), OpenAI keys
+  (`sk-…`), Stripe secret keys (`sk_live_…` / `sk_test_…`), and Google API keys
+  (`AIza…`).
+- **Source-control, chat and registry tokens**: GitHub classic tokens (`ghp_`,
+  `gho_`, …), GitHub fine-grained PATs (`github_pat_…`), Slack tokens
   (`xoxb-…`), npm tokens (`npm_…`), and PyPI tokens (`pypi-…`).
-- **JSON Web Tokens** — `eyJ….eyJ….…` (the whole token, since the payload
-  carries claims/PII).
-- **Private keys** — PEM `-----BEGIN … PRIVATE KEY-----` blocks.
-- **Generic credentials** — `api_key`/`token`/`secret = "…"` assignments,
-  quoted `password`/`passphrase` literals, `Authorization: Bearer/Basic …`
-  headers, passwords embedded in connection-string URLs
-  (`scheme://user:secret@host`), and Azure storage / Cosmos connection-string
-  keys (`AccountKey=…` / `SharedAccessKey=…`).
+- **JSON Web Tokens**: `eyJ….eyJ….…` and five-part encrypted JWEs, as whole
+  tokens, since the payload can carry claims and PII.
+- **Private keys**: PEM `-----BEGIN … PRIVATE KEY-----` blocks.
+- **Generic credentials**: `api_key` / `secret_key` / `access_token` / `token`
+  assignments with a value of 16 or more characters, quoted `password` /
+  `passwd` / `passphrase` / `pwd` literals, `Authorization: Bearer/Basic …`
+  headers, passwords in connection-string URLs (`scheme://user:secret@host`),
+  and Azure storage or Cosmos connection-string keys (`AccountKey=…` /
+  `SharedAccessKey=…`).
 
-For credential assignments only the value is replaced — the key name or URL host
-stays readable so the reviewer can still reason about the change.
+For credential assignments only the value is replaced. The key name or URL
+host stays readable, so the reviewer can still reason about the change.
 
-This happens as the **first** pipeline stage, before the diff is compressed or
-the prompt is built, so redacted values never reach the LLM or appear in logs.
+Redaction is the **first** pipeline stage, before the diff is compressed or the
+prompt is built, so redacted values never reach the LLM.
 
-Redaction is a best-effort defence. Do not commit real secrets to your
-repository and rely on this alone.
+Redaction is a best-effort defence. Do not commit real secrets and rely on it
+alone.
 
-## Model replies in the log
+## Model Replies in the Log
 
-When a model's reply cannot be parsed into findings, lgtmaybe logs why. At the
-default log level it records only **which** parse failure it was (`prose`,
-`malformed_json`, `not_findings`, `schema`, `truncated`, `empty`) and **how many
-characters** the reply was — never its content.
+When a model's reply can't be parsed into findings, lgtmaybe logs why. At the
+default log level it records only the kind of parse failure (`prose`,
+`malformed_json`, `not_findings`, `schema`, `truncated`, `empty`), the reply's
+length in characters, and a short hash that tells you whether two runs failed
+on the same reply. It never logs the content.
 
-Set `LGTMAYBE_LOG_LEVEL=DEBUG` and the log line additionally carries a capped
-excerpt of the reply itself (the first 2,000 and last 500 characters, with the
-gap marked). This exists so a model that stops honouring the output schema can
-be diagnosed without re-running the review. The excerpt:
+Set `LGTMAYBE_LOG_LEVEL=DEBUG` and the log line also carries a capped excerpt
+of the reply (the first 2,000 and last 500 characters, with the gap marked).
+This lets you diagnose a model that stops following the output schema without
+re-running the review. The excerpt:
 
-- is passed through the same secret redaction described above before it is
-  logged, and is redacted **before** it is cut, so a truncated match cannot slip
-  past the redactor;
-- is written to **stderr**, alongside the other structured JSON log lines —
-  never to stdout (the machine-readable channel) and never to the PR;
+- passes through the same secret redaction described above, and is redacted
+  **before** it is cut, so a truncated match can't slip past the redactor;
+- is written to **stderr** with the other structured JSON log lines, never to
+  stdout (the machine-readable channel) and never to the PR;
 - is model output, which can quote the diff back. That is why it is off unless
   you ask for it.
 
-## The repair re-ask
+## The Repair Re-ask
 
-When a review call's reply cannot be parsed into findings, lgtmaybe sends that
+When a review call's reply can't be parsed into findings, lgtmaybe sends that
 reply back to the **same provider** once, with the output schema and a request
 to re-express it in the required shape (`repair_unparseable`, on by default).
 
-This adds no new data: the reply is the model's own output about a diff it has
-already been sent, and the repair call carries **no diff, no context lines, and
-no PR metadata** — only the reply itself, capped and wrapped as untrusted data.
-It happens at most once per failed call and never recursively.
+This adds no new data. The reply is the model's own output about a diff it has
+already seen, and the repair call carries **no diff, no context lines, and no
+PR metadata**: only the reply itself, capped and wrapped as untrusted data. It
+happens at most once per failed call and never recursively.
 
-## The schema-less re-run
+## The Schema-less Re-run
 
-When that reformat fails too *and* the original call carried the provider's JSON
-schema, lgtmaybe re-runs that one lens once with the schema omitted
-(`retry_without_schema`, on by default) — the prompt asks for JSON regardless,
+When that reformat also fails *and* the original call carried the provider's
+JSON schema, lgtmaybe re-runs that one lens once without the schema
+(`retry_without_schema`, on by default). The prompt asks for JSON regardless,
 so a model whose constrained decoding produced something unreadable often
 answers fine without it.
 
-Unlike the repair, this **does re-send the diff** — it is the same request minus
-one parameter, to the same provider, so nothing new leaves the process and
-nothing new is exposed, but it is a second full send rather than a small one. It
-runs at most once per lens per batch, only after the cheaper repair has failed,
-and only where a schema was actually sent. Set `retry_without_schema: false` to
-turn it off.
+Unlike the repair, this **does re-send the diff**. It is the same request minus
+one parameter, to the same provider, so no new data leaves the process, but it
+is a second full send rather than a small one. It runs at most once per lens
+per batch, only after the cheaper repair has failed, and only where a schema
+was sent. Set `retry_without_schema: false` to turn it off.
 
-## Prompt-injection defence
+## Prompt-Injection Defence
 
-PR diff content is treated as untrusted input throughout the pipeline. lgtmaybe
-defends in depth (OWASP LLM01):
+PR diff content is treated as untrusted input throughout the pipeline.
+lgtmaybe defends in depth (OWASP LLM01):
 
-1. The diff is wrapped in explicit `DIFF_START`/`DIFF_END` delimiters and labelled
-   as untrusted data; the stated-intent text gets its own
-   `INTENT_START`/`INTENT_END` block with the same labelling.
-2. Any forged delimiter markers smuggled inside the diff or the intent text are
-   **neutralised** before wrapping — both marker families in both blocks — so a
-   malicious PR cannot close a data block early, append its own instructions, or
-   fake an intent block from inside the diff.
-3. The system prompt instructs the model to ignore any instructions embedded in
-   the diff or the intent text that attempt to alter reviewer behaviour.
+1. The diff is wrapped in explicit `DIFF_START`/`DIFF_END` delimiters and
+   labelled as untrusted data. The stated-intent text gets its own
+   `INTENT_START`/`INTENT_END` block with the same labelling, and every other
+   untrusted block (static-analysis hints, spec text, path signals, fetched
+   context) has its own delimiter family.
+2. Forged delimiter markers smuggled into the diff or the intent text are
+   **neutralised** before wrapping, both marker families in both blocks, so a
+   malicious PR can't close a data block early, append its own instructions,
+   or fake an intent block from inside the diff.
+3. The system prompt tells the model to ignore any instructions embedded in the
+   diff or the intent text that try to change reviewer behaviour.
 4. The model's response must validate against a strict JSON schema
-   (`extra="forbid"`); drifted or injected fields are rejected rather than acted
-   on.
+   (`extra="forbid"`). Drifted or injected fields are rejected rather than
+   acted on.
 
 lgtmaybe does not execute any code from the PR.
 
-## Ollama: local or self-hosted
+## Ollama: Local or Self-Hosted
 
-When `--provider ollama` is used, the diff and all other data are sent only to
-the ollama server you specify via `--api-base`. If that server is
-`http://localhost:11434`, no data leaves your machine. If it is a remote host
-(Tailscale peer, self-hosted VM), data is sent only to that host.
+With `--provider ollama`, the diff and all other data go only to the ollama
+server you name with `--api-base` (default `http://localhost:11434`). If that
+server is on your machine, no data leaves it. If it is a remote host (a
+Tailscale peer, a self-hosted VM), data goes only to that host. The same holds
+for an `openai-compatible` server you run yourself.
 
-Ollama itself is not operated by lgtmaybe. Review ollama's own documentation
-for its data handling.
+lgtmaybe does not operate ollama. See ollama's own documentation for its data
+handling.
 
-## Cloud providers: data handling
+## Hosted Providers: Data Handling
 
-When using Bedrock or Vertex, the compressed and redacted diff is sent over
-HTTPS to the respective cloud provider's inference endpoint. Review each
-provider's data handling policies:
+With any hosted provider, the redacted diff and the other inputs above are sent
+over HTTPS to that provider's inference endpoint. Review each provider's data
+handling policy, for example:
 
-- **AWS Bedrock** — [AWS Bedrock data protection](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html)
-- **Google Vertex AI** — [Vertex AI data governance](https://cloud.google.com/vertex-ai/docs/general/data-governance)
-- **OpenAI** — [OpenAI API data privacy](https://openai.com/policies/api-data-privacy)
-- **Anthropic** — [Anthropic usage policy](https://www.anthropic.com/legal/aup)
-- **OpenRouter** — [OpenRouter privacy policy](https://openrouter.ai/privacy)
+- **AWS Bedrock**: [AWS Bedrock data protection](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html)
+- **Google Vertex AI**: [Vertex AI data governance](https://cloud.google.com/vertex-ai/docs/general/data-governance)
+- **Azure OpenAI**: [Data, privacy, and security for Azure OpenAI](https://learn.microsoft.com/en-us/legal/cognitive-services/openai/data-privacy)
+- **OpenAI**: [OpenAI API data privacy](https://openai.com/policies/api-data-privacy)
+- **Anthropic**: [Anthropic privacy policy](https://www.anthropic.com/legal/privacy)
+- **OpenRouter**: [OpenRouter privacy policy](https://openrouter.ai/privacy)
+
+For z.ai and hosted `openai-compatible` endpoints such as DeepSeek, check that
+provider's own policy.
 
 ## Credentials
 
 lgtmaybe does not log or persist API keys. API-key providers receive the key
-as part of authentication for model calls. For Bedrock and Vertex, lgtmaybe
-uses short-lived ambient credentials and does not write them to disk. See
-[Auth Model](./auth-model.md) for details.
+only to authenticate model calls. For Bedrock, Vertex, and keyless Azure,
+lgtmaybe uses short-lived ambient credentials and does not write them to disk.
+See [Auth Model](./auth-model.md) for details.
 
-## GitHub token
+## GitHub Token
 
 `GITHUB_TOKEN` is used to:
 
-1. Read the PR diff and metadata via the GitHub REST API.
-2. Post the review (inline comments + summary) back to the PR.
+1. Read the PR diff and metadata through the GitHub REST API.
+2. Post the review (inline comments and summary) back to the PR.
 
-The token is not sent to any LLM provider. It requires the minimum scopes:
-`contents: read` and `pull-requests: write`.
+The token is never sent to an LLM provider. It needs only `contents: read` and
+`pull-requests: write`. GitLab and Gitea use their own tokens, listed in
+[Code-Host Auth](./auth-model.md#code-host-auth).
 
-## Fork pull requests
+## Fork Pull Requests
 
 On GitHub, lgtmaybe uses the `pull_request_target` trigger, which runs in the
-context of the **base branch**. PR code from the fork is never checked out or
-executed. The diff is fetched exclusively through the host's API. This prevents
-a malicious PR from gaining access to repository secrets.
+context of the **base branch**. Code from the fork is never checked out or
+executed, and the diff is fetched only through the host's API. A malicious PR
+therefore can't reach the repository's secrets.
 
-GitLab and Gitea have no `pull_request_target` equivalent — their merge- and
-pull-request pipelines run with the project's own secrets. The protection is
-unchanged and holds for the same reason: lgtmaybe never checks out or executes
-change-request code on any host, so there is nothing for an attacker to run. The
-supplied GitLab job even sets `GIT_STRATEGY: none`, so the repository is never
-cloned at all.
+GitLab and Gitea have no `pull_request_target` equivalent: their merge- and
+pull-request pipelines run with the project's own secrets. The protection
+holds for the same reason. lgtmaybe never checks out or executes change-request
+code on any host, so there is nothing for an attacker to run. The supplied
+GitLab job also sets `GIT_STRATEGY: none`, so the repository is never cloned.
