@@ -150,7 +150,9 @@ the first comment of a live, non-`fixed` thread written by the token's own
 identity (`connectionData`'s `authenticatedUser.id`, resolved once), consuming
 each id once. A thread by anyone else SHALL NOT suppress a finding, and when the
 identity cannot be read no thread SHALL. A won't-fix or closed thread of ours
-SHALL keep suppressing its finding; a fixed one SHALL NOT.
+SHALL keep suppressing its finding; a fixed one SHALL NOT. Here and for
+resolve-on-fix, a comment's ids SHALL be read only from the block appended
+after its suggestion, never from the suggestion itself.
 <!-- anchor: azure-devops.dedupe -->
 
 #### Scenario: a fixed finding returns

@@ -121,9 +121,9 @@ path, or any API failure SHALL return no increment so the run is a full review.
 
 ### Requirement: Downvoted findings are read from award emoji
 
-The adapter SHALL report the fingerprint of each of its finding discussions
-whose first note carries a `thumbsdown` award emoji from a member with
-Developer access or above. Any other reactor, and one whose membership cannot
+The adapter SHALL report the stamped fingerprint (never one inside a
+suggestion) of each of its finding discussions whose first note carries a
+`thumbsdown` award emoji from a member with Developer access or above. Any other reactor, and one whose membership cannot
 be read, SHALL NOT count, and a note whose awards cannot be read SHALL be
 skipped rather than fail the review.
 <!-- anchor: gitlab.feedback -->
