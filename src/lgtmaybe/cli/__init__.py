@@ -105,6 +105,24 @@ SKIPPED_MARKER = "<!-- lgtmaybe-skipped -->"
 FAIL_ON_EXIT_CODE = 3
 
 
+#: Forge spellings of a pull-request event action that differ from GitHub's.
+#: Gitea Actions writes a push to the PR into the event payload as its own
+#: ``api.HookIssueSynchronized`` ("synchronized"); it converts that to
+#: GitHub's name only when matching a workflow's ``types:``, never in the
+#: payload itself.
+_EVENT_ACTION_ALIASES = {"synchronized": "synchronize"}
+
+
+def pr_event_action(event: dict[str, Any]) -> str:
+    """The pull-request event's ``action``, in GitHub's spelling.
+
+    Read once here so every comparison downstream (the overview gate, auto
+    incremental) sees one name for a push, whichever forge sent it.
+    """
+    action = str(event.get("action") or "")
+    return _EVENT_ACTION_ALIASES.get(action, action)
+
+
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
     """Whether the action run should post or refresh the change overview.
 
@@ -1402,6 +1420,7 @@ __all__ = [
     "execute_review",
     "graceful_interrupt",
     "main",
+    "pr_event_action",
     "pr_url_from_event",
     "render_findings",
     "resolve_auto_incremental",
