@@ -27,7 +27,7 @@ dependencies = [
     "litellm>=1.87.1,<1.105; python_version >= '3.14'",
     "pydantic>=2.7",
     "pyyaml>=6.0.3",
-    "tenacity>=9.1.4",
+    "tenacity>=9.2.1",
 ]
 
 # Per-provider auth deps for the keyless cloud paths. litellm normalises the

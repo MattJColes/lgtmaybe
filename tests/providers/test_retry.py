@@ -1525,7 +1525,7 @@ class TestFallback:
 class TestRateLimitBackoff:
     """A capacity 429 is a rate *window*, not a blip.
 
-    The generic ladder (`initial=0.1, max=5`, tenacity's default `jitter=1`) puts
+    The generic ladder (`multiplier=0.1, max=5`, tenacity's default `jitter=1`) puts
     all four attempts inside about four seconds, which is nothing against a
     per-minute limit — every attempt lands in the same window and fails
     identically. So a rate limit waits on its own, much longer, ladder, and

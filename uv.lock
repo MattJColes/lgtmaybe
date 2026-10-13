@@ -1404,7 +1404,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", marker = "extra == 'static-analysis'", specifier = ">=0.5" },
     { name = "semgrep", marker = "extra == 'static-analysis'", specifier = ">=1.60" },
-    { name = "tenacity", specifier = ">=9.1.4" },
+    { name = "tenacity", specifier = ">=9.2.1" },
     { name = "zizmor", marker = "extra == 'static-analysis'", specifier = ">=1.5" },
 ]
 provides-extras = ["azure", "bedrock", "vertex", "static-analysis"]
