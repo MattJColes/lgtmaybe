@@ -394,7 +394,7 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` uses four calls (security, correctness, code health, artefacts) on every provider; `full` runs one call per lens. |
+| `preset` | `fast` | `fast` uses four calls (security, correctness, code health, artefacts) on every provider, plus a fifth spec call when a spec matches; `full` runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files and posts a "reviewed top N of M" notice if there are more. |
 | `max_file_diff_lines` | 2000 | Skips any single file whose diff is longer, naming it in the summary. `0` disables. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. Left at the default, it is capped at what the model's context window can take. |
@@ -426,6 +426,8 @@ Each finding has:
 | `failure_scenario` | For defect findings: the trigger, the changed behaviour, and the observable impact |
 | `suggestion` | Optional suggested replacement code |
 | `anchor` | The flagged line, verbatim, used to place the comment on the right line |
+| `anchored` | Whether `anchor` matched a changed line; an unanchored finding moves to the review body |
+| `broad` | Set by reflection when the fix needs a broad change (redesign, infra, API contract) rather than a local edit; broad findings go to a collapsed "Broader observations" section |
 | `category` | The lens that raised it |
 | `confidence` | The self-reflection auditor's 0-10 score (absent when reflection is off) |
 

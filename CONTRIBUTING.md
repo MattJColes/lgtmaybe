@@ -7,7 +7,8 @@ need a clean docs build.
 ## The Bar
 
 A code PR needs **green CI and a behavioural test**. A documentation-only PR
-needs `mkdocs build --strict` to pass. Specifically:
+needs `mkdocs build --strict` to pass locally (CI builds the docs only after
+merge). Specifically:
 
 - **Write the test first for code changes.** Start from the expected input and
   output, watch the test fail, then write the minimum code to pass. A code
