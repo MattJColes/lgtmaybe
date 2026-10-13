@@ -27,13 +27,23 @@ _WINDOWS = os.name == "nt"
 class AuthConfig:
     api_key: str | None = None
     api_base: str | None = None
-    # An Azure AD (Entra) bearer token for keyless Azure OpenAI — set instead of
-    # api_key when ambient cloud creds (GitHub OIDC / managed identity) are used.
-    azure_ad_token: str | None = None
+    # Returns a fresh Azure AD (Entra) bearer token for keyless Azure OpenAI — set
+    # instead of api_key when ambient cloud creds (GitHub OIDC / managed identity)
+    # are used. A provider, not a token: litellm calls it per request, so a review
+    # that outlives one token (~an hour) is not 401'd part-way through.
+    azure_ad_token_provider: Callable[[], str] | None = None
 
 
 # Data-plane scope for Azure OpenAI / Cognitive Services AD tokens.
 _AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
+
+_AZURE_KEYLESS_GUIDANCE = (
+    "azure requires credentials. Either set AZURE_API_KEY (or pass "
+    "--api-key) for key-based auth, or configure keyless Azure AD "
+    "credentials — GitHub OIDC via azure/login (needs id-token: write "
+    "and a federated credential on your Entra app), or a local "
+    "'az login' / managed identity."
+)
 
 # Env var carrying the key, for the plain API-key providers. Looked up (not
 # .get) on purpose: a provider missing here is a bug, and a KeyError names it
@@ -53,7 +63,10 @@ def _default_gcp_probe() -> bool:
     ``GCLOUD_PROJECT``, ``CLOUDSDK_CORE_PROJECT``, ``VERTEXAI_PROJECT``), plus the
     Application Default Credentials well-known file written by
     ``gcloud auth application-default login`` — which sets no env var — so the
-    documented local Vertex flow is recognised.
+    documented local Vertex flow is recognised. Past that fast path it defers to
+    ``google.auth.default()``, which alone can see metadata-server credentials
+    (GCE, GKE Workload Identity, Cloud Run, Cloud Build) — the same reason
+    Bedrock hands its chain to the AWS SDK.
     """
 
     if (
@@ -73,21 +86,31 @@ def _default_gcp_probe() -> bool:
         config_dir = (Path(appdata) if appdata else Path.home() / "AppData" / "Roaming") / "gcloud"
     else:
         config_dir = Path.home() / ".config" / "gcloud"
-    return (config_dir / "application_default_credentials.json").is_file()
+    if (config_dir / "application_default_credentials.json").is_file():
+        return True
+
+    try:
+        import google.auth  # the vertex extra
+
+        google.auth.default()
+    except Exception:  # ImportError, DefaultCredentialsError, a metadata timeout
+        return False
+    return True
 
 
-def _default_azure_token() -> str | None:
-    """Fetch an Azure AD access token for Azure OpenAI from ambient credentials.
+def _default_azure_token_provider() -> Callable[[], str]:
+    """Build a refreshing Azure AD token provider from ambient credentials.
 
     Uses azure-identity's ``DefaultAzureCredential``, which transparently covers
     GitHub OIDC workload-identity federation in CI (``AZURE_FEDERATED_TOKEN_FILE``
     + ``AZURE_CLIENT_ID`` + ``AZURE_TENANT_ID``) and local creds when developing
-    (``az login``, a managed identity, or ``AZURE_*`` env vars). Returns ``None``
-    when no ambient credential is available so the resolver can fall through to a
-    clear error.
+    (``az login``, a managed identity, or ``AZURE_*`` env vars). One token is
+    fetched up front so a missing or misconfigured credential fails at start-up
+    with the guidance, not at the first model call.
     """
     try:
-        from azure.identity import CredentialUnavailableError, DefaultAzureCredential
+        from azure.core.exceptions import ClientAuthenticationError
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     except ImportError as exc:
         raise ValueError(
             "keyless azure needs the azure-identity package. "
@@ -95,12 +118,15 @@ def _default_azure_token() -> str | None:
             "image already bundles it)."
         ) from exc
 
+    token_provider: Callable[[], str] = get_bearer_token_provider(
+        DefaultAzureCredential(), _AZURE_OPENAI_SCOPE
+    )
     try:
-        credential = DefaultAzureCredential()
-        token: str = credential.get_token(_AZURE_OPENAI_SCOPE).token
-        return token
-    except CredentialUnavailableError:
-        return None
+        token_provider()
+    except ClientAuthenticationError as exc:
+        # The chain's own detail (e.g. an AADSTS code) names what is misconfigured.
+        raise ValueError(f"{_AZURE_KEYLESS_GUIDANCE}\n{exc}") from exc
+    return token_provider
 
 
 def resolve_credentials(
@@ -109,7 +135,7 @@ def resolve_credentials(
     api_key: str | None = None,
     api_base: str | None = None,
     ambient_probe: Callable[[], bool] | None = None,
-    azure_token_provider: Callable[[], str | None] | None = None,
+    azure_token_provider: Callable[[], str] | None = None,
 ) -> AuthConfig:
     """Resolve auth for the given provider.
 
@@ -147,20 +173,12 @@ def resolve_credentials(
 
         # Keyless: ambient Azure AD creds — GitHub OIDC federation in CI, or a
         # local 'az login' / managed identity. No static key is stored.
-        get_token = (
-            azure_token_provider if azure_token_provider is not None else _default_azure_token
+        token_provider = (
+            azure_token_provider
+            if azure_token_provider is not None
+            else _default_azure_token_provider()
         )
-        token = get_token()
-        if token:
-            return AuthConfig(api_base=base, azure_ad_token=token)
-
-        raise ValueError(
-            "azure requires credentials. Either set AZURE_API_KEY (or pass "
-            "--api-key) for key-based auth, or configure keyless Azure AD "
-            "credentials — GitHub OIDC via azure/login (needs id-token: write "
-            "and a federated credential on your Entra app), or a local "
-            "'az login' / managed identity."
-        )
+        return AuthConfig(api_base=base, azure_ad_token_provider=token_provider)
 
     if provider is Provider.ollama:
         return AuthConfig(api_base=api_base or DEFAULT_OLLAMA_BASE)

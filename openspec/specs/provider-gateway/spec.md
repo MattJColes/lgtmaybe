@@ -39,7 +39,9 @@ creds for bedrock/vertex/azure), then an API key from flag/env; ollama needs
 neither; openai-compatible needs an `api_base` with the key optional
 (placeholder when absent). Vertex ambient credential probing MUST prefer
 `CLOUDSDK_CONFIG`, then use `%APPDATA%\gcloud` on Windows or
-`~/.config/gcloud` on POSIX. Static cloud keys (AWS keys, service-account JSON)
+`~/.config/gcloud` on POSIX, then defer to google-auth's own chain. Keyless
+Azure MUST hand litellm a refreshing token provider, not one fetched token.
+Static cloud keys (AWS keys, service-account JSON)
 are never accepted or required; exhaustion fails with a clear "how to auth
 this provider" message.
 <!-- anchor: provider.credentials -->
@@ -56,6 +58,14 @@ this provider" message.
 #### Scenario: Vertex uses an explicit gcloud location
 - **WHEN** `CLOUDSDK_CONFIG` is set
 - **THEN** that directory is checked before the platform default
+
+#### Scenario: Vertex on a GCP runtime
+- **WHEN** only metadata-server credentials exist (GCE, GKE, Cloud Run)
+- **THEN** ambient Vertex authentication is detected
+
+#### Scenario: keyless Azure has no ambient credential
+- **WHEN** no key is supplied and `DefaultAzureCredential` finds no credential
+- **THEN** the run fails at start-up with the keyless guidance and the SDK's detail
 
 ### Requirement: Completion calls retry, fall back, cache, and time out
 

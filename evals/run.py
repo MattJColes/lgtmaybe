@@ -190,7 +190,7 @@ def _review(
             model,
             api_key=auth.api_key,
             api_base=auth.api_base,
-            azure_ad_token=auth.azure_ad_token,
+            azure_ad_token_provider=auth.azure_ad_token_provider,
             timeout=timeout,
             **extra,
         ),
