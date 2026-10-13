@@ -70,6 +70,7 @@ from .injection import (
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
 from .prompt import (
+    CODE_HEALTH_GROUP,
     FAST_GROUPS,
     build_correctness_block,
     build_custom_lens_block,
@@ -137,12 +138,18 @@ _log = get_logger(__name__)
 # last one was a named-but-empty set two hundred lines away, which read as a
 # policy it no longer had.
 _DEFAULT_MAX_WORKERS = 6
+# The fast preset's `code-health` group id is gated too: a finding stamped with
+# it carried no member category, so it cannot prove it is one of the exempt
+# members (complexity, ponytail) rather than a gated one (performance,
+# deprecation). An attributed exempt member keeps its own category and stays
+# exempt. `artefacts` holds only exempt members, so it needs no entry.
 _FAILURE_SCENARIO_CATEGORIES: frozenset[str] = frozenset(
     {
         ReviewCategory.security.value,
         ReviewCategory.correctness.value,
         ReviewCategory.deprecation.value,
         ReviewCategory.performance.value,
+        CODE_HEALTH_GROUP.id,
     }
 )
 
@@ -1365,11 +1372,10 @@ class LLMReviewEngine:
 
         reviewed_diff = "\n".join(patch for _, patch in file_patches)
 
-        # 5c. Deterministic findings join the model's here — after the fan-out so
-        #     the model's copy of a shared finding wins the dedupe tie below, and
-        #     before snapping so they get re-anchored, deduped, suppressed and
-        #     rule-filtered by exactly the same stages. Reflection is the one
-        #     stage they skip; see step 8.
+        # 5c. Deterministic findings join the model's here — before snapping so
+        #     they get re-anchored, suppressed and rule-filtered by exactly the
+        #     same stages. Dedupe never merges them with a model finding (see
+        #     `_dedupe`), and reflection is the one stage they skip; see step 8.
         all_findings = all_findings + scan_findings
 
         # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
@@ -1393,30 +1399,38 @@ class LLMReviewEngine:
             _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
         all_findings = scoped
 
-        # 7. Merge: a finding can surface under more than one lens (a shell
-        #    injection is both a security and a correctness issue), so collapse
-        #    duplicates before reflecting.
-        with profiler.stage("dedupe"):
-            all_findings = _dedupe(all_findings)
-
-        # 7b. Suppression: drop findings a team has marked known-fine — by
-        #     fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
-        #     ignore` pragma on/above the flagged line. Done before reflection so a
-        #     suppressed finding costs no reflection tokens and never posts.
+        # 7. Suppression: drop findings a team has marked known-fine — by
+        #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
+        #    ignore` pragma on/above the flagged line. Done before reflection so a
+        #    suppressed finding costs no reflection tokens and never posts.
+        #
+        #    This and the evidence gate (7b) run BEFORE the merge (7c): dedupe
+        #    keeps one finding per location, so a copy these filters would drop
+        #    could otherwise win its location and take the line's real finding
+        #    down with it.
         with profiler.stage("suppress"):
-            before_suppress = len(all_findings)
-            all_findings = apply_suppressions(
+            unsuppressed = apply_suppressions(
                 all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
             )
-            suppressed = before_suppress - len(all_findings)
+            # Counted per location, as the merge would collapse them, so several
+            # lenses' copies of one dismissed finding read as one suppression.
+            unsuppressed_ids = {id(f) for f in unsuppressed}
+            suppressed = len(_dedupe([f for f in all_findings if id(f) not in unsuppressed_ids]))
+            all_findings = unsuppressed
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
 
-        # 7c. Evidence gate: built-in defect findings must name a concrete way
+        # 7b. Evidence gate: built-in defect findings must name a concrete way
         #     the changed code fails. Category is engine-stamped, so lowering the
         #     model-selected severity cannot bypass this check.
         with profiler.stage("failure_scenario"):
             all_findings = _filter_missing_failure_scenarios(all_findings)
+
+        # 7c. Merge: a finding can surface under more than one lens (a shell
+        #     injection is both a security and a correctness issue), so collapse
+        #     duplicates before reflecting.
+        with profiler.stage("dedupe"):
+            all_findings = _dedupe(all_findings)
 
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
@@ -3330,10 +3344,17 @@ def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
     1. Highest severity wins.
     2. On a tie: the finding with the longer body wins (more context is more useful).
     3. On a further tie: the first in input order wins (stable, provider-independent).
+
+    Scan findings are keyed on their title (`tool: rule`) too, so distinct tool
+    hits never merge with each other or with a model finding: osv-scanner puts
+    every advisory at line 1, and a model copy that won a scanner's location
+    could then be dropped by reflection — which scan findings skip — taking the
+    deterministic hit with it.
     """
-    best: dict[tuple[str, int, str], ReviewFinding] = {}
+    best: dict[tuple[str, int, str, str | None], ReviewFinding] = {}
     for finding in findings:
-        key = (finding.path, finding.line, finding.side)
+        scan_title = finding.title if _is_scan_finding(finding) else None
+        key = (finding.path, finding.line, finding.side, scan_title)
         existing = best.get(key)
         if existing is None:
             best[key] = finding
