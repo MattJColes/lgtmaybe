@@ -584,8 +584,14 @@ network rule registry. Paths MUST be canonical forward-slash repository
 paths. On Windows the scrubbed environment MUST pass through process-critical
 system variables while pinning user config and profile directories to the temp
 root. A tool that is not installed is skipped, and any tool failure degrades to
-no output from that tool rather than failing the review.
+no output from that tool rather than failing the review. No tool MAY take its
+config, ignore files or inline ignore pragmas from the PR-authored corpus.
 <!-- anchor: engine.static-analysis -->
+
+#### Scenario: a PR adds a scanner config that hides its own bug
+- **WHEN** a PR adds `sgconfig.yml`, `.ignore`, `.bandit`, `.semgrepignore`,
+  `zizmor.yml`, `.gitleaks.toml` or `osv-scanner.toml` beside a flagged line
+- **THEN** the tool still reports that line, including under `.github/`
 
 #### Scenario: a rules-driven tool has no rules
 - **WHEN** static analysis runs a rules-driven tool for which no rules exist,
