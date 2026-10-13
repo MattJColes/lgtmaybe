@@ -194,6 +194,7 @@ are published at the docs root.
 - [Review on GitLab](docs/how-to/review-on-gitlab.md)
 - [Review on Gitea](docs/how-to/review-on-gitea.md)
 - [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md)
+- [Calibrate reviews to your project](docs/how-to/calibrate-reviews-to-your-project.md)
 - [Releasing (maintainers)](docs/how-to/releasing.md)
 
 **Reference** — look things up

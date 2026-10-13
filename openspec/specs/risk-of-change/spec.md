@@ -95,8 +95,10 @@ blast radius: a High Impact path signal on a file that is neither a test nor
 documentation SHALL raise it to `high` for infrastructure, security, data
 migration, or backup and recovery, and to `medium` for any other area; 500 or more changed lines SHALL raise it to
 `medium`; and 50 or more changed lines of non-test code with no test file
-changed SHALL raise it to `medium`. A change touching only documentation and
-test files SHALL be `low` with that stated as its reason. Distinct means a
+changed SHALL raise it to `medium`; and a `regulated` project stage SHALL
+raise it to `medium` with the reason "regulated workload". A change touching
+only documentation and test files SHALL be `low` with that stated as its
+reason, whatever the project stage. Distinct means a
 different factor or a different High Impact area; two files in one area count
 once.
 <!-- anchor: risk.level -->
@@ -112,6 +114,10 @@ once.
 #### Scenario: docs and tests only
 - **WHEN** only `README.md` and `tests/test_api.py` change
 - **THEN** the verdict is `low` with the reason "docs and tests only"
+
+#### Scenario: a regulated project
+- **WHEN** `project.stage` is `regulated` and a small code change has no other signal
+- **THEN** the verdict is `medium`, and a configured core path alongside it is `high`, not `critical`
 
 ### Requirement: The verdict covers the whole pull request
 

@@ -400,3 +400,28 @@ def test_risk_round_trips_from_file(tmp_path):
     cfg = load_config(config_path=cfg_file)
     assert cfg.risk.enabled is False
     assert cfg.risk.core_paths == ["src/shared/**"]
+
+
+def test_project_profile_loads_from_file(tmp_path):
+    """A `project:` block calibrates the review; a prototype raises the floor."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text(
+        "project:\n  stage: prototype\n  domain: internal tooling\n  notes: Demo only.\n"
+    )
+
+    cfg = load_config(config_path=cfg_file)
+
+    assert cfg.project.stage == "prototype"
+    assert cfg.project.domain == "internal tooling"
+    assert cfg.project.notes == "Demo only."
+    assert cfg.min_severity == "medium"
+
+
+def test_cli_severity_floor_beats_the_project_default(tmp_path):
+    """An explicitly supplied min_severity is never overridden by the stage."""
+    cfg_file = tmp_path / ".lgtmaybe.yml"
+    cfg_file.write_text("project:\n  stage: prototype\n")
+
+    cfg = load_config(config_path=cfg_file, min_severity="low")
+
+    assert cfg.min_severity == "low"

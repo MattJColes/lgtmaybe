@@ -106,6 +106,18 @@ class TestSplitShape:
         }
         assert len(prefixes) == 1
 
+    def test_project_profile_rides_the_shared_prefix(self) -> None:
+        """A configured profile reaches every lens through the system preamble,
+        identically, so it costs one cache entry rather than one per lens."""
+        provider = FakeProvider()
+        cfg = _cfg(project={"stage": "regulated", "domain": "payments"})
+        LLMReviewEngine(provider).review(_CTX, cfg)
+        systems = {c["messages"][0]["content"] for c in provider.calls}
+        assert len(systems) == 1
+        system = next(iter(systems))
+        assert "payments" in system
+        assert system != build_shared_preamble()
+
     def test_custom_lens_rides_the_same_split_shape(self) -> None:
         provider = FakeProvider()
         LLMReviewEngine(provider).review(

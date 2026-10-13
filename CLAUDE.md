@@ -446,6 +446,21 @@ pattern, event bus, plugin framework.
      context text is `injection.neutralise`d. YAML-only (list-of-objects, like
      `finding_rules`): no CLI flag, no Action input. **No `BUGBOT.md` walk-up** —
      it stays available later as a pure loader desugar needing no engine change.
+   - **Project profile (BYO, whole repo):** `ReviewConfig.project` (a
+     `ProjectProfile`: `stage` prototype / production / regulated, a short
+     `domain`, capped `notes`) calibrates the review to the workload. `stage`
+     moves **defaults only**, through `ReviewConfig._apply_project_stage`, so a
+     configured value always wins: `prototype` raises the `min_severity` default to
+     `medium`, and `regulated` adds a `medium` "regulated workload" risk reason
+     (`risk._assess`; a floor, never `high`, which would make every other high
+     reason `critical`). All three fields render one trusted paragraph
+     (`prompt.project_context`, notes neutralised) at the end of the shared
+     preamble, so it is cached once per run; unset is byte-identical. YAML-only.
+     **Deliberately not** read from AGENTS.md / CLAUDE.md / SOUL.md: those are
+     written for coding agents, mostly noise to a reviewer, and the big ones
+     overflow the `max_input_tokens // 8` context budget and get skipped
+     silently. Whether the stage guidance actually moves severities is
+     unmeasured until a paired eval fixture exists.
    - **Intent lens:** "does the PR do what it says?" — `PRContext` carries the
      stated intent (`title`, `description`, `commit_messages`): PR title/body +
      commit names via the REST gateway, or `git log` commit names from the local

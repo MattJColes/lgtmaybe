@@ -129,4 +129,5 @@ and context files the way you review any other change to CI.
 
 - [Configure `.lgtmaybe.yml`](configure-lgtmaybe-yml.md) — every field
 - [Add a custom review lens](add-a-custom-lens.md) — a whole extra lens, repo-wide
+- [Calibrate reviews to your project](calibrate-reviews-to-your-project.md) — stage, domain and notes for the whole repo
 - [Configuration reference](../reference/config.md) — generated schema

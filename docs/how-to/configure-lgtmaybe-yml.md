@@ -49,6 +49,7 @@ automatic where the provider supports it.
   - [extra_lenses](#extra_lenses)
   - [lens_paths](#lens_paths)
   - [directory_rules](#directory_rules)
+  - [project](#project)
 - [CLI flag overrides](#cli-flag-overrides)
 
 ## Full example
@@ -839,6 +840,44 @@ silently. Both the instructions and the context text are **trusted config** — 
 [Scope review instructions to a directory](scope-review-instructions-to-a-directory.md).
 
 Default: no rules.
+
+### project
+
+Tell the reviewer what kind of project this is, so a weekend prototype and a
+regulated payments service don't get the same review. See
+[Calibrate reviews to your project](calibrate-reviews-to-your-project.md) for
+the full walkthrough.
+
+```yaml
+project:
+  stage: regulated        # prototype | production | regulated
+  domain: payments        # a short label, up to 80 characters
+  notes: |                # up to 1,000 characters
+    PCI-scoped card flows live under payments/. Most traffic is batch.
+```
+
+`stage` changes defaults deterministically. A setting you configure yourself
+always wins over the stage.
+
+| Stage | Default it changes | Review guidance |
+|---|---|---|
+| `prototype` | `min_severity` defaults to `medium` instead of `low` | Report correctness and security, skip hardening, observability and docs polish |
+| `production` | none | The standard bar |
+| `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
+
+All three fields also render one short paragraph in the system prompt every
+lens shares, so it's cached once per run rather than paid per lens. Leave the
+block out and the prompt is byte-identical to a review without it. Like
+`directory_rules`, this is trusted config: on `pull_request_target` it comes
+from the base branch, never the PR head.
+
+lgtmaybe deliberately doesn't read `AGENTS.md`, `CLAUDE.md` or `SOUL.md` for
+this. Those files are written for coding agents (build commands, style rules,
+personas), most of their text is noise to a reviewer, and the larger ones don't
+fit the context-file budget anyway. If you want one of them in front of the
+reviewer regardless, name it in a `directory_rules` entry's `context_files`.
+
+Default: no profile.
 
 ## CLI flag overrides
 

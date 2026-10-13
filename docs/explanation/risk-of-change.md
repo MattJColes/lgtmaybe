@@ -31,7 +31,7 @@ review` prints the same summary line.
 
 ## How the Level Is Decided
 
-Four factors each raise the level, and the verdict takes the highest:
+Each factor raises the level, and the verdict takes the highest:
 
 | Factor | Raises to |
 |---|---|
@@ -41,11 +41,14 @@ Four factors each raise the level, and the verdict takes the highest:
 | Touching any other High Impact area (dependencies, compatibility, cost, …) | `medium` |
 | 500 or more changed lines | `medium` |
 | 50 or more changed lines of code with no test file changed | `medium` |
+| A [`regulated` project stage](../how-to/calibrate-reviews-to-your-project.md) | `medium` |
 
 Two distinct `high` reasons make the change `critical`: a widely imported
 module and a Terraform file, say, or an auth change and a database migration.
 Two files in one area count once. A change touching only documentation and
-tests is `low`.
+tests is `low`, whatever the project stage. The `regulated` floor never goes
+above `medium`, so it can't combine with one other `high` reason to make a
+change `critical`.
 
 ## Blast Radius
 

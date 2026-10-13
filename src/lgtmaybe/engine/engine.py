@@ -76,6 +76,7 @@ from .prompt import (
     build_group_block,
     build_lens_block,
     build_shared_preamble,
+    project_context,
 )
 from .redact import redact
 from .reflect import reflect_findings
@@ -704,6 +705,8 @@ class _Run:
     # review calls only — the reflection call keeps its own format.
     response_format: type[ReviewResult] | None
     language: str | None
+    # The rendered project paragraph (`prompt.project_context`), "" when unset.
+    project: str
     deadline_at: float | None
     budget_at: int | None
     # Mid-review retrieval budget in tokens, or None when a lens may not defer.
@@ -832,7 +835,7 @@ def _lens_messages(
     if intent is not None:
         suffix = f"{intent}\n\n{suffix}"
     return [
-        {"role": "system", "content": build_shared_preamble(run.language, retrieval)},
+        {"role": "system", "content": build_shared_preamble(run.language, retrieval, run.project)},
         {"role": "user", "content": prefix},
         {"role": "user", "content": suffix},
     ]
@@ -1215,6 +1218,7 @@ class LLMReviewEngine:
             # review call — NOT globally, so the reflection call keeps its own format.
             response_format=ReviewResult if cfg.structured_output else None,
             language=cfg.language,
+            project=project_context(cfg.project),
             deadline_at=lens_deadline_at,
             budget_at=lens_budget_at,
             retrieval_budget=retrieval_budget,
@@ -3069,7 +3073,9 @@ def _prompt_overhead_tokens(lenses: Sequence[_Lens], cfg: ReviewConfig) -> int:
     widest lens, because each call carries exactly one and the batch has to fit
     whichever it is.
     """
-    preamble = count_tokens(build_shared_preamble(cfg.language, cfg.mid_review_retrieval))
+    preamble = count_tokens(
+        build_shared_preamble(cfg.language, cfg.mid_review_retrieval, project_context(cfg.project))
+    )
     widest_lens = max((count_tokens(lens.user_block) for lens in lenses), default=0)
     return preamble + widest_lens + _WRAPPER_OVERHEAD_TOKENS
 

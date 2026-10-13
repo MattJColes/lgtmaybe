@@ -1116,6 +1116,7 @@ _ACTION_CONFIG_EXCLUSIONS = frozenset(
         "max_files",
         "min_confidence",
         "min_severity",
+        "project",
         "reflect",
         "spec_paths",
         "summary_template",

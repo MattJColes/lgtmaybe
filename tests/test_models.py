@@ -520,3 +520,50 @@ def test_pr_context_carries_an_optional_risk_assessment() -> None:
     )
     assert PRContext.model_validate_json(ctx.model_dump_json()).risk == risk
     assert ctx.model_copy(update={"diff": "narrowed"}).risk == risk
+
+
+# --- project profile --------------------------------------------------------------
+
+
+def test_project_profile_defaults_to_empty() -> None:
+    from lgtmaybe.core.models import ProjectProfile
+
+    cfg = ReviewConfig(provider=Provider.openai, model="gpt-4o")
+    assert cfg.project == ProjectProfile()
+    assert cfg.min_severity == Severity.low
+
+
+def test_a_prototype_raises_the_default_severity_floor() -> None:
+    cfg = ReviewConfig.model_validate(
+        {"provider": "openai", "model": "gpt-4o", "project": {"stage": "prototype"}}
+    )
+    assert cfg.min_severity == Severity.medium
+
+
+def test_an_explicit_severity_floor_beats_the_prototype_default() -> None:
+    cfg = ReviewConfig.model_validate(
+        {
+            "provider": "openai",
+            "model": "gpt-4o",
+            "min_severity": "low",
+            "project": {"stage": "prototype"},
+        }
+    )
+    assert cfg.min_severity == Severity.low
+
+
+@pytest.mark.parametrize("stage", ["production", "regulated"])
+def test_other_stages_leave_the_severity_floor_alone(stage: str) -> None:
+    cfg = ReviewConfig.model_validate(
+        {"provider": "openai", "model": "gpt-4o", "project": {"stage": stage}}
+    )
+    assert cfg.min_severity == Severity.low
+
+
+@pytest.mark.parametrize(
+    "project",
+    [{"stage": "startup"}, {"notes": "x" * 1001}, {"domain": "d" * 81}, {"tier": "gold"}],
+)
+def test_project_profile_rejects_bad_values(project: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        ReviewConfig.model_validate({"provider": "openai", "model": "gpt-4o", "project": project})
