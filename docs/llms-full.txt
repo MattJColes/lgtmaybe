@@ -3562,8 +3562,10 @@ Default: no rules.
 
 A custom template for the review summary line. Placeholders: `{count}`
 (findings posted), `{provider}`, `{model}`, `{version}` (the lgtmaybe release
-that produced the review) and `{risk}` (the risk segment, empty when `risk` is
-off). A template that fails to format falls back to the built-in line.
+that produced the review), `{risk}` (the risk segment, empty when `risk` is
+off) and `{temperature}` (`temperature not sent` when the model's route dropped
+the configured temperature, so the review may not be reproducible; empty
+otherwise). A template that fails to format falls back to the built-in line.
 
 ```yaml
 summary_template: "🤖 {count} finding(s) · {model} · lgtmaybe {version}"

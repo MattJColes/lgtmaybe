@@ -27,6 +27,7 @@ from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.engine.compress import count_tokens
 from lgtmaybe.engine.engine import (
     _SCHEMA_DROP_NOTE,
+    _TEMPERATURE_SEGMENT,
     INCOMPLETE_MARKER,
     LENSES_MARKER_PREFIX,
     _build_notices,
@@ -2754,6 +2755,61 @@ def test_a_provider_that_cannot_answer_is_not_asked_twice() -> None:
     with pytest.raises(ReviewIncompleteError) as exc_info:
         engine.review(_CTX, make_cfg())
     assert _SCHEMA_DROP_NOTE not in str(exc_info.value)
+
+
+class _CleanProvider(FakeProvider):
+    """Every call parses, and finds nothing."""
+
+    def complete(self, messages, model, **opts):  # type: ignore[override]
+        self.calls.append({"messages": messages, "model": model, "opts": opts})
+        return ProviderResult(text='{"findings": []}', input_tokens=10, output_tokens=5)
+
+
+class _TemperatureDropped(_CleanProvider):
+    def temperature_dropped(self) -> bool:
+        return True
+
+
+class _TemperatureKept(_CleanProvider):
+    def temperature_dropped(self) -> bool:
+        return False
+
+
+def test_a_temperature_that_never_reached_the_model_is_a_summary_line_segment() -> None:
+    """Informational, not a notice: it qualifies the result (the review may not
+    come out the same twice) without saying anything went wrong, so it rides the
+    summary line beside the model it is about — and a clean review keeps its
+    LGTM. A notice would cost the LGTM on every clean review of a common setup
+    (openai/gpt-5.5 with no effort configured)."""
+    cfg = make_cfg()
+    _findings, flagged = LLMReviewEngine(_TemperatureDropped()).review(_CTX, cfg)
+    _findings, kept = LLMReviewEngine(_TemperatureKept()).review(_CTX, cfg)
+
+    assert flagged.startswith("👍 LGTM!")
+    with_segment = f"· model {cfg.model} · {_TEMPERATURE_SEGMENT} · lgtmaybe "
+    assert with_segment in flagged
+    # The segment is the ONLY difference.
+    assert flagged == kept.replace(f"· model {cfg.model} · lgtmaybe ", with_segment)
+
+
+def test_the_summary_is_byte_identical_when_the_temperature_arrived() -> None:
+    """A provider that says "no" and one that cannot answer at all render the
+    same summary — the common case must not move by a byte."""
+    _f1, kept = LLMReviewEngine(_TemperatureKept()).review(_CTX, make_cfg())
+    _f2, unaware = LLMReviewEngine(_CleanProvider()).review(_CTX, make_cfg())
+    assert kept == unaware
+    assert _TEMPERATURE_SEGMENT not in kept
+    assert kept.startswith("👍 LGTM!")
+
+
+def test_summary_template_can_place_the_temperature_segment() -> None:
+    """``{temperature}`` works like ``{risk}``: the segment when there is one,
+    empty otherwise."""
+    cfg = make_cfg(summary_template="{count} · {model} [{temperature}]")
+    _f1, flagged = LLMReviewEngine(_TemperatureDropped()).review(_CTX, cfg)
+    _f2, kept = LLMReviewEngine(_TemperatureKept()).review(_CTX, cfg)
+    assert f"0 · {cfg.model} [{_TEMPERATURE_SEGMENT}]" in flagged
+    assert f"0 · {cfg.model} []" in kept
 
 
 def test_a_repaired_lens_is_named_in_its_own_notice() -> None:

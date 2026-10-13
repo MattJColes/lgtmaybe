@@ -64,6 +64,12 @@ provider.thinking-sampling:
     has: { field: name, regex: '^_withhold_temperature_under_thinking$' }
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.temperature-reach:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_litellm_drops_temperature$' }
+  files: [src/lgtmaybe/providers/**/*.py]
+
 provider.input-budget:
   rule:
     kind: function_definition
