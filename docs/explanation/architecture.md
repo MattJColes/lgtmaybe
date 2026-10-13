@@ -140,8 +140,8 @@ predefined `SYSTEM_*` and `BUILD_*` variables.
 The engine runs a pipeline of composable stages:
 
 ```
-fetch → redact → compress → prompt → parse → re-anchor → merge/dedupe
-      → suppress → evidence gate → reflect → filter → post
+fetch → redact → compress → prompt → parse → re-anchor → suppress
+      → evidence gate → merge/dedupe → reflect → filter → post
 ```
 
 The prompt/parse stage fans out, one concurrent model call per review lens,
@@ -158,7 +158,7 @@ flowchart TD
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    anchor --> dedupe["merge / dedupe"] --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+    anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
 The four lens calls shown are the default `fast` grouping, and the same four run
@@ -234,22 +234,25 @@ matches the PR) and any custom lenses join the same fan-out.
    `high`) and is then demoted to the review body instead of posted on a
    guessed line.
 
-5. **merge/dedupe**: findings from every lens are merged and de-duplicated
-   (`_dedupe`, keyed on path/line/side).
-
-6. **suppress**: findings a team has marked known-fine are dropped before they
+5. **suppress**: findings a team has marked known-fine are dropped before they
    cost any reflection tokens: fingerprints in `ignore_fingerprints`, a
    `# lgtmaybe: ignore` pragma on (or just above) the flagged line, and findings
    a reviewer reacted 👎 to on an earlier run (`learn_feedback`). Neither a 👎
    nor a pragma (which the PR's author writes) suppresses a high or critical
    security finding; only `ignore_fingerprints` in trusted config can.
 
-7. **evidence gate**: security, correctness, deprecation and performance
+6. **evidence gate**: security, correctness, deprecation and performance
    findings must carry a concrete `failure_scenario`: the trigger, the changed
    behaviour, and the observable impact. The rule applies regardless of the
    severity the model chose, so lowering a finding to `low` cannot bypass it.
    Gap and maintainability findings (tests, documentation, complexity) do not
-   need a runtime failure.
+   need a runtime failure; a fast-preset code-health finding the model left
+   unattributed does, since it may be a performance or deprecation one.
+
+7. **merge/dedupe**: findings from every lens are merged and de-duplicated
+   (`_dedupe`, keyed on path/line/side; scan findings on their title too, so
+   distinct tool hits never merge). It runs after the two filters above, so a
+   copy they would drop never displaces the finding that shares its line.
 
 8. **reflect**: a self-reflection pass (`engine/reflect.py`) asks the provider
    to audit its own findings, scores each 0-10, and drops the ones it marks

@@ -183,12 +183,25 @@ not prove a broken schema mode.
 ### Requirement: Findings merge and dedupe across lenses
 
 After the fan-out, findings SHALL be merged and de-duplicated keyed on
-path/line/side, so overlapping lenses never post the same comment twice.
+path/line/side, so overlapping lenses never post the same comment twice. The
+merge SHALL run after suppression and the evidence gate, so a copy those drop
+never displaces its location's surviving finding. Scan findings SHALL also be
+keyed on their title, so distinct tool hits never merge with each other or with
+a model finding.
 <!-- anchor: engine.dedupe -->
 
 #### Scenario: two lenses flag the same line
 - **WHEN** security and correctness both return a finding on one line
 - **THEN** a single finding survives the merge
+
+#### Scenario: the winning copy is gated
+- **WHEN** a critical finding with no failure scenario and an evidenced medium
+  finding share a line
+- **THEN** the evidenced finding survives, and the review is not reported clean
+
+#### Scenario: two advisories at one lockfile line
+- **WHEN** osv-scanner reports two advisories, both at line 1 of `uv.lock`
+- **THEN** both findings survive the merge
 
 ### Requirement: Line anchoring never trusts model arithmetic
 
