@@ -713,6 +713,27 @@ class TestBuildReviewContext:
         assert isinstance(github, RestGitHubGateway)
         assert isinstance(engine, LLMReviewEngine)
 
+    @pytest.mark.parametrize(
+        ("url", "token_var"),
+        [
+            ("https://github.com/org/repo/pull/7", "GITHUB_TOKEN"),
+            ("https://gitlab.example.com/group/proj/-/merge_requests/7", "GITLAB_TOKEN"),
+            ("https://gitea.example.com/org/repo/pulls/7", "GITEA_TOKEN"),
+        ],
+    )
+    def test_the_forge_token_is_redacted_from_logs(self, monkeypatch, url, token_var):
+        import logging
+
+        from lgtmaybe.core.logging import JsonFormatter
+
+        monkeypatch.setenv(token_var, "forge-token-0123456789")
+        cfg = _default_cfg(provider="ollama", model="llama3")
+
+        build_review_context(cfg, RuntimeOptions(pr_url=url))
+
+        record = logging.makeLogRecord({"msg": "auth: forge-token-0123456789"})
+        assert "forge-token-0123456789" not in JsonFormatter().format(record)
+
     def test_requires_github_token(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         cfg = _default_cfg(provider="ollama", model="llama3")
