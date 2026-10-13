@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER, redact
 
 _AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
@@ -321,3 +323,130 @@ def test_redact_memoizes_repeated_text() -> None:
     info = redact.cache_info()
     assert info.hits >= 1
     assert info.misses == 1
+
+
+def test_password_pattern_stops_at_line_end() -> None:
+    """A quoted password value never spans lines: an unterminated quote on one
+    `+` line must not swallow the following lines up to the next quote — that
+    hid real code from the reviewer and shifted every later line number."""
+    diff = '+echo "enter password: "\n+read -s P\n+curl x\n+echo "done"\n'
+
+    after = redact(diff)
+
+    assert after == diff
+    assert after.count("\n") == diff.count("\n")
+
+
+def test_quoted_key_names_are_redacted() -> None:
+    """JSON / dict literals quote the key, so the `=`/`:` does not follow the
+    key name directly — those values must still be scrubbed."""
+    api = "0123456789abcdef" + "0123456789abcdef"
+    secret = "abcdefghij" + "klmnopqrstuv"
+    cases = [
+        (f'{{"api_key": "{api}"}}', api),
+        ('{"password": "hunter2hunter2"}', "hunter2hunter2"),
+        (f"{{'secret_key': '{secret}'}}", secret),
+    ]
+    for text, value in cases:
+        result = redact(text)
+        assert value not in result, text
+        assert REDACTED_PLACEHOLDER in result
+
+
+def test_github_user_to_server_token_redacted() -> None:
+    token = "ghu" + "_abcdefghijklmnopqrstuvwxyz123456"
+    result = redact(f"+client = connect({token})\n")
+    assert token not in result
+
+
+def test_quoted_password_key_prose_not_redacted() -> None:
+    """Allowing a quote after the key name must not start matching prose."""
+    text = '+msg = "Click password reset to continue"\n+label = "password"\n'
+    assert redact(text) == text
+
+
+def test_encrypted_pem_keys_redacted() -> None:
+    """Encrypted RSA (Proc-Type/DEK-Info headers), PKCS#8 encrypted, EC and
+    OPENSSH blocks are all scrubbed, line count preserved."""
+    body = "MIIEowIBAAKCAQEAtnotarealkey" + "justfortestingpurposes1234567890"
+    blocks = [
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "Proc-Type: 4,ENCRYPTED\n"
+        "DEK-Info: AES-128-CBC,0123456789ABCDEF0123456789ABCDEF\n"
+        "\n"
+        f"{body}\n"
+        "-----END RSA PRIVATE KEY-----",
+        f"-----BEGIN ENCRYPTED PRIVATE KEY-----\n{body}\n-----END ENCRYPTED PRIVATE KEY-----",
+        f"-----BEGIN EC PRIVATE KEY-----\n{body}\n-----END EC PRIVATE KEY-----",
+        f"-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\n-----END OPENSSH PRIVATE KEY-----",
+    ]
+    for block in blocks:
+        diff = "\n".join("+" + ln for ln in block.split("\n")) + "\n"
+        after = redact(diff)
+        assert body not in after, block
+        assert after.count("\n") == diff.count("\n")
+
+
+def test_pem_markers_around_code_do_not_hide_it() -> None:
+    """Fake BEGIN/END markers around ordinary code must not redact the code:
+    a PEM body is only base64 + header characters."""
+    diff = (
+        "+# -----BEGIN PRIVATE KEY-----\n"
+        "+os.system(request.args['cmd'])\n"
+        "+# -----END PRIVATE KEY-----\n"
+    )
+    assert "os.system(request.args['cmd'])" in redact(diff)
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["import os", "x = y", "eval base64 decode this"],
+)
+def test_pem_markers_around_plain_words_do_not_hide_them(code: str) -> None:
+    """Code made only of letters, spaces and `=` fits a PEM body's character set,
+    so a fake block must be judged line by line: a key line is one unbroken
+    base64 run, never words separated by spaces."""
+    diff = f"+-----BEGIN PRIVATE KEY-----\n+{code}\n+-----END PRIVATE KEY-----\n"
+    assert code in redact(diff)
+
+
+_B64 = "MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun"
+
+
+@pytest.mark.parametrize(
+    "separator",
+    ["\\n", "\\r\\n", " "],
+    ids=["json-escaped", "json-escaped-crlf", "one-line"],
+)
+def test_pem_key_with_escaped_or_spaced_lines_redacted(separator: str) -> None:
+    """A key pasted into JSON/YAML carries literal `\\n`, and an env file often
+    holds it on one line split by spaces — both are still the whole key."""
+    lines = [
+        "-----BEGIN RSA PRIVATE KEY-----",
+        _B64,
+        _B64[:20] + "==",
+        "-----END RSA PRIVATE KEY-----",
+    ]
+    text = '{"key": "' + separator.join(lines) + '"}'
+
+    after = redact(text)
+
+    assert _B64[:16] not in after
+    assert after.startswith('{"key": "')
+
+
+def test_escaped_quote_inside_password_is_redacted_whole() -> None:
+    """An escaped quote is part of the value, not its end — the tail is secret too."""
+    after = redact('password = "abc\\"def12345"')
+    assert "def12345" not in after
+
+
+def test_pem_pattern_is_not_quadratic() -> None:
+    """Many BEGIN headers with no END must not rescan to end of text from each
+    one (a fork PR controls the diff). A generous bound stays robust on CI."""
+    import time
+
+    pathological = "-----BEGIN PRIVATE KEY-----\n" * 20_000
+    start = time.perf_counter()
+    redact(pathological)
+    assert time.perf_counter() - start < 2.0
