@@ -30,10 +30,12 @@ from lgtmaybe.core.comment import (
     REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
+    last_match,
     marker,
     render_broad,
     render_demoted,
     render_inline_body,
+    strip_markers,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -360,10 +362,15 @@ class RestGitHubGateway:
         comments = [comment for comment, _finding in inline]
 
         def build_body(demoted_findings: list[ReviewFinding]) -> str:
-            body = (
-                f"{summary}{render_demoted(demoted_findings)}"
-                f"{render_broad(broad)}\n\n{self._marker}"
+            # A watermark is only ever the one appended below, so any in the
+            # content is stripped rather than left for a reader to take as ours.
+            # Only that family: the summary carries the engine's own lenses and
+            # risk markers, and finding prose is already stripped of every one.
+            content = strip_markers(
+                f"{summary}{render_demoted(demoted_findings)}{render_broad(broad)}",
+                _REVIEWED_MARKER,
             )
+            body = f"{content}\n\n{self._marker}"
             if self._reviewed_sha:
                 body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
             return body
@@ -542,7 +549,7 @@ class RestGitHubGateway:
         the three comments never clobber each other. Adapter-only, beyond the
         frozen port.
         """
-        body = _DIAGRAMMED_MARKER.sub("", body).rstrip()
+        body = strip_markers(body, _DIAGRAMMED_MARKER).rstrip()
         if completed_sha is not None:
             body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
         self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
@@ -569,9 +576,10 @@ class RestGitHubGateway:
             for comment in resp.json():
                 if marker in (comment.get("body") or ""):
                     if preserve is not None and preserve.search(stamped) is None:
-                        previous = preserve.search(comment.get("body") or "")
-                        if previous is not None:
-                            stamped += f"\n{previous.group(0)}"
+                        # The last stamp: ours is always appended after the body.
+                        previous = list(preserve.finditer(comment.get("body") or ""))
+                        if previous:
+                            stamped += f"\n{previous[-1].group(0)}"
                     patched = self._client.patch(
                         f"{self._api}/issues/comments/{comment['id']}",
                         headers=self._json_headers,
@@ -663,7 +671,8 @@ class RestGitHubGateway:
         """The head SHA covered by our previous review, or None.
 
         Read the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
-        ``post_review`` stamps into the summary. No prior marker or an HTTP
+        ``post_review`` stamps into the summary — the LAST one, since the stamp
+        is appended after the model prose. No prior marker or an HTTP
         lookup failure returns None, so the caller runs a full review. Invalid
         authenticated-actor metadata raises instead of authorizing reuse.
         """
@@ -674,8 +683,7 @@ class RestGitHubGateway:
         if entry is None:
             return None
         _review_id, body, _commit_id = entry
-        match = _REVIEWED_MARKER.search(body)
-        return match.group(1) if match else None
+        return last_match(_REVIEWED_MARKER, body)
 
     def last_completed_sha(self, *, diagram_required: bool) -> str | None:
         """Return the latest head whose required review outputs were posted.
@@ -701,8 +709,7 @@ class RestGitHubGateway:
                         or user.get("login") != self._posting_login
                     ):
                         continue
-                    match = _DIAGRAMMED_MARKER.search(body)
-                    return match.group(1) if match else None
+                    return last_match(_DIAGRAMMED_MARKER, body)
         except httpx.HTTPError:
             return None
         return None

@@ -40,10 +40,12 @@ from lgtmaybe.core.comment import (
     REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
+    last_match,
     marker,
     render_broad,
     render_demoted,
     render_inline_body,
+    strip_markers,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -272,11 +274,12 @@ class GitLabGateway:
             if not self._post_discussion(position, render_inline_body(finding)):
                 demoted.append(finding)
 
-        # A watermark is only ever the one appended below: model prose reaches
-        # the summary and the demoted findings, so any marker inside it is
-        # stripped rather than left for a reader to mistake for ours.
-        content = REVIEWED_MARKER.sub(
-            "", f"{summary}{render_demoted(demoted)}{render_broad(broad)}"
+        # A watermark is only ever the one appended below, so any in the
+        # content is stripped rather than left for a reader to mistake for
+        # ours. Only that family: the summary carries the engine's own lenses
+        # and risk markers, and finding prose is already stripped of every one.
+        content = strip_markers(
+            f"{summary}{render_demoted(demoted)}{render_broad(broad)}", REVIEWED_MARKER
         )
         body = f"{content}\n\n{self._marker}"
         # The note is edited in place, so an unmarked post (a failure notice, a
@@ -318,7 +321,7 @@ class GitLabGateway:
         A manual refresh (no SHA) keeps the previous stamp, and a marker inside
         the model-written diagram is stripped so content can never forge one.
         """
-        body = DIAGRAMMED_MARKER.sub("", body).rstrip()
+        body = strip_markers(body, DIAGRAMMED_MARKER).rstrip()
         stamp = completed_sha or self._carried_marker(self._diagram_marker, DIAGRAMMED_MARKER)
         body = f"{body}\n\n{self._diagram_marker}"
         if stamp:
@@ -957,10 +960,7 @@ def _last_match(pattern: re.Pattern[str], note: dict[str, Any] | None) -> str | 
 
     The last, because the adapter always appends its own stamp after the body.
     """
-    if note is None:
-        return None
-    found: list[str] = pattern.findall(note.get("body") or "")
-    return found[-1] if found else None
+    return None if note is None else last_match(pattern, note.get("body"))
 
 
 def _unusable_increment(comparison: dict[str, Any], base_sha: str, head_sha: str) -> str | None:

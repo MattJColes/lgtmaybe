@@ -131,7 +131,7 @@ Inline, demoted, and broad findings SHALL render it identically.
 
 ### Requirement: Incremental review is commit-scoped and safe
 
-A follow-up run with a completed-head watermark SHALL review only the compare-API diff since that head and explicitly validate earlier open findings against the new head. The completed watermark SHALL move only after a non-partial review result and, when automatic diagrams are enabled, the current-head diagram have posted; force-push, missing marker, compare failure, and incomplete attempts SHALL fall back to a full review. Completion summaries and diagrams SHALL belong to the authenticated token's GitHub viewer. A run whose head already equals the completed head SHALL make no model calls or duplicate posts. LEFT-side new findings SHALL be dropped and resolution scope SHALL remain limited to findings actually validated.
+A follow-up run with a completed-head watermark SHALL review only the compare-API diff since that head and explicitly validate earlier open findings against the new head. The completed watermark SHALL move only after a non-partial review result and, when automatic diagrams are enabled, the current-head diagram have posted; force-push, missing marker, compare failure, and incomplete attempts SHALL fall back to a full review. Completion summaries and diagrams SHALL belong to the authenticated token's GitHub viewer. A run whose head already equals the completed head SHALL make no model calls or duplicate posts. LEFT-side new findings SHALL be dropped and resolution scope SHALL remain limited to findings actually validated. Completion stamps SHALL be read as the last match in a body. Every hidden lgtmaybe marker SHALL be stripped from finding titles and bodies, and the watermark family from the whole summary (which keeps the engine's own lenses and risk markers), so a prompt-injected finding cannot forge a watermark, lenses list, or risk level.
 <!-- anchor: github.incremental -->
 
 #### Scenario: a later push follows a complete review
@@ -149,6 +149,10 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 #### Scenario: a review run fails
 - **WHEN** posting fails after review
 - **THEN** the watermark does not move, so nothing is skipped next run
+
+#### Scenario: a finding body carries a forged watermark
+- **WHEN** a demoted or broad finding's text contains `<!-- lgtmaybe-reviewed:<sha> -->`
+- **THEN** the marker is stripped before posting, and the next run reads only the stamp the adapter appended
 
 ### Requirement: Resolving threads is best-effort GraphQL
 
