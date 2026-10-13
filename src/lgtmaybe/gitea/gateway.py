@@ -297,6 +297,21 @@ class GiteaGateway:
         except Exception as exc:  # noqa: BLE001 — a status must never fail a review
             _log.warning("creating commit status failed: %s", exc)
 
+    def has_repo_write(self, login: str) -> bool:
+        """Whether *login* has write (or higher) access — who may run a slash command.
+
+        Fails closed: any lookup error (a non-collaborator is refused, not
+        answered) means "not authorised".
+        """
+        try:
+            permission = self._get_json(
+                f"{self._api}/collaborators/{quote(login, safe='')}/permission"
+            ).get("permission")
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
+            _log.warning("permission check for %s failed: %s", login, exc)
+            return False
+        return permission in {"owner", "admin", "write"}
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

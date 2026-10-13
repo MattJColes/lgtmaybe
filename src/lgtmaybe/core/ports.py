@@ -295,6 +295,15 @@ class SupportsChecks(Protocol):
 
 
 @runtime_checkable
+class SupportsPermissions(Protocol):
+    """Tell whether a user may push — the bar for running a slash command."""
+
+    def has_repo_write(self, login: str) -> bool:
+        """Whether *login* has write (or higher) access; False when unverifiable."""
+        ...
+
+
+@runtime_checkable
 class SupportsFeedback(Protocol):
     """Read 👎 reactions so a rejected finding stops being resurfaced."""
 

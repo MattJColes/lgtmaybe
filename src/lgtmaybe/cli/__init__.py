@@ -50,6 +50,7 @@ from lgtmaybe.core.ports import (
     SupportsBaseCheckout,
     SupportsConversation,
     SupportsFileContents,
+    SupportsPermissions,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
@@ -1046,6 +1047,17 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
     runtime = replace(runtime, pr_url=_change_url(repo, pr_number))
 
     github, engine, provider = _build_context_or_fail(cfg, runtime)
+
+    # Anyone can comment on a public PR, and a command spends the model, so it
+    # runs only for someone who can push. Checked here, not just in the example
+    # workflows' `if:` — a workflow without that gate (Gitea's cannot read
+    # author_association) must not hand the reviewer to a stranger. Fails closed:
+    # no login, or an adapter that cannot tell, is not authorised.
+    author = (event.get("comment", {}).get("user") or {}).get("login") or ""
+    if not (author and isinstance(github, SupportsPermissions) and github.has_repo_write(author)):
+        _log.warning("slash command ignored: no write access", extra={"author": author})
+        click.echo(f"/{parsed.name} ignored: {author or 'the commenter'} has no write access.")
+        return
 
     try:
         dispatch(parsed, github=github, engine=engine, provider=provider, cfg=cfg)

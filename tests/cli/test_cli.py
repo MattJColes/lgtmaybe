@@ -862,7 +862,7 @@ class TestDiffUnavailable:
             lambda cfg, runtime: (github, FakeEngine(FakeProvider()), FakeProvider()),
         )
         event = {
-            "comment": {"body": command},
+            "comment": {"body": command, "user": {"login": "maintainer"}},
             "issue": {"number": 7, "pull_request": {}},
             "repository": {"full_name": "owner/repo"},
         }
