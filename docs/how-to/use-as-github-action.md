@@ -194,7 +194,7 @@ Swap the `provider`, `model`, and `api_key` inputs:
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: openrouter
-    model: anthropic/claude-sonnet-4-6
+    model: anthropic/claude-sonnet-4.6
     api_key: ${{ secrets.OPENROUTER_API_KEY }}
 
 # zai (GLM / Zhipu AI)

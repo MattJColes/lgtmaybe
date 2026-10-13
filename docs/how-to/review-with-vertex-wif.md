@@ -59,7 +59,7 @@ The review step is:
 - uses: MattJColes/lgtmaybe@v2
   with:
     provider: vertex
-    model: gemini-3-pro
+    model: gemini-3.8-flash
     gcp_wif_provider: ${{ secrets.GCP_WIF_PROVIDER }}
     gcp_service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 ```
@@ -87,11 +87,17 @@ a workflow step with `VERTEXAI_LOCATION` set instead.
 
 | Model | Vertex model ID |
 |---|---|
-| Gemini 3 Pro | `gemini-3-pro` |
-| Gemini 3.1 Pro | `gemini-3.1-pro` |
-| Gemini 3 Flash | `gemini-3-flash` |
+| Gemini 3.8 Flash | `gemini-3.8-flash` |
 | Gemini 3.5 Flash | `gemini-3.5-flash` |
+| Gemini 3.1 Pro (preview) | `gemini-3.1-pro-preview` |
+| Gemini 3 Pro (preview) | `gemini-3-pro-preview` |
 | Gemini 2.5 Pro | `gemini-2.5-pro` |
+| Claude Opus 5.5 | `claude-opus-5-5` |
+
+Use the Gemini 3.x Pro `-preview` IDs as written: litellm's model map has no
+bare `gemini-3-pro` or `gemini-3.1-pro` entry, so with those lgtmaybe can't fit
+its input budget to the model's window. Claude on Vertex must be enabled in
+Model Garden first, and `VERTEXAI_LOCATION` must be a region that serves it.
 
 ## Running Locally with ADC
 
@@ -107,7 +113,7 @@ export VERTEXAI_LOCATION=us-central1
 
 lgtmaybe review \
   --provider vertex \
-  --model gemini-3-pro
+  --model gemini-3.8-flash
 ```
 
 This reviews your current branch with Vertex. Vertex always uses ambient

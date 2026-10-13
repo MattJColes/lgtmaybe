@@ -51,5 +51,5 @@ jobs:
       - uses: MattJColes/lgtmaybe@v2
         with:
           provider: openrouter
-          model: anthropic/claude-sonnet-4-6
+          model: anthropic/claude-sonnet-4.6
           api_key: ${{ secrets.OPENROUTER_API_KEY }}

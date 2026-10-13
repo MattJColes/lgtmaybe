@@ -54,9 +54,9 @@ way, the key is never persisted to config.
 ## Choosing the Model
 
 Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
-strong default. Use an Opus-class model (such as `claude-opus-4-8`) for the
-deepest review at a higher price, or a Haiku-class model to cut cost on smaller
-PRs.
+strong default. Use an Opus-class model (such as `claude-opus-5-5`) for the
+deepest review at a higher price, or a Haiku-class model (such as
+`claude-haiku-4-5`) to cut cost on smaller PRs.
 
 Under the default `fast` preset, a Sonnet or Opus review model has its
 reflection (false-positive audit) pass run on `claude-haiku-4-5`, so your key
@@ -68,7 +68,7 @@ auditor.
 If you reach Claude through OpenRouter, Bedrock or Vertex rather than the
 Anthropic API, use that provider instead:
 
-- [OpenRouter](review-with-openrouter.md): `anthropic/claude-sonnet-4-6`
+- [OpenRouter](review-with-openrouter.md): `anthropic/claude-sonnet-4.6`
 - [Bedrock (keyless OIDC)](review-with-bedrock-oidc.md)
 - [Vertex (keyless WIF)](review-with-vertex-wif.md)
 
