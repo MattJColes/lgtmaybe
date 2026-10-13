@@ -81,7 +81,10 @@ share one — so re-run dedupe SHALL match candidates to posted comments
 one-for-one rather than by set membership. Only comments and threads the posting
 identity wrote SHALL count — the identity has no secret, so anyone can paste it —
 and an unidentifiable posting identity counts none (a duplicate, never a hidden
-finding); marked comments are upserted under the same rule.
+finding); marked comments are upserted under the same rule. Every reader SHALL
+take a comment's ids only from the block appended after its suggestion fence
+(`core/comment.stamped_ids`): the suggestion is posted verbatim, so an id inside
+it is the model's, not ours.
 <!-- anchor: github.fingerprint -->
 
 #### Scenario: same finding, next run
@@ -100,6 +103,11 @@ finding); marked comments are upserted under the same rule.
 #### Scenario: someone else posts our id first
 - **WHEN** a PR author's comment carries the identity of a finding not yet made
 - **THEN** the finding still posts, and their comment is never edited
+
+#### Scenario: a suggestion carries a forged finding id
+- **WHEN** a posted comment's suggestion carries another finding's ids
+- **THEN** that finding still posts, its thread is not kept open by them, and
+  a 👎 on the comment suppresses only the comment's own finding
 
 ### Requirement: Unanchored findings are demoted, never guessed
 
@@ -165,7 +173,7 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 
 ### Requirement: Resolving threads is best-effort GraphQL
 
-A follow-up run SHALL classify each earlier active finding as `fixed`, `still_open`, or `uncertain` from structured model output. A finding SHALL be resolved via GraphQL only when the model returns `fixed` and GitHub independently marks its anchored thread outdated; every other or invalid verdict SHALL remain open without repetitive replies. Before resolve, the opening comment's fingerprint and identity markers SHALL be rewritten into disjoint resolved families; a failed resolve SHALL restore the active body, and only a successful resolve may receive one cosmetic reply. Threads remain independently best-effort and identity-wide permission refusal SHALL stop that wave without failing the review.
+A follow-up run SHALL classify each earlier active finding as `fixed`, `still_open`, or `uncertain` from structured model output. A finding SHALL be resolved via GraphQL only when the model returns `fixed` and GitHub independently marks its anchored thread outdated; every other or invalid verdict SHALL remain open without repetitive replies. Before resolve, the opening comment's stamped fingerprint and identity markers SHALL be rewritten into disjoint resolved families, leaving the suggestion's text as posted; a failed resolve SHALL restore the active body, and only a successful resolve may receive one cosmetic reply. Threads remain independently best-effort and identity-wide permission refusal SHALL stop that wave without failing the review.
 <!-- anchor: github.resolve-fixed -->
 
 #### Scenario: a prior finding is explicitly fixed
@@ -200,9 +208,9 @@ A follow-up run SHALL classify each earlier active finding as `fixed`, `still_op
 
 `list_downvoted_fingerprints` SHALL return the fingerprints of our findings an
 authorised reviewer reacted 👎 (THUMBS_DOWN) to — read via GraphQL from each
-review thread's first comment (its body marker plus the reacting users), with
-each reactor's repo permission checked and failing closed, never persisted
-locally. A write-access thumbs-down is the only suppress signal; an unprivileged
+review thread's first comment (its stamped fingerprint plus the reacting
+users), with each reactor's repo permission checked and failing closed, never
+persisted locally. A write-access thumbs-down is the only suppress signal; an unprivileged
 reaction and a resolved thread are not.
 <!-- anchor: github.feedback -->
 

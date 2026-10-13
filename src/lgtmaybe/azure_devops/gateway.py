@@ -49,8 +49,6 @@ import httpx
 
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
-    FINDING_MARKER,
-    IDENTITY_MARKER,
     current_finding_keys,
     finding_keys,
     marker,
@@ -58,6 +56,7 @@ from lgtmaybe.core.comment import (
     render_demoted,
     render_inline_body,
     render_unread_files,
+    stamped_ids,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -947,16 +946,15 @@ class AzureDevOpsGateway:
         thread: dict[str, Any], root: dict[str, Any], *, outdated: bool
     ) -> ActiveFinding:
         body = root.get("content") or ""
-        fingerprint = FINDING_MARKER.search(body)
-        identity = IDENTITY_MARKER.search(body)
+        fingerprint, identity = stamped_ids(body)
         comment_id = root.get("id")
         return ActiveFinding(
             thread_id=str(thread.get("id")),
             comment_id=comment_id if isinstance(comment_id, int) else None,
             path=_repo_path((thread.get("threadContext") or {}).get("filePath")) or "",
             body=body,
-            fingerprint=fingerprint.group(1) if fingerprint else None,
-            identity=identity.group(1) if identity else None,
+            fingerprint=fingerprint,
+            identity=identity,
             outdated=outdated,
         )
 

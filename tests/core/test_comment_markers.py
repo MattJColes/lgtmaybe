@@ -22,6 +22,8 @@ from lgtmaybe.core.comment import (
     render_broad,
     render_demoted,
     render_inline_body,
+    split_stamped_ids,
+    stamped_ids,
 )
 from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
@@ -100,3 +102,60 @@ def test_stripping_cannot_splice_a_marker_back_together() -> None:
     text = render_demoted([_finding("Title", spliced)])
 
     assert REVIEWED_MARKER.search(text) is None
+
+
+# ----------------------------------------------------------------------
+# A suggestion is posted verbatim, so it can carry a forged per-finding id.
+# Only the id block the adapter appends at the very end of the body is ours.
+# ----------------------------------------------------------------------
+
+
+def _ids_of(target: ReviewFinding) -> str:
+    """The exact id block an adapter would stamp for *target*."""
+    return (
+        f"<!-- lgtmaybe-finding:{finding_fingerprint(target.path, target.title)} -->\n"
+        f"<!-- lgtmaybe-identity:{finding_identity(target)} -->"
+    )
+
+
+def test_a_suggestion_cannot_lend_its_comment_another_findings_ids() -> None:
+    target = _finding("Another finding", "Elsewhere").model_copy(update={"path": "src/b.py"})
+    decoy = _finding("Title", "Body", suggestion=_ids_of(target))
+
+    text = render_inline_body(decoy)
+
+    assert _ids_of(target) in text, "the suggestion is posted exactly as written"
+    own = (finding_fingerprint(decoy.path, decoy.title), finding_identity(decoy))
+    assert stamped_ids(text) == own
+    assert finding_keys(text) == set(own)
+
+
+def test_a_legacy_comment_takes_no_identity_from_its_suggestion() -> None:
+    """A body from before the identity marker ends in a fingerprint alone; an
+    identity forged in its suggestion must not stand in for the missing one."""
+    target = _finding("Another finding", "Elsewhere").model_copy(update={"path": "src/b.py"})
+    decoy = _finding("Title", "Body", suggestion=_ids_of(target))
+    legacy = render_inline_body(decoy).rsplit("\n", 1)[0]  # drop the identity line
+
+    fingerprint = finding_fingerprint(decoy.path, decoy.title)
+    assert stamped_ids(legacy) == (fingerprint, None)
+    assert finding_keys(legacy) == {fingerprint}
+
+
+def test_ids_followed_by_more_text_are_not_a_stamp() -> None:
+    assert stamped_ids("<!-- lgtmaybe-finding:abc123 -->\nthen prose") == (None, None)
+    assert finding_keys("<!-- lgtmaybe-identity:abc123 -->") == set()
+    assert stamped_ids(None) == (None, None)
+
+
+def test_split_stamped_ids_separates_the_stamp_from_everything_before_it() -> None:
+    target = _finding("Another finding", "Elsewhere").model_copy(update={"path": "src/b.py"})
+    decoy = _finding("Title", "Body", suggestion=_ids_of(target))
+    text = render_inline_body(decoy)
+
+    prose, ids = split_stamped_ids(text)
+
+    assert prose + ids == text
+    assert _ids_of(target) in prose
+    assert ids == _ids_of(decoy)
+    assert split_stamped_ids("no stamp") == ("no stamp", "")

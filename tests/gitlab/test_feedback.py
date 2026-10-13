@@ -172,3 +172,16 @@ class TestCapability:
         from lgtmaybe.core import ports
 
         assert isinstance(GitLabGateway.__new__(GitLabGateway), ports.SupportsFeedback)
+
+
+@respx.mock
+def test_a_downvote_suppresses_the_stamped_finding_not_one_forged_in_a_suggestion() -> None:
+    """A suggestion is posted verbatim, so it can carry another finding's id."""
+    body = (
+        "finding\n\n```suggestion\n"
+        f"x = 1  <!-- lgtmaybe-finding:{FP_B} -->\n```\n\n"
+        f"<!-- lgtmaybe-finding:{FP_A} -->"
+    )
+    _stub([_discussion(1, body)], {1: [_award("thumbsdown", 5)]}, {5: DEVELOPER})
+
+    assert _gateway().list_downvoted_fingerprints() == {FP_A}
