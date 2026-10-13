@@ -236,8 +236,12 @@ class TestPostReview:
         )
         respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
             return_value=httpx.Response(
-                200, json=[{"id": 55, "body": "old summary\n\n<!-- lgtmaybe -->"}]
+                200,
+                json=[{"id": 55, "body": "old summary\n\n<!-- lgtmaybe -->", "author": {"id": 99}}],
             )
+        )
+        respx.get(f"https://{HOST}/api/v4/user").mock(
+            return_value=httpx.Response(200, json={"id": 99})
         )
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))

@@ -722,20 +722,22 @@ class GitLabGateway:
         return int(note_id) if note_id is not None else None
 
     def _family_note(self, family: str) -> dict[str, Any] | None:
-        """The note an upsert in ``family`` would edit: the newest, or None.
+        """The note an upsert in ``family`` would edit: our own newest, or None.
 
-        The newest, so the note written is the one ``_own_note`` reads back.
+        Our own, because anyone can post a note carrying the marker: a planted
+        note as the target would 403 on every run, and its stamp would be
+        carried into ours. The same note ``_own_note`` reads back. No own note,
+        or an unknown identity, means a fresh note is posted.
         """
-        return _newest([note for note in self._notes() if family in (note.get("body") or "")])
+        return self._own_note(family)
 
     def _carried_marker(self, family: str, pattern: re.Pattern[str]) -> str | None:
-        """The stamp already on the note an upsert in ``family`` will edit.
+        """The stamp already on our own note an upsert in ``family`` will edit.
 
         Carried forward so an edit that sets no new stamp keeps the old one.
-        Taken from the very note being replaced, whoever wrote it: readers only
-        believe a stamp in a note our own identity wrote, so carrying one never
-        makes it trusted. A read failure carries nothing, which only costs the
-        next run a full review.
+        Only ever from a note our identity wrote, so a planted stamp can never
+        be re-written under our name. A read failure carries nothing, which
+        only costs the next run a full review.
         """
         try:
             return _last_match(pattern, self._family_note(family))

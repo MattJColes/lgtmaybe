@@ -322,6 +322,7 @@ class TestWatermarkStamping:
         """The note is edited in place, so an unmarked post must not erase the old head:
         the commits up to it were reviewed, and nothing after it was."""
         _stub_notes([_summary_note(LAST)])
+        _stub_user()
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
 
         _gateway().post_review([], "⚠️ lgtmaybe review failed", diff=DIFF)
@@ -333,6 +334,7 @@ class TestWatermarkStamping:
     @respx.mock
     def test_a_successful_rerun_replaces_the_watermark(self) -> None:
         _stub_notes([_summary_note(LAST)])
+        _stub_user()
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
         gateway = _gateway()
 
@@ -430,6 +432,7 @@ class TestWatermarkReading:
     def test_an_upsert_edits_the_newest_note_in_its_family(self) -> None:
         """The note written to is the one read back, so the two never diverge."""
         _stub_notes([_summary_note(LAST, note_id=10), _summary_note(LAST, note_id=20)])
+        _stub_user()
         older = respx.put(f"{MR_URL}/notes/10").mock(return_value=httpx.Response(200, json={}))
         newer = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(200, json={}))
         gateway = _gateway()
@@ -439,6 +442,39 @@ class TestWatermarkReading:
 
         assert newer.called
         assert not older.called
+
+    @respx.mock
+    def test_a_planted_newer_note_is_neither_edited_nor_carried(self) -> None:
+        """Anyone can post a note carrying our marker and a forged stamp. It must not
+        become the upsert target (the edit would 403 on every run) and its stamp
+        must not be carried into the note we write."""
+        forged = "f" * 40
+        _stub_notes(
+            [_summary_note(LAST, note_id=10), _summary_note(forged, author=HUMAN, note_id=20)]
+        )
+        _stub_user()
+        ours = respx.put(f"{MR_URL}/notes/10").mock(return_value=httpx.Response(200, json={}))
+        planted = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(403))
+
+        _gateway().post_review([], "review failed", diff=DIFF)
+
+        assert not planted.called
+        body = json.loads(ours.calls.last.request.content)["body"]
+        assert f"lgtmaybe-reviewed:{LAST}" in body
+        assert forged not in body
+
+    @respx.mock
+    def test_only_a_planted_note_posts_a_fresh_note_without_its_stamp(self) -> None:
+        forged = "f" * 40
+        _stub_notes([_summary_note(forged, author=HUMAN, note_id=20)])
+        _stub_user()
+        planted = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(403))
+        posted = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
+
+        _gateway().post_review([], "review failed", diff=DIFF)
+
+        assert not planted.called
+        assert forged not in json.loads(posted.calls.last.request.content)["body"]
 
 
 class TestCompletedHead:
@@ -514,6 +550,7 @@ class TestDiagramCompletionMarker:
                 }
             ]
         )
+        _stub_user()
         edit = respx.put(f"{MR_URL}/notes/66").mock(return_value=httpx.Response(200, json={}))
 
         _gateway().post_diagram_comment("new diagram")

@@ -20,7 +20,8 @@ extra request (such as `merge_base`) is needed.
 ### D2. A withheld patch is a fallback, not a partial increment
 
 GitLab stops listing files past an instance's diff limits without saying so,
-and flags per-file patches it withheld (`too_large`, `collapsed`). Any flag,
+and flags per-file patches it withheld (`too_large`, `collapsed`, and
+`overflow` on versions that report it). Any flag,
 or a file list at 500 entries (the smallest `diff_max_files` an admin can
 set), falls back to a full review: an increment missing a file would present
 unreviewed code as reviewed.

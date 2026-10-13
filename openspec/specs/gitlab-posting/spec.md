@@ -55,12 +55,19 @@ commentable diff line, or when the diff refs are unknown.
 The summary SHALL be posted as a merge request note carrying the hidden marker,
 upserted in place on a re-run, with disjoint marker families for the summary,
 the description, and the diagram. Findings whose hidden ids are already present
-on the merge request SHALL NOT be posted again.
+on the merge request SHALL NOT be posted again. Only a note the token's own user
+wrote SHALL be edited or have its stamps carried forward; anyone can post a note
+carrying the marker, so a note by anyone else is ignored and, with no own note,
+a fresh one is posted.
 <!-- anchor: gitlab.upsert -->
 
 #### Scenario: a re-run edits rather than duplicates
 - **WHEN** a review runs a second time on the same merge request
 - **THEN** the existing summary note is edited and no second one is posted
+
+#### Scenario: someone plants a note carrying the marker
+- **WHEN** another user's newer note carries the summary marker and a forged stamp
+- **THEN** our own note is the one edited, and the forged stamp is not carried into it
 
 ### Requirement: Threads resolve over REST, only when validated
 
