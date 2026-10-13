@@ -75,6 +75,23 @@ class TestGetPRContext:
         assert ctx.changed_files == ["app.py"]
 
     @respx.mock
+    def test_lists_every_file_when_the_server_caps_pages_below_the_limit(self) -> None:
+        # MAX_RESPONSE_ITEMS = 30: every page is shorter than the limit=50 asked.
+        _stub_context_routes()
+        names = [f"f{i}.py" for i in range(80)]
+
+        def files_page(request: httpx.Request) -> httpx.Response:
+            start = (int(request.url.params["page"]) - 1) * 30
+            rows = [{"filename": n} for n in names[start : start + 30]]
+            return httpx.Response(200, json=rows, headers={"X-Total-Count": "80"})
+
+        respx.route(method="GET", url__startswith=f"{PR_URL}/files").mock(side_effect=files_page)
+
+        ctx = _gateway(httpx.Client()).get_pr_context()
+
+        assert ctx.changed_files == names
+
+    @respx.mock
     def test_carries_the_stated_intent_for_the_intent_lens(self) -> None:
         _stub_context_routes()
         ctx = _gateway(httpx.Client()).get_pr_context()
