@@ -201,8 +201,9 @@ by `PRECEDENCE`, Ponytail 5's review order with leanness last.
 - **THEN** only the security finding posts, whatever the two findings' severities
 
 #### Scenario: both findings can be right
-- **WHEN** performance and ponytail flag the same loop
-- **THEN** both post — the pair is not declared opposed
+- **WHEN** performance and ponytail flag the same loop with compatible advice
+- **THEN** both post: the backstop never drops an undeclared pair, and
+  reflection drops one only when the two actually advise opposite things
 
 #### Scenario: reflection is off
 - **WHEN** `reflect` is false
