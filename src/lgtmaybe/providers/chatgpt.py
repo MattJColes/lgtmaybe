@@ -79,9 +79,20 @@ def forbid_interactive_login() -> None:
 
     Process-wide and idempotent. Only review paths call it: ``lgtmaybe login``
     runs in its own process and keeps litellm's prompt.
+
+    It replaces a private litellm method, and a pip install is not held to the
+    lockfile. So a litellm that no longer has the method fails loudly here:
+    assigning a missing name would guard nothing and bring the prompt back.
     """
     from litellm.llms.chatgpt.authenticator import Authenticator
     from litellm.llms.chatgpt.common_utils import GetAccessTokenError
+
+    if not callable(getattr(Authenticator, "_login_device_code", None)):
+        raise ValueError(
+            "this litellm version moved its ChatGPT sign-in prompt, so lgtmaybe cannot "
+            "stop a review from starting it. Install the litellm version lgtmaybe "
+            "pins, or use another provider."
+        )
 
     def refuse(self: Authenticator) -> dict[str, str]:
         raise GetAccessTokenError(
@@ -104,4 +115,6 @@ def refresh() -> None:
     try:
         Authenticator().get_access_token()
     except ChatGPTAuthError as exc:
-        raise ValueError(f"chatgpt sign-in unusable: {exc}") from exc
+        detail = str(exc)
+        hint = "" if _RELOGIN_HINT in detail else f" {_RELOGIN_HINT}"
+        raise ValueError(f"chatgpt sign-in unusable: {detail}{hint}") from exc

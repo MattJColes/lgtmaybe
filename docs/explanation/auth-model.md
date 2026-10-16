@@ -103,7 +103,7 @@ provider has its own rule for where to look:
 7. **chatgpt** needs a stored sign-in from `lgtmaybe login chatgpt`. litellm
    keeps the token at `~/.config/litellm/chatgpt/auth.json` (or under
    `CHATGPT_TOKEN_DIR`) and refreshes it. lgtmaybe renews it once at start-up,
-   before the review's calls run at the same time. With no sign-in, or one that
+   before the review sends its calls in parallel. With no sign-in, or one that
    cannot be renewed, lgtmaybe fails with a message naming the login command. A
    review never starts the browser sign-in itself.
 8. **openai, anthropic and openrouter** read the key from `--api-key`, or else

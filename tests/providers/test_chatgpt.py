@@ -208,6 +208,40 @@ def test_an_unrenewable_sign_in_fails_at_start_up_with_the_login_command(
     device_code.assert_not_called()
 
 
+def test_an_unusable_sign_in_always_names_the_login_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hint comes from refresh() itself, not from whatever litellm's own
+    error text happens to say."""
+    from litellm.llms.chatgpt.authenticator import Authenticator
+    from litellm.llms.chatgpt.common_utils import GetAccessTokenError
+
+    monkeypatch.setenv("CHATGPT_TOKEN_DIR", str(tmp_path / "tokens"))
+    _write_token(tmp_path / "tokens")
+
+    def broken(_self: Authenticator) -> str:
+        raise GetAccessTokenError(message="token file unreadable", status_code=400)
+
+    with (
+        patch.object(Authenticator, "get_access_token", broken),
+        pytest.raises(ValueError, match="token file unreadable") as info,
+    ):
+        resolve_credentials(Provider.chatgpt)
+    assert "lgtmaybe login chatgpt" in str(info.value)
+
+
+def test_the_guard_fails_loudly_if_litellm_renames_the_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pip installs are not held to our lock. If a newer litellm moves the
+    device-code prompt, patching a missing name would silently guard nothing."""
+    from litellm.llms.chatgpt.authenticator import Authenticator
+
+    monkeypatch.delattr(Authenticator, "_login_device_code")
+    with pytest.raises(ValueError, match="litellm"):
+        chatgpt.forbid_interactive_login()
+
+
 def test_an_expiring_sign_in_is_renewed_once_up_front(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

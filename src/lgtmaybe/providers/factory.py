@@ -224,6 +224,8 @@ def dropped_params(provider: Provider, model: str, params: Iterable[str]) -> lis
 
     Keyed off litellm's own two maps rather than a per-param special case, so a
     param added to the config later is covered without touching this function.
+    The one exception is :data:`_WIRE_STRIPPED`: params a route's list names but
+    its transform never sends (chatgpt's temperature) are reported as dropped.
     Only OpenAI-vocabulary params are judged: a provider-native option (ollama's
     ``num_ctx``/``think``) never appears in the capability map and is not
     litellm's to drop, so flagging it would only teach the reader to ignore the
