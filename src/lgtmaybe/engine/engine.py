@@ -92,6 +92,7 @@ from .risk import assess_risk, risk_marker, risk_segment
 from .selftalk import drop_self_talk
 from .severity import clamp_to_category_ceiling
 from .static_analysis import (
+    MAX_SCAN_FINDINGS,
     SCAN_CATEGORY_PREFIX,
     UNANCHORABLE_SCAN_CATEGORIES,
     ToolFinding,
@@ -1511,6 +1512,20 @@ class LLMReviewEngine:
             all_findings = unsuppressed
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
+
+        # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
+        #     cap bounds posted comments, so findings those stages drop must not
+        #     spend its slots — the slot a suppressed hit vacates goes to the
+        #     next on-diff hit instead. Model findings never count against it.
+        scans = [f for f in all_findings if _is_scan_finding(f)]
+        if len(scans) > MAX_SCAN_FINDINGS:
+            considered = len(scans) + off_diff  # pre-cap count, before reassignment
+            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
+            _log.info(
+                "scan findings capped after diff scoping",
+                extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
+            )
+            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
 
         # 7b. Evidence gate: built-in defect findings must name a concrete way
         #     the changed code fails. Category is engine-stamped, so lowering the
