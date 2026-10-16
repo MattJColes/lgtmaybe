@@ -118,7 +118,7 @@ _CODE_EXTS = frozenset(
 _TEST_RE = re.compile(
     r"(?:^|/)(?:tests?|__tests__|spec)/"
     r"|(?:^|/)test_[^/]*\.py$|_test\.(?:py|go)$|_spec\.rb$"
-    r"|\.(?:test|spec)\.[^/]+$"
+    r"|\.(?:test|spec|jest)\.[^/]+$"
 )
 _DOC_RE = re.compile(r"\.(?:md|mdx|rst|adoc)$|(?:^|/)docs?/", re.IGNORECASE)
 
