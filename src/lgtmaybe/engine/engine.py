@@ -1546,7 +1546,6 @@ class LLMReviewEngine:
             file_patches = kept
 
             total_files = len(file_patches)
-            capped_files = False
 
         # 2c. Fail loud when there is code to review but no lens to review it:
         #     every configured lens was skipped (intent with nothing stated, spec
