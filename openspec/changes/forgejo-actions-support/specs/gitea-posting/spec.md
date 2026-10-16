@@ -30,9 +30,10 @@ a run that sets `FORGEJO_SERVER_URL`.
 
 The supplied Forgejo workflow SHALL trigger on `pull_request_target` and
 `issue_comment` only, use the lgtmaybe image as its job container, contain no
-`uses:` step, and run only `python -m lgtmaybe action`. Its forge token SHALL be
-mapped from a secret whose name does not start with `FORGEJO_`, `GITEA_` or
-`GITHUB_`, so it can never resolve to the automatic job token by accident.
+`uses:` step, and run only `python -m lgtmaybe action`. As shipped, its forge
+token SHALL be mapped from a `LGTMAYBE_`-prefixed secret, never the automatic
+job token, because that token cannot check a commenter's permission. Mapping
+the job token is a user's documented opt-in edit.
 <!-- anchor: gitea.forgejo-workflow -->
 
 #### Scenario: a pull request edits the workflow
@@ -43,3 +44,8 @@ mapped from a secret whose name does not start with `FORGEJO_`, `GITEA_` or
 #### Scenario: the token secret is named
 - **WHEN** the starter workflow is read
 - **THEN** `GITEA_TOKEN` comes from a `LGTMAYBE_`-prefixed secret
+
+#### Scenario: a user opts in to the job token
+- **WHEN** a user maps `GITEA_TOKEN` to `secrets.FORGEJO_TOKEN`
+- **THEN** reviews still post and re-runs still de-duplicate, while slash
+  commands are ignored because the commenter's permission cannot be read

@@ -25,9 +25,10 @@ You need:
 
 Pick one environment and write it down:
 
-- **A. Local.** `docker compose -f tests/forgejo/uat/compose.yml up` starts
-  Forgejo and a registered runner on your machine. Fastest, but it cannot do
-  the keyless scenarios, because no cloud can reach `localhost`.
+- **A. Local.** `tests/forgejo/uat/up.sh` starts Forgejo and a registered
+  runner on your machine and creates both accounts. Add `--stub` for a stand-in
+  model that needs no API key. Fastest, but it cannot do the keyless
+  scenarios, because no cloud can reach `localhost`.
 - **B. Codeberg with your own runner.** A real public instance. Covers
   everything.
 - **C. Codeberg's shared runners.** Only for scenario 10.
@@ -129,10 +130,10 @@ send you to the pip fallback. Record which happened.
 Change the token mapping to `GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}` and
 re-run scenarios 1 and 2.
 
-Expect: record what happens. This scenario answers an open design question, so
-"it does not work" is a useful result, not a failure. Note whether comments
-post, which account they post as, and whether scenario 2 still avoids
-duplicates.
+Expect: reviews post as `forgejo-actions`, and scenario 2 still avoids
+duplicates. Slash commands are ignored, because this token cannot read a
+commenter's permission, and the job log says so. Check the docs explain this
+trade-off before you try it.
 
 ## Afterwards
 

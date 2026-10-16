@@ -6,9 +6,17 @@ investigation:
 - Codeberg (Forgejo 16, reporting `gitea-1.22.0` API compatibility) serves
   every read endpoint `GiteaGateway` calls, in the shape it expects: PR
   metadata (`base.sha`, `head.sha`, `head.ref`), `pulls/{n}.diff`, `/files`,
-  `/commits`, `/reviews` and `/labels`. The write endpoints (review post,
-  comment edit, commit status, collaborator permission, `GET /user`) are
-  unverified and are the main risk.
+  `/commits`, `/reviews` and `/labels`.
+- The spike (task group 1) ran the released lgtmaybe v2 image as a Forgejo
+  Actions job on Forgejo 17 with forgejo-runner 12, the stub model standing in
+  for a provider. With a personal token: inline review, summary upsert, re-run
+  dedupe, commit status, `/describe` from the maintainer, an outsider's `/ask`
+  ignored with no reply, and a fork pull request reviewed through
+  `pull_request_target`. With the automatic job token: reviews post as
+  `forgejo-actions` and re-runs de-duplicate, but the collaborator-permission
+  call returns 403, so every slash command is ignored (fail closed).
+- Forgejo refuses secret names starting with `FORGEJO_`, as well as `GITEA_`
+  and `GITHUB_` (HTTP 400).
 - forgejo-runner v7 and later sets each `FORGEJO_*` variable and its `GITHUB_*`
   alias. Earlier runners set only `GITHUB_*`. `GITHUB_API_URL` ends in
   `/api/v1`.
@@ -69,9 +77,12 @@ compatibility.
 the token chain read it, a missing secret would silently fall back to the job
 token. If that identity cannot answer `GET /user`, `_posting_login` returns
 None, dedupe trusts nothing, and every re-run posts duplicate findings. The
-workflow maps `GITEA_TOKEN` explicitly. If the user test shows the job token
-does work end to end, the docs offer `GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}`
-as an explicit, opt-in mapping. Still no code change.
+workflow maps `GITEA_TOKEN` explicitly, from `LGTMAYBE_FORGEJO_TOKEN`. The spike
+showed the job token reviews correctly but cannot read a commenter's
+permission, so the docs offer `GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}` as a
+reviews-only opt-in, naming the trade-off. The gateway's 403 log line names the
+cause (the token cannot read collaborator permissions) instead of only "no
+write access", so a user who opted in can see why commands are ignored.
 
 **4. Federation lives in Python, in the container.** A new
 `providers/federation.py` exposes one function, called from the `action`
@@ -148,7 +159,5 @@ a revert.
 
 ## Open Questions
 
-- Does the automatic job token post reviews and answer `GET /user`? It changes
-  only one docs paragraph (decision 3).
 - Do Codeberg's shared runners honour job `container:`? It changes only which
   setup path the docs lead with.

@@ -37,6 +37,20 @@ SHALL NOT fall back to another credential.
 - **WHEN** `INPUT_AWS_ROLE_ARN` is set and the job did not enable OpenID Connect
 - **THEN** the run exits non-zero naming `enable-openid-connect: true`
 
+### Requirement: An incomplete input set fails before the token request
+
+Each cloud's federation inputs SHALL be checked as a set before any token is
+requested: Azure needs `INPUT_AZURE_CLIENT_ID` and `INPUT_AZURE_TENANT_ID`, and
+Bedrock needs `INPUT_AWS_ROLE_ARN` and a region (`INPUT_AWS_REGION`, else
+`AWS_REGION`). A missing companion SHALL fail the run naming that input, rather
+than surfacing later as an SDK error.
+<!-- anchor: federation.inputs -->
+
+#### Scenario: Azure without a tenant
+- **WHEN** `INPUT_AZURE_CLIENT_ID` is set and `INPUT_AZURE_TENANT_ID` is not
+- **THEN** the run exits non-zero naming `INPUT_AZURE_TENANT_ID`, and no token
+  is requested
+
 ### Requirement: Each cloud gets the credential its SDK already reads
 
 Federation SHALL request the ID token with the audience the cloud expects and

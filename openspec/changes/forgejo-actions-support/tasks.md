@@ -1,12 +1,13 @@
 ## 1. Spike: Prove the Write Path on Real Forgejo
 
 - [ ] 1.1 Commit `tests/forgejo/uat/compose.yml` (Forgejo plus a registered forgejo-runner with the `docker` label, reused by the user test and task 5.1), bring it up, create a repository and a pull request, and run `python -m lgtmaybe action` in the job container against it with a scoped `GITEA_TOKEN`; verify a review, a summary comment and a commit status post, and record any endpoint that fails in this change's design.md
-- [ ] 1.2 Repeat 1.1 with `GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}`; verify whether `GET /user`, the review post and a re-run's dedupe work, and settle design.md's first open question
+- [x] 1.2 Repeat 1.1 with `GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}`; verify whether `GET /user`, the review post and a re-run's dedupe work, and settle design.md's first open question
 
 ## 2. Host Recognition
 
 - [ ] 2.1 Red first: add `tests/cli/test_action.py` cases for `FORGEJO_SERVER_URL` winning over `GITHUB_SERVER_URL`, the `GITHUB_*`-only fallback, and no GHES refusal when `FORGEJO_SERVER_URL` is set; then change `cli._change_url` and verify the cases pass
 - [ ] 2.2 Name Forgejo beside Gitea in `parse_pr_url`'s unparseable-URL error and `GHES_UNSUPPORTED`; verify `tests/core/test_forge.py` asserts the new text
+- [ ] 2.4 Red first: a `tests/gitea/test_gateway.py` case where the permission call returns 403 and the logged warning names the token's missing permission; then reword the warning in `GiteaGateway.has_repo_write` and verify the case passes
 - [ ] 2.3 Add the `gitea.forgejo-host` rule to `openspec/specs/gitea-posting/anchors.yml` (bound to `_change_url`); verify `uv run pytest tests/specs -q`
 
 ## 3. Starter Workflow and Docs
@@ -18,7 +19,7 @@
 
 ## 4. Workload Identity Federation
 
-- [ ] 4.1 Red first: add `tests/providers/test_federation.py` with a stubbed token endpoint (httpx `MockTransport`) covering the gate (no input, no request, environment unchanged), the missing-token error naming `enable-openid-connect: true`, a 403 leaving no token text in the message, and the `0600` file mode on POSIX; then add `providers/federation.py` and verify the tests pass on Ubuntu and Windows (explicit `encoding=` on every file write)
+- [ ] 4.1 Red first: add `tests/providers/test_federation.py` with a stubbed token endpoint (httpx `MockTransport`) covering the gate (no input, no request, environment unchanged), the missing-token error naming `enable-openid-connect: true`, a 403 leaving no token text in the message, an incomplete input set (Azure client ID without tenant ID, Bedrock without a region) failing before any request, and the `0600` file mode on POSIX; then add `providers/federation.py` and verify the tests pass on Ubuntu and Windows (explicit `encoding=` on every file write)
 - [ ] 4.2 Bedrock: assert the `sts.amazonaws.com` audience and the `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_REGION` variables; then check botocore resolves a web-identity provider from them with the STS call stubbed
 - [ ] 4.3 Azure: assert the `api://AzureADTokenExchange` audience and the three `AZURE_*` variables; then check `DefaultAzureCredential` selects workload identity from them
 - [ ] 4.4 Vertex: assert the `https://iam.googleapis.com/<provider>` audience and an `external_account` file with `credential_source.file`, plus impersonation when a service account is given; then check `google.auth.load_credentials_from_file` accepts it
