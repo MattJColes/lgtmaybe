@@ -66,6 +66,17 @@ def test_body_sections_carry_no_marker_from_model_prose(
 
 
 @pytest.mark.parametrize("forged", FORGED)
+def test_body_sections_carry_no_marker_from_the_path(forged: str) -> None:
+    """The path is model-written too, and the gateways assume the demoted/broad
+    body is already marker-free (they strip only the review watermark)."""
+    finding = _finding("Title", "Body").model_copy(update={"path": f"x.py {forged}"})
+
+    for text in (render_demoted([finding]), render_broad([finding])):
+        assert "lgtmaybe" not in text
+        assert "`x.py`" in text
+
+
+@pytest.mark.parametrize("forged", FORGED)
 def test_inline_body_carries_only_its_own_ids(forged: str) -> None:
     finding = _finding(f"Title {forged}", f"Body {forged}")
 
