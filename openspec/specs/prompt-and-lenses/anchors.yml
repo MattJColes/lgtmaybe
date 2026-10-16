@@ -87,3 +87,9 @@ prompt.never-cut:
     kind: function_definition
     has: { field: name, regex: '^build_shared_preamble$' }
   files: [src/lgtmaybe/engine/prompt.py]
+
+prompt.architecture:
+  rule:
+    kind: assignment
+    has: { field: left, regex: '^_ARCHITECTURE_SECTION$' }
+  files: [src/lgtmaybe/engine/prompt.py]

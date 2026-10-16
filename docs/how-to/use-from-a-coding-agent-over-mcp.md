@@ -101,7 +101,7 @@ full review per call.
 | `mode` | `branch` (default): committed branch changes against the base. `working`: branch commits plus uncommitted edits. `uncommitted`: only the uncommitted edits against `HEAD`. |
 | `base` | The base ref to diff against, like `--base`. Defaults to the remote's primary branch. |
 | `min_severity` | Drop findings below `info`, `low`, `medium`, `high` or `critical`. |
-| `preset` | `fast` (four model calls) or `full` (one call per review category). |
+| `preset` | `fast` (five model calls) or `full` (one call per review category). |
 
 A review that cannot run (not a Git repository, a missing credential, a provider
 error) comes back as a tool error with the reason, so the agent sees what went

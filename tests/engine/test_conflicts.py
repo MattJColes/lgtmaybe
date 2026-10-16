@@ -133,3 +133,18 @@ def test_each_drop_names_the_loser_and_the_winner(caplog: pytest.LogCaptureFixtu
     assert record.title == cut.title  # type: ignore[attr-defined]
     assert record.outranked_by == "security"  # type: ignore[attr-defined]
     assert record.winner_line == 10  # type: ignore[attr-defined]
+
+
+def test_architecture_ranks_above_the_readability_lenses() -> None:
+    rank = {c: i for i, c in enumerate(PRECEDENCE)}
+    assert rank[ReviewCategory.architecture] < rank[ReviewCategory.complexity]
+    assert rank[ReviewCategory.tests] < rank[ReviewCategory.architecture]
+
+
+def test_a_cut_across_a_seam_the_architecture_lens_flags_loses() -> None:
+    """Architecture says "this dependency belongs behind the port"; ponytail says
+    "inline it". Only one of those can post."""
+    keep = _finding(ReviewCategory.architecture, line=12)
+    cut = _finding(ReviewCategory.ponytail, line=13)
+
+    assert resolve_conflicts([cut, keep]) == [keep]

@@ -117,7 +117,7 @@ def test_real_engine_reviews_forged_completion_but_reuses_trusted_current_head(
         assert not provider.calls and not posted
         assert "already complete" in summary
     else:
-        assert len(provider.calls) == 4 and len(posted) == 1
+        assert len(provider.calls) == 5 and len(posted) == 1
         assert posted[0]["commit_id"] == HEAD
         assert "already complete" not in summary
 

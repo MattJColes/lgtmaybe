@@ -12,14 +12,18 @@ finding rules — all biased to never silently drop a real finding.
 After merge/dedupe the provider SHALL audit its own findings and drop the ones
 it marks low-confidence, including cross-file false positives whose validity
 hinges on unshown code — while gap findings (performance, complexity, intent,
-spec) stay valid. A missing-test/doc finding SHALL keep that protection only
-when the test or doc file is shown or retrieved; otherwise it is an absence
-claim about unshown code like any other. An unparseable audit keeps everything.
+spec) stay valid. Missing-test/doc and architecture findings SHALL keep that
+protection only when what they rely on is shown; otherwise they are claims
+about unshown code like any other. An unparseable audit keeps everything.
 <!-- anchor: quality.reflect -->
 
 #### Scenario: reflection output can't be parsed
 - **WHEN** the audit reply fails to parse
 - **THEN** every finding is kept — a broken audit never silently drops findings
+
+#### Scenario: an architecture finding against an unshown base class
+- **WHEN** a substitutability finding's base class is not in the diff or the file text
+- **THEN** the carve-out does not protect it — it is judged as a cross-file claim
 
 #### Scenario: the test a finding calls absent lives in an untouched file
 - **WHEN** a finding says the change adds no test and no test file is in front of the auditor
@@ -152,7 +156,7 @@ languages or any ast-grep failure fall back to the plain verdict.
 The engine SHALL require a non-blank `failure_scenario` for security,
 correctness, deprecation, and performance findings before reflection and SHALL
 apply the rule regardless of model-selected severity. Tests, documentation,
-complexity, intent, ponytail, and custom-lens findings SHALL remain eligible
+complexity, intent, ponytail, architecture, and custom-lens findings SHALL remain eligible
 without one. A fast-preset finding the model left unattributed carries the
 `code-health` group id and SHALL be gated too, since it cannot show it belongs
 to an exempt member.

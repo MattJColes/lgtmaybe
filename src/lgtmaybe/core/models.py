@@ -73,6 +73,10 @@ class ReviewCategory(StrEnum):
     ``ponytail`` is the "lazy senior dev" lens — the best code is the code you
     never wrote — flagging code that needn't exist at all (YAGNI, reach for the
     standard library, do it in fewer lines).
+    ``architecture`` flags design decisions the diff introduces that are
+    expensive to reverse — coupling across boundaries, dependency direction,
+    broken substitutability, misuse-prone public surface — each tied to a
+    concrete change scenario.
     ``spec`` checks the diff against a specification the repository commits
     (OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is
     something to check against — here, a detected spec that matches the PR.
@@ -87,17 +91,19 @@ class ReviewCategory(StrEnum):
     complexity = "complexity"
     intent = "intent"
     ponytail = "ponytail"
+    architecture = "architecture"
     spec = "spec"
 
 
 class ReviewPreset(StrEnum):
     """How many model calls a review spends: the everyday path or the deep audit.
 
-    ``fast`` (the default) covers all nine built-in categories in FOUR calls,
+    ``fast`` (the default) covers all ten everyday categories in FIVE calls,
     one per concern: security, correctness (with stated intent folded in), code
-    health, and artefacts (tests + documentation). The same four run on every
-    provider — worker count changes the schedule, not the call count.
-    ``full`` runs each of the nine categories as its own call for release
+    health, artefacts (tests + documentation), and architecture. The same five
+    run on every provider — worker count changes the schedule, not the call
+    count. A matched spec adds a sixth.
+    ``full`` runs each category as its own call for release
     branches and deep audits. An explicit ``categories`` list always wins over
     the preset.
     """
@@ -1147,10 +1153,11 @@ class ReviewConfig(_Strict):
     # replies and resolves the conversation. GitHub posting only — ignored by the
     # local CLI review, which has no conversations to resolve.
     resolve_fixed: bool = True
-    # Call-count preset (see ReviewPreset): `fast` (default) covers all nine
-    # built-in categories in four calls, one per concern — security,
-    # correctness, code health, artefacts — the same four on every provider;
-    # `full` runs one call per lens. An explicit `categories` list overrides it.
+    # Call-count preset (see ReviewPreset): `fast` (default) covers all ten
+    # everyday categories in five calls, one per concern — security,
+    # correctness, code health, artefacts, architecture — the same five on
+    # every provider; `full` runs one call per lens. An explicit `categories`
+    # list overrides it.
     preset: ReviewPreset = ReviewPreset.fast
     # Review lenses to run. Each is asked in its own concurrent LLM call and the
     # findings are merged + deduped. Defaults to all of them (grouped per the

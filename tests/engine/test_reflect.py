@@ -952,3 +952,17 @@ def test_the_auditor_arbitrates_only_ranked_categories() -> None:
     from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
 
     assert "not on this ladder, keep both" in _REFLECT_SYSTEM
+
+
+def test_reflect_prompt_protects_architecture_findings_only_when_the_relationship_is_shown() -> (
+    None
+):
+    """A coupling or substitutability claim is a gap type only when both ends of the
+    relationship are in front of the auditor; otherwise it is exactly the cross-file
+    guess the drop-rule exists for."""
+    from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
+
+    system = _REFLECT_SYSTEM.lower()
+    assert "architecture finding" in system
+    assert "both ends" in system
+    assert "base contract" in system

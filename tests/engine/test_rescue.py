@@ -140,6 +140,20 @@ class _SplitPieces(FakeProvider):
         )
 
 
+def _split_then_rescue(calls: list[str], rescued: tuple[str, ...] = ("a",)) -> bool:
+    """The whole batch once, each piece once, then a rescue wave of *rescued*.
+
+    The pieces run concurrently, and so does the rescue wave, so the order
+    within each wave is the pool's scheduling, not behaviour; each wave
+    strictly follows the one before it.
+    """
+    return (
+        calls[0] == "whole"
+        and sorted(calls[1:3]) == ["a", "b"]
+        and sorted(calls[3:]) == sorted(rescued)
+    )
+
+
 class _InterruptOnFirstCall(FakeProvider):
     """Raises the wind-down flag from inside its first completion."""
 
@@ -251,7 +265,7 @@ class TestRescueWave:
 
         # whole batch, two pieces, then the rescue — of the two pieces, which
         # succeed. Never the whole batch again: that payload already timed out.
-        assert provider.security == ["whole", "a", "b", "a", "b"]
+        assert _split_then_rescue(provider.security, rescued=("a", "b")), provider.security
         assert "review calls failed" not in summary
         # And the rescue's answer was actually kept: a rescue that made the call
         # and discarded the response would satisfy everything above.
@@ -273,7 +287,7 @@ class TestRescueWave:
 
         findings, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
 
-        assert provider.security == ["whole", "a", "b", "a"]
+        assert _split_then_rescue(provider.security), provider.security
         assert "review calls failed" not in summary
         assert INCOMPLETE_MARKER not in summary
         assert {f.path for f in findings if f.category == "security"} == {"a.py", "b.py"}
@@ -284,7 +298,7 @@ class TestRescueWave:
 
         findings, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
 
-        assert provider.security == ["whole", "a", "b", "a"]
+        assert _split_then_rescue(provider.security), provider.security
         assert "1 of 2 review calls failed" in summary
         assert INCOMPLETE_MARKER in summary
         assert {f.path for f in findings if f.category == "security"} == {"b.py"}
@@ -309,7 +323,7 @@ class TestRescueWave:
 
         _, summary = LLMReviewEngine(provider).review(_TWO_FILES, _cfg())
 
-        assert provider.security == ["whole", "a", "b", "a"]  # a still rescued
+        assert _split_then_rescue(provider.security), provider.security  # a still rescued
         assert "1 of 2 review calls failed" in summary
         assert "600s" in summary  # the failure that stands is the one named
 

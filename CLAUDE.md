@@ -432,12 +432,12 @@ pattern, event bus, plugin framework.
    - **Per-lens fan-out (preset-shaped):** the prompt is composed per lens
      (`engine/prompt.py`) — each lens gets a **worked example** (with a real
      hunk header, teaching the line-number arithmetic). `ReviewConfig.preset`
-     picks the lens set: **`fast` (default)** covers all nine categories in
-     **four calls, one per concern** — dedicated security, dedicated
+     picks the lens set: **`fast` (default)** covers all ten everyday categories in
+     **five calls, one per concern** — dedicated security, dedicated
      correctness (stated intent folds in, with per-finding `category`
-     attribution), merged code-health, and merged artefacts (tests +
-     documentation); the two merged lenses are `prompt.FAST_GROUPS`. The same
-     four run on **every** provider: worker count decides only whether they
+     attribution), merged code-health, merged artefacts (tests +
+     documentation), and dedicated architecture; the two merged lenses are
+     `prompt.FAST_GROUPS`. The same five run on **every** provider: worker count decides only whether they
      overlap, never how many there are. **`full`** runs one call per category.
      An explicit `categories` list overrides the grouping. Every (batch, lens) call runs through **one global
      `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 6
@@ -540,7 +540,7 @@ pattern, event bus, plugin framework.
      neutralised `SPEC_START`/`SPEC_END` family) carrying the batch's
      `files_not_visible` list — a requirement delivered elsewhere is *not shown,
      not undelivered*. Sent **only on the spec call**, which is its own lens in
-     both presets (a **fifth** `fast` call, paid only when a spec matched);
+     both presets (a **sixth** `fast` call, paid only when a spec matched);
      nothing detected or nothing matched skips it entirely (logged, zero prompt
      bytes) — but a spec that **matched and did not fit** the budget is a lens
      the round should have run, so the summary names it and the budget
@@ -561,6 +561,27 @@ pattern, event bus, plugin framework.
      ("is this hard to follow?"): ponytail asks "should this exist at all?".
      Asserted by `test_prompt.py::test_prompt_asks_for_ponytail_review` and the
      ladder/boundary tests beside it; eval fixture `counter-advice`.
+   - **Architecture lens:** `ReviewCategory.architecture` asks "what will this
+     change make hard to change?" — only design decisions the diff introduces
+     that are **expensive to reverse** (Booch / Johnson). Checklist: coupling
+     across boundaries (calibrated by Khononov's strength × distance ×
+     volatility), dependency direction (Martin's Dependency Rule, Cockburn's
+     ports), broken substitutability (Liskov & Wing, Meyer; only against a
+     shown base contract), misplaced responsibility (Parnas, Fowler, Evans),
+     sharp edges (Bloch, Hyrum's Law), leaky ports. Every finding must OPEN
+     with a **change scenario** ("when X changes, Y and Z change with it"); a
+     principle's name is a label, never the justification. This is prompted
+     and audited by reflection, not mechanically enforced. Its evidence bar:
+     no new abstraction without a visible second variant/caller or an existing
+     boundary; layers inferred from the repo's own paths, never invented.
+     `failure_scenario` null (gap lens), ceiling `medium`
+     (`severity.CATEGORY_SEVERITY_CEILING`), and reflection protects it as a
+     gap type **only** when both ends of the relationship are shown. It is
+     its own focused call under `fast` (the fifth), not a code-health member
+     — that group already carries four concerns. Distinct from `complexity`
+     ("hard to follow?"), `ponytail` ("should this exist?") and `pack:design`
+     (finer Ousterhout-style taste). Eval fixture `architecture`; lineage in
+     `ATTRIBUTION.md`.
    - **Opposing advice is arbitrated, never posted together:** lens prompts
      never name each other (that would couple them, and custom/pack lenses
      could never join), so cross-lens awareness lives in orchestration only.
@@ -569,7 +590,8 @@ pattern, event bus, plugin framework.
      validation, data-loss error handling, security controls or accessibility,
      and a shorter replacement keeps every edge case (Ponytail 5's never-cut
      list); (2) self-contained **evidence bars** per lens (ponytail never
-     collapses an existing boundary; complexity extracts duplication only for
+     collapses an existing boundary; architecture never proposes a new one
+     without a visible second variant; complexity extracts duplication only for
      uniform callers; `pack:design`'s shallow-module spares port
      implementations); (3) **reflection referees** — it sees every merged
      finding, and keeps the higher-ranked of two opposite recommendations
@@ -578,8 +600,10 @@ pattern, event bus, plugin framework.
      after reflection (so it holds under `--no-reflect`): a finding from a
      pair in `OPPOSED` within `NEAR_LINES` of a higher-`PRECEDENCE` one is
      dropped, logged with the loser and the lens that outranked it. `PRECEDENCE` is Ponytail 5's `/ponytail-review` order
-     (correctness → security → performance → tests → complexity → ponytail)
+     (correctness → security → performance → tests → architecture →
+     complexity → ponytail; design slotted above readability)
      and is rendered into the reflection prompt, so both referees rank alike.
+     `OPPOSED` is ponytail against correctness, security and architecture.
      Only declared pairs are arbitrated — group ids, unattributed, custom/pack
      and scan findings are never guessed at.
    - **Mid-review retrieval (lens deferral, default off):** with
@@ -824,7 +848,11 @@ Two distinct concerns, kept separate:
   unfulfilled claims vs the stated intent; `medium`/`high`; "Intent" section),
   and **needless code** (YAGNI / speculative generality, reinventing the stdlib,
   code that could be far shorter, premature configurability; `info`/`medium`,
-  restrained; the Ponytail "lazy senior dev" lens, "Ponytail" section).
+  restrained; the Ponytail "lazy senior dev" lens, "Ponytail" section), and
+  **hard-to-reverse design decisions** (coupling across boundaries, dependency
+  direction, broken substitutability, misplaced responsibility, sharp-edged
+  APIs, leaky ports; `info`/`medium`, each opening with a change scenario;
+  "Architecture" section).
 
 Both are covered by tests in `tests/engine/` (`test_redact.py`, `test_injection.py`,
 `test_prompt.py`, `test_parse.py`, `test_engine.py`) and `tests/github/test_diff.py`.
@@ -838,7 +866,7 @@ health"; covered by `test_prompt.py`). Every scan category is asserted in
 `test_prompt_asks_for_test_coverage`, `test_prompt_asks_for_documentation_review`,
 `test_prompt_names_pii_and_secrets_in_logs`, `test_prompt_asks_for_performance_review`,
 `test_prompt_asks_for_complexity_review`, `test_prompt_asks_for_intent_review`,
-`test_prompt_asks_for_ponytail_review`,
+`test_prompt_asks_for_ponytail_review`, `test_prompt_asks_for_architecture_review`,
 plus the topic-coverage block: concurrency/races, numeric/datetime, CSRF /
 redirect / XXE / mass assignment, CI/IaC, weak tests, stale docs, leaks,
 typosquats) — extend those when you change the prompt's checklist. Prompt
@@ -886,7 +914,11 @@ Split by whether it can be deterministic, because that decides where it lives:
   there: it needs a stated intent the fixtures don't carry. Ponytail's one
   planted catch lives in **`counter-advice`**, beside the two cuts it must not
   recommend — trust-boundary validation that looks redundant, and an adapter
-  that looks like a pass-through but implements a port.) Beyond recall, a
+  that looks like a pass-through but implements a port. The architecture
+  lens's planted catches live in **`architecture`**: a domain module importing an adapter and
+  an override breaking its shown base contract, beside two restraint traps — a
+  seam proposed for a single-caller private helper, and a Liskov claim against
+  a base class only the unshown corpus holds.) Beyond recall, a
   fixture can declare **`forbidden`** findings — claims that must *not* appear,
   typically cross-file false positives where the relevant guard lives in an unshown
   file; any produced finding matching one is a **false positive** that makes the

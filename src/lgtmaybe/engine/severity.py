@@ -1,10 +1,10 @@
 """Severity ceilings for the advisory lenses.
 
-The prompt already grades these lenses itself — complexity and ponytail `info`
-to `medium`, documentation `info` to `low`, tests `low`/`medium` — but a graded
-instruction is a request, not a constraint, and benchmark runs across a dozen
-models are full of style commentary arriving at `high`, occasionally
-`critical`.
+The prompt already grades these lenses itself — complexity, ponytail and
+architecture `info` to `medium`, documentation `info` to `low`, tests
+`low`/`medium` — but a graded instruction is a request, not a constraint, and
+benchmark runs across a dozen models are full of style commentary arriving at
+`high`, occasionally `critical`.
 
 An over-graded nit costs twice. It sits above a real bug wherever findings are
 ordered by severity — the summary, the per-lens bound that drops the least
@@ -39,6 +39,7 @@ _log = get_logger(__name__)
 CATEGORY_SEVERITY_CEILING: dict[str, Severity] = {
     ReviewCategory.complexity: Severity.medium,
     ReviewCategory.ponytail: Severity.medium,
+    ReviewCategory.architecture: Severity.medium,
     ReviewCategory.documentation: Severity.medium,
     ReviewCategory.tests: Severity.medium,
 }
