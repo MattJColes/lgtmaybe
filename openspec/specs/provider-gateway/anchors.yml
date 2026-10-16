@@ -12,6 +12,12 @@ provider.credentials:
     has: { field: name, regex: '^resolve_credentials$' }
   files: [src/lgtmaybe/providers/**/*.py]
 
+provider.subscription-sign-in:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^forbid_interactive_login$' }
+  files: [src/lgtmaybe/providers/chatgpt.py]
+
 provider.reasoning-accounting:
   rule:
     kind: function_definition

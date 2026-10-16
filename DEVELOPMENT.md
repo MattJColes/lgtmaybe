@@ -142,6 +142,7 @@ API calls, so you pay for the tokens:
 | `ollama` | Just `--api-base` (e.g. `http://localhost:11434`) |
 | `openai-compatible` | `--api-base` (any OpenAI `/v1` endpoint: llama.cpp, LM Studio, vLLM, DeepSeek); a key only if the server needs one |
 | `openai` / `anthropic` / `openrouter` / `zai` | `--api-key`, or the matching `*_API_KEY` env var |
+| `chatgpt` | `lgtmaybe login chatgpt` once (a ChatGPT Plus or Pro subscription) |
 | `bedrock` | Ambient AWS credentials (`~/.aws`), never a static key |
 | `vertex` | Ambient GCP credentials (local ADC) |
 | `azure` | `--api-base` (or `AZURE_API_BASE`), plus `AZURE_API_KEY` or ambient Entra credentials (`az login`) |

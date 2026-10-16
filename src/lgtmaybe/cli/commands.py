@@ -696,6 +696,26 @@ def mcp_command(
 
 
 @main.command()
+@click.argument("service", type=click.Choice(["chatgpt"]))
+def login(service: str) -> None:
+    """Sign in to a model subscription, for `--provider chatgpt`.
+
+    Prints a URL and a one-time code: open the URL, sign in to ChatGPT and
+    enter the code. The token is stored by litellm (default
+    ~/.config/litellm/chatgpt/auth.json) and refreshed automatically, so this
+    runs once per machine. Local reviews only; CI should use an API key.
+    """
+    from lgtmaybe.providers import chatgpt
+
+    try:
+        path = chatgpt.login()
+    except chatgpt.ChatGPTLoginError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Signed in to ChatGPT. Token stored at {path}")
+    click.echo("Review with: lgtmaybe review --provider chatgpt --model gpt-5.5")
+
+
+@main.command()
 @click.option(
     "--event-path",
     envvar="GITHUB_EVENT_PATH",

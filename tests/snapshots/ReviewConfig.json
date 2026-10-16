@@ -232,7 +232,8 @@
         "azure",
         "ollama",
         "openai-compatible",
-        "zai"
+        "zai",
+        "chatgpt"
       ],
       "title": "Provider",
       "type": "string"

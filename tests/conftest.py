@@ -66,6 +66,11 @@ _PROVIDER_CRED_ENV = (
     # GLM / Zhipu AI (zai)
     "ZAI_API_KEY",
     "ZAI_API_BASE",
+    # ChatGPT subscription (chatgpt): litellm's token file and Codex endpoint
+    "CHATGPT_TOKEN_DIR",
+    "CHATGPT_AUTH_FILE",
+    "CHATGPT_API_BASE",
+    "OPENAI_CHATGPT_API_BASE",
     # Ambient AWS creds (bedrock)
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -88,10 +93,13 @@ _PROVIDER_CRED_ENV = (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_provider_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Start every test from a clean, credential-free environment."""
     for var in _PROVIDER_CRED_ENV:
         monkeypatch.delenv(var, raising=False)
+    # Unset, the ChatGPT sign-in is read from the developer's home directory, so
+    # point it at an empty per-test directory instead.
+    monkeypatch.setenv("CHATGPT_TOKEN_DIR", str(tmp_path / "chatgpt-tokens"))
 
 
 @pytest.fixture(autouse=True)

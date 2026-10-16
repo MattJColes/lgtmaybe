@@ -143,6 +143,11 @@ client's config file. lgtmaybe itself never writes a key to disk.
 Keyless providers need no key at all: ollama, and Bedrock, Vertex or Azure with
 [ambient cloud credentials](../reference/glossary.md#ambient-credentials).
 
+To review with a ChatGPT subscription, run `lgtmaybe login chatgpt` before you
+start the client. The server never asks you to sign in itself, because that
+prompt would break the client's connection. See
+[Review with a ChatGPT Subscription](review-with-a-chatgpt-subscription.md).
+
 ## Troubleshooting
 
 - **The client says the server failed to start.** Run the same command in a

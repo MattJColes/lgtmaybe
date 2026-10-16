@@ -13,7 +13,7 @@ the LLM backend with `--provider`, puts a key in GitHub secrets (or wires
 OIDC/WIF for cloud) and gets a review. One core, four distribution variants.
 
 **The wedge:** first-class **Bedrock, Vertex and Azure with keyless OIDC/WIF**.
-Seven hosted providers plus local ollama, one flag, no keys in secrets for
+Eight hosted providers plus local ollama, one flag, no keys in secrets for
 cloud. We win on auth and simplicity. `openai-compatible` is the escape hatch
 for anything speaking the OpenAI `/v1` format (bring `--api-base`; key
 optional), so the provider list is never a cage.
@@ -64,6 +64,7 @@ checkout.
 |---|---|
 | openai / openrouter / anthropic | API key from `secrets.*` / env / `--api-key` |
 | zai (GLM / Zhipu AI) | API key (`ZAI_API_KEY` / `--api-key`); litellm `zai/` route, which lacks `response_format`, so the schema goes as a forced tool call (`_honour_route_schema_support`). Optional `--api-base` / `ZAI_API_BASE` |
+| chatgpt (ChatGPT Plus/Pro subscription) | stored OAuth sign-in from `lgtmaybe login chatgpt` (`providers/chatgpt.py`); litellm `chatgpt/` route to the Codex backend, which lists but strips `response_format`, `temperature` and `max_tokens` (`factory._WIRE_STRIPPED`), so the schema goes as a forced tool call. Local only. A review never starts the device-code prompt (`forbid_interactive_login`) |
 | bedrock | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
 | vertex | ambient GCP creds (WIF, or local ADC) |
 | azure | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); `AZURE_API_KEY` / `--api-key` when supplied, else ambient Entra creds (OIDC via `azure/login`, or local `az login` / managed identity) |
