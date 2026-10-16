@@ -2869,6 +2869,53 @@ def test_a_confirmed_lockfile_advisory_reaches_the_posted_review(monkeypatch, an
     assert advisory.title in review["body"]
 
 
+def test_only_a_hint_backed_lockfile_finding_skips_the_unanchored_floor(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The floor exemption is for a scanner hint the model confirmed, not for any
+    model finding that happens to name a scan-only file. A claim about a lockfile
+    no scanner flagged is a guess like any other unanchored finding, so the
+    stricter floor still applies to it."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    ctx = _LOCKFILE_CTX.model_copy(
+        update={
+            "diff": _LOCKFILE_CTX.diff
+            + "diff --git a/package-lock.json b/package-lock.json\n@@ -1 +1,2 @@\n a\n+b\n",
+            "changed_files": [*_LOCKFILE_CTX.changed_files, "package-lock.json"],
+            "scan_contents": {**_LOCKFILE_CTX.scan_contents, "package-lock.json": "a\nb\n"},
+        }
+    )
+
+    def _medium(path: str) -> ReviewFinding:
+        return ReviewFinding(
+            path=path,
+            line=1,
+            severity=Severity.medium,  # below the unanchored floor (high)
+            title=f"{path} pins a vulnerable package",
+            body="Upgrade it.",
+            failure_scenario="An attacker exploits the pinned package.",
+        )
+
+    answer = json.dumps(
+        [_medium(p).model_dump(mode="json") for p in ("uv.lock", "package-lock.json")]
+    )
+
+    class _Answering(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _REFLECT_MARKER in messages[0]["content"]:
+                verdict = '{"0": true, "1": true}'
+                return ProviderResult(text=verdict, input_tokens=1, output_tokens=1)
+            text = answer if "GHSA-1234" in messages[-1]["content"] else "[]"
+            return ProviderResult(text=text, input_tokens=1, output_tokens=1)
+
+    findings, _summary = LLMReviewEngine(_Answering()).review(
+        ctx, ReviewConfig(provider=Provider.ollama, model="llama3")
+    )
+
+    assert [f.path for f in findings] == ["uv.lock"]
+
+
 def test_reflection_can_verify_a_lockfile_advisory_against_the_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """An auditor that keeps a finding only when its evidence is in front of it.
 

@@ -4147,7 +4147,9 @@ have a published advisory? That depends on what was disclosed this week, past
 any model's knowledge cutoff. osv-scanner reads the manifests and lockfiles the
 PR changes through a scan-only channel. The file text never enters the diff, a
 prompt or reflection. By default its advisories go to the security lens as
-hints, and an advisory the model confirms shows in the review body. With
+hints, or to the correctness lens when the run has no security lens. With
+neither lens, the hints are dropped and the summary says how many. An advisory
+the model confirms shows in the review body. With
 `tool_mode: {osv-scanner: finding}` the advisories post directly instead, and
 only `high` and `critical` ones show (`unanchored_min_severity`).
 

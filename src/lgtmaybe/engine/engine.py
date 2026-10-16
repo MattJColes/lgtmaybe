@@ -1454,8 +1454,13 @@ class LLMReviewEngine:
             # confirmed from an unbatched hint) has no reviewed line to sit on:
             # the file is never in the reviewed diff. Mark it unanchored, so
             # every gateway demotes it to the review body rather than guessing
-            # a line, and exempt it from the unanchored floor in step 9.
+            # a line. Only a file a carried hint flagged is exempt from the
+            # unanchored floor in step 9: a claim about a lockfile no scanner
+            # flagged is a guess like any other unanchored finding.
             no_line_paths = set(ctx.scan_contents) - {path for path, _ in file_patches}
+            hinted_no_line_paths = (
+                {h.path for h in unbatched} & no_line_paths if carrier is not None else set()
+            )
             all_findings = [
                 f.model_copy(update={"anchored": False})
                 if f.path in no_line_paths and f.anchored
@@ -1575,7 +1580,7 @@ class LLMReviewEngine:
             filtered = [
                 f
                 for f in all_findings
-                if _passes_severity_floor(f, cfg, no_line_paths=no_line_paths)
+                if _passes_severity_floor(f, cfg, no_line_paths=hinted_no_line_paths)
             ]
 
             # 9b. Declarative post-processing (finding_rules, default none): the
@@ -3306,10 +3311,11 @@ def _passes_severity_floor(
     anchor is a low-confidence guess). Extracted so the on-demand replay benchmark
     asserts against the exact predicate production uses — no drift.
 
-    ``no_line_paths`` are scan-only files (lockfiles) a model finding can never
-    anchor to, because they are never in the reviewed diff. A model finding there
-    is not a guess about a line, so only the plain floor applies; a tool's own
-    direct-post finding keeps the stricter one.
+    ``no_line_paths`` are scan-only files (lockfiles) that a scanner hint carried
+    to a lens flagged. A model finding there can never anchor, because the file is
+    never in the reviewed diff, but it confirms a hint rather than guessing a
+    line, so only the plain floor applies; a tool's own direct-post finding keeps
+    the stricter one.
     """
     no_line = finding.path in no_line_paths and not _is_scan_finding(finding)
     return finding.severity >= cfg.min_severity and (
