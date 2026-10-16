@@ -313,6 +313,13 @@ def test_code_changed_without_tests_is_medium(tmp_path: Path) -> None:
     assert _texts(result) == ["60 changed lines of code with no test file changed"]
 
 
+def test_a_jest_named_test_counts_as_a_test_change(tmp_path: Path) -> None:
+    root = _write(tmp_path, {"app/store.ts": ""})
+    result = assess_risk(_ctx(("app/store.ts", 60), ("app/store.jest.ts", 40)), _cfg(), root)
+    assert result.level == "low"
+    assert _texts(result) == ["no risk signals"]
+
+
 def test_a_small_untested_change_is_not_flagged(tmp_path: Path) -> None:
     root = _write(tmp_path, {"app/view.py": ""})
     result = assess_risk(_ctx(("app/view.py", 49)), _cfg(), root)
@@ -395,6 +402,8 @@ def test_a_newline_in_a_path_cannot_inject_a_heading(tmp_path: Path) -> None:
         ("api/handler_test.go", True, False),
         ("web/a.test.ts", True, False),
         ("web/a.spec.js", True, False),
+        ("api/store/enum.jest.ts", True, False),
+        ("api/jester.ts", False, False),
         ("src/contest.py", False, False),
         ("src/latest/app.py", False, False),
         ("README.md", False, True),
