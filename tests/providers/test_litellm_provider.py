@@ -745,3 +745,16 @@ class TestTemperatureReach:
 
         assert lookup.call_count == 4, "both lookups, once per effort"
         assert provider.temperature_dropped(), "`high` drops it"
+
+    def test_the_build_site_seeds_the_record_through_the_public_surface(self) -> None:
+        """The factory withholds the temperature before the client exists, so it
+        records the loss on the adapter's public surface: the drop record is
+        the adapter's to own, and a builder reaching into a private method
+        couples the two classes at an implementation detail."""
+        provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5")
+
+        provider.note_withheld_temperature(
+            "anthropic/claude-sonnet-4-5", "withheld-under-thinking"
+        )
+
+        assert provider.temperature_dropped()

@@ -3826,7 +3826,7 @@ def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> Non
         ],
         usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
     )
-    with patch("litellm.completion", return_value=response):
+    with patch("litellm.completion", return_value=response) as completion:
         built = build_provider(
             Provider.anthropic,
             "claude-sonnet-4-5",
@@ -3839,6 +3839,9 @@ def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> Non
         )
         _findings, summary = LLMReviewEngine(built).review(_CTX, cfg)
 
+    # The cause, not just the symptom: the requests themselves carry no
+    # temperature, so the segment is the factory's withhold and nothing else.
+    assert all("temperature" not in call.kwargs for call in completion.call_args_list)
     assert _TEMPERATURE_SEGMENT in summary
 
 

@@ -489,5 +489,5 @@ def build_provider(
         # The adapter's own drop record, not a factory-side flag: it is the one
         # channel the engine's temperature disclosure reads, and no call can
         # ever report a param that was withheld before the client existed.
-        client._mark_temperature_dropped(resolved_model, "withheld-under-thinking")
+        client.note_withheld_temperature(resolved_model, "withheld-under-thinking")
     return client
