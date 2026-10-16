@@ -322,6 +322,100 @@ class SupportsFeedback(Protocol):
         ...
 
 
+# ---------------------------------------------------------------------------
+# Optional provider capabilities
+# ---------------------------------------------------------------------------
+#
+# The mirror image of the gateway groups above, probed by the ENGINE on the
+# ``ProviderClient`` adapter: recovery steps (the truncation ladder, schema
+# fallbacks) and run disclosure. One protocol per capability, because the
+# engine probes each independently and an adapter may implement any subset —
+# a shared group would switch off a capability its siblings do not share.
+#
+# The member name is the method the engine calls, so renaming a method on the
+# adapter breaks the conformance test in ``tests/test_ports.py`` instead of
+# silently disabling the recovery step behind a ``getattr`` probe.
+
+
+@runtime_checkable
+class SupportsInputBudget(Protocol):
+    """Say how many prompt tokens fit, so default batching can be capped."""
+
+    def input_budget(self) -> int | None:
+        """The model's usable prompt window, or None when the adapter cannot say."""
+        ...
+
+
+@runtime_checkable
+class SupportsSchemaDropReport(Protocol):
+    """Report that structured output was given up on during this run."""
+
+    def schema_dropped(self) -> bool:
+        """Whether the adapter stopped sending the JSON schema this run."""
+        ...
+
+
+@runtime_checkable
+class SupportsTemperatureDropReport(Protocol):
+    """Report that a configured temperature never reached the model."""
+
+    def temperature_dropped(self) -> bool:
+        """Whether any call this run dropped the configured temperature."""
+        ...
+
+
+@runtime_checkable
+class SupportsResponseFormatStatus(Protocol):
+    """Tell whether the requested schema actually reached a given model."""
+
+    def sends_response_format(self, model: str) -> bool:
+        """Whether calls to ``model`` are still sending ``response_format``."""
+        ...
+
+
+@runtime_checkable
+class SupportsResponseFormatDrop(Protocol):
+    """Remember a model's provider-native schema mode is not working."""
+
+    def drop_response_format(self, model: str, why: str) -> None:
+        """Stop sending ``response_format`` to ``model`` from now on."""
+        ...
+
+
+@runtime_checkable
+class SupportsReasoningStepDown(Protocol):
+    """Step a reasoning model's effort down one level, as a truncation remedy."""
+
+    def lower_reasoning_effort(self) -> dict[str, Any] | None:
+        """Per-call opts one level down, or None when there is no lower level."""
+        ...
+
+
+@runtime_checkable
+class SupportsReasoningSwitchOff(Protocol):
+    """Switch a reasoning model's thinking off, as the last effort remedy."""
+
+    def disable_reasoning(self) -> dict[str, Any] | None:
+        """Per-call opts with reasoning off, or None when it cannot switch."""
+        ...
+
+
+@runtime_checkable
+class SupportsModelEscalation(Protocol):
+    """Name the fallback model for the engine's own escalation rung."""
+
+    def escalate_model(self) -> str | None:
+        """The resolved fallback model, or None when none is configured."""
+        ...
+
+
+@runtime_checkable
+class SupportsModelName(Protocol):
+    """Expose the configured primary model, so disclosures can name it."""
+
+    model: str
+
+
 class ReviewEngine(Protocol):
     """Port: turn a PR context + config into findings and a summary."""
 
