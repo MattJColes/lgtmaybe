@@ -435,6 +435,9 @@ Maintainer setup: `docs/how-to/releasing.md`.
 - **Release automation:** `release-please.yml` reads **conventional commits**
   on `main` and keeps a Release PR. Merging it tags, releases and publishes in
   the same run. `commitlint.yml` gates PR titles and commits so it can version.
+  A commit that never reaches `main` is never released: `stack-retarget.yml`
+  moves a merged PR's open children onto its base, and a PR landing stranded
+  layers lists them in `BEGIN_COMMIT_OVERRIDE` (`docs/how-to/releasing.md`).
 - **PyPI** (`pip install lgtmaybe`): trusted publishing (OIDC, env `pypi`) from
   an *inline* top-level job in `release-please.yml`, so the OIDC publisher
   matches.
