@@ -180,7 +180,8 @@ host.** Host differences: `docs/explanation/architecture.md` and
   `<!-- lgtmaybe-diff:… -->` fingerprint (`core/diff.diff_fingerprint`) rides
   beside the watermark, so a rebase that leaves the diff unchanged is skipped.
   `edited` with `changes.base` is a full review; any other `edited` reviews
-  nothing. Detail: `docs/how-to/review-stacked-pull-requests.md`.
+  nothing. Detail: `docs/how-to/use-as-github-action.md` (Review Stacked Pull
+  Requests).
 
 ## Security Rules
 

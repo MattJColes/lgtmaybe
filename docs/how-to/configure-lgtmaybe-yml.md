@@ -803,7 +803,7 @@ A custom template for the review summary line. Placeholders:
 - `{version}`: the lgtmaybe release that produced the review
 - `{risk}`: the risk segment, empty when `risk` is off
 - `{stack}`: the pull request's layer in a
-  [stack](review-stacked-pull-requests.md), such as `layer 2 of 3 in a stack`;
+  [stack](use-as-github-action.md#review-stacked-pull-requests), such as `layer 2 of 3 in a stack`;
   empty outside a stack
 - `{temperature}`: `temperature not sent` when the model's route dropped the
   configured temperature, so the review may not be reproducible; empty
