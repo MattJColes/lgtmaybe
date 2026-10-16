@@ -198,12 +198,19 @@ Two findings that give opposite advice about the same code SHALL NOT both post.
 Reflection keeps the higher-ranked of two opposite recommendations from ranked lenses; a
 deterministic backstop (`resolve_conflicts`) then drops a finding from a
 declared-opposed lens pair within `NEAR_LINES` of a higher-ranked one. Both rank
-by `PRECEDENCE`, Ponytail 5's review order with leanness last.
+by `PRECEDENCE`, Ponytail 5's review order with leanness last. The backstop
+SHALL run before the location merge and again after reflection, so a merge keyed
+on path/line/side never collapses an opposed pair before a referee sees it.
 <!-- anchor: quality.conflicts -->
 
 #### Scenario: a cut beside a fix
 - **WHEN** ponytail recommends cutting lines a security finding three lines away says to guard
 - **THEN** only the security finding posts, whatever the two findings' severities
+
+#### Scenario: an opposed pair shares one line
+- **WHEN** a medium ponytail cut and a low correctness fix land on the same line
+- **THEN** the correctness finding posts alone: the merge cannot collapse the
+  pair by severity first
 
 #### Scenario: both findings can be right
 - **WHEN** performance and ponytail flag the same loop with compatible advice

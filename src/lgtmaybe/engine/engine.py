@@ -1520,9 +1520,12 @@ class LLMReviewEngine:
 
         # 7c. Merge: a finding can surface under more than one lens (a shell
         #     injection is both a security and a correctness issue), so collapse
-        #     duplicates before reflecting.
+        #     duplicates before reflecting. Arbitration runs first: the merge
+        #     selects by severity, which would let an opposed lens's copy win
+        #     the shared location before either referee saw the pair, posting
+        #     the code-cutting advice and losing the fix (issue #752).
         with profiler.stage("dedupe"):
-            all_findings = _dedupe(all_findings)
+            all_findings = _dedupe(resolve_conflicts(all_findings))
 
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.

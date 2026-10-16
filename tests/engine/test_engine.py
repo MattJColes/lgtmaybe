@@ -1112,6 +1112,45 @@ def test_a_suppressed_finding_does_not_displace_another_at_its_line() -> None:
     assert "1 finding suppressed" in summary
 
 
+def test_an_opposed_pair_reaches_arbitration_before_the_location_merge() -> None:
+    # Issue #752: dedupe picked by severity and collapsed an opposed pair before
+    # either referee saw it, so the code-cutting advice posted and the fix on the
+    # same line was lost. The pair must be arbitrated before the merge: the lens
+    # that cuts code yields to the one that fixes.
+    guard_is_wrong = {
+        "path": "a.py",
+        "line": 2,
+        "severity": "low",
+        "title": "guard is wrong",
+        "body": "the bounds check uses the wrong index",
+        "failure_scenario": "With an empty list the guard reads index 0 and raises.",
+    }
+    cut_the_guard = {
+        "path": "a.py",
+        "line": 2,
+        "severity": "medium",
+        "title": "delete this guard",
+        "body": "the caller already validates this",
+    }
+    provider = _per_lens_provider(
+        {
+            "## Correctness & logic": [guard_is_wrong],
+            "## Ponytail": [cut_the_guard],
+        }
+    )
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        reflect=False,
+        preset="full",
+        categories=[ReviewCategory.correctness, ReviewCategory.ponytail],
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["guard is wrong"]
+
+
 def _code_health_finding(category: str | None) -> list[dict[str, object]]:
     finding: dict[str, object] = {
         "path": "a.py",
