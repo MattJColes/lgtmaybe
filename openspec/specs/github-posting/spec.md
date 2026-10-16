@@ -153,6 +153,10 @@ A follow-up run with a completed-head watermark SHALL review only the compare-AP
 - **WHEN** the current head is ahead of the completed head
 - **THEN** only the compare diff is scanned for new problems and prior open findings are classified against the new head
 
+#### Scenario: validation clears a thread outside the increment
+- **WHEN** validation says `fixed` for a thread on a file the increment did not re-review
+- **THEN** the thread stays open: the increment carries no fresh evidence about it
+
 #### Scenario: the completed head runs again
 - **WHEN** a run starts on the same head recorded as complete
 - **THEN** it succeeds without model calls or GitHub writes
