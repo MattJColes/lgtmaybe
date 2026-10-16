@@ -89,9 +89,9 @@ explanation, and sometimes a suggested fix:
 - **On a pull or merge request**, findings appear on the changed lines, with
   one summary naming the model. A re-run on the same commit updates that
   summary. A new commit gets a new summary. lgtmaybe does not repeat findings
-  it already posted. A clean review gets a 👍 **LGTM!**. GitHub and GitLab
-  resolve a finding's conversation once a later run shows it fixed; Gitea
-  cannot. See [Where It Posts](#where-it-posts).
+  it already posted. A clean review gets a 👍 **LGTM!**. GitHub, GitLab, Azure
+  DevOps and Gitea 1.26+ resolve a finding's conversation once a later run
+  shows it fixed. See [Where It Posts](#where-it-posts).
 - **On the CLI**, `lgtmaybe review` prints findings without posting them.
   Choose readable output (the default), JSON (`--json`), instructions for a
   coding agent (`--format agent`), or a SARIF log for GitHub code scanning
@@ -220,7 +220,7 @@ do with the result:
 |---|---|---|---|---|
 | Inline comments + summary | ✅ | ✅ | ✅ | ✅ |
 | Slash commands | ✅ | ✅ | ✅ | not yet |
-| Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API | not yet |
+| Auto-resolve a fixed finding | ✅ | ✅ | ✅ 1.26+ | ✅ |
 | Incremental re-review | ✅ | ✅ | ✗ no compare diff | not yet |
 | Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ | not yet |
 | Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key | ✗ use an API key |

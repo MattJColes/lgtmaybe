@@ -49,6 +49,10 @@ duplicated comment is a better outcome than a failed review.
 - **WHEN** a re-run produces a finding whose id is already on the pull request
 - **THEN** no new inline comment is created for it
 
+#### Scenario: a finding we resolved comes back
+- **WHEN** a re-run produces a finding whose comment the posting identity resolved
+- **THEN** it posts again, while one a person resolved still suppresses it
+
 ### Requirement: Positions translate at the adapter boundary
 
 Inline comments SHALL be anchored with Gitea's `new_position` (new-file line) or
@@ -65,15 +69,34 @@ rather than posted on a line the reviewer cannot stand behind.
 ### Requirement: Unavailable capabilities are not claimed
 
 The adapter SHALL declare only the optional capability protocols Gitea can
-actually serve. Incremental review and review-thread resolution SHALL NOT be
+actually serve. Incremental review and validated thread resolution SHALL NOT be
 claimed — Gitea's compare endpoint returns commit metadata rather than a unified
-diff, and it has no thread-resolution API — so a caller degrades to a full
+diff, and it cannot reply in a review thread — so a caller degrades to a full
 review instead of calling a method that cannot work.
 <!-- anchor: gitea.capabilities -->
 
-#### Scenario: thread resolution is absent
+#### Scenario: validated thread resolution is absent
 - **WHEN** a caller probes the adapter for thread resolution
-- **THEN** the check fails and resolve-on-fix is skipped
+- **THEN** the check fails and the validation step is skipped
+
+### Requirement: Fixed findings' comments are resolved
+
+The adapter SHALL resolve its own open finding comment, after a complete run
+with `resolve_fixed` on, only when the run no longer produced either hidden id
+and the comment's new-file line was replaced or removed between its `commit_id`
+and the head (or the file is gone). Gitea has no "outdated" flag, so the file is
+read at both commits. An unreadable side, an old-file comment, or a partial run
+SHALL resolve nothing, and no resolve failure SHALL fail the review.
+<!-- anchor: gitea.resolve -->
+
+#### Scenario: a fixed finding's comment is resolved
+- **WHEN** a complete run no longer produces a finding and its line changed
+- **THEN** the adapter posts to `/pulls/comments/{id}/resolve`
+
+#### Scenario: a server without the endpoint
+- **WHEN** the first resolve call answers 404 (Forgejo, Gitea before 1.26) or
+  401/403
+- **THEN** no further resolve is attempted and the review still posts
 
 ### Requirement: Forgejo is served by the Gitea adapter
 

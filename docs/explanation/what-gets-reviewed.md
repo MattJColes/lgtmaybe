@@ -727,12 +727,14 @@ input). Resolving a thread uses GitHub's GraphQL API; the workflow's default
 is enough. The step is best-effort: if it can't run, the review still posts
 normally.
 
-On **GitLab** the same thing happens over plain REST. On **Gitea** it does not
-happen at all: Gitea has no thread-resolution API, so finding comments stay open
-for a human to close. On **Azure DevOps** the thread is set to *Resolved*.
-Azure DevOps has no "outdated" flag, so lgtmaybe records the iteration each
-finding thread was posted at and compares the file then against the file now.
-It only resolves threads its own token opened, and only after a complete run.
+On **GitLab** the same thing happens over plain REST. On **Azure DevOps** the
+thread is set to *Resolved*. Azure DevOps has no "outdated" flag, so lgtmaybe
+records the iteration each finding thread was posted at and compares the file
+then against the file now. It only resolves threads its own token opened, and
+only after a complete run. **Gitea** 1.26 or later works the same way: lgtmaybe
+compares the file at the comment's commit against the file now, then resolves
+the comment. Gitea cannot reply in a review thread, so no reply is posted.
+Forgejo and older Gitea have no resolve endpoint, so their comments stay open.
 
 ### How Each Host Posts
 

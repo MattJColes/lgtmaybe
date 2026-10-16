@@ -390,3 +390,44 @@ def test_any_change_to_what_a_reviewer_reads_changes_the_fingerprint(
     from lgtmaybe.core.diff import diff_fingerprint
 
     assert diff_fingerprint(_LAYER.replace(*edit)) != diff_fingerprint(_LAYER)
+
+
+# ---------------------------------------------------------------------------
+# Line change between two revisions (resolve-on-fix's "outdated" signal)
+# ---------------------------------------------------------------------------
+
+
+class TestLineChanged:
+    """Whether the line a comment was posted on changed between two revisions."""
+
+    BEFORE = "import os\npassword = 'hunter2'\n\ndef main():\n"
+
+    def test_a_replaced_line_is_changed(self) -> None:
+        from lgtmaybe.core.diff import line_changed
+
+        after = self.BEFORE.replace("'hunter2'", "os.environ['PASSWORD']")
+        assert line_changed(self.BEFORE, after, 2)
+
+    def test_a_removed_line_is_changed(self) -> None:
+        from lgtmaybe.core.diff import line_changed
+
+        after = self.BEFORE.replace("password = 'hunter2'\n", "")
+        assert line_changed(self.BEFORE, after, 2)
+
+    def test_a_line_that_only_moved_is_not_changed(self) -> None:
+        """An insertion above shifts the line; the code under the comment is the same."""
+        from lgtmaybe.core.diff import line_changed
+
+        assert not line_changed(self.BEFORE, "# header\n" + self.BEFORE, 2)
+
+    def test_an_edit_elsewhere_does_not_change_the_line(self) -> None:
+        from lgtmaybe.core.diff import line_changed
+
+        assert not line_changed(self.BEFORE, self.BEFORE.replace("main", "run"), 2)
+
+    @pytest.mark.parametrize("line", [0, -1, 99])
+    def test_a_line_outside_the_old_text_is_not_changed(self, line: int) -> None:
+        """No evidence either way, so nothing is resolved on it."""
+        from lgtmaybe.core.diff import line_changed
+
+        assert not line_changed(self.BEFORE, "", line)
