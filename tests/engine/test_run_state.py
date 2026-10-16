@@ -25,7 +25,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
-from lgtmaybe.engine.engine import _SCHEMA_DROP_NOTE, _TEMPERATURE_SEGMENT
+from lgtmaybe.engine.notices import _SCHEMA_DROP_NOTE, _TEMPERATURE_SEGMENT
 from lgtmaybe.engine.profiling import profiler
 from tests.conftest import make_cfg
 

@@ -36,7 +36,8 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.core.ports import ProviderTruncated
-from lgtmaybe.engine.engine import LLMReviewEngine, ReviewIncompleteError, _response_digest
+from lgtmaybe.engine.engine import LLMReviewEngine, ReviewIncompleteError
+from lgtmaybe.engine.recovery import _response_digest
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider, RecoveringFakeProvider
 

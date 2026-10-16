@@ -17,7 +17,7 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.engine import LLMReviewEngine
-from lgtmaybe.engine.engine import _build_lenses
+from lgtmaybe.engine.lenses import _build_lenses
 from lgtmaybe.providers.factory import cheaper_reflect_sibling
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
@@ -195,7 +195,7 @@ def test_lenses_narrow_dependency_health_when_a_scanner_covers_it() -> None:
         StaticAnalysisTool,
         ToolMode,
     )
-    from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.lenses import _build_lenses
 
     def _lens_text(cfg: ReviewConfig) -> str:
         return " ".join(lens.user_block for lens in _build_lenses(cfg, has_intent=False))

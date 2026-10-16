@@ -13,7 +13,7 @@ from __future__ import annotations
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import FindingRule, ReviewConfig, ReviewFinding
 
-from .engine import _matches_glob  # same package; the one canonical glob matcher
+from .stages import _matches_glob  # same package; the one canonical glob matcher
 
 _log = get_logger(__name__)
 

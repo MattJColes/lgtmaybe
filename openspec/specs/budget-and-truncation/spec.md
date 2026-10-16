@@ -2,8 +2,8 @@
 
 ## Purpose
 
-How the engine (`engine/engine.py`) keeps each model call inside the
-model's limits: the batching budget fitted to the model's window, the
+How the engine (`engine/engine.py`, its recovery ladder in
+`engine/recovery.py`) keeps each model call inside the model's limits: the batching budget fitted to the model's window, the
 hunk-by-hunk walk of an over-budget file, and the truncation ladder that
 remedies a cut-off answer on the user's own model before it escalates to
 `fallback_model`. Every rung degrades loudly, never silently.

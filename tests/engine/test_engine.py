@@ -27,16 +27,13 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
 from lgtmaybe.engine.compress import count_tokens
-from lgtmaybe.engine.engine import (
+from lgtmaybe.engine.engine import INCOMPLETE_MARKER, LENSES_MARKER_PREFIX, passes_path_filters
+from lgtmaybe.engine.notices import (
     _SCHEMA_DROP_NOTE,
     _TEMPERATURE_SEGMENT,
-    INCOMPLETE_MARKER,
-    LENSES_MARKER_PREFIX,
     _build_notices,
     _NoticeState,
-    passes_path_filters,
 )
-from lgtmaybe.engine.engine import LLMReviewEngine as EngineClass
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
@@ -45,7 +42,9 @@ _REFLECT_MARKER = "auditing another reviewer"
 
 
 def test_review_delegates_summary_notices_to_the_builder() -> None:
-    source = inspect.getsource(EngineClass._collect_findings)
+    from lgtmaybe.engine import engine as engine_mod
+
+    source = inspect.getsource(engine_mod._summarise)
     assert "_build_notices(" in source
     assert "Token budget reached" not in source
 
@@ -2316,7 +2315,7 @@ def test_file_cap_applies_after_triage_ranking(monkeypatch: pytest.MonkeyPatch) 
     def rank_tail_first(file_patches, *_args):  # type: ignore[no-untyped-def]
         return list(reversed(file_patches)), []
 
-    monkeypatch.setattr("lgtmaybe.engine.engine.triage_files", rank_tail_first)
+    monkeypatch.setattr("lgtmaybe.engine.stages.triage_files", rank_tail_first)
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = ReviewConfig(
         provider=Provider.ollama,
@@ -2408,7 +2407,7 @@ _HINT_CTX = PRContext(
 
 
 def test_hints_enter_the_user_message_wrapped_as_untrusted(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_hint()])
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_hint()])
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
@@ -2425,7 +2424,7 @@ def test_hints_enter_the_user_message_wrapped_as_untrusted(monkeypatch) -> None:
 def test_hints_absent_when_disabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     calls: list[object] = []
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: calls.append(1) or [],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2440,7 +2439,7 @@ def test_hints_absent_when_disabled(monkeypatch) -> None:  # type: ignore[no-unt
 
 def test_static_analysis_runs_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """A default config runs the installed tools and grounds the lenses."""
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_hint()])
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_hint()])
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
@@ -2453,7 +2452,7 @@ def test_a_scanner_hit_is_a_hint_by_default_never_a_direct_post(monkeypatch) -> 
     """gitleaks and osv-scanner default to hint mode like every other tool: the
     model sees the hit in context, and nothing posts without the model."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [_scan_hit(), _osv_hit()],
     )
     provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
@@ -2472,7 +2471,7 @@ def test_a_scanner_hit_is_a_hint_by_default_never_a_direct_post(monkeypatch) -> 
 def test_hints_are_redacted_before_prompting(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     secret = "AKIAIOSFODNN7EXAMPLE"
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [_hint(message=f"hardcoded key {secret} found")],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2487,7 +2486,7 @@ def test_hints_are_redacted_before_prompting(monkeypatch) -> None:  # type: igno
 
 def test_hints_filtered_to_the_batch_files(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [_hint(path="unrelated.py", message="other-file hint")],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2503,7 +2502,7 @@ def test_hints_filtered_to_the_batch_files(monkeypatch) -> None:  # type: ignore
 def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Tool findings ground the model; they must not become review findings
     unless the model itself reports them."""
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_hint()])
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_hint()])
     provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
     engine = LLMReviewEngine(provider)
 
@@ -2539,7 +2538,7 @@ def _scan_hit(  # type: ignore[no-untyped-def]
 def test_finding_mode_posts_without_the_model_reporting_it(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """The whole point: a deterministic hit becomes a comment with no model call."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_scan_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
     engine = LLMReviewEngine(provider)
@@ -2553,7 +2552,7 @@ def test_finding_mode_posts_without_the_model_reporting_it(monkeypatch) -> None:
 
 def test_scan_finding_survives_total_model_failure(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_scan_hit()]
     )
     engine = LLMReviewEngine(_TimeoutProvider())
     cfg = _finding_mode_cfg().model_copy(update={"reflect": False})
@@ -2567,7 +2566,7 @@ def test_scan_finding_survives_total_model_failure(monkeypatch) -> None:  # type
 def test_finding_mode_output_never_becomes_a_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """A tool posts or it grounds — never both, or the model re-reports it."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_scan_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
@@ -2584,7 +2583,7 @@ def test_scan_findings_never_reach_reflection(monkeypatch) -> None:  # type: ign
     direct-post path exists to remove.
     """
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_scan_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=False)  # would drop everything
     engine = LLMReviewEngine(provider)
@@ -2603,7 +2602,7 @@ def test_scan_finding_on_an_unchanged_line_is_dropped(monkeypatch) -> None:  # t
     forever — which is why teams switch scanners off.
     """
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit(line=1)]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_scan_hit(line=1)]
     )
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
@@ -2622,7 +2621,7 @@ def test_the_scan_cap_scopes_to_the_diff_before_capping(monkeypatch) -> None:  #
 
     olds = [_scan_hit(line=1, rule=f"old-{i}") for i in range(MAX_SCAN_FINDINGS)]
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [*olds, _scan_hit(line=2, rule="new")],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2640,7 +2639,7 @@ def test_on_diff_scan_findings_are_capped_most_severe_first(monkeypatch) -> None
 
     lows = [_scan_hit(line=2, rule=f"low-{i}") for i in range(MAX_SCAN_FINDINGS)]
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [*lows, _scan_hit(line=2, rule="crit", severity=Severity.critical)],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2659,7 +2658,7 @@ def test_model_findings_survive_the_scan_cap(monkeypatch) -> None:  # type: igno
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: scans)
     model_note = ReviewFinding(
         path="f.py",
         line=2,
@@ -2684,7 +2683,7 @@ def test_suppressed_scan_findings_do_not_spend_cap_slots(monkeypatch) -> None:  
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: scans)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     # _finding_mode_cfg overrides land on the static-analysis sub-config, so
@@ -2710,7 +2709,7 @@ def test_scan_cap_considered_count_is_the_pre_cap_count(
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: scans)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
@@ -2743,7 +2742,7 @@ def test_a_scan_finding_on_a_file_the_cap_dropped_still_posts(monkeypatch) -> No
     as the corpus saw it. Snapping it against the capped reviewed_diff failed to
     anchor and dropped it with a false "unchanged lines" notice (issue #750)."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [_scan_hit(path="g.py", line=2)],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2770,14 +2769,14 @@ def test_a_scan_finding_on_a_file_triage_skipped_still_posts(monkeypatch) -> Non
     the real floor escalates any file a scanner flagged, so only a stub can
     produce a skipped file that carries a scan finding.)"""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [_scan_hit(path="g.py", line=2)],
     )
 
     def skip_g_py(file_patches, *_args):  # type: ignore[no-untyped-def]
         return [(p, patch) for p, patch in file_patches if p != "g.py"], ["g.py"]
 
-    monkeypatch.setattr("lgtmaybe.engine.engine.triage_files", skip_g_py)
+    monkeypatch.setattr("lgtmaybe.engine.stages.triage_files", skip_g_py)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     cfg = _finding_mode_cfg().model_copy(update={"triage_model": "tiny"})
@@ -2819,7 +2818,7 @@ def test_a_scan_snap_never_crosses_files_on_identical_changed_lines(monkeypatch)
     that matched anchor content without file boundaries would pull g.py's
     finding onto f.py's line 2 (nearer the scanner's reported line 3)."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis",
+        "lgtmaybe.engine.stages.run_static_analysis",
         lambda files, cfg: [_scan_hit(path="g.py", line=3)],
     )
     provider = _provider_for([], reflection_keeps_all=True)
@@ -2941,7 +2940,7 @@ _FN_CTX = PRContext(
 
 
 def test_function_context_pads_to_the_enclosing_def(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("lgtmaybe.engine.engine.definition_spans", lambda text, path: [(1, 1000)])
+    monkeypatch.setattr("lgtmaybe.engine.stages.definition_spans", lambda text, path: [(1, 1000)])
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3", context_lines=3)
@@ -2953,7 +2952,7 @@ def test_function_context_pads_to_the_enclosing_def(monkeypatch) -> None:  # typ
 
 
 def test_function_context_off_keeps_the_fixed_pad(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("lgtmaybe.engine.engine.definition_spans", lambda text, path: [(1, 1000)])
+    monkeypatch.setattr("lgtmaybe.engine.stages.definition_spans", lambda text, path: [(1, 1000)])
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     cfg = ReviewConfig(
@@ -3003,7 +3002,7 @@ def test_dependency_findings_survive_the_off_diff_drop(monkeypatch) -> None:  # 
     delete all of them, which is why dependency findings are exempt.
     """
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
@@ -3026,7 +3025,7 @@ def test_distinct_advisories_at_one_lockfile_line_all_post(monkeypatch) -> None:
         severity=Severity.high,
     )
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit(), second]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit(), second]
     )
     provider = _provider_for([], reflection_keeps_all=True)
 
@@ -3046,7 +3045,7 @@ def test_a_model_copy_rejected_by_reflection_does_not_take_the_scan_hit_with_it(
     from lgtmaybe.engine.static_analysis import StaticAnalysisTool
 
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_scan_hit()]
     )
     model_copy = ReviewFinding(
         path="f.py",
@@ -3105,7 +3104,7 @@ def _lockfile_cfg(**overrides: object) -> ReviewConfig:
 
 def _lens_of(call: dict, cfg: ReviewConfig) -> str:
     """Which lens a review call speaks for, from its final (lens) block."""
-    from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.lenses import _build_lenses
 
     block = str(call["messages"][-1]["content"])
     (lens_id,) = [
@@ -3122,7 +3121,7 @@ def test_an_unbatched_lockfile_hint_reaches_only_the_first_security_call(monkeyp
     """A lockfile is never reviewed, so its advisories have no batch of their own.
     They ride the security lens, once per review, on the first batch."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = _lockfile_cfg()
@@ -3155,7 +3154,7 @@ def test_unbatched_hints_are_redacted(monkeypatch) -> None:  # type: ignore[no-u
         message=f"token {secret} leaked",
         severity=Severity.high,
     )
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [leaky])
+    monkeypatch.setattr("lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [leaky])
     provider = _provider_for([], reflection_keeps_all=True)
 
     LLMReviewEngine(provider).review(_MULTI_BATCH_LOCK_CTX, _lockfile_cfg())
@@ -3169,7 +3168,7 @@ def test_unbatched_hints_leave_the_shared_prefix_byte_identical(monkeypatch) -> 
     """Sibling lenses read the batch prefix from cache; one lens's extra block
     must not make it differ between them."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)
 
@@ -3186,7 +3185,7 @@ def test_unbatched_hints_leave_the_shared_prefix_byte_identical(monkeypatch) -> 
 
 def test_with_no_security_lens_correctness_carries_unbatched_hints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = _lockfile_cfg(categories=[ReviewCategory.correctness, ReviewCategory.performance])
@@ -3199,7 +3198,7 @@ def test_with_no_security_lens_correctness_carries_unbatched_hints(monkeypatch) 
 
 def test_with_no_carrier_lens_the_summary_names_the_dropped_hints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = _lockfile_cfg(categories=[ReviewCategory.performance])
@@ -3223,7 +3222,7 @@ def test_a_confirmed_lockfile_advisory_reaches_the_posted_review(monkeypatch, an
     from lgtmaybe.github import RestGitHubGateway
 
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     advisory = ReviewFinding(
         path="uv.lock",
@@ -3276,7 +3275,7 @@ def test_only_a_hint_backed_lockfile_finding_skips_the_unanchored_floor(monkeypa
     no scanner flagged is a guess like any other unanchored finding, so the
     stricter floor still applies to it."""
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     ctx = _LOCKFILE_CTX.model_copy(
         update={
@@ -3329,7 +3328,7 @@ def test_reflection_can_verify_a_lockfile_advisory_against_the_hint(monkeypatch)
     from lgtmaybe.github import RestGitHubGateway
 
     monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+        "lgtmaybe.engine.stages.run_static_analysis", lambda files, cfg: [_osv_hit()]
     )
     advisory = ReviewFinding(
         path="uv.lock",
@@ -3386,7 +3385,7 @@ def test_reflection_can_verify_a_lockfile_advisory_against_the_hint(monkeypatch)
 
 
 def _security_lens_text(cfg: ReviewConfig) -> str:
-    from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.lenses import _build_lenses
     from lgtmaybe.engine.prompt import build_shared_preamble
 
     lenses = _build_lenses(cfg, has_intent=False)
@@ -3405,7 +3404,7 @@ def test_security_lens_asks_for_secrets_by_default() -> None:
 
 def test_lenses_ask_for_dependency_health_by_default() -> None:
     """Likewise osv-scanner: a hint by default, so the advisory ask stays."""
-    from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.lenses import _build_lenses
 
     cfg = ReviewConfig(provider=Provider.openai, model="m")
 
@@ -3456,7 +3455,7 @@ def test_every_lens_is_told_the_redaction_marker_is_not_a_finding() -> None:
     """redact() puts REDACTED_PLACEHOLDER in the diff the model reads; without
     being told what it is, a lens reports our own marker as a leaked secret."""
     cfg = ReviewConfig(provider=Provider.openai, model="m")
-    from lgtmaybe.engine.engine import _build_lenses
+    from lgtmaybe.engine.lenses import _build_lenses
     from lgtmaybe.engine.prompt import build_shared_preamble
 
     for lens in _build_lenses(cfg, has_intent=False):
@@ -3928,10 +3927,10 @@ class TestFloodedAccountingUnderConcurrency:
     def test_concurrent_bounds_on_one_lens_do_not_lose_counts(self) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
-        from lgtmaybe.engine.engine import _Lens, _Run, _RunState
+        from lgtmaybe.engine.lenses import _Lens
+        from lgtmaybe.engine.run import _Run, _RunState, _stamp_and_bound
 
         provider = FakeProvider()
-        engine = LLMReviewEngine(provider)
         state = _RunState(flooded=self._SlowStoreDict())
         run = _Run(
             model="m",
@@ -3962,9 +3961,7 @@ class TestFloodedAccountingUnderConcurrency:
         calls = 24
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            list(
-                pool.map(lambda _: engine._stamp_and_bound(list(findings), lens, run), range(calls))
-            )
+            list(pool.map(lambda _: _stamp_and_bound(list(findings), lens, run), range(calls)))
 
         assert state.flooded["security"] == 3 * calls
 
@@ -3975,7 +3972,7 @@ class TestBoundaryScansOverlap:
     changed file in front of every review. They are independent."""
 
     def _spans(self, monkeypatch, paths: list[str], *, function_context: bool = True):
-        from lgtmaybe.engine import engine as engine_mod
+        from lgtmaybe.engine import stages as stages_mod
 
         live = 0
         peak = 0
@@ -3991,9 +3988,9 @@ class TestBoundaryScansOverlap:
                 live -= 1
             return [(1, len(text))]
 
-        monkeypatch.setattr(engine_mod, "definition_spans", fake_definition_spans)
+        monkeypatch.setattr(stages_mod, "definition_spans", fake_definition_spans)
         contents = {path: f"# {path}" for path in paths}
-        result = engine_mod._definition_spans_by_path(
+        result = stages_mod._definition_spans_by_path(
             contents,
             [(path, "@@ -1 +1 @@") for path in paths],
             make_cfg(function_context=function_context),
@@ -4020,11 +4017,11 @@ class TestBoundaryScansOverlap:
     def test_a_file_without_fetched_head_text_is_absent_not_empty(self, monkeypatch) -> None:
         """`.get(path)` must yield None for it — the same "no boundaries" value
         expand_hunks took before."""
-        from lgtmaybe.engine import engine as engine_mod
+        from lgtmaybe.engine import stages as stages_mod
 
-        monkeypatch.setattr(engine_mod, "definition_spans", lambda text, path: [(1, 2)])
+        monkeypatch.setattr(stages_mod, "definition_spans", lambda text, path: [(1, 2)])
 
-        result = engine_mod._definition_spans_by_path(
+        result = stages_mod._definition_spans_by_path(
             {"a.py": "code"},
             [("a.py", "patch"), ("b.py", "patch")],
             make_cfg(),
@@ -4041,7 +4038,8 @@ class TestBatchBudgetCoversTheWholePrompt:
     budget produced a request over it."""
 
     def test_the_batch_budget_reserves_the_per_call_prompt_overhead(self) -> None:
-        from lgtmaybe.engine.engine import _build_lenses, _prompt_overhead_tokens
+        from lgtmaybe.engine.lenses import _build_lenses
+        from lgtmaybe.engine.stages import _prompt_overhead_tokens
 
         cfg = make_cfg(max_input_tokens=100_000)
         lenses = _build_lenses(cfg, has_intent=False)
@@ -4055,7 +4053,8 @@ class TestBatchBudgetCoversTheWholePrompt:
         """Lenses are sized differently and each call carries exactly one, so the
         reserve has to hold for the widest of them."""
         from lgtmaybe.engine.compress import count_tokens
-        from lgtmaybe.engine.engine import _build_lenses, _prompt_overhead_tokens
+        from lgtmaybe.engine.lenses import _build_lenses
+        from lgtmaybe.engine.stages import _prompt_overhead_tokens
 
         cfg = make_cfg(preset=ReviewPreset.full)
         lenses = _build_lenses(cfg, has_intent=False)
@@ -4067,14 +4066,16 @@ class TestBatchBudgetCoversTheWholePrompt:
         """Reserving out of a budget that cannot fit the prompt anyway would
         shrink the diff share to nothing and split every file into single hunks —
         making a misconfiguration worse instead of safer."""
-        from lgtmaybe.engine.engine import _batch_budget, _build_lenses
+        from lgtmaybe.engine.lenses import _build_lenses
+        from lgtmaybe.engine.stages import _batch_budget
 
         cfg = make_cfg(max_input_tokens=60)
 
         assert _batch_budget(_build_lenses(cfg, has_intent=False), cfg) == 60
 
     def test_a_realistic_budget_is_reduced_by_the_overhead(self) -> None:
-        from lgtmaybe.engine.engine import _batch_budget, _build_lenses, _prompt_overhead_tokens
+        from lgtmaybe.engine.lenses import _build_lenses
+        from lgtmaybe.engine.stages import _batch_budget, _prompt_overhead_tokens
 
         cfg = make_cfg(max_input_tokens=100_000)
         lenses = _build_lenses(cfg, has_intent=False)
