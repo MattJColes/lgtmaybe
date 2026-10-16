@@ -7,7 +7,9 @@ instructions: |
   method with the same signature; and a module split by execution order (temporal
   decomposition) rather than by knowledge, so callers must touch several pieces to
   do one thing. Deep modules hide a lot behind a simple interface; shallow ones add
-  surface area without hiding complexity. Distinct from complexity ("is this hard
+  surface area without hiding complexity. A method that implements a port,
+  protocol, or interface is not a pass-through even when its body is one call:
+  it is the seam, and collapsing it couples callers to the implementation. Distinct from complexity ("is this hard
   to follow?") and ponytail ("should this exist?") — this asks "does this interface
   pay for itself?"
 example_diff: |
