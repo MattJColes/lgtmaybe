@@ -25,6 +25,7 @@ from lgtmaybe.core.comment import (
     diagrammed_marker,
     finding_keys,
     last_match,
+    marker,
     render_inline_body,
     retire_stamped_ids,
     reviewed_diff_marker,
@@ -76,6 +77,14 @@ def test_watermark_families_are_disjoint() -> None:
         for owner, written in writers.items():
             if owner is not reader:
                 assert reader.search(written) is None, (reader.pattern, written)
+
+
+def test_github_summary_marker_text_is_unchanged() -> None:
+    """Existing PRs carry this exact text; a drift would re-post the summary."""
+    from lgtmaybe.github.rest_gateway import _MARKER
+
+    assert marker("lgtmaybe", None) == "<!-- lgtmaybe -->"
+    assert _MARKER == "<!-- lgtmaybe -->"
 
 
 def _finding() -> ReviewFinding:
