@@ -39,10 +39,10 @@
 
 ## Reference
 
-- [Configuration](https://lgtmaybe.coles.codes/reference/config/): Complete lgtmaybe configuration reference — every ReviewConfig field, enum, and JSON schema, generated from the pydantic models.
+- [Configuration](https://lgtmaybe.coles.codes/reference/config/): Every lgtmaybe configuration key you can set in .lgtmaybe.yml, with its type, default and allowed values.
 - [Profile output](https://lgtmaybe.coles.codes/reference/profile/): The --profile table and --profile-json payload - every column, the summary lines, what a dash means, and the machine-readable shape to parse instead.
 - [Glossary](https://lgtmaybe.coles.codes/reference/glossary/): Plain definitions of the terms lgtmaybe's docs use, from lens and preset to watermark and fan-out.
-- [Changelog](https://lgtmaybe.coles.codes/changelog/): Every release, newest first, built from CHANGELOG.md.
+- [Changelog](https://lgtmaybe.coles.codes/changelog/): Every lgtmaybe release, newest first, with what changed in each.
 
 ## Explanation
 

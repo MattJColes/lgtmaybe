@@ -75,8 +75,6 @@ flowchart LR
 
 ## What's New
 
-The latest releases, built from the changelog every time the docs publish.
-
 See the [Changelog](https://lgtmaybe.coles.codes/changelog/) for every release.
 
 ## Providers
@@ -6342,6 +6340,9 @@ working, then understand why it works.
   a code example to make a sentence shorter. Shorter wording, never fewer facts.
 - **Say what the reader will see.** "The run fails with a message naming the
   missing key" beats "an error occurs".
+- **Leave out how the docs are made.** Readers want to use lgtmaybe, not
+  know how this site is built or kept up to date. Skip lines such as "this list
+  is generated from the changelog".
 
 ## House Style
 
@@ -6401,7 +6402,7 @@ fix a page, the test fails until you take it off the list.
 
 # Configuration Reference
 
-This reference is generated from the pydantic schemas in `src/lgtmaybe/core/models.py`.
+Every key you can set in `.lgtmaybe.yml`, with its type, default and allowed values.
 
 ## ReviewConfig
 

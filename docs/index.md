@@ -69,8 +69,6 @@ flowchart LR
 
 ## What's New
 
-The latest releases, built from the changelog every time the docs publish.
-
 <!-- whats-new -->
 
 ## Providers
