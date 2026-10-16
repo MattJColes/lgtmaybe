@@ -1,4 +1,4 @@
-# ast-grep anchors for core-contracts — see "Living specs" in CLAUDE.md.
+# ast-grep anchors for core-contracts — see "Living specs" in AGENTS.md.
 # Rules match code shape (kind + name), never paths/lines or `pattern:`.
 
 core.provider-port:

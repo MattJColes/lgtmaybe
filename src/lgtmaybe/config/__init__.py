@@ -1,1 +1,1 @@
-"""config — populated by its track (see CLAUDE.md)."""
+"""config — populated by its track (see AGENTS.md)."""

@@ -1,4 +1,4 @@
-# ast-grep anchors for prompt-and-lenses — see "Living specs" in CLAUDE.md.
+# ast-grep anchors for prompt-and-lenses — see "Living specs" in AGENTS.md.
 
 prompt.shared-preamble:
   rule:

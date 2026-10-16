@@ -1,4 +1,4 @@
-# ast-grep anchors for hardening — see "Living specs" in CLAUDE.md.
+# ast-grep anchors for hardening — see "Living specs" in AGENTS.md.
 
 hardening.wrap-diff:
   - rule:

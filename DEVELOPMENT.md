@@ -3,7 +3,7 @@
 How to run **lgtmaybe** locally, and how its tests run on your machine and in
 GitHub Actions. For the contribution bar (TDD, scope) see
 [CONTRIBUTING.md](CONTRIBUTING.md); for the decisions that are made, not
-options, see [CLAUDE.md](CLAUDE.md).
+options, see [AGENTS.md](AGENTS.md).
 
 ## Prerequisites
 
@@ -242,7 +242,7 @@ mirrors `src/`:
   generated-docs freshness checks (see below)
 - `tests/specs/`: the living-spec anchor gate. Every requirement in
   `openspec/specs/*/spec.md` has an ast-grep anchor in its `anchors.yml` that
-  resolves to exactly one place in `src/` (see "Living specs" in `CLAUDE.md`;
+  resolves to exactly one place in `src/` (see "Living specs" in `AGENTS.md`;
   the non-blocking PR drift warning is `scripts/check_spec_drift.py`)
 - `tests/evals/`: the eval harness's scorer and fixtures (no live model)
 - `tests/e2e/`: end-to-end through the real CLI, one suite against a stub
