@@ -17,13 +17,17 @@ Source: https://lgtmaybe.coles.codes/ — generated from the docs/ tree.
 </div>
 
 lgtmaybe reviews pull and merge requests on **GitHub, GitLab, Gitea, and Azure
-DevOps**, or a local Git diff. Choose a hosted model, ollama, or another
-OpenAI-compatible endpoint. It posts inline comments and one summary, or prints
-findings locally.
+DevOps**, posting inline comments and one summary. Choose a hosted model,
+ollama, or another OpenAI-compatible endpoint.
 
-It reads the diff and a little surrounding code, but comments only on changed
-lines. It never checks out or runs the change. It skips generated files and
-binaries, [redacts](reference/glossary.md#redaction) secrets, and treats all
+It works before a pull request exists. Run `lgtmaybe review` on your
+branch, add a [pre-commit hook](how-to/review-before-you-commit.md), or
+[hand its findings to your coding agent](how-to/fix-findings-with-an-ai-agent.md)
+to fix. With a local model, your code stays local.
+
+It reads the diff plus a little surrounding code and comments only on changed
+lines. It never checks out or runs the change, skips generated files and
+binaries, [redacts](reference/glossary.md#redaction) secrets, and treats
 author-supplied text as untrusted.
 
 It checks for:
@@ -36,16 +40,15 @@ It checks for:
 - **Architecture:** coupling, wrong-way dependencies, and broken subclass contracts that will be hard to undo.
 
 Each [finding](reference/glossary.md#finding) is graded `info` to `critical`
-and lands on the changed line it refers to. A clean change gets a 👍 **LGTM!**.
+and lands on its changed line. A clean change gets a 👍 **LGTM!**.
 
-![An inline lgtmaybe comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterised-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
+![An inline lgtmaybe comment flagging a critical SQL injection and suggesting a fix](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
-Slash commands can refresh a review (`/review`, `/improve`), answer a question
-(`/ask`), post a structured description (`/describe`), or post
-[a change overview](how-to/generate-a-change-diagram.md) (`/diagram`). The
-overview rates the risk of change, lists high-impact areas, and draws a
-flowchart, plus a sequence diagram when the change alters a runtime flow.
-`lgtmaybe diagram` prints a text version locally.
+Slash commands refresh a review (`/review`, `/improve`), answer a question
+(`/ask`), or post a description (`/describe`) or
+[change overview](how-to/generate-a-change-diagram.md) (`/diagram`). The
+overview rates the risk of change, lists high-impact areas, and diagrams what
+the change touches.
 
 ```mermaid
 flowchart LR
