@@ -20,7 +20,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from lgtmaybe.core.comment import code_span
+from lgtmaybe.core.comment import code_span, strip_markers
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import DescribeResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
@@ -85,8 +85,8 @@ def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClien
     """One provider call → the Markdown body of the PR-description comment.
 
     Structured output with a lenient parser; when no description object can be
-    parsed the raw model text is returned as-is (the pre-structured
-    behaviour), so a weak model still yields a usable comment.
+    parsed the model's prose is posted escaped (one line, no HTML, no hidden
+    markers), so a weak model still yields a usable and inert comment.
     """
     return structured_comment(
         ctx,
@@ -156,8 +156,9 @@ def structured_comment(
 
     Renders what ``structured_call`` returns: on a parse the *render* result
     (with whether an intent block was sent), otherwise a caller-supplied safe
-    fallback, or the raw text preserved for compatibility with weak prose-only
-    models.
+    fallback, or by default the model's own prose escaped with
+    ``prose_text(strip_markers(...))``, inert the same way the structured
+    sections are, because a weak model can echo diff content verbatim.
     """
     parsed, raw, has_intent = structured_call(
         ctx,
@@ -172,8 +173,8 @@ def structured_comment(
     )
     if parsed is None:
         if fallback is None:
-            _log.info("%s output unstructured — posting raw text", label)
-            return raw
+            _log.info("%s output unstructured; posting escaped prose", label)
+            return prose_text(strip_markers(raw))
         _log.info("%s output did not match its schema — using safe fallback", label)
         return fallback(raw)
     return render(parsed, has_intent)
