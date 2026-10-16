@@ -46,6 +46,14 @@ from lgtmaybe.core.ports import (
     ProviderInputTooLarge,
     ProviderTruncated,
     ProviderWallTimeout,
+    SupportsInputBudget,
+    SupportsModelEscalation,
+    SupportsReasoningStepDown,
+    SupportsReasoningSwitchOff,
+    SupportsResponseFormatDrop,
+    SupportsResponseFormatStatus,
+    SupportsSchemaDropReport,
+    SupportsTemperatureDropReport,
 )
 from lgtmaybe.core.version import package_version
 
@@ -656,6 +664,9 @@ def _spec_lens() -> _Lens:
 
 # One prepared _review_lens call, ready to submit to the fan-out pool.
 _LensOutcome = tuple[list[ReviewFinding], str | None]
+# Builds the (intent, hint, directory, spec) blocks for one set of file paths:
+# a batch's own set, or the subset a split piece shows.
+_BlocksFor = Callable[[set[str]], tuple[str | None, str | None, str | None, str | None]]
 _ReviewTask = partial[_LensOutcome]
 
 
@@ -928,23 +939,25 @@ class LLMReviewEngine:
     def _schema_dropped(self) -> bool:
         """Whether the adapter gave up on structured output during this run.
 
-        Feature-detected, like ``lower_reasoning_effort``: it is an adapter-only
-        method beyond the frozen ``ProviderClient`` port, so a provider that
-        cannot answer simply never reports a drop rather than every fake in the
-        suite growing a method to say "no".
+        Probed through ``SupportsSchemaDropReport``, like ``lower_reasoning_effort``
+        below: it is an optional capability beyond the frozen ``ProviderClient``
+        port, so a provider that cannot answer simply never reports a drop
+        rather than every fake in the suite growing a method to say "no".
         """
-        probe = getattr(self._provider, "schema_dropped", None)
-        return bool(probe()) if callable(probe) else False
+        if not isinstance(self._provider, SupportsSchemaDropReport):
+            return False
+        return bool(self._provider.schema_dropped())
 
     def _temperature_dropped(self) -> bool:
         """Whether a configured temperature never reached the model this run.
 
-        Feature-detected like ``_schema_dropped``, for the same reason: only the
-        litellm adapter can know, so a provider without the method never reports
-        a drop.
+        Probed like ``_schema_dropped``, for the same reason: only the
+        litellm adapter can know, so a provider without the capability never
+        reports a drop.
         """
-        probe = getattr(self._provider, "temperature_dropped", None)
-        return bool(probe()) if callable(probe) else False
+        if not isinstance(self._provider, SupportsTemperatureDropReport):
+            return False
+        return bool(self._provider.temperature_dropped())
 
     def __init__(
         self,
@@ -999,11 +1012,10 @@ class LLMReviewEngine:
         """
         if "max_input_tokens" in cfg.model_fields_set:
             return cfg
-        probe = getattr(self._provider, "input_budget", None)
-        if probe is None:
+        if not isinstance(self._provider, SupportsInputBudget):
             return cfg
         try:
-            budget = probe()
+            budget = self._provider.input_budget()
         except Exception:  # noqa: BLE001 — a capability lookup must never fail a review
             _log.warning("could not read the model's input budget", exc_info=True)
             return cfg
@@ -1357,6 +1369,25 @@ class LLMReviewEngine:
             else None
         )
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
+
+        # Blocks for any SUBSET of a batch's files. A split piece shows a
+        # subset, so the batch's own intent, spec, hint and directory blocks
+        # are wrong for it twice over: their not-visible lists omit the
+        # sibling-piece files, and their hints and rules cover files the piece
+        # cannot see. One builder serves the batch and each piece, so the two
+        # can never drift.
+        def blocks_for(paths: set[str]) -> tuple[str | None, str | None, str | None, str | None]:
+            not_visible = files_not_visible(ctx.changed_files, paths)
+            hints = [h for h in sa_hints if h.path in paths]
+            return (
+                wrap_intent(clean_intent, not_visible) if clean_intent is not None else None,
+                wrap_hints(redact(format_hints(hints))) if hints else None,
+                build_directory_block(rules_for(paths, cfg), dir_contents)
+                if cfg.directory_rules
+                else None,
+                wrap_spec(clean_spec, not_visible) if clean_spec is not None else None,
+            )
+
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
             wrapped = wrap_diff(batch_diff)
@@ -1365,8 +1396,7 @@ class LLMReviewEngine:
             # diff) and wrapped as their own neutralised untrusted block.
             batch_paths = {path for path, _ in batch}
             not_visible = files_not_visible(ctx.changed_files, batch_paths)
-            batch_hints = [h for h in sa_hints if h.path in batch_paths]
-            hint_block = wrap_hints(redact(format_hints(batch_hints))) if batch_hints else None
+            intent_block, hint_block, dir_block, spec_block = blocks_for(batch_paths)
             # What this call was NOT shown, for EVERY lens — not just the two that
             # judge a whole-PR promise. Absence stated as fact beats absence
             # inferred from "code you rely on may live in files you CANNOT see",
@@ -1374,24 +1404,6 @@ class LLMReviewEngine:
             # when the batch shows the whole PR, so the common case adds nothing
             # to the cached prefix.
             hidden_block = wrap_not_shown(not_visible)
-            # Directory rules matching THIS batch's files, with the context
-            # files they name. Batch-scoped like the hints above, so a batch
-            # never pays for another directory's instructions.
-            dir_block = (
-                build_directory_block(rules_for(batch_paths, cfg), dir_contents)
-                if cfg.directory_rules
-                else None
-            )
-            # The intent block is built PER BATCH, not once, because it has to
-            # name the files this particular call cannot see.
-            intent_block = (
-                wrap_intent(clean_intent, not_visible) if clean_intent is not None else None
-            )
-            # Same for the spec block, and the correction matters more here: a
-            # requirement is delivered by CODE, so a spec call that does not know
-            # which files it was denied reports every requirement implemented in
-            # another batch as undelivered.
-            spec_block = wrap_spec(clean_spec, not_visible) if clean_spec is not None else None
             # Warm the prompt cache for this batch: a fully concurrent first
             # wave defeats it (every call misses, and on explicit-breakpoint
             # routes each also pays the cache write), so one lens is dispatched
@@ -1418,6 +1430,7 @@ class LLMReviewEngine:
                         batch,
                         spec_block=spec_block,
                         hidden_block=hidden_block,
+                        blocks_for=blocks_for,
                     ),
                 )
                 for lens in lenses
@@ -1819,6 +1832,7 @@ class LLMReviewEngine:
         *,
         spec_block: str | None = None,
         hidden_block: str | None = None,
+        blocks_for: _BlocksFor | None = None,
     ) -> tuple[list[ReviewFinding], str | None]:
         """Run one focused review call for a single lens (built-in or user-defined).
 
@@ -1831,7 +1845,8 @@ class LLMReviewEngine:
         this call into the one retry an oversized payload can actually benefit
         from: the payload is split and the pieces reviewed (see
         :meth:`_review_split`). None means "already a piece" — no further
-        splitting.
+        splitting. ``blocks_for`` rebuilds the per-batch blocks for each piece's
+        own file set; None means there is nothing smaller to rebuild for.
 
         Every call uses the shared system preamble, then the shared prefix
         (hints + diff) as one user message, then the lens block (intent +
@@ -1861,6 +1876,7 @@ class LLMReviewEngine:
                 lens=lens,
                 spec_block=spec_block,
                 hidden_block=hidden_block,
+                blocks_for=blocks_for,
             )
         )
         on_needs = (
@@ -2070,6 +2086,14 @@ class LLMReviewEngine:
         findings, split_reason = on_oversized(reason, slice_hunks=slice_hunks)
         if split_reason is None:
             return completed + findings, None
+        if isinstance(split_reason, _PiecesReason):
+            # The split worked — the payload shrank and a piece answered — so the
+            # remaining failure is a transient provider blip on one piece, and the
+            # reason already carries that piece's retry. Escalating here re-sends
+            # the request the split just recovered from and replaces the piece
+            # reason with the fallback's own failure, so the rescue wave would
+            # replay the oversized whole batch the split exists to avoid.
+            return completed + findings, split_reason
         # The pieces did not cover the batch either, so the payload was
         # never the whole story. Last rung: the same request, a different
         # model. Any findings the pieces did manage ride along, and the
@@ -2092,6 +2116,7 @@ class LLMReviewEngine:
         lens: _Lens,
         spec_block: str | None = None,
         hidden_block: str | None = None,
+        blocks_for: _BlocksFor | None = None,
         slice_hunks: bool = False,
     ) -> _LensOutcome:
         """Re-review an oversized batch as smaller pieces, one call each.
@@ -2136,19 +2161,25 @@ class LLMReviewEngine:
         def review_piece(piece: list[tuple[str, str]]) -> _LensOutcome:
             # Recomputed, never inherited: this piece carries a subset of the
             # batch's files, so the batch's manifest would omit exactly the
-            # sibling-piece files this call is now missing.
-            piece_hidden = wrap_not_shown(
-                files_not_visible(run.changed_files, {path for path, _ in piece})
+            # sibling-piece files this call is now missing — and so would its
+            # intent, spec, hint and directory blocks, which additionally
+            # carry hints and rules for files the piece cannot see.
+            piece_paths = {path for path, _ in piece}
+            piece_hidden = wrap_not_shown(files_not_visible(run.changed_files, piece_paths))
+            piece_intent, piece_hint, piece_dir, piece_spec = (
+                blocks_for(piece_paths)
+                if blocks_for is not None
+                else (intent_block, hint_block, dir_block, spec_block)
             )
             return self._review_lens(
                 run,
                 wrap_diff("\n".join(patch for _, patch in piece)),
-                intent_block,
-                hint_block,
-                dir_block,
+                piece_intent,
+                piece_hint,
+                piece_dir,
                 batch_num,
                 lens,
-                spec_block=spec_block,
+                spec_block=piece_spec,
                 hidden_block=piece_hidden,
             )
 
@@ -2287,16 +2318,17 @@ class LLMReviewEngine:
         Returns the retry's ``(findings, error)``. The cut call's salvage is
         merged by the caller, exactly as the split's is.
         """
-        # Adapter-only, like `post_issue_comment` on the GitHub side: the effort
-        # lives in provider-shaped opts (a flat `reasoning_effort`, or
-        # OpenRouter's nested `reasoning` object), and the engine has no business
-        # knowing which. A provider without it simply never steps down.
+        # An optional capability, like `post_issue_comment` on the GitHub side:
+        # the effort lives in provider-shaped opts (a flat `reasoning_effort`,
+        # or OpenRouter's nested `reasoning` object), and the engine has no
+        # business knowing which. A provider without it simply never steps down.
         if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             # Past a ceiling: the run is already stopping, and the notice it will
             # carry is the truncation's, not a skip's — this call never happened.
             return [], reason
-        lower = getattr(self._provider, "lower_reasoning_effort", None)
-        step_down = lower() if callable(lower) else None
+        step_down = None
+        if isinstance(self._provider, SupportsReasoningStepDown):
+            step_down = self._provider.lower_reasoning_effort()
         if not step_down:
             return [], reason
         _log.warning(
@@ -2325,8 +2357,9 @@ class LLMReviewEngine:
         # the price. A model whose thinking is a switch does not answer to a
         # dial, so the one further step is to off — and it is taken BEFORE the
         # model changes, because switching model says nothing about the failure.
-        off = getattr(self._provider, "disable_reasoning", None)
-        switch_off = off() if callable(off) else None
+        switch_off = None
+        if isinstance(self._provider, SupportsReasoningSwitchOff):
+            switch_off = self._provider.disable_reasoning()
         if not switch_off or switch_off == step_down:
             # No switch on this route, or the step-down already was it (a
             # configured `minimal` steps to `none`): a second request at the
@@ -2403,11 +2436,12 @@ class LLMReviewEngine:
         """
         if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             return [], reason
-        # Adapter-only, like `lower_reasoning_effort`: which litellm model string
-        # a configured fallback resolves to is the adapter's knowledge, and a
-        # provider without a second model simply never answers.
-        probe = getattr(self._provider, "escalate_model", None)
-        target = probe() if callable(probe) else None
+        # An optional capability, like `lower_reasoning_effort`: which litellm
+        # model string a configured fallback resolves to is the adapter's
+        # knowledge, and a provider without a second model simply never answers.
+        target = None
+        if isinstance(self._provider, SupportsModelEscalation):
+            target = self._provider.escalate_model()
         if not target:
             return [], reason
         _log.warning(
@@ -2445,7 +2479,10 @@ class LLMReviewEngine:
         cannot be proved should not be made.
         """
         answered = result.model
-        asked = getattr(self._provider, "model", None)
+        # Attribute presence, not a protocol isinstance: runtime-checkable
+        # protocols check members with hasattr anyway, and saying that directly
+        # keeps the probe honest for an adapter that is not a Protocol.
+        asked = self._provider.model if hasattr(self._provider, "model") else None
         if answered and asked and answered != asked:
             self._escalated[lens.id] = answered
 
@@ -2521,26 +2558,27 @@ class LLMReviewEngine:
         would re-send the request that just failed, byte for byte — a wasted
         full-diff call, and exactly what ``engine.rescue`` forbids.
 
-        Feature-detected and **fail-open**, like every other adapter probe: an
-        adapter that cannot answer is assumed to have sent what it was given, so
-        the recovery keeps working rather than silently switching itself off.
+        Probed through ``SupportsResponseFormatStatus`` and **fail-open**, like
+        every other adapter probe: an adapter that cannot answer is assumed to
+        have sent what it was given, so the recovery keeps working rather than
+        silently switching itself off.
         """
-        probe = getattr(self._provider, "sends_response_format", None)
-        return bool(probe(model)) if callable(probe) else True
+        if not isinstance(self._provider, SupportsResponseFormatStatus):
+            return True
+        return bool(self._provider.sends_response_format(model))
 
     def _drop_response_format(self, model: str) -> None:
         """Tell the adapter this model's schema mode is not working.
 
-        Feature-detected like ``schema_dropped`` and ``lower_reasoning_effort``,
-        and the first of the three that WRITES. It stays off the frozen
-        ``ProviderClient`` port for the same reason they do: the knowledge is
-        adapter-shaped (which litellm model string keys the drop), and a provider
-        that cannot honour it should simply not remember rather than every fake
-        in the suite growing a no-op.
+        Probed through ``SupportsResponseFormatDrop``, and the first of the
+        adapter probes that WRITES. It stays off the frozen
+        ``ProviderClient`` port for the same reason the read-only ones do: the
+        knowledge is adapter-shaped (which litellm model string keys the drop),
+        and a provider that cannot honour it should simply not remember rather
+        than every fake in the suite growing a no-op.
         """
-        drop = getattr(self._provider, "drop_response_format", None)
-        if callable(drop):
-            drop(model, "unparseable-output")
+        if isinstance(self._provider, SupportsResponseFormatDrop):
+            self._provider.drop_response_format(model, "unparseable-output")
 
     def _stamp_and_bound(self, findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
         """Stamp the originating lens, then bound what one call may contribute.

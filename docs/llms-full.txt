@@ -1837,6 +1837,11 @@ rules:
 A branch pipeline has no merge request to review. There, lgtmaybe fails with an
 error naming the missing `CI_MERGE_REQUEST_IID` rather than guessing.
 
+A GitLab served under a sub-path is not supported. Its `CI_SERVER_URL` looks
+like `https://example.com/gitlab`, which the job cannot tell apart from a
+nested group, so it fails with an error naming the sub-path. Serve GitLab at
+the host root instead.
+
 The example job does not clone the repository (`GIT_STRATEGY: none`), so there
 is no `.lgtmaybe.yml` to read. Configure the review with the command's flags:
 `--provider`, `--model`, `--fallback-model`, `--api-key`, `--api-base`,
@@ -10132,6 +10137,7 @@ what its host cannot do, instead of failing at run time.
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
 | `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsScanManifests`: fetch dependency manifests for scanning | ✅ | ✅ | ✅ | ✅ |
 | `SupportsPermissions`: only writers run slash commands | ✅ | ✗ no slash commands | ✅ | ✗ no slash commands |
 | `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
@@ -11183,6 +11189,11 @@ only when the commenter has write access to the repository. It ignores anyone
 else's with a log line and no model call. So opening the comment arm (the
 `issue_comment` half of the `if:`) to everyone, or adding `CONTRIBUTOR`, changes
 who triggers a run, not who can spend the model through one.
+
+A second floor: a command runs only on a comment's `created` action. An edit or
+a delete re-delivers the comment's original text and author, and lgtmaybe
+ignores that event, so a maintainer tidying an old command cannot re-spend a
+review.
 
 The slash-command half of the comment arm saves runner time rather than
 tokens. `issue_comment` fires on every comment on every pull request. Without

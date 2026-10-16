@@ -44,7 +44,7 @@ from lgtmaybe.core.models import (
 )
 
 from .astgrep import _find_binary, iter_matches
-from .static_analysis import _scrubbed_env
+from .static_analysis import scrubbed_env
 
 _log = get_logger(__name__)
 
@@ -173,7 +173,7 @@ def default_scanner(binary: str, rules: str, root: Path) -> str | None:
         proc = subprocess.run(
             [binary, "scan", "--inline-rules", rules, "--json=compact", "."],
             cwd=root,
-            env=_scrubbed_env(root),
+            env=scrubbed_env(root),
             capture_output=True,
             text=True,
             encoding="utf-8",

@@ -39,6 +39,7 @@ from lgtmaybe.core.comment import (
     finding_keys,
     last_match,
     marker,
+    partition_findings,
     render_broad,
     render_demoted,
     render_inline_body,
@@ -52,6 +53,7 @@ from lgtmaybe.core.diff import (
     is_reviewable,
     is_scannable_manifest,
 )
+from lgtmaybe.core.diffbuild import has_unsafe_path_chars, patch_from_hunks
 from lgtmaybe.core.diffparse import parse_hunk_header, walk_diff
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
@@ -76,10 +78,6 @@ _COMPARE_MAX_FILES = 500
 
 # Per-file flags GitLab sets when it withheld some or all of a file's patch.
 _TRUNCATION_FLAGS = ("too_large", "collapsed", "overflow")
-
-# Characters that would let an attacker-chosen file name forge a diff header
-# line (or the tab-delimited timestamp the header parser strips).
-_UNSAFE_PATH_CHARS = ("\n", "\r", "\t")
 
 # Developer: the lowest GitLab role that can push, so the analogue of the GitHub
 # write permission that feedback learning trusts.
@@ -564,11 +562,11 @@ class GitLabGateway:
     ]:
         """Split findings into positioned discussions, body-demoted, and broad.
 
-        Same rule as the other adapters — a finding goes inline only when it is
-        confidently anchored AND lands on a real commentable diff line — with
-        GitLab's position object substituted at the end. A finding is also
-        demoted when the diff refs are unknown, since a position without them is
-        rejected by the API.
+        The placement rule is shared (``core.comment.partition_findings``); only
+        the payload here is GitLab's position object, which carries both lines
+        for a context line (the API rejects a context position naming one) and
+        is demoted when the diff refs are unknown, since a position without
+        them is rejected too.
         """
         context_lines: dict[tuple[str, int, str], tuple[int, int]] = {}
         for path, kind, old_line, new_line, _text in walk_diff(diff):
@@ -576,19 +574,9 @@ class GitLabGateway:
                 context_lines[path, old_line, "LEFT"] = old_line, new_line
                 context_lines[path, new_line, "RIGHT"] = old_line, new_line
 
-        inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-        demoted: list[ReviewFinding] = []
-        broad: list[ReviewFinding] = []
-        for f in findings:
-            if f.broad:
-                broad.append(f)
-                continue
-            if not f.anchored or (f.path, f.line, f.side) not in commentable:
-                demoted.append(f)
-                continue
+        def place(f: ReviewFinding) -> dict[str, Any] | None:
             if self._diff_refs is None:
-                demoted.append(f)
-                continue
+                return None
             position: dict[str, Any] = {
                 **self._diff_refs,
                 "position_type": "text",
@@ -601,8 +589,9 @@ class GitLabGateway:
                 position["old_line"] = f.line
             else:
                 position["new_line"] = f.line
-            inline.append((position, f))
-        return inline, demoted, broad
+            return position
+
+        return partition_findings(findings, commentable, place)
 
     def _post_discussion(self, position: dict[str, Any], body: str) -> bool:
         """Open one positioned discussion.
@@ -712,6 +701,17 @@ class GitLabGateway:
                 timeout=_TIMEOUT,
             )
         resp.raise_for_status()
+        if existing_id is None and self._notes_cache is not None:
+            # The cache predates this note, so a same-run re-read (a failure
+            # notice after a posted summary) must not miss it and post twice.
+            try:
+                created = resp.json()
+            except ValueError:
+                created = None
+            note = created if isinstance(created, dict) else {}
+            self._notes_cache.append(
+                {"id": note.get("id"), "body": body, "author": {"id": self._posting_user()}}
+            )
 
     def _notes(self) -> list[dict[str, Any]]:
         """Every note on the merge request, fetched once per run."""
@@ -1012,7 +1012,7 @@ def _unusable_increment(comparison: dict[str, Any], base_sha: str, head_sha: str
             path = entry.get(key)
             if not isinstance(path, str) or not path:
                 return "a file diff names no path"
-            if any(char in path for char in _UNSAFE_PATH_CHARS):
+            if has_unsafe_path_chars(path):
                 return "a file path cannot be written into a diff header safely"
     return None
 
@@ -1021,27 +1021,18 @@ def _unified_diff(entries: list[dict[str, Any]]) -> str:
     """Reassemble the compare API's per-file patches into one ``git diff``.
 
     Each entry already carries its hunks; what it lacks is the file header the
-    shared diff parser keys on. Paths were vetted by ``_unusable_increment``.
+    shared diff parser keys on, which ``diffbuild.patch_from_hunks`` renders.
+    Paths were vetted by ``_unusable_increment``.
     """
     parts: list[str] = []
     for entry in entries:
-        old, new = entry["old_path"], entry["new_path"]
-        a_mode, b_mode = entry.get("a_mode"), entry.get("b_mode")
-        lines = [f"diff --git a/{old} b/{new}"]
-        if entry.get("new_file"):
-            lines.append(f"new file mode {b_mode or '100644'}")
-        elif entry.get("deleted_file"):
-            lines.append(f"deleted file mode {a_mode or '100644'}")
-        else:
-            if a_mode and b_mode and a_mode != b_mode:
-                lines += [f"old mode {a_mode}", f"new mode {b_mode}"]
-            if entry.get("renamed_file"):
-                lines += [f"rename from {old}", f"rename to {new}"]
-        patch = entry.get("diff") or ""
-        if patch:
-            lines.append("--- /dev/null" if entry.get("new_file") else f"--- a/{old}")
-            lines.append("+++ /dev/null" if entry.get("deleted_file") else f"+++ b/{new}")
-            if not patch.endswith("\n"):
-                patch += "\n"
-        parts.append("\n".join(lines) + "\n" + patch)
+        parts.append(
+            patch_from_hunks(
+                old_path=None if entry.get("new_file") else entry["old_path"],
+                new_path=None if entry.get("deleted_file") else entry["new_path"],
+                old_mode=entry.get("a_mode"),
+                new_mode=entry.get("b_mode"),
+                hunks=entry.get("diff") or "",
+            )
+        )
     return "".join(parts)

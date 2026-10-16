@@ -335,7 +335,7 @@ def _is_claude_route(provider: Provider, model: str) -> bool:
 
 def _withhold_temperature_under_thinking(
     provider: Provider, model: str, opts: dict[str, Any]
-) -> None:
+) -> bool:
     """Drop `temperature` from a Claude request that turns thinking on.
 
     litellm maps a `reasoning_effort` on the anthropic, bedrock and vertex
@@ -347,18 +347,23 @@ def _withhold_temperature_under_thinking(
     here: the effort was configured; the temperature is our determinism
     default, and thinking is not deterministic anyway. Said out loud, like
     every other param this factory declines to send.
+
+    Returns whether the temperature was withheld, so the caller can seed the
+    adapter's drop record — the disclosure channel a route-stripped or
+    model-rejected temperature uses, and this pre-adapter loss must too.
     """
     effort = opts.get("reasoning_effort")
     if "temperature" not in opts or not isinstance(effort, str):
-        return
+        return False
     if effort in _THINKING_OFF_EFFORTS or not _is_claude_route(provider, model):
-        return
+        return False
     del opts["temperature"]
     _log.info(
         "temperature not sent: extended thinking is on for this Claude model, and "
         "Anthropic rejects a temperature beside it",
         extra={"provider": provider.value, "model": litellm_model_string(provider, model)},
     )
+    return True
 
 
 def build_provider(
@@ -394,7 +399,7 @@ def build_provider(
     # judged here because this is where the litellm model string the capability
     # map keys on comes into existence.
     _honour_param_support(provider, model, opts)
-    _withhold_temperature_under_thinking(provider, model, opts)
+    withheld_temperature = _withhold_temperature_under_thinking(provider, model, opts)
 
     opts["timeout"] = (
         timeout if timeout is not None else default_timeout_for(provider, concurrency=concurrency)
@@ -471,7 +476,7 @@ def build_provider(
     # may land on, resolved once here rather than on every retry.
     effort_levels, default_effort = declared_effort_capability(provider, model)
 
-    return LiteLLMProvider(
+    client = LiteLLMProvider(
         model=resolved_model,
         fallback_model=resolved_fallback,
         route=_PREFIXES[provider],
@@ -480,3 +485,9 @@ def build_provider(
         default_effort=default_effort,
         **opts,
     )
+    if withheld_temperature:
+        # The adapter's own drop record, not a factory-side flag: it is the one
+        # channel the engine's temperature disclosure reads, and no call can
+        # ever report a param that was withheld before the client existed.
+        client._mark_temperature_dropped(resolved_model, "withheld-under-thinking")
+    return client
