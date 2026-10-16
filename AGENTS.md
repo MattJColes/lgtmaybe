@@ -251,7 +251,9 @@ docstrings.
   Hints on files no batch holds (lockfile advisories) ride the first batch's
   security lens (else correctness, else named in the summary) on its own
   uncached block, **never the shared prefix**; a confirmed finding there is
-  demoted to the review body and exempt from the unanchored floor.
+  demoted to the review body and exempt from the unanchored floor, and
+  reflection gets the matching hints as its evidence (`reflect._scan_hint_block`,
+  its own block, zero bytes when no such finding exists).
   `_scanner_covers` drops a lens's secret/advisory ask only for a
   `finding`-mode scanner. **Tool output is always redacted and never posted
   verbatim.** A missing tool is skipped, so a minimal install runs nothing.

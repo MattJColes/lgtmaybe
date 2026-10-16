@@ -1554,6 +1554,9 @@ class LLMReviewEngine:
                         self._provider,
                         fetch_file=self._fetch_file,
                         resolve_symbol=self._resolve_symbol,
+                        # The hints a lockfile finding was confirmed from: the
+                        # auditor's only evidence for a file the diff never shows.
+                        scan_hints=unbatched,
                     )
 
         # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that

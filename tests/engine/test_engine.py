@@ -2869,6 +2869,69 @@ def test_a_confirmed_lockfile_advisory_reaches_the_posted_review(monkeypatch, an
     assert advisory.title in review["body"]
 
 
+def test_reflection_can_verify_a_lockfile_advisory_against_the_hint(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """An auditor that keeps a finding only when its evidence is in front of it.
+
+    The lockfile is never in the diff reflection reads, so without the scanner
+    hint the advisory looks like a claim about unseen code and is pruned.
+    """
+    import httpx
+    import respx
+
+    from lgtmaybe.github import RestGitHubGateway
+
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    advisory = ReviewFinding(
+        path="uv.lock",
+        line=1,
+        severity=Severity.medium,
+        title="jinja2 2.4.1 has a sandbox escape advisory",
+        body="GHSA-1234 affects the pinned jinja2. Upgrade it.",
+        failure_scenario="A template author escapes the sandbox and runs code.",
+        anchor="jinja2 2.4.1",
+    )
+    advisory_text = json.dumps([advisory.model_dump(mode="json")])
+
+    class _EvidenceAuditor(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _REFLECT_MARKER in messages[0]["content"]:
+                shown = "\n".join(str(m["content"]) for m in messages[1:])
+                # The finding itself names the advisory, so only the evidence
+                # OUTSIDE the findings list counts: the scanner's own hint.
+                evidence = shown.split("Findings (indexed from 0)")[0]
+                keep = "GHSA-1234" in evidence and "jinja2 2.4.1" in evidence
+                return ProviderResult(text=json.dumps({"0": keep}), input_tokens=1, output_tokens=1)
+            text = advisory_text if "GHSA-1234" in messages[-1]["content"] else "[]"
+            return ProviderResult(text=text, input_tokens=1, output_tokens=1)
+
+    findings, summary = LLMReviewEngine(_EvidenceAuditor()).review(
+        _LOCKFILE_CTX, ReviewConfig(provider=Provider.ollama, model="llama3")
+    )
+
+    assert [f.path for f in findings] == ["uv.lock"]
+    assert "LGTM" not in summary
+
+    reviews_url = "https://api.github.com/repos/org/repo/pulls/3/reviews"
+    posted: list[dict] = []
+    with respx.mock:
+        respx.get(reviews_url).mock(return_value=httpx.Response(200, json=[]))
+
+        def capture(request: httpx.Request) -> httpx.Response:
+            posted.append(json.loads(request.content))
+            return httpx.Response(201, json={"id": 1, "body": posted[-1].get("body", "")})
+
+        respx.post(reviews_url).mock(side_effect=capture)
+        RestGitHubGateway(
+            repo="org/repo", pr_number=3, token="t", client=httpx.Client()
+        ).post_review(findings, summary, diff=_LOCKFILE_CTX.diff)
+
+    (review,) = posted
+    assert advisory.title in review["body"]
+
+
 # ---------------------------------------------------------------------------
 # secret scanning narrows the security lens
 # ---------------------------------------------------------------------------

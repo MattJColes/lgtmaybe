@@ -966,3 +966,65 @@ def test_reflect_prompt_protects_architecture_findings_only_when_the_relationshi
     assert "architecture finding" in system
     assert "both ends" in system
     assert "base contract" in system
+
+
+# ---------------------------------------------------------------------------
+# scanner hints ground a finding on a file the diff does not show (a lockfile)
+# ---------------------------------------------------------------------------
+
+
+def _osv_hint(message: str = "jinja2 2.4.1: sandbox escape"):  # type: ignore[no-untyped-def]
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    return ToolFinding(
+        tool="osv-scanner",
+        path="uv.lock",
+        line=1,
+        rule="GHSA-1234",
+        message=message,
+        severity=Severity.high,
+    )
+
+
+_LOCK_FINDING = ReviewFinding(
+    path="uv.lock",
+    line=1,
+    severity=Severity.medium,
+    title="jinja2 2.4.1 has a sandbox escape advisory",
+    body="GHSA-1234 affects the pinned jinja2.",
+)
+
+
+def _audit_messages(findings: list[ReviewFinding], **kwargs: object) -> list[dict]:
+    provider = _fake_with_verdict({i: True for i in range(len(findings))})
+    reflect_findings(findings, _CTX, _CFG, provider, **kwargs)  # type: ignore[arg-type]
+    (call,) = provider.calls
+    return call["messages"]
+
+
+def test_scanner_hints_ground_a_lockfile_finding() -> None:
+    """The lockfile is never in the diff, so without the hint the auditor has
+    nothing to verify the advisory against and the cross-file rule prunes it."""
+    plain = _audit_messages([_LOCK_FINDING])
+    grounded = _audit_messages([_LOCK_FINDING], scan_hints=[_osv_hint()])
+
+    # The cached system + diff prefix is untouched; the hints ride the last block.
+    assert grounded[:2] == plain[:2]
+    block = grounded[-1]["content"]
+    assert "===HINTS_START===" in block
+    assert block.index("===HINTS_START===") < block.index("GHSA-1234")
+    assert "deterministic scanner results" in block.lower()
+    # The carve-out: a hint-backed finding is not a cross-file assumption.
+    assert "not a cross-file assumption" in block.lower()
+
+
+def test_scanner_hints_add_zero_bytes_without_a_matching_finding() -> None:
+    """The common case (no finding on a scan-only file) is byte-identical."""
+    assert _audit_messages([_HIGH], scan_hints=[_osv_hint()]) == _audit_messages([_HIGH])
+
+
+def test_scanner_hints_are_redacted_for_the_auditor() -> None:
+    secret = "AKIAIOSFODNN7EXAMPLE"
+    messages = _audit_messages([_LOCK_FINDING], scan_hints=[_osv_hint(f"key {secret} leaked")])
+
+    assert all(secret not in str(m["content"]) for m in messages)

@@ -21,6 +21,11 @@ about unshown code like any other. An unparseable audit keeps everything.
 - **WHEN** the audit reply fails to parse
 - **THEN** every finding is kept — a broken audit never silently drops findings
 
+#### Scenario: a lockfile finding backed by a scanner hint
+- **WHEN** a finding sits on a lockfile the diff never shows and a scanner hint backs it
+- **THEN** the audit gets that hint, redacted and wrapped, as its evidence; with
+  no such finding the audit prompt is byte-identical
+
 #### Scenario: an architecture finding against an unshown base class
 - **WHEN** a substitutability finding's base class is not in the diff or the file text
 - **THEN** the carve-out does not protect it — it is judged as a cross-file claim
