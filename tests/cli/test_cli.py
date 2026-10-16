@@ -208,6 +208,17 @@ class TestReviewCommandLocal:
         assert result.exit_code == 2, result.output
         assert "mutually exclusive" in result.output
 
+    def test_timeout_zero_fails_fast_with_the_accepted_range(self):
+        """`--timeout 0` must die at config load with a clear message, not as
+        four retries of a call that can never succeed."""
+        result = CliRunner().invoke(
+            main,
+            ["review", "--provider", "ollama", "--model", "llama3", "--timeout", "0"],
+        )
+
+        assert result.exit_code != 0, result.output
+        assert "timeout must be a positive number of seconds" in result.output
+
     def test_uncommitted_flag_is_threaded_through(self, monkeypatch):
         """`review --uncommitted` reaches local_pr_context as uncommitted=True."""
         import lgtmaybe.cli as cli_module
