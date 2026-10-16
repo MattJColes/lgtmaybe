@@ -2475,7 +2475,12 @@ def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: i
 # ---------------------------------------------------------------------------
 
 
-def _scan_hit(path: str = "f.py", line: int = 2):  # type: ignore[no-untyped-def]
+def _scan_hit(  # type: ignore[no-untyped-def]
+    path: str = "f.py",
+    line: int = 2,
+    rule: str = "aws-access-key-id",
+    severity: Severity = Severity.high,
+):
     """A gitleaks hit (posts directly only when opted into finding mode)."""
     from lgtmaybe.engine.static_analysis import ToolFinding
 
@@ -2483,9 +2488,9 @@ def _scan_hit(path: str = "f.py", line: int = 2):  # type: ignore[no-untyped-def
         tool="gitleaks",
         path=path,
         line=line,
-        rule="aws-access-key-id",
+        rule=rule,
         message="AWS Access Key",
-        severity=Severity.high,
+        severity=severity,
     )
 
 
@@ -2565,6 +2570,44 @@ def test_scan_finding_on_an_unchanged_line_is_dropped(monkeypatch) -> None:  # t
 
     assert findings == []
     assert "unchanged" in summary.lower()
+
+
+def test_the_scan_cap_scopes_to_the_diff_before_capping(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A file with many pre-existing hits plus one new one: the cap kept the 20
+    most severe (all on unchanged line 1, all dropped later as off-diff) and cut
+    the new hit on the changed line, so nothing posted (issue #751)."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    olds = [_scan_hit(line=1, rule=f"old-{i}") for i in range(MAX_SCAN_FINDINGS)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [*olds, _scan_hit(line=2, rule="new")],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    assert [f.title for f in findings] == ["gitleaks: new"]
+
+
+def test_on_diff_scan_findings_are_capped_most_severe_first(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The cap moved to after diff scoping, but its job is unchanged: one
+    over-broad rule pack must not open a comment per hit."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    lows = [_scan_hit(line=2, rule=f"low-{i}") for i in range(MAX_SCAN_FINDINGS)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [*lows, _scan_hit(line=2, rule="crit", severity=Severity.critical)],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    assert len(findings) == MAX_SCAN_FINDINGS
+    assert findings[0].severity is Severity.critical
 
 
 # ---------------------------------------------------------------------------
