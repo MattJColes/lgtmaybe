@@ -1602,7 +1602,7 @@ class LiteLLMProvider:
             detail = f" ({reasoning} reasoning)" if reasoning else ""
             raise ProviderTruncated(
                 f"response hit the {output_tokens}-token `max_tokens` ceiling{detail} before "
-                "finishing — the batch is re-reviewed in smaller pieces automatically, so a "
+                "finishing. The batch is re-reviewed in smaller pieces automatically, so a "
                 "lens that keeps doing it is usually generation instability in the model, "
                 "which a higher ceiling makes more expensive rather than prevents",
                 text=text,

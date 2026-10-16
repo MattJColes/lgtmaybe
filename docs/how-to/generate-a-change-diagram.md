@@ -90,14 +90,14 @@ service. The Mermaid renders in place. Each text rendering sits in a collapsible
 
 > ### **High Impact Areas**
 >
-> - **Infrastructure** &mdash; New ElastiCache cluster (`infra/redis.tf`). Adds a
+> - **Infrastructure**: New ElastiCache cluster (`infra/redis.tf`). Adds a
 >   managed dependency to the production VPC. _Check:_ security group and
 >   failover settings.
-> - **Availability** &mdash; Cache on the user read path (`api/users.py`). User reads
+> - **Availability**: Cache on the user read path (`api/users.py`). User reads
 >   now depend on Redis. A Redis outage takes reads down with it. _Check:_
 >   confirm a Redis error falls back to the database.
-> - **Backup and recovery** &mdash; touched: `ops/backup_retention.yaml` (not assessed
->   by the model)
+> - **Backup and recovery**: touched `ops/backup_retention.yaml` (not assessed by
+>   the model)
 
 > ### Walkthrough
 >
@@ -223,7 +223,7 @@ When nothing qualifies, the section says so and names what it checked:
 
 > ### **High Impact Areas**
 >
-> None detected &mdash; checked: infrastructure, security posture, availability, data
+> None detected. Checked: infrastructure, security posture, availability, data
 > migrations, backups and recovery, compatibility, observability, dependencies,
 > cost, compliance.
 

@@ -370,7 +370,7 @@ def tool_review_findings(
                 title=f"{finding.tool}: {finding.rule}",
                 body=(
                     f"{redact(finding.message)}\n\n"
-                    f"Reported by `{finding.tool}` (rule `{finding.rule}`) — a deterministic "
+                    f"Reported by `{finding.tool}` (rule `{finding.rule}`): a deterministic "
                     "scan, not a model judgement."
                 ),
                 anchor=redact(anchor),

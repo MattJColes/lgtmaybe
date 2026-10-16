@@ -361,16 +361,16 @@ def test_sequence_steps_are_capped_validated_and_escaped() -> None:
     assert "dangling" not in body
 
 
-def test_step_without_a_label_renders_an_em_dash_and_no_text_suffix() -> None:
-    """Mermaid needs a message after the colon, so an unlabelled step gets an
-    em-dash; the text view drops the suffix instead."""
+def test_step_without_a_label_renders_a_hyphen_and_no_text_suffix() -> None:
+    """Mermaid needs a message after the colon, so an unlabelled step gets a
+    hyphen (house style has no em dash); the text view drops the suffix instead."""
     body = build_diagram(
         _CTX,
         _CFG,
         _sequence_provider(steps=[{"source": "client", "target": "app", "label": "   "}]),
     )
 
-    assert "    n0->>n1: —" in body
+    assert "    n0->>n1: -\n" in body
     assert "1. [Client] -> [App (changed)]" in body
     assert "1. [Client] -> [App (changed)]:" not in body
 

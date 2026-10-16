@@ -280,7 +280,7 @@ per-call budget resolved  timeout_s=3600  max_tokens=16384  max_tokens_source="p
 If a lens hits it, you get a truncation notice, not a silent clean review:
 
 ```
-response hit the 16384-token `max_tokens` ceiling before finishing — the batch
+response hit the 16384-token `max_tokens` ceiling before finishing. The batch
 is re-reviewed in smaller pieces automatically, so a lens that keeps doing it is
 usually generation instability in the model, which a higher ceiling makes more
 expensive rather than prevents
@@ -383,7 +383,7 @@ the `--api-base` URL is reachable.
 
 **Model not found**: run `ollama pull <model>` before using it.
 
-**`review incomplete — every review call failed`**: every lens call timed out or
+**`review incomplete: every review call failed`**: every lens call timed out or
 returned output that wasn't valid JSON. To fix it:
 
 - raise `--timeout`;
