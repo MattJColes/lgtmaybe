@@ -287,6 +287,7 @@ runs:
         repositories: ${{ inputs.app_repositories }}
 
     - name: Run lgtmaybe
+      id: run-lgtmaybe
       shell: bash
       env:
         # Prefer the selected branded App identity; a skipped mint/exchange
@@ -345,7 +346,14 @@ runs:
         # host-gateway mapping: lets api_base reach a model server on the
         # runner host (ollama / openai-compatible) at host.docker.internal,
         # which Linux Docker does not resolve without it.
+        # --cidfile: cancelling this step kills the docker client, not the
+        # container, so the stop step below finds the container by this file.
+        # RUNNER_TEMP is per runner and per job, so it cannot collide the way a
+        # run-scoped --name could across matrix jobs on one shared daemon; and
+        # docker refuses an existing cidfile, so clear a stale one first.
+        rm -f "${RUNNER_TEMP}/lgtmaybe.cid"
         docker run --rm \
+          --cidfile "${RUNNER_TEMP}/lgtmaybe.cid" \
           --add-host=host.docker.internal:host-gateway \
           --env-file "${RUNNER_TEMP}/lgtmaybe.env" \
           -v "${GITHUB_EVENT_PATH}:${GITHUB_EVENT_PATH}:ro" \
@@ -353,6 +361,37 @@ runs:
           -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
           -w "${GITHUB_WORKSPACE}" \
           "${LGTMAYBE_IMAGE}" action
+
+    # Must run before any token is revoked. A cancelled run (a newer push under
+    # `cancel-in-progress`, or `timeout-minutes`) kills the docker client but
+    # leaves the container reviewing; its signal used to arrive only at the
+    # runner's orphan cleanup, after the revoke below (and after the App-token
+    # post step / job-end expiry of the workflow token), so its wind-down posted
+    # with a dead token: a false "review failed: 401" comment. Stopping it here
+    # sends SIGTERM while the token is still valid. `python -m lgtmaybe` is the
+    # image's exec-form ENTRYPOINT, so it is PID 1 and the signal lands directly
+    # on `cli.graceful_interrupt`'s handler (no --init needed).
+    #
+    # Grace period, 60s: the wind-down skips queued model calls and reflection,
+    # lets in-flight calls finish, then posts. Posting is a few REST calls
+    # (seconds); 60s also covers a typical in-flight call. In-flight calls can
+    # run to the provider timeout (600s cloud), so no bound covers every case:
+    # past 60s docker sends SIGKILL and nothing posts, which is silence, not a
+    # false failure. 60s keeps the revoke well inside GitHub's five-minute
+    # window for always() steps of a cancelled job, and bounds how long a newer
+    # run queued behind this one in a concurrency group waits. A container
+    # that already exited (the normal path; --rm removed it) costs nothing.
+    - name: Stop the review container
+      id: stop-lgtmaybe-container
+      if: ${{ always() }}
+      continue-on-error: true
+      shell: bash
+      run: |
+        cidfile="${RUNNER_TEMP}/lgtmaybe.cid"
+        if [ -s "$cidfile" ]; then
+          docker stop --time 60 "$(cat "$cidfile")" >/dev/null 2>&1 || true
+        fi
+        rm -f "$cidfile"
 
     - name: Revoke temporary lgtmaybe App token
       id: revoke-lgtmaybe-token
