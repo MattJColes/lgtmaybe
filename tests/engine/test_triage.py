@@ -305,3 +305,42 @@ def test_engine_without_triage_model_never_makes_a_triage_call() -> None:
     assert all(c["model"] != "tiny" for c in provider.calls)
     sent = provider.calls[0]["messages"][1]["content"]
     assert "docs/readme.md" in sent  # nothing skipped
+
+
+_SCAN_FLOOR_CTX = PRContext(
+    diff=_TWO_FILE_CTX.diff,
+    changed_files=_TWO_FILE_CTX.changed_files,
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=4,
+    file_contents={"docs/readme.md": "old\ntypo fix\n", "src/util.py": "old\nreturn x + 1\n"},
+)
+
+
+def test_a_finding_mode_scan_hit_escalates_past_triage(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The security floor is fed every static-analysis finding, not only the
+    hint-mode ones: a gitleaks hit set to post directly must stop a cheap
+    verdict skipping its file, or the hit is dropped as off-diff because the
+    skipped file left the reviewed diff (issue #750)."""
+    from lgtmaybe.core.models import StaticAnalysisTool, ToolMode
+
+    hit = ToolFinding(
+        tool="gitleaks",
+        path="docs/readme.md",
+        line=2,
+        rule="aws-access-key-id",
+        message="AWS Access Key",
+        severity=Severity.high,
+    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hit])
+    base = _cfg(triage_model="tiny", reflect=False)
+    sa = base.static_analysis.model_copy(
+        update={"tool_mode": {StaticAnalysisTool.gitleaks: ToolMode.finding}}
+    )
+
+    findings, _summary = LLMReviewEngine(_RoutingProvider()).review(
+        _SCAN_FLOOR_CTX, base.model_copy(update={"static_analysis": sa})
+    )
+
+    assert [(f.path, f.line) for f in findings] == [("docs/readme.md", 2)]
