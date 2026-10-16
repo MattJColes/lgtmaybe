@@ -5,11 +5,13 @@ description: Run lgtmaybe as an MCP server so Claude Code, Cursor and other codi
 # Use from a Coding Agent over MCP
 
 `lgtmaybe mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io/)
-server on stdio. A coding agent such as Claude Code or Cursor connects to it and
-reviews your local changes by calling a tool, instead of running
-`lgtmaybe review` in a shell and parsing what it prints. The review is the same
-one `lgtmaybe review` runs: the same engine, the same config files, the same
-credentials. Nothing is posted anywhere.
+([MCP](../reference/glossary.md#mcp)) server on stdio (standard input and
+output). A coding agent such as Claude Code or Cursor connects to it. The agent
+then reviews your local changes by calling a tool. It no longer needs to run
+`lgtmaybe review` in a shell and parse what it prints.
+
+The review is the same one `lgtmaybe review` runs: the same engine, the same
+config files, the same credentials. Nothing is posted anywhere.
 
 ## Contents
 
@@ -24,22 +26,22 @@ credentials. Nothing is posted anywhere.
 ## Install the MCP Extra
 
 The MCP SDK is an optional extra, so a plain install stays small. Install it
-with pip (or `uv tool install` / `pipx install`, which put `lgtmaybe` on your
-`PATH` in an isolated environment):
+with pip. `uv tool install` and `pipx install` also work, and put `lgtmaybe` on
+your `PATH` in an isolated environment.
 
 ```bash
 pip install 'lgtmaybe[mcp]'
 ```
 
-The Homebrew formula and the Windows executable do not include the extra; use
-pip for `lgtmaybe mcp`. Without it the command exits with a message naming the
-extra to install.
+The Homebrew formula and the Windows executable do not include the extra, so
+use pip for `lgtmaybe mcp`. Without the extra, the command exits with a message
+naming the extra to install.
 
 ## Add It to Claude Code
 
-From the repository you want reviewed, register the server with `claude mcp add`.
-Everything after `--` is the command Claude Code runs; the `lgtmaybe mcp` flags
-apply to every review the agent asks for:
+From the repository you want reviewed, register the server with
+`claude mcp add`. Everything after `--` is the command Claude Code runs. The
+`lgtmaybe mcp` flags apply to every review the agent asks for.
 
 ```bash
 claude mcp add lgtmaybe -- lgtmaybe mcp \
@@ -50,11 +52,12 @@ claude mcp add lgtmaybe -- lgtmaybe mcp \
 
 Claude Code starts the server in the project directory, so the review sees that
 repository. Add `--scope project` to write the entry to the repository's
-`.mcp.json` and share it with your team. The entry stores the command and every
-flag exactly as you typed them, so never pass `--api-key` to `claude mcp add` or
-write it into `.mcp.json`: the key would sit in a file you commit. Supply API
-keys through environment variables instead (see
-[Credentials and Config](#credentials-and-config)).
+`.mcp.json` and share it with your team.
+
+The entry stores the command and every flag exactly as you typed them. So never
+pass `--api-key` to `claude mcp add` or write it into `.mcp.json`: the key would
+sit in a file you commit. Supply API keys through environment variables instead
+(see [Credentials and Config](#credentials-and-config)).
 
 Then ask the agent for a review in plain words, for example:
 
@@ -65,7 +68,7 @@ Then ask the agent for a review in plain words, for example:
 Most clients (Cursor, Windsurf, Claude Desktop and others) read an
 `mcpServers` block from a JSON config file. Add an entry that runs
 `lgtmaybe mcp`. Pass `-C` with the repository path when the client does not
-start servers inside your project:
+start servers inside your project.
 
 ```json
 {
@@ -101,33 +104,44 @@ full review per call.
 | `mode` | `branch` (default): committed branch changes against the base. `working`: branch commits plus uncommitted edits. `uncommitted`: only the uncommitted edits against `HEAD`. |
 | `base` | The base ref to diff against, like `--base`. Defaults to the remote's primary branch. |
 | `min_severity` | Drop findings below `info`, `low`, `medium`, `high` or `critical`. |
-| `preset` | `fast` (five model calls) or `full` (one call per review category). |
+| `preset` | `fast` (five model calls, plus a sixth when a committed spec matches) or `full` (one call per review category). |
 
-A review that cannot run (not a Git repository, a missing credential, a provider
-error) comes back as a tool error with the reason, so the agent sees what went
-wrong rather than an empty result. The server keeps running for the next call.
+The `preset` argument picks a [preset](../reference/glossary.md#preset): the
+set of [lenses](../reference/glossary.md#lens) a review runs.
+
+Some reviews cannot run. Examples are a folder that is not a Git repository, a
+missing credential, or a provider error. The review then comes back as a tool
+error with the reason, so the agent sees what went wrong rather than an empty
+result. The server keeps running for the next call.
 
 Reviews run one at a time. A review makes several model calls, so it takes as
-long as `lgtmaybe review` does; ask for one per change set rather than after
+long as `lgtmaybe review` does. Ask for one per change set rather than after
 every edit.
 
 ## Credentials and Config
 
-Config loads exactly as it does for `lgtmaybe review`: your user config
-(`lgtmaybe config`), then the repository's `.lgtmaybe.yml`, then the flags on
-`lgtmaybe mcp`, then the tool call's own arguments. The config files are read on
-every call, so an edit to `.lgtmaybe.yml` applies without restarting the server.
-A config file that does not parse stops the server at startup, where the client
-shows the error.
+Config loads exactly as it does for `lgtmaybe review`, in this order:
+
+1. your user config (`lgtmaybe config`);
+2. the repository's `.lgtmaybe.yml`;
+3. the flags on `lgtmaybe mcp`;
+4. the tool call's own arguments.
+
+The server reads the config files on every call, so an edit to `.lgtmaybe.yml`
+applies without restarting it. A config file that does not parse stops the
+server at startup, where the client shows the error.
 
 API keys come from the environment, as they do for the CLI (`OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY` and so on; see the provider how-tos). The server inherits
-the environment the client starts it with, so export the key in the shell you
-start the client from. If your client starts servers without your shell
-environment, set the key in the entry's `env` block instead, keeping in mind
-that this stores it in the client's config file. lgtmaybe itself never writes a
-key to disk. Keyless providers need no key at all: ollama, and Bedrock, Vertex
-or Azure with ambient cloud credentials.
+the environment the client starts it with. So export the key in the shell you
+start the client from.
+
+Some clients start servers without your shell environment. Then set the key in
+the entry's `env` block instead. Keep in mind that this stores it in the
+client's config file. lgtmaybe itself never writes a key to disk.
+
+Keyless providers need no key at all: ollama, and Bedrock, Vertex or Azure with
+[ambient cloud credentials](../reference/glossary.md#ambient-credentials).
 
 ## Troubleshooting
 

@@ -33,20 +33,7 @@ from doc_readability import (  # noqa: E402
 # Generated from the models; its prose comes from ReviewConfig field docs.
 _GENERATED = {"docs/reference/config.md"}
 
-NOT_YET_PASSING: frozenset[str] = frozenset(
-    {
-        "docs/how-to/add-a-custom-lens.md",
-        "docs/how-to/calibrate-reviews-to-your-project.md",
-        "docs/how-to/configure-lgtmaybe-yml.md",
-        "docs/how-to/fix-findings-with-an-ai-agent.md",
-        "docs/how-to/generate-a-change-diagram.md",
-        "docs/how-to/reduce-review-cost.md",
-        "docs/how-to/releasing.md",
-        "docs/how-to/scope-review-instructions-to-a-directory.md",
-        "docs/how-to/use-from-a-coding-agent-over-mcp.md",
-        "docs/reference/profile.md",
-    }
-)
+NOT_YET_PASSING: frozenset[str] = frozenset()
 
 
 def _pages() -> list[str]:

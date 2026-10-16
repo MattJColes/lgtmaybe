@@ -1047,7 +1047,7 @@ class ReviewConfig(_Strict):
     # default, but gated on DETECTION: no spec system in the workspace, or no
     # spec matching this PR, and the lens is dropped before the fan-out, so a
     # repository without specs pays no call and no prompt bytes. When it does
-    # run it is a lens of its own (a fifth call under the fast preset).
+    # run it is a lens of its own (a sixth call under the fast preset).
     spec_review: bool = True
     # Extra directory globs to search for specs, for a house layout the three
     # known systems do not describe (e.g. `docs/rfcs/*`). Each match is treated

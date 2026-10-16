@@ -90,8 +90,8 @@ _SeverityArg = Annotated[
 _PresetArg = Annotated[
     PresetName | None,
     Field(
-        description="fast: four model calls (default); full: one call per review "
-        "category, slower and more thorough"
+        description="fast: five model calls, plus one when a committed spec matches "
+        "(default); full: one call per review category, slower and more thorough"
     ),
 ]
 
