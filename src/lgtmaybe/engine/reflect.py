@@ -42,6 +42,15 @@ _log = get_logger(__name__)
 # rather than nothing when the budget is merely tight.
 _MIN_GROUNDING_TOKENS = 256
 
+# The fixed prose wrapped around the diff and findings in every audit prompt.
+# Counted against the input budget so the assembled prompt fits it, not just
+# its variable parts.
+_PROMPT_SCAFFOLD = (
+    "Diff:\n",
+    "Findings (indexed from 0):\n",
+    "\n\nReturn the confidence verdict JSON object.",
+)
+
 # Lenses are prompted independently and never name each other, so two of them
 # can give opposite advice about the same lines (one cuts what the other
 # guards). The auditor sees every merged finding at once, so it referees first;
@@ -169,6 +178,7 @@ def reflect_findings(
     hop: int = 0,
     fetched_paths: list[str] | None = None,
     scan_hints: Sequence[ToolFinding] = (),
+    notices: list[str] | None = None,
 ) -> list[ReviewFinding]:
     """Filter *findings* by asking the provider to score confidence.
 
@@ -196,6 +206,10 @@ def reflect_findings(
     ``scan_hints`` are static-analysis hints on files the diff never shows (a
     lockfile advisory). The ones on a finding's own path ground that finding,
     because the auditor otherwise has nothing to verify it against.
+
+    ``notices``, when supplied, collects a line per pass whose diff had to be
+    trimmed to fit the input budget, so the caller can surface it in the
+    review summary instead of only the log.
     """
     if not findings:
         return []
@@ -207,6 +221,7 @@ def reflect_findings(
             provider,
             fetched_paths=fetched_paths or [],
             scan_hints=scan_hints,
+            notices=notices,
         )
     except Exception:
         # If reflection fails (provider error, quota, unparseable output), keep all
@@ -302,6 +317,7 @@ def reflect_findings(
                     hop=hop + 1,
                     fetched_paths=sorted(fetched),
                     scan_hints=scan_hints,
+                    notices=notices,
                 )
             )
             return survivors
@@ -323,6 +339,7 @@ def _audit(
     provider: ProviderClient,
     fetched_paths: list[str],
     scan_hints: Sequence[ToolFinding] = (),
+    notices: list[str] | None = None,
 ) -> tuple[dict[int, _ParsedVerdict], set[str]]:
     """Run one auditor completion over *findings*; ``(verdicts, grounded paths)``.
 
@@ -348,11 +365,36 @@ def _audit(
         )
     )
 
+    # Budget the input (issue #758): a multi-batch review joins every batch's
+    # diff into ctx.diff, which can run several times the model-fitted budget
+    # and get the audit rejected outright, so the findings then ship unaudited
+    # with only a log line saying so. The system prompt, the fixed scaffolding
+    # and the scan-hint block all count against the budget too: the hint block
+    # rides the audit's own message, so leaving it out would spend hint tokens
+    # on top of a prompt sized to exactly fill the budget.
+    hint_block = _scan_hint_block(findings, scan_hints)
+    scaffold_tokens = sum(count_tokens(part) for part in _PROMPT_SCAFFOLD)
+    overhead = (
+        count_tokens(_REFLECT_SYSTEM)
+        + count_tokens(findings_json)
+        + count_tokens(hint_block)
+        + scaffold_tokens
+    )
+    room = cfg.max_input_tokens - overhead
+    diff, trimmed = _budgeted_diff(findings, ctx, room)
+    if trimmed:
+        _log.info(
+            "reflection diff trimmed to the input budget",
+            extra={"findings": len(findings)},
+        )
+        if notices is not None:
+            notices.append("reflection diff trimmed to the input budget")
+
     # Asymmetric grounding: the reviews ran per-batch on slices; here the auditor
     # gets the full (redacted) head text of every file carrying a surviving
     # finding so it can verify a whole-file claim — that an import/symbol IS
     # present, that a duplicate isn't real — instead of guessing about unseen code.
-    reserve = cfg.max_input_tokens - count_tokens(ctx.diff) - count_tokens(findings_json)
+    reserve = cfg.max_input_tokens - count_tokens(diff) - overhead
     if cfg.preset is ReviewPreset.fast:
         # The everyday path trades some grounding depth for a faster, cheaper
         # audit: cap the head-text budget at a quarter of the input budget
@@ -365,9 +407,9 @@ def _audit(
     # ``===DIFF_END===`` (or any other sentinel family) must not read as one of
     # our own markers to the auditor either. The grounding block and findings
     # JSON neutralise their own attacker-derived text.
-    diff_part = f"Diff:\n{neutralise(ctx.diff)}"
+    diff_part = f"Diff:\n{neutralise(diff)}"
     rest_part = (
-        f"{_scan_hint_block(findings, scan_hints)}"
+        f"{hint_block}"
         f"{grounding}"
         f"Findings (indexed from 0):\n{findings_json}\n\n"
         "Return the confidence verdict JSON object."
@@ -391,6 +433,35 @@ def _audit(
         **opts,
     )
     return _parse_verdicts(result.text), grounded_paths
+
+
+def _budgeted_diff(
+    findings: list[ReviewFinding],
+    ctx: PRContext,
+    room: int,
+) -> tuple[str, bool]:
+    """The diff for the audit prompt, trimmed to the flagged files' patches.
+
+    Only the patches carrying a finding are kept, walked in diff order while
+    they fit in *room* tokens; the walk stops at the first flagged patch that
+    does not fit (the same narrowing the deferral recheck uses). Returns the
+    diff and whether anything was trimmed.
+    """
+    flagged = {f.path for f in findings}
+    kept: list[str] = []
+    used = 0
+    trimmed = False
+    for path, patch in split_by_file(ctx.diff, ctx.changed_files):
+        if path not in flagged:
+            trimmed = True
+            continue
+        cost = count_tokens(patch)
+        if used + cost > room:
+            trimmed = True
+            break
+        kept.append(patch)
+        used += cost
+    return "".join(kept), trimmed
 
 
 # Rides the audit's own block, and only when a finding sits on a hinted file, so

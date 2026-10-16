@@ -297,6 +297,8 @@ class _NoticeState:
     # the spec lens ran at all (against the specs that did fit).
     spec_unfit: list[str] = field(default_factory=list)
     spec_reviewed: bool = False
+    # The reflection audit's diff had to be trimmed to fit max_input_tokens.
+    reflection_trimmed: bool = False
 
 
 def _build_notices(state: _NoticeState) -> list[str]:
@@ -454,6 +456,15 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"⚠️ {state.reflection_skipped}: the self-reflection audit was skipped, "
             "so findings may include false positives."
+        )
+    if state.reflection_trimmed:
+        notices.append(
+            "✂️ The self-reflection audit ran on a trimmed diff: the full diff "
+            f"exceeded `max_input_tokens` ({cfg.max_input_tokens:,}), so only the "
+            "flagged files' patches were kept, in diff order, until the budget "
+            "ran out. Flagged files after the first that did not fit were not "
+            "shown to the audit at all. Raise `max_input_tokens` to audit the "
+            "whole diff."
         )
 
     count_notices: tuple[tuple[int, Callable[[int], str]], ...] = (
@@ -1566,6 +1577,8 @@ class LLMReviewEngine:
         # None, or the name of the ceiling that stopped the audit — it feeds the
         # notice below, so a skipped audit always says which knob to raise.
         reflection_skipped: str | None = None
+        # Trim notices from the audit (diff narrowed to fit the input budget).
+        reflection_notices: list[str] = []
         scanned = [f for f in all_findings if _is_scan_finding(f)]
         all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
@@ -1604,6 +1617,7 @@ class LLMReviewEngine:
                         # The hints a lockfile finding was confirmed from: the
                         # auditor's only evidence for a file the diff never shows.
                         scan_hints=unbatched,
+                        notices=reflection_notices,
                     )
 
         # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
@@ -1670,6 +1684,7 @@ class LLMReviewEngine:
                 self_talk=dict(self._self_talk),
                 spec_unfit=list(spec_context.unfit),
                 spec_reviewed=clean_spec is not None,
+                reflection_trimmed=bool(reflection_notices),
             )
         )
         # Which lenses completed, on every summary shape — hidden, so it costs
