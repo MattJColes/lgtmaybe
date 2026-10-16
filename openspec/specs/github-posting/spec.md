@@ -192,6 +192,10 @@ A follow-up run SHALL classify each earlier active finding as `fixed`, `still_op
 - **WHEN** several threads are fixed and one errors mid-resolve
 - **THEN** the remaining threads are still replied to and resolved
 
+#### Scenario: the run did not complete
+- **WHEN** the run stamped no completion watermark (an interrupted or failed run, or a failure notice)
+- **THEN** no thread is resolved: findings the run never produced are not evidence of fixes
+
 #### Scenario: the identity may not resolve threads
 - **WHEN** `resolveReviewThread` is refused for the configured identity
 - **THEN** no reply is posted and no marker is rewritten, so the step is a no-op
