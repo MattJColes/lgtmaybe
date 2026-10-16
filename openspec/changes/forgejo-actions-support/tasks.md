@@ -5,7 +5,7 @@
 
 ## 2. Host Recognition
 
-- [x] 2.1 Red first: add `tests/cli/test_action.py` cases for `FORGEJO_SERVER_URL` winning over `GITHUB_SERVER_URL`, the `GITHUB_*`-only fallback, and no GHES refusal when `FORGEJO_SERVER_URL` is set; then change `cli._change_url` and verify the cases pass
+- [x] 2.1 Red first: add `tests/forgejo/test_actions_entrypoint.py` cases for `FORGEJO_SERVER_URL` winning over `GITHUB_SERVER_URL`, the `GITHUB_*`-only fallback, and no GHES refusal when `FORGEJO_SERVER_URL` is set; then change `cli._change_url` and verify the cases pass
 - [x] 2.2 Name Forgejo beside Gitea in `parse_pr_url`'s unparseable-URL error and `GHES_UNSUPPORTED`; verify `tests/core/test_forge.py` asserts the new text
 - [x] 2.3 Red first: a `tests/gitea/test_gateway.py` case where the permission call returns 403 and the logged warning names the token's missing permission; then reword the warning in `GiteaGateway.has_repo_write` and verify the case passes
 - [x] 2.4 Add the `gitea.forgejo-host` rule to `openspec/specs/gitea-posting/anchors.yml` (bound to `_change_url`); verify `uv run pytest tests/specs -q`
@@ -30,16 +30,16 @@
 
 ## 5. Forgejo Contract Test
 
-- [ ] 5.1 Add `tests/forgejo/contract/` behind a `forgejo_contract` marker registered in `pyproject.toml` beside `e2e` and deselected by default, with a fixture that provisions a user, a token with the three scopes, a repository and a pull request through the API; verify `uv run pytest -m forgejo_contract` passes against a local `codeberg.org/forgejo/forgejo` container
-- [ ] 5.2 Cover `get_pr_context`, `post_review` with one inline finding and one demoted finding, the summary upsert on a re-run, dedupe, `create_check_run`, `has_repo_write` for a writer and a reader, and `apply_pr_labels`; verify all pass
-- [ ] 5.3 Add `.github/workflows/forgejo-contract.yml` (weekly, `workflow_dispatch`, and PRs touching `src/lgtmaybe/gitea/**` or `tests/forgejo/**`), pinned to a Forgejo major, every `uses:` pinned to a commit SHA; verify `tests/test_workflow_examples.py` and a green dispatch run
+- [x] 5.1 Add `tests/forgejo/contract/` behind a `forgejo_contract` marker registered in `pyproject.toml` beside `e2e` and deselected by default, with a fixture that provisions a user, a token with the three scopes, a repository and a pull request through the API; verify `uv run pytest -m forgejo_contract` passes against a local `codeberg.org/forgejo/forgejo` container
+- [x] 5.2 Cover `get_pr_context`, `post_review` with one inline finding and one demoted finding, the summary upsert on a re-run, dedupe, `create_check_run`, `has_repo_write` for a writer and a reader, and `apply_pr_labels`; verify all pass
+- [x] 5.3 Add `.github/workflows/forgejo-contract.yml` (weekly, `workflow_dispatch`, and PRs touching `src/lgtmaybe/gitea/**` or `tests/forgejo/**`), pinned to a Forgejo major, every `uses:` pinned to a commit SHA; verify `tests/test_workflow_examples.py` and a green dispatch run
 
 ## 6. Integration
 
-- [ ] 6.1 Run `uv run pytest -q`, `uv run ruff check`, `uv run ruff format --check`, `uv run mypy`, `uv lock --check` and `npx -y @fission-ai/openspec@latest validate --specs`; verify all pass
+- [x] 6.1 Run `uv run pytest -q`, `uv run ruff check`, `uv run ruff format --check`, `uv run mypy`, `uv lock --check` and `npx -y @fission-ai/openspec@latest validate --specs`; verify all pass
 - [ ] 6.2 Hand `user-test.md` to the tester and record results in it; verify every scenario marked "must pass" passes, and fix or file anything that does not
 
 ## Workflow follow-up
 
-- Fold the two delta specs into `openspec/specs/` and archive the change once the user test passes.
+- The delta specs are already folded into `openspec/specs/` (each implementation PR synced its own requirements, with anchors). Once the user test passes, archive with `openspec archive forgejo-actions-support --skip-specs` so they are not applied twice.
 - Drop "preview" from the docs after two green scheduled contract runs.
