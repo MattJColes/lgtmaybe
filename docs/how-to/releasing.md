@@ -119,7 +119,13 @@ one) isn't used.
 1. Merge feature/fix PRs to `main` using conventional-commit messages
    (`feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:` for a major bump).
 2. release-please opens or updates the **Release PR** automatically. Review the
-   proposed version + changelog, then **merge it** to publish.
+   proposed version + changelog, then **merge it** to publish. Once the release
+   is cut, the `contributors` job appends a **Contributors** section to the
+   GitHub release, naming the human authors of its pull requests and welcoming
+   first-time contributors (`scripts/release_contributors.py`, fed by GitHub's
+   generate-notes API; bots are left out). `CHANGELOG.md` is not touched, and
+   the merge also republishes the docs, so the homepage's What's New list
+   picks up the release.
 3. To (re)publish an existing tag to PyPI without a new release, run the
    `release-please` workflow via **workflow_dispatch** with the tag name (for
    example `lgtmaybe-v2.11.1`). To rebuild the GHCR image and move the Action
