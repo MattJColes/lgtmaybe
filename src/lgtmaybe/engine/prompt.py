@@ -21,7 +21,19 @@ from lgtmaybe.core.models import CustomLens, ProjectProfile, ReviewCategory
 
 from .injection import neutralise
 
-_SHARED_HEADER = """\
+# Who every human-facing sentence is written for. One string, shared by the
+# review contract below and the change-overview prompts (describe, high impact,
+# diagram), so a finding and the overview beside it read the same way.
+PLAIN_LANGUAGE = (
+    "Write for an engineer new to this codebase. Use plain words and short sentences, "
+    "and name the concrete thing affected (the function, the input, the request) rather "
+    "than an abstraction. When a technical term is needed, say what it means in a few "
+    'words the first time you use it (for example "race condition: two requests update '
+    'the same record at once and one change is silently lost").'
+)
+
+_SHARED_HEADER = (
+    """\
 You are an expert code reviewer. Review a pull-request diff and report real, actionable \
 findings as JSON. Be thorough — do not let a genuine problem through.
 
@@ -52,6 +64,11 @@ correction, state the problem plainly instead of inventing an action.
 
 `body` explains what is wrong through its cause and observable impact. Start directly, with \
 no preamble. Do not repeat the title, add tangents or a recap, or end with closing pleasantries.
+
+"""
+    + PLAIN_LANGUAGE
+    + """ Say why it matters: what a user, operator or maintainer would actually see. Keep \
+`body` to what the reader needs to act on it, usually two to four sentences.
 
 `failure_scenario` is the concrete way a defect causes harm: name the trigger, the changed \
 behaviour, and the observable impact in one concise causal chain. It is REQUIRED for every \
@@ -90,6 +107,7 @@ about — copy it straight from the diff with its leading `+`/`-` marker removed
 the original indentation, and nothing else. Counting lines is error-prone, so `anchor`
 is what actually places the comment: it must match a changed line character-for-character.
 """
+)
 
 
 def language_directive(
@@ -483,7 +501,12 @@ classes, aligned with the OWASP Top 10, to watch for:
   untrusted input interpolated into a `run:` shell step, third-party actions
   not pinned to a commit SHA, overly broad IAM policies or wildcard
   permissions, public storage buckets, privileged containers, secrets echoed
-  into build logs.
+  into build logs. Also flag a control that only looks enforced: an
+  `environment:` key treated as an approval gate when the environment has no
+  required reviewers, a budget alert presented as a spending cap, or a policy
+  file nothing loads. And a check that cannot fail: `continue-on-error: true`,
+  `|| true` on a test or scan step, or a validation step that exits 0 when its
+  tool is missing, so a skipped check reports as a pass.
 - **Resource safety** — missing timeouts, unbounded loops/allocations,
   unvalidated input sizes, or regexes vulnerable to catastrophic backtracking
   (ReDoS) that enable denial of service."""
