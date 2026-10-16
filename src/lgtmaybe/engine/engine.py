@@ -92,6 +92,7 @@ from .risk import assess_risk, risk_marker, risk_segment
 from .selftalk import drop_self_talk
 from .severity import clamp_to_category_ceiling
 from .static_analysis import (
+    MAX_SCAN_FINDINGS,
     SCAN_CATEGORY_PREFIX,
     UNANCHORABLE_SCAN_CATEGORIES,
     ToolFinding,
@@ -1490,6 +1491,19 @@ class LLMReviewEngine:
         if off_diff:
             _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
         all_findings = scoped
+
+        # 6c. Cap the scan findings only now, after scoping: the cap bounds
+        #     posted comments, and applying it before the scope spent it on
+        #     off-diff hits step 6b had just dropped, starving the one new hit
+        #     the PR actually added. Model findings never count against it.
+        scans = [f for f in all_findings if _is_scan_finding(f)]
+        if len(scans) > MAX_SCAN_FINDINGS:
+            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
+            _log.info(
+                "scan findings capped after diff scoping",
+                extra={"kept": MAX_SCAN_FINDINGS, "considered": len(scans) + off_diff},
+            )
+            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
 
         # 7. Suppression: drop findings a team has marked known-fine — by
         #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
