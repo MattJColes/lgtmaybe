@@ -368,12 +368,18 @@ def test_the_dogfood_config_is_valid_and_fits_this_repo() -> None:
     # Planted bugs, generated snapshots, and the release-please changelog.
     for path in (
         "evals/fixtures/badcode/diff.txt",
+        "evals/fixtures/cross-file-fp/repo/src/links/models.py",
         "tests/snapshots/ReviewConfig.json",
         "CHANGELOG.md",
     ):
         assert not reviewed(path), path
-    assert reviewed("src/lgtmaybe/engine/redact.py")
-    assert reviewed("tests/engine/test_redact.py")
+    # What a fixture expects decides what the eval scores, so it stays reviewed.
+    for path in (
+        "evals/fixtures/badcode/expected.json",
+        "src/lgtmaybe/engine/redact.py",
+        "tests/engine/test_redact.py",
+    ):
+        assert reviewed(path), path
 
     assert config.project.stage == "production"
     for path in ("src/lgtmaybe/engine/injection.py", "src/lgtmaybe/engine/redact.py"):

@@ -10,7 +10,11 @@ exclude_paths:
   - tests/snapshots/**        # generated schema snapshots of the models
   - CHANGELOG.md              # written by release-please
   # Eval fixtures plant bugs on purpose: a finding on one is noise, not a catch.
-  - evals/fixtures/**
+  # Each fixture's expected.json is still reviewed: it decides what the eval
+  # scores, so a mistake there changes what the harness measures.
+  - evals/fixtures/*/diff.txt
+  - evals/fixtures/*/repo/**
+  - evals/fixtures/*/head/**
 
 # What this repository is, so the review is calibrated to it. lgtmaybe runs in
 # other people's CI with secrets in scope and reads diffs written by strangers.
@@ -50,10 +54,12 @@ directory_rules:
   - paths:
       - tests/**
     instructions: >-
-      Tests may use hard-coded secrets, fake tokens, injection payloads and
-      deliberately malformed input as fixtures. Flag them only when they could
-      leak a real credential. Prefer findings about missing assertions or a
-      test that cannot fail.
+      Fake secrets, placeholder tokens, injection payloads and deliberately
+      malformed input are normal test fixtures here. Anything that looks like
+      a real credential is still a finding: a key in a live provider's
+      format, a private key, or a token that could have come from someone's
+      environment. Prefer findings about missing assertions or a test that
+      cannot fail.
 
 # Bound what one call may generate — and, more to the point, bound what a
 # RUNAWAY call may generate.
