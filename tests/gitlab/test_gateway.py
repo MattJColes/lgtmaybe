@@ -221,6 +221,41 @@ class TestPostReview:
         assert edit.called
         assert listed.call_count == 1
 
+    @pytest.mark.parametrize(
+        "created",
+        [
+            httpx.Response(201, text="Created."),  # not JSON at all
+            httpx.Response(201, json=[1]),  # JSON, but not an object
+        ],
+        ids=["non-json", "non-dict"],
+    )
+    @respx.mock
+    def test_a_note_created_without_a_usable_id_is_reposted_not_edited(
+        self, created: httpx.Response
+    ) -> None:
+        """A degenerate create response still feeds the cache, minus the id.
+
+        The cached note carries our body and author, so the marker is found
+        without a refetch, but with no id to address the same-run notice
+        posts a fresh note rather than crashing or guessing an id.
+        """
+        listed = respx.route(method="GET", url__startswith=f"{MR_URL}/notes").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        create = respx.post(f"{MR_URL}/notes").mock(return_value=created)
+        edit = respx.put(url__startswith=f"{MR_URL}/notes/").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        gateway = _gateway()
+
+        gateway.post_review([], "summary", diff=DIFF)
+        gateway.mark_reviewed(None)
+        gateway.post_review([], "review failed", diff=DIFF)
+
+        assert create.call_count == 2
+        assert not edit.called
+        assert listed.call_count == 1
+
     @respx.mock
     def test_each_finding_becomes_its_own_positioned_discussion(self) -> None:
         """GitLab has no batched review object — a discussion per finding."""
