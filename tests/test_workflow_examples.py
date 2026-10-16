@@ -350,9 +350,9 @@ def test_dogfood_config_caps_what_one_call_may_generate() -> None:
 def test_the_dogfood_config_is_valid_and_fits_this_repo() -> None:
     """lgtmaybe reviewing itself loads its own config, so check it here, not in a review.
 
-    ReviewConfig forbids unknown keys, so a misspelt key would fail the next
-    dogfood review rather than this test. Beyond loading, it must keep the
-    review off files that are noise to review here, and point every
+    Loading it here catches a schema error (ReviewConfig forbids unknown keys)
+    in CI, before a dogfood review trips on it. Beyond loading, it must keep
+    the review off files that are noise to review here, and point every
     directory rule at context files that exist.
     """
     from lgtmaybe.config.loader import load_config
@@ -378,6 +378,7 @@ def test_the_dogfood_config_is_valid_and_fits_this_repo() -> None:
     assert config.project.stage == "production"
     for path in ("src/lgtmaybe/engine/injection.py", "src/lgtmaybe/engine/redact.py"):
         assert path in config.risk.core_paths, path
+    assert config.directory_rules, ".lgtmaybe.yml lost its directory rules"
     for rule in config.directory_rules:
         for context_file in rule.context_files:
             assert (_REPO_ROOT / context_file).is_file(), context_file
