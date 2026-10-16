@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import pytest
 
-from lgtmaybe.core.forge import Forge, PRLocator, parse_pr_url, token_env_var, token_env_vars
+from lgtmaybe.core.forge import (
+    GHES_UNSUPPORTED,
+    Forge,
+    PRLocator,
+    parse_pr_url,
+    token_env_var,
+    token_env_vars,
+)
 
 
 class TestParsePRUrl:
@@ -136,6 +143,13 @@ class TestParsePRUrl:
         assert "/merge_requests/" in message
         assert "/pulls/" in message
         assert "/pullrequest/" in message
+
+    def test_messages_name_forgejo_beside_gitea(self) -> None:
+        """Forgejo rides the Gitea adapter, so its users must see their host named."""
+        with pytest.raises(ValueError) as excinfo:
+            parse_pr_url("nonsense")
+        assert "Forgejo" in str(excinfo.value)
+        assert "Forgejo" in GHES_UNSUPPORTED
 
 
 class TestTokenEnvVar:

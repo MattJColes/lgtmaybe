@@ -135,18 +135,21 @@ diff and posting the review need a separate credential for the
 |---|---|---|
 | GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is enough |
 | GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
-| Gitea | `GITEA_TOKEN` | A token with `write:repository`, `write:issue` and `read:user` |
+| Gitea, Forgejo | `GITEA_TOKEN` | A token with `write:repository`, `write:issue` and `read:user` |
 | Azure DevOps | `AZURE_DEVOPS_TOKEN`, else `SYSTEM_ACCESSTOKEN` | A personal access token with Code (Read & write) scope, or the pipeline's own token with *Contribute to pull requests* granted to the build service |
 
 These are always tokens. There is no keyless path to a code host, and lgtmaybe
 does not attempt one. The token is read from the environment only and, like a
 provider key, is never written to `.lgtmaybe.yml` or logged.
 
-!!! note "Keyless cloud auth is GitHub-only"
+!!! note "Keyless cloud auth needs GitHub or Forgejo"
 
-    Bedrock, Vertex, and Azure go keyless by exchanging a **GitHub Actions**
-    OIDC token. GitLab CI, Gitea Actions and Azure Pipelines have no equivalent
-    exchange wired up, so on those hosts use an API-key provider, or `ollama` against a
+    Bedrock, Vertex, and Azure go keyless by exchanging the CI job's own OIDC
+    token. The GitHub Action does it in its own steps. On Forgejo Actions, the
+    container does it, when the job sets `enable-openid-connect: true` (see
+    [Review on Forgejo](../how-to/review-on-forgejo.md#keyless-bedrock-azure-and-vertex)).
+    GitLab CI, Gitea Actions and Azure Pipelines have no equivalent exchange
+    wired up, so on those hosts use an API-key provider, or `ollama` against a
     runner-local model, which needs no credential at all.
 
 ## Least-Privilege IAM

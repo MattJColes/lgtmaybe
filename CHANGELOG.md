@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.14.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.13.0...lgtmaybe-v2.14.0) (2026-10-16)
+
+
+### Features
+
+* **forgejo:** keyless Bedrock, Azure and Vertex from a runner's OIDC token ([#823](https://github.com/MattJColes/lgtmaybe/issues/823)) ([75147cf](https://github.com/MattJColes/lgtmaybe/commit/75147cf610cd51732094e7f264e06be1880e4089))
+* **forgejo:** review Forgejo pull requests from Forgejo Actions ([#822](https://github.com/MattJColes/lgtmaybe/issues/822)) ([a6d00b0](https://github.com/MattJColes/lgtmaybe/commit/a6d00b0fbd32c375c0841619ea1bbb94be2e02f0))
+* review stacked pull requests ([#781](https://github.com/MattJColes/lgtmaybe/issues/781)) ([52af2f4](https://github.com/MattJColes/lgtmaybe/commit/52af2f421b02958b4c770058c9a6c2f72ad305cf))
+
+
+### Bug Fixes
+
+* **azure_devops:** count open finding threads in the PR context ([#793](https://github.com/MattJColes/lgtmaybe/issues/793)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **config:** reject a non-positive timeout at the config boundary ([#802](https://github.com/MattJColes/lgtmaybe/issues/802)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* disclose a temperature withheld under extended thinking ([#801](https://github.com/MattJColes/lgtmaybe/issues/801)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* **engine:** arbitrate opposed findings before the location merge ([#786](https://github.com/MattJColes/lgtmaybe/issues/786)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **engine:** budget the reflection audit diff to the input budget ([#797](https://github.com/MattJColes/lgtmaybe/issues/797)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **engine:** cap scan findings after diff scoping, not before ([#788](https://github.com/MattJColes/lgtmaybe/issues/788)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **engine:** keep scan findings on files triage or the cap dropped ([#789](https://github.com/MattJColes/lgtmaybe/issues/789)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **engine:** prefer the anchored finding when deduping a shared location ([#785](https://github.com/MattJColes/lgtmaybe/issues/785)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **engine:** rebuild the per-batch blocks for each split piece ([#799](https://github.com/MattJColes/lgtmaybe/issues/799)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* escape the describe fallback text before posting it ([#791](https://github.com/MattJColes/lgtmaybe/issues/791)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* escape the finding path rendered in body-section bullets ([#790](https://github.com/MattJColes/lgtmaybe/issues/790)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* fail fast on a response with no choices ([#800](https://github.com/MattJColes/lgtmaybe/issues/800)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* **github:** gate resolve-on-fix on a completed run ([#783](https://github.com/MattJColes/lgtmaybe/issues/783)) ([bd7aba4](https://github.com/MattJColes/lgtmaybe/commit/bd7aba4ff4941115c1d155f4272037d20d83320d)), closes [#747](https://github.com/MattJColes/lgtmaybe/issues/747)
+* **github:** keep validated resolution inside the incremental scope ([#784](https://github.com/MattJColes/lgtmaybe/issues/784)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* **gitlab:** record a posted note in the run's notes cache ([#805](https://github.com/MattJColes/lgtmaybe/issues/805)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* keep a split piece's retry when a fallback model is configured ([#798](https://github.com/MattJColes/lgtmaybe/issues/798)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* read branch-mode head text from HEAD, not the working tree ([#795](https://github.com/MattJColes/lgtmaybe/issues/795)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* redact five secret shapes the pattern battery missed ([#792](https://github.com/MattJColes/lgtmaybe/issues/792)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* refuse a GitLab served under a sub-path on gitlab-ci ([#806](https://github.com/MattJColes/lgtmaybe/issues/806)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* require a self-note's formatting error to belong to the model's reply ([#804](https://github.com/MattJColes/lgtmaybe/issues/804)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* run slash commands only on created issue_comment events ([#807](https://github.com/MattJColes/lgtmaybe/issues/807)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* run the ast-grep subprocess on a scrubbed environment ([#808](https://github.com/MattJColes/lgtmaybe/issues/808)) ([b74c3e2](https://github.com/MattJColes/lgtmaybe/commit/b74c3e2de4bf24c2f03affbbf1238d41639f5cf9))
+* **static-analysis:** anchor zizmor findings on the Primary location ([#787](https://github.com/MattJColes/lgtmaybe/issues/787)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+* surface a hung local git as a ClickException ([#796](https://github.com/MattJColes/lgtmaybe/issues/796)) ([3cfc1e3](https://github.com/MattJColes/lgtmaybe/commit/3cfc1e3bbea31bab4724ff48d841fd2a6f64f69d))
+
+
+### Documentation
+
+* **openspec:** propose Forgejo Actions support ([#821](https://github.com/MattJColes/lgtmaybe/issues/821)) ([5d0b766](https://github.com/MattJColes/lgtmaybe/commit/5d0b7660e973081451291cd6d45b36009a225459))
+
 ## [2.13.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.12.0...lgtmaybe-v2.13.0) (2026-10-16)
 
 

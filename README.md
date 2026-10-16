@@ -176,7 +176,8 @@ Three help commands show the options:
 To post reviews on real pull requests, set up the
 [GitHub Action](#use-as-a-github-action). On another host, use
 [GitLab CI](docs/how-to/review-on-gitlab.md),
-[Gitea Actions](docs/how-to/review-on-gitea.md) or
+[Gitea Actions](docs/how-to/review-on-gitea.md),
+[Forgejo Actions](docs/how-to/review-on-forgejo.md) or
 [Azure Pipelines](docs/how-to/review-on-azure-devops.md).
 [Getting Started](docs/tutorial/getting-started.md) has the full walkthrough,
 and [Choose a review model](docs/how-to/choose-a-review-model.md) compares
@@ -206,6 +207,7 @@ above works on any host below.
 | GitHub | GitHub Action (`MattJColes/lgtmaybe@v2`) | `GITHUB_TOKEN` | [GitHub Action](docs/how-to/use-as-github-action.md) |
 | GitLab | GitLab CI job (`lgtmaybe gitlab-ci`) | `GITLAB_TOKEN` | [Review on GitLab](docs/how-to/review-on-gitlab.md) |
 | Gitea | Gitea Actions (same container) | `GITEA_TOKEN` | [Review on Gitea](docs/how-to/review-on-gitea.md) |
+| Forgejo, Codeberg | Forgejo Actions (same container) | `GITEA_TOKEN` | [Review on Forgejo](docs/how-to/review-on-forgejo.md) |
 | Azure DevOps | Azure Pipelines job (`lgtmaybe azure-pipelines`) | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) |
 | None | `lgtmaybe review` on your local diff | n/a | [Install the CLI](docs/how-to/install-the-cli.md) |
 
@@ -243,6 +245,7 @@ the docs root.
 - [Post as lgtmaybe[bot]](docs/how-to/post-as-a-github-app.md)
 - [Review on GitLab](docs/how-to/review-on-gitlab.md)
 - [Review on Gitea](docs/how-to/review-on-gitea.md)
+- [Review on Forgejo](docs/how-to/review-on-forgejo.md)
 - [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md)
 - [Review with OpenAI](docs/how-to/review-with-openai.md)
 - [Review with Claude (Anthropic)](docs/how-to/review-with-anthropic.md)
@@ -345,6 +348,10 @@ changes:
   reimplements the same runtime. See
   [Review on Gitea](docs/how-to/review-on-gitea.md) and
   [`examples/gitea/`](examples/gitea/).
+- **Forgejo and Codeberg:** Forgejo is a Gitea fork with the same API, so
+  Forgejo Actions runs the same container through the Gitea adapter. See
+  [Review on Forgejo](docs/how-to/review-on-forgejo.md) and
+  [`examples/forgejo/`](examples/forgejo/).
 - **Azure DevOps:** an Azure Pipelines job running `lgtmaybe azure-pipelines`,
   added as a build validation branch policy. See
   [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) and

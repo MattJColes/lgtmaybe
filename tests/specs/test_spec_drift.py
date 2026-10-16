@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from check_spec_drift import (  # noqa: E402
+    SCAN_TARGETS,
     AnchorRule,
     Match,
     SpecSection,
@@ -265,3 +266,8 @@ def test_classify_reports_one_warning_per_anchor_not_per_rule() -> None:
         touched_paths={"src/x.py"},
     )
     assert len(warnings) == 1
+
+
+def test_scan_targets_cover_the_shipped_example_workflows() -> None:
+    """A requirement about a starter workflow anchors on the example itself."""
+    assert "examples/" in SCAN_TARGETS

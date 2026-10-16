@@ -650,6 +650,22 @@ class TestPermissions:
         )
         assert _gateway(httpx.Client()).has_repo_write("stranger") is False
 
+    @respx.mock
+    def test_a_refused_lookup_names_the_token_as_the_likely_cause(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Forgejo's automatic job token gets a 403 here, while a personal token
+        reads any account's permission (a stranger answers "read"). So a 403
+        points at the token, and the log says so rather than blaming the
+        commenter."""
+        respx.get(f"{API}/collaborators/maintainer/permission").mock(
+            return_value=httpx.Response(403, json={"message": "token does not have the scope"})
+        )
+        with caplog.at_level("WARNING", logger="lgtmaybe.gitea.gateway"):
+            assert _gateway(httpx.Client()).has_repo_write("maintainer") is False
+        assert "cannot read collaborator permissions" in caplog.text
+        assert "personal access token" in caplog.text
+
 
 class TestLabels:
     @respx.mock

@@ -248,6 +248,24 @@ mirrors `src/`:
 - `tests/e2e/`: end-to-end through the real CLI, one suite against a stub
   provider and one against a live local model server. Both are marked `e2e` and
   deselected by default (see below).
+- `tests/forgejo/`: the Forgejo workflow and entrypoint. `tests/forgejo/contract/`
+  runs the Gitea adapter against a live Forgejo; it is marked
+  `forgejo_contract` and deselected by default (see below).
+
+### Forgejo Contract Tests (tests/forgejo/contract/)
+
+Forgejo is served through the Gitea adapter. These tests make the adapter's
+real calls (review, upserts, dedupe, status, labels, permissions) against a
+live Forgejo, with no model. `tests/forgejo/uat/up.sh` starts one locally:
+
+```bash
+tests/forgejo/uat/up.sh
+FORGEJO_CONTRACT_URL=http://localhost:3000 FORGEJO_CONTRACT_ADMIN=maintainer \
+  FORGEJO_CONTRACT_PASSWORD=lgtmaybe-uat-1 uv run pytest -m forgejo_contract
+```
+
+`forgejo-contract.yml` runs them weekly on Forgejo 11 and 17, and on PRs that
+touch `src/lgtmaybe/gitea/` or `tests/forgejo/`.
 
 ### CLI Scenario e2e (tests/e2e/test_cli_scenarios.py)
 

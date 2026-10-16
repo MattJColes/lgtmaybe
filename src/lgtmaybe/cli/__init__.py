@@ -1285,7 +1285,14 @@ def _change_url(repo: str, number: int) -> str:
 
     The path segment is what ``core.forge`` discriminates on, so it has to match
     the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
+
+    Forgejo (a Gitea fork, same API and URL shape) sets ``FORGEJO_SERVER_URL``
+    beside the ``GITHUB_*`` aliases from forgejo-runner v7. It is read first, so
+    a Forgejo run never rests on the alias and is never taken for GHES.
     """
+    forgejo = os.environ.get("FORGEJO_SERVER_URL", "").rstrip("/")
+    if forgejo:
+        return f"{forgejo}/{repo}/pulls/{number}"
     server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"

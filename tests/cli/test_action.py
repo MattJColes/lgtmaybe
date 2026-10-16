@@ -8,6 +8,7 @@ a slash command. The PR URL for a review is derived from the event payload.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -1062,3 +1063,56 @@ class TestExistingOverview:
         )
 
         assert len(github.diagrams) == 1
+
+
+class TestFederation:
+    """A runner's OIDC ID token is federated before any provider is built."""
+
+    def _invoke(self, tmp_path, monkeypatch, federate):
+        import lgtmaybe.cli as cli_module
+        from lgtmaybe.providers import federation
+
+        seen: dict[str, str | None] = {}
+
+        def build(cfg, runtime):
+            seen["AWS_ROLE_ARN"] = os.environ.get("AWS_ROLE_ARN")
+            return FakeGitHub(), FakeEngine(FakeProvider()), FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", build)
+        monkeypatch.setattr(federation, "federate_ci_credentials", federate)
+        # setenv first so teardown removes whatever the run exports.
+        monkeypatch.setenv("AWS_ROLE_ARN", "")
+        monkeypatch.delenv("AWS_ROLE_ARN")
+        event = _write_event(
+            tmp_path, {"repository": {"full_name": "org/repo"}, "pull_request": {"number": 3}}
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        return CliRunner().invoke(main, ["action"]), seen
+
+    def test_federated_variables_are_set_before_the_provider_is_built(self, tmp_path, monkeypatch):
+        calls: list[object] = []
+
+        def federate(env, **_kwargs):
+            calls.append(env)
+            return {"AWS_ROLE_ARN": "arn:aws:iam::1:role/r"}
+
+        result, seen = self._invoke(tmp_path, monkeypatch, federate)
+
+        assert result.exit_code == 0, result.output
+        assert calls == [os.environ]
+        assert seen["AWS_ROLE_ARN"] == "arn:aws:iam::1:role/r"
+
+    def test_a_federation_failure_fails_the_run_before_any_build(self, tmp_path, monkeypatch):
+        from lgtmaybe.providers.federation import FederationError
+
+        def federate(env, **_kwargs):
+            raise FederationError("add `enable-openid-connect: true` to the job")
+
+        result, seen = self._invoke(tmp_path, monkeypatch, federate)
+
+        assert result.exit_code != 0
+        assert "enable-openid-connect: true" in result.output
+        assert seen == {}

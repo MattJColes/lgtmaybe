@@ -303,6 +303,20 @@ class GiteaGateway:
             permission = self._get_json(
                 f"{self._api}/collaborators/{quote(login, safe='')}/permission"
             ).get("permission")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                # A personal token reads any account's permission (a stranger
+                # answers "read"), so a refusal points at the token: Forgejo's
+                # automatic job token is refused here.
+                _log.warning(
+                    "permission check for %s refused (403): this token cannot read "
+                    "collaborator permissions, so slash commands are ignored. Map a "
+                    "personal access token to GITEA_TOKEN to enable them.",
+                    login,
+                )
+            else:
+                _log.warning("permission check for %s failed: %s", login, exc)
+            return False
         except (httpx.HTTPError, ValueError, AttributeError) as exc:
             _log.warning("permission check for %s failed: %s", login, exc)
             return False

@@ -63,7 +63,7 @@ _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 
 GHES_UNSUPPORTED = (
     "GitHub Enterprise Server is not supported; "
-    "run lgtmaybe on GitHub.com, GitLab, Gitea, or Azure DevOps."
+    "run lgtmaybe on GitHub.com, GitLab, Gitea or Forgejo, or Azure DevOps."
 )
 
 # Azure DevOps is told apart by its ``/_git/<repo>/pullrequest/<id>`` tail, and
@@ -161,7 +161,7 @@ def parse_pr_url(pr_url: str) -> PRLocator:
         f"Could not parse a pull/merge request URL from {pr_url!r}. Expected one of "
         "https://github.com/org/repo/pull/42, "
         "https://gitlab.com/org/repo/-/merge_requests/42, "
-        "https://gitea.example.com/org/repo/pulls/42, or "
+        "https://gitea.example.com/org/repo/pulls/42 (Gitea or Forgejo), or "
         "https://dev.azure.com/org/project/_git/repo/pullrequest/42"
     )
 
