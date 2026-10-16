@@ -31,7 +31,7 @@ from typing import Any, NamedTuple
 
 from lgtmaybe.core.logging import get_logger
 
-from .static_analysis import _scrubbed_env
+from .static_analysis import scrubbed_env
 
 _log = get_logger(__name__)
 
@@ -216,7 +216,7 @@ def _default_runner(binary: str, rule_yaml: str, target: Path) -> str:
             # The scan runs over untrusted text (boundaries feeds it PR-head
             # files), so it gets static analysis' scrubbed env, HOME pinned to
             # the scanned tree.
-            env=_scrubbed_env(target if target.is_dir() else target.parent),
+            env=scrubbed_env(target if target.is_dir() else target.parent),
             capture_output=True,
             text=True,
             encoding="utf-8",

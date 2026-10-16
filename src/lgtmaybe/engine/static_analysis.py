@@ -686,7 +686,7 @@ def _run_tool(
         result = subprocess.run(  # noqa: S603 — argv is built above, never from PR data
             argv,
             cwd=str(root),
-            env=_scrubbed_env(root),
+            env=scrubbed_env(root),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -712,10 +712,13 @@ def _run_tool(
         return []
 
 
-def _scrubbed_env(root: Path) -> dict[str, str]:
+def scrubbed_env(root: Path) -> dict[str, str]:
     """A minimal subprocess environment: nothing to phone home with.
 
-    POSIX retains only PATH. Windows also needs a small set of process-critical
+    Shared by every engine subprocess that scans untrusted text (static
+    analysis, the risk scan, ast-grep), so the scrubbing policy has one
+    definition. POSIX retains only PATH. Windows also needs a small set of
+    process-critical
     system variables; user profile/config roots stay pinned inside the sandbox.
     Proxy variables, cloud credentials, and tokens are always dropped.
     """

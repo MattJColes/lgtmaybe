@@ -427,7 +427,7 @@ def test_scrubbed_env_windows_passes_system_vars(monkeypatch, tmp_path: Path) ->
     monkeypatch.setenv("TMP", r"C:\Tmp")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must-not-leak")
 
-    env = static_analysis._scrubbed_env(tmp_path)
+    env = static_analysis.scrubbed_env(tmp_path)
 
     assert env["SystemRoot"] == r"C:\Windows"
     assert env["COMSPEC"] == r"C:\Windows\System32\cmd.exe"
@@ -445,7 +445,7 @@ def test_scrubbed_env_posix_stays_minimal(monkeypatch, tmp_path: Path) -> None: 
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "must-not-leak")
     monkeypatch.delenv("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", raising=False)
 
-    assert static_analysis._scrubbed_env(tmp_path) == {
+    assert static_analysis.scrubbed_env(tmp_path) == {
         "PATH": static_analysis.os.environ.get("PATH", ""),
         "HOME": str(tmp_path),
         "NO_COLOR": "1",
@@ -467,7 +467,7 @@ def test_scrubbed_env_passes_through_the_offline_vulnerability_database(  # type
     monkeypatch.setenv("OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY", "/opt/osv-db")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
 
-    env = static_analysis._scrubbed_env(tmp_path)
+    env = static_analysis.scrubbed_env(tmp_path)
 
     assert env["OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY"] == "/opt/osv-db"
     assert "AWS_SECRET_ACCESS_KEY" not in env
