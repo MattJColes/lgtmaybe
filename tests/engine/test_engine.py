@@ -2681,6 +2681,40 @@ def test_scan_cap_considered_count_is_the_pre_cap_count(
     assert getattr(capped[0], "considered", None) == MAX_SCAN_FINDINGS + 5
 
 
+_CAP_CTX = PRContext(
+    diff=(
+        "diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n"
+        "diff --git a/g.py b/g.py\n@@ -1 +1,2 @@\n old\n+gnew\n"
+    ),
+    changed_files=["f.py", "g.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=3,
+    file_contents={"f.py": "old\nnew\n", "g.py": "old\ngnew\n"},
+)
+
+
+def test_a_scan_finding_on_a_file_the_cap_dropped_still_posts(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The file cap bounds the model's reading list, not the scanners': the
+    corpus was built before the cap, so the finding must snap against the diff
+    as the corpus saw it. Snapping it against the capped reviewed_diff failed to
+    anchor and dropped it with a false "unchanged lines" notice (issue #750)."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_scan_hit(path="g.py", line=2)],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, summary = engine.review(
+        _CAP_CTX, _finding_mode_cfg().model_copy(update={"max_files": 1})
+    )
+
+    assert [(f.path, f.line) for f in findings] == [("g.py", 2)]
+    assert "unchanged" not in summary.lower()
+
+
 # ---------------------------------------------------------------------------
 # summary template (F5b)
 # ---------------------------------------------------------------------------

@@ -80,9 +80,11 @@ onto review findings posted with no model call. Every tool MUST default to
 `hint`; `finding` is a per-tool opt-in. Direct-posted findings MUST be
 redacted, MUST carry a `scan:<tool>` category, and MUST be re-anchored, deduped,
 suppressed and rule-filtered like any other finding — but never reflected, since
-there is no model judgement to audit. A direct finding whose anchor matches no
-changed line MUST be dropped and counted in the summary, because the tools read
-whole files and only the diff is under review.
+there is no model judgement to audit. They re-anchor against the diff the scan
+corpus saw (triage or the file cap may since narrow the reviewed diff), are
+capped most-severe-first only after diff scoping, and a finding whose anchor
+matches no changed line MUST be dropped and counted in the summary, because
+the tools read whole files and only the diff is under review.
 <!-- anchor: engine.tool-findings -->
 
 #### Scenario: a scanner runs with the default mode
