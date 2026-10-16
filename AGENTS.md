@@ -407,7 +407,7 @@ docstrings.
   it is a required completion step and must not stamp the head complete.
   `auto_diagram` is the one switch for the whole comment. Path signals are
   untrusted hints and a floor; High Impact drops model-chosen paths not in
-  `changed_files`. `describe.structured_call` / `structured_comment` is the
+  `changed_files`. `describe.structured_call` is the
   shared one-call scaffold; `describe.markdown_text` escapes every section's
   model prose. Model-authored Mermaid never reaches a fence; sequence labels are
   escaped with Mermaid entity codes. **No D2:** GitHub does not render it.
