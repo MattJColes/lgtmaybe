@@ -712,6 +712,17 @@ class GitLabGateway:
                 timeout=_TIMEOUT,
             )
         resp.raise_for_status()
+        if existing_id is None and self._notes_cache is not None:
+            # The cache predates this note, so a same-run re-read (a failure
+            # notice after a posted summary) must not miss it and post twice.
+            try:
+                created = resp.json()
+            except ValueError:
+                created = None
+            note = created if isinstance(created, dict) else {}
+            self._notes_cache.append(
+                {"id": note.get("id"), "body": body, "author": {"id": self._posting_user()}}
+            )
 
     def _notes(self) -> list[dict[str, Any]]:
         """Every note on the merge request, fetched once per run."""
