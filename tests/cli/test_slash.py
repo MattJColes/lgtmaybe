@@ -283,12 +283,20 @@ class TestDispatch:
         assert "```mermaid" in body
 
 
-def _write_event(tmp_path: Path, body: str, *, user: dict | None = None) -> Path:  # type: ignore[type-arg]
+def _write_event(
+    tmp_path: Path,
+    body: str,
+    *,
+    user: dict | None = None,
+    action: str | None = None,
+) -> Path:  # type: ignore[type-arg]
     event = {
         "comment": {"body": body, "user": {"login": "maintainer"} if user is None else user},
         "issue": {"number": 7, "pull_request": {"url": "x"}},
         "repository": {"full_name": "org/repo"},
     }
+    if action is not None:
+        event["action"] = action
     path = tmp_path / "event.json"
     path.write_text(json.dumps(event))
     return path
@@ -384,6 +392,31 @@ class TestCommentCommand:
 
         assert result.exit_code == 0, result.output
         assert github.posted == []
+
+    @pytest.mark.parametrize("action", ["edited", "deleted"])
+    def test_an_edited_or_deleted_comment_runs_no_command(self, tmp_path, monkeypatch, action):
+        """An ``edited``/``deleted`` issue_comment re-carries the original body
+        and author, so a workflow without ``types: [created]`` would otherwise
+        re-run a paid review on a maintainer tidying an old comment.
+        """
+
+        class NoCalls(FakeProvider):
+            def complete(self, *args, **kwargs):
+                pytest.fail("a stale comment event must not call the model")
+
+        github = FakeGitHub()
+        provider = NoCalls()
+        self._patch_build(monkeypatch, github, FakeEngine(provider), provider)
+        event = _write_event(tmp_path, "/review", action=action)
+
+        result = CliRunner().invoke(
+            main,
+            ["comment", "--event-path", str(event), "--provider", "ollama", "--model", "llama3"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert github.posted == []
+        assert github.comments == []
 
     def test_non_command_comment_is_ignored(self, tmp_path, monkeypatch):
         github = FakeGitHub()

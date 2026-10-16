@@ -50,6 +50,17 @@ run only for a commenter the gateway confirms has write access; anyone else's
 - **THEN** that source is not posted as Mermaid and the comment explains that no
   valid diagram was produced
 
+### Requirement: Slash commands trigger only on created comments
+
+An `issue_comment` event whose action is not `created` SHALL run no command:
+an edit or a delete re-delivers the original body and author, so it is
+ignored, exit zero, with no model call.
+<!-- anchor: cli.comment-created -->
+
+#### Scenario: a maintainer edits or deletes an old command comment
+- **WHEN** the `issue_comment` event's action is `edited` or `deleted`
+- **THEN** no command runs, exit zero, with no model call
+
 ### Requirement: Conversational answers are directly actionable
 
 Provider prompts for `/ask` answers SHALL require the response to begin with the
