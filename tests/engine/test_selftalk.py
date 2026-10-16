@@ -88,12 +88,23 @@ def test_a_note_owning_its_formatting_error_is_self_talk() -> None:
         "My response had formatting errors near the end. Emit a valid JSON findings array.",
         "The previous reply contained a JSON formatting error mid-way; emit valid JSON only.",
         "My above output has minor formatting errors. Return a findings object, no prose.",
+        "My last response had a formatting error near the end. Output a clean, "
+        "valid JSON findings array.",
+        "My previous final reply contained a formatting error; emit valid JSON only.",
     ],
 )
 def test_owned_formatting_error_variants_are_self_talk(body: str) -> None:
     """Plural and qualified forms of the owned phrase are still the reply
-    owning its breakage, and the owner can sit at any word of the anchor."""
+    owning its breakage, and the owner can sit at any word of the anchor or
+    carry an adjective before the noun it owns."""
     assert is_self_talk(_finding(body=body))
+
+
+def test_an_owned_formatting_error_alone_is_kept() -> None:
+    """The owned phrase is one half only; without a shape phrase it is kept."""
+    assert not is_self_talk(
+        _finding(body="My response had a formatting error near the end.")
+    )
 
 
 # ---------------------------------------------------------------------------
