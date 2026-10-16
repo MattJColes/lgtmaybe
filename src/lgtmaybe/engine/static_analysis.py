@@ -75,7 +75,9 @@ MAX_HINTS = 50
 # pass through the model, so nothing else bounds them: one over-broad rule pack
 # on a large PR would otherwise open a comment per hit and burn the reviewer's
 # credibility in a single run. Far below MAX_HINTS on purpose — a hint costs a
-# few prompt tokens, a comment costs a human's attention.
+# few prompt tokens, a comment costs a human's attention. Applied by the engine
+# AFTER it scopes scan findings to the diff, so the cap is spent on findings
+# that can actually post.
 MAX_SCAN_FINDINGS = 20
 
 # How each tool's findings reach the review when the user has not overridden it.
@@ -351,6 +353,11 @@ def tool_review_findings(
     the category is namespaced per tool, and a finding whose line does not exist
     in the fetched text is dropped rather than anchored to a guess.
 
+    Uncapped by design: the cap bounds POSTED comments, and the engine scopes
+    scan findings to the diff before capping them (step 6b/6c in ``review``) —
+    capping here would spend the cap on off-diff hits the engine is about to
+    drop, starving the one new hit the PR actually added.
+
     The anchor is the source line, redacted. Redaction is not optional here and
     is not only a safety measure: the engine re-anchors against the **redacted**
     diff (``engine.review`` snaps against ``redact(ctx.diff)``), so a raw anchor
@@ -385,12 +392,6 @@ def tool_review_findings(
                 category=f"{SCAN_CATEGORY_PREFIX}{finding.tool}",
             )
         )
-        if len(kept) == MAX_SCAN_FINDINGS:
-            _log.info(
-                "scan findings capped",
-                extra={"kept": MAX_SCAN_FINDINGS, "considered": len(ordered)},
-            )
-            break
     return kept
 
 
