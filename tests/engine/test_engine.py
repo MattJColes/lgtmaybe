@@ -3339,3 +3339,43 @@ def test_a_failed_lens_is_left_out_of_the_lenses_marker() -> None:
 
     assert INCOMPLETE_MARKER in summary
     assert f"{LENSES_MARKER_PREFIX}artefacts,code-health,correctness -->" in summary
+
+
+_GUARD_FIX = {
+    "path": "a.py",
+    "line": 2,
+    "severity": "low",
+    "title": "Keep the size check on the upload",
+    "body": "The check bounds untrusted input.",
+    "failure_scenario": "A 2 GB upload is read into memory and the worker is killed.",
+}
+_GUARD_CUT = {
+    "path": "a.py",
+    "line": 3,
+    "severity": "medium",
+    "title": "Collapse the redundant size check",
+    "body": "Fewer lines.",
+    "category": "ponytail",
+}
+
+
+def test_opposing_advice_never_posts_together() -> None:
+    """A cut beside a fix is the counter-advice the deterministic referee drops —
+    even with reflection, the model referee, switched off."""
+    provider = _per_lens_provider(
+        {"## Security review": [_GUARD_FIX], "## Code health": [_GUARD_CUT]}
+    )
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False)
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == [_GUARD_FIX["title"]]
+
+
+def test_a_cut_with_nothing_opposing_it_still_posts() -> None:
+    provider = _per_lens_provider({"## Code health": [_GUARD_CUT]})
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", reflect=False)
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == [_GUARD_CUT["title"]]

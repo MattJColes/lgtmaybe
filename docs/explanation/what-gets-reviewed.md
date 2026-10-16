@@ -369,22 +369,66 @@ can do is suppress a spec finding, because no other lens sees the block.
 
 ## Ponytail: The Laziest Senior Dev in the Room
 
-The best code is the code you never wrote. Inspired by the
-[Ponytail](https://github.com/DietrichGebert/ponytail) skill, this lens reviews
-new code with a senior engineer's reflex to **not** add code, and flags what
-needn't exist at all (graded `info` to `medium`, and deliberately restrained):
+The best code is the code you never wrote. Inspired by
+[Ponytail 5](https://github.com/DietrichGebert/ponytail), this lens reviews new
+code with a senior engineer's reflex to **not** add code. It walks Ponytail's
+ladder and stops at the first rung that holds: does this need to exist, is it
+already in this codebase, does the standard library or platform do it, does an
+installed dependency, can it be one line? It flags what skipped a rung (graded
+`info` to `medium`, and deliberately restrained):
 
 - **Needless code (YAGNI)**: speculative generality, "just in case" parameters,
   an abstraction with a single caller, or scaffolding for a future that isn't
   here.
-- **Reinventing the standard library**: hand-rolled code that a built-in, the
+- **Re-implementing what exists**: a helper this codebase already has (only when
+  that helper is in front of the model), or hand-rolled code that a built-in, the
   standard library, or an already-imported dependency does directly.
+- **A new dependency for a few lines**: a package added for what a handful of
+  lines or an installed dependency already does.
 - **Could be far shorter**: several lines doing what one clear expression would.
 - **Premature configurability**: flags, hooks, or options no caller uses yet.
 
 It prefers deleting or collapsing code over adding to it, and puts the smaller
-replacement in the suggestion. The complexity lens asks "is this code hard to
-follow?"; Ponytail asks "should this code exist at all?"
+replacement in the suggestion. It checks the code really is unused before saying
+so, never collapses an existing port, layer, or interface boundary (an adapter
+implementing one is not needless), and treats a `shortcut:` comment as a
+recorded decision rather than a finding. The complexity lens asks "is this code
+hard to follow?"; Ponytail asks "should this code exist at all?"
+
+We take Ponytail's leanness rules, not its whole review: Ponytail 5's own
+`/ponytail-review` also checks bugs, security, load, and tests, which here are
+separate lenses.
+
+## When Lenses Disagree
+
+Each lens is prompted on its own and none of them names another, so two lenses
+could in principle give opposite advice about the same lines: one says "cut
+this", another says "this guard is what keeps it safe". Posting both tells the
+author two contradictory things, so lgtmaybe stops it at four points:
+
+1. **Nobody cuts protective code.** A rule shared by every lens, including
+   bundled packs and your own custom lenses, forbids recommending the removal or
+   weakening of validation at a trust boundary, error handling that prevents data
+   loss, security controls, or accessibility support. Any shorter replacement
+   must keep every edge case and error path. This is Ponytail 5's "never cut"
+   list, applied to all of them.
+2. **Each lens has its own evidence bar.** The bars keep territories apart
+   without lenses knowing about each other: ponytail never collapses an existing
+   boundary, and complexity only suggests extracting duplicated code when the
+   copies have uniform callers (never through a flag argument).
+3. **Reflection referees.** The self-reflection pass sees every finding at once
+   and, when two give opposite advice about the same code, keeps the one higher
+   on the ladder: correctness, security, performance, tests, complexity,
+   ponytail. That is Ponytail 5's own review order, with leanness last.
+4. **A deterministic backstop.** After reflection (and even with `--no-reflect`),
+   `engine/conflicts.py` drops a lower-ranked finding that sits within three
+   lines of a higher-ranked one from a lens pair declared opposed, today ponytail
+   against correctness and security. Group ids, custom and pack lenses, and
+   scanner hits declare no opposition, so the backstop never guesses about them.
+
+The `counter-advice` eval fixture measures this: it plants a genuine lean catch
+beside upload validation that looks redundant and an adapter that looks like a
+pass-through, and fails the run if a model recommends cutting either.
 
 ## How the Scope Is Bounded
 

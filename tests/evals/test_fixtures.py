@@ -41,6 +41,7 @@ _FP_FIXTURES = [
     "cloud-semantics",
     "test-harness",
     "unshown-code-fp",
+    "counter-advice",
 ]
 
 _VIBE_FILES = {
@@ -650,3 +651,15 @@ def test_eval_ctx_without_head_dir_has_no_file_contents() -> None:
 
     diff, manifest = _fixture("badcode")
     assert _eval_ctx(diff, manifest).file_contents == {}
+
+
+def test_counter_advice_plants_a_lean_catch_beside_never_cut_traps() -> None:
+    """Ponytail's first planted finding, set beside the two counter-advice traps a
+    lean lens is tempted by: trust-boundary validation that looks redundant, and an
+    adapter that looks like a pass-through but implements a port. A model that
+    recommends either cut fails the clean bar."""
+    _diff, manifest = _fixture("counter-advice")
+    assert any("fromkeys" in e.keywords for e in manifest.expected)
+    labels = " ".join(f.label for f in manifest.forbidden).lower()
+    assert "trust boundary" in labels
+    assert "port" in labels

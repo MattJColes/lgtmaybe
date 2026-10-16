@@ -182,3 +182,28 @@ override and keep-all audit-error fallback SHALL remain unchanged.
 #### Scenario: reflection is explicitly disabled
 - **WHEN** `--no-reflect` is used
 - **THEN** the presence gate still applies but semantic validation is skipped
+
+### Requirement: Opposing advice is arbitrated, never posted together
+
+Two findings that give opposite advice about the same code SHALL NOT both post.
+Reflection keeps the higher-ranked of two opposite recommendations; a
+deterministic backstop (`resolve_conflicts`) then drops a finding from a
+declared-opposed lens pair within `NEAR_LINES` of a higher-ranked one. Both rank
+by `PRECEDENCE`, Ponytail 5's review order with leanness last.
+<!-- anchor: quality.conflicts -->
+
+#### Scenario: a cut beside a fix
+- **WHEN** ponytail recommends cutting lines a security finding three lines away says to guard
+- **THEN** only the security finding posts, whatever the two findings' severities
+
+#### Scenario: both findings can be right
+- **WHEN** performance and ponytail flag the same loop
+- **THEN** both post — the pair is not declared opposed
+
+#### Scenario: reflection is off
+- **WHEN** `reflect` is false
+- **THEN** the deterministic backstop still drops the opposed lower-ranked finding
+
+#### Scenario: a lens declares no opposition
+- **WHEN** one finding is a group id, unattributed, a custom or pack lens, or a scanner hit
+- **THEN** the backstop never drops it — only declared pairs are arbitrated, and every drop is logged

@@ -141,7 +141,7 @@ The engine runs a pipeline of composable stages:
 
 ```
 fetch → redact → compress → prompt → parse → re-anchor → suppress
-      → evidence gate → merge/dedupe → reflect → filter → post
+      → evidence gate → merge/dedupe → reflect → arbitrate → filter → post
 ```
 
 The prompt/parse stage fans out, one concurrent model call per review lens,
@@ -158,7 +158,7 @@ flowchart TD
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
-    anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
+    anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> arbitrate["arbitrate<br/>no opposite advice on the same code"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
 The four lens calls shown are the default `fast` grouping, and the same four run
@@ -276,6 +276,15 @@ matches the PR) and any custom lenses join the same fan-out.
    resolution needs the bundled `ast-grep` binary and a corpus; without either
    it falls back to the path-only fetch, and `--no-symbol-resolution` disables
    it. It is bounded by the same hop and file caps as the path fetch.
+
+   The auditor is also the first referee for opposing advice: when two findings
+   point opposite ways about the same code, it keeps the higher-ranked one.
+
+   **arbitrate**: the deterministic referee behind it (`engine/conflicts.py`),
+   which also runs under `--no-reflect`. A finding from a declared-opposed lens
+   pair (ponytail against correctness or security) within three lines of a
+   higher-ranked one is dropped. See
+   [When Lenses Disagree](what-gets-reviewed.md#when-lenses-disagree).
 
 9. **filter**: findings below `min_severity` are dropped, then any
    `finding_rules` (drop or re-grade by path, lens, title or severity) apply.

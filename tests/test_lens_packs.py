@@ -80,3 +80,11 @@ def test_each_pack_loads_through_the_real_loader(tmp_path):
         cfg_file.write_text(f"provider: ollama\nmodel: m\nlens_paths:\n  - pack:{pack}\n")
         cfg = load_config(config_path=cfg_file)
         assert cfg.extra_lenses, f"pack {pack!r} loaded no lenses"
+
+
+def test_shallow_module_spares_methods_that_implement_a_port() -> None:
+    """A pass-through that implements a port or interface is the seam, not dead
+    weight — the same evidence bar the built-in ponytail lens carries, so the
+    pack can't recommend collapsing what the lean lens is told to leave alone."""
+    text = (_LENSES_DIR / "design" / "shallow-module.yml").read_text(encoding="utf-8")
+    assert "implements a port" in text

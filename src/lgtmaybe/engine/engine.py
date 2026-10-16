@@ -59,6 +59,7 @@ from .compress import (
     split_patch_into_hunks,
     trailing_context_lines,
 )
+from .conflicts import resolve_conflicts
 from .directory import build_directory_block, load_context_files, rules_for
 from .injection import (
     wrap_context,
@@ -1493,6 +1494,12 @@ class LLMReviewEngine:
                         fetch_file=self._fetch_file,
                         resolve_symbol=self._resolve_symbol,
                     )
+
+        # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
+        #     fixes the same lines. Reflection was asked to arbitrate too; this is
+        #     the deterministic referee, so it also holds under --no-reflect.
+        with profiler.stage("arbitrate"):
+            all_findings = resolve_conflicts(all_findings)
 
         # 8b. Rejoin the deterministic findings the auditor never saw.
         all_findings = all_findings + scanned

@@ -194,7 +194,7 @@ This is what lets tracks build in parallel against frozen contracts.
 - `core/ports.py` — the ports (interfaces). **Frozen in the foundation step.**
 - litellm / github classes — the adapters.
 - **Engine is a pipeline:** `fetch → compress → prompt → parse → re-anchor →
-  merge/dedupe → reflect → filter → post`, as composable stages. The prompt/parse
+  merge/dedupe → reflect → arbitrate → filter → post`, as composable stages. The prompt/parse
   stage **fans out per `ReviewCategory`** — one concurrent model call per lens —
   then merges + de-dupes the findings, and a **self-reflection pass**
   (`engine/reflect.py`) drops the model's own low-confidence findings before posting.
@@ -548,13 +548,39 @@ pattern, event bus, plugin framework.
      auditor prunes them as cross-file absence claims. CLI `--spec/--no-spec`,
      Action input `spec_review`; eval fixture `spec-delivery`.
    - **Ponytail lens:** the "lazy senior dev" lens (`ReviewCategory.ponytail`),
-     inspired by the Ponytail skill — *the best code is the code you never wrote*.
-     Flags code that needn't exist at all (YAGNI / speculative generality,
-     reinventing the stdlib, code that could be far shorter, premature
-     configurability), restrained at `info`/`medium`. Distinct from `complexity`
+     following **Ponytail 5** — *the best code is the code you never wrote*.
+     Walks its ladder (needed at all → already in this codebase, only when shown
+     → stdlib/platform → installed dependency → one line) and flags code that
+     skipped a rung (YAGNI, re-implementing what exists, a new dependency for a
+     few lines, code that could be far shorter, premature configurability),
+     restrained at `info`/`medium`. It never collapses an existing port, layer
+     or interface boundary, and a `shortcut:` comment is a recorded decision
+     (that rule binds the advisory lenses only, never security/correctness).
+     We take Ponytail's leanness rules, **not** its v5 review scope (bugs,
+     security, load, tests are other lenses). Distinct from `complexity`
      ("is this hard to follow?"): ponytail asks "should this exist at all?".
-     Default-on like the other built-ins; asserted by
-     `test_prompt.py::test_prompt_asks_for_ponytail_review`.
+     Asserted by `test_prompt.py::test_prompt_asks_for_ponytail_review` and the
+     ladder/boundary tests beside it; eval fixture `counter-advice`.
+   - **Opposing advice is arbitrated, never posted together:** lens prompts
+     never name each other (that would couple them, and custom/pack lenses
+     could never join), so cross-lens awareness lives in orchestration only.
+     Four layers: (1) a **never-cut rule** in the shared preamble — no lens,
+     custom and pack lenses included, recommends removing trust-boundary
+     validation, data-loss error handling, security controls or accessibility,
+     and a shorter replacement keeps every edge case (Ponytail 5's never-cut
+     list); (2) self-contained **evidence bars** per lens (ponytail never
+     collapses an existing boundary; complexity extracts duplication only for
+     uniform callers; `pack:design`'s shallow-module spares port
+     implementations); (3) **reflection referees** — it sees every merged
+     finding, and keeps the higher-ranked of two opposite recommendations;
+     (4) `engine/conflicts.resolve_conflicts`, the **deterministic backstop**
+     after reflection (so it holds under `--no-reflect`): a finding from a
+     pair in `OPPOSED` within `NEAR_LINES` of a higher-`PRECEDENCE` one is
+     dropped and logged. `PRECEDENCE` is Ponytail 5's `/ponytail-review` order
+     (correctness → security → performance → tests → complexity → ponytail)
+     and is rendered into the reflection prompt, so both referees rank alike.
+     Only declared pairs are arbitrated — group ids, unattributed, custom/pack
+     and scan findings are never guessed at.
    - **Mid-review retrieval (lens deferral, default off):** with
      `ReviewConfig.mid_review_retrieval`, a lens may answer `needs` beside its
      `findings` — the paths/symbols it must read — instead of hedging or omitting
@@ -855,10 +881,11 @@ Split by whether it can be deterministic, because that decides where it lives:
   `python -m evals.run` runs: the fixtures plant security + correctness bugs **and**
   blatant performance (N+1 / quadratic) + complexity (deep nesting / duplication)
   issues so a full run exercises those code lenses, with the per-lens coverage
-  guarded in `tests/evals/test_fixtures.py`. (Two lenses aren't scored there: the
-  intent lens needs a stated intent the fixtures don't carry, and the ponytail
-  lens looks for needless code the fixtures don't plant — the engine still runs
-  ponytail, but there's no planted finding for it to match.) Beyond recall, a
+  guarded in `tests/evals/test_fixtures.py`. (The intent lens isn't scored
+  there: it needs a stated intent the fixtures don't carry. Ponytail's one
+  planted catch lives in **`counter-advice`**, beside the two cuts it must not
+  recommend — trust-boundary validation that looks redundant, and an adapter
+  that looks like a pass-through but implements a port.) Beyond recall, a
   fixture can declare **`forbidden`** findings — claims that must *not* appear,
   typically cross-file false positives where the relevant guard lives in an unshown
   file; any produced finding matching one is a **false positive** that makes the
