@@ -47,6 +47,8 @@ theme:
     - content.code.copy
     - search.suggest
     - search.highlight
+    # Hover tooltips for the acronyms in includes/abbreviations.md.
+    - content.tooltips
 
 extra_css:
   - stylesheets/extra.css
@@ -57,7 +59,16 @@ extra_javascript:
   - javascripts/goatcounter.js
   - https://gc.zgo.at/count.js
 
+# A link to a heading that a rewrite renamed fails the strict build.
+validation:
+  anchors: warn
+
 markdown_extensions:
+  - abbr
+  - pymdownx.snippets:
+      # Outside docs_dir, so it is never built or read as a page itself.
+      auto_append:
+        - includes/abbreviations.md
   - admonition
   - tables
   - attr_list
@@ -112,9 +123,11 @@ nav:
           - Reduce review cost: how-to/reduce-review-cost.md
       - Maintainers:
           - Releasing: how-to/releasing.md
+          - Write the docs: how-to/write-docs.md
   - Reference:
       - Configuration: reference/config.md
       - Profile output: reference/profile.md
+      - Glossary: reference/glossary.md
       - Changelog: changelog.md
   - Explanation:
       - What gets reviewed: explanation/what-gets-reviewed.md
