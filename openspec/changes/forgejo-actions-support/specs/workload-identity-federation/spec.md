@@ -26,9 +26,9 @@ change no environment variable, so every existing run is byte-identical.
 
 ### Requirement: A missing ID token fails with the fix
 
-When a federation input is set but `ACTIONS_ID_TOKEN_REQUEST_URL` or
-`ACTIONS_ID_TOKEN_REQUEST_TOKEN` is absent, the run SHALL fail before any model
-or forge call with a message naming the workflow setting that grants the token
+The run SHALL fail before any model or forge call when a federation input is
+set but `ACTIONS_ID_TOKEN_REQUEST_URL` or `ACTIONS_ID_TOKEN_REQUEST_TOKEN` is
+absent, naming the workflow setting that grants the token
 (`enable-openid-connect: true` on Forgejo, `id-token: write` on GitHub). It
 SHALL NOT fall back to another credential.
 <!-- anchor: federation.missing-token -->
@@ -42,7 +42,7 @@ SHALL NOT fall back to another credential.
 Each cloud's federation inputs SHALL be checked as a set before any token is
 requested: Azure needs `INPUT_AZURE_CLIENT_ID` and `INPUT_AZURE_TENANT_ID`, and
 Bedrock needs `INPUT_AWS_ROLE_ARN` and a region (`INPUT_AWS_REGION`, else
-`AWS_REGION`). A missing companion SHALL fail the run naming that input, rather
+`AWS_REGION` or `AWS_DEFAULT_REGION`). A missing companion SHALL fail the run naming that input, rather
 than surfacing later as an SDK error.
 <!-- anchor: federation.inputs -->
 
@@ -80,7 +80,7 @@ credential resolution itself is unchanged.
 
 The ID token and the request token SHALL never be logged, posted or sent to a
 model. The token file SHALL be readable by its owner only and live in a fresh
-temporary directory. A failed token request SHALL fail the run, and its message
+temporary directory, removed when the process exits. A failed token request SHALL fail the run, and its message
 SHALL carry the HTTP status but never a token or the request URL's query string.
 <!-- anchor: federation.secrecy -->
 
