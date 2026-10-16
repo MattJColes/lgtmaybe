@@ -461,8 +461,10 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             "✂️ The self-reflection audit ran on a trimmed diff: the full diff "
             f"exceeded `max_input_tokens` ({cfg.max_input_tokens:,}), so only the "
-            "patches carrying findings were audited. Raise `max_input_tokens` to "
-            "audit the whole diff."
+            "flagged files' patches were kept, in diff order, until the budget "
+            "ran out. Flagged files after the first that did not fit were not "
+            "shown to the audit at all. Raise `max_input_tokens` to audit the "
+            "whole diff."
         )
 
     count_notices: tuple[tuple[int, Callable[[int], str]], ...] = (

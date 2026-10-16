@@ -368,15 +368,19 @@ def _audit(
     # Budget the input (issue #758): a multi-batch review joins every batch's
     # diff into ctx.diff, which can run several times the model-fitted budget
     # and get the audit rejected outright, so the findings then ship unaudited
-    # with only a log line saying so. The system prompt and the fixed
-    # scaffolding count against the budget too.
+    # with only a log line saying so. The system prompt, the fixed scaffolding
+    # and the scan-hint block all count against the budget too: the hint block
+    # rides the audit's own message, so leaving it out would spend hint tokens
+    # on top of a prompt sized to exactly fill the budget.
+    hint_block = _scan_hint_block(findings, scan_hints)
     scaffold_tokens = sum(count_tokens(part) for part in _PROMPT_SCAFFOLD)
-    room = (
-        cfg.max_input_tokens
-        - count_tokens(_REFLECT_SYSTEM)
-        - count_tokens(findings_json)
-        - scaffold_tokens
+    overhead = (
+        count_tokens(_REFLECT_SYSTEM)
+        + count_tokens(findings_json)
+        + count_tokens(hint_block)
+        + scaffold_tokens
     )
+    room = cfg.max_input_tokens - overhead
     diff, trimmed = _budgeted_diff(findings, ctx, room)
     if trimmed:
         _log.info(
@@ -390,13 +394,7 @@ def _audit(
     # gets the full (redacted) head text of every file carrying a surviving
     # finding so it can verify a whole-file claim — that an import/symbol IS
     # present, that a duplicate isn't real — instead of guessing about unseen code.
-    reserve = (
-        cfg.max_input_tokens
-        - count_tokens(_REFLECT_SYSTEM)
-        - count_tokens(diff)
-        - count_tokens(findings_json)
-        - scaffold_tokens
-    )
+    reserve = cfg.max_input_tokens - count_tokens(diff) - overhead
     if cfg.preset is ReviewPreset.fast:
         # The everyday path trades some grounding depth for a faster, cheaper
         # audit: cap the head-text budget at a quarter of the input budget
@@ -411,7 +409,7 @@ def _audit(
     # JSON neutralise their own attacker-derived text.
     diff_part = f"Diff:\n{neutralise(diff)}"
     rest_part = (
-        f"{_scan_hint_block(findings, scan_hints)}"
+        f"{hint_block}"
         f"{grounding}"
         f"Findings (indexed from 0):\n{findings_json}\n\n"
         "Return the confidence verdict JSON object."
