@@ -48,7 +48,6 @@ from lgtmaybe.core.ports import (
     ProviderWallTimeout,
     SupportsInputBudget,
     SupportsModelEscalation,
-    SupportsModelName,
     SupportsReasoningStepDown,
     SupportsReasoningSwitchOff,
     SupportsResponseFormatDrop,
@@ -2479,7 +2478,10 @@ class LLMReviewEngine:
         cannot be proved should not be made.
         """
         answered = result.model
-        asked = self._provider.model if isinstance(self._provider, SupportsModelName) else None
+        # Attribute presence, not a protocol isinstance: runtime-checkable
+        # protocols check members with hasattr anyway, and saying that directly
+        # keeps the probe honest for an adapter that is not a Protocol.
+        asked = self._provider.model if hasattr(self._provider, "model") else None
         if answered and asked and answered != asked:
             self._escalated[lens.id] = answered
 
