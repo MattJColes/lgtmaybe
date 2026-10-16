@@ -712,16 +712,26 @@ class TestClaudeThinkingSampling:
         assert built.default_opts["reasoning_effort"] == "medium"
         assert any("temperature" in record.getMessage() for record in caplog.records)
 
-    def test_a_withheld_temperature_is_disclosed_as_dropped(self) -> None:
+    @pytest.mark.parametrize(
+        ("provider", "model"),
+        [
+            (Provider.anthropic, "claude-sonnet-4-5"),
+            (Provider.bedrock, "anthropic.claude-sonnet-4-5-20250929-v1:0"),
+            (Provider.vertex, "claude-sonnet-4-5"),
+        ],
+    )
+    def test_a_withheld_temperature_is_disclosed_as_dropped(
+        self, provider: Provider, model: str
+    ) -> None:
         """The withhold used to be an INFO log only: `temperature_dropped()`
         stayed False, so the engine's "temperature not sent" summary segment
         never appeared — while the same loss on Bedrock (the model rejecting the
         param, then a re-send without it) was disclosed. The factory records the
         drop through the adapter's own mechanism, so both losses read one
-        channel."""
+        channel. Every Claude route (native, Bedrock, Vertex) seeds the record."""
         built = build_provider(
-            Provider.anthropic,
-            "claude-sonnet-4-5",
+            provider,
+            model,
             api_key="k",
             reasoning_effort="medium",
             temperature=0.0,
