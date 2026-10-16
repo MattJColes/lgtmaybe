@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from lgtmaybe.cli import run_review
 from lgtmaybe.core.models import PRContext, RiskAssessment, RiskConfig, RiskReason
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine import engine as engine_module
 from lgtmaybe.engine.engine import INCOMPLETE_MARKER, LENSES_MARKER_PREFIX
+from lgtmaybe.review import run_review
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
 

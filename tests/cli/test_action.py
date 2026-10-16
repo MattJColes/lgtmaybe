@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+import lgtmaybe.review as review_module
 from lgtmaybe.cli import RuntimeOptions, execute_comment, main, pr_url_from_event
 from lgtmaybe.core.models import Provider, ReviewConfig
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
@@ -96,7 +97,7 @@ class TestActionRouting:
 
         called: list[bool] = []
         monkeypatch.setattr(
-            cli_module,
+            review_module,
             "run_diagram",
             lambda github, provider, cfg, ctx=None, completed_sha=None: called.append(True),
         )
@@ -154,7 +155,7 @@ class TestActionRouting:
         monkeypatch.setattr(cli_module, "build_review_context", build)
         diagrams: list[bool] = []
         monkeypatch.setattr(
-            cli_module,
+            review_module,
             "run_diagram",
             lambda github, provider, cfg, ctx=None, completed_sha=None: diagrams.append(True),
         )
@@ -233,7 +234,7 @@ class TestActionRouting:
 
         monkeypatch.setattr(cli_module, "build_review_context", _build)
         monkeypatch.setattr(
-            cli_module,
+            review_module,
             "run_diagram",
             lambda github, provider, cfg, ctx=None, completed_sha=None: None,
         )

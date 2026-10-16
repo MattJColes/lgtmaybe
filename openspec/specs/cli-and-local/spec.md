@@ -35,7 +35,7 @@ The split is rendering only: every option parses the same either way.
 
 ### Requirement: One orchestrator behind every entrypoint
 
-`run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head and unchanged-diff no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, `action`, and `gitlab-ci` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path, and so SHALL every `gitlab-ci` pipeline with `incremental` unset (GitLab CI has no synchronize action; the missing watermark makes the first pipeline full); explicit `incremental: false`, `gitlab-ci --no-incremental` / `LGTMAYBE_INCREMENTAL=false`, and `/review full` SHALL run a full review.
+`run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head and unchanged-diff no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, `action`, and `gitlab-ci` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path, and so SHALL every `gitlab-ci` pipeline with `incremental` unset (GitLab CI has no synchronize action; the missing watermark makes the first pipeline full); explicit `incremental: false`, `gitlab-ci --no-incremental` / `LGTMAYBE_INCREMENTAL=false`, and `/review full` SHALL run a full review. `run_review` SHALL live outside the CLI package, in `lgtmaybe.review`, which imports nothing from `lgtmaybe.cli`, so a new entry point calls it rather than copying the flow.
 <!-- anchor: cli.run-review -->
 
 #### Scenario: Action synchronize event

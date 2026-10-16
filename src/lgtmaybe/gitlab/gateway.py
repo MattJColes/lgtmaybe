@@ -494,7 +494,7 @@ class GitLabGateway:
                 json={
                     # GitLab's state vocabulary is narrower than GitHub's
                     # conclusions, but the one producer of `conclusion`
-                    # (`cli._fail_on_check`) emits only "success"/"failure" —
+                    # (`review.fail_on_check`) emits only "success"/"failure" —
                     # so a full mapping table is entries for inputs that never
                     # arrive. Only "failure" reds the commit; anything else
                     # keeps the fail-open default a best-effort status wants.

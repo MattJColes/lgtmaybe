@@ -97,8 +97,11 @@ lgtmaybe/
 │   │   ├── loader.py        #   merge layers → ReviewConfig
 │   │   └── store.py         #   ~/.config/lgtmaybe user config (never stores keys)
 │   │
-│   └── cli/                 # Click entrypoints + wiring
-│       ├── __init__.py      #   execute_* logic; wires real adapters into the engine
+│   ├── review.py            # the review use case: run_review · run_describe · run_diagram
+│   │                        #   over injected ports; imports nothing from cli/
+│   │
+│   └── cli/                 # Click entrypoints + wiring (the composition root)
+│       ├── __init__.py      #   execute_* logic; builds real adapters, calls review.py
 │       ├── commands.py      #   command + option declarations (review/diagram/comment/action/config)
 │       ├── slash.py         #   /review /improve /ask /describe /diagram slash commands
 │       ├── runtime.py       #   per-invocation options bag (creds, PR URL)
@@ -159,11 +162,11 @@ resolved forge to its adapter.
 
 `ReviewGateway` requires only three methods — fetch context, post a review, post
 a comment. Everything richer (incremental review, thread resolution, labels,
-checks, feedback, file reads) is an optional `Supports*` protocol the CLI probes
-for and skips when absent. That is what lets an adapter be **honest** about what
-its host cannot do rather than failing at run time: Gitea claims neither
-incremental review nor thread resolution, GitLab claims thread resolution
-but not (yet) incremental, and Azure DevOps claims neither yet.
+checks, feedback, file reads) is an optional `Supports*` protocol that the
+review use case (`review.py`) and the CLI probe for and skip when absent. That
+is what lets an adapter be **honest** about what its host cannot do rather than
+failing at run time: Gitea claims neither incremental review nor thread
+resolution, GitLab claims both, and Azure DevOps claims neither yet.
 
 The engine never sees a gateway at all — it takes a `PRContext` and returns
 findings — which is why `local/` can produce one from `git` with no host
@@ -215,7 +218,18 @@ minified, vendored, generated, binary).
 repo `.lgtmaybe.yml` → CLI flags / Action inputs); the user store deliberately
 refuses to persist API keys.
 
-**CLI (`cli/`)** — the Click surface: `review` (local), `diagram` (the local change
+**Review use case (`review.py`)** — the application layer. `run_review` owns
+what one pull-request review run does: incremental scoping, the whole-PR risk
+assessment, learned feedback, the watermark and diff fingerprint, labels and the
+merge-gate check run, the posting order, and diagram completion. `run_describe`
+and `run_diagram` do the same for the describe and overview comments. Every
+function takes its gateway, engine and provider as arguments and imports nothing
+from `cli/`, so the MCP server, the eval harness or a library caller can drive
+the same flow without copying it.
+
+**CLI (`cli/`)** — the composition root: it resolves flags, environment and
+config, builds the real adapters (`build_review_context`), and calls the review
+use case. The Click surface: `review` (local), `diagram` (the local change
 overview — description, high impact areas, structure and sequence), `comment`
 (issue_comment slash commands), `action` (the
 container entrypoint that routes by event), and a `config` group. Slash commands

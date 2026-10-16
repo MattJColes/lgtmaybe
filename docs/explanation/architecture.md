@@ -80,8 +80,8 @@ the resolved forge to its adapter.
 ### Required Surface vs Optional Capabilities
 
 `ReviewGateway` is deliberately three methods. Everything richer is an optional
-`Supports*` protocol. The CLI probes for each one with `isinstance` and skips it
-when absent. So an adapter is useful long before it is complete. It can also be
+`Supports*` protocol. The review use case and the CLI probe for each one with
+`isinstance` and skip it when absent. So an adapter is useful long before it is complete. It can also be
 honest about what its host cannot do, instead of failing at run time. A group
 is all or nothing: an adapter missing one of its methods does not get the
 feature at all.
@@ -579,6 +579,32 @@ file-fetch and symbol-resolver callables. `review()` takes a `PRContext`. In
 production the CLI wires the real adapters. In tests, the fakes in
 `tests/fakes/` (`FakeProvider`, `FakeGitHub`, `FakeEngine`) drop in directly.
 So swapping a port never needs patching.
+
+### The Review Use Case
+
+A review run is more than one engine call. Something has to decide what to
+review, then post the result in a safe order. That code lives in
+`lgtmaybe/review.py`, outside the CLI. Its `run_review` function does the
+following:
+
+- reads the last completed head and scopes an
+  [incremental review](../reference/glossary.md#incremental-review);
+- assesses the risk of the whole pull request;
+- applies learned 👎 feedback;
+- calls the engine;
+- stamps the watermark and the diff fingerprint;
+- applies labels and the merge-gate check run;
+- posts the review, then the overview when a run requires one.
+
+`run_describe` and `run_diagram` do the same job for the describe and overview
+comments.
+
+Each function takes its gateway, engine and provider as arguments. The module
+imports nothing from the CLI, and a test holds it to that. The CLI is the
+composition root: the one place that builds the real adapters. It reads flags,
+environment and config, builds the adapters, then calls in. A second entry
+point, such as the MCP server or a library caller, calls the same functions
+rather than copying them.
 
 ## Why Not a Plugin Framework or Event Bus
 

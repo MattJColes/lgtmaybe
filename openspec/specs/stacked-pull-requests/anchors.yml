@@ -16,7 +16,7 @@ stack.unchanged-rebase:
   rule:
     kind: function_definition
     has: { field: name, regex: '^_diff_unchanged_since$' }
-  files: [src/lgtmaybe/cli/**/*.py]
+  files: [src/lgtmaybe/review.py]
 
 stack.retarget:
   rule:

@@ -21,7 +21,7 @@ import httpx
 import pytest
 import respx
 
-from lgtmaybe.cli import _post_failure, run_review
+from lgtmaybe.cli import _post_failure
 from lgtmaybe.core.models import (
     PRContext,
     ProviderResult,
@@ -31,6 +31,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.engine import INCOMPLETE_MARKER
+from lgtmaybe.review import run_review
 from tests.conftest import make_cfg
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 

@@ -8,13 +8,13 @@ check run is created. Enforcement rides the check run, never PR approval state.
 
 from __future__ import annotations
 
-from lgtmaybe.cli import run_review
 from lgtmaybe.core.models import (
     PRContext,
     ReviewConfig,
     ReviewFinding,
     Severity,
 )
+from lgtmaybe.review import run_review
 from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 

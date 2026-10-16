@@ -14,10 +14,11 @@ from typing import Any
 import httpx
 import respx
 
-from lgtmaybe.cli import _post_failure, run_review
+from lgtmaybe.cli import _post_failure
 from lgtmaybe.core.models import PRContext, ProviderResult, ReviewConfig, ReviewFinding
 from lgtmaybe.engine import INCOMPLETE_MARKER
 from lgtmaybe.gitlab import GitLabGateway
+from lgtmaybe.review import run_review
 from tests.conftest import make_cfg
 from tests.fakes import FakeProvider
 
