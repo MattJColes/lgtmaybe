@@ -4,13 +4,15 @@ description: Turn lgtmaybe findings into instructions an AI coding agent can app
 
 # Fix Findings with an AI Agent
 
-`lgtmaybe review` runs locally and prints findings; it never posts anywhere. The
-`--format agent` output turns those findings into plain correction instructions
-an AI coding agent (such as Claude Code) can read and apply, so you get a
-review-and-fix loop on your own machine before you ever open a pull request.
+`lgtmaybe review` runs locally and prints [findings](../reference/glossary.md#finding);
+it never posts anywhere. The `--format agent` output turns those findings into
+plain correction instructions. An AI coding agent (such as Claude Code) can read
+and apply them. You get a review-and-fix loop on your own machine before you
+ever open a pull request.
 
-It works with any provider. ollama keeps it local and free; a cloud provider
-gives you a stronger reviewer for a small cost.
+It works with any [provider](../reference/glossary.md#provider). ollama keeps
+it local and free; a cloud provider gives you a stronger reviewer for a small
+cost.
 
 ## Contents
 
@@ -21,9 +23,9 @@ gives you a stronger reviewer for a small cost.
 
 ## Print the Findings as Agent Instructions
 
-From inside the repo, on the branch you want reviewed (this reviews the
-branch's commits against the remote primary branch; add `--working` to include
-uncommitted edits too):
+Run this from inside the repo, on the branch you want reviewed. It reviews the
+branch's commits against the remote primary branch. Add `--working` to include
+uncommitted edits too.
 
 ```bash
 lgtmaybe review \
@@ -52,26 +54,28 @@ confirm they are resolved.
 
 ## Hand It to the Agent
 
-Save the instructions and point your agent at them. Only the instructions go to
-stdout; the token-usage footer goes to stderr, so it stays out of the file:
+Save the instructions to a file and point your agent at them:
 
 ```bash
 lgtmaybe review --provider ollama --model qwen3.6:27b \
   --api-base http://localhost:11434 --format agent > review.txt
 ```
 
+Only the instructions go to stdout. The token-usage footer goes to stderr, so it
+stays out of the file.
+
 Then ask the agent to work through `review.txt`. For example, in Claude Code:
 
 > Apply the corrections in review.txt, then delete it.
 
 Each finding carries a path, a line, the issue and often a suggested
-replacement, so the agent can make the edit without guessing.
+replacement. The agent can make the edit without guessing.
 
 ## Close the Loop
 
 Once the agent has applied the fixes, run the review again to confirm the
 findings are gone. By default `lgtmaybe review` reviews only your committed
-branch changes, so either commit the fixes first or add `--working` to include
+branch changes. Either commit the fixes first, or add `--working` to include
 uncommitted edits:
 
 ```bash

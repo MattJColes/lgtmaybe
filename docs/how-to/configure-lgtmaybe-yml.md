@@ -5,9 +5,9 @@ description: Configure lgtmaybe with a .lgtmaybe.yml file - provider, model, sev
 # Configure .lgtmaybe.yml
 
 Put a `.lgtmaybe.yml` file at the root of your repository to set how lgtmaybe
-reviews it. lgtmaybe reads the file from the directory it runs in, which is the
-repo root for both the CLI and the GitHub Action. Pass `--config PATH` (or the
-Action's `config_path` input) to read a different file; an explicit path must
+reviews it. lgtmaybe reads the file from the directory it runs in. For both the
+CLI and the GitHub Action, that is the repo root. To read a different file, pass
+`--config PATH` (or the Action's `config_path` input). An explicit path must
 exist.
 
 The file holds non-secret settings only. API keys stay in the environment or
@@ -80,17 +80,18 @@ described here (`max_tokens`, `reasoning_effort`, `temperature`, `language`,
 
 ### provider
 
-Which LLM backend to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
+Which LLM backend, or [provider](../reference/glossary.md#provider), to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
 `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
 
 ```yaml
 provider: anthropic
 ```
 
-There is no built-in provider or model. If no flag, no `.lgtmaybe.yml` and no
-user config (written by `lgtmaybe config init`) sets both, lgtmaybe stops before
-doing any work and tells you how to configure one. In the GitHub Action, set the
-`provider` and `model` inputs instead.
+There is no built-in provider or model. lgtmaybe looks for both in its flags,
+`.lgtmaybe.yml` and the user config (written by `lgtmaybe config init`). If
+those leave either one unset, lgtmaybe stops before doing any work and tells you
+how to configure it. In the GitHub Action, set the `provider` and `model` inputs
+instead.
 
 ### model
 
@@ -117,8 +118,8 @@ A second model for a review call the primary model cannot finish. It is off by
 default and adds no calls to a healthy review.
 
 Both models go through the same `provider`, `api_base` and credentials. An
-OpenRouter review can fall back from a Google model to a Qwen model because
-OpenRouter serves both; an `openai` review cannot fall back to an Anthropic
+OpenRouter review can fall back from a Google model to a Qwen model, because
+OpenRouter serves both. An `openai` review cannot fall back to an Anthropic
 account. Cross-provider failover needs a separate review run.
 
 ```yaml
@@ -136,19 +137,19 @@ When the fallback runs depends on the failure:
 | Output hits the `max_tokens` ceiling, or the reply stops mid-JSON | First retries on the primary with a smaller payload or lower `reasoning_effort`, as the token counts suggest. Tries the fallback only if that also fails. |
 
 The fallback does not judge the primary's answer. A clean review, a weak
-finding or zero findings never trigger it. Unparseable output has its own
+[finding](../reference/glossary.md#finding) or zero findings never trigger it. Unparseable output has its own
 bounded repair path.
 
-The fallback gets a fresh request and retry budget, so its time and tokens add
-to what the primary already spent, and its usage counts towards
-`max_review_tokens` once the call returns. The review summary names every lens
-the fallback answered. `--profile` prints a `models:` line, and
+The fallback gets a fresh request and retry budget. Its time and tokens add to
+what the primary already spent, and its usage counts towards
+`max_review_tokens` once the call returns. The review summary names every
+[lens](../reference/glossary.md#lens) the fallback answered. `--profile` prints a `models:` line, and
 `--profile-json` records the model on each call (see
 [Profile Reference](../reference/profile.md#the-models-line)).
 
 If the fallback also fails, lgtmaybe marks the lens incomplete. It does not
-walk a list of models or go back to the primary, and a review with no usable
-results fails rather than posting a clean result. If a lens keeps needing the
+walk a list of models or go back to the primary. A review with no usable results
+fails rather than posting a clean result. If a lens keeps needing the
 second model, make that model the primary.
 
 The `--fallback-model` flag and the Action's `fallback_model` input override
@@ -162,7 +163,8 @@ See [Choose a Review Model](choose-a-review-model.md) for current model results.
 
 ### min_severity
 
-The lowest severity to report. Findings below it are dropped. From low to high:
+The lowest [severity](../reference/glossary.md#severity) to report. lgtmaybe drops findings below
+it. From low to high:
 `info`, `low`, `medium`, `high`, `critical`.
 
 ```yaml
@@ -174,12 +176,12 @@ Default: `low`, which drops only `info` findings. A `project.stage` of
 
 ### include_paths / exclude_paths
 
-Glob patterns that restrict which changed files are reviewed. `include_paths`
-is an allowlist and `exclude_paths` a denylist applied after it, so an exclude
+Glob patterns that limit which changed files lgtmaybe reviews. `include_paths`
+is an allowlist. `exclude_paths` is a denylist applied after it, so an exclude
 always wins. Both default to empty, which reviews every file.
 
-Patterns match the full repo-relative path, and a `**/` prefix also matches at
-the repo root, so `**/*.lock` covers a root-level lockfile. The built-in skip
+Patterns match the full repo-relative path. A `**/` prefix also matches at the
+repo root, so `**/*.lock` covers a root-level lockfile. The built-in skip
 filter for generated, vendored and binary files runs first, so an
 `include_paths` entry can't bring back a lockfile.
 
@@ -193,37 +195,39 @@ exclude_paths:
 
 ### max_files
 
-The maximum number of changed files to review. Files past the cap are skipped
-and the summary says `Reviewed the top N of M changed files`. With
-[`triage_model`](#triage_model) set, the cap drops the lowest-risk files;
-otherwise files keep their diff order.
+The maximum number of changed files to review. lgtmaybe skips files past the
+cap, and the summary says `Reviewed the top N of M changed files`. With
+[`triage_model`](#triage_model) set, the cap drops the lowest-risk files.
+Otherwise files keep their diff order.
 
 ```yaml
 max_files: 30
 ```
 
 Default: `50`. A separate per-file cap, `max_file_diff_lines` (default `2000`,
-`0` disables), skips any single file whose diff is longer than that and names it
-in the summary. It catches generated data files that the name-based skip filter
-can't recognise.
+`0` disables), skips any single file whose diff is longer than that. The
+summary names the skipped file. This catches generated data files that the
+name-based skip filter can't recognise.
 
 ### max_input_tokens
 
 The token budget for each model call. When the diff exceeds it, lgtmaybe splits
-the review across batched calls. With `recursive` on (the default), a single
-file larger than the budget is walked hunk by hunk instead of being cut short.
+the review across [batched](../reference/glossary.md#batch) calls. With `recursive` on (the
+default), lgtmaybe walks a single file larger than the budget
+[hunk](../reference/glossary.md#hunk) by hunk, instead of cutting it short.
 
 ```yaml
 max_input_tokens: 80000
 ```
 
-Default: `100000`. When you leave it unset, lgtmaybe lowers it to fit a model
-whose context window is smaller. A value you set is used as is.
+Default: `100000`. If you leave it unset, lgtmaybe lowers it to fit a model
+with a smaller context window. A value you set is used as is.
 
 ### preset
 
-How many model calls the review spends. `fast` (the default) covers the ten
-everyday categories in five calls, one per concern:
+How many model calls the review spends. A [preset](../reference/glossary.md#preset) groups the
+review's lenses into calls. `fast` (the default) covers the ten everyday
+categories in five calls, one per concern:
 
 | Call | Covers |
 |---|---|
@@ -249,9 +253,9 @@ input: `preset`. An explicit `categories` list overrides the grouping.
 
 ### categories
 
-Which review lenses to run. Narrowing the list turns off the preset grouping:
-each listed category runs as its own concurrent call, and the findings are
-merged. Fewer categories means fewer calls and fewer tokens, at the cost of
+Which review lenses to run. Narrowing the list turns off the preset grouping.
+Each listed category runs as its own concurrent call, and lgtmaybe merges the
+findings. Fewer categories means fewer calls and fewer tokens, at the cost of
 coverage.
 
 Choose from `security`, `correctness`, `deprecation`, `tests`, `documentation`,
@@ -269,32 +273,37 @@ Default: all eleven. Two of them only run when there is something to check:
   and commit names on GitHub, or your `git log` commit names on the CLI. With
   no stated intent (for example, no commits beyond the base branch yet) it is
   skipped and costs nothing. Under `fast` it shares the correctness call.
-- `spec` checks the diff against a committed specification (OpenSpec, GitHub
-  Spec Kit or Kiro). With no matching spec it is skipped. Turn it off with
+- [`spec`](../reference/glossary.md#spec-lens) checks the diff against a committed specification
+  (OpenSpec, GitHub Spec Kit or Kiro). With no matching spec it is skipped. Turn it off with
   `spec_review: false`, `--no-spec`, or the Action input `spec_review`.
 
 The PR title, description and commit names reach the provider only through the
-`intent` lens and the change overview (`auto_diagram`). To keep that text from
+`intent` lens and the [change overview](../reference/glossary.md#change-overview) (`auto_diagram`). To keep that text from
 being sent at all, drop `intent` from `categories` and set `auto_diagram: false`.
 
-`ponytail` is the "lazy senior dev" check: *the best code is the code you never
+[`ponytail`](../reference/glossary.md#ponytail) is the "lazy senior dev" check: *the best code is the code you never
 wrote*. It flags code that needn't exist (YAGNI, reinventing the standard
 library, code that could be far shorter). See
 [What gets reviewed](../explanation/what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room).
 
-`architecture` flags design decisions the change makes that will be expensive
-to reverse: coupling across boundaries, dependencies pointing the wrong way,
-subclasses that break their base class's contract, and misuse-prone APIs. Each
-finding has to open with the change it would make painful. See
+`architecture` flags design decisions in the change that will be expensive to
+reverse:
+
+- coupling across boundaries
+- dependencies pointing the wrong way
+- subclasses that break their base class's contract
+- misuse-prone APIs
+
+Each finding has to open with the change it would make painful. See
 [What gets reviewed](../explanation/what-gets-reviewed.md#architecture-what-will-this-make-hard-to-change).
 
 ### context_lines
 
-The most unchanged lines added around each changed hunk, read from the head
-revision of the file, so the model sees a change in the context of its
-surrounding code. The full budget goes before the hunk, where the enclosing
-signature and setup are, and a quarter of it (at least one line) goes after.
-lgtmaybe uses the smaller of this value and what the token budget allows, so
+The most unchanged lines lgtmaybe adds around each changed hunk, so the model
+sees a change in the context of its surrounding code. lgtmaybe reads these lines
+from the head revision of the file. The full budget goes before the hunk, where
+the enclosing signature and setup are. A quarter of it (at least one line) goes
+after. lgtmaybe uses the smaller of this value and what the token budget allows, so
 the padding shrinks on large PRs. Set it to `0` to review the bare diff.
 
 ```yaml
@@ -306,9 +315,9 @@ Default: `20`. CLI: `--context-lines`.
 ### function_context
 
 Extends each hunk's leading padding up to the enclosing function or class
-signature when that sits above the `context_lines` window. lgtmaybe finds the
-boundary with ast-grep (parsing only, never running code) for Python,
-JavaScript, TypeScript/TSX, Go, Rust, Java and Ruby, with a bounded reach so a
+signature, when that signature sits above the `context_lines` window. lgtmaybe
+finds the boundary with ast-grep (parsing only, never running code) for Python,
+JavaScript, TypeScript/TSX, Go, Rust, Java and Ruby. Its reach is bounded, so a
 distant definition can't swamp the diff. Other languages, and any ast-grep
 failure, fall back to the fixed-line padding.
 
@@ -352,9 +361,9 @@ failures:
 2. The gateway **accepts** JSON-schema mode but returns replies the parser reads
    as empty. This fails silently: `--profile` shows
    `findings: 0 parsed / 0 returned`, the run exits clean, and a capable model
-   looks like one that finds nothing. This was seen with
-   `anthropic/claude-fable-5.1` behind OpenRouter on lgtmaybe 2.3.0 and 2.7.0:
-   the same diff returned 11 findings with this off. If a model is unexpectedly
+   looks like one that finds nothing. We saw this with
+   `anthropic/claude-fable-5.1` behind OpenRouter on lgtmaybe 2.3.0 and 2.7.0.
+   With this off, the same diff returned 11 findings. If a model is unexpectedly
    silent, re-run one diff with `--no-structured-output` before concluding it
    finds nothing.
 
@@ -371,9 +380,9 @@ Default: `true`. CLI: `--no-structured-output`; Action input:
 
 ### reflect
 
-Runs the self-reflection pass, which audits the merged findings and drops the
-ones the model marks low-confidence before anything is posted. It trims false
-positives, so leave it on for most models. Turn it off for a weaker or local
+Runs the [self-reflection](../reference/glossary.md#reflection) pass. It audits the merged findings
+and drops the ones the model marks low-confidence, before anything is posted. It
+trims [false positives](../reference/glossary.md#false-positive), so leave it on for most models. Turn it off for a weaker or local
 model that drops valid findings during the audit.
 
 ```yaml
@@ -383,30 +392,34 @@ reflect: false   # keep every finding; skip the false-positive audit
 Default: `true`. CLI: `--no-reflect`.
 
 To audit a weak reviewer with a stronger model instead of turning the pass off,
-set `reflect_model` (same provider and credentials as `model`). Under the
-`fast` preset, unless you set `reflect_model`, an `anthropic` Sonnet or Opus
-review audits with `claude-haiku-4-5`, and an `openai` GPT-5 review (other than
-a mini or nano model) audits with `gpt-5-mini`. Every other combination audits
-with the review model.
+set `reflect_model`. It uses the same provider and credentials as `model`.
+Under the `fast` preset, unless you set `reflect_model`:
+
+- an `anthropic` Sonnet or Opus review audits with `claude-haiku-4-5`;
+- an `openai` GPT-5 review (other than a mini or nano model) audits with
+  `gpt-5-mini`;
+- every other combination audits with the review model.
 
 ### min_confidence
 
-During reflection, the auditor scores each kept finding from 0 (certainly a
-false positive) to 10 (certainly real) by trying to disprove it against the diff
-and the file text. Findings scored below `min_confidence` are dropped.
+During reflection, the auditor gives each kept finding a
+[confidence](../reference/glossary.md#confidence) score from 0 (certainly a false positive) to 10
+(certainly real). It reaches the score by trying to disprove the finding against
+the diff and the file text. lgtmaybe drops findings scored below
+`min_confidence`.
 
 The score appears in the CLI output, the JSON output and, as a percentage, in
 the posted comment's title next to the lens that raised it:
 `**[HIGH · security · 80%] Title**`. A kept finding with no score always passes
-the threshold, and its comment leaves out the percentage (as every comment does
-with `reflect: false`).
+the threshold. Its comment leaves out the percentage, as every comment does with
+`reflect: false`.
 
 ```yaml
 min_confidence: 5   # drop findings the auditor scores 0-4
 ```
 
-Default: `0`, no numeric filtering; reflection prunes only through its keep/drop
-verdicts. CLI: `--min-confidence`.
+Default: `0`, no numeric filtering. Reflection then prunes only through its
+keep/drop verdicts. CLI: `--min-confidence`.
 
 ### mid_review_retrieval
 
@@ -415,34 +428,41 @@ Lets a review lens ask once for files it can't see.
 By default every lens is told the diff is only a slice of the codebase. If a
 finding depends on unseen code (a guard, a base class, a helper), the lens must
 hedge, lower the severity, or say nothing. That keeps out confident cross-file
-mistakes, but it also hides a real bug whose evidence is one file away.
+mistakes. It also hides a real bug whose evidence is one file away.
 
 With this on, a lens can name the files or symbols it needs alongside its
-findings. lgtmaybe fetches them read-only (the same API or worktree read the
-reflection auditor uses, never a checkout of PR code), redacts them, and re-runs
-that one lens with them. Findings from both calls are kept and de-duplicated,
-so a deferral can only add findings.
+findings. lgtmaybe fetches them read-only, through the same API or worktree read
+the reflection auditor uses, never a checkout of PR code. It
+[redacts](../reference/glossary.md#redaction) them and re-runs that one lens with them. lgtmaybe
+keeps and de-duplicates the findings from both calls, so a deferral can only add
+findings.
 
 ```yaml
 mid_review_retrieval: true   # trade tokens for cross-file recall
 ```
 
 Default: `false`, because it can cost up to one extra model call per batch and
-lens, carrying the fetched text too. The other bounds are fixed: one hop (the
-re-run can't ask again), at most five files within a quarter of
-`max_input_tokens`, and a deferral that arrives past `max_review_seconds` or
-`max_review_tokens` is skipped and reported in the summary. Read
-[Reduce Review Cost](reduce-review-cost.md#what-costs-more-on-purpose) first,
-and set `max_review_tokens` if the worst case matters. CLI:
+lens, carrying the fetched text too. The other bounds are fixed:
+
+- one hop: the re-run can't ask again;
+- at most five files, within a quarter of `max_input_tokens`;
+- a deferral that arrives past `max_review_seconds` or `max_review_tokens` is
+  skipped and reported in the summary.
+
+Read [Reduce Review Cost](reduce-review-cost.md#what-costs-more-on-purpose)
+first, and set `max_review_tokens` if the worst case matters. CLI:
 `--mid-review-retrieval`; Action input: `mid_review_retrieval`.
 
 ### incremental
 
-Commit-scoped review on GitHub. On a re-run, lgtmaybe reads a hidden watermark
-from its own summary comment (the head SHA its last completed review covered)
-and reviews only the commits pushed since, instead of the whole PR. New findings
-post as inline comments. Findings on files outside the increment stay open, and
-only a run that re-reviewed their file can auto-resolve them.
+Commit-scoped review on GitHub, also called
+[incremental review](../reference/glossary.md#incremental-review). On a re-run, lgtmaybe reads a
+hidden [watermark](../reference/glossary.md#watermark) from its own summary comment. The watermark
+is the [head SHA](../reference/glossary.md#head-sha) its last completed review covered. lgtmaybe then
+reviews only the commits pushed since, instead of the whole PR.
+
+New findings post as inline comments. Findings on files outside the increment
+stay open. Only a run that re-reviewed their file can auto-resolve them.
 
 It falls back to a full review when there is no watermark yet, after a
 force-push or rebase, or if the compare call fails. A failed review never moves
@@ -459,22 +479,24 @@ and the local CLI. Action input: `incremental`.
 
 ### static_analysis
 
-Runs fast, deterministic tools over the changed files. Each tool feeds the
+Runs fast, deterministic tools over the changed files
+([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)). Each tool feeds the
 review in one of two modes:
 
 - **`hint`**: the tool's findings become hints the model confirms, puts in
-  context, or discards. This catches mechanical bugs models miss without posting
-  raw linter noise; only findings the model confirms are reported. Default for
-  ruff, bandit, mypy and semgrep.
-- **`finding`**: the tool's findings are posted directly, with no model call.
-  Free and identical run to run. Default for gitleaks, zizmor, ast-grep and
-  osv-scanner.
+  context, or discards. This catches mechanical bugs models miss, without
+  posting raw linter noise. lgtmaybe reports only findings the model confirms.
+  Default for ruff, bandit, mypy and semgrep.
+- **`finding`**: lgtmaybe posts the tool's findings directly, with no model
+  call. This is free and gives the same result every run. Default for gitleaks,
+  zizmor, ast-grep and osv-scanner.
 
-The split follows the tool. A committed credential is either there or not, so
-asking a model to "confirm or discard" a regex match only adds latency and a
-chance of talking itself out of a real hit. A lint or SAST heuristic is often
-technically true and beside the point, which is what a model is good at
-filtering. Override either way with `tool_mode`.
+The split follows the tool. A committed credential is either there or not.
+Asking a model to "confirm or discard" a regex match only adds latency, and a
+chance of talking itself out of a real hit. A lint or SAST (static application
+security testing) heuristic is often technically true and beside the point.
+That is what a model is good at filtering. Override either way with
+`tool_mode`.
 
 | Tool | Checks |
 |---|---|
@@ -503,16 +525,17 @@ Default: `enabled: false`, so no tool ever runs. CLI:
 
 **Installing the tools.** A tool that isn't installed is skipped silently.
 `pip install lgtmaybe[static-analysis]` installs ruff, bandit, mypy, semgrep and
-zizmor, and ast-grep ships with lgtmaybe. gitleaks and osv-scanner are Go
+zizmor. ast-grep ships with lgtmaybe. gitleaks and osv-scanner are Go
 binaries you install separately. The GitHub Action image includes all eight.
 
 **Sandboxing.** The tools run on the already-fetched file texts in a throwaway
-directory (never a checkout, never running PR code), in a subprocess with no
-network, a scrubbed environment and a hard timeout. Their output is treated as
-untrusted: redacted and wrapped before it reaches the model.
+directory. That is never a checkout, and PR code never runs. Each tool runs in a
+subprocess with no network, a scrubbed environment and a hard timeout. lgtmaybe
+treats their output as untrusted: it is redacted and wrapped before it reaches
+the model.
 
-**Direct findings.** Tools read whole files, but only the diff is under review,
-so a finding on a line the PR didn't change is dropped and counted in the
+**Direct findings.** Tools read whole files, but only the diff is under review.
+So lgtmaybe drops a finding on a line the PR didn't change, and counts it in the
 summary. Otherwise a fake credential in a test fixture would post on every PR
 that touches the file. Direct findings are also capped per review, most severe
 first. They carry a `scan:<tool>` category, so `finding_rules` can drop or
@@ -524,17 +547,17 @@ finding_rules:
     action: {drop: true}
 ```
 
-**osv-scanner** answers a question a model can't: whether a pinned dependency
-has a published advisory depends on what was disclosed this week, past any
-model's knowledge cutoff. It reads the manifests and lockfiles the PR changes
-through a scan-only channel that never enters the diff, a prompt or reflection.
-Its findings are about a dependency rather than a line, so they render in the
-review body, and only `high` and `critical` advisories show by default
-(`unanchored_min_severity`).
+**osv-scanner** answers a question a model can't: does a pinned dependency
+have a published advisory? That depends on what was disclosed this week, past
+any model's knowledge cutoff. osv-scanner reads the manifests and lockfiles the
+PR changes through a scan-only channel. That channel never enters the diff, a
+prompt or reflection. Its findings are about a dependency rather than a line, so
+they render in the review body. By default only `high` and `critical`
+advisories show (`unanchored_min_severity`).
 
 It needs a local vulnerability database, since the sandbox has no network. The
 Action image bakes one in at build time. On the CLI, point
-`OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY` at a directory and seed it once from a
+`OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY` at a directory. Then seed it once from a
 project that has your manifests:
 
 ```bash
@@ -542,53 +565,59 @@ export OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY="$HOME/.cache/osv-db"
 osv-scanner scan source --offline-vulnerabilities --download-offline-databases .
 ```
 
-Keep the variable set when you run lgtmaybe; it is the one variable passed into
+Keep the variable set when you run lgtmaybe. It is the one variable passed into
 the sandbox. Without a database the scanner reports nothing, and the review says
 so rather than calling it clean.
 
 **What the model stops being asked.** When osv-scanner posts findings, the
-review prompt no longer asks the model whether a version has a known advisory
-or a package is abandoned, since a knowledge cutoff can't answer either. The
-model keeps deprecated APIs, end-of-life runtimes, typosquats and licence
-conflicts. Likewise, when gitleaks posts findings the model is no longer asked
-for hardcoded secrets: lgtmaybe redacts matched secrets before the diff leaves
-for the provider, so the model couldn't see them anyway, while gitleaks reads
-the unredacted text. Secrets written to a log are a different defect that no
-secret scanner reports, so the model keeps that one. Set either tool to `hint`
-and the model takes those checks back.
+review prompt stops asking the model two things: whether a version has a known
+advisory, and whether a package is abandoned. A knowledge cutoff can't answer
+either. The model keeps deprecated APIs, end-of-life runtimes, typosquats and
+licence conflicts.
+
+Likewise, when gitleaks posts findings, the model is no longer asked for
+hardcoded secrets. lgtmaybe redacts matched secrets before the diff leaves for
+the provider, so the model couldn't see them anyway. gitleaks reads the
+unredacted text. Secrets written to a log are a different defect that no secret
+scanner reports, so the model keeps that one. Set either tool to `hint` and the
+model takes those checks back.
 
 **semgrep** runs out of the box with a small, high-precision MIT rule pack that
-ships with lgtmaybe; `semgrep_rules` replaces it. Rules are always read from a
+ships with lgtmaybe. `semgrep_rules` replaces it. Rules are always read from a
 local path, because semgrep's registry configs need the network. lgtmaybe
-doesn't bundle the well-known semgrep-rules or opengrep-rules collections:
-they are LGPL-2.1 plus a Commons Clause, which an MIT package can't
-redistribute. Point `semgrep_rules` at a fuller pack you have obtained yourself.
+doesn't bundle the well-known semgrep-rules or opengrep-rules collections. They
+are LGPL-2.1 plus a Commons Clause, which an MIT package can't redistribute. Point `semgrep_rules` at a fuller pack you have obtained yourself.
 
-**mypy** catches unguarded `Optional` bugs, such as a `dict.get()` result
-dereferenced without a `None` check, which a review lens reads straight past. It
-runs with `--ignore-missing-imports --follow-imports=skip` because the sandbox
-holds only the changed files, so it reports what it can prove from one file and
-stays quiet about the rest.
+**mypy** catches unguarded `Optional` bugs that a review lens reads straight
+past, such as a `dict.get()` result dereferenced without a `None` check. It runs
+with `--ignore-missing-imports --follow-imports=skip`, because the sandbox holds
+only the changed files. So it reports what it can prove from one file and stays
+quiet about the rest.
 
 ### triage_model
 
 Two-stage routing, so routine PRs don't pay frontier prices while risky ones
 still get the strong model. When set, this cheap model runs first over the
 per-file diffs. It skips files that plainly need no review (pure formatting,
-trivial renames, generated churn) and scores the rest 0-10 by risk. The strong
-`model` then reviews only the survivors, riskiest first. Skipped files are
-listed in the review summary, and `/review full` reviews everything.
+trivial renames, generated churn). It scores the rest 0-10 by risk. The strong
+`model` then reviews only the survivors, riskiest first. The review summary
+lists skipped files, and `/review full` reviews everything.
 
 Some files always go to the strong model, whatever triage says:
-security-relevant paths (auth, crypto, session code, migrations, IaC, CI
-workflows, dependency manifests), patches containing security-relevant tokens,
-files with static-analysis hits, and large hunks. Any triage failure, such as an
-unparseable verdict or a provider error, reviews everything.
+
+- security-relevant paths (auth, crypto, session code, migrations, IaC
+  (infrastructure as code), CI workflows, dependency manifests);
+- patches containing security-relevant tokens;
+- files with static-analysis hits;
+- large hunks.
+
+Any triage failure, such as an unparseable verdict or a provider error, reviews
+everything.
 
 `triage_model`, `model` and `reflect_model` share one provider and set of
 credentials, so pointing them all at one ollama model costs nothing. The
 trade-off is cheaper, faster reviews against the risk of triage under-rating a
-subtle change. The always-review rules bound that risk; for maximum recall,
+subtle change. The always-review rules bound that risk. For maximum recall,
 leave triage off.
 
 ```yaml
@@ -600,16 +629,21 @@ input: `triage_model`.
 
 ### auto_diagram
 
-Posts the change overview as a comment and refreshes it on every push: a
-description of the change, a Risk of Change section, High Impact Areas, a
-Mermaid flowchart of the components the PR touches and, when the change alters
-a run-time flow, a Mermaid sequence diagram. It is one comment, updated in
-place. `/diagram` posts the same overview on demand.
+Posts the change overview as one comment, updated in place on every push. The
+comment holds:
 
-This is the switch for the whole comment. With it off, only the review itself
-is posted automatically. It also stands down when the PR description or another
-comment already has a diagram; the review summary says so, and `/diagram` still
-works.
+- a description of the change;
+- a [Risk of Change](../reference/glossary.md#risk-of-change) section;
+- [High Impact Areas](../reference/glossary.md#high-impact-areas);
+- a Mermaid flowchart of the components the PR touches;
+- a Mermaid sequence diagram, when the change alters a run-time flow.
+
+`/diagram` posts the same overview on demand.
+
+This is the switch for the whole comment. With it off, lgtmaybe posts only the
+review itself automatically. The overview also stands down when the PR
+description or another comment already has a diagram. The review summary says
+so, and `/diagram` still works.
 
 ```yaml
 auto_diagram: false
@@ -620,11 +654,18 @@ Default: `true`. Action input: `auto_diagram`. See
 
 ### auto_describe
 
-Heads the change overview with a structured description: a suggested title, the
-change type, a short summary, a per-file walkthrough table and, when the PR
-states an intent, a "does it do what it says" check. It is its own model call
-and best-effort: a failure leaves a short note in its place and never blocks the
-rest of the comment.
+Heads the change overview with a structured description. It contains:
+
+- a suggested title;
+- the change type;
+- a short summary;
+- a per-file walkthrough table;
+- when the PR states an intent, a "does it do what it says" check.
+
+The description comes from its own model call, one of the overview's calls. It
+is separate from the review's lenses, so this intent check is not the `intent`
+lens. It is best-effort: a failure leaves a short note in its place and never
+blocks the rest of the comment.
 
 Because it rides the overview comment, it refreshes on every push. `/describe`
 posts a description as a separate comment whether or not this is on.
@@ -638,15 +679,15 @@ Default: `true`. Action input: `auto_describe`.
 ### high_impact
 
 Includes the High Impact Areas section in the change overview: changes a
-reviewer must not miss, across ten areas - infrastructure, security posture,
+reviewer must not miss. It covers ten areas: infrastructure, security posture,
 availability (anything that could cause an outage), data migrations, backups
 and recovery, compatibility, observability, dependencies, cost and compliance.
 
-Path patterns ground the model call as untrusted hints and also set a floor on
-its output, so a sensitive file (a `*.tf`, a workflow, a migration, a backup
-policy, a lockfile) is named even when the model says nothing about it. A failed
-call falls back to that floor instead of dropping the section, and an empty
-result says what was checked.
+Path patterns ground the model call as untrusted hints. They also set a floor on
+its output, so a sensitive file is named even when the model says nothing about
+it. Examples are a `*.tf`, a workflow, a migration, a backup policy or a
+lockfile. A failed call falls back to that floor instead of dropping the
+section. An empty result says what was checked.
 
 ```yaml
 high_impact: false
@@ -658,18 +699,21 @@ Default: `true`. Action input: `high_impact`. See
 ### risk
 
 Rates each PR's risk of change as `low`, `medium`, `high` or `critical`, with
-the reasons. It is deterministic and makes no model call. It combines how many
-workspace files import each changed file (Python and TS/JS, via ast-grep), the
-High Impact path signals, the size of the change, and code changed without any
-test changing.
+the reasons. It is deterministic and makes no model call. It combines:
 
-The level and its top reason appear on the review summary line, the change
-overview explains every reason, and a hidden `<!-- lgtmaybe-risk:<level> -->`
+- how many workspace files import each changed file (Python and TS/JS, via
+  ast-grep);
+- the High Impact path signals;
+- the size of the change;
+- code changed without any test changing.
+
+The level and its top reason appear on the review summary line. The change
+overview explains every reason. A hidden `<!-- lgtmaybe-risk:<level> -->`
 marker lets a workflow read it. With `pr_labels` on, the PR also gets a
 `risk/<level>` label.
 
-`core_paths` names modules the importer count can't see as central, such as a
-config loader or a plugin registry. A changed file matching one is at least
+`core_paths` names central modules that the importer count can't recognise as
+central, such as a config loader or a plugin registry. A changed file matching one is at least
 `high`.
 
 ```yaml
@@ -689,15 +733,15 @@ and how to gate on it.
 Adds labels derived from the finished review, with no extra model calls:
 
 - `review-effort/1` to `review-effort/5`: a size estimate from the changed lines.
-- `possible-security-issue`: a high or critical finding was posted by the
-  security lens or by a security scanner (gitleaks, bandit, semgrep, zizmor,
-  osv-scanner).
+- `possible-security-issue`: the security lens or a security scanner
+  (gitleaks, bandit, semgrep, zizmor, osv-scanner) posted a high or critical
+  finding.
 - `consider-splitting`: the diff spans many unrelated top-level directories.
 - `risk/<level>`: the [risk of change](../explanation/risk-of-change.md)
   verdict, when `risk` is on. Only one level is applied at a time.
 
-Labels are reconciled on each run (a stale `review-effort/2` is removed when the
-score changes), and only lgtmaybe's own label families are touched. A labelling
+lgtmaybe reconciles labels on each run: a stale `review-effort/2` is removed
+when the score changes. It touches only its own label families. A labelling
 failure never fails the review.
 
 ```yaml
@@ -708,9 +752,9 @@ Default: `false`. Action input: `pr_labels`.
 
 ### finding_rules
 
-Declarative rules applied to findings just before posting. Rules can only drop
-or re-grade findings; no user code runs. Each rule has a `match` (every field
-given must match) and an `action`, and rules apply in order.
+Declarative rules applied to findings right before posting. Rules can only drop
+or re-grade findings. No user code runs. Each rule has a `match` (every field
+given must match) and an `action`. Rules apply in order.
 
 Match fields:
 
@@ -736,12 +780,18 @@ Default: no rules.
 
 ### summary_template
 
-A custom template for the review summary line. Placeholders: `{count}`
-(findings posted), `{provider}`, `{model}`, `{version}` (the lgtmaybe release
-that produced the review), `{risk}` (the risk segment, empty when `risk` is
-off) and `{temperature}` (`temperature not sent` when the model's route dropped
-the configured temperature, so the review may not be reproducible; empty
-otherwise). A template that fails to format falls back to the built-in line.
+A custom template for the review summary line. Placeholders:
+
+- `{count}`: findings posted
+- `{provider}`
+- `{model}`
+- `{version}`: the lgtmaybe release that produced the review
+- `{risk}`: the risk segment, empty when `risk` is off
+- `{temperature}`: `temperature not sent` when the model's route dropped the
+  configured temperature, so the review may not be reproducible; empty
+  otherwise
+
+A template that fails to format falls back to the built-in line.
 
 ```yaml
 summary_template: "🤖 {count} finding(s) · {model} · lgtmaybe {version}"
@@ -756,26 +806,34 @@ Default: unset, which uses the built-in
 
 ### resolve_fixed
 
-Resolves a review conversation once its finding is fixed. On a re-run, when a
-finding lgtmaybe raised is no longer produced and GitHub marks its thread
-outdated (the code under it changed), lgtmaybe replies `✅ Looks resolved.` and
-resolves the conversation. Both conditions must hold, so a thread is never
-closed just because nearby lines moved. Set it to `false` to resolve
-conversations by hand.
+Resolves a review conversation once its finding is fixed. On a re-run, two
+conditions must both hold:
 
-GitHub resolves threads through its GraphQL API; the default `GITHUB_TOKEN` with
-`pull-requests: write`, which posting already needs, is enough. The public
+- a finding lgtmaybe raised is no longer produced;
+- GitHub marks its thread outdated (the code under it changed).
+
+lgtmaybe then replies `✅ Looks resolved.` and resolves the conversation.
+Because both must hold, a thread is never closed only because nearby lines
+moved. Set it to `false` to resolve conversations by hand.
+
+GitHub resolves threads through its GraphQL API. The default `GITHUB_TOKEN`
+with `pull-requests: write`, which posting already needs, is enough. The public
 `lgtmaybe[bot]` App cannot resolve threads, so under `github_identity: lgtmaybe`
 they stay open (see
 [What the public App cannot do](use-as-github-action.md#what-the-public-app-cannot-do)).
-GitLab has no
-"outdated" signal, so there lgtmaybe resolves only threads its re-run validated
-as fixed. Azure DevOps has no "outdated" signal either, so lgtmaybe compares
-the file at the iteration it posted the thread against the file now. It marks
-the thread *Resolved* only when the finding is no longer reported **and** the
-flagged line changed, and never after a run that failed or finished only
-partly. Gitea's API can't resolve
-threads, and the local CLI has no conversations, so both ignore this.
+
+Other [forges](../reference/glossary.md#forge) (code hosts) work differently:
+
+- GitLab has no "outdated" signal, so there lgtmaybe resolves only threads its
+  re-run validated as fixed.
+- Azure DevOps has no "outdated" signal either. lgtmaybe compares the file at
+  the iteration where it posted the thread against the file now. It marks the
+  thread *Resolved* only when the finding is no longer reported **and** the
+  flagged line changed. It never does so after a run that failed or finished
+  only partly.
+- Gitea's API can't resolve threads, so Gitea ignores this setting.
+
+The local CLI has no conversations, so it ignores this setting too.
 
 ```yaml
 resolve_fixed: false   # leave fixed conversations open for manual resolution
@@ -787,10 +845,10 @@ Default: `true`. Action input: `resolve_fixed`.
 
 Your own review lenses, run alongside the built-in categories. Each one runs as
 its own focused model call, and its findings merge into the same review. A lens
-needs an `id` (unique, not a built-in category name, and not starting with
-`scan:`) and `instructions`. A `title` and a worked example (`example_diff` and
-`example_finding`, supplied together) are optional, but the example noticeably
-improves a small model's output.
+needs an `id` and `instructions`. The `id` must be unique, must not be a
+built-in category name, and must not start with `scan:`. A `title` and a worked
+example (`example_diff` and `example_finding`, supplied together) are optional.
+The example noticeably improves a small model's output.
 
 ```yaml
 extra_lenses:
@@ -817,7 +875,7 @@ extra_lenses:
       suggestion: "    return user.name"
 ```
 
-Lens text reaches the model as trusted instructions, so define lenses only in
+Lens text reaches the model as trusted instructions. So define lenses only in
 files you control (the committed `.lgtmaybe.yml` or repo skill files), never
 from PR-author content. See [Add a custom review lens](add-a-custom-lens.md)
 for a walkthrough.
@@ -826,10 +884,14 @@ Default: none.
 
 ### lens_paths
 
-Loads `extra_lenses` from separate skill files instead of inlining them, which
+Loads `extra_lenses` from separate skill files instead of inlining them. This
 helps when sharing a lens across repos or wiring lgtmaybe into an agent harness.
-Each entry is a YAML file (one lens or a list of lenses), a directory of `*.yml`
-/ `*.yaml` lens files, or `pack:<name>` for a lens pack bundled with lgtmaybe.
+Each entry is one of:
+
+- a YAML file (one lens or a list of lenses);
+- a directory of `*.yml` / `*.yaml` lens files;
+- `pack:<name>` for a [lens pack](../reference/glossary.md#lens-pack) bundled with lgtmaybe.
+
 Paths resolve relative to where lgtmaybe runs (your repo root). Loaded lenses
 are appended to any inline `extra_lenses`.
 
@@ -846,11 +908,14 @@ Default: none. See
 ### directory_rules
 
 Scopes extra review instructions and reference files to part of the repo, for
-when `payments/**` and `tests/**` deserve different treatment. Each rule has
-`paths` (globs; a `**/` prefix also matches at the repo root, and an empty or
-missing list applies the rule everywhere), free-text `instructions`, and
-`context_files` read from the checked-out workspace. A rule reaches every lens
-call whose batch contains a file it matches.
+when `payments/**` and `tests/**` deserve different treatment. Each rule has:
+
+- `paths`: globs. A `**/` prefix also matches at the repo root. An empty or
+  missing list applies the rule everywhere.
+- `instructions`: free text.
+- `context_files`: files read from the checked-out workspace.
+
+A rule reaches every lens call whose batch contains a file it matches.
 
 ```yaml
 directory_rules:
@@ -869,8 +934,8 @@ directory_rules:
     context_files: [ARCHITECTURE.md]
 ```
 
-Context files are redacted like the diff, share an eighth of
-`max_input_tokens`, and are capped at five files per review. A missing or
+Context files are redacted like the diff and share an eighth of
+`max_input_tokens`. They are capped at five files per review. A missing or
 over-budget file is skipped silently. Instructions and context are trusted
 config: on `pull_request_target` they come from the base branch, never the PR
 head. See
@@ -902,13 +967,14 @@ project:
 | `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](#risk), with a `regulated workload` reason | Rate data handling, auditability, access control and personal-data exposure one severity step higher where the domain makes them material |
 
 All three fields also add one short paragraph to the system prompt every lens
-shares, so with prompt caching it is paid for once per run rather than per lens.
+shares. With [prompt caching](../reference/glossary.md#prompt-cache), that paragraph is paid for once
+per run rather than per lens.
 Leave the block out and the prompt is unchanged. Like `directory_rules`, this is
 trusted config, read from the base branch on `pull_request_target`.
 
 lgtmaybe doesn't read `AGENTS.md`, `CLAUDE.md` or `SOUL.md` for this. Those
-files are written for coding agents, most of their text is noise to a reviewer,
-and the larger ones don't fit the context-file budget. To put one in front of
+files are written for coding agents, and most of their text is noise to a
+reviewer. The larger ones don't fit the context-file budget either. To put one in front of
 the reviewer anyway, name it in a `directory_rules` entry's `context_files`.
 
 Default: no profile.
@@ -930,8 +996,9 @@ lgtmaybe review \
   --min-severity high
 ```
 
-Most single-value settings have a flag; run `lgtmaybe review --help-all` for
-the list (`--help` alone shows only the everyday ones). List and nested settings are YAML-only: `include_paths`, `exclude_paths`,
+Most single-value settings have a flag. Run `lgtmaybe review --help-all` for
+the list (`--help` alone shows only the everyday ones). List and nested settings
+are YAML-only: `include_paths`, `exclude_paths`,
 `categories`, `finding_rules`, `extra_lenses`, `lens_paths`, `directory_rules`,
 `project`, `spec_paths`, `risk.core_paths` and the `static_analysis` sub-keys.
 The `--static-analysis` and `--risk` flags switch those features on or off and

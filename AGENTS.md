@@ -243,9 +243,13 @@ docstrings.
   bypasses triage and incremental scoping. All model slots share one provider
   and credentials.
 - **Static analysis** (`engine/static_analysis.py`, `static_analysis.enabled`,
-  default off, `lgtmaybe[static-analysis]` extra): output becomes an untrusted
-  hints block only. **Raw tool findings are never posted.** A missing tool is
-  skipped.
+  default off, `lgtmaybe[static-analysis]` extra): each tool runs in `hint` or
+  `finding` mode (`static_analysis.tool_mode`; defaults in `_DEFAULT_MODE`).
+  `hint` tools (ruff, bandit, mypy, semgrep) become an untrusted HINTS block
+  the model confirms or discards; `finding` tools (gitleaks, zizmor, ast-grep,
+  osv-scanner) skip the model and post directly, because their claims are true
+  or false with no interpretation. **Tool output is always redacted and never
+  posted verbatim.** A missing tool is skipped.
 
 **Lenses**
 

@@ -5,10 +5,11 @@ description: Tell lgtmaybe what kind of project it is reviewing with the project
 # Calibrate Reviews to Your Project
 
 A weekend prototype and a regulated payments service shouldn't get the same
-review. The prototype doesn't need to hear about missing metrics, and the
-payments service shouldn't have an access-control slip rated as a minor issue.
+review. The prototype doesn't need to hear about missing metrics. The payments
+service shouldn't have an access-control slip rated as a minor issue.
+
 The `project` block tells the reviewer which kind of repository it is looking
-at, and lgtmaybe adjusts both its defaults and the model's guidance to match.
+at. lgtmaybe then adjusts both its defaults and the model's guidance to match.
 
 ## Contents
 
@@ -51,28 +52,33 @@ Every field is optional. Leave the block out and the review is unchanged.
 | `production` | none | Hold the change to the standard review bar. |
 | `regulated` | Any PR that isn't only docs and tests is at least `medium` [risk](../explanation/risk-of-change.md), with a "regulated workload" reason | Where the domain makes them material, rate data handling, auditability, access control and personal-data exposure one severity step higher. |
 
-`production` changes no settings. It lets a team state the stage explicitly,
-and gives the guidance paragraph a stage to name alongside `domain` and
+`production` changes no settings. It lets a team state the stage explicitly. It
+also gives the guidance paragraph a stage to name alongside `domain` and
 `notes`.
 
 The `regulated` risk floor stops at `medium` on purpose. Two distinct `high`
-reasons make a change `critical`, so a `high` floor would turn every change to a
+reasons make a change `critical`. So a `high` floor would turn every change to a
 widely imported module into `critical`. A PR that only touches documentation
 and tests stays `low` in any stage.
 
 ## Add Domain and Notes
 
 `domain` and `notes` give the model context it can't infer from a diff. Keep
-`notes` to what changes how a finding should be judged: where the sensitive
-code lives, which paths are hot, what the team has decided not to care about.
-For instructions that only apply to part of the repo, use
-[`directory_rules`](scope-review-instructions-to-a-directory.md) instead, which
-reaches only the lenses reviewing matching files.
+`notes` to what changes how a finding should be judged:
+
+- where the sensitive code lives;
+- which paths are hot;
+- what the team has decided not to care about.
+
+Some instructions only apply to part of the repo. For those, use
+[`directory_rules`](scope-review-instructions-to-a-directory.md) instead. It
+reaches only the [lenses](../reference/glossary.md#lens) reviewing matching
+files.
 
 ## What Your Settings Still Control
 
-A stage only moves defaults. A value you set yourself always wins, whether it
-comes from `.lgtmaybe.yml`, the user config or a CLI flag:
+A stage only moves defaults. A value you set yourself always wins. It can come
+from `.lgtmaybe.yml`, the user config or a CLI flag:
 
 ```yaml
 project:
@@ -100,32 +106,37 @@ Domain: payments.
 Notes from the maintainers: PCI-scoped card flows live under payments/. ...
 ```
 
-Because it sits in the shared prompt, providers with prompt caching pay for it
-once per run rather than once per lens. Only the review lenses see it: the
-reflection pass and the change overview (description, High Impact Areas and
-diagrams) do not.
+It sits in the shared prompt. So providers with
+[prompt caching](../reference/glossary.md#prompt-cache) pay for it once per run
+rather than once per lens.
 
-The stage's settings changes are deterministic. Whether the guidance paragraph
-shifts the severities a given model reports depends on the model, and isn't
-measured by the eval harness yet.
+Only the review lenses see it. The
+[reflection](../reference/glossary.md#reflection) pass does not. Nor does the
+[change overview](../reference/glossary.md#change-overview): its description,
+[High Impact Areas](../reference/glossary.md#high-impact-areas) and
+diagrams.
+
+The stage's settings changes are deterministic. The guidance paragraph may or
+may not shift the severities a given model reports. That depends on the model,
+and the eval harness doesn't measure it yet.
 
 ## Why Not Read AGENTS.md?
 
-Many repositories already have an `AGENTS.md`, `CLAUDE.md` or `SOUL.md`, and
-reading one automatically looks like a shortcut. lgtmaybe deliberately doesn't,
+Many repositories already have an `AGENTS.md`, `CLAUDE.md` or `SOUL.md`.
+Reading one automatically looks like a shortcut. lgtmaybe deliberately doesn't,
 for three reasons:
 
 - Those files are written for coding agents: build commands, test runners,
   style rules, personas. Little of it tells a reviewer how strict to be, and
   all of it costs tokens on every call.
 - Context files share an eighth of `max_input_tokens` (12,500 tokens at the
-  default of 100,000), and a file over budget is skipped whole. The repositories
+  default of 100,000). A file over budget is skipped whole. The repositories
   with the most thorough agent docs are the ones whose file wouldn't fit.
 - A stage maps to settings changes that behave the same way every run. Free
   prose can't do that.
 
-If you want one of those files in front of the reviewer anyway, name it in a
-`directory_rules` entry with no `paths`, which applies everywhere:
+You may want one of those files in front of the reviewer anyway. Then name it
+in a `directory_rules` entry with no `paths`, which applies everywhere:
 
 ```yaml
 directory_rules:
@@ -134,10 +145,11 @@ directory_rules:
 
 ## Security: the Profile Is Trusted Configuration
 
-The paragraph enters the system prompt as trusted content, so it must never come
+The paragraph enters the system prompt as trusted content. So it must never come
 from a pull request's author. On the recommended `pull_request_target` trigger,
 `.lgtmaybe.yml` is read from the checked-out base branch, never the PR head.
-lgtmaybe still neutralises prompt delimiters in `notes` and `domain`, so nothing
+
+lgtmaybe still neutralises prompt delimiters in `notes` and `domain`. So nothing
 in them can close a prompt block early.
 
 ## See Also
