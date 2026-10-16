@@ -108,10 +108,12 @@ def local_pr_context(
             diff += _untracked_patches(cwd, untracked)
             changed_files += untracked
 
-    # Working-tree text for the changed files. Static analysis has never run on
-    # the local CLI because nothing populated these; the reader is the same
-    # traversal-guarded one reflection already uses.
-    read = local_file_reader(cwd)
+    # Head text for the changed files. Branch mode reviews base...HEAD, so its
+    # text is HEAD's blob: reading the working tree instead would mix
+    # uncommitted edits into the context expansion and every anchor, garbling
+    # the code the model sees. --working/--uncommitted review the worktree, so
+    # they keep the traversal-guarded working-tree reader reflection uses.
+    read = local_file_reader(cwd) if working or uncommitted else local_head_file_reader(cwd)
     file_contents: dict[str, str] = {}
     scan_contents: dict[str, str] = {}
     for path in changed_files:
@@ -161,6 +163,24 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
             target.relative_to(root)  # refuse paths that climb out of the repo
             return target.read_text(encoding="utf-8", errors="replace")
         except (OSError, ValueError):
+            return None
+
+    return read
+
+
+def local_head_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
+    """A HEAD-blob file reader: the text at HEAD, not the working tree's.
+
+    Same interface as ``local_file_reader``, but the blob comes from
+    ``git show HEAD:<path>``, so branch mode serves the exact text its
+    ``base...HEAD`` diff describes. A path HEAD does not hold (a file the
+    branch deletes, an untracked one) reads as None, like a missing file.
+    """
+
+    def read(path: str) -> str | None:
+        try:
+            return _git(cwd, "show", f"HEAD:{path}")
+        except ValueError:
             return None
 
     return read
