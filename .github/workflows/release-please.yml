@@ -75,7 +75,8 @@ jobs:
     permissions:
       contents: write # edit the release notes
     steps:
-      - uses: actions/checkout@v7
+      # Pinned, like homebrew.yml's token-bearing checkout: this job writes.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0 # every tag, to find the previous release's
       - name: Append contributors to the release notes

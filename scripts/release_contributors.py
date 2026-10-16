@@ -22,7 +22,10 @@ MARKER = "<!-- lgtmaybe-contributors -->"
 
 # GitHub's generated lines: "* <title> by @<login> in <url>" and, under
 # "## New Contributors", "* @<login> made their first contribution in <url>".
-_AUTHOR = re.compile(r" by @(?P<login>[A-Za-z0-9-]+(?:\[bot\])?) in https://")
+# Anchored to the line end: the title before it is author-written and may
+# itself contain "by @someone in https://", which must not credit (or ping)
+# anyone. GitHub always appends the real author last.
+_AUTHOR = re.compile(r" by @(?P<login>[A-Za-z0-9-]+(?:\[bot\])?) in https://\S+\s*$")
 _FIRST = re.compile(r"^\* @(?P<login>[A-Za-z0-9-]+(?:\[bot\])?) made their first contribution")
 # Automation accounts that open PRs without a `[bot]` suffix in the login.
 _BOT_LOGINS = {"dependabot", "renovate", "github-actions", "release-please"}
@@ -41,10 +44,9 @@ def contributors(generated: str) -> tuple[list[str], list[str]]:
             if first["login"] not in first_timers:
                 first_timers.append(first["login"])
             continue
-        for match in _AUTHOR.finditer(line):
-            login = match["login"]
-            if not _is_bot(login) and login not in people:
-                people.append(login)
+        if (match := _AUTHOR.search(line)) and not _is_bot(match["login"]):
+            if match["login"] not in people:
+                people.append(match["login"])
     return people, first_timers
 
 
@@ -68,7 +70,7 @@ def with_contributors(body: str, generated: str) -> str:
     base = body.split(MARKER, 1)[0].rstrip() if MARKER in body else body.rstrip()
     people, first_timers = contributors(generated)
     if not people:
-        return base
+        return f"{base}\n"
     return f"{base}\n\n{_section(people, first_timers)}\n"
 
 
