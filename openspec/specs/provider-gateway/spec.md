@@ -69,6 +69,23 @@ this provider" message.
 - **WHEN** no key is supplied and `DefaultAzureCredential` finds no credential
 - **THEN** the run fails at start-up with the keyless guidance and the SDK's detail
 
+### Requirement: A subscription sign-in is used, never started, by a review
+
+The `chatgpt` provider SHALL use the sign-in `lgtmaybe login chatgpt` stored in
+litellm's token file, and a review MUST never start litellm's device-code
+prompt: it prints to stdout (breaking MCP stdio and `--format json`) and polls
+in every lens call. The resolver SHALL renew the sign-in once before the
+fan-out, and fail at start-up naming the login command when it cannot.
+<!-- anchor: provider.subscription-sign-in -->
+
+#### Scenario: no stored sign-in
+- **WHEN** `--provider chatgpt` runs with no token file, as on a CI runner
+- **THEN** it fails at start-up naming `lgtmaybe login chatgpt` and the path read
+
+#### Scenario: the refresh token is revoked
+- **WHEN** litellm cannot renew the stored sign-in
+- **THEN** the run fails with the login command and nothing is printed to stdout
+
 ### Requirement: Completion calls retry, fall back, cache, and time out
 
 `LiteLLMProvider.complete` SHALL enforce the configured request timeout at the

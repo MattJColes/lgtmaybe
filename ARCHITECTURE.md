@@ -132,6 +132,7 @@ backends, each with its own native auth (resolved by the credential chain in
 | `anthropic`  | `anthropic/`   | API key (`--api-key` / `ANTHROPIC_API_KEY`)                       |
 | `openrouter` | `openrouter/`  | API key (`--api-key` / `OPENROUTER_API_KEY`)                      |
 | `zai`        | `zai/`         | API key (`--api-key` / `ZAI_API_KEY`); optional `api_base` for the China / coding-plan endpoint |
+| `chatgpt`    | `chatgpt/`     | ChatGPT Plus/Pro subscription: an OAuth token from `lgtmaybe login chatgpt`, stored and refreshed by litellm; local only |
 | `bedrock`    | `bedrock/`     | **ambient AWS creds** (GitHub OIDC role or local `~/.aws`) — no static key |
 | `vertex`     | `vertex_ai/`   | **ambient GCP creds** (Workload Identity Federation or local ADC) — no static key |
 | `azure`      | `azure/`       | API key **or** keyless Azure AD/Entra token (OIDC); needs the resource endpoint |

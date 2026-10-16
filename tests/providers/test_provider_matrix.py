@@ -37,6 +37,8 @@ EXPECTED_PREFIX: dict[Provider, str] = {
     Provider.openai_compatible: "openai/",
     # GLM / Zhipu AI rides litellm's native zai/ route.
     Provider.zai: "zai/",
+    # A ChatGPT Plus/Pro subscription on litellm's chatgpt/ (Codex backend) route.
+    Provider.chatgpt: "chatgpt/",
 }
 
 # Providers that authenticate with an API key, and the env var that supplies it.
@@ -55,6 +57,8 @@ HYBRID_PROVIDERS = (Provider.azure,)
 # Custom endpoint: always needs an api_base; the key is optional (placeholder
 # sent for keyless local servers).
 ENDPOINT_PROVIDERS = (Provider.openai_compatible,)
+# Subscription sign-in: a stored OAuth token from `lgtmaybe login`, no key.
+SUBSCRIPTION_PROVIDERS = (Provider.chatgpt,)
 
 
 def test_every_provider_is_classified_exactly_once() -> None:
@@ -70,6 +74,7 @@ def test_every_provider_is_classified_exactly_once() -> None:
         set(NO_AUTH_PROVIDERS),
         set(HYBRID_PROVIDERS),
         set(ENDPOINT_PROVIDERS),
+        set(SUBSCRIPTION_PROVIDERS),
     ]
     union = set().union(*auth_classes)
     assert union == set(Provider)
@@ -268,6 +273,7 @@ _SCHEMA_MODELS: dict[Provider, str] = {
     Provider.ollama: "qwen3:8b",
     Provider.openai_compatible: "my-local-model",
     Provider.zai: "glm-4.6",
+    Provider.chatgpt: "gpt-5.5",
 }
 
 # The request-shape keys under which a route carries a structured-output
@@ -298,7 +304,16 @@ def test_the_schema_survives_litellm_translation(provider: Provider) -> None:
     while the adapter reported enforcement was on. This runs the real
     translation on the adapter's real kwargs, offline, for every provider.
     """
+    import os
+    from pathlib import Path
+
     import litellm
+
+    if provider in SUBSCRIPTION_PROVIDERS:
+        from tests.providers.test_chatgpt import _write_token
+
+        # litellm resolves this route's provider by reading the stored sign-in.
+        _write_token(Path(os.environ["CHATGPT_TOKEN_DIR"]))
 
     built = build_provider(
         provider,

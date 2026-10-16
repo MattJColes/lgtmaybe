@@ -46,3 +46,17 @@ gitea.forgejo-workflow:
     has: { field: key, regex: '^runs-on$' }
   language: yaml
   files: [examples/forgejo/lgtmaybe.yml]
+
+gitea.forgejo-event-env:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_actions_env$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+gitea.forgejo-comment-concurrency:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^concurrency$' }
+  language: yaml
+  files: [examples/forgejo/lgtmaybe.yml]
+

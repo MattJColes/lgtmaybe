@@ -89,6 +89,7 @@ See the [Changelog](https://lgtmaybe.coles.codes/changelog/) for every release.
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
 | `zai` | `ZAI_API_KEY` for GLM / Zhipu AI; optional `--api-base` for the China / coding-plan endpoint |
+| `chatgpt` | A ChatGPT Plus or Pro subscription, signed in with `lgtmaybe login chatgpt`; local reviews only |
 | `bedrock` | Ambient AWS creds via GitHub OIDC, no static key |
 | `vertex` | Ambient GCP creds via Workload Identity Federation, no key |
 | `azure` | Resource endpoint, plus `AZURE_API_KEY` or keyless Entra (Azure AD) creds via GitHub OIDC |
@@ -445,6 +446,7 @@ API-key and local provider:
 | Providers | Covered by base install? |
 |---|---|
 | `openai`, `anthropic`, `openrouter`, `zai`: set the provider's API key in your environment | ✅ Yes |
+| `chatgpt`: run `lgtmaybe login chatgpt` once to sign in with a ChatGPT subscription | ✅ Yes |
 | `ollama`, `openai-compatible`: point `--api-base` at the server (local, or a hosted OpenAI-compatible API) | ✅ Yes |
 | `bedrock`, `vertex`, `azure`: keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
@@ -679,6 +681,7 @@ through the [CLI](run-locally.md) rather than a posting workflow.
 - [Keyless cloud workflows](#keyless-cloud-workflows)
 - [Action inputs](#action-inputs)
 - [Gate merges on findings](#gate-merges-on-findings)
+- [Review stacked pull requests](#review-stacked-pull-requests)
 - [Adding a config file](#adding-a-config-file)
 - [Pin to a specific version](#pin-to-a-specific-version)
 - [On another code host](#on-another-code-host)
@@ -812,7 +815,7 @@ What each part does:
 - `on:` runs the job when a PR is opened, reopened, pushed to or moved onto
   another base branch (`pull_request_target`), and when someone posts a comment
   (`issue_comment`). The move matters for
-  [stacked pull requests](review-stacked-pull-requests.md). The `edited` event
+  [stacked pull requests](#review-stacked-pull-requests). The `edited` event
   also fires for a new title or description, so the `if:` below skips any edit
   that leaves the base branch alone.
 - `permissions:` lets the job read the repository and write review comments on
@@ -1049,6 +1052,113 @@ Both work under the default `actions` identity (with `pull-requests: write` in
 the workflow `permissions:` block) or a self-managed App holding the matching
 permission. Set `resolve_fixed: false` to stop attempting it.
 
+## Review Stacked Pull Requests
+
+A stack is a chain of small pull requests, each built on the one below it. You
+review and merge them from the bottom up. GitHub supports stacks natively, and
+tools such as Graphite, ghstack and git-town build them from ordinary branches.
+
+Each pull request in a stack shows only its own changes: its layer. lgtmaybe
+reviews that layer and nothing else. It also knows where the layer sits, so its
+findings make sense for one part of a bigger change.
+
+Stack support is GitHub only. On GitLab, Gitea and Azure DevOps, each pull or
+merge request is reviewed on its own, with no stack context.
+
+### What lgtmaybe Does With a Stack
+
+**It tells the model about the stack.** Every
+[lens](../reference/glossary.md#lens) learns the layer's position, such as
+"layer 2 of 3", and the branch the stack lands on. It also gets the number,
+title and changed files of every other open layer. Code this layer uses may
+come from a layer below, and a gap it leaves may be filled by a layer above.
+Knowing that, the model hedges such claims instead of reporting them as bugs.
+The review summary names the layer too.
+
+The other layers' titles and paths are handled like the diff. They are
+[redacted](../reference/glossary.md#redaction) before they leave, and the model
+is told they are data, not instructions. lgtmaybe names at most eight layers on
+each side.
+
+**It skips a rebase that changes nothing.** When a lower pull request merges,
+GitHub rebases every pull request above it. Each one gets a new commit, but its
+diff is the same. lgtmaybe stamps a fingerprint of the whole diff next to its
+[watermark](../reference/glossary.md#watermark). When a new commit's diff
+matches it, the run stops without calling the model or posting anything.
+
+The fingerprint ignores line numbers and blob ids, which a rebase moves. Any
+change to an added, removed or surrounding line still counts, so that layer is
+reviewed again. The skip is part of
+[incremental review](../reference/glossary.md#incremental-review), which is on
+by default for pushes.
+
+**It reviews a retargeted pull request.** Tools that chain branches move a pull
+request onto its parent's base when the parent merges. GitHub reports that as
+an `edited` event that changes the base. The head commit stays the same, but
+the diff changes. lgtmaybe runs a full review and refreshes the change
+overview. Any other edit, such as a new title, runs nothing.
+
+### How It Finds the Stack
+
+GitHub's native stacks put a `stack` object on each pull request. lgtmaybe
+reads it, then lists the layers through GitHub's stacks API.
+
+Without that object, lgtmaybe follows branch names. When the pull request's base
+is not the default branch, it looks for the open pull request whose head is that
+base, and repeats downwards. It then looks for open pull requests based on this
+one's head, and repeats upwards. A step with more than one match ends the walk
+on that side. Only branches in the same repository count, so a pull request from
+a fork is never walked.
+
+When the walk stops early, at the eight-layer cap, an ambiguous step or a branch
+it has already seen, lgtmaybe cannot know the layer's exact position. It then
+tells the model, and the summary, only that the stack has at least that many
+pull requests.
+
+The lookup is best effort. If it fails, the review runs without stack context
+and the failure is logged.
+
+### Set Up the Workflow for Stacks
+
+The [minimal workflow](#minimal-workflow-openai) and the starter workflows in
+[`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows)
+already listen for the events a stack needs. If you wrote your own workflow,
+add `edited` to the trigger:
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+```
+
+Then skip the edits that leave the base alone. Add the middle line below to the
+`pull_request_target` arm of your job's `if:`, and keep the rest as it is:
+
+```yaml
+      (github.event_name == 'pull_request_target' &&
+       (github.event.action != 'edited' || github.event.changes.base) &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+```
+
+If your workflow sets `concurrency` at the top level, give those edits a group
+of their own. Otherwise a title edit joins the review's group, and
+`cancel-in-progress` cancels the running review. The minimal workflow shows how.
+
+Every layer runs its own review, so a stack of five pull requests costs five
+reviews. The rebase skip keeps the repeat cost down when lower layers merge.
+
+### Review a Stacked Branch Locally
+
+`lgtmaybe review` compares your branch with the repository's main branch. On a
+stacked branch, that includes every layer below yours. Pass the parent branch
+to review only your layer:
+
+```bash
+lgtmaybe review --base feature-a
+```
+
+The CLI does not find the parent branch for you.
+
 ## Adding a Config File
 
 Place a `.lgtmaybe.yml` at the repo root to control severity thresholds, path
@@ -1231,137 +1341,6 @@ revokes it at the end of the job. To review across repositories, set
 
 Do not combine `app_id` / `app_private_key` with
 `github_identity: lgtmaybe`. The Action checks this before minting a token.
-
----
-
-<!-- Source: https://lgtmaybe.coles.codes/how-to/review-stacked-pull-requests/ -->
-
-# Review Stacked Pull Requests
-
-A stack is a chain of small pull requests, each built on the one below it. You
-review and merge them from the bottom up. GitHub supports stacks natively, and
-tools such as Graphite, ghstack and git-town build them from ordinary branches.
-
-lgtmaybe reviews each pull request in a stack on its own. It also knows where
-that pull request sits, so its findings make sense for one layer of a bigger
-change.
-
-## Contents
-
-- [What lgtmaybe Does](#what-lgtmaybe-does)
-- [How It Finds the Stack](#how-it-finds-the-stack)
-- [Set Up the Workflow](#set-up-the-workflow)
-- [Review a Stacked Branch Locally](#review-a-stacked-branch-locally)
-- [Other Code Hosts](#other-code-hosts)
-- [See Also](#see-also)
-
-## What lgtmaybe Does
-
-Each pull request in a stack shows only its own changes: its layer. lgtmaybe
-reviews that layer and nothing else. On GitHub it adds three things.
-
-**It tells the model about the stack.** Every
-[lens](../reference/glossary.md#lens) learns the layer's position, such as
-"layer 2 of 3", and the branch the stack lands on. It also gets the number,
-title and changed files of every other open layer. Code this layer uses may
-come from a layer below, and a gap it leaves may be filled by a layer above.
-Knowing that, the model hedges such claims instead of reporting them as bugs.
-The review summary names the layer too.
-
-The other layers' titles and paths are handled like the diff. They are
-[redacted](../reference/glossary.md#redaction) before they leave, and the model
-is told they are data, not instructions. lgtmaybe names at most eight layers on
-each side.
-
-**It skips a rebase that changes nothing.** When a lower pull request merges,
-GitHub rebases every pull request above it. Each one gets a new commit, but its
-diff is the same. lgtmaybe stamps a fingerprint of the whole diff next to its
-[watermark](../reference/glossary.md#watermark). When a new commit's diff
-matches it, the run stops without calling the model or posting anything.
-
-The fingerprint ignores line numbers and blob ids, which a rebase moves. Any
-change to an added, removed or surrounding line still counts, so that layer is
-reviewed again. The skip is part of
-[incremental review](../reference/glossary.md#incremental-review), which is on
-by default for pushes.
-
-**It reviews a retargeted pull request.** Tools that chain branches move a pull
-request onto its parent's base when the parent merges. GitHub reports that as
-an `edited` event that changes the base. The head commit stays the same, but
-the diff changes. lgtmaybe runs a full review and refreshes the change
-overview. Any other edit, such as a new title, runs nothing.
-
-## How It Finds the Stack
-
-GitHub's native stacks put a `stack` object on each pull request. lgtmaybe
-reads it, then lists the layers through GitHub's stacks API.
-
-Without that object, lgtmaybe follows branch names. When the pull request's base
-is not the default branch, it looks for the open pull request whose head is that
-base, and repeats downwards. It then looks for open pull requests based on this
-one's head, and repeats upwards. A step with more than one match ends the walk
-on that side. Only branches in the same repository count, so a pull request from
-a fork is never walked.
-
-When the walk stops early, at the eight-layer cap, an ambiguous step or a branch
-it has already seen, lgtmaybe cannot know the layer's exact position. It then
-tells the model, and the summary, only that the stack has at least that many
-pull requests.
-
-The lookup is best effort. If it fails, the review runs without stack context
-and the failure is logged.
-
-## Set Up the Workflow
-
-The starter workflows in
-[`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows)
-already listen for the events a stack needs. If you wrote your own workflow,
-add `edited` to the trigger:
-
-```yaml
-on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, edited]
-```
-
-Then skip the edits that leave the base alone. Add the middle line below to the
-`pull_request_target` arm of your job's `if:`, and keep the rest as it is:
-
-```yaml
-      (github.event_name == 'pull_request_target' &&
-       (github.event.action != 'edited' || github.event.changes.base) &&
-       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
-```
-
-If your workflow sets `concurrency` at the top level, give those edits a group
-of their own. Otherwise a title edit joins the review's group, and
-`cancel-in-progress` cancels the running review. The starter workflows show how.
-
-Every layer runs its own review, so a stack of five pull requests costs five
-reviews. The rebase skip keeps the repeat cost down when lower layers merge.
-
-## Review a Stacked Branch Locally
-
-`lgtmaybe review` compares your branch with the repository's main branch. On a
-stacked branch, that includes every layer below yours. Pass the parent branch
-to review only your layer:
-
-```bash
-lgtmaybe review --base feature-a
-```
-
-The CLI does not find the parent branch for you.
-
-## Other Code Hosts
-
-Stack support is GitHub only. On GitLab, Gitea and Azure DevOps, each pull or
-merge request is reviewed on its own, with no stack context.
-
-## See Also
-
-- [Use as a GitHub Action](use-as-github-action.md) - the workflow and its
-  inputs.
-- [Glossary: stacked pull requests](../reference/glossary.md#stacked-pull-requests).
 
 ---
 
@@ -1678,6 +1657,8 @@ You need Forgejo 11 or later and a runner that can run Docker containers.
 Open a pull request and the review runs. The example runs lgtmaybe's container
 image as the job container, with the same `action` command used on GitHub and
 Gitea. lgtmaybe reads `FORGEJO_SERVER_URL` to know which instance to post to.
+It reads the event from `GITHUB_EVENT_NAME` and `GITHUB_EVENT_PATH`, or from
+their `FORGEJO_` names when a runner sets only those.
 
 ## Use the Automatic Token Instead
 
@@ -1782,22 +1763,47 @@ same review locally and prints the findings. See
 
 ## What Works, and What Does Not
 
-The same as on Gitea, because it is the same adapter. Every lens, reflection,
-[redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the `fail_on` gate and
-slash commands work.
-[Incremental review](../reference/glossary.md#incremental-review), resolve-on-fix, 👎 feedback and symbol
-resolution do not. Resolve-on-fix works on Gitea 1.26 or later, but Forgejo has
-no endpoint to resolve a review comment, so fixed findings' comments stay open. The [Gitea page](review-on-gitea.md#what-works-and-what-does-not)
-explains why for each one.
+Mostly the same as on Gitea, because it is the same adapter. Every lens,
+reflection, [redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the
+`fail_on` gate and slash commands work.
+[Incremental review](../reference/glossary.md#incremental-review), 👎 feedback and symbol resolution do not.
+The [Gitea page](review-on-gitea.md#what-works-and-what-does-not) explains why
+for each one.
+
+Resolve-on-fix never happens on Forgejo. Forgejo has no endpoint to resolve a
+review comment, so fixed findings' comments stay open for a person to close.
+This is the one place Forgejo differs from Gitea, which resolves them from 1.26.
+
+Forgejo's web page can mark a review conversation resolved, but its API
+cannot. That needs a signed-in browser session, so an API token is turned
+away. No Forgejo release from 11 to 17 has a route for it. lgtmaybe's weekly
+Forgejo checks watch for one, so resolve-on-fix can follow when it lands.
 
 ## Security
 
-Forgejo's trigger rules match Gitea's. `pull_request_target` takes the workflow
-from the base branch, so a pull request cannot rewrite the review job. It also
-gives that workflow the repository's secrets for pull requests from forks.
-lgtmaybe never checks out or runs pull-request code, so that is safe to do.
-Read [Security: Who Can Change the Workflow](review-on-gitea.md#security-who-can-change-the-workflow)
+Forgejo's trigger rules mostly match Gitea's. `pull_request_target` takes the
+workflow from the base branch, so a pull request cannot rewrite the review job.
+It also gives that workflow the repository's secrets for pull requests from
+forks. lgtmaybe never checks out or runs pull-request code, so that is safe to
+do. Read
+[Security: Who Can Change the Workflow](review-on-gitea.md#security-who-can-change-the-workflow)
 for what this does not cover. The same limits apply on Forgejo.
+
+Keep the trigger as `pull_request_target`. A `pull_request` run for a pull
+request from a fork waits until a maintainer approves it. Even then it gets no
+secrets, only a read-only job token, so lgtmaybe has neither the model key nor
+a token that can post.
+
+Slash commands work on pull requests from forks too, which they do not on
+Gitea. An `issue_comment` run uses the workflow from the default branch and
+gets the repository's secrets wherever the pull request came from.
+lgtmaybe still runs a command only for a commenter with write access.
+
+The example's `concurrency` block gives each comment that does not start with
+`/` a group of its own. With a personal token, every comment lgtmaybe posts
+starts a run of the workflow. Without that rule, the run would share the slash
+command's group, and Forgejo would cancel the command that posted it. Keep that
+line if you change the block.
 
 ---
 
@@ -2680,6 +2686,112 @@ With that file in place, `lgtmaybe review` needs no flags. See
 [Configure .lgtmaybe.yml](configure-lgtmaybe-yml.md) for every setting.
 
 [wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-zai.yml
+
+---
+
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-a-chatgpt-subscription/ -->
+
+# Review with a ChatGPT Subscription
+
+The `chatgpt` [provider](../reference/glossary.md#provider) reviews with your
+ChatGPT Plus or Pro subscription. You sign in once with a code in your browser.
+There is no API key to create or pay for.
+
+It is for reviews on your own machine: `lgtmaybe review`, `lgtmaybe diagram`
+and `lgtmaybe mcp`. For CI, use the [OpenAI provider](review-with-openai.md)
+with an API key.
+
+## Contents
+
+- [Sign In](#sign-in)
+- [Run a Review](#run-a-review)
+- [Use It from a Coding Agent](#use-it-from-a-coding-agent)
+- [Choosing the Model](#choosing-the-model)
+- [What Differs from the OpenAI Provider](#what-differs-from-the-openai-provider)
+- [Troubleshooting](#troubleshooting)
+
+## Sign In
+
+```bash
+lgtmaybe login chatgpt
+```
+
+lgtmaybe prints a URL and a one-time code. Open the URL, sign in to ChatGPT and
+enter the code. The command waits until you approve it, for up to 15 minutes.
+It then prints where the token is stored.
+
+The sign-in is the same one the Codex CLI uses. lgtmaybe signs in through
+[litellm](https://docs.litellm.ai/), which keeps the token at
+`~/.config/litellm/chatgpt/auth.json` and refreshes it for you. You only sign
+in again if the token is revoked or stops refreshing.
+
+Never share the code. Device codes are a common phishing target.
+
+## Run a Review
+
+```bash
+lgtmaybe review --provider chatgpt --model gpt-5.5
+```
+
+Provider and model are not secrets, so they can live in `.lgtmaybe.yml`:
+
+```yaml
+provider: chatgpt
+model: gpt-5.5
+```
+
+The token stays in litellm's file. lgtmaybe never copies it into its own
+config.
+
+## Use It from a Coding Agent
+
+The [MCP](../reference/glossary.md#mcp) server takes the same flags:
+
+```bash
+claude mcp add lgtmaybe -- lgtmaybe mcp --provider chatgpt --model gpt-5.5
+```
+
+Sign in with `lgtmaybe login chatgpt` before you start the agent. The server
+never asks you to sign in itself. See
+[Use from a Coding Agent over MCP](use-from-a-coding-agent-over-mcp.md).
+
+## Choosing the Model
+
+Pass a model your plan can use in Codex, such as `gpt-5.5` or
+`gpt-5.3-codex`. Use the name without a prefix. lgtmaybe adds the `chatgpt/`
+route for you.
+
+Reviews count against your plan's Codex usage limits. A review sends one
+request per [lens](../reference/glossary.md#lens), several at once. On a large
+change, a Plus plan can hit its limit part-way through. If it does, set
+`max_concurrency: 2` in `.lgtmaybe.yml` or review a smaller change.
+
+## What Differs from the OpenAI Provider
+
+The subscription reaches OpenAI's Codex backend, not the public API. That
+backend accepts fewer request settings:
+
+- **The review format is sent as a tool call.** lgtmaybe still holds the model
+  to its JSON schema. Nothing changes in what gets posted.
+- **`temperature` is ignored.** The default of `0.0` cannot reach the model.
+  So two runs on the same change can differ, and the run log says so.
+- **`max_tokens` is ignored.** The backend applies its own output limit.
+
+The backend is not a published API. OpenAI can change it without notice, and
+an lgtmaybe update may be needed when it does.
+
+## Troubleshooting
+
+**"no sign-in was found"**: run `lgtmaybe login chatgpt`. The message names the
+file it looked for. If you set `CHATGPT_TOKEN_DIR`, check that it points at
+the same directory you signed in with.
+
+**"the ChatGPT sign-in is missing or has expired"**: the stored token could not
+be refreshed. Run `lgtmaybe login chatgpt` again.
+
+**A review in CI fails with "no sign-in was found"**: this is expected. A CI
+runner has no stored sign-in. Use `--provider openai` with an
+`OPENAI_API_KEY` secret there.
 
 ---
 
@@ -4016,7 +4128,7 @@ described here (`max_tokens`, `reasoning_effort`, `temperature`, `language`,
 ### provider
 
 Which LLM backend, or [provider](../reference/glossary.md#provider), to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
-`bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
+`chatgpt`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
 
 ```yaml
 provider: anthropic
@@ -4038,6 +4150,7 @@ The model identifier for the chosen provider. The format varies by provider:
 | anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
 | openrouter | `anthropic/claude-sonnet-4.6` |
 | zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` IDs pass through too) |
+| chatgpt | `gpt-5.5`, `gpt-5.3-codex` (models your ChatGPT plan can use in Codex - see [Review with a ChatGPT subscription](review-with-a-chatgpt-subscription.md)) |
 | bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (prefer the cross-region inference profile; another provider's name like `gpt-6-sol` is invalid, Bedrock's is `openai.gpt-6-sol` - see [Review with Bedrock](review-with-bedrock-oidc.md)) |
 | vertex | `gemini-3.8-flash`, `gemini-3.1-pro-preview` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment`, not the upstream model ID - see [Review with Azure](review-with-azure.md) |
@@ -4738,7 +4851,7 @@ A custom template for the review summary line. Placeholders:
 - `{version}`: the lgtmaybe release that produced the review
 - `{risk}`: the risk segment, empty when `risk` is off
 - `{stack}`: the pull request's layer in a
-  [stack](review-stacked-pull-requests.md), such as `layer 2 of 3 in a stack`;
+  [stack](use-as-github-action.md#review-stacked-pull-requests), such as `layer 2 of 3 in a stack`;
   empty outside a stack
 - `{temperature}`: `temperature not sent` when the model's route dropped the
   configured temperature, so the review may not be reproducible; empty
@@ -6359,6 +6472,11 @@ client's config file. lgtmaybe itself never writes a key to disk.
 Keyless providers need no key at all: ollama, and Bedrock, Vertex or Azure with
 [ambient cloud credentials](../reference/glossary.md#ambient-credentials).
 
+To review with a ChatGPT subscription, run `lgtmaybe login chatgpt` before you
+start the client. The server never asks you to sign in itself, because that
+prompt would break the client's connection. See
+[Review with a ChatGPT Subscription](review-with-a-chatgpt-subscription.md).
+
 ## Troubleshooting
 
 - **The client says the server failed to start.** Run the same command in a
@@ -7295,7 +7413,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
 | `project` | ProjectProfile | No | — |  |
-| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
+| `provider` | `anthropic` / `azure` / `bedrock` / `chatgpt` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
@@ -7324,6 +7442,7 @@ LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azu
 - `anthropic`
 - `azure`
 - `bedrock`
+- `chatgpt`
 - `ollama`
 - `openai`
 - `openai-compatible`
@@ -7642,7 +7761,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "azure",
         "ollama",
         "openai-compatible",
-        "zai"
+        "zai",
+        "chatgpt"
       ],
       "title": "Provider",
       "type": "string"
@@ -9271,7 +9391,7 @@ it finds a spec that matches the pull request.
 A chain of small pull requests, each built on the one below it and merged
 bottom up. Each one shows only its own changes. lgtmaybe tells the model where a
 pull request sits in its stack. See
-[Review Stacked Pull Requests](../how-to/review-stacked-pull-requests.md).
+[Review Stacked Pull Requests](../how-to/use-as-github-action.md#review-stacked-pull-requests).
 
 ## Static-Analysis Fusion
 
@@ -10866,6 +10986,8 @@ a long-lived key you store and rotate by hand.
   short-lived tokens that the environment already provides.
 - Key-based SaaS providers (openai, anthropic, openrouter, zai) need an API key.
   The key lives in a secret store, never in committed config.
+- The `chatgpt` provider uses a ChatGPT Plus or Pro subscription instead of a
+  key. You sign in once on your own machine, so it is for local reviews only.
 - Azure sits between the two. It accepts a resource key but falls back to
   ambient Entra (Azure AD) credentials. It always needs the resource endpoint
   (`AZURE_API_BASE`), because each Azure OpenAI deployment lives at its own URL.
@@ -10948,7 +11070,13 @@ provider has its own rule for where to look:
    `OPENAI_COMPATIBLE_API_KEY`). Local servers (llama.cpp, LM Studio, vLLM)
    need none, and lgtmaybe sends a harmless placeholder key because the
    underlying OpenAI client rejects an empty one.
-7. **openai, anthropic and openrouter** read the key from `--api-key`, or else
+7. **chatgpt** needs a stored sign-in from `lgtmaybe login chatgpt`. litellm
+   keeps the token at `~/.config/litellm/chatgpt/auth.json` (or under
+   `CHATGPT_TOKEN_DIR`) and refreshes it. lgtmaybe renews it once at start-up,
+   before the review sends its calls in parallel. With no sign-in, or one that
+   cannot be renewed, lgtmaybe fails with a message naming the login command. A
+   review never starts the browser sign-in itself.
+8. **openai, anthropic and openrouter** read the key from `--api-key`, or else
    from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`. With
    neither, lgtmaybe fails with a message naming the variable to set.
 
@@ -10968,6 +11096,7 @@ provider has its own rule for where to look:
 | anthropic | API key | `ANTHROPIC_API_KEY` env var or `--api-key` |
 | openrouter | API key | `OPENROUTER_API_KEY` env var or `--api-key` |
 | zai | API key (+ optional endpoint) | `ZAI_API_KEY` env var or `--api-key`; optional `ZAI_API_BASE` / `--api-base` for the China / coding-plan endpoint |
+| chatgpt | Subscription sign-in (OAuth token) | `lgtmaybe login chatgpt` once per machine; local reviews only |
 | bedrock | Ambient AWS creds | GitHub OIDC role or local `~/.aws`; IAM needs only `bedrock:InvokeModel*` |
 | vertex | Ambient GCP creds | GitHub WIF or local ADC (`gcloud auth application-default login`) |
 | azure | Ambient Entra creds (keyless) or API key, + endpoint | GitHub OIDC to an Entra federated credential, or local `az login` / managed identity; or `AZURE_API_KEY`. Always with `AZURE_API_BASE` / `--api-base` |

@@ -119,6 +119,7 @@ API-key and local provider:
 | Providers | Covered by base install? |
 |---|---|
 | `openai`, `anthropic`, `openrouter`, `zai`: set the provider's API key in your environment | ✅ Yes |
+| `chatgpt`: run `lgtmaybe login chatgpt` once to sign in with a ChatGPT subscription | ✅ Yes |
 | `ollama`, `openai-compatible`: point `--api-base` at the server (local, or a hosted OpenAI-compatible API) | ✅ Yes |
 | `bedrock`, `vertex`, `azure`: keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 

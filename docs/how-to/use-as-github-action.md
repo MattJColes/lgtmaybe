@@ -59,6 +59,7 @@ through the [CLI](run-locally.md) rather than a posting workflow.
 - [Keyless cloud workflows](#keyless-cloud-workflows)
 - [Action inputs](#action-inputs)
 - [Gate merges on findings](#gate-merges-on-findings)
+- [Review stacked pull requests](#review-stacked-pull-requests)
 - [Adding a config file](#adding-a-config-file)
 - [Pin to a specific version](#pin-to-a-specific-version)
 - [On another code host](#on-another-code-host)
@@ -192,7 +193,7 @@ What each part does:
 - `on:` runs the job when a PR is opened, reopened, pushed to or moved onto
   another base branch (`pull_request_target`), and when someone posts a comment
   (`issue_comment`). The move matters for
-  [stacked pull requests](review-stacked-pull-requests.md). The `edited` event
+  [stacked pull requests](#review-stacked-pull-requests). The `edited` event
   also fires for a new title or description, so the `if:` below skips any edit
   that leaves the base branch alone.
 - `permissions:` lets the job read the repository and write review comments on
@@ -428,6 +429,113 @@ two features are unavailable under `github_identity: lgtmaybe`:
 Both work under the default `actions` identity (with `pull-requests: write` in
 the workflow `permissions:` block) or a self-managed App holding the matching
 permission. Set `resolve_fixed: false` to stop attempting it.
+
+## Review Stacked Pull Requests
+
+A stack is a chain of small pull requests, each built on the one below it. You
+review and merge them from the bottom up. GitHub supports stacks natively, and
+tools such as Graphite, ghstack and git-town build them from ordinary branches.
+
+Each pull request in a stack shows only its own changes: its layer. lgtmaybe
+reviews that layer and nothing else. It also knows where the layer sits, so its
+findings make sense for one part of a bigger change.
+
+Stack support is GitHub only. On GitLab, Gitea and Azure DevOps, each pull or
+merge request is reviewed on its own, with no stack context.
+
+### What lgtmaybe Does With a Stack
+
+**It tells the model about the stack.** Every
+[lens](../reference/glossary.md#lens) learns the layer's position, such as
+"layer 2 of 3", and the branch the stack lands on. It also gets the number,
+title and changed files of every other open layer. Code this layer uses may
+come from a layer below, and a gap it leaves may be filled by a layer above.
+Knowing that, the model hedges such claims instead of reporting them as bugs.
+The review summary names the layer too.
+
+The other layers' titles and paths are handled like the diff. They are
+[redacted](../reference/glossary.md#redaction) before they leave, and the model
+is told they are data, not instructions. lgtmaybe names at most eight layers on
+each side.
+
+**It skips a rebase that changes nothing.** When a lower pull request merges,
+GitHub rebases every pull request above it. Each one gets a new commit, but its
+diff is the same. lgtmaybe stamps a fingerprint of the whole diff next to its
+[watermark](../reference/glossary.md#watermark). When a new commit's diff
+matches it, the run stops without calling the model or posting anything.
+
+The fingerprint ignores line numbers and blob ids, which a rebase moves. Any
+change to an added, removed or surrounding line still counts, so that layer is
+reviewed again. The skip is part of
+[incremental review](../reference/glossary.md#incremental-review), which is on
+by default for pushes.
+
+**It reviews a retargeted pull request.** Tools that chain branches move a pull
+request onto its parent's base when the parent merges. GitHub reports that as
+an `edited` event that changes the base. The head commit stays the same, but
+the diff changes. lgtmaybe runs a full review and refreshes the change
+overview. Any other edit, such as a new title, runs nothing.
+
+### How It Finds the Stack
+
+GitHub's native stacks put a `stack` object on each pull request. lgtmaybe
+reads it, then lists the layers through GitHub's stacks API.
+
+Without that object, lgtmaybe follows branch names. When the pull request's base
+is not the default branch, it looks for the open pull request whose head is that
+base, and repeats downwards. It then looks for open pull requests based on this
+one's head, and repeats upwards. A step with more than one match ends the walk
+on that side. Only branches in the same repository count, so a pull request from
+a fork is never walked.
+
+When the walk stops early, at the eight-layer cap, an ambiguous step or a branch
+it has already seen, lgtmaybe cannot know the layer's exact position. It then
+tells the model, and the summary, only that the stack has at least that many
+pull requests.
+
+The lookup is best effort. If it fails, the review runs without stack context
+and the failure is logged.
+
+### Set Up the Workflow for Stacks
+
+The [minimal workflow](#minimal-workflow-openai) and the starter workflows in
+[`examples/workflows/`](https://github.com/MattJColes/lgtmaybe/tree/main/examples/workflows)
+already listen for the events a stack needs. If you wrote your own workflow,
+add `edited` to the trigger:
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+```
+
+Then skip the edits that leave the base alone. Add the middle line below to the
+`pull_request_target` arm of your job's `if:`, and keep the rest as it is:
+
+```yaml
+      (github.event_name == 'pull_request_target' &&
+       (github.event.action != 'edited' || github.event.changes.base) &&
+       contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+```
+
+If your workflow sets `concurrency` at the top level, give those edits a group
+of their own. Otherwise a title edit joins the review's group, and
+`cancel-in-progress` cancels the running review. The minimal workflow shows how.
+
+Every layer runs its own review, so a stack of five pull requests costs five
+reviews. The rebase skip keeps the repeat cost down when lower layers merge.
+
+### Review a Stacked Branch Locally
+
+`lgtmaybe review` compares your branch with the repository's main branch. On a
+stacked branch, that includes every layer below yours. Pass the parent branch
+to review only your layer:
+
+```bash
+lgtmaybe review --base feature-a
+```
+
+The CLI does not find the parent branch for you.
 
 ## Adding a Config File
 

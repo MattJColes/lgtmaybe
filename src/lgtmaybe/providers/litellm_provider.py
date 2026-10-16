@@ -64,7 +64,11 @@ from lgtmaybe.core.ports import (
     ProviderTruncated,
     ProviderWallTimeout,
 )
-from lgtmaybe.providers.factory import CLOUD_TIMEOUT, litellm_model_string
+from lgtmaybe.providers.factory import (
+    CLOUD_TIMEOUT,
+    litellm_model_string,
+    wire_stripped_params,
+)
 
 _log = get_logger(__name__)
 
@@ -1943,8 +1947,10 @@ def _supported_params(model: str) -> frozenset[str] | None:
     """The OpenAI-vocabulary params litellm forwards on *model*'s route, or None.
 
     The same list litellm's own ``drop_params`` consults, so what this answers
-    is exactly what would be silently removed. None on any lookup failure — an
-    unknown route is a route to try, not a route to strip.
+    is exactly what would be silently removed, less the params the route's
+    transform strips later despite listing them (``wire_stripped_params``).
+    None on any lookup failure — an unknown route is a route to try, not a
+    route to strip.
     """
     try:
         supported = litellm.get_supported_openai_params(model=model)
@@ -1952,7 +1958,7 @@ def _supported_params(model: str) -> frozenset[str] | None:
         return None
     if supported is None:
         return None
-    return frozenset(str(name) for name in supported)
+    return frozenset(str(name) for name in supported) - wire_stripped_params(model)
 
 
 def _litellm_drops_temperature(model: str, temperature: Any, effort: Any) -> bool:
@@ -1980,6 +1986,8 @@ def _litellm_drops_temperature(model: str, temperature: Any, effort: Any) -> boo
     lookup that raises — reports "not dropped": this is disclosure, never a
     reason a review fails.
     """
+    if "temperature" in wire_stripped_params(model):
+        return True
     try:
         bare, route, _, _ = litellm.get_llm_provider(model=model)
         extra = {} if effort is None else {"reasoning_effort": effort}

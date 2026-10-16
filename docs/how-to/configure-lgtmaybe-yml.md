@@ -81,7 +81,7 @@ described here (`max_tokens`, `reasoning_effort`, `temperature`, `language`,
 ### provider
 
 Which LLM backend, or [provider](../reference/glossary.md#provider), to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
-`bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
+`chatgpt`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
 
 ```yaml
 provider: anthropic
@@ -103,6 +103,7 @@ The model identifier for the chosen provider. The format varies by provider:
 | anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
 | openrouter | `anthropic/claude-sonnet-4.6` |
 | zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` IDs pass through too) |
+| chatgpt | `gpt-5.5`, `gpt-5.3-codex` (models your ChatGPT plan can use in Codex - see [Review with a ChatGPT subscription](review-with-a-chatgpt-subscription.md)) |
 | bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (prefer the cross-region inference profile; another provider's name like `gpt-6-sol` is invalid, Bedrock's is `openai.gpt-6-sol` - see [Review with Bedrock](review-with-bedrock-oidc.md)) |
 | vertex | `gemini-3.8-flash`, `gemini-3.1-pro-preview` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment`, not the upstream model ID - see [Review with Azure](review-with-azure.md) |
@@ -803,7 +804,7 @@ A custom template for the review summary line. Placeholders:
 - `{version}`: the lgtmaybe release that produced the review
 - `{risk}`: the risk segment, empty when `risk` is off
 - `{stack}`: the pull request's layer in a
-  [stack](review-stacked-pull-requests.md), such as `layer 2 of 3 in a stack`;
+  [stack](use-as-github-action.md#review-stacked-pull-requests), such as `layer 2 of 3 in a stack`;
   empty outside a stack
 - `{temperature}`: `temperature not sent` when the model's route dropped the
   configured temperature, so the review may not be reproducible; empty

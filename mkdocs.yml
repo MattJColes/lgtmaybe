@@ -98,7 +98,6 @@ nav:
           - Choose a review model: how-to/choose-a-review-model.md
           - Use as a GitHub Action: how-to/use-as-github-action.md
           - Post as lgtmaybe[bot]: how-to/post-as-a-github-app.md
-          - Review stacked pull requests: how-to/review-stacked-pull-requests.md
           - Review on Azure DevOps: how-to/review-on-azure-devops.md
           - Review on Forgejo: how-to/review-on-forgejo.md
           - Review on Gitea: how-to/review-on-gitea.md
@@ -108,6 +107,8 @@ nav:
           - Review with Claude (Anthropic): how-to/review-with-anthropic.md
           - Review with OpenRouter: how-to/review-with-openrouter.md
           - Review with z.ai (GLM): how-to/review-with-zai.md
+      - Subscription (local only):
+          - Review with a ChatGPT subscription: how-to/review-with-a-chatgpt-subscription.md
       - Keyless cloud (OIDC/WIF):
           - Review with Bedrock OIDC: how-to/review-with-bedrock-oidc.md
           - Review with Vertex WIF: how-to/review-with-vertex-wif.md

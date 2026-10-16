@@ -214,8 +214,8 @@ Action, flags or `.lgtmaybe.yml` for `gitlab-ci` / `comment`).
 
 ### Requirement: First-run setup detects, then verifies
 
-`lgtmaybe config init` SHALL detect provider API keys, cheaply visible ambient
-cloud credentials, and a running ollama (with its pulled models) before
+`lgtmaybe config init` SHALL detect provider API keys, a stored ChatGPT
+sign-in, cheaply visible ambient cloud credentials, and a running ollama (with its pulled models) before
 asking anything, offer the strongest detection as the default, validate the
 provider against the enum, and suggest a current model from a table kept in
 step with the how-to guides. Unless `--no-verify` is given, it SHALL make one

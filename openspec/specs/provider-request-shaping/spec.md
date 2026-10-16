@@ -91,7 +91,9 @@ consults, once per model, before the first request that carries a schema: a
 route that omits `response_format` but takes `tools` gets the schema as the
 forced tool call up front, a route with neither drops it up front and announces
 the downgrade, and a lookup failure leaves the schema on so the request-level
-recoveries still apply. Without this a route litellm strips the field from (zai)
+recoveries still apply. A route whose transform strips a param its list names
+(chatgpt drops `response_format`, `temperature` and `max_tokens`) is read as
+omitting it. Without this a route litellm strips the field from (zai)
 reviewed with no schema while the adapter reported enforcement was on — no 400,
 no empty body, nothing for the existing recoveries to see.
 <!-- anchor: provider.schema-route -->
@@ -100,6 +102,11 @@ no empty body, nothing for the existing recoveries to see.
 - **WHEN** the first schema-carrying call for a zai model is made
 - **THEN** it goes out as a forced tool call, `sends_response_format` stays true,
   and no round-trip is spent learning it
+
+#### Scenario: the route lists response_format but strips it
+- **WHEN** the first schema-carrying call for a chatgpt model is made
+- **THEN** it goes out as a forced tool call, and the unsent temperature is
+  disclosed
 
 #### Scenario: the route lists neither
 - **WHEN** a route takes no structured-output mechanism at all

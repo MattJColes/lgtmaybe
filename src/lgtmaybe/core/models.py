@@ -128,6 +128,9 @@ class Provider(StrEnum):
     # GLM / Zhipu AI via litellm's native zai/ route; API-key auth (ZAI_API_KEY),
     # optional --api-base override for the China / coding-plan endpoints.
     zai = "zai"
+    # A ChatGPT Plus/Pro subscription via litellm's chatgpt/ route (the Codex
+    # backend). No key: `lgtmaybe login chatgpt` stores an OAuth token locally.
+    chatgpt = "chatgpt"
 
 
 class _Strict(BaseModel):

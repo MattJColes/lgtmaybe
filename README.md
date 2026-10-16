@@ -191,6 +191,7 @@ models.
 | `anthropic` | `ANTHROPIC_API_KEY` | [Claude](docs/how-to/review-with-anthropic.md) |
 | `openrouter` | `OPENROUTER_API_KEY` | [OpenRouter](docs/how-to/review-with-openrouter.md) |
 | `zai` | `ZAI_API_KEY` for GLM / Zhipu AI models (`glm-4.6`, `glm-4.7`, `glm-4.5-air`, `glm-5.x`). Optional `--api-base` for the China / coding-plan endpoint | [z.ai (GLM)](docs/how-to/review-with-zai.md) |
+| `chatgpt` | A ChatGPT Plus or Pro subscription, signed in with `lgtmaybe login chatgpt`. Local reviews only, no API key | [ChatGPT subscription](docs/how-to/review-with-a-chatgpt-subscription.md) |
 | `bedrock` | Ambient AWS creds via GitHub OIDC, no static key | [Bedrock](docs/how-to/review-with-bedrock-oidc.md) |
 | `vertex` | Ambient GCP creds via Workload Identity Federation, no key | [Vertex](docs/how-to/review-with-vertex-wif.md) |
 | `azure` | Resource endpoint, plus `AZURE_API_KEY` or keyless Entra (Azure AD) creds via GitHub OIDC | [Azure](docs/how-to/review-with-azure.md) |
@@ -251,6 +252,7 @@ the docs root.
 - [Review with Claude (Anthropic)](docs/how-to/review-with-anthropic.md)
 - [Review with OpenRouter](docs/how-to/review-with-openrouter.md)
 - [Review with z.ai (GLM)](docs/how-to/review-with-zai.md)
+- [Review with a ChatGPT subscription](docs/how-to/review-with-a-chatgpt-subscription.md)
 - [Review with Bedrock OIDC](docs/how-to/review-with-bedrock-oidc.md)
 - [Review with Vertex WIF](docs/how-to/review-with-vertex-wif.md)
 - [Review with Azure OpenAI](docs/how-to/review-with-azure.md)

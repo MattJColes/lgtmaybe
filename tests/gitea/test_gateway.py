@@ -1067,6 +1067,19 @@ class TestResolveOnFix:
         assert not reviews.called
 
     @respx.mock
+    def test_a_failed_identity_lookup_never_hides_a_finding_we_resolved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a login nothing is trusted as ours, so a returning finding posts again."""
+        _whoami(monkeypatch, httpx.Response(500))
+        self._stub(head_text=self.OLD, comments=[self._comment(resolver={"login": BOT})])
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+
+        self._complete_run([self._finding()])
+
+        assert reviews.call_count == 1
+
+    @respx.mock
     def test_the_cli_passes_the_resolve_fixed_setting_through(self) -> None:
         from lgtmaybe.cli import _GATEWAY_BUILDERS
         from lgtmaybe.core.forge import Forge, PRLocator

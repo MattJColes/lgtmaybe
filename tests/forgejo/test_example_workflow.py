@@ -67,6 +67,20 @@ class TestForgejoExample:
         assert job["runs-on"] == "docker"
         assert job["container"]["image"] == f"ghcr.io/mattjcoles/lgtmaybe:v{_MAJOR}"
 
+    def test_its_own_comments_cannot_cancel_a_running_slash_command(self, path: Path) -> None:
+        """A personal token's comments start workflow runs on Forgejo.
+
+        Workflow-level concurrency applies before the job's `if`, so the run a
+        posted comment starts would share the slash command's group and cancel
+        it. A comment that does not start with `/` (all of lgtmaybe's) gets a
+        group of its own, keyed on its run id; a real command still coalesces.
+        """
+        group = _load(path)["concurrency"]["group"]
+
+        assert "github.event_name" in group
+        assert "!startsWith(github.event.comment.body, '/')" in group
+        assert "github.run_id" in group
+
     def test_the_token_comes_from_a_secret_name_forgejo_accepts(self, path: Path) -> None:
         """Forgejo refuses secret names starting FORGEJO_, GITEA_ or GITHUB_.
 

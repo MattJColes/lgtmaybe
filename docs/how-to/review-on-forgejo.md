@@ -44,6 +44,8 @@ You need Forgejo 11 or later and a runner that can run Docker containers.
 Open a pull request and the review runs. The example runs lgtmaybe's container
 image as the job container, with the same `action` command used on GitHub and
 Gitea. lgtmaybe reads `FORGEJO_SERVER_URL` to know which instance to post to.
+It reads the event from `GITHUB_EVENT_NAME` and `GITHUB_EVENT_PATH`, or from
+their `FORGEJO_` names when a runner sets only those.
 
 ## Use the Automatic Token Instead
 
@@ -148,19 +150,44 @@ same review locally and prints the findings. See
 
 ## What Works, and What Does Not
 
-The same as on Gitea, because it is the same adapter. Every lens, reflection,
-[redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the `fail_on` gate and
-slash commands work.
-[Incremental review](../reference/glossary.md#incremental-review), resolve-on-fix, 👎 feedback and symbol
-resolution do not. Resolve-on-fix works on Gitea 1.26 or later, but Forgejo has
-no endpoint to resolve a review comment, so fixed findings' comments stay open. The [Gitea page](review-on-gitea.md#what-works-and-what-does-not)
-explains why for each one.
+Mostly the same as on Gitea, because it is the same adapter. Every lens,
+reflection, [redaction](../reference/glossary.md#redaction), static analysis, labels, the change overview, the
+`fail_on` gate and slash commands work.
+[Incremental review](../reference/glossary.md#incremental-review), 👎 feedback and symbol resolution do not.
+The [Gitea page](review-on-gitea.md#what-works-and-what-does-not) explains why
+for each one.
+
+Resolve-on-fix never happens on Forgejo. Forgejo has no endpoint to resolve a
+review comment, so fixed findings' comments stay open for a person to close.
+This is the one place Forgejo differs from Gitea, which resolves them from 1.26.
+
+Forgejo's web page can mark a review conversation resolved, but its API
+cannot. That needs a signed-in browser session, so an API token is turned
+away. No Forgejo release from 11 to 17 has a route for it. lgtmaybe's weekly
+Forgejo checks watch for one, so resolve-on-fix can follow when it lands.
 
 ## Security
 
-Forgejo's trigger rules match Gitea's. `pull_request_target` takes the workflow
-from the base branch, so a pull request cannot rewrite the review job. It also
-gives that workflow the repository's secrets for pull requests from forks.
-lgtmaybe never checks out or runs pull-request code, so that is safe to do.
-Read [Security: Who Can Change the Workflow](review-on-gitea.md#security-who-can-change-the-workflow)
+Forgejo's trigger rules mostly match Gitea's. `pull_request_target` takes the
+workflow from the base branch, so a pull request cannot rewrite the review job.
+It also gives that workflow the repository's secrets for pull requests from
+forks. lgtmaybe never checks out or runs pull-request code, so that is safe to
+do. Read
+[Security: Who Can Change the Workflow](review-on-gitea.md#security-who-can-change-the-workflow)
 for what this does not cover. The same limits apply on Forgejo.
+
+Keep the trigger as `pull_request_target`. A `pull_request` run for a pull
+request from a fork waits until a maintainer approves it. Even then it gets no
+secrets, only a read-only job token, so lgtmaybe has neither the model key nor
+a token that can post.
+
+Slash commands work on pull requests from forks too, which they do not on
+Gitea. An `issue_comment` run uses the workflow from the default branch and
+gets the repository's secrets wherever the pull request came from.
+lgtmaybe still runs a command only for a commenter with write access.
+
+The example's `concurrency` block gives each comment that does not start with
+`/` a group of its own. With a personal token, every comment lgtmaybe posts
+starts a run of the workflow. Without that rule, the run would share the slash
+command's group, and Forgejo would cancel the command that posted it. Keep that
+line if you change the block.
