@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from whats_new import MARKER
 
 DOCS = Path(__file__).parent
 MKDOCS_PATH = DOCS.parent / "mkdocs.yml"
@@ -75,9 +76,9 @@ def _front_matter(md_rel: str) -> dict[str, Any]:
     return yaml.safe_load(fm) or {}
 
 
-# The homepage's What's New list is filled in by the build hook; a dump of the
-# raw markdown points at the changelog instead of carrying a stale copy.
-_WHATS_NEW_MARKER = "<!-- whats-new -->"
+# The homepage's What's New list is filled in by the build hook (whose MARKER
+# this shares); a dump of the raw markdown points at the changelog instead of
+# carrying a stale copy.
 _WHATS_NEW_STANDIN = f"See the [Changelog]({SITE_URL}changelog/) for every release."
 
 
@@ -86,7 +87,7 @@ def _body(md_rel: str) -> str:
     text = (DOCS / md_rel).read_text(encoding="utf-8")
     if text.startswith("---"):
         text = text.split("---", 2)[2].lstrip("\n")
-    return text.replace(_WHATS_NEW_MARKER, _WHATS_NEW_STANDIN)
+    return text.replace(MARKER, _WHATS_NEW_STANDIN)
 
 
 def _page_url(md_rel: str) -> str:

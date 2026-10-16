@@ -141,3 +141,52 @@ def test_the_homepage_carries_the_marker_and_the_build_runs_the_hook() -> None:
     assert "Changelog: changelog.md" in mkdocs
     # A release only touches CHANGELOG.md, so it must trigger a docs rebuild.
     assert '"CHANGELOG.md"' in workflow
+
+
+def test_on_files_registers_the_generated_changelog_page(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The hook's only contact with the mkdocs API is File.generated; pin the call
+    here, since the dev environment does not install mkdocs. The docs workflow's
+    strict build on every PR then checks it against the real API."""
+    import types
+
+    import whats_new
+
+    calls: list[tuple[object, str, str]] = []
+
+    class _File:
+        @staticmethod
+        def generated(config: object, src_uri: str, *, content: str) -> str:
+            calls.append((config, src_uri, content))
+            return src_uri
+
+    fake = types.ModuleType("mkdocs.structure.files")
+    fake.File = _File  # type: ignore[attr-defined]
+    for name in ("mkdocs", "mkdocs.structure"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "mkdocs.structure.files", fake)
+
+    files: list[str] = []
+    config = object()
+    assert whats_new.on_files(files, config) is files
+
+    ((got_config, src_uri, content),) = calls
+    assert got_config is config
+    assert src_uri == "changelog.md"
+    assert content.startswith("# Changelog")
+    assert files == ["changelog.md"]
+
+
+def test_llms_generator_shares_the_hooks_marker() -> None:
+    """One marker, owned by the hook: a second copy would drift silently."""
+    import generate_llms_txt
+
+    assert generate_llms_txt.MARKER is MARKER
+    assert not hasattr(generate_llms_txt, "_WHATS_NEW_MARKER")
+
+
+def test_every_pr_builds_the_docs_but_only_main_deploys() -> None:
+    """The hook can break the build, so a PR must run it — without publishing."""
+    workflow = (_ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+
+    assert "pull_request:" in workflow
+    assert "if: github.event_name != 'pull_request'" in workflow

@@ -10,16 +10,23 @@ on:
       # Changelog page are built from it, so a release must rebuild the site.
       - "CHANGELOG.md"
       - ".github/workflows/docs.yml"
+  # Build (never deploy) on PRs: the What's New hook runs inside the build, so
+  # a strict build is the only check that it still works against real mkdocs.
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "CHANGELOG.md"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# Allow one docs deploy at a time; don't cancel an in-progress publish.
+# Allow one docs deploy at a time; don't cancel an in-progress publish. PR
+# builds get their own group so they never queue behind a deploy.
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.ref) || 'pages' }}
   cancel-in-progress: false
 
 jobs:
@@ -34,12 +41,17 @@ jobs:
       - name: Build site
         run: uv run --group docs mkdocs build --strict
       - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
