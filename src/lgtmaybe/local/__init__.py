@@ -95,7 +95,7 @@ def local_pr_context(
         base_sha = head_sha  # base and head are both HEAD — resolved once above
         commit_messages: list[str] = []
     else:
-        base_ref = base or _default_base(cwd)
+        base_ref = base or default_base(cwd)
         if working:
             merge_base = _git(cwd, "merge-base", base_ref, "HEAD").strip()
             spec = merge_base
@@ -324,7 +324,7 @@ def _commit_subjects(cwd: Path | None, base_ref: str) -> list[str]:
     return [line for line in log.splitlines() if line.strip()]
 
 
-def _default_base(cwd: Path | None) -> str:
+def default_base(cwd: Path | None) -> str:
     """The remote primary branch, falling back through local names.
 
     ``origin/HEAD`` is only set by a normal clone of a non-empty repo; after

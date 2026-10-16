@@ -375,9 +375,11 @@ class FindingValidationResult(_Strict):
 _BUILTIN_LENS_IDS: frozenset[str] = frozenset(c.value for c in ReviewCategory)
 
 # Category prefix stamped on a finding that came from a deterministic tool
-# rather than a lens. Lives here, not in the engine, so the CustomLens id
-# validator can reserve it without importing the engine.
-_SCAN_CATEGORY_PREFIX = "scan:"
+# rather than a lens. Keeps `finding_rules` able to target a specific scanner,
+# and keeps scan findings out of the built-in defect categories whose
+# failure_scenario gate they'd fail. Lives here, not in the engine, so the
+# CustomLens id validator can reserve it without importing the engine.
+SCAN_CATEGORY_PREFIX = "scan:"
 
 
 class CustomLens(_Strict):
@@ -409,10 +411,10 @@ class CustomLens(_Strict):
         # category prefix, and treats such findings differently: they skip the
         # reflection audit and are dropped when they land off the diff. A lens
         # must not be able to claim that status for a model's output.
-        if cleaned.startswith(_SCAN_CATEGORY_PREFIX):
+        if cleaned.startswith(SCAN_CATEGORY_PREFIX):
             raise ValueError(
                 f"custom lens id {cleaned!r} is reserved: the "
-                f"{_SCAN_CATEGORY_PREFIX!r} prefix marks deterministic tool findings"
+                f"{SCAN_CATEGORY_PREFIX!r} prefix marks deterministic tool findings"
             )
         return cleaned
 

@@ -21,9 +21,9 @@ from __future__ import annotations
 
 from lgtmaybe.core.diffparse import changed_line_count
 from lgtmaybe.core.models import (
-    _SCAN_CATEGORY_PREFIX,
     EFFORT_PREFIX,
     RISK_PREFIX,
+    SCAN_CATEGORY_PREFIX,
     SECURITY_LABEL,
     SPLITTING_LABEL,
     PRContext,
@@ -37,7 +37,7 @@ from lgtmaybe.core.models import (
 # rather than inferred: a type checker or a linter also carries a `scan:`
 # category, and a mypy error is not a security issue.
 _SECURITY_SCAN_CATEGORIES: frozenset[str] = frozenset(
-    f"{_SCAN_CATEGORY_PREFIX}{tool.value}"
+    f"{SCAN_CATEGORY_PREFIX}{tool.value}"
     for tool in (
         StaticAnalysisTool.gitleaks,
         StaticAnalysisTool.bandit,

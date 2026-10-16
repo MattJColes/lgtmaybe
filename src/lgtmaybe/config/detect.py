@@ -23,7 +23,7 @@ import httpx
 
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers import chatgpt
-from lgtmaybe.providers.credentials import _default_gcp_probe
+from lgtmaybe.providers.credentials import default_gcp_probe
 from lgtmaybe.providers.factory import DEFAULT_OLLAMA_BASE
 
 #: A current model to suggest per provider. Kept to IDs the how-to guides
@@ -124,7 +124,7 @@ def detect(
     env: Mapping[str, str] | None = None,
     probe_ollama: Callable[[str], tuple[str, ...] | None] | None = None,
     aws_probe: Callable[[Mapping[str, str]], bool] = aws_credentials_present,
-    gcp_probe: Callable[[], bool] = _default_gcp_probe,
+    gcp_probe: Callable[[], bool] = default_gcp_probe,
     chatgpt_probe: Callable[[Mapping[str, str]], bool] = chatgpt.signed_in,
 ) -> list[Detection]:
     """Every provider the environment looks ready for, strongest signal first.

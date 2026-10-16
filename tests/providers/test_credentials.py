@@ -11,7 +11,7 @@ import pytest
 import lgtmaybe.providers.credentials as credentials
 from lgtmaybe.core.models import Provider
 from lgtmaybe.providers.credentials import (
-    _default_gcp_probe,
+    default_gcp_probe,
     resolve_credentials,
 )
 
@@ -416,7 +416,7 @@ class TestDefaultGcpProbe:
         monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "empty"))
         _stub_google_auth(monkeypatch, lambda: (object(), "metadata-project"))
 
-        assert _default_gcp_probe() is True
+        assert default_gcp_probe() is True
         assert resolve_credentials(Provider.vertex).api_key is None
 
     def test_google_auth_finding_nothing_is_absent(
@@ -430,21 +430,21 @@ class TestDefaultGcpProbe:
 
         _stub_google_auth(monkeypatch, no_credentials)
 
-        assert _default_gcp_probe() is False
+        assert default_gcp_probe() is False
 
     def test_vertexai_project_alone_is_detected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
         monkeypatch.setenv("VERTEXAI_PROJECT", "my-project")
-        assert _default_gcp_probe() is True
+        assert default_gcp_probe() is True
 
     def test_cloudsdk_core_project_is_detected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
         monkeypatch.setenv("CLOUDSDK_CORE_PROJECT", "my-project")
-        assert _default_gcp_probe() is True
+        assert default_gcp_probe() is True
 
     def test_adc_well_known_file_is_detected(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
@@ -455,7 +455,7 @@ class TestDefaultGcpProbe:
         gcloud_dir.mkdir()
         (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
         monkeypatch.setenv("CLOUDSDK_CONFIG", str(gcloud_dir))
-        assert _default_gcp_probe() is True
+        assert default_gcp_probe() is True
 
     def test_gcp_probe_finds_adc_under_appdata_on_windows(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
@@ -468,7 +468,7 @@ class TestDefaultGcpProbe:
         (gcloud_dir / "application_default_credentials.json").write_text("{}", encoding="utf-8")
         monkeypatch.setenv("APPDATA", str(appdata))
 
-        assert _default_gcp_probe() is True
+        assert default_gcp_probe() is True
 
     def test_gcp_probe_prefers_cloudsdk_config_over_appdata(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
@@ -482,12 +482,12 @@ class TestDefaultGcpProbe:
         monkeypatch.setenv("APPDATA", str(appdata))
         monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "explicit-empty"))
 
-        assert _default_gcp_probe() is False
+        assert default_gcp_probe() is False
 
     def test_no_creds_anywhere_is_absent(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         _clear(monkeypatch, _GCP_ENV_VARS, str(tmp_path))
         monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path / "empty"))
-        assert _default_gcp_probe() is False
+        assert default_gcp_probe() is False
 
     def test_vertex_resolves_keyless_with_only_vertexai_project(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
