@@ -1183,6 +1183,10 @@ class LLMReviewEngine:
         sa_hints: list[ToolFinding] = []
         sa_all: list[ToolFinding] = []
         scan_findings: list[ReviewFinding] = []
+        # The diff exactly as the scan corpus saw it: triage (3c) and the file
+        # cap (3d) narrow file_patches after this, and a scan finding must snap
+        # against what was actually scanned, not the narrower reviewed diff.
+        scan_scope = ""
         if cfg.static_analysis.enabled and (ctx.file_contents or ctx.scan_contents):
             with profiler.stage("static_analysis"):
                 reviewed_paths = {path for path, _ in file_patches}
@@ -1199,18 +1203,21 @@ class LLMReviewEngine:
                 # would bust the shared-prefix cache for nothing.
                 sa_hints, direct = partition_by_mode(sa_all, cfg)
                 scan_findings = tool_review_findings(direct, corpus)
+                scan_scope = "\n".join(patch for _, patch in file_patches)
 
         # 3c. Two-stage triage (default off): a cheap triage_model skips
         #     plainly-non-substantive files and ranks the rest by risk, so the
         #     strong model reviews only what deserves it. A deterministic
         #     security floor (security paths/tokens, static-analysis hits,
         #     large hunks) always escalates past triage, and any triage
-        #     failure reviews everything.
+        #     failure reviews everything. Every static-analysis finding feeds
+        #     the floor, hint-mode or finding-mode: a direct-post hit must stop
+        #     triage skipping its file, or the diff scoping drops the hit.
         skipped_by_triage: list[str] = []
         if cfg.triage_model and file_patches:
             with profiler.stage("triage"):
                 file_patches, skipped_by_triage = triage_files(
-                    file_patches, sa_hints, cfg, self._provider
+                    file_patches, sa_all, cfg, self._provider
                 )
 
         # 3d. File cap: after triage so it drops the lowest-risk survivors,
@@ -1459,8 +1466,15 @@ class LLMReviewEngine:
         #    changed line whose content matches its verbatim `anchor`, so comments
         #    land on the code they describe. Done before dedupe so findings the
         #    model placed on slightly different wrong lines collapse correctly.
+        #    Scan findings snap against `scan_scope` (the diff the corpus saw)
+        #    rather than the reviewed diff: their files can have left file_patches
+        #    at triage (3c) or the file cap (3d), and dropping them as off-diff
+        #    for that would blame unchanged lines that were never the problem.
         with profiler.stage("snap"):
-            all_findings = _snap_findings(all_findings, reviewed_diff)
+            scans_at_snap = [f for f in all_findings if _is_scan_finding(f)]
+            all_findings = _snap_findings(
+                [f for f in all_findings if not _is_scan_finding(f)], reviewed_diff
+            ) + _snap_findings(scans_at_snap, scan_scope)
             # A finding on a scan-only file (a lockfile advisory the model
             # confirmed from an unbatched hint) has no reviewed line to sit on:
             # the file is never in the reviewed diff. Mark it unanchored, so
