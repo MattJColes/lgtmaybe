@@ -1,0 +1,43 @@
+{
+  "name": "counter-advice",
+  "changed_file": "uploads/service.py",
+  "expected": [
+    {
+      "label": "unique_names hand-rolls an order-preserving dedupe the standard library does (dict.fromkeys)",
+      "line": 21,
+      "keywords": ["dict.fromkeys", "fromkeys", "standard library", "stdlib", "built-in", "builtin"]
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: tells the author to remove or merge away upload validation at a trust boundary (the never-cut rule)",
+      "line": 34,
+      "keywords": [
+        "redundant check",
+        "redundant validation",
+        "unnecessary check",
+        "unnecessary validation",
+        "remove the check",
+        "remove the validation",
+        "drop the check",
+        "already covered by the regex",
+        "regex already"
+      ]
+    },
+    {
+      "label": "FP: calls the S3 adapter's put() a needless pass-through (it implements the BlobStore port)",
+      "line": 16,
+      "keywords": [
+        "pass-through",
+        "passthrough",
+        "thin wrapper",
+        "needless wrapper",
+        "unnecessary wrapper",
+        "inline the adapter",
+        "remove the adapter",
+        "use the client directly",
+        "call the client directly"
+      ]
+    }
+  ]
+}

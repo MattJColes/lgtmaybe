@@ -33,7 +33,7 @@ noticing — and tests inject fakes instead of patching.
    │        → fan-out per lens (preset: fast=4      │
    │          calls / full=9; one global pool,      │
    │          cached preamble+diff prefix) → parse  │
-   │        → merge/dedupe → reflect → filter       │
+   │  → merge/dedupe → reflect → arbitrate → filter │
    └───────┬───────────────────────────┬───────────┘
            │ ProviderClient            │ ReviewGateway
            ▼                           ▼
@@ -75,7 +75,8 @@ lgtmaybe/
 │   │   ├── prompt.py        #   per-category system prompts (OWASP checklist, etc.)
 │   │   ├── parse.py         #   lenient JSON → ReviewFinding parsing; names the failure shape
 │   │   ├── repair.py        #   one reformat re-ask at a reply that would not parse
-│   │   └── reflect.py       #   self-reflection pass that drops low-confidence findings
+│   │   ├── reflect.py       #   self-reflection pass that drops low-confidence findings
+│   │   └── conflicts.py     #   drops a finding whose advice opposes a higher-ranked one
 │   │
 │   ├── providers/           # LLM adapter (the ProviderClient side)
 │   │   ├── litellm_provider.py  # litellm wrapper: retries (tenacity) + fallback
@@ -180,7 +181,8 @@ involved.
 **Engine (`engine/`)** — the pipeline, as composable stages:
 `redact → split per file → drop non-reviewable → file-cap → expand hunks with
 budget-scaled context → batch to token budget → fan out one call per review
-lens → parse → merge & dedupe → self-reflect → filter by severity →
+lens → parse → merge & dedupe → self-reflect → arbitrate opposing advice →
+filter by severity →
 findings + summary`. The lens set follows the `preset` — `fast` (default)
 covers seven code-focused categories in four calls when the pool can overlap
 work, or three combined calls with one worker; `full` runs all nine — and every

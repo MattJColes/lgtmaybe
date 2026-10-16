@@ -263,3 +263,21 @@ default to `medium`, and a floor the user configured SHALL win over it.
 #### Scenario: a prototype with an explicit floor
 - **WHEN** `stage` is `prototype` and `min_severity: low` is configured
 - **THEN** the floor stays `low`
+
+### Requirement: No lens recommends cutting protective code
+
+The shared preamble SHALL forbid every lens — built-in, pack, or custom — from
+recommending the removal or weakening of trust-boundary validation, data-loss
+error handling, security controls, or accessibility support, and SHALL require a
+shorter replacement to keep every edge case and error path (Ponytail 5's
+never-cut list). A `shortcut:` comment is a recorded decision for the advisory
+lenses only.
+<!-- anchor: prompt.never-cut -->
+
+#### Scenario: a custom lens is built
+- **WHEN** a review runs a custom or pack lens
+- **THEN** its system prompt carries the never-cut rule, because the rule lives in the shared preamble
+
+#### Scenario: a shortcut comment sits on a vulnerable line
+- **WHEN** the diff marks an unsafe call with a `shortcut:` comment
+- **THEN** only the advisory lens prompts treat it as a recorded decision; the security prompt has no such rule

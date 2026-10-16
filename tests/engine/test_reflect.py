@@ -933,3 +933,22 @@ def test_deferred_file_reaches_recheck_when_full_diff_exceeds_batch_budget() -> 
     assert "verified_definition = 42" in recheck
     assert changed in recheck
     assert "unrelated.py" not in recheck
+
+
+def test_the_auditor_arbitrates_opposing_advice_on_the_shared_ladder() -> None:
+    """Reflection sees every merged finding at once, so it is told to referee
+    opposite advice — ranked by the same ladder the deterministic backstop uses."""
+    from lgtmaybe.engine.conflicts import PRECEDENCE
+    from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
+
+    assert "opposite advice" in _REFLECT_SYSTEM
+    assert " > ".join(c.value for c in PRECEDENCE) in _REFLECT_SYSTEM
+
+
+def test_the_auditor_arbitrates_only_ranked_categories() -> None:
+    """The deterministic backstop never guesses about custom, pack, group or scanner
+    findings; the model referee must not either, or the guarantee the docs state
+    holds only under --no-reflect."""
+    from lgtmaybe.engine.reflect import _REFLECT_SYSTEM
+
+    assert "not on this ladder, keep both" in _REFLECT_SYSTEM

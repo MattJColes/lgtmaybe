@@ -362,6 +362,66 @@ def test_prompt_asks_for_ponytail_review() -> None:
     assert "standard library" in prompt
 
 
+def _ponytail_blocks() -> list[str]:
+    from lgtmaybe.engine.prompt import CODE_HEALTH_GROUP, build_group_block
+
+    return [
+        build_lens_block(ReviewCategory.ponytail).lower(),
+        build_group_block(CODE_HEALTH_GROUP).lower(),
+    ]
+
+
+@pytest.mark.parametrize("block", _ponytail_blocks(), ids=["focused", "code-health"])
+def test_ponytail_follows_the_ponytail_5_ladder(block: str) -> None:
+    """Ponytail 5's ladder adds 'is it already in this codebase?' before the
+    standard library, and refuses a new dependency bought for a few lines."""
+    assert "already in this codebase" in block
+    assert block.index("already in this codebase") < block.index("standard library")
+    assert "new dependency" in block
+    # Verify before reporting: the code really is unused, its callers really exist.
+    assert "really" in block
+
+
+@pytest.mark.parametrize("block", _ponytail_blocks(), ids=["focused", "code-health"])
+def test_ponytail_never_collapses_an_existing_boundary(block: str) -> None:
+    """An adapter or pass-through that implements an existing port/interface is not
+    needless — collapsing it is the counter-advice a design lens would undo."""
+    assert "existing port, layer, or interface" in block
+    assert "shortcut:" in block  # a recorded decision, not a finding
+
+
+def test_complexity_extracts_duplication_only_for_uniform_callers() -> None:
+    """'Extract a shared helper' must not become the flag-argument wrong abstraction."""
+    from lgtmaybe.engine.prompt import CODE_HEALTH_GROUP, build_group_block
+
+    for block in (
+        build_lens_block(ReviewCategory.complexity).lower(),
+        build_group_block(CODE_HEALTH_GROUP).lower(),
+    ):
+        assert "uniform callers" in block
+
+
+def test_shared_preamble_never_cuts_protective_code() -> None:
+    """Ponytail 5's never-cut list rides the shared preamble, so every lens —
+    built-in, bundled pack, or custom — is bound by it, not just the lean one."""
+    preamble = build_shared_preamble().lower()
+    for term in ("trust boundary", "data loss", "security control", "accessibility"):
+        assert term in preamble
+    assert "every edge case" in preamble
+
+
+_ADVISORY = (ReviewCategory.complexity, ReviewCategory.ponytail)
+
+
+@pytest.mark.parametrize("category", list(ReviewCategory), ids=lambda c: c.value)
+def test_recorded_decisions_bind_only_advisory_lenses(category: ReviewCategory) -> None:
+    """A `shortcut:` comment is a recorded decision for the advisory lenses — and
+    must never be able to talk the security or correctness lens out of a finding."""
+    block = build_lens_block(category)
+    assert ("shortcut:" in block) is (category in _ADVISORY)
+    assert "shortcut:" not in build_shared_preamble()
+
+
 # ---------------------------------------------------------------------------
 # Per-category fan-out: each lens gets its own focused prompt
 # ---------------------------------------------------------------------------

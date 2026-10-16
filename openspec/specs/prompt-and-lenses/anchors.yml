@@ -81,3 +81,9 @@ prompt.project-profile:
     kind: function_definition
     has: { field: name, regex: '^project_context$' }
   files: [src/lgtmaybe/engine/prompt.py]
+
+prompt.never-cut:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^build_shared_preamble$' }
+  files: [src/lgtmaybe/engine/prompt.py]

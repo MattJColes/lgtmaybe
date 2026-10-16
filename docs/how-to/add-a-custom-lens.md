@@ -73,6 +73,15 @@ extra_lenses:
     `ponytail` lens, so you don't need a custom lens for it. Use `extra_lenses`
     for something the built-ins don't cover, like the house-style rule above.
 
+!!! note "Custom lenses share the never-cut rule"
+    Every lens, custom and bundled ones included, runs under the shared rule that
+    forbids recommending the removal of trust-boundary validation, data-loss
+    error handling, security controls, or accessibility support. Custom lenses
+    sit outside the deterministic conflict backstop, which only arbitrates lens
+    pairs lgtmaybe declares opposed, so write instructions that don't contradict
+    the built-ins. See
+    [When Lenses Disagree](../explanation/what-gets-reviewed.md#when-lenses-disagree).
+
 ## As Reusable Skill Files
 
 To share lenses across repos, or let an agent harness add its own, put each

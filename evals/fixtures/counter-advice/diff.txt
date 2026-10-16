@@ -1,0 +1,48 @@
+diff --git a/uploads/service.py b/uploads/service.py
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/uploads/service.py
+@@ -0,0 +1,42 @@
++import re
++
++from .ports import BlobStore
++
++MAX_UPLOAD_BYTES = 10 * 1024 * 1024
++_NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
++
++
++class S3BlobStore(BlobStore):
++    """Adapter: the BlobStore port backed by S3."""
++
++    def __init__(self, client, bucket: str) -> None:
++        self._client = client
++        self._bucket = bucket
++
++    def put(self, key: str, data: bytes) -> None:
++        self._client.put_object(Bucket=self._bucket, Key=key, Body=data)
++
++
++def unique_names(names: list[str]) -> list[str]:
++    seen = set()
++    out = []
++    for name in names:
++        if name not in seen:
++            seen.add(name)
++            out.append(name)
++    return out
++
++
++def save_upload(store: BlobStore, name: str, data: bytes) -> str:
++    """Store an untrusted upload from the public API."""
++    if not _NAME.fullmatch(name):
++        raise ValueError("invalid file name")
++    if ".." in name or name.startswith("/"):
++        raise ValueError("invalid file name")
++    if len(data) > MAX_UPLOAD_BYTES:
++        raise ValueError("upload too large")
++    if not data:
++        raise ValueError("empty upload")
++    key = f"uploads/{name}"
++    store.put(key, data)
++    return key
