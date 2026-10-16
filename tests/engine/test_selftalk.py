@@ -102,9 +102,7 @@ def test_owned_formatting_error_variants_are_self_talk(body: str) -> None:
 
 def test_an_owned_formatting_error_alone_is_kept() -> None:
     """The owned phrase is one half only; without a shape phrase it is kept."""
-    assert not is_self_talk(
-        _finding(body="My response had a formatting error near the end.")
-    )
+    assert not is_self_talk(_finding(body="My response had a formatting error near the end."))
 
 
 # ---------------------------------------------------------------------------

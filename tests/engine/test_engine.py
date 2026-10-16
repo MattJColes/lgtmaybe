@@ -2795,9 +2795,9 @@ def test_a_scan_finding_on_a_file_triage_skipped_still_posts(monkeypatch) -> Non
 # scanner can report a line that sits nearer f.py's match than g.py's.
 _SAME_TEXT_CTX = PRContext(
     diff=(
-        "diff --git a/f.py b/f.py\n@@ -1,2 +1,2 @@\n ctx\n-value = \"old\"\n+value = \"same\"\n"
+        'diff --git a/f.py b/f.py\n@@ -1,2 +1,2 @@\n ctx\n-value = "old"\n+value = "same"\n'
         "diff --git a/g.py b/g.py\n@@ -39,3 +39,3 @@\n ctx\n ctx\n"
-        "-value = \"old\"\n+value = \"same\"\n"
+        '-value = "old"\n+value = "same"\n'
     ),
     changed_files=["f.py", "g.py"],
     base_sha="abc",
@@ -2805,10 +2805,8 @@ _SAME_TEXT_CTX = PRContext(
     repo="org/repo",
     pr_number=3,
     file_contents={
-        "f.py": " ctx\nvalue = \"same\"\n",
-        "g.py": "\n".join(
-            ["pad"] * 2 + ['value = "same"'] + ["pad"] * 37 + ['value = "same"']
-        )
+        "f.py": ' ctx\nvalue = "same"\n',
+        "g.py": "\n".join(["pad"] * 2 + ['value = "same"'] + ["pad"] * 37 + ['value = "same"'])
         + "\n",
     },
 )

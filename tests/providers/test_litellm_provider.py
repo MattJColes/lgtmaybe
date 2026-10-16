@@ -753,8 +753,6 @@ class TestTemperatureReach:
         couples the two classes at an implementation detail."""
         provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5")
 
-        provider.note_withheld_temperature(
-            "anthropic/claude-sonnet-4-5", "withheld-under-thinking"
-        )
+        provider.note_withheld_temperature("anthropic/claude-sonnet-4-5", "withheld-under-thinking")
 
         assert provider.temperature_dropped()

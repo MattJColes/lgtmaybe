@@ -863,9 +863,7 @@ def test_an_incapable_route_reports_rather_than_re_sending_the_same_request() ->
     class _IncapableRoute(_TruncatesUntilEffortDrops):
         def __init__(self) -> None:
             super().__init__(effort=None, answers_at=_EFFORT_FLOOR)
-            self._adapter = LiteLLMProvider(
-                model="openai/gpt-5.5", effort_override_supported=False
-            )
+            self._adapter = LiteLLMProvider(model="openai/gpt-5.5", effort_override_supported=False)
 
         def lower_reasoning_effort(self) -> dict[str, Any] | None:
             return self._adapter.lower_reasoning_effort()

@@ -101,8 +101,8 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
         r"(?i)(?:api[_\-]?key|api[_\-]?secret|secret[_\-]?access[_\-]?key|"
         r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|"
         r"client[_\-]?secret|private[_\-]?key|token|secret)"
-        + _KEY_TAIL +
-        r"[\"']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})[\"']?"
+        + _KEY_TAIL
+        + r"[\"']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})[\"']?"
     ),
     # Quoted password / passphrase literals: password = "hunter2" (value ≥ 4 chars).
     # Quotes required so we don't swallow prose like "password reset"; the key may
@@ -111,8 +111,9 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # diff lines up to the next quote. An escaped quote is part of the value, not
     # its end, or the tail would leak.
     re.compile(
-        r"(?i)(?:password|passwd|passphrase|pwd)" + _KEY_TAIL +
-        r"(?P<q>[\"'])(?P<secret>(?:[^\"'\n\\]|\\.){4,})(?P=q)"
+        r"(?i)(?:password|passwd|passphrase|pwd)"
+        + _KEY_TAIL
+        + r"(?P<q>[\"'])(?P<secret>(?:[^\"'\n\\]|\\.){4,})(?P=q)"
     ),
     # Unquoted connection-string passwords: Server=db;Password=hunter2;User ID=sa
     # (ADO.NET / JDBC). The value is bare and ends at `;`, a quote, whitespace or
@@ -126,8 +127,9 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # its own dot/underscore component. A literal that merely embeds the word
     # (`Password=hunter2password;`) has no such separator and still redacts.
     re.compile(
-        r"(?i)(?:password|passwd|pwd)" + _KEY_TAIL +
-        r"(?!(?:[A-Za-z0-9_.]*[._])?(?:password|passwd|pwd)"
+        r"(?i)(?:password|passwd|pwd)"
+        + _KEY_TAIL
+        + r"(?!(?:[A-Za-z0-9_.]*[._])?(?:password|passwd|pwd)"
         r"(?:[._][A-Za-z0-9_.]*)?(?=[;\"'\s]|$))"
         r"(?P<secret>[^\s;\"\']{3,}[^\s;\"\'()\[\]])(?=[;\"'\s]|$)"
     ),
@@ -135,8 +137,7 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # key and a quoted value, e.g. JSON `"Authorization": "Bearer <token>"`, or a
     # dict subscript: headers["Authorization"] = "Bearer ...".
     re.compile(
-        r"(?i)[\"']?authorization" + _KEY_TAIL +
-        r"[\"']?(?:bearer|basic)\s+"
+        r"(?i)[\"']?authorization" + _KEY_TAIL + r"[\"']?(?:bearer|basic)\s+"
         r"(?P<secret>[A-Za-z0-9\-._~+/=]{16,})"
     ),
     # Credentials embedded in connection-string URLs: scheme://user:secret@host.
