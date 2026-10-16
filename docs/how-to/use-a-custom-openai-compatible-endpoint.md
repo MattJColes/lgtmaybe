@@ -2,7 +2,7 @@
 description: Point lgtmaybe at any OpenAI-compatible server - vLLM, llama.cpp, LM Studio, DeepSeek - with --api-base; the key is optional.
 ---
 
-# Local Models and Other OpenAI-Compatible Providers
+# Other OpenAI-Compatible Servers
 
 Many model servers speak the OpenAI `/v1` wire format (the request and reply
 shape of OpenAI's API). They include local and self-hosted runtimes like
@@ -13,19 +13,20 @@ server wants one, a key.
 
 Use this provider when the model you want is not in the built-in provider list.
 
-> Some endpoints that could run through here have a first-class provider
-> instead, which needs less setup: [z.ai / GLM](review-with-zai.md) (`zai`) and
-> [ollama](run-locally-with-ollama.md) (`ollama`).
+> **Running a model on your own machine?** Start with
+> [Run locally](run-locally.md). It covers ollama, llama.cpp and vLLM end to
+> end: model choice, hardware, context windows and concurrency. This page
+> covers the provider itself, hosted endpoints and LM Studio.
+>
+> [z.ai / GLM](review-with-zai.md) could also run through here, but it has a
+> first-class provider (`zai`) that needs less setup.
 
 ## Contents
 
 - [Local models at a glance](#local-models-at-a-glance)
 - [How it works](#how-it-works)
 - [DeepSeek (hosted, keyed)](#deepseek-hosted-keyed)
-- [llama.cpp (local, keyless)](#llamacpp-local-keyless)
 - [LM Studio (local, keyless)](#lm-studio-local-keyless)
-- [vLLM (local or self-hosted, keyless)](#vllm-local-or-self-hosted-keyless)
-- [Concurrency: what each server can actually take](#concurrency-what-each-server-can-actually-take)
 - [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
 - [Gateways that don't support JSON mode (`response_format`)](#gateways-that-dont-support-json-mode-response_format)
 
@@ -36,19 +37,13 @@ machine:
 
 | Runtime | Provider | Key needed? | See |
 |---|---|---|---|
-| [ollama][ollama] | `ollama` (native) | No | [Run locally with ollama](run-locally-with-ollama.md) |
-| [vLLM][vllm] | `openai-compatible` | No | [below](#vllm-local-or-self-hosted-keyless) |
-| [llama.cpp][llamacpp] | `openai-compatible` | No | [below](#llamacpp-local-keyless) |
+| [ollama][ollama] | `ollama` (native) | No | [Run locally](run-locally.md#ollama) |
+| [llama.cpp][llamacpp] | `openai-compatible` | No | [Run locally](run-locally.md#llamacpp) |
+| [vLLM][vllm] | `openai-compatible` | No | [Run locally](run-locally.md#vllm) |
 | [LM Studio][lmstudio] | `openai-compatible` | No | [below](#lm-studio-local-keyless) |
 
-ollama has its own `--provider ollama` and [its own guide](run-locally-with-ollama.md).
-vLLM, llama.cpp and LM Studio are reached through `openai-compatible` and their
-local server's `--api-base`, as shown below.
-
-**Which model, and will it fit?** The ollama guide's model-choice and hardware
-advice applies to any local runtime: pick a coding model, prefer bigger and
-newer, and size it to your RAM/VRAM. See
-[Which model, and will it fit?](run-locally-with-ollama.md#which-model-and-will-it-fit).
+For model choice and hardware on any of them, see
+[Which model, and will it fit?](run-locally.md#which-model-and-will-it-fit).
 
 ## How It Works
 
@@ -70,7 +65,7 @@ The endpoint might be a slow local model. So `openai-compatible` gets the same
 defaults as ollama:
 
 - the same generous 1800-second per-call timeout (scaled for queueing, see
-  [Concurrency](#concurrency-what-each-server-can-actually-take));
+  [Slow models and timeouts](run-locally.md#slow-models-and-timeouts));
 - the same default output ceiling of 16384 tokens per call.
 
 For a fast hosted endpoint like DeepSeek, you can lower the timeout with
@@ -89,23 +84,6 @@ lgtmaybe review \
 
 You can pass the key with `--api-key sk-...` instead of the env var.
 
-## llama.cpp (Local, Keyless)
-
-Start the server:
-
-```bash
-llama-server -m ./model.gguf --port 8000        # serves the OpenAI API at /v1
-```
-
-Then review against it, with no key:
-
-```bash
-lgtmaybe review \
-  --provider openai-compatible \
-  --model local-model \
-  --api-base http://localhost:8000/v1
-```
-
 ## LM Studio (Local, Keyless)
 
 Enable the local server in LM Studio (it serves the OpenAI API on port `1234` by
@@ -118,78 +96,10 @@ lgtmaybe review \
   --api-base http://localhost:1234/v1
 ```
 
-## vLLM (Local or Self-Hosted, Keyless)
-
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-```bash
-lgtmaybe review \
-  --provider openai-compatible \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --api-base http://localhost:8000/v1
-```
-
-## Concurrency: What Each Server Can Actually Take
-
-lgtmaybe [fans out](../reference/glossary.md#fan-out) its calls across a pool
-sized by `max_concurrency`, 6 by default on every provider. That is a ceiling on
-what it will have in flight. Whether your server runs the calls together is up
-to the server, and the three above differ sharply:
-
-| Server | Concurrent by default? | Raising it |
-|---|---|---|
-| **vLLM** | Yes, continuous batching | Close to free; each request keeps the full `--max-model-len` |
-| **llama.cpp** | No, one slot | `-np N` adds slots, but **splits one KV cache between them** |
-| **LM Studio** | No, single slot | Not exposed; set `max_concurrency` to 1 |
-
-The llama.cpp trap fails as a quality problem rather than an error. `-np`
-divides the context you asked for: `-c 32768 -np 4` leaves each slot 8k. A
-lgtmaybe review prompt is comfortably larger than that. So the diff is silently
-truncated, and the model reviews something it was never fully shown. Size `-c`
-as `slots × per-slot context`:
-
-```bash
-llama-server -m ./model.gguf --port 8000 -np 4 -c 131072   # 4 slots × 32k each
-```
-
-vLLM allocates KV blocks (its per-request memory for the context) dynamically
-rather than up front. So concurrent requests each keep the full
-`--max-model-len`. That makes it the local server to choose when review latency
-matters:
-
-```bash
-vllm serve <model> --port 8000 --max-model-len 32768
-lgtmaybe review --provider openai-compatible --model <model> \
-  --api-base http://localhost:8000/v1 --max-concurrency 6
-```
-
-**Queueing does not cost you a timeout.** A queued request's clock starts when it
-is sent, not when a slot frees. So lgtmaybe scales the `openai-compatible`
-default timeout (1800 seconds) by the fan-out width:
-
-- At the default width, it is `1800 × 6`.
-- That is bounded by `max_review_seconds` (3600 seconds). `0` disables the
-  deadline and the bound with it.
-- It is never trimmed below the 1800-second provider default. A deadline set
-  lower than that does not shrink it.
-- The bound applies to the budget, not the wall clock. The deadline gates when a
-  call may start, and does not cut a running call short.
-- An explicit `timeout` is used exactly as written, at any width.
-
-Each run logs the number it resolved and the width it assumed:
-
-```
-per-call budget resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
-```
-
-For a single-slot server, you can say so and have lgtmaybe queue nothing:
-
-```yaml
-# .lgtmaybe.yml
-max_concurrency: 1
-```
+LM Studio serves one request at a time and does not expose a setting to raise
+it. lgtmaybe's other calls queue rather than fail, and the default timeout
+already allows for the wait. To skip the queue, set `max_concurrency: 1`. See
+[Concurrency on a local server](run-locally.md#concurrency-on-a-local-server).
 
 ## Persist It in `.lgtmaybe.yml`
 
@@ -206,9 +116,9 @@ With that file in place, `lgtmaybe review` needs no flags.
 
 In the GitHub Action, set the same values as inputs (or in `.lgtmaybe.yml`). For
 hosted endpoints, pass `api_key` from a secret. See
-[`examples/workflows/review-openai-compatible.yml`][wf]. Leave `api_key` empty
-for a keyless server on the runner host. The Action's container reaches it at
-`http://host.docker.internal:<port>/v1`.
+[`examples/workflows/review-openai-compatible.yml`][wf]. For a keyless server on
+the runner host, see
+[Inside the GitHub Action's container](run-locally.md#inside-the-github-actions-container).
 
 ## Gateways That Don't Support JSON Mode (`response_format`)
 

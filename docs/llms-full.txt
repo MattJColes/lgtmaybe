@@ -71,7 +71,7 @@ flowchart LR
 <div class="grid cards" markdown>
 
 - **Tutorial:** [Getting started](tutorial/getting-started.md): your first review with ollama, locally and free.
-- **How-to:** [install the CLI](how-to/install-the-cli.md), [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally-with-ollama.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md), [Forgejo](how-to/review-on-forgejo.md), [Azure DevOps](how-to/review-on-azure-devops.md).
+- **How-to:** [install the CLI](how-to/install-the-cli.md), [choose a review model](how-to/choose-a-review-model.md), [run locally](how-to/run-locally.md), [Bedrock OIDC](how-to/review-with-bedrock-oidc.md), [Vertex WIF](how-to/review-with-vertex-wif.md), [Azure OpenAI](how-to/review-with-azure.md), [GitHub Action](how-to/use-as-github-action.md), [GitLab](how-to/review-on-gitlab.md), [Gitea](how-to/review-on-gitea.md), [Forgejo](how-to/review-on-forgejo.md), [Azure DevOps](how-to/review-on-azure-devops.md).
 - **Reference:** [Configuration](reference/config.md): every config field and schema.
 - **Explanation:** [What gets reviewed](explanation/what-gets-reviewed.md), [Architecture](explanation/architecture.md), [Auth model](explanation/auth-model.md), [Data & privacy](explanation/data-and-privacy.md).
 
@@ -601,9 +601,8 @@ lgtmaybe review \
   --api-base http://127.0.0.1:8000/v1
 ```
 
-See [Run locally with ollama](run-locally-with-ollama.md) for hardware guidance
-and [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md)
-for vLLM, llama.cpp, and LM Studio setup.
+See [Run locally](run-locally.md) for hardware guidance and for ollama,
+llama.cpp and vLLM setup.
 
 ## Source and Limits
 
@@ -669,8 +668,8 @@ lgtmaybe skips the automatic overview when a Mermaid diagram is already there,
 in the PR description or in a comment lgtmaybe didn't post. The review summary
 says so. `/diagram` still posts one on request.
 
-ollama runs the model on your own machine, so use it through the
-[CLI](run-locally-with-ollama.md) rather than a posting workflow.
+A local model (ollama, llama.cpp or vLLM) runs on your own machine, so use it
+through the [CLI](run-locally.md) rather than a posting workflow.
 
 ## Contents
 
@@ -3309,30 +3308,35 @@ resource that `api_base` points at, not the upstream OpenAI model ID.
 
 ---
 
-<!-- Source: https://lgtmaybe.coles.codes/how-to/run-locally-with-ollama/ -->
+<!-- Source: https://lgtmaybe.coles.codes/how-to/run-locally/ -->
 
-# Run Locally with ollama
+# Run Locally
 
-Use this guide to review your local changes with a local ollama model. There is
-no API cost, no egress (no data goes to a hosted provider) and no key. The CLI reviews
-your `git` diff and prints the findings. To post reviews on pull requests, use
-the [GitHub Action](use-as-github-action.md).
+Use this guide to review your local changes with a model running on your own
+hardware. There is no API cost, no egress (no data goes to a hosted provider)
+and no key. The CLI reviews your `git` diff and prints the findings. To post
+reviews on pull requests, use the [GitHub Action](use-as-github-action.md).
 
-> **ollama is the easiest local start.** Are you running a different local
-> server (vLLM, llama.cpp or LM Studio), or a hosted OpenAI-compatible API like
-> DeepSeek? Use the `openai-compatible` provider instead:
-> [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md).
-> The [model-choice and hardware guidance below](#which-model-and-will-it-fit)
-> applies to any local runtime.
+Three local runtimes are covered here, and lgtmaybe works well with all of
+them: [ollama][ollama], [llama.cpp][llamacpp] and [vLLM][vllm]. ollama has its
+own `--provider ollama`. llama.cpp and vLLM serve the OpenAI `/v1` API, so they
+use `--provider openai-compatible` with the server's URL. Everything else on
+this page applies to all three unless it says otherwise.
+
+> LM Studio also works through `openai-compatible`. It has a quirk with thinking
+> models, covered in
+> [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md#lm-studio-local-keyless).
 
 ## Contents
 
+- [Pick a runtime](#pick-a-runtime)
 - [Prerequisites](#prerequisites)
-- [Pull the model you want](#pull-the-model-you-want)
 - [Which model, and will it fit?](#which-model-and-will-it-fit)
-- [Run the review](#run-the-review)
+- [Start the server and run the review](#start-the-server-and-run-the-review)
+- [Match the batch size to the server's window](#match-the-batch-size-to-the-servers-window)
+- [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
 - [Reviewing large files (recursive walk)](#reviewing-large-files-recursive-walk)
-- [Use a remote ollama instance](#use-a-remote-ollama-instance)
+- [Use a remote server](#use-a-remote-server)
 - [Inside the GitHub Action's container](#inside-the-github-actions-container)
 - [Get findings as JSON](#get-findings-as-json)
 - [Let an AI agent apply the fixes](#let-an-ai-agent-apply-the-fixes)
@@ -3341,24 +3345,23 @@ the [GitHub Action](use-as-github-action.md).
 - [Slow models and timeouts](#slow-models-and-timeouts)
 - [Troubleshooting](#troubleshooting)
 
+## Pick a Runtime
+
+| Runtime | `--provider` | Default URL | Choose it when |
+|---|---|---|---|
+| [ollama][ollama] | `ollama` | `http://localhost:11434` | You want the quickest start: one command pulls a model and serves it. |
+| [llama.cpp][llamacpp] | `openai-compatible` | `http://localhost:8080/v1` | You want one small binary, GGUF files and fine control over quantisation, on CPU, Apple Silicon or a GPU. |
+| [vLLM][vllm] | `openai-compatible` | `http://localhost:8000/v1` | You have an NVIDIA GPU and want speed. It runs the review's parallel calls together. |
+
+None of them needs a key on a local machine. With `openai-compatible` and no
+key, lgtmaybe sends a harmless placeholder, because the OpenAI client rejects an
+empty one.
+
 ## Prerequisites
 
 - lgtmaybe installed (`pip install lgtmaybe`)
-- [ollama](https://ollama.com) installed and running
+- One of the runtimes above, installed
 - A local git repository with changes to review
-
-## Pull the Model You Want
-
-```bash
-ollama pull qwen3.6:27b        # strong all-round coding model
-ollama pull gemma4:e4b         # smaller, for devices with limited RAM
-```
-
-List the models you have:
-
-```bash
-ollama list
-```
 
 ## Which Model, and Will It Fit?
 
@@ -3372,11 +3375,12 @@ Two rules:
    (88% vs 61% recall). A larger, newer model catches more and relies on that
    less.
 
-A solid mid-2026 default is Qwen3.6-27B (`qwen3.6:27b`). On coding benchmarks it
-is close to frontier API models (SWE-bench Verified ~77%). Yet it is small
-enough for a workstation or a well-specced laptop. So it clears lgtmaybe's bar
-across all the review [lenses](../reference/glossary.md#lens) without a
-data-centre GPU.
+A solid mid-2026 default is Qwen3.6-27B. On coding benchmarks it is close to
+frontier API models (SWE-bench Verified ~77%). Yet it is small enough for a
+workstation or a well-specced laptop. So it clears lgtmaybe's bar across all the
+review [lenses](../reference/glossary.md#lens) without a data-centre GPU. Each
+runtime names it differently: `qwen3.6:27b` on ollama, a GGUF file on llama.cpp
+and `Qwen/Qwen3.6-27B` (or its FP8 build) on vLLM.
 
 Smaller models work too, but accuracy falls off. You will miss subtler
 findings. You may also need `--no-reflect`, because the
@@ -3387,36 +3391,124 @@ model.
 
 | You have | What to expect |
 |---|---|
-| **< 32 GB** RAM/VRAM | Drop to a smaller model (`gemma4:e4b`) or use a hosted provider. 27B at a usable quant won't leave room for the diff. |
-| **32 GB** RAM/VRAM | The practical floor. Run `qwen3.6:27b` at a 4-bit quant (≈16-18 GB of weights) with a modest context window. Keep `num_ctx` conservative so the model plus the diff and findings fit. |
-| **48 GB+** RAM/VRAM (preferred) | Comfortable. Room for the weights plus the default `--num-ctx` (32k), or a raised 64k window for very large diffs, with headroom for the KV cache. |
+| **< 32 GB** RAM/VRAM | Drop to a smaller model (e.g. `gemma4:e4b` on ollama) or use a hosted provider. 27B at a usable quant won't leave room for the diff. |
+| **32 GB** RAM/VRAM | The practical floor. Run Qwen3.6-27B at a 4-bit quant (≈16-18 GB of weights) with a modest context window of about 32k. |
+| **48 GB+** RAM/VRAM (preferred) | Comfortable. Room for the weights plus a 32k window, or 64k for very large diffs, with headroom for the KV cache. |
 
 This applies to discrete VRAM and Apple Silicon unified memory alike. A bigger
-context window costs memory on top of the weights. So if you raise `--num-ctx`
-for a large diff (see [Slow models and timeouts](#slow-models-and-timeouts)),
-size it to the table above. On a hosted provider none of this matters: the model
-runs on the provider's hardware.
+context window costs memory on top of the weights. Each runtime sets the window
+its own way: `--num-ctx` on lgtmaybe for ollama, `-c` on `llama-server` and
+`--max-model-len` on `vllm serve`. The vLLM server is GPU-first. It usually runs
+an FP8 or AWQ build rather than a 4-bit GGUF, so check the model card for its
+memory needs. On a hosted provider none of this matters: the model runs on the
+provider's hardware.
 
-## Run the Review
+## Start the Server and Run the Review
 
-From inside the repository, on the branch you want reviewed:
-
-```bash
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434
-```
-
-`http://localhost:11434` is the default, so `--api-base` is optional here.
-
-This diffs your current branch against the remote primary branch and prints the
-findings. To change what it reviews:
+Run `lgtmaybe review` from inside the repository, on the branch you want
+reviewed. It diffs your current branch against the remote primary branch and
+prints the findings. To change what it reviews:
 
 - `--working` reviews the whole worktree (branch commits plus uncommitted edits)
   against that same base.
 - `--uncommitted` reviews only your uncommitted edits against HEAD.
 - `--base <ref>` diffs against a different base.
+
+### ollama
+
+```bash
+ollama pull qwen3.6:27b        # strong all-round coding model
+ollama pull gemma4:e4b         # smaller, for devices with limited RAM
+
+lgtmaybe review --provider ollama --model qwen3.6:27b
+```
+
+`http://localhost:11434` is the default, so `--api-base` is optional. lgtmaybe
+tells ollama the context window to use (`--num-ctx`, 32768 by default). Run
+`ollama list` to see the models you have.
+
+### llama.cpp
+
+Start `llama-server` with a 32k context window. `-hf` downloads the GGUF from
+Hugging Face, or use `-m ./model.gguf` for a file you already have. `--alias`
+sets the model name the server answers to:
+
+```bash
+llama-server -hf unsloth/Qwen3.6-27B-GGUF:Q4_K_M \
+  --alias qwen3.6-27b -c 32768 --port 8080
+```
+
+Then review against it, with no key:
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model qwen3.6-27b \
+  --api-base http://localhost:8080/v1 \
+  --max-input-tokens 16000
+```
+
+### vLLM
+
+Start the server with a 32k context window. The model name is the Hugging Face
+id unless you set `--served-model-name`:
+
+```bash
+vllm serve Qwen/Qwen3.6-27B-FP8 --max-model-len 32768 --port 8000
+```
+
+Then review against it, with no key:
+
+```bash
+lgtmaybe review \
+  --provider openai-compatible \
+  --model Qwen/Qwen3.6-27B-FP8 \
+  --api-base http://localhost:8000/v1 \
+  --max-input-tokens 16000
+```
+
+## Match the Batch Size to the Server's Window
+
+`--max-input-tokens` is the most tokens lgtmaybe puts in one model call. A
+bigger diff is split into several calls. Its default (100000) is lowered
+automatically when lgtmaybe knows the model's window:
+
+- **ollama:** lgtmaybe sets the window itself (`--num-ctx`). So it fits the
+  batch to it: `num_ctx` minus the output ceiling, 16384 tokens at the defaults.
+  You don't need to set anything.
+- **llama.cpp and vLLM:** the window is set on the server (`-c` or
+  `--max-model-len`), and lgtmaybe cannot read it. So the 100000 default stays.
+  Set `--max-input-tokens` yourself, as the commands above do.
+
+Leave room for the answer. The server's window must hold the batch plus the
+output ceiling (16384 tokens by default, see
+[below](#the-output-ceiling-why-a-review-cant-run-forever)). lgtmaybe also counts
+tokens with a generic tokeniser, and local models count a little differently.
+So for a 32k window, `--max-input-tokens 16000` is a safe value. For a 64k
+window, use about 45000.
+
+If you forget, a small diff still works, because it fits anyway. A large diff
+sends a batch bigger than the window, and the server refuses it or cuts it
+short.
+
+## Persist It in `.lgtmaybe.yml`
+
+The provider, model and URL are not secrets, so they can live in config. Then
+`lgtmaybe review` needs no flags. For llama.cpp:
+
+```yaml
+provider: openai-compatible
+model: qwen3.6-27b
+api_base: http://localhost:8080/v1
+max_input_tokens: 16000
+```
+
+For ollama:
+
+```yaml
+provider: ollama
+model: qwen3.6:27b
+```
 
 ## Reviewing Large Files (Recursive Walk)
 
@@ -3446,8 +3538,7 @@ per file, which keeps all of a file's hunks in view together. It tends to miss
 more on big files with small models.
 
 ```bash
-lgtmaybe review --provider ollama --model qwen3.5:4b \
-  --api-base http://localhost:11434 --no-recursive
+lgtmaybe review --provider ollama --model qwen3.5:4b --no-recursive
 ```
 
 ```yaml
@@ -3455,24 +3546,28 @@ lgtmaybe review --provider ollama --model qwen3.5:4b \
 recursive: false
 ```
 
-## Use a Remote ollama Instance
+## Use a Remote Server
 
-If ollama runs on another machine (e.g. a Tailscale peer):
+If the server runs on another machine (e.g. a Tailscale peer), point
+`--api-base` at it:
 
 ```bash
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
+lgtmaybe review --provider ollama --model qwen3.6:27b \
   --api-base http://100.x.x.x:11434
+
+lgtmaybe review --provider openai-compatible --model qwen3.6-27b \
+  --api-base http://100.x.x.x:8080/v1 --max-input-tokens 16000
 ```
 
-lgtmaybe adds no authentication, and ollama has none built in. Restrict network
-access at the host or firewall.
+ollama has no authentication built in, so restrict network access at the host
+or firewall. `llama-server` and `vllm serve` both take `--api-key <key>` to
+require one. Pass the same key to lgtmaybe with `OPENAI_COMPATIBLE_API_KEY` (or
+`--api-key`). It is read from the environment and never saved to config.
 
 ## Inside the GitHub Action's Container
 
-The Action runs lgtmaybe in a container. So it reaches an ollama server on the
-runner host at `host.docker.internal`, not `localhost`. Set it with the Action's
+The Action runs lgtmaybe in a container. So it reaches a server on the runner
+host at `host.docker.internal`, not `localhost`. Set it with the Action's
 `provider`, `model` and `api_base` inputs, or in `.lgtmaybe.yml`:
 
 ```yaml
@@ -3481,17 +3576,18 @@ model: qwen3.6:27b
 api_base: http://host.docker.internal:11434
 ```
 
+For llama.cpp or vLLM, use `provider: openai-compatible` and
+`http://host.docker.internal:<port>/v1`. Leave the `api_key` input empty for a
+keyless server. See
+[`examples/workflows/review-openai-compatible.yml`][wf].
+
 ## Get Findings as JSON
 
 The CLI prints a readable listing by default and never posts anywhere. Add
 `--json` for a machine-readable array you can pipe into other tools:
 
 ```bash
-lgtmaybe review \
-  --provider ollama \
-  --model qwen3.6:27b \
-  --api-base http://localhost:11434 \
-  --json
+lgtmaybe review --provider ollama --model qwen3.6:27b --json
 ```
 
 ## Let an AI Agent Apply the Fixes
@@ -3505,19 +3601,40 @@ branch locally before opening a PR. See
 
 lgtmaybe [fans out](../reference/glossary.md#fan-out) its review calls across a
 pool sized by `max_concurrency`. It is 6 by default on every provider, local
-included. That is a ceiling on what lgtmaybe will have in flight. It is not a
-promise that your server runs them at once:
+included. That is a ceiling on what lgtmaybe will have in flight. Whether your
+server runs the calls together is up to the server, and the three differ
+sharply:
 
-- **A default ollama runs one request at a time.** `OLLAMA_NUM_PARALLEL` is `1`
-  unless you set it, so five of six calls queue (up to `OLLAMA_MAX_QUEUE`, 512).
-  Nothing is lost and nothing fails. The wall clock is your server's throughput
-  either way. Raising `max_concurrency` alone changes nothing.
-- **The setting that matters is on the server.** Start ollama with
-  `OLLAMA_NUM_PARALLEL=4` and four calls really do run together.
-- **It costs memory in proportion.** ollama allocates the context window per
-  parallel slot: four slots at `num_ctx` 32768 need 128k of context, not 32k.
-  This is the usual reason a machine that reviewed happily with one slot falls
-  over with four.
+| Server | Concurrent by default? | Raising it |
+|---|---|---|
+| **ollama** | No, one request at a time | `OLLAMA_NUM_PARALLEL=N`; each slot allocates its own `num_ctx` |
+| **llama.cpp** | No, one slot | `-np N` adds slots, but **splits one KV cache between them** |
+| **vLLM** | Yes, continuous batching | Close to free; each request keeps the full `--max-model-len` |
+
+Queued calls are not lost and do not fail. The wall clock is your server's
+throughput either way, so raising `max_concurrency` alone changes nothing. The
+setting that matters is on the server, and each one costs memory differently:
+
+- **ollama** queues the extra calls (up to `OLLAMA_MAX_QUEUE`, 512). Start it
+  with `OLLAMA_NUM_PARALLEL=4` and four calls really do run together. ollama
+  allocates the context window per slot, so four slots at `num_ctx` 32768 need
+  128k of context, not 32k. This is the usual reason a machine that reviewed
+  happily with one slot falls over with four.
+- **llama.cpp** divides the context you asked for between its slots:
+  `-c 32768 -np 4` leaves each slot 8k. A lgtmaybe review prompt is comfortably
+  larger than that. So the diff is silently truncated, and the model reviews
+  something it was never fully shown. This fails as a quality problem rather
+  than an error. Size `-c` as `slots × per-slot context`:
+
+  ```bash
+  llama-server -hf unsloth/Qwen3.6-27B-GGUF:Q4_K_M --alias qwen3.6-27b \
+    --port 8080 -np 4 -c 131072      # 4 slots × 32k each
+  ```
+
+- **vLLM** allocates KV blocks (its per-request memory for the context) as it
+  needs them, not up front. So concurrent requests each keep the full
+  `--max-model-len`. That makes it the local server to choose when review
+  latency matters.
 
 So the two settings should match. If you have raised the server, tell lgtmaybe:
 
@@ -3559,13 +3676,13 @@ decoding. With no ceiling, only the per-call timeout ends it. That can mean half
 an hour of sustained GPU for a single lens on a one-file diff, and hours for a
 whole review.
 
-So a review runs with a default output ceiling of 16384 tokens per call, half
-the default 32768 `num_ctx`. Measured findings payloads are hundreds of tokens.
-The rest is headroom for a thinking model, which draws its reasoning from the
-same budget.
+So a review on `ollama` or `openai-compatible` runs with a default output
+ceiling of 16384 tokens per call. That is half the default 32768 `num_ctx`.
+Measured findings payloads are hundreds of tokens. The rest is headroom for a
+thinking model, which draws its reasoning from the same budget.
 
-The same ceiling applies to `openai-compatible` and `openrouter`, because the
-failure is not specific to local models. Benchmarking found:
+The same ceiling applies to `openrouter`, because the failure is not specific to
+local models. Benchmarking found:
 
 - a model behind `openai-compatible` emitting 223,558 tokens on a single lens
   call;
@@ -3576,8 +3693,8 @@ The first-party APIs (openai, anthropic, zai, bedrock, vertex, azure) get no
 default ceiling. They have not shown this failure, and a cap could truncate long
 findings payloads.
 
-The ceiling is a fixed number, not a fraction of your window. Raising `num_ctx`
-for a big diff adds room for the prompt, not for a longer answer. Use
+The ceiling is a fixed number, not a fraction of your window. Raising the
+window for a big diff adds room for the prompt, not for a longer answer. Use
 `max_tokens` when you want a longer answer.
 
 Every run logs the ceiling it resolved and where it came from:
@@ -3615,15 +3732,19 @@ lgtmaybe review --provider ollama --model qwen3.5:4b --max-tokens 0  # uncapped
 max_tokens: 32768
 ```
 
+On llama.cpp or vLLM, a higher ceiling needs a bigger server window too, since
+the window must hold the batch plus the answer.
+
 Lowering the ceiling is the quickest way to get a result out of a slow model.
 `--max-tokens 512` turns a stuck review into one that finishes in minutes and
 reports what it truncated.
 
 ## Slow Models and Timeouts
 
-Local models are slow, especially large ones on CPU. So ollama gets a long
-default per-call timeout of 1800 seconds. You don't need to set anything for a
-normal run. (Direct cloud providers default to 600 seconds.)
+Local models are slow, especially large ones on CPU. So `ollama` and
+`openai-compatible` get a long default per-call timeout of 1800 seconds. You
+don't need to set anything for a normal run. (Direct cloud providers default to
+600 seconds.)
 
 **That default scales with the fan-out.** Because the calls queue, the budget
 has to cover the wait as well as the work:
@@ -3631,8 +3752,8 @@ has to cover the wait as well as the work:
 - At the default width of six, the per-call timeout is `1800 × 6`.
 - That is bounded by `max_review_seconds` (3600 seconds by default). `0`
   disables the deadline and with it the bound.
-- It is never trimmed below ollama's own 1800 seconds. A deadline set lower than
-  that does not shrink it.
+- It is never trimmed below the provider's own 1800 seconds. A deadline set
+  lower than that does not shrink it.
 - The bound applies to the budget, not the wall clock. The deadline decides when
   a call may start, so a call that begins just inside it still runs its full
   budget.
@@ -3653,21 +3774,18 @@ explicitly:
 
 ```bash
 # CLI flag (seconds):
-lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 3600
+lgtmaybe review --provider ollama --model qwen3.6:35b --timeout 3600
 ```
 
 ```yaml
 # or in .lgtmaybe.yml (also how the GitHub Action picks it up):
-provider: ollama
-model: qwen3.6:35b
-timeout: 1800
+timeout: 3600
 ```
 
 The review makes five lens calls under the default `fast`
 [preset](../reference/glossary.md#preset) (one per category under
-`--preset full`). On a default ollama those queue rather than overlap. So a slow
-model takes roughly `lens calls × per-call time`. That is why `fast` is the
+`--preset full`). On a single-slot server those queue rather than overlap. So a
+slow model takes roughly `lens calls × per-call time`. That is why `fast` is the
 default: five calls instead of one per category is the biggest single local
 speed-up.
 
@@ -3676,21 +3794,23 @@ To go faster:
 - Narrow the lenses with `categories:` in `.lgtmaybe.yml` (e.g. just `security`
   and `correctness`).
 - Use a smaller model.
-- Give ollama more GPU.
-- If you have the VRAM to serve requests in parallel, raise
-  `OLLAMA_NUM_PARALLEL` on the ollama server as described
-  [above](#concurrency-on-a-local-server). The same five calls then overlap
-  instead of queueing. That is close to a 5× wall-clock win with
-  `OLLAMA_NUM_PARALLEL=5`.
+- Give the server more GPU.
+- Let the server run requests in parallel, if you have the memory, as described
+  [above](#concurrency-on-a-local-server). vLLM does this out of the box. On
+  ollama, `OLLAMA_NUM_PARALLEL=5` makes the same five calls overlap instead of
+  queueing, close to a 5× wall-clock win.
 
 Add `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting
 
-**`Connection refused` on port 11434**: make sure `ollama serve` is running and
-the `--api-base` URL is reachable.
+**`Connection refused`**: make sure the server is running and the `--api-base`
+URL is reachable. The default ports are 11434 (ollama), 8080 (llama.cpp) and
+8000 (vLLM). For llama.cpp and vLLM the URL ends in `/v1`.
 
-**Model not found**: run `ollama pull <model>` before using it.
+**Model not found**: on ollama, run `ollama pull <model>` first. On vLLM,
+`--model` must match the served name: the Hugging Face id, or
+`--served-model-name` if you set it.
 
 **`review incomplete: every review call failed`**: every lens call timed out or
 returned output that wasn't valid JSON. To fix it:
@@ -3701,24 +3821,21 @@ returned output that wasn't valid JSON. To fix it:
 
 lgtmaybe reports this and exits non-zero rather than pretending the PR is clean.
 
-For a large diff this can mean the prompt plus the findings don't fit in
-ollama's context window, so the output is truncated. lgtmaybe runs ollama with a
-32768-token context (`num_ctx`) and structured JSON output, which covers most
-reviews.
+For a large diff this can mean the prompt plus the findings don't fit in the
+server's context window, so the output is truncated. Check the window first:
 
-lgtmaybe does not send ollama's `think` flag. ollama already turns thinking on
-for a model that supports it and rejects the flag for one that does not. So
-sending nothing is right for both.
-
-For a big multi-file change, raise the context window with `--num-ctx` so the
-whole diff and the findings fit. This is ollama-only. Hosted providers manage
-their context window server-side and ignore it:
+- **ollama:** lgtmaybe runs ollama with a 32768-token context (`num_ctx`) and
+  structured JSON output, which covers most reviews. Raise it with `--num-ctx`
+  (ollama only) so the whole diff and the findings fit.
+- **llama.cpp and vLLM:** raise `-c` or `--max-model-len` on the server, and
+  keep `--max-input-tokens` well under it (see
+  [above](#match-the-batch-size-to-the-servers-window)).
 
 ```bash
-# A large multi-file diff on a local model: more time and more context
+# A large multi-file diff on ollama: more time and more context
 # (32768 is already the default; go above it for very large diffs):
 lgtmaybe review --provider ollama --model qwen3.6:35b \
-  --api-base http://localhost:11434 --timeout 1800 --num-ctx 65536
+  --timeout 1800 --num-ctx 65536
 ```
 
 ```yaml
@@ -3729,39 +3846,38 @@ timeout: 1800
 num_ctx: 65536
 ```
 
-`--num-ctx` needs enough RAM/VRAM on the ollama host, so size it to your
+A bigger window needs enough RAM/VRAM on the server host, so size it to your
 machine.
 
-`--max-input-tokens` is the budget that decides when lgtmaybe splits a diff into
-separate model calls. It applies to any provider. Its default (100000) is
-lowered automatically to fit the model's window. On ollama that is `num_ctx`
-minus the output ceiling, so 16384 tokens at the defaults. Set it explicitly to
-send a large diff in fewer calls, or lower it for a small-context model.
+> **If you set `--max-input-tokens` yourself on ollama, keep it under
+> `--num-ctx`.** The two are independent. `--max-input-tokens` caps each batch
+> lgtmaybe sends, while `--num-ctx` is the window ollama allocates. An explicit
+> value is used as given, not fitted. So leave headroom: use a batch budget well
+> below the window (e.g. `--max-input-tokens 16000` with `--num-ctx 32768`).
+> That avoids ollama silently truncating the findings JSON, which otherwise
+> shows up only as an unhelpful "review failed".
 
-If a very large diff still truncates, you can:
+lgtmaybe does not send ollama's `think` flag. ollama already turns thinking on
+for a model that supports it and rejects the flag for one that does not. So
+sending nothing is right for both.
+
+**Review is empty or truncated**: the diff may exceed the model's context
+window. To shrink it, you can:
 
 - narrow it with `include_paths` / `exclude_paths` in `.lgtmaybe.yml`;
 - set a lower `max_files` in `.lgtmaybe.yml`;
 - or run a model with a bigger context window.
 
-> **If you set `--max-input-tokens` yourself, keep it under `--num-ctx`.** The
-> two are independent. `--max-input-tokens` caps each batch lgtmaybe sends,
-> while `--num-ctx` is the window ollama allocates. An explicit value is used as
-> given, not fitted. lgtmaybe also estimates tokens with a generic tokeniser,
-> and local models tokenise differently. So leave headroom: use a batch budget
-> well below the window (e.g. `--max-input-tokens 16000` with
-> `--num-ctx 32768`). That avoids ollama silently truncating the findings JSON,
-> which otherwise shows up only as an unhelpful "review failed".
-
-**Review is empty or truncated**: the diff may exceed the model's context
-window. Add a path filter in `.lgtmaybe.yml` to shrink the diff, or lower
-`max_files`.
+[llamacpp]: https://github.com/ggml-org/llama.cpp
+[vllm]: https://docs.vllm.ai/
+[ollama]: https://ollama.com/
+[wf]: https://github.com/MattJColes/lgtmaybe/blob/main/examples/workflows/review-openai-compatible.yml
 
 ---
 
 <!-- Source: https://lgtmaybe.coles.codes/how-to/use-a-custom-openai-compatible-endpoint/ -->
 
-# Local Models and Other OpenAI-Compatible Providers
+# Other OpenAI-Compatible Servers
 
 Many model servers speak the OpenAI `/v1` wire format (the request and reply
 shape of OpenAI's API). They include local and self-hosted runtimes like
@@ -3772,19 +3888,20 @@ server wants one, a key.
 
 Use this provider when the model you want is not in the built-in provider list.
 
-> Some endpoints that could run through here have a first-class provider
-> instead, which needs less setup: [z.ai / GLM](review-with-zai.md) (`zai`) and
-> [ollama](run-locally-with-ollama.md) (`ollama`).
+> **Running a model on your own machine?** Start with
+> [Run locally](run-locally.md). It covers ollama, llama.cpp and vLLM end to
+> end: model choice, hardware, context windows and concurrency. This page
+> covers the provider itself, hosted endpoints and LM Studio.
+>
+> [z.ai / GLM](review-with-zai.md) could also run through here, but it has a
+> first-class provider (`zai`) that needs less setup.
 
 ## Contents
 
 - [Local models at a glance](#local-models-at-a-glance)
 - [How it works](#how-it-works)
 - [DeepSeek (hosted, keyed)](#deepseek-hosted-keyed)
-- [llama.cpp (local, keyless)](#llamacpp-local-keyless)
 - [LM Studio (local, keyless)](#lm-studio-local-keyless)
-- [vLLM (local or self-hosted, keyless)](#vllm-local-or-self-hosted-keyless)
-- [Concurrency: what each server can actually take](#concurrency-what-each-server-can-actually-take)
 - [Persist it in `.lgtmaybe.yml`](#persist-it-in-lgtmaybeyml)
 - [Gateways that don't support JSON mode (`response_format`)](#gateways-that-dont-support-json-mode-response_format)
 
@@ -3795,19 +3912,13 @@ machine:
 
 | Runtime | Provider | Key needed? | See |
 |---|---|---|---|
-| [ollama][ollama] | `ollama` (native) | No | [Run locally with ollama](run-locally-with-ollama.md) |
-| [vLLM][vllm] | `openai-compatible` | No | [below](#vllm-local-or-self-hosted-keyless) |
-| [llama.cpp][llamacpp] | `openai-compatible` | No | [below](#llamacpp-local-keyless) |
+| [ollama][ollama] | `ollama` (native) | No | [Run locally](run-locally.md#ollama) |
+| [llama.cpp][llamacpp] | `openai-compatible` | No | [Run locally](run-locally.md#llamacpp) |
+| [vLLM][vllm] | `openai-compatible` | No | [Run locally](run-locally.md#vllm) |
 | [LM Studio][lmstudio] | `openai-compatible` | No | [below](#lm-studio-local-keyless) |
 
-ollama has its own `--provider ollama` and [its own guide](run-locally-with-ollama.md).
-vLLM, llama.cpp and LM Studio are reached through `openai-compatible` and their
-local server's `--api-base`, as shown below.
-
-**Which model, and will it fit?** The ollama guide's model-choice and hardware
-advice applies to any local runtime: pick a coding model, prefer bigger and
-newer, and size it to your RAM/VRAM. See
-[Which model, and will it fit?](run-locally-with-ollama.md#which-model-and-will-it-fit).
+For model choice and hardware on any of them, see
+[Which model, and will it fit?](run-locally.md#which-model-and-will-it-fit).
 
 ## How It Works
 
@@ -3829,7 +3940,7 @@ The endpoint might be a slow local model. So `openai-compatible` gets the same
 defaults as ollama:
 
 - the same generous 1800-second per-call timeout (scaled for queueing, see
-  [Concurrency](#concurrency-what-each-server-can-actually-take));
+  [Slow models and timeouts](run-locally.md#slow-models-and-timeouts));
 - the same default output ceiling of 16384 tokens per call.
 
 For a fast hosted endpoint like DeepSeek, you can lower the timeout with
@@ -3848,23 +3959,6 @@ lgtmaybe review \
 
 You can pass the key with `--api-key sk-...` instead of the env var.
 
-## llama.cpp (Local, Keyless)
-
-Start the server:
-
-```bash
-llama-server -m ./model.gguf --port 8000        # serves the OpenAI API at /v1
-```
-
-Then review against it, with no key:
-
-```bash
-lgtmaybe review \
-  --provider openai-compatible \
-  --model local-model \
-  --api-base http://localhost:8000/v1
-```
-
 ## LM Studio (Local, Keyless)
 
 Enable the local server in LM Studio (it serves the OpenAI API on port `1234` by
@@ -3877,78 +3971,10 @@ lgtmaybe review \
   --api-base http://localhost:1234/v1
 ```
 
-## vLLM (Local or Self-Hosted, Keyless)
-
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-```bash
-lgtmaybe review \
-  --provider openai-compatible \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --api-base http://localhost:8000/v1
-```
-
-## Concurrency: What Each Server Can Actually Take
-
-lgtmaybe [fans out](../reference/glossary.md#fan-out) its calls across a pool
-sized by `max_concurrency`, 6 by default on every provider. That is a ceiling on
-what it will have in flight. Whether your server runs the calls together is up
-to the server, and the three above differ sharply:
-
-| Server | Concurrent by default? | Raising it |
-|---|---|---|
-| **vLLM** | Yes, continuous batching | Close to free; each request keeps the full `--max-model-len` |
-| **llama.cpp** | No, one slot | `-np N` adds slots, but **splits one KV cache between them** |
-| **LM Studio** | No, single slot | Not exposed; set `max_concurrency` to 1 |
-
-The llama.cpp trap fails as a quality problem rather than an error. `-np`
-divides the context you asked for: `-c 32768 -np 4` leaves each slot 8k. A
-lgtmaybe review prompt is comfortably larger than that. So the diff is silently
-truncated, and the model reviews something it was never fully shown. Size `-c`
-as `slots × per-slot context`:
-
-```bash
-llama-server -m ./model.gguf --port 8000 -np 4 -c 131072   # 4 slots × 32k each
-```
-
-vLLM allocates KV blocks (its per-request memory for the context) dynamically
-rather than up front. So concurrent requests each keep the full
-`--max-model-len`. That makes it the local server to choose when review latency
-matters:
-
-```bash
-vllm serve <model> --port 8000 --max-model-len 32768
-lgtmaybe review --provider openai-compatible --model <model> \
-  --api-base http://localhost:8000/v1 --max-concurrency 6
-```
-
-**Queueing does not cost you a timeout.** A queued request's clock starts when it
-is sent, not when a slot frees. So lgtmaybe scales the `openai-compatible`
-default timeout (1800 seconds) by the fan-out width:
-
-- At the default width, it is `1800 × 6`.
-- That is bounded by `max_review_seconds` (3600 seconds). `0` disables the
-  deadline and the bound with it.
-- It is never trimmed below the 1800-second provider default. A deadline set
-  lower than that does not shrink it.
-- The bound applies to the budget, not the wall clock. The deadline gates when a
-  call may start, and does not cut a running call short.
-- An explicit `timeout` is used exactly as written, at any width.
-
-Each run logs the number it resolved and the width it assumed:
-
-```
-per-call budget resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
-```
-
-For a single-slot server, you can say so and have lgtmaybe queue nothing:
-
-```yaml
-# .lgtmaybe.yml
-max_concurrency: 1
-```
+LM Studio serves one request at a time and does not expose a setting to raise
+it. lgtmaybe's other calls queue rather than fail, and the default timeout
+already allows for the wait. To skip the queue, set `max_concurrency: 1`. See
+[Concurrency on a local server](run-locally.md#concurrency-on-a-local-server).
 
 ## Persist It in `.lgtmaybe.yml`
 
@@ -3965,9 +3991,9 @@ With that file in place, `lgtmaybe review` needs no flags.
 
 In the GitHub Action, set the same values as inputs (or in `.lgtmaybe.yml`). For
 hosted endpoints, pass `api_key` from a secret. See
-[`examples/workflows/review-openai-compatible.yml`][wf]. Leave `api_key` empty
-for a keyless server on the runner host. The Action's container reaches it at
-`http://host.docker.internal:<port>/v1`.
+[`examples/workflows/review-openai-compatible.yml`][wf]. For a keyless server on
+the runner host, see
+[Inside the GitHub Action's container](run-locally.md#inside-the-github-actions-container).
 
 ## Gateways That Don't Support JSON Mode (`response_format`)
 
@@ -4368,7 +4394,7 @@ timeout: 3600   # an hour per call, e.g. for a big model on CPU
 ```
 
 CLI: `--timeout`; Action input: `timeout`. See
-[Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
+[Run locally](run-locally.md#slow-models-and-timeouts).
 
 ### structured_output
 
@@ -6038,7 +6064,7 @@ on the PR itself, set up the [GitHub Action](use-as-github-action.md).
 
 - [Use from a coding agent over MCP](use-from-a-coding-agent-over-mcp.md) - let
   the agent call the review as a tool, with no files in between
-- [Run locally with ollama](run-locally-with-ollama.md) - the local CLI setup
+- [Run locally](run-locally.md) - the local CLI setup with ollama, llama.cpp or vLLM
 - [What gets reviewed](../explanation/what-gets-reviewed.md) - scope, caps, and output formats
 
 ---
@@ -6155,7 +6181,7 @@ pre-commit install
 While hooks run, pre-commit sets your unstaged edits aside, so the review covers
 what you have staged. Untracked files in the working tree are reviewed too.
 Because this calls your model on every commit, prefer a local model (see
-[Run locally with ollama](run-locally-with-ollama.md)) or the `pre-push` hook.
+[Run locally](run-locally.md)) or the `pre-push` hook.
 
 ## Use a Keyless Cloud Provider
 
@@ -10919,7 +10945,7 @@ network recovers, but a dead-end failure surfaces fast.
 
     Local throughput is decided by `OLLAMA_NUM_PARALLEL`, llama.cpp's `-np` or
     vLLM's batching. Raising those costs memory per slot; see
-    [running locally](../how-to/run-locally-with-ollama.md). Drop
+    [running locally](../how-to/run-locally.md#concurrency-on-a-local-server). Drop
     `max_concurrency` to 1 for a very slow local model, where six queued calls
     could each wait out the timeout. The pool is shared across batches. So wall
     time is `ceil(batches × lenses / workers)` call-latencies rather than

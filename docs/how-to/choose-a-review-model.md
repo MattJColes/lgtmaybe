@@ -99,9 +99,8 @@ lgtmaybe review \
   --api-base http://127.0.0.1:8000/v1
 ```
 
-See [Run locally with ollama](run-locally-with-ollama.md) for hardware guidance
-and [Other OpenAI-compatible servers](use-a-custom-openai-compatible-endpoint.md)
-for vLLM, llama.cpp, and LM Studio setup.
+See [Run locally](run-locally.md) for hardware guidance and for ollama,
+llama.cpp and vLLM setup.
 
 ## Source and Limits
 

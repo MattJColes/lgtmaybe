@@ -112,7 +112,7 @@ pre-commit install
 While hooks run, pre-commit sets your unstaged edits aside, so the review covers
 what you have staged. Untracked files in the working tree are reviewed too.
 Because this calls your model on every commit, prefer a local model (see
-[Run locally with ollama](run-locally-with-ollama.md)) or the `pre-push` hook.
+[Run locally](run-locally.md)) or the `pre-push` hook.
 
 ## Use a Keyless Cloud Provider
 

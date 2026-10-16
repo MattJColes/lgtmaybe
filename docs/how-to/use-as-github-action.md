@@ -46,8 +46,8 @@ lgtmaybe skips the automatic overview when a Mermaid diagram is already there,
 in the PR description or in a comment lgtmaybe didn't post. The review summary
 says so. `/diagram` still posts one on request.
 
-ollama runs the model on your own machine, so use it through the
-[CLI](run-locally-with-ollama.md) rather than a posting workflow.
+A local model (ollama, llama.cpp or vLLM) runs on your own machine, so use it
+through the [CLI](run-locally.md) rather than a posting workflow.
 
 ## Contents
 
