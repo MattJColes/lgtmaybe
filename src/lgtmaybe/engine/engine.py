@@ -1208,19 +1208,6 @@ class LLMReviewEngine:
             _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
         all_findings = scoped
 
-        # 6c. Cap the scan findings only now, after scoping: the cap bounds
-        #     posted comments, and applying it before the scope spent it on
-        #     off-diff hits step 6b had just dropped, starving the one new hit
-        #     the PR actually added. Model findings never count against it.
-        scans = [f for f in all_findings if _is_scan_finding(f)]
-        if len(scans) > MAX_SCAN_FINDINGS:
-            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
-            _log.info(
-                "scan findings capped after diff scoping",
-                extra={"kept": MAX_SCAN_FINDINGS, "considered": len(scans) + off_diff},
-            )
-            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
-
         # 7. Suppression: drop findings a team has marked known-fine — by
         #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
         #    ignore` pragma on/above the flagged line. Done before reflection so a
@@ -1241,6 +1228,20 @@ class LLMReviewEngine:
             all_findings = unsuppressed
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
+
+        # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
+        #     cap bounds posted comments, so findings those stages drop must not
+        #     spend its slots — the slot a suppressed hit vacates goes to the
+        #     next on-diff hit instead. Model findings never count against it.
+        scans = [f for f in all_findings if _is_scan_finding(f)]
+        if len(scans) > MAX_SCAN_FINDINGS:
+            considered = len(scans) + off_diff  # pre-cap count, before reassignment
+            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
+            _log.info(
+                "scan findings capped after diff scoping",
+                extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
+            )
+            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
 
         # 7b. Evidence gate: built-in defect findings must name a concrete way
         #     the changed code fails. Category is engine-stamped, so lowering the
