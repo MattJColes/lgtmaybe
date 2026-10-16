@@ -53,15 +53,20 @@ the key is never persisted to config.
 
 ## Choosing the Model
 
-Use any chat model your key can access, named as you would send it to the
-OpenAI API (litellm's native form): `gpt-5.5` or one of the newer GPT-6 models
-(`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`), or a smaller model to cut cost.
+Use any chat model your key can access. Name it as you would send it to the
+OpenAI API (litellm's native form). Good choices are:
+
+- `gpt-5.5`;
+- one of the newer GPT-6 models (`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`);
+- a smaller model, to cut cost.
+
 [Choose a review model](choose-a-review-model.md) has measured results for the
 GPT-6 family.
 
-Under the default `fast` preset, a `gpt-5*` review model has its reflection
-(false-positive audit) pass run on `gpt-5-mini`, so your key needs access to
-that model too. Set `reflect_model` to choose a different auditor.
+Under the default `fast` [preset](../reference/glossary.md#preset), a `gpt-5*`
+review model runs its [reflection](../reference/glossary.md#reflection)
+(false-positive audit) pass on `gpt-5-mini`. So your key needs access to that
+model too. Set `reflect_model` to choose a different auditor.
 
 ## Persist Non-Secret Defaults
 
