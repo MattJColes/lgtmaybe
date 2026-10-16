@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 Guidance for agents working in **lgtmaybe** — a provider-agnostic PR reviewer.
 Read this before writing code. It encodes decisions that are **made, not options**.

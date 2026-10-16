@@ -285,7 +285,7 @@ def _honour_param_support(provider: Provider, model: str, opts: dict[str, Any]) 
 
     The OpenRouter branch is a DELIBERATE, narrowly scoped exception to the
     "litellm normalises every provider to one `completion()` call" decision in
-    CLAUDE.md — not licence for general per-provider plumbing. The reason it has
+    AGENTS.md — not licence for general per-provider plumbing. The reason it has
     to exist here: litellm's openrouter transformation only forwards
     ``reasoning_effort`` when its capability map already flags the model
     reasoning-capable, and the newest models are not in that map — which is

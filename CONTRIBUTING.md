@@ -25,7 +25,7 @@ new to the project, keep sentences short, and link project terms to the
   generation, chat integrations, …) are declined regardless of quality. If a
   change is large or speculative, open an issue first.
 
-The decisions that are *made, not options* live in [`CLAUDE.md`](CLAUDE.md).
+The decisions that are *made, not options* live in [`AGENTS.md`](AGENTS.md).
 Read it before a non-trivial change: structured output only, fork safety, no
 static cloud keys, ports frozen in `core/ports.py`.
 [`DEVELOPMENT.md`](DEVELOPMENT.md) covers running the CLI locally and the test
