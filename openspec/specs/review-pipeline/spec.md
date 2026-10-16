@@ -578,7 +578,8 @@ any triage failure reviews everything, and skips are named in the summary.
 
 ### Requirement: Static analysis runs sandboxed
 
-Installed tools SHALL run sandboxed when static analysis is enabled — scrubbed
+Installed tools SHALL run sandboxed when static analysis is enabled, which is
+the default: scrubbed
 env, no network, hard timeout, throwaway temp dir, never a checkout, and rules
 read only from a local path — bundled with the package or configured — never a
 network rule registry. Paths MUST be canonical forward-slash repository
@@ -611,9 +612,10 @@ config, ignore files or inline ignore pragmas from the PR-authored corpus.
 ### Requirement: Scan-only file texts never reach a prompt
 
 Dependency manifests and lockfiles fetched for scanning SHALL travel in their
-own context channel, separate from reviewed file texts. They MUST NOT enter the
-diff, any prompt, a hint block, or the reflection pass, and they are fetched
-only when a scanner will read them.
+own context channel, separate from reviewed file texts. Their text MUST NOT
+enter the diff, any prompt, a hint block, or the reflection pass (only a
+scanner's own redacted hint about them may), and they are fetched only when a
+scanner will read them.
 <!-- anchor: engine.scan-manifests -->
 
 #### Scenario: a PR changes a lockfile
@@ -628,13 +630,25 @@ only when a scanner will read them.
 
 Each tool's findings SHALL reach the review by its configured mode: `hint`
 wraps them as untrusted grounding for the lens calls, while `finding` maps them
-onto review findings posted with no model call. Direct-posted findings MUST be
+onto review findings posted with no model call. Every tool MUST default to
+`hint`; `finding` is a per-tool opt-in. Direct-posted findings MUST be
 redacted, MUST carry a `scan:<tool>` category, and MUST be re-anchored, deduped,
 suppressed and rule-filtered like any other finding — but never reflected, since
 there is no model judgement to audit. A direct finding whose anchor matches no
 changed line MUST be dropped and counted in the summary, because the tools read
 whole files and only the diff is under review.
 <!-- anchor: engine.tool-findings -->
+
+#### Scenario: a scanner runs with the default mode
+- **WHEN** gitleaks reports a credential and no `tool_mode` is configured
+- **THEN** the hit reaches the lens calls as a hint and nothing posts without
+  the model
+
+#### Scenario: a hint is about a file no batch holds
+- **WHEN** a `hint`-mode tool reports an advisory against a lockfile
+- **THEN** it rides the first batch's security lens (else correctness, else the
+  summary names the drop) once, on that lens's own block, and a confirmed
+  finding renders in the review body
 
 #### Scenario: a scanner hits a line the PR changed
 - **WHEN** a `finding`-mode tool reports a credential on a changed line

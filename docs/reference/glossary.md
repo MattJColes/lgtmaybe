@@ -235,9 +235,10 @@ it finds a spec that matches the pull request.
 
 ## Static-Analysis Fusion
 
-An optional step that runs installed tools, such as ruff, bandit and semgrep,
-on the changed files. Their results go to the model as hints to confirm or
-discard. The raw tool output is never posted.
+A step, on by default, that runs installed tools, such as ruff, bandit,
+gitleaks and semgrep, on the changed files. Their results go to the model as
+hints to confirm or discard. The raw tool output is never posted. A tool you
+opt into `finding` mode posts its findings directly instead.
 
 ## Symbol Resolution
 

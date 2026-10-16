@@ -124,14 +124,67 @@ def _patch_tools(monkeypatch, run: _FakeRun, present: set[str]) -> None:  # type
     monkeypatch.setattr(subprocess, "run", run)
 
 
-def test_disabled_by_default_runs_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_disabled_runs_nothing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     run = _FakeRun()
     _patch_tools(monkeypatch, run, present={"ruff", "bandit", "semgrep"})
+
+    assert run_static_analysis(FILES, _cfg(enabled=False)) == []
+    assert run.calls == []
+
+
+def test_enabled_by_default_runs_installed_tools(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """On by default: whatever is installed runs, and nothing else is needed."""
+    run = _FakeRun()
+    _patch_tools(monkeypatch, run, present={"ruff"})
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
 
-    assert cfg.static_analysis.enabled is False
-    assert run_static_analysis(FILES, cfg) == []
-    assert run.calls == []
+    run_static_analysis(FILES, cfg)
+
+    assert [Path(str(c["argv"][0])).name for c in run.calls] == ["ruff"]
+
+
+def _record_skip_logs(monkeypatch) -> list[tuple[str, str]]:  # type: ignore[no-untyped-def]
+    """Capture the "not installed" log level per tool (the logger never propagates)."""
+    seen: list[tuple[str, str]] = []
+
+    def record(level: str):  # type: ignore[no-untyped-def]
+        def log(msg: str, *args: object, extra: dict | None = None, **kw: object) -> None:
+            if "not installed" in msg and extra:
+                seen.append((level, str(extra["tool"])))
+
+        return log
+
+    monkeypatch.setattr(
+        static_analysis,
+        "_log",
+        SimpleNamespace(info=record("info"), warning=record("warning")),
+    )
+    return seen
+
+
+def test_a_missing_tool_is_quiet_under_the_default_hint_mode(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Every tool defaults to hint, and `tools` defaults to all of them: a default
+    run on a machine with one linter installed must not warn about the rest."""
+    _patch_tools(monkeypatch, _FakeRun(), present=set())
+    seen = _record_skip_logs(monkeypatch)
+
+    run_static_analysis(FILES, ReviewConfig(provider=Provider.ollama, model="llama3"))
+
+    assert seen and all(level == "info" for level, _ in seen)
+
+
+def test_a_missing_tool_opted_into_finding_mode_warns(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Opting a tool into posting and then not installing it is a coverage hole
+    the user asked for by name, so it is loud; the hint tools stay quiet."""
+    from lgtmaybe.core.models import ToolMode
+
+    _patch_tools(monkeypatch, _FakeRun(), present=set())
+    seen = _record_skip_logs(monkeypatch)
+
+    run_static_analysis(FILES, _cfg(tool_mode={StaticAnalysisTool.gitleaks: ToolMode.finding}))
+
+    assert ("warning", "gitleaks") in seen
+    assert all(level == "info" for level, tool in seen if tool != "gitleaks")
 
 
 def test_missing_tool_is_skipped_silently(monkeypatch) -> None:  # type: ignore[no-untyped-def]

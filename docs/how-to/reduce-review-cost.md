@@ -141,28 +141,30 @@ credentials.
 
 ### 2. Let Deterministic Tools Do the Deterministic Work
 
-Findings a linter can prove do not need a language model:
+[Static-analysis fusion](../reference/glossary.md#static-analysis-fusion) is
+on by default. Installed tools run over the changed files, and a tool that is
+not installed is skipped. To install them locally:
 
 ```bash
 pip install 'lgtmaybe[static-analysis]'
 ```
 
+By default every tool sends its findings to the lenses as hints to confirm or
+discard. This grounds the model, and tends to cut low-value findings. Hints
+are not free: they add prompt tokens to each lens call, up to 50 per batch.
+
+To post a tool's findings directly, with no model tokens spent on them, opt it
+into `finding` mode:
+
 ```yaml
 static_analysis:
-  enabled: true
+  tool_mode:
+    gitleaks: finding
+    osv-scanner: finding
 ```
 
-With [static-analysis fusion](../reference/glossary.md#static-analysis-fusion)
-on, installed tools run over the changed files at no token cost. They come in
-two kinds:
-
-- **Interpretive tools** (ruff, bandit, mypy, and semgrep with local rules)
-  feed their findings to the lenses as hints to confirm or discard. This
-  grounds the model, and tends to cut low-value findings as well as spend.
-- **Deterministic tools** (gitleaks, zizmor, ast-grep with your own rules,
-  osv-scanner) post their findings directly, with no model call.
-
-A tool that is not installed is skipped.
+To stop the tools and their hints, set `enabled: false`, pass
+`--no-static-analysis`, or set the Action input `static_analysis: false`.
 
 ### 3. Check Prompt Caching Is Working
 

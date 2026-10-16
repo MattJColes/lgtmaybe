@@ -156,16 +156,15 @@ class StaticAnalysisTool(StrEnum):
 class ToolMode(StrEnum):
     """How a tool's findings reach the review.
 
-    ``hint`` is the original fusion behaviour: findings become an untrusted
-    HINTS block the model confirms, contextualises, or discards. ``finding``
-    skips the model entirely and posts the tool's result as a review comment.
+    ``hint`` (the default for every tool): findings become an untrusted HINTS
+    block the model confirms, contextualises, or discards, so every tool takes
+    one path and the model sees each hit in context. ``finding`` skips the model
+    entirely and posts the tool's result as a review comment.
 
-    Which one is right is a property of the tool's precision, not a user
-    preference: a secret is present or it isn't, so asking a model to "confirm
-    or discard" a deterministic regex match only adds cost and doubt. A lint or
-    a SAST heuristic genuinely benefits from a model judging whether it matters
-    here. Per-tool defaults live in ``engine.static_analysis``; this enum is the
-    override users reach for via ``static_analysis.tool_mode``.
+    ``finding`` is a per-tool opt-in through ``static_analysis.tool_mode``, for a
+    tool whose claims need no interpretation: in hint mode the model can discard
+    a real hit, such as a committed secret. Defaults live in
+    ``engine.static_analysis``.
     """
 
     hint = "hint"
@@ -175,18 +174,20 @@ class ToolMode(StrEnum):
 class StaticAnalysisConfig(_Strict):
     """Static-analysis fusion: deterministic tool findings as LLM grounding.
 
-    When enabled, the installed tools run over the already-fetched changed-file
-    texts (sandboxed subprocess, scrubbed environment, no network, never a
-    checkout) and their findings enter each lens prompt as untrusted HINTS —
-    "confirm, contextualise, or discard" — raising recall on the deterministic
-    bugs models miss without posting raw linter noise. A tool that isn't
-    installed is skipped silently, so the feature degrades to nothing on a
-    minimal install.
+    On by default: the installed tools run over the already-fetched
+    changed-file texts (sandboxed subprocess, scrubbed environment, no network,
+    never a checkout) and, in the default ``hint`` mode, their findings enter
+    each lens prompt as untrusted HINTS ("confirm, contextualise, or discard"),
+    raising recall on the deterministic bugs models miss without posting raw
+    linter noise. A tool that isn't installed is skipped silently, so the
+    feature degrades to nothing on a minimal install.
     """
 
-    # Global switch. Off by default: existing installs and zero-dependency
-    # setups see no behaviour change and no subprocess ever runs.
-    enabled: bool = False
+    # Global switch. On by default: a minimal install has no tools, so it
+    # degrades to nothing; an install with the tools (the Action image, or the
+    # `static-analysis` extra) grounds every review. `--no-static-analysis` or
+    # Action input `static_analysis: false` turns it off.
+    enabled: bool = True
     # Tools to run when enabled (each skipped silently if not installed).
     # `default=` (not default_factory) on purpose, like ReviewConfig.categories:
     # pydantic copies it per instance and it reaches the generated docs schema.
@@ -201,9 +202,9 @@ class StaticAnalysisConfig(_Strict):
     # floor; a tool's own entry always wins, in either direction.
     tool_min_severity: dict[StaticAnalysisTool, Severity] = Field(default_factory=dict)
     # Per-tool overrides of how findings reach the review (hint vs finding). A
-    # tool without an entry uses the built-in default for that tool — see
-    # `engine.static_analysis._DEFAULT_MODE`, which routes deterministic-claim
-    # tools straight to posting and interpretive ones through the model.
+    # tool without an entry uses the built-in default, `hint` for every tool
+    # (`engine.static_analysis._DEFAULT_MODE`); `{gitleaks: finding}` makes that
+    # one tool post directly with no model call.
     tool_mode: dict[StaticAnalysisTool, ToolMode] = Field(default_factory=dict)
     # Local semgrep rules file/dir passed as --config. Unset runs the bundled
     # MIT rule pack (`static_analysis.bundled_semgrep_rules`) — never the

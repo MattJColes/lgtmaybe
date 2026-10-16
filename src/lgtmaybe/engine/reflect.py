@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,11 +27,12 @@ from lgtmaybe.core.ports import ProviderClient
 from .astgrep import SymbolResolver
 from .compress import count_tokens, take_lines
 from .conflicts import PRECEDENCE
-from .injection import neutralise
+from .injection import neutralise, wrap_hints
 from .parse import coerce_needs, iter_json_values
 from .profiling import timed_complete
 from .redact import redact
 from .retrieve import MAX_FETCH_FILES, MAX_HOPS, FileFetcher, resolve_needs
+from .static_analysis import ToolFinding, format_hints
 
 _log = get_logger(__name__)
 
@@ -166,6 +168,7 @@ def reflect_findings(
     *,
     hop: int = 0,
     fetched_paths: list[str] | None = None,
+    scan_hints: Sequence[ToolFinding] = (),
 ) -> list[ReviewFinding]:
     """Filter *findings* by asking the provider to score confidence.
 
@@ -189,12 +192,21 @@ def reflect_findings(
     :data:`MAX_HOPS`), so an auditor that always defers can never loop forever;
     ``fetched_paths`` are the files pulled for THIS pass's deferral, force-included
     in the grounding so the recheck sees the cross-file code it deferred for.
+
+    ``scan_hints`` are static-analysis hints on files the diff never shows (a
+    lockfile advisory). The ones on a finding's own path ground that finding,
+    because the auditor otherwise has nothing to verify it against.
     """
     if not findings:
         return []
     try:
         verdicts, grounded_paths = _audit(
-            findings, ctx, cfg, provider, fetched_paths=fetched_paths or []
+            findings,
+            ctx,
+            cfg,
+            provider,
+            fetched_paths=fetched_paths or [],
+            scan_hints=scan_hints,
         )
     except Exception:
         # If reflection fails (provider error, quota, unparseable output), keep all
@@ -289,6 +301,7 @@ def reflect_findings(
                     resolve_symbol,
                     hop=hop + 1,
                     fetched_paths=sorted(fetched),
+                    scan_hints=scan_hints,
                 )
             )
             return survivors
@@ -309,6 +322,7 @@ def _audit(
     cfg: ReviewConfig,
     provider: ProviderClient,
     fetched_paths: list[str],
+    scan_hints: Sequence[ToolFinding] = (),
 ) -> tuple[dict[int, _ParsedVerdict], set[str]]:
     """Run one auditor completion over *findings*; ``(verdicts, grounded paths)``.
 
@@ -353,6 +367,7 @@ def _audit(
     # JSON neutralise their own attacker-derived text.
     diff_part = f"Diff:\n{neutralise(ctx.diff)}"
     rest_part = (
+        f"{_scan_hint_block(findings, scan_hints)}"
         f"{grounding}"
         f"Findings (indexed from 0):\n{findings_json}\n\n"
         "Return the confidence verdict JSON object."
@@ -376,6 +391,26 @@ def _audit(
         **opts,
     )
     return _parse_verdicts(result.text), grounded_paths
+
+
+# Rides the audit's own block, and only when a finding sits on a hinted file, so
+# the common case adds zero bytes and the cached system prompt never changes. The
+# carve-out lives here, not in `_REFLECT_SYSTEM`, for the same reason.
+_SCAN_HINTS_LEAD = (
+    "Deterministic scanner results for files the diff does not show (dependency "
+    "lockfiles) follow. A finding on one of those files that a result below supports "
+    "is not a cross-file assumption: the scanner read the file. Judge it against the "
+    "result.\n"
+)
+
+
+def _scan_hint_block(findings: list[ReviewFinding], scan_hints: Sequence[ToolFinding]) -> str:
+    """The redacted, wrapped hints on the findings' own paths, or "" when none match."""
+    paths = {f.path for f in findings}
+    matching = [hint for hint in scan_hints if hint.path in paths]
+    if not matching:
+        return ""
+    return f"{_SCAN_HINTS_LEAD}{wrap_hints(redact(format_hints(matching)))}\n\n"
 
 
 def _grounding_block(

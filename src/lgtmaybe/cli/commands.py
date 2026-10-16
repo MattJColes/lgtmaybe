@@ -534,11 +534,11 @@ local_diff_options = _stack(
     "--static-analysis/--no-static-analysis",
     default=None,
     help="Run installed deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, "
-    "ast-grep, osv-scanner, semgrep) over the changed files: linters ground the model "
-    "as untrusted hints to confirm or discard, while gitleaks, zizmor, ast-grep and "
-    "osv-scanner post findings directly with no model call "
-    "(default off; tools not installed are skipped silently — "
-    "pip install lgtmaybe[static-analysis])",
+    "ast-grep, osv-scanner, semgrep) over the changed files in a sandbox with no "
+    "network. Every tool's output grounds the model as untrusted hints to confirm, "
+    "contextualise or discard; set static_analysis.tool_mode to make a tool post "
+    "directly (default on; tools not installed are skipped silently, so "
+    "pip install lgtmaybe[static-analysis] to get them; --no-static-analysis disables)",
 )
 @click.option(
     "--risk/--no-risk",

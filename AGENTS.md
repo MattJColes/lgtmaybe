@@ -243,13 +243,22 @@ docstrings.
   bypasses triage and incremental scoping. All model slots share one provider
   and credentials.
 - **Static analysis** (`engine/static_analysis.py`, `static_analysis.enabled`,
-  default off, `lgtmaybe[static-analysis]` extra): each tool runs in `hint` or
-  `finding` mode (`static_analysis.tool_mode`; defaults in `_DEFAULT_MODE`).
-  `hint` tools (ruff, bandit, mypy, semgrep) become an untrusted HINTS block
-  the model confirms or discards; `finding` tools (gitleaks, zizmor, ast-grep,
-  osv-scanner) skip the model and post directly, because their claims are true
-  or false with no interpretation. **Tool output is always redacted and never
-  posted verbatim.** A missing tool is skipped.
+  default **on**, `lgtmaybe[static-analysis]` extra): every tool defaults to
+  `hint` mode (`_DEFAULT_MODE`), an untrusted HINTS block the model confirms,
+  contextualises or discards, so nothing posts without the model. `finding`
+  mode (skip the model, post directly) is a per-tool opt-in via
+  `static_analysis.tool_mode`; the trade-off is that a hint can be discarded.
+  Hints on files no batch holds (lockfile advisories) ride the first batch's
+  security lens (else correctness, else named in the summary) on its own
+  uncached block, **never the shared prefix**; a confirmed finding there is
+  demoted to the review body and exempt from the unanchored floor, and
+  reflection gets the matching hints as its evidence (`reflect._scan_hint_block`,
+  its own block, zero bytes when no such finding exists).
+  `_scanner_covers` drops a lens's secret/advisory ask only for a
+  `finding`-mode scanner. **Tool output is always redacted and never posted
+  verbatim.** A missing tool is skipped, so a minimal install runs nothing.
+  Tests stub the engine's runner (`tests/conftest.py`) so installed linters
+  never leak into prompts.
 
 **Lenses**
 

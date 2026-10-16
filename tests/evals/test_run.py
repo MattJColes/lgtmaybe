@@ -759,3 +759,32 @@ def test_repeated_runs_report_their_spread(
 
     out = capsys.readouterr().out
     assert "min" in out and "max" in out
+
+
+def _capture_static_analysis(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> list[bool]:
+    """Run main with *argv* and return the static_analysis.enabled seen by the engine."""
+    seen: list[bool] = []
+    real_review = run_mod.LLMReviewEngine.review
+
+    def spy_review(self, ctx, cfg):  # type: ignore[no-untyped-def]
+        seen.append(cfg.static_analysis.enabled)
+        return real_review(self, ctx, cfg)
+
+    monkeypatch.setattr(run_mod, "build_provider", lambda *a, **k: _ShellInjectionProvider())
+    monkeypatch.setattr(run_mod.LLMReviewEngine, "review", spy_review)
+    run_mod.main(["--provider", "ollama", "--model", "x", "--min-recall", "0.0", *argv])
+    return seen
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [([], True), (["--static-analysis"], True), (["--no-static-analysis"], False)],
+)
+def test_static_analysis_follows_the_production_default(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], expected: bool
+) -> None:
+    """Static analysis is on by default in production, so an eval run without the
+    flag measures the same thing; --no-static-analysis is the A/B's off arm."""
+    seen = _capture_static_analysis(monkeypatch, argv)
+
+    assert seen and all(v is expected for v in seen)

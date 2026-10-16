@@ -109,6 +109,20 @@ def _isolate_working_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
 
 @pytest.fixture(autouse=True)
+def _isolate_installed_analyzers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep engine runs independent of which linters happen to be installed.
+
+    Static analysis is on by default, so every review would otherwise spawn
+    whatever ruff / mypy / semgrep sits on PATH and feed its hints into the
+    prompt the test asserts on. The engine's runner returns nothing here; a test
+    about static analysis patches ``lgtmaybe.engine.engine.run_static_analysis``
+    itself, and ``tests/engine/test_static_analysis.py`` calls the real runner
+    directly.
+    """
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [])
+
+
+@pytest.fixture(autouse=True)
 def _isolate_user_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep tests independent of the developer's ~/.config/lgtmaybe/config.yml.
 
