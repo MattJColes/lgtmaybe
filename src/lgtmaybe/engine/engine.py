@@ -593,17 +593,16 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False
                 user_block=build_lens_block(ReviewCategory.security, secret_scanning=secrets),
             ),
         ]
-        correctness_categories = (
-            frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
-            if has_intent
-            else frozenset({ReviewCategory.correctness.value})
-        )
         lenses.append(
             _Lens(
                 id=ReviewCategory.correctness.value,
                 user_block=build_correctness_block(has_intent),
                 carries_intent=has_intent,
-                allowed_categories=correctness_categories if has_intent else None,
+                allowed_categories=(
+                    frozenset({ReviewCategory.correctness.value, ReviewCategory.intent.value})
+                    if has_intent
+                    else None
+                ),
             )
         )
         lenses += [
@@ -770,7 +769,7 @@ class _PreparedCall:
 
 @dataclass(frozen=True)
 class _Run:
-    """The settings that are fixed for a whole review, resolved once in ``review()``.
+    """The settings that are fixed for a whole review, resolved once per run.
 
     Every model call in the fan-out — the first one, an oversized batch's split
     pieces, a deferral's re-run — reads exactly the same values, so they travel
@@ -805,6 +804,38 @@ class _Run:
     # outside a stack. The same for every batch and lens, so it rides the shared
     # prefix of every call, split pieces and deferral re-runs included.
     stack_block: str | None = None
+
+
+@dataclass(frozen=True)
+class _PreparedReview:
+    """The work of one review, ready for the fan-out; see ``_prepare_review``.
+
+    The redacted, filtered, scanned and batched calls (``per_batch`` and
+    ``workers``) plus the filter and scan state the post-fan-out pipeline and
+    the summary notices report on.
+    """
+
+    cfg: ReviewConfig
+    lenses: list[_Lens]
+    per_batch: list[tuple[bool, list[_PreparedCall]]]
+    workers: int
+    # The reviewed files after every filter (triage, file cap, expansion).
+    file_patches: list[tuple[str, str]]
+    scan_findings: list[ReviewFinding]
+    # The diff exactly as the scan corpus saw it, before triage and the file
+    # cap narrowed file_patches; scan findings snap against this.
+    scan_scope: str
+    # Static-analysis hints on scan-only files, and the lens carrying them.
+    unbatched: list[ToolFinding]
+    carrier: _Lens | None
+    # Filter outcomes the summary names rather than silently dropping.
+    oversized: list[str]
+    skipped_by_triage: list[str]
+    total_files: int
+    capped_files: bool
+    unbatched_hints_dropped: int
+    spec_unfit: list[str]
+    spec_reviewed: bool
 
 
 class _OnOversized(Protocol):
@@ -1036,6 +1067,340 @@ class LLMReviewEngine:
         # already carries was assessed on the WHOLE pull request (the CLI does so
         # before incremental scoping narrows the diff), so it is reported as is.
         risk = self._risk(ctx, cfg)
+        prepared = self._prepare_review(ctx, cfg)
+
+        all_findings: list[ReviewFinding] = []
+        total_calls = 0
+        failed_calls = 0
+        errors: list[str] = []
+        # The lens ids behind those errors, in the same order — the summary names
+        # them, because "1 of 4 failed" says nothing about whether to worry.
+        failed_lenses: list[str] = []
+
+        # 5. Fan out one call per (batch, lens) through ONE global pool. The old
+        #    shape — a fresh pool per batch, joined before the next batch starts —
+        #    cost `batches × ceil(lenses / workers)` sequential full-latency
+        #    waves; flattened, it is `ceil(batches × lenses / workers)`. Each
+        #    lens gets a focused prompt; findings are merged afterwards.
+        #    Concurrency is provider-aware (see _resolve_workers).
+        with profiler.stage("review"):
+            # Results keyed by task index and consumed in task order, so the
+            # findings stay deterministic (dedupe's first-wins tiebreak is
+            # order-sensitive) whatever order the futures complete in. Zipped
+            # back against the calls in that same order so a failure can name
+            # the lens it lost.
+            calls = [call for _, batch_calls in prepared.per_batch for call in batch_calls]
+            for call, (findings, error) in zip(
+                calls, self._fan_out(prepared.per_batch, prepared.workers, calls), strict=True
+            ):
+                total_calls += 1
+                if error is not None:
+                    failed_calls += 1
+                    errors.append(error)
+                    failed_lenses.append(call.lens_id)
+                all_findings.extend(findings)
+
+        # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
+        #     have no signal — never pass that off as a clean review. Findings are
+        #     part of that test now that a call can be partially successful: a
+        #     timed-out batch whose split produced findings from one piece and a
+        #     failure from another has real signal to post, and throwing it away to
+        #     raise "every review call failed" would lose a genuine finding. The
+        #     failure still reaches the summary through the incomplete-results
+        #     notice, so nothing is hidden either way.
+        if (
+            total_calls > 0
+            and failed_calls == total_calls
+            and not all_findings
+            and not prepared.scan_findings
+        ):
+            # The most common error, not the last — see _build_notices.
+            detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
+            hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
+            raise ReviewIncompleteError(
+                f"review incomplete: every review call failed ({detail}). "
+                "Check the provider credentials/quota, model, and timeout "
+                f"(ollama: a larger model needs a longer --timeout), then retry.{hint}"
+            )
+
+        return self._collect_findings(
+            ctx,
+            prepared,
+            findings=all_findings,
+            errors=errors,
+            failed_lenses=failed_lenses,
+            total_calls=total_calls,
+            failed_calls=failed_calls,
+            risk=risk,
+        )
+
+    def _collect_findings(
+        self,
+        ctx: PRContext,
+        prepared: _PreparedReview,
+        *,
+        findings: list[ReviewFinding],
+        errors: list[str],
+        failed_lenses: list[str],
+        total_calls: int,
+        failed_calls: int,
+        risk: RiskAssessment | None,
+    ) -> tuple[list[ReviewFinding], str]:
+        """Stages 5c to 9b plus the summary: everything after the fan-out.
+
+        The model's findings join the deterministic scan findings, then snap,
+        scope, suppress, merge, reflect, arbitrate and filter; the summary and
+        its notices are built from what survived and the run's state.
+        """
+        cfg = prepared.cfg
+        reviewed_diff = "\n".join(patch for _, patch in prepared.file_patches)
+
+        # 5c. Deterministic findings join the model's here — before snapping so
+        #     they get re-anchored, suppressed and rule-filtered by exactly the
+        #     same stages. Dedupe never merges them with a model finding (see
+        #     `_dedupe`), and reflection is the one stage they skip; see step 8.
+        all_findings = findings + prepared.scan_findings
+
+        # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
+        #    routinely drifts a few lines. Snap each finding's line to the real
+        #    changed line whose content matches its verbatim `anchor`, so comments
+        #    land on the code they describe. Done before dedupe so findings the
+        #    model placed on slightly different wrong lines collapse correctly.
+        #    Scan findings snap against `scan_scope` (the diff the corpus saw)
+        #    rather than the reviewed diff: their files can have left file_patches
+        #    at triage (3c) or the file cap (3d), and dropping them as off-diff
+        #    for that would blame unchanged lines that were never the problem.
+        with profiler.stage("snap"):
+            scans_at_snap = [f for f in all_findings if _is_scan_finding(f)]
+            all_findings = _snap_findings(
+                [f for f in all_findings if not _is_scan_finding(f)], reviewed_diff
+            ) + _snap_findings(scans_at_snap, prepared.scan_scope)
+            # A finding on a scan-only file (a lockfile advisory the model
+            # confirmed from an unbatched hint) has no reviewed line to sit on:
+            # the file is never in the reviewed diff. Mark it unanchored, so
+            # every gateway demotes it to the review body rather than guessing
+            # a line. Only a file a carried hint flagged is exempt from the
+            # unanchored floor in step 9: a claim about a lockfile no scanner
+            # flagged is a guess like any other unanchored finding.
+            no_line_paths = set(ctx.scan_contents) - {path for path, _ in prepared.file_patches}
+            hinted_no_line_paths = (
+                {h.path for h in prepared.unbatched} & no_line_paths
+                if prepared.carrier is not None
+                else set()
+            )
+            all_findings = [
+                f.model_copy(update={"anchored": False})
+                if f.path in no_line_paths and f.anchored
+                else f
+                for f in all_findings
+            ]
+
+        # 6b. Scope scan findings to the change. The tools read whole files, so
+        #     they see pre-existing code the PR never touched; an anchor that
+        #     matched no changed line means exactly that. The model is already
+        #     told "only raise these when the diff itself shows the change" —
+        #     hold the tools to the same rule, or a fixture's fake credential
+        #     posts on every PR that happens to touch the file. Dependency
+        #     findings are exempt: see _UNANCHORABLE_SCAN_CATEGORIES.
+        scoped = [f for f in all_findings if f.anchored or not _is_droppable_scan(f)]
+        off_diff = len(all_findings) - len(scoped)
+        if off_diff:
+            _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
+        all_findings = scoped
+
+        # 7. Suppression: drop findings a team has marked known-fine — by
+        #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
+        #    ignore` pragma on/above the flagged line. Done before reflection so a
+        #    suppressed finding costs no reflection tokens and never posts.
+        #
+        #    This and the evidence gate (7b) run BEFORE the merge (7c): dedupe
+        #    keeps one finding per location, so a copy these filters would drop
+        #    could otherwise win its location and take the line's real finding
+        #    down with it.
+        with profiler.stage("suppress"):
+            unsuppressed = apply_suppressions(
+                all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
+            )
+            # Counted per location, as the merge would collapse them, so several
+            # lenses' copies of one dismissed finding read as one suppression.
+            unsuppressed_ids = {id(f) for f in unsuppressed}
+            suppressed = len(_dedupe([f for f in all_findings if id(f) not in unsuppressed_ids]))
+            all_findings = unsuppressed
+        if suppressed:
+            _log.info("suppressed findings", extra={"count": suppressed})
+
+        # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
+        #     cap bounds posted comments, so findings those stages drop must not
+        #     spend its slots — the slot a suppressed hit vacates goes to the
+        #     next on-diff hit instead. Model findings never count against it.
+        scans = [f for f in all_findings if _is_scan_finding(f)]
+        if len(scans) > MAX_SCAN_FINDINGS:
+            considered = len(scans) + off_diff  # pre-cap count, before reassignment
+            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
+            _log.info(
+                "scan findings capped after diff scoping",
+                extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
+            )
+            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
+
+        # 7b. Evidence gate: built-in defect findings must name a concrete way
+        #     the changed code fails. Category is engine-stamped, so lowering the
+        #     model-selected severity cannot bypass this check.
+        with profiler.stage("failure_scenario"):
+            all_findings = _filter_missing_failure_scenarios(all_findings)
+
+        # 7c. Merge: a finding can surface under more than one lens (a shell
+        #     injection is both a security and a correctness issue), so collapse
+        #     duplicates before reflecting. Arbitration runs first: the merge
+        #     selects by severity, which would let an opposed lens's copy win
+        #     the shared location before either referee saw the pair, posting
+        #     the code-cutting advice and losing the fix (issue #752).
+        with profiler.stage("dedupe"):
+            all_findings = _dedupe(resolve_conflicts(all_findings))
+
+        # 8. Self-reflection: filter out low-confidence findings. Reflect against
+        #    only the reviewed diff — redacted, and free of skipped/over-cap files.
+        #    Skippable (--no-reflect) for weaker models that drop valid findings here.
+        #    Scan findings sit this stage out: the auditor's job is to catch a
+        #    model talking itself into a false positive, and there is no model
+        #    here to audit. Partitioned rather than filtered afterwards so they
+        #    cost no reflection tokens and the auditor cannot drop them.
+        # None, or the name of the ceiling that stopped the audit — it feeds the
+        # notice below, so a skipped audit always says which knob to raise.
+        reflection_skipped: str | None = None
+        # Trim notices from the audit (diff narrowed to fit the input budget).
+        reflection_notices: list[str] = []
+        scanned = [f for f in all_findings if _is_scan_finding(f)]
+        all_findings = [f for f in all_findings if not _is_scan_finding(f)]
+        if cfg.reflect and all_findings:
+            # Overrunning a ceiling is NOT a reason to skip the audit. The lens
+            # fan-out already stops short of both ceilings (`lens_deadline_at` /
+            # `lens_budget_at`) to leave the auditor room, and a review that
+            # overran still needs pruning: measured, a runaway lens call passed
+            # the deadline and 325 unaudited findings posted, 323 of them false
+            # positives on a diff with nothing wrong in it. Reflection is a
+            # single bounded call, so running it past the ceiling is cheaper than
+            # posting that many unaudited findings.
+            #
+            # A termination signal is the only exception: the process is being
+            # torn down on someone else's clock, so there is no budget to reserve.
+            # Skip the audit, post what we have, and record why in the summary.
+            if interrupt_requested():
+                reflection_skipped = "Review interrupted (termination signal)"
+                _log.warning(
+                    "review interrupted — skipping reflection",
+                    extra={"findings": len(all_findings)},
+                )
+            else:
+                _log.info("reflecting on findings", extra={"findings": len(all_findings)})
+                # model_copy keeps file_contents — reflection now grounds itself
+                # on the (redacted) head text of flagged files to verify
+                # whole-file claims.
+                clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
+                with profiler.stage("reflect"):
+                    all_findings = reflect_findings(
+                        all_findings,
+                        clean_ctx,
+                        cfg,
+                        self._provider,
+                        fetch_file=self._fetch_file,
+                        resolve_symbol=self._resolve_symbol,
+                        # The hints a lockfile finding was confirmed from: the
+                        # auditor's only evidence for a file the diff never shows.
+                        scan_hints=prepared.unbatched,
+                        notices=reflection_notices,
+                    )
+
+        # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
+        #     fixes the same lines. Reflection was asked to arbitrate too; this is
+        #     the deterministic referee, so it also holds under --no-reflect.
+        with profiler.stage("arbitrate"):
+            all_findings = resolve_conflicts(all_findings)
+
+        # 8b. Rejoin the deterministic findings the auditor never saw.
+        all_findings = all_findings + scanned
+
+        # 9. Filter: drop findings below the severity floor, and apply the
+        #    stricter unanchored floor — a finding the engine could not anchor is a
+        #    low-confidence guess, so surface it only when it's high/critical.
+        with profiler.stage("filter"):
+            filtered = [
+                f
+                for f in all_findings
+                if _passes_severity_floor(f, cfg, no_line_paths=hinted_no_line_paths)
+            ]
+
+            # 9b. Declarative post-processing (finding_rules, default none): the
+            #     team's drop / severity-remap rules, applied last so they see
+            #     exactly what would otherwise post. Imported lazily — rules.py
+            #     imports this module's glob matcher, so a top import would cycle.
+            if cfg.finding_rules:
+                from .rules import apply_finding_rules
+
+                filtered = apply_finding_rules(filtered, cfg)
+
+        summary_line = _summary_line(
+            len(filtered),
+            cfg,
+            risk,
+            temperature_dropped=self._temperature_dropped(),
+            stack=ctx.stack,
+        )
+        profiler.record_returned_findings(len(filtered))
+
+        notices = _build_notices(
+            _NoticeState(
+                cfg=cfg,
+                capped_files=prepared.capped_files,
+                total_files=prepared.total_files,
+                oversized=prepared.oversized,
+                skipped_by_triage=prepared.skipped_by_triage,
+                errors=errors,
+                total_calls=total_calls,
+                failed_calls=failed_calls,
+                failed_lenses=failed_lenses,
+                split_batches=len(self._split_batches),
+                stepped_down=sorted(self._stepped_down),
+                reasoning_off=sorted(self._reasoning_off),
+                escalated=dict(self._escalated),
+                repaired=sorted(self._repaired),
+                flooded=dict(self._flooded),
+                re_asked=sorted(self._re_asked),
+                schema_dropped=self._schema_dropped(),
+                reflection_skipped=reflection_skipped,
+                suppressed=suppressed,
+                off_diff=off_diff,
+                open_finding_threads=ctx.open_finding_threads,
+                unbatched_hints_dropped=prepared.unbatched_hints_dropped,
+                self_talk=dict(self._self_talk),
+                spec_unfit=prepared.spec_unfit,
+                spec_reviewed=prepared.spec_reviewed,
+                reflection_trimmed=bool(reflection_notices),
+            )
+        )
+        # Which lenses completed, on every summary shape — hidden, so it costs
+        # the rendered body nothing and a terminal never prints it.
+        lenses_marker = _lenses_marker(prepared.lenses, failed_lenses)
+        # The risk marker rides just above it, so the lenses marker still closes
+        # every summary. No verdict (off, or unavailable) means no marker at all.
+        if risk is not None and (marker := risk_marker(risk)):
+            lenses_marker = f"{marker}\n{lenses_marker}"
+        if notices:
+            return filtered, "\n\n".join([*notices, summary_line]) + f"\n{lenses_marker}"
+        # A genuinely clean review (nothing flagged, every call succeeded) gets an
+        # explicit thumbs-up rather than a bare "0 findings".
+        if not filtered:
+            return filtered, f"👍 LGTM!\n\n{summary_line}\n{lenses_marker}"
+        return filtered, f"{summary_line}\n{lenses_marker}"
+
+    def _prepare_review(self, ctx: PRContext, cfg: ReviewConfig) -> _PreparedReview:
+        """Stages 1 to 4 of the pipeline: redact, filter, scan, batch, arm the calls.
+
+        Everything up to (but not including) the fan-out: the run-scoped
+        ceilings and per-review state, the lens set, and one prepared call per
+        (batch, lens) in ``per_batch``. Raises :class:`ReviewIncompleteError`
+        when there is code to review but no lens could run over it.
+        """
         # Soft whole-review deadline: model calls reaching execution after this
         # instant are skipped (in-flight ones finish), so a pathological run
         # degrades to partial-with-a-notice instead of grinding on. Measured
@@ -1183,7 +1548,6 @@ class LLMReviewEngine:
             file_patches = kept
 
             total_files = len(file_patches)
-            capped_files = False
 
         # 2c. Fail loud when there is code to review but no lens to review it:
         #     every configured lens was skipped (intent with nothing stated, spec
@@ -1310,20 +1674,6 @@ class LLMReviewEngine:
             },
         )
 
-        all_findings: list[ReviewFinding] = []
-        total_calls = 0
-        failed_calls = 0
-        errors: list[str] = []
-        # The lens ids behind those errors, in the same order — the summary names
-        # them, because "1 of 4 failed" says nothing about whether to worry.
-        failed_lenses: list[str] = []
-
-        # 5. Fan out one call per (batch, lens) through ONE global pool. The old
-        #    shape — a fresh pool per batch, joined before the next batch starts —
-        #    cost `batches × ceil(lenses / workers)` sequential full-latency
-        #    waves; flattened, it is `ceil(batches × lenses / workers)`. Each
-        #    lens gets a focused prompt; findings are merged afterwards.
-        #    Concurrency is provider-aware (see _resolve_workers).
         # Everything a model call needs that does not vary across the run, in one
         # object: resolved here, then carried unchanged through the fan-out, the
         # oversized-batch split, and a deferral's re-run.
@@ -1437,288 +1787,35 @@ class LLMReviewEngine:
             ]
             per_batch.append((warm, batch_calls))
 
-        with profiler.stage("review"):
-            # Results keyed by task index and consumed in task order, so the
-            # findings stay deterministic (dedupe's first-wins tiebreak is
-            # order-sensitive) whatever order the futures complete in. Zipped
-            # back against the calls in that same order so a failure can name
-            # the lens it lost.
-            calls = [call for _, batch_calls in per_batch for call in batch_calls]
-            for call, (findings, error) in zip(
-                calls, self._fan_out(per_batch, workers), strict=True
-            ):
-                total_calls += 1
-                if error is not None:
-                    failed_calls += 1
-                    errors.append(error)
-                    failed_lenses.append(call.lens_id)
-                all_findings.extend(findings)
-
-        # 5b. Fail loud: if EVERY call errored or returned unparseable output, we
-        #     have no signal — never pass that off as a clean review. Findings are
-        #     part of that test now that a call can be partially successful: a
-        #     timed-out batch whose split produced findings from one piece and a
-        #     failure from another has real signal to post, and throwing it away to
-        #     raise "every review call failed" would lose a genuine finding. The
-        #     failure still reaches the summary through the incomplete-results
-        #     notice, so nothing is hidden either way.
-        if (
-            total_calls > 0
-            and failed_calls == total_calls
-            and not all_findings
-            and not scan_findings
-        ):
-            # The most common error, not the last — see _build_notices.
-            detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
-            hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
-            raise ReviewIncompleteError(
-                f"review incomplete: every review call failed ({detail}). "
-                "Check the provider credentials/quota, model, and timeout "
-                f"(ollama: a larger model needs a longer --timeout), then retry.{hint}"
-            )
-
-        reviewed_diff = "\n".join(patch for _, patch in file_patches)
-
-        # 5c. Deterministic findings join the model's here — before snapping so
-        #     they get re-anchored, suppressed and rule-filtered by exactly the
-        #     same stages. Dedupe never merges them with a model finding (see
-        #     `_dedupe`), and reflection is the one stage they skip; see step 8.
-        all_findings = all_findings + scan_findings
-
-        # 6. Re-anchor: the model hand-counts line numbers from the hunk header and
-        #    routinely drifts a few lines. Snap each finding's line to the real
-        #    changed line whose content matches its verbatim `anchor`, so comments
-        #    land on the code they describe. Done before dedupe so findings the
-        #    model placed on slightly different wrong lines collapse correctly.
-        #    Scan findings snap against `scan_scope` (the diff the corpus saw)
-        #    rather than the reviewed diff: their files can have left file_patches
-        #    at triage (3c) or the file cap (3d), and dropping them as off-diff
-        #    for that would blame unchanged lines that were never the problem.
-        with profiler.stage("snap"):
-            scans_at_snap = [f for f in all_findings if _is_scan_finding(f)]
-            all_findings = _snap_findings(
-                [f for f in all_findings if not _is_scan_finding(f)], reviewed_diff
-            ) + _snap_findings(scans_at_snap, scan_scope)
-            # A finding on a scan-only file (a lockfile advisory the model
-            # confirmed from an unbatched hint) has no reviewed line to sit on:
-            # the file is never in the reviewed diff. Mark it unanchored, so
-            # every gateway demotes it to the review body rather than guessing
-            # a line. Only a file a carried hint flagged is exempt from the
-            # unanchored floor in step 9: a claim about a lockfile no scanner
-            # flagged is a guess like any other unanchored finding.
-            no_line_paths = set(ctx.scan_contents) - {path for path, _ in file_patches}
-            hinted_no_line_paths = (
-                {h.path for h in unbatched} & no_line_paths if carrier is not None else set()
-            )
-            all_findings = [
-                f.model_copy(update={"anchored": False})
-                if f.path in no_line_paths and f.anchored
-                else f
-                for f in all_findings
-            ]
-
-        # 6b. Scope scan findings to the change. The tools read whole files, so
-        #     they see pre-existing code the PR never touched; an anchor that
-        #     matched no changed line means exactly that. The model is already
-        #     told "only raise these when the diff itself shows the change" —
-        #     hold the tools to the same rule, or a fixture's fake credential
-        #     posts on every PR that happens to touch the file. Dependency
-        #     findings are exempt: see _UNANCHORABLE_SCAN_CATEGORIES.
-        scoped = [f for f in all_findings if f.anchored or not _is_droppable_scan(f)]
-        off_diff = len(all_findings) - len(scoped)
-        if off_diff:
-            _log.info("scan findings outside the diff dropped", extra={"count": off_diff})
-        all_findings = scoped
-
-        # 7. Suppression: drop findings a team has marked known-fine — by
-        #    fingerprint (cfg.ignore_fingerprints) or an inline `# lgtmaybe:
-        #    ignore` pragma on/above the flagged line. Done before reflection so a
-        #    suppressed finding costs no reflection tokens and never posts.
-        #
-        #    This and the evidence gate (7b) run BEFORE the merge (7c): dedupe
-        #    keeps one finding per location, so a copy these filters would drop
-        #    could otherwise win its location and take the line's real finding
-        #    down with it.
-        with profiler.stage("suppress"):
-            unsuppressed = apply_suppressions(
-                all_findings, cfg, ctx.file_contents, ctx.feedback_downvotes
-            )
-            # Counted per location, as the merge would collapse them, so several
-            # lenses' copies of one dismissed finding read as one suppression.
-            unsuppressed_ids = {id(f) for f in unsuppressed}
-            suppressed = len(_dedupe([f for f in all_findings if id(f) not in unsuppressed_ids]))
-            all_findings = unsuppressed
-        if suppressed:
-            _log.info("suppressed findings", extra={"count": suppressed})
-
-        # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
-        #     cap bounds posted comments, so findings those stages drop must not
-        #     spend its slots — the slot a suppressed hit vacates goes to the
-        #     next on-diff hit instead. Model findings never count against it.
-        scans = [f for f in all_findings if _is_scan_finding(f)]
-        if len(scans) > MAX_SCAN_FINDINGS:
-            considered = len(scans) + off_diff  # pre-cap count, before reassignment
-            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
-            _log.info(
-                "scan findings capped after diff scoping",
-                extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
-            )
-            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
-
-        # 7b. Evidence gate: built-in defect findings must name a concrete way
-        #     the changed code fails. Category is engine-stamped, so lowering the
-        #     model-selected severity cannot bypass this check.
-        with profiler.stage("failure_scenario"):
-            all_findings = _filter_missing_failure_scenarios(all_findings)
-
-        # 7c. Merge: a finding can surface under more than one lens (a shell
-        #     injection is both a security and a correctness issue), so collapse
-        #     duplicates before reflecting. Arbitration runs first: the merge
-        #     selects by severity, which would let an opposed lens's copy win
-        #     the shared location before either referee saw the pair, posting
-        #     the code-cutting advice and losing the fix (issue #752).
-        with profiler.stage("dedupe"):
-            all_findings = _dedupe(resolve_conflicts(all_findings))
-
-        # 8. Self-reflection: filter out low-confidence findings. Reflect against
-        #    only the reviewed diff — redacted, and free of skipped/over-cap files.
-        #    Skippable (--no-reflect) for weaker models that drop valid findings here.
-        #    Scan findings sit this stage out: the auditor's job is to catch a
-        #    model talking itself into a false positive, and there is no model
-        #    here to audit. Partitioned rather than filtered afterwards so they
-        #    cost no reflection tokens and the auditor cannot drop them.
-        # None, or the name of the ceiling that stopped the audit — it feeds the
-        # notice below, so a skipped audit always says which knob to raise.
-        reflection_skipped: str | None = None
-        # Trim notices from the audit (diff narrowed to fit the input budget).
-        reflection_notices: list[str] = []
-        scanned = [f for f in all_findings if _is_scan_finding(f)]
-        all_findings = [f for f in all_findings if not _is_scan_finding(f)]
-        if cfg.reflect and all_findings:
-            # Overrunning a ceiling is NOT a reason to skip the audit. The lens
-            # fan-out already stops short of both ceilings (`lens_deadline_at` /
-            # `lens_budget_at`) to leave the auditor room, and a review that
-            # overran still needs pruning: measured, a runaway lens call passed
-            # the deadline and 325 unaudited findings posted, 323 of them false
-            # positives on a diff with nothing wrong in it. Reflection is a
-            # single bounded call, so running it past the ceiling is cheaper than
-            # posting that many unaudited findings.
-            #
-            # A termination signal is the only exception: the process is being
-            # torn down on someone else's clock, so there is no budget to reserve.
-            # Skip the audit, post what we have, and record why in the summary.
-            if interrupt_requested():
-                reflection_skipped = "Review interrupted (termination signal)"
-                _log.warning(
-                    "review interrupted — skipping reflection",
-                    extra={"findings": len(all_findings)},
-                )
-            else:
-                _log.info("reflecting on findings", extra={"findings": len(all_findings)})
-                # model_copy keeps file_contents — reflection now grounds itself
-                # on the (redacted) head text of flagged files to verify
-                # whole-file claims.
-                clean_ctx = ctx.model_copy(update={"diff": reviewed_diff})
-                with profiler.stage("reflect"):
-                    all_findings = reflect_findings(
-                        all_findings,
-                        clean_ctx,
-                        cfg,
-                        self._provider,
-                        fetch_file=self._fetch_file,
-                        resolve_symbol=self._resolve_symbol,
-                        # The hints a lockfile finding was confirmed from: the
-                        # auditor's only evidence for a file the diff never shows.
-                        scan_hints=unbatched,
-                        notices=reflection_notices,
-                    )
-
-        # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
-        #     fixes the same lines. Reflection was asked to arbitrate too; this is
-        #     the deterministic referee, so it also holds under --no-reflect.
-        with profiler.stage("arbitrate"):
-            all_findings = resolve_conflicts(all_findings)
-
-        # 8b. Rejoin the deterministic findings the auditor never saw.
-        all_findings = all_findings + scanned
-
-        # 9. Filter: drop findings below the severity floor, and apply the
-        #    stricter unanchored floor — a finding the engine could not anchor is a
-        #    low-confidence guess, so surface it only when it's high/critical.
-        with profiler.stage("filter"):
-            filtered = [
-                f
-                for f in all_findings
-                if _passes_severity_floor(f, cfg, no_line_paths=hinted_no_line_paths)
-            ]
-
-            # 9b. Declarative post-processing (finding_rules, default none): the
-            #     team's drop / severity-remap rules, applied last so they see
-            #     exactly what would otherwise post. Imported lazily — rules.py
-            #     imports this module's glob matcher, so a top import would cycle.
-            if cfg.finding_rules:
-                from .rules import apply_finding_rules
-
-                filtered = apply_finding_rules(filtered, cfg)
-
-        summary_line = _summary_line(
-            len(filtered),
-            cfg,
-            risk,
-            temperature_dropped=self._temperature_dropped(),
-            stack=ctx.stack,
+        return _PreparedReview(
+            cfg=cfg,
+            lenses=lenses,
+            per_batch=per_batch,
+            workers=workers,
+            file_patches=file_patches,
+            scan_findings=scan_findings,
+            scan_scope=scan_scope,
+            unbatched=unbatched,
+            carrier=carrier,
+            oversized=oversized,
+            skipped_by_triage=skipped_by_triage,
+            total_files=total_files,
+            capped_files=capped_files,
+            unbatched_hints_dropped=unbatched_dropped,
+            spec_unfit=list(spec_context.unfit),
+            spec_reviewed=clean_spec is not None,
         )
-        profiler.record_returned_findings(len(filtered))
-
-        notices = _build_notices(
-            _NoticeState(
-                cfg=cfg,
-                capped_files=capped_files,
-                total_files=total_files,
-                oversized=oversized,
-                skipped_by_triage=skipped_by_triage,
-                errors=errors,
-                total_calls=total_calls,
-                failed_calls=failed_calls,
-                failed_lenses=failed_lenses,
-                split_batches=len(self._split_batches),
-                stepped_down=sorted(self._stepped_down),
-                reasoning_off=sorted(self._reasoning_off),
-                escalated=dict(self._escalated),
-                repaired=sorted(self._repaired),
-                flooded=dict(self._flooded),
-                re_asked=sorted(self._re_asked),
-                schema_dropped=self._schema_dropped(),
-                reflection_skipped=reflection_skipped,
-                suppressed=suppressed,
-                off_diff=off_diff,
-                open_finding_threads=ctx.open_finding_threads,
-                unbatched_hints_dropped=unbatched_dropped,
-                self_talk=dict(self._self_talk),
-                spec_unfit=list(spec_context.unfit),
-                spec_reviewed=clean_spec is not None,
-                reflection_trimmed=bool(reflection_notices),
-            )
-        )
-        # Which lenses completed, on every summary shape — hidden, so it costs
-        # the rendered body nothing and a terminal never prints it.
-        lenses_marker = _lenses_marker(lenses, failed_lenses)
-        # The risk marker rides just above it, so the lenses marker still closes
-        # every summary. No verdict (off, or unavailable) means no marker at all.
-        if risk is not None and (marker := risk_marker(risk)):
-            lenses_marker = f"{marker}\n{lenses_marker}"
-        if notices:
-            return filtered, "\n\n".join([*notices, summary_line]) + f"\n{lenses_marker}"
-        # A genuinely clean review (nothing flagged, every call succeeded) gets an
-        # explicit thumbs-up rather than a bare "0 findings".
-        if not filtered:
-            return filtered, f"👍 LGTM!\n\n{summary_line}\n{lenses_marker}"
-        return filtered, f"{summary_line}\n{lenses_marker}"
 
     def _fan_out(
-        self, per_batch: list[tuple[bool, list[_PreparedCall]]], workers: int
+        self,
+        per_batch: list[tuple[bool, list[_PreparedCall]]],
+        workers: int,
+        calls: list[_PreparedCall],
     ) -> list[_LensOutcome]:
         """Run every (batch, lens) call through one pool; results in call order.
+
+        ``calls`` is ``per_batch`` flattened, built once by the caller and shared
+        so the outcomes stay aligned with the calls they answer.
 
         Batches flagged for cache warm-up submit only their FIRST lens; the
         rest of that batch is released when the primer completes (having
@@ -1729,7 +1826,6 @@ class LLMReviewEngine:
 
         Whatever failed transiently then gets one more go; see :meth:`_rescue`.
         """
-        calls = [call for _, batch_calls in per_batch for call in batch_calls]
         results: dict[int, _LensOutcome] = {}
         with ThreadPoolExecutor(max_workers=workers) as pool:
             pending: dict[Future[_LensOutcome], int] = {}
@@ -1908,7 +2004,6 @@ class LLMReviewEngine:
         )
         return self._complete_lens(
             messages,
-            run.model,
             run.response_format,
             batch_num,
             lens,
@@ -1996,7 +2091,7 @@ class LLMReviewEngine:
             context=wrap_context(fetched),
         )
         retry, error = self._complete_lens(
-            messages, run.model, run.response_format, batch_num, lens, None, None, run=run
+            messages, run.response_format, batch_num, lens, None, None, run=run
         )
         return findings + retry, error
 
@@ -2007,11 +2102,10 @@ class LLMReviewEngine:
         exhausted: str | None,
         *,
         messages: list[Message],
-        model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
-        run: _Run | None,
+        run: _Run,
         on_oversized: _OnOversized | None,
         effort: dict[str, Any] | None,
         escalate_to: str | None,
@@ -2068,14 +2162,14 @@ class LLMReviewEngine:
                 # offered the step-down decides what follows it.
                 return completed, exhausted
             retried, retry_reason = self._retry_lower_effort(
-                messages, model, response_format, batch_num, lens, exhausted, run
+                messages, response_format, batch_num, lens, exhausted, run
             )
             if retry_reason is None or on_oversized is None:
                 # Answered, or this is a piece/retry — see _escalate_model
                 # for why only the whole batch may buy a fallback call.
                 return completed + retried, retry_reason
             escalated, escalate_reason = self._escalate_model(
-                messages, model, response_format, batch_num, lens, retry_reason, run
+                messages, response_format, batch_num, lens, retry_reason, run
             )
             return completed + retried + escalated, escalate_reason
         if on_oversized is None:
@@ -2099,7 +2193,7 @@ class LLMReviewEngine:
         # model. Any findings the pieces did manage ride along, and the
         # overlap with the escalation's collapses in `_dedupe`.
         escalated, escalate_reason = self._escalate_model(
-            messages, model, response_format, batch_num, lens, split_reason, run
+            messages, response_format, batch_num, lens, split_reason, run
         )
         return completed + findings + escalated, escalate_reason
 
@@ -2276,12 +2370,11 @@ class LLMReviewEngine:
     def _retry_lower_effort(
         self,
         messages: list[Message],
-        model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
         reason: str,
-        run: _Run | None = None,
+        run: _Run,
     ) -> _LensOutcome:
         """Re-run one lens once with its reasoning effort stepped down a level.
 
@@ -2322,7 +2415,7 @@ class LLMReviewEngine:
         # the effort lives in provider-shaped opts (a flat `reasoning_effort`,
         # or OpenRouter's nested `reasoning` object), and the engine has no
         # business knowing which. A provider without it simply never steps down.
-        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             # Past a ceiling: the run is already stopping, and the notice it will
             # carry is the truncation's, not a skip's — this call never happened.
             return [], reason
@@ -2336,7 +2429,7 @@ class LLMReviewEngine:
             extra={"lens": lens.id, "batch": batch_num, "effort": step_down},
         )
         findings, error = self._complete_lens(
-            messages, model, response_format, batch_num, lens, None, None, effort=step_down, run=run
+            messages, response_format, batch_num, lens, None, None, effort=step_down, run=run
         )
         if error is None:
             # Recorded on the way OUT, not the way in: the notice claims findings
@@ -2365,7 +2458,7 @@ class LLMReviewEngine:
             # configured `minimal` steps to `none`): a second request at the
             # same setting is the byte-identical call that just failed.
             return findings, error
-        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             return findings, error
         _log.warning(
             "the lower effort exhausted the ceiling too — retrying once with reasoning off",
@@ -2373,7 +2466,6 @@ class LLMReviewEngine:
         )
         more, error = self._complete_lens(
             messages,
-            model,
             response_format,
             batch_num,
             lens,
@@ -2389,12 +2481,11 @@ class LLMReviewEngine:
     def _escalate_model(
         self,
         messages: list[Message],
-        model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
         reason: str,
-        run: _Run | None,
+        run: _Run,
     ) -> _LensOutcome:
         """Re-run one lens once on the configured fallback model.
 
@@ -2434,7 +2525,7 @@ class LLMReviewEngine:
         on the result (:meth:`_note_answering_model`), which also catches the
         adapter switching model on its own for a failure that never reaches this.
         """
-        if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             return [], reason
         # An optional capability, like `lower_reasoning_effort`: which litellm
         # model string a configured fallback resolves to is the adapter's
@@ -2450,7 +2541,6 @@ class LLMReviewEngine:
         )
         return self._complete_lens(
             messages,
-            model,
             response_format,
             batch_num,
             lens,
@@ -2538,7 +2628,7 @@ class LLMReviewEngine:
             extra={"lens": lens.id, "batch": batch_num},
         )
         findings, error = self._complete_lens(
-            messages, model, None, batch_num, lens, None, None, recover=False, run=run
+            messages, None, batch_num, lens, None, None, recover=False, run=run
         )
         if error is None:
             # Recorded on the way OUT, like the step-down: a re-run that failed
@@ -2625,7 +2715,6 @@ class LLMReviewEngine:
     def _complete_lens(
         self,
         messages: list[Message],
-        model: str,
         response_format: type[ReviewResult] | None,
         batch_num: int,
         lens: _Lens,
@@ -2635,7 +2724,7 @@ class LLMReviewEngine:
         effort: dict[str, Any] | None = None,
         recover: bool = True,
         escalate_to: str | None = None,
-        run: _Run | None = None,
+        run: _Run,
     ) -> tuple[list[ReviewFinding], str | None]:
         """The provider call + parse + stamp shared by both prompt shapes.
 
@@ -2682,7 +2771,7 @@ class LLMReviewEngine:
         _log.info("reviewing lens", extra={"lens": lens.id})
         started = time.perf_counter()
         try:
-            result = self._provider.complete(messages, model=model, **opts)
+            result = self._provider.complete(messages, model=run.model, **opts)
         except Exception as exc:
             # Retryable by default: this is the provider faltering, not us, so the
             # rescue wave gets one more go once the fan-out has drained. Two
@@ -2734,7 +2823,6 @@ class LLMReviewEngine:
                     reason,
                     _reasoning_exhausted_reason(reasoning, spent),
                     messages=messages,
-                    model=model,
                     response_format=response_format,
                     batch_num=batch_num,
                     lens=lens,
@@ -2768,11 +2856,7 @@ class LLMReviewEngine:
                 #
                 # Ceilings are re-checked first: these are new model calls, and a
                 # run already past its deadline or budget must not start one.
-                if (
-                    recover
-                    and run is not None
-                    and _skip_reason(run.deadline_at, run.budget_at, lens) is None
-                ):
+                if recover and _skip_reason(run.deadline_at, run.budget_at, lens) is None:
                     # 1. One reformat attempt at the answer the model already
                     #    produced and was already billed for. A DIFFERENT request
                     #    — the reply plus the schema, no diff — which is why it
@@ -2795,10 +2879,10 @@ class LLMReviewEngine:
                     if (
                         response_format is not None
                         and run.cfg.retry_without_schema
-                        and self._sends_response_format(model)
+                        and self._sends_response_format(run.model)
                     ):
                         retried, retry_error = self._retry_without_schema(
-                            messages, model, batch_num, lens, reason, run
+                            messages, run.model, batch_num, lens, reason, run
                         )
                         if retry_error is None:
                             return retried, None
@@ -2857,7 +2941,6 @@ class LLMReviewEngine:
                 # wherever the body happened to stop, which is a share of nothing.
                 _reasoning_exhausted_reason(result.reasoning_tokens, result.output_ceiling),
                 messages=messages,
-                model=model,
                 response_format=response_format,
                 batch_num=batch_num,
                 lens=lens,
