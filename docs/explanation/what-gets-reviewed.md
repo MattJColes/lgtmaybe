@@ -98,7 +98,11 @@ looks for:
 - **CI / IaC misconfiguration**: untrusted input interpolated into workflow
   `run:` steps, third-party actions not pinned to a SHA, overly broad IAM
   policies, public buckets, privileged containers, secrets echoed into build
-  logs.
+  logs. It also flags controls that only look enforced (an `environment:` key
+  used as an approval gate when the environment has no required reviewers, or a
+  budget alert treated as a spending cap) and checks that cannot fail
+  (`continue-on-error: true`, `|| true` on a test or scan step), because a
+  skipped check that reports a pass is worse than no check.
 - **Resource / DoS safety**: missing timeouts, unbounded loops or allocations,
   regexes vulnerable to catastrophic backtracking (ReDoS).
 
@@ -511,6 +515,11 @@ configurable in `.lgtmaybe.yml` (see
 > [Use as a GitHub Action](../how-to/use-as-github-action.md).
 
 ## What a Finding Contains
+
+Every finding is written for an engineer new to the codebase. Its title leads
+with the fix when one is known. Its body says what goes wrong and why it
+matters, in plain words, and explains a technical term the first time it
+appears. The change overview comment follows the same rule.
 
 Findings are structured data, not prose, so they render the same everywhere.
 Each finding has:

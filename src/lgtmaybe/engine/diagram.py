@@ -31,9 +31,10 @@ from lgtmaybe.core.models import DiagramResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
 
 from .describe import markdown_text, single_line, structured_call, structured_comment
-from .prompt import language_directive
+from .prompt import PLAIN_LANGUAGE, language_directive
 
-_DIAGRAM_SYSTEM = """\
+_DIAGRAM_SYSTEM = (
+    """\
 You are a software architect describing a compact change graph for a pull request.
 
 Return ONLY a JSON object with these keys:
@@ -48,6 +49,10 @@ Return ONLY a JSON object with these keys:
   "source" and "target" MUST match node ids, and may be the same id for work a
   component does on itself;
 - "notes": one or two sentences of caveats or a legend, or an empty string.
+
+"""
+    + PLAIN_LANGUAGE
+    + """
 
 Rules:
 - Use a maximum of six nodes. Keep each node label short, with optional technology
@@ -90,6 +95,7 @@ Example:
 {"source": "build", "target": "release", "label": "reports build result",
 "reply": true}], "notes": ""}
 """
+)
 
 
 _DIFF_PREAMBLE = (

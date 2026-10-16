@@ -59,6 +59,23 @@ known, the title SHALL state the problem plainly instead of inventing one.
 - **WHEN** a review lens reports a valid finding without a concrete drop-in fix
 - **THEN** its title states the problem directly and its body carries the recommendation without inventing replacement code
 
+### Requirement: Findings are written for an engineer new to the codebase
+
+The shared review contract SHALL ask for plain words and short sentences, a
+technical term explained the first time it is used, and why the finding
+matters to a user, operator or maintainer. The change-overview prompts
+(describe, high impact, diagram) SHALL carry the same plain-language rule, so
+the overview reads like the findings beside it.
+<!-- anchor: prompt.plain-language -->
+
+#### Scenario: a finding needs a technical term
+- **WHEN** a lens reports a finding that turns on a term such as a race condition
+- **THEN** the prompt it ran under asks it to say what the term means the first time
+
+#### Scenario: the change overview is composed
+- **WHEN** the describe, high impact or diagram call runs
+- **THEN** its system prompt carries the same plain-language rule as the review contract
+
 ### Requirement: Custom lenses are trusted config, fanned out uniformly
 
 Users SHALL add lenses via `extra_lenses` (id + instructions, optional worked

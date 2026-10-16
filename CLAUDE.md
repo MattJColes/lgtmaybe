@@ -143,6 +143,11 @@ github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. 
   bedrock, vertex, azure, ollama to one `completion()` call. A thin wrapper on
   top adds retries / fallback.
 - **License:** MIT (already in `LICENSE`).
+- **Finding prose is written for an engineer new to the codebase:**
+  `prompt.PLAIN_LANGUAGE` (plain words, short sentences, a technical term
+  explained the first time) rides the shared review contract — with "why it
+  matters" and a two-to-four sentence `body` — and the describe, high-impact
+  and diagram system prompts, so the overview reads like the findings.
 - **Posting:** REST review API — batched inline comments + one summary. Every
   posted finding's title line carries its provenance inside the severity
   brackets — `**[HIGH · security · 80%] Title**`, the originating lens and the
@@ -828,7 +833,10 @@ Two distinct concerns, kept separate:
   insecure deserialization/XXE, mass assignment, weak crypto, sensitive-data
   exposure (secrets/PII — passwords, tokens, SSNs, card data — leaking into
   logs), CI/IaC misconfiguration (workflow script injection, unpinned actions,
-  broad IAM, public buckets, privileged containers), resource/DoS safety (incl.
+  broad IAM, public buckets, privileged containers, controls that only look
+  enforced — an `environment:` key with no required reviewers, a budget alert
+  sold as a spending cap — and checks that cannot fail: `continue-on-error`,
+  `|| true`), resource/DoS safety (incl.
   ReDoS) — graded `high`/`critical`. Alongside security it also scans for
   **correctness/logic bugs** (edge cases, null/None derefs, off-by-one and
   boundary errors, mismatched/inverted ranges, unhandled error paths, races /
