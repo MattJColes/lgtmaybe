@@ -8404,6 +8404,10 @@ author two contradictory things, so lgtmaybe stops it at four points:
    lines of a higher-ranked one from a lens pair declared opposed, today ponytail
    against correctness and security. Group ids, custom and pack lenses, and
    scanner hits declare no opposition, so the backstop never guesses about them.
+   It sees only where a finding sits, not what it advises, which is why it acts
+   only on pairs that oppose each other by nature. Reflection reads the advice
+   itself, so it covers the rest of the ladder, and drops one of two findings
+   only when they really do point opposite ways.
 
 The `counter-advice` eval fixture measures this: it plants a genuine lean catch
 beside upload validation that looks redundant and an adapter that looks like a

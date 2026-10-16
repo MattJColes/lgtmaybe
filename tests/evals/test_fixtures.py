@@ -662,4 +662,4 @@ def test_counter_advice_plants_a_lean_catch_beside_never_cut_traps() -> None:
     assert any("fromkeys" in e.keywords for e in manifest.expected)
     labels = " ".join(f.label for f in manifest.forbidden).lower()
     assert "trust boundary" in labels
-    assert "port" in labels
+    assert "implements the blobstore port" in labels
