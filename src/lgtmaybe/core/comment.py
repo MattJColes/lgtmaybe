@@ -151,6 +151,25 @@ REVIEWED_DIFF_MARKER = re.compile(
     rf"<!-- lgtmaybe-diff:([0-9a-f]{{{DIFF_FINGERPRINT_LENGTH}}}) -->"
 )
 
+
+# The writers for the three markers above. Each sits beside its reader so the
+# shape stamped and the shape parsed are defined in one place; a gateway never
+# spells a marker out itself.
+def reviewed_marker(sha: str) -> str:
+    """The review watermark for *sha*, as ``REVIEWED_MARKER`` reads it back."""
+    return f"<!-- lgtmaybe-reviewed:{sha} -->"
+
+
+def diagrammed_marker(sha: str) -> str:
+    """The overview watermark for *sha*, as ``DIAGRAMMED_MARKER`` reads it back."""
+    return f"<!-- lgtmaybe-diagrammed:{sha} -->"
+
+
+def reviewed_diff_marker(fingerprint: str) -> str:
+    """The diff fingerprint marker, as ``REVIEWED_DIFF_MARKER`` reads it back."""
+    return f"<!-- lgtmaybe-diff:{fingerprint} -->"
+
+
 # A fenced Mermaid diagram — the one kind all three forges render. The info
 # string is what marks it; the word in prose proves nothing. PlantUML is left
 # out: GitHub and Gitea show it as source, which replaces no rendered overview.
@@ -282,6 +301,27 @@ def split_stamped_ids(body: str) -> tuple[str, str]:
     """
     match = _STAMPED_IDS.search(body)
     return (body, "") if match is None else (body[: match.start()], body[match.start() :])
+
+
+# Resolve-on-fix retires a comment's ids into these disjoint "resolved"
+# families, which ``FINDING_MARKER`` / ``IDENTITY_MARKER`` never match. A finding
+# that reappears after being fixed then posts again instead of being
+# suppressed forever.
+_RETIRED_FAMILIES = (
+    ("<!-- lgtmaybe-finding:", "<!-- lgtmaybe-resolved-fingerprint:"),
+    ("<!-- lgtmaybe-identity:", "<!-- lgtmaybe-resolved-identity:"),
+)
+
+
+def retire_stamped_ids(ids: str) -> str:
+    """The id block from ``split_stamped_ids`` with both ids retired.
+
+    Both families go together: an identity left active would keep suppressing
+    the finding after its fingerprint was retired.
+    """
+    for active, resolved in _RETIRED_FAMILIES:
+        ids = ids.replace(active, resolved)
+    return ids
 
 
 def stamped_ids(body: str | None) -> tuple[str | None, str | None]:
