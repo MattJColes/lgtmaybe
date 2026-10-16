@@ -75,6 +75,10 @@ class IncrementalFakeGitHub(FakeGitHub):
         self.scopes: list[set[str] | None] = []
         self.last_completed_calls: list[bool] = []
 
+    def last_reviewed_sha(self) -> str | None:
+        # A completed head was reviewed first, so the two agree in these fakes.
+        return self._last_sha
+
     def last_completed_sha(self, *, diagram_required: bool) -> str | None:
         self.last_completed_calls.append(diagram_required)
         return self._last_sha
@@ -88,6 +92,46 @@ class IncrementalFakeGitHub(FakeGitHub):
 
     def set_incremental_scope(self, paths: set[str] | None) -> None:
         self.scopes.append(paths)
+
+    def count_open_finding_threads(self) -> int:
+        # Completes SupportsThreadResolution (with FakeGitHub.reply_in_thread)
+        # for the hybrid fakes below, which add the validation pair.
+        return 0
+
+
+def test_a_partial_incremental_gateway_gets_a_full_review() -> None:
+    """The group is all-or-nothing: half of an incremental review is worse than none.
+
+    Without ``set_incremental_scope`` resolve-on-fix could not be scoped to the
+    increment, so the gateway is not incremental at all — not incremental with
+    every earlier thread up for resolution.
+    """
+
+    class PartialGitHub(FakeGitHub):
+        def __init__(self) -> None:
+            super().__init__(CTX)
+            self.compare_calls = 0
+
+        def last_reviewed_sha(self) -> str | None:
+            return "head1111"
+
+        def last_completed_sha(self, *, diagram_required: bool) -> str | None:
+            return "head1111"
+
+        def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
+            self.compare_calls += 1
+            return INC_DIFF
+
+        def mark_reviewed(self, head_sha: str | None) -> None:
+            pass
+
+    github = PartialGitHub()
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
+
+    assert engine.reviewed_ctxs[0].diff == FULL_DIFF
+    assert github.compare_calls == 0
 
 
 def test_incremental_reviews_only_the_increment() -> None:
@@ -572,6 +616,8 @@ def test_required_diagram_fails_without_a_completion_aware_gateway() -> None:
 
 
 def test_manual_diagram_fails_when_the_gateway_cannot_post() -> None:
+    """Without the upsert, the diagram rides the required plain comment, and a
+    failure to post it propagates: a diagram asked for must not vanish."""
     import json as _json
 
     from lgtmaybe.cli import run_diagram
@@ -590,6 +636,9 @@ def test_manual_diagram_fails_when_the_gateway_cannot_post() -> None:
 
         def post_review(self, findings, summary, diff=None) -> None:  # pragma: no cover
             pass
+
+        def post_issue_comment(self, body: str) -> None:
+            raise RuntimeError("the gateway cannot post a diagram")
 
     structured = _json.dumps({"title": "Change map", "nodes": [], "edges": [], "notes": ""})
 

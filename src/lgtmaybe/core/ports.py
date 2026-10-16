@@ -223,11 +223,27 @@ class SupportsConversation(Protocol):
 
 
 @runtime_checkable
-class SupportsIncremental(Protocol):
+class SupportsCompletionMark(Protocol):
+    """Hear whether this run reviewed the head completely, before it posts.
+
+    Split from ``SupportsIncremental`` (issue #832): Gitea and Azure DevOps
+    take the stamp as the gate for resolve-on-fix — a partial run or a failure
+    notice is missing findings, not reporting them fixed — without offering
+    incremental review. On an incremental gateway it is also the watermark.
+    """
+
+    def mark_reviewed(self, head_sha: str | None) -> None:
+        """Stamp ``head_sha`` as reviewed (success path only); None clears it."""
+        ...
+
+
+@runtime_checkable
+class SupportsIncremental(SupportsCompletionMark, Protocol):
     """Review only the commits pushed since the last successful review.
 
     Requires somewhere durable to stamp a watermark (in practice an editable
-    bot comment) and an API for the diff between two commits.
+    bot comment, written through the inherited ``mark_reviewed``) and an API
+    for the diff between two commits.
     """
 
     def last_reviewed_sha(self) -> str | None:
@@ -242,12 +258,27 @@ class SupportsIncremental(Protocol):
         """Unified diff between two commits, or None when not comparable."""
         ...
 
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Stamp ``head_sha`` as reviewed (success path only)."""
-        ...
-
     def set_incremental_scope(self, paths: set[str] | None) -> None:
         """Limit resolve-on-fix to the files this increment re-reviewed."""
+        ...
+
+
+@runtime_checkable
+class SupportsDiffFingerprint(SupportsIncremental, Protocol):
+    """Stamp the whole change's diff fingerprint beside the watermark.
+
+    A new head whose diff fingerprints the same as the reviewed one (a rebase
+    that only moved a stacked pull request onto its merged parent) then has
+    nothing new to review. A refinement of incremental review: the fingerprint
+    is only compared against the head ``last_reviewed_sha`` names.
+    """
+
+    def last_reviewed_diff(self) -> str | None:
+        """The fingerprint stamped with ``last_reviewed_sha``, or None."""
+        ...
+
+    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
+        """Stamp the whole diff's fingerprint (success path only); None clears it."""
         ...
 
 

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import pytest
 
+from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.core import ports
 from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine, ReviewGateway
 from lgtmaybe.engine.engine import LLMReviewEngine
+from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github.rest_gateway import RestGitHubGateway
+from lgtmaybe.gitlab import GitLabGateway
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
 # Optional capabilities the ENGINE probes on the provider adapter, by name.
@@ -115,3 +118,55 @@ class TestCapabilities:
         """GitHub is the complete adapter — it is what the full surface is drawn from."""
         gateway = RestGitHubGateway.__new__(RestGitHubGateway)
         assert isinstance(gateway, getattr(ports, name))
+
+
+# What each shipped gateway is used for, capability by capability. Exact, not a
+# lower bound: a gateway that loses one method of a group (a rename) loses the
+# whole feature, and one that grows a group by accident is suddenly probed for
+# it, so drift either way fails here. Mirrors the table in
+# docs/explanation/architecture.md.
+_EVERY_FORGE = {
+    "SupportsFileContents",
+    "SupportsDescribe",
+    "SupportsDiagram",
+    "SupportsConversation",
+    "SupportsScanManifests",
+    "SupportsCompletionMark",
+}
+SHIPPED_GATEWAYS: dict[type, set[str]] = {
+    RestGitHubGateway: set(CAPABILITIES),
+    GitLabGateway: _EVERY_FORGE
+    | {
+        "SupportsIncremental",
+        "SupportsThreadResolution",
+        "SupportsLabels",
+        "SupportsChecks",
+        "SupportsFeedback",
+    },
+    GiteaGateway: _EVERY_FORGE | {"SupportsLabels", "SupportsChecks", "SupportsPermissions"},
+    AzureDevOpsGateway: _EVERY_FORGE,
+}
+
+
+class TestShippedGatewayCapabilities:
+    """Each shipped gateway satisfies exactly the capability groups it is used for."""
+
+    @pytest.mark.parametrize("gateway_type", SHIPPED_GATEWAYS, ids=lambda t: t.__name__)
+    def test_claims_exactly_its_capabilities(self, gateway_type: type) -> None:
+        gateway = gateway_type.__new__(gateway_type)
+        claimed = {name for name in CAPABILITIES if isinstance(gateway, getattr(ports, name))}
+        assert claimed == SHIPPED_GATEWAYS[gateway_type]
+
+    def test_completion_mark_is_its_own_capability(self) -> None:
+        """Gitea and Azure DevOps stamp completion as their resolve-on-fix gate
+        without offering incremental review, so the stamp is its own group."""
+        assert hasattr(ports.SupportsCompletionMark, "mark_reviewed")
+        # An incremental review still needs somewhere to stamp its watermark.
+        assert issubclass(ports.SupportsIncremental, ports.SupportsCompletionMark)
+
+    def test_the_diff_fingerprint_pair_has_a_home(self) -> None:
+        """The CLI reads and writes it, so a rename must be loud, not a skipped no-op."""
+        assert hasattr(ports.SupportsDiffFingerprint, "last_reviewed_diff")
+        assert hasattr(ports.SupportsDiffFingerprint, "mark_reviewed_diff")
+        # It only means anything beside the watermark it fingerprints.
+        assert issubclass(ports.SupportsDiffFingerprint, ports.SupportsIncremental)
