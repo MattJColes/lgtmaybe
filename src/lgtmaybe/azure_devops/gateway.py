@@ -56,7 +56,6 @@ from lgtmaybe.core.comment import (
     render_demoted,
     render_inline_body,
     render_unread_files,
-    stamped_ids,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -66,7 +65,7 @@ from lgtmaybe.core.diff import (
 )
 from lgtmaybe.core.diffbuild import binary_file_patch, file_patch, has_unsafe_path_chars
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import ActiveFinding, PRContext, ReviewFinding
+from lgtmaybe.core.models import PRContext, ReviewFinding
 from lgtmaybe.core.ports import DiffUnavailable
 
 _log = get_logger(__name__)
@@ -237,8 +236,6 @@ class AzureDevOpsGateway:
         # across iterations in Azure DevOps' own UI.
         self._tracking_ids: dict[str, int] = {}
         self._texts_at: dict[tuple[str, str], _Text] = {}
-        self._active_findings: list[ActiveFinding] | None = None
-        self._validated_fixed_thread_ids: set[str] | None = None
 
     # ------------------------------------------------------------------
     # ReviewGateway implementation
@@ -441,19 +438,6 @@ class AzureDevOpsGateway:
         findings, not reporting them fixed, so neither may resolve a thread.
         """
         self._reviewed_sha = head_sha
-
-    def list_active_findings(self) -> list[ActiveFinding]:
-        """Our own open finding threads, keyed by their hidden ids."""
-        active = [
-            self._active_finding(thread, root, outdated=self._is_outdated(thread))
-            for thread, root in self._open_finding_threads(self._threads())
-        ]
-        self._active_findings = active
-        return active
-
-    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-        """Install the allowlist of threads confirmed fixed and safe to resolve."""
-        self._validated_fixed_thread_ids = set(thread_ids)
 
     def reply_in_thread(self, thread_id: str, body: str) -> None:
         """Reply to the comment that opened an existing thread."""
@@ -903,20 +887,13 @@ class AzureDevOpsGateway:
     ) -> list[str]:
         """Our open finding threads whose finding is gone and whose line changed.
 
-        A validated allowlist, when the caller installed one, decides instead,
-        and an empty one resolves nothing: the caller installs that when it
-        could not read the active findings. Gone means neither hidden id was
-        produced this run, so a reworded finding still counts as reported. The
-        line check is only paid for gone findings.
+        Gone means neither hidden id was produced this run, so a reworded finding
+        still counts as reported. The line check is only paid for gone findings.
         """
-        own = self._open_finding_threads(threads)
-        if self._validated_fixed_thread_ids is not None:
-            allowed = self._validated_fixed_thread_ids
-            return [str(thread.get("id")) for thread, _ in own if str(thread.get("id")) in allowed]
         current = current_finding_keys(findings)
         return [
             str(thread.get("id"))
-            for thread, root in own
+            for thread, root in self._open_finding_threads(threads)
             if not finding_keys(root.get("content") or "") & current and self._is_outdated(thread)
         ]
 
@@ -941,23 +918,6 @@ class AzureDevOpsGateway:
             if finding_keys(root.get("content") or ""):
                 out.append((thread, root))
         return out
-
-    @staticmethod
-    def _active_finding(
-        thread: dict[str, Any], root: dict[str, Any], *, outdated: bool
-    ) -> ActiveFinding:
-        body = root.get("content") or ""
-        fingerprint, identity = stamped_ids(body)
-        comment_id = root.get("id")
-        return ActiveFinding(
-            thread_id=str(thread.get("id")),
-            comment_id=comment_id if isinstance(comment_id, int) else None,
-            path=_repo_path((thread.get("threadContext") or {}).get("filePath")) or "",
-            body=body,
-            fingerprint=fingerprint,
-            identity=identity,
-            outdated=outdated,
-        )
 
     def _is_outdated(self, thread: dict[str, Any]) -> bool:
         """Whether the line a finding thread was posted on has changed since.
