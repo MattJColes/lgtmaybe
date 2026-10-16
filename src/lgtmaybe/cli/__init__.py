@@ -29,7 +29,12 @@ import click
 
 from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
-from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
+from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
+    current_finding_keys,
+    find_existing_overview,
+    marker,
+)
 from lgtmaybe.core.diff import diff_fingerprint
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
@@ -839,15 +844,10 @@ def _validate_prior_findings(
         set_fixed(set())
         return ""
 
-    from lgtmaybe.core.findings import finding_fingerprint, finding_identity
     from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
     from lgtmaybe.engine.validate import validate_findings
 
-    current_keys = {
-        key
-        for finding in current_findings
-        for key in (finding_fingerprint(finding.path, finding.title), finding_identity(finding))
-    }
+    current_keys = current_finding_keys(current_findings)
     reproduced = [
         finding
         for finding in active

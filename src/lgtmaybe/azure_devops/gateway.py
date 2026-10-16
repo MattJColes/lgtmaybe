@@ -52,10 +52,12 @@ from lgtmaybe.core.comment import (
     current_finding_keys,
     finding_keys,
     marker,
+    partition_findings,
     render_broad,
     render_demoted,
     render_inline_body,
     render_unread_files,
+    unposted,
 )
 from lgtmaybe.core.diff import (
     CommentableLines,
@@ -351,16 +353,7 @@ class AzureDevOpsGateway:
         threads = self._threads()
 
         if inline:
-            unmatched = self._existing_finding_keys(threads)
-            new_inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-            for context, finding in inline:
-                keys = current_finding_keys([finding])
-                already = next((i for i, existing in enumerate(unmatched) if existing & keys), None)
-                if already is None:
-                    new_inline.append((context, finding))
-                else:
-                    unmatched.pop(already)
-            inline = new_inline
+            inline = unposted(inline, self._existing_finding_keys(threads))
         for context, finding in inline:
             if not self._post_finding_thread(context, finding.path, render_inline_body(finding)):
                 demoted.append(finding)
@@ -676,28 +669,20 @@ class AzureDevOpsGateway:
     ]:
         """Split findings into positioned threads, body-demoted, and broad.
 
-        Same rule as every adapter: a finding goes inline only when it is
-        confidently anchored AND lands on a real commentable diff line. The
-        RIGHT/LEFT side becomes a right-file or left-file range on one line.
+        The placement rule is shared (``core.comment.partition_findings``); only
+        the payload here is Azure DevOps': the RIGHT/LEFT side becomes a
+        right-file or left-file range on one line.
         """
-        inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-        demoted: list[ReviewFinding] = []
-        broad: list[ReviewFinding] = []
-        for f in findings:
-            if f.broad:
-                broad.append(f)
-                continue
-            if not f.anchored or (f.path, f.line, f.side) not in commentable:
-                demoted.append(f)
-                continue
+
+        def place(f: ReviewFinding) -> dict[str, Any]:
             side = "left" if f.side == "LEFT" else "right"
-            context: dict[str, Any] = {
+            return {
                 "filePath": f"/{f.path}",
                 f"{side}FileStart": {"line": f.line, "offset": 1},
                 f"{side}FileEnd": {"line": f.line, "offset": 1},
             }
-            inline.append((context, f))
-        return inline, demoted, broad
+
+        return partition_findings(findings, commentable, place)
 
     def _post_finding_thread(self, context: dict[str, Any], path: str, body: str) -> bool:
         """Open one positioned finding thread; False when Azure DevOps refuses it.

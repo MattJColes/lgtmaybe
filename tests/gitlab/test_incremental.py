@@ -266,9 +266,23 @@ class TestCompareDiff:
         assert _gateway().compare_diff(LAST, HEAD) is None
 
     @respx.mock
-    @pytest.mark.parametrize("path", ["evil\n+++ b/app.py", "tab\tpath", "cr\rpath"])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "evil\n+++ b/app.py",
+            "tab\tpath",
+            "cr\rpath",
+            "null\x00path",
+            "esc\x1bpath",
+            "del\x7fpath",
+        ],
+    )
     def test_a_path_that_could_forge_a_header_is_refused(self, path: str) -> None:
-        """File names are attacker-chosen on a fork MR; one must not inject a header."""
+        """File names are attacker-chosen on a fork MR; one must not inject a header.
+
+        Every control character and DEL is refused, matching the core set
+        (``diffbuild.has_unsafe_path_chars``), not just newline, CR and tab.
+        """
         _stub_compare(_comparison(diffs=[_entry(path)]))
 
         assert _gateway().compare_diff(LAST, HEAD) is None
