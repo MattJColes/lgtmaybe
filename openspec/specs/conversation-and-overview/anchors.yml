@@ -22,6 +22,12 @@ cli.review-comment-noop:
     has: { field: name, regex: '^action$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
+cli.comment-created:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^execute_comment$' }
+  files: [src/lgtmaybe/cli/__init__.py]
+
 cli.diagram-sequence:
   rule:
     kind: function_definition
