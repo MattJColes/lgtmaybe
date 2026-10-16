@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.13.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.12.0...lgtmaybe-v2.13.0) (2026-10-16)
+
+
+### Features
+
+* **engine:** add architecture review lens ([#734](https://github.com/MattJColes/lgtmaybe/issues/734)) ([111d3df](https://github.com/MattJColes/lgtmaybe/commit/111d3dfc38a9e311109c522601eea46b19602ce0))
+* **engine:** arbitrate opposing findings and refresh ponytail lens for ponytail 5 ([#731](https://github.com/MattJColes/lgtmaybe/issues/731)) ([b2e5f8d](https://github.com/MattJColes/lgtmaybe/commit/b2e5f8d365c2b1bb5145fc296b56fccbe4cbd6cb))
+* **engine:** write findings any engineer can act on ([#736](https://github.com/MattJColes/lgtmaybe/issues/736)) ([afa9f0d](https://github.com/MattJColes/lgtmaybe/commit/afa9f0d8dcc6f6f59397df1cda44c5aa03cd4b67))
+* **static-analysis:** static analysis now runs on every review by default, and every tool's output is a hint the reviewing model checks rather than a posted finding. Turn it off with `static_analysis.enabled: false` or `--no-static-analysis`, or post a tool directly with `static_analysis.tool_mode` ([#779](https://github.com/MattJColes/lgtmaybe/issues/779)) ([5671ce8](https://github.com/MattJColes/lgtmaybe/commit/5671ce8d46c8444abef9b6eb65fc92895b86e7fe))
+
+
+### Bug Fixes
+
+* **action:** stop the review container before revoking its token ([#745](https://github.com/MattJColes/lgtmaybe/issues/745)) ([e15e373](https://github.com/MattJColes/lgtmaybe/commit/e15e373bf071591bf75727e030c2d88119ece60c))
+* **comment:** drop em dashes from the text lgtmaybe posts ([#746](https://github.com/MattJColes/lgtmaybe/issues/746)) ([2fe41a4](https://github.com/MattJColes/lgtmaybe/commit/2fe41a48c0e6f727110a613f74a1f0b0bb1eda5b))
+* **risk:** count *.jest.* files as tests, thanks [@kukielp](https://github.com/kukielp) ([#730](https://github.com/MattJColes/lgtmaybe/issues/730)) ([5e945a0](https://github.com/MattJColes/lgtmaybe/commit/5e945a0323c7bd8a4c89531ace6aacb8d8342930))
+
+
+### Documentation
+
+* add a glossary, a docs style guide and a readability gate ([#737](https://github.com/MattJColes/lgtmaybe/issues/737)) ([0dee3a0](https://github.com/MattJColes/lgtmaybe/commit/0dee3a044103e8357d9fabc3f5ee13222d2c2ff5))
+* add a What's New list and a Changelog page to the docs site ([#732](https://github.com/MattJColes/lgtmaybe/issues/732)) ([43dc53d](https://github.com/MattJColes/lgtmaybe/commit/43dc53d64b5608a913126e1d07c0473d094c20d8))
+* **agents:** cut AGENTS.md to the rules an agent acts on ([#742](https://github.com/MattJColes/lgtmaybe/issues/742)) ([f197899](https://github.com/MattJColes/lgtmaybe/commit/f1978996a7417ee28965366cfc8ecdeced7020a6))
+* drop lines about how the docs are built ([#738](https://github.com/MattJColes/lgtmaybe/issues/738)) ([e500665](https://github.com/MattJColes/lgtmaybe/commit/e5006656bc9b5d1c14e2082d7fe3b316135d61e6))
+* rename CLAUDE.md to AGENTS.md ([#739](https://github.com/MattJColes/lgtmaybe/issues/739)) ([fbd41ba](https://github.com/MattJColes/lgtmaybe/commit/fbd41ba3727c6b13ff6aa9c3ad9575fdf0c4ca98))
+* rewrite the configuration and feature guides in plain language ([#744](https://github.com/MattJColes/lgtmaybe/issues/744)) ([0b8bf4d](https://github.com/MattJColes/lgtmaybe/commit/0b8bf4df81cb57c03d10fcfba624c9350c4ea468))
+* rewrite the homepage, README, tutorial and explanation pages in plain language ([#741](https://github.com/MattJColes/lgtmaybe/issues/741)) ([ac92c47](https://github.com/MattJColes/lgtmaybe/commit/ac92c476b0af05bbf5add407b8e16053aac26d9f))
+* rewrite the install, provider and host guides in plain language ([#743](https://github.com/MattJColes/lgtmaybe/issues/743)) ([2542169](https://github.com/MattJColes/lgtmaybe/commit/2542169eb84fd96429c9f9f6863aaa7d7385a2fe))
+
 ## [2.12.0](https://github.com/MattJColes/lgtmaybe/compare/lgtmaybe-v2.11.1...lgtmaybe-v2.12.0) (2026-10-13)
 
 
