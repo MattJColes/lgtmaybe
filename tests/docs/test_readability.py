@@ -194,6 +194,7 @@ def test_the_checker_cli_exits_by_result(capsys: pytest.CaptureFixture[str]) -> 
         page.write("This has a dash \u2014 here.\n")
     try:
         assert main([page.name]) == 1
+        assert "[em-dash]" in capsys.readouterr().out
     finally:
         Path(page.name).unlink()
     assert main([str(_ROOT / "docs/no-such-page.md")]) == 1
