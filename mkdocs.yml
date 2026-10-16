@@ -11,6 +11,12 @@ docs_dir: docs
 exclude_docs: |
   generate_reference.py
   generate_llms_txt.py
+  whats_new.py
+
+# Builds the homepage's What's New list and the Changelog page from
+# CHANGELOG.md at build time, so a release never leaves them stale.
+hooks:
+  - docs/whats_new.py
 
 theme:
   name: material
@@ -109,6 +115,7 @@ nav:
   - Reference:
       - Configuration: reference/config.md
       - Profile output: reference/profile.md
+      - Changelog: changelog.md
   - Explanation:
       - What gets reviewed: explanation/what-gets-reviewed.md
       - Risk of change: explanation/risk-of-change.md
