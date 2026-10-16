@@ -42,6 +42,16 @@ _DIFF_FORMAT = (
 )
 
 
+class LocalGitError(Exception):
+    """A git command hung past ``_TIMEOUT`` seconds.
+
+    Deliberately not a ValueError: this module's ``except ValueError``
+    fallbacks (repo root, branch, default base) degrade on a git *failure*
+    and must never swallow a hung git. The CLI layer converts it into a
+    clean ClickException for the user.
+    """
+
+
 def local_pr_context(
     *,
     base: str | None = None,
@@ -65,7 +75,8 @@ def local_pr_context(
     Commit subjects between the base and HEAD are collected in branch and
     working mode (the stated intent for the intent lens); uncommitted edits are
     not described by any commit, so ``uncommitted`` mode collects none. Raises
-    ValueError when git is missing or this is not a git repository.
+    ValueError when git is missing or this is not a git repository, and
+    LocalGitError when a git command hangs.
     """
     if working and uncommitted:
         raise ValueError("--working and --uncommitted are mutually exclusive")
@@ -255,7 +266,11 @@ def _untracked_patches(cwd: Path | None, paths: list[str]) -> str:
 
 
 def _git(cwd: Path | None, *args: str) -> str:
-    """Run a git command and return stdout; raise ValueError on failure."""
+    """Run a git command and return stdout.
+
+    Raises ValueError when git fails (not installed, non-zero exit) and
+    LocalGitError when it hangs past ``_TIMEOUT`` seconds.
+    """
     try:
         result = subprocess.run(
             ["git", *_QUOTE_PATH_OFF, *args],
@@ -271,6 +286,8 @@ def _git(cwd: Path | None, *args: str) -> str:
         raise ValueError("git is not installed or not on PATH") from exc
     except subprocess.CalledProcessError as exc:
         raise ValueError(f"git {' '.join(args)} failed: {exc.stderr.strip()}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise LocalGitError(f"git {' '.join(args)} timed out after {_TIMEOUT}s") from exc
     return result.stdout
 
 
