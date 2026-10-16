@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -155,6 +156,22 @@ def test_repo_name_from_remote(repo: Path) -> None:
 def test_not_a_git_repo_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="git"):
         local_pr_context(base="main", working=False, cwd=tmp_path)
+
+
+def test_git_timeout_surfaces_as_a_click_error(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung git must surface as a clean CLI error naming the command, not a
+    raw TimeoutExpired traceback."""
+    import click
+
+    import lgtmaybe.local as local_mod
+
+    def hanging_run(*args: object, **kwargs: object) -> NoReturn:
+        raise subprocess.TimeoutExpired(cmd=["git"], timeout=120)
+
+    monkeypatch.setattr(local_mod.subprocess, "run", hanging_run)
+
+    with pytest.raises(click.ClickException, match=r"git log --format=%s timed out"):
+        local_mod._git(repo, "log", "--format=%s")
 
 
 def test_default_base_falls_back_to_head_with_no_main_master_or_remote(tmp_path: Path) -> None:

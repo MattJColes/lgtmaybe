@@ -12,6 +12,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import click
+
 from lgtmaybe.core.diff import is_reviewable, is_scannable_manifest
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.models import PRContext
@@ -277,6 +279,10 @@ def _git(cwd: Path | None, *args: str) -> str:
         raise ValueError("git is not installed or not on PATH") from exc
     except subprocess.CalledProcessError as exc:
         raise ValueError(f"git {' '.join(args)} failed: {exc.stderr.strip()}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise click.ClickException(
+            f"git {' '.join(args)} timed out after {_TIMEOUT}s"
+        ) from exc
     return result.stdout
 
 
