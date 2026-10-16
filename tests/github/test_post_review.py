@@ -800,11 +800,20 @@ def test_resolve_fixed_skipped_on_first_review() -> None:
 
 
 @respx.mock
-def test_resolve_fixed_skipped_on_failure_notice() -> None:
-    """A failure notice posts through post_review with no findings and no
-    completion watermark (the CLI clears it via mark_reviewed(None)): with
-    nothing reviewed this run, an absent finding is not evidence of a fix, so
-    nothing resolves (#747)."""
+@pytest.mark.parametrize(
+    ("findings", "summary", "diff"),
+    [
+        pytest.param([], "⚠️ lgtmaybe review failed: boom", None, id="failure-notice"),
+        pytest.param(FINDINGS, "partial summary", SAMPLE_DIFF, id="incomplete-run"),
+    ],
+)
+def test_resolve_fixed_skipped_without_watermark(
+    findings: list[ReviewFinding], summary: str, diff: str | None
+) -> None:
+    """A run with no completion watermark (a failure notice cleared via
+    mark_reviewed(None), or a partial run after a lens failure, SIGTERM or
+    max_review_seconds) has reviewed nothing: an absent finding is not
+    evidence of a fix, so threads stay open (#747)."""
     _mark_existing_review()
     gone_fp = finding_fingerprint("src/old.py", "Removed bug")
     graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
@@ -812,25 +821,7 @@ def test_resolve_fixed_skipped_on_failure_notice() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     gw.mark_reviewed(None)
-    gw.post_review([], "⚠️ lgtmaybe review failed: boom")
-
-    assert graphql.queried is False
-    assert graphql.resolved == []
-
-
-@respx.mock
-def test_resolve_fixed_skipped_on_incomplete_run() -> None:
-    """A partial run (a lens failure, SIGTERM or max_review_seconds) stamps no
-    watermark: the findings its failed calls never produced are not fixes, so
-    their threads must stay open (#747)."""
-    _mark_existing_review()
-    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
-    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
-    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
-
-    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed(None)
-    gw.post_review(FINDINGS, "partial summary", diff=SAMPLE_DIFF)
+    gw.post_review(findings, summary, diff=diff)
 
     assert graphql.queried is False
     assert graphql.resolved == []
