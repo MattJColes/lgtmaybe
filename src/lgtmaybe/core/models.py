@@ -1191,9 +1191,10 @@ class ReviewConfig(_Strict):
     incremental: bool | None = None
     # Auto-resolve a previously-posted review conversation once its finding is
     # fixed: on a re-run, when a finding lgtmaybe flagged is no longer produced
-    # and GitHub marks the thread outdated (the code under it changed), lgtmaybe
-    # replies and resolves the conversation. GitHub posting only — ignored by the
-    # local CLI review, which has no conversations to resolve.
+    # and the code under it changed (GitHub's outdated flag, or the file compared
+    # on hosts without one), lgtmaybe resolves the conversation. GitHub, GitLab,
+    # Azure DevOps and Gitea 1.26+; ignored by the local CLI review, which has no
+    # conversations to resolve.
     resolve_fixed: bool = True
     # Call-count preset (see ReviewPreset): `fast` (default) covers all ten
     # everyday categories in five calls, one per concern — security,

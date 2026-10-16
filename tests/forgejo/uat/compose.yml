@@ -1,0 +1,58 @@
+# A throwaway Forgejo plus a registered forgejo-runner, for trying lgtmaybe on
+# Forgejo locally. Start it with ./up.sh, which also creates the accounts and
+# registers the runner; stop it with `docker compose down -v`.
+#
+# Local only: the admin password and runner secret are throwaway values, and
+# the runner mounts the Docker socket so it can start job containers.
+name: forgejo-uat
+
+services:
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:${FORGEJO_VERSION:-17}
+    environment:
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__actions__ENABLED: "true"
+      # Job containers reach Forgejo by its service name, so that is the URL
+      # Forgejo hands them (FORGEJO_SERVER_URL). Browse at http://localhost:3000.
+      FORGEJO__server__ROOT_URL: http://forgejo:3000/
+    ports:
+      - "3000:3000"
+    volumes:
+      - forgejo-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/v1/version"]
+      interval: 2s
+      retries: 60
+
+  runner:
+    image: data.forgejo.org/forgejo/runner:${RUNNER_VERSION:-12}
+    user: "0:0"
+    depends_on:
+      forgejo:
+        condition: service_healthy
+    command: ["forgejo-runner", "daemon", "--config", "/runner/config.yml"]
+    restart: on-failure
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.runner:/runner
+
+  # An OpenAI-compatible stand-in for a model, so a review runs with no API
+  # key. Point the workflow at it with INPUT_PROVIDER: openai-compatible and
+  # INPUT_API_BASE: http://stub:8080/v1. Started only with `--profile stub`.
+  stub:
+    # The lgtmaybe image already carries Python, so no extra registry pull.
+    image: ghcr.io/mattjcoles/lgtmaybe:v2
+    profiles: [stub]
+    working_dir: /repo
+    entrypoint: ["python", "-I", "tests/forgejo/uat/stub_server.py"]
+    command: ["--host", "0.0.0.0", "--port", "8080"]
+    volumes:
+      - ../../..:/repo:ro
+
+volumes:
+  forgejo-data:
+
+networks:
+  default:
+    name: forgejo-uat

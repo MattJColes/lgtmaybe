@@ -110,6 +110,7 @@ lgtmaybe/
 ├── examples/workflows/      # one ready-to-copy GitHub workflow per model provider
 ├── examples/gitlab/         # ready-to-copy .gitlab-ci.yml
 ├── examples/gitea/          # ready-to-copy Gitea Actions workflow
+├── examples/forgejo/        # ready-to-copy Forgejo Actions workflow
 ├── examples/azure-devops/   # ready-to-copy azure-pipelines.yml
 │
 ├── action.yml              # composite Action: keyless OIDC/WIF auth → docker run GHCR image

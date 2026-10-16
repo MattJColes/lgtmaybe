@@ -14,10 +14,15 @@ switch on the GitHub one:
    ``new_position`` (a line in the new file) or ``old_position`` (a line in the
    old file), where GitHub uses ``line`` + ``side``. lgtmaybe keeps GitHub's
    RIGHT/LEFT vocabulary internally and translates at this boundary.
-3. **No resolvable threads.** Gitea has no ``resolveReviewThread`` equivalent,
-   so this adapter does not claim ``SupportsThreadResolution`` — and, because
-   an immutable review cannot be de-duplicated after the fact, it instead reads
-   the hidden ids already on the PR and declines to post those findings again.
+3. **Comments resolve one at a time, with no replies.** An immutable review
+   cannot be de-duplicated after the fact, so this adapter reads the hidden ids
+   already on the PR and declines to post those findings again. Gitea 1.26+
+   resolves a single review comment, but has no "outdated" flag and no way to
+   reply in a thread, so it does not claim ``SupportsThreadResolution``. It
+   resolves our comment itself, after a complete run, when the finding is gone
+   and the file read at the comment's commit and at the head shows its line
+   changed. A server without the endpoint (Forgejo, older Gitea) answers 404 and
+   the comments stay open.
 
 Also deliberately absent: incremental review (Gitea's compare API returns commit
 metadata, not a unified diff, so there is nothing to review an increment from)
@@ -29,6 +34,7 @@ from __future__ import annotations
 
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
 from typing import Any
 from urllib.parse import quote
 
@@ -36,6 +42,7 @@ import httpx
 
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
+    current_finding_keys,
     finding_keys,
     marker,
     partition_findings,
@@ -49,6 +56,7 @@ from lgtmaybe.core.diff import (
     build_commentable_lines,
     is_reviewable,
     is_scannable_manifest,
+    line_changed,
 )
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import PRContext, ReviewFinding
@@ -68,6 +76,15 @@ _CONTENT_FETCH_WORKERS = 8
 _PAGE_LIMIT = 50
 
 
+class _Unreadable(Enum):
+    """A file side that could not be read as text (None means it is not there)."""
+
+    unreadable = "unreadable"
+
+
+_Text = str | _Unreadable | None
+
+
 class GiteaGateway:
     """Gitea REST adapter.
 
@@ -77,6 +94,7 @@ class GiteaGateway:
         pr_number: Pull-request index.
         token:     Gitea API token.
         client:    Injected httpx.Client; a default is created if omitted.
+        resolve_fixed: Whether to resolve our comments whose finding was fixed.
     """
 
     def __init__(
@@ -87,6 +105,7 @@ class GiteaGateway:
         token: str,
         client: httpx.Client | None = None,
         marker_key: str | None = None,
+        resolve_fixed: bool = True,
         scheme: str = "https",
     ) -> None:
         self._repo = repo
@@ -106,7 +125,11 @@ class GiteaGateway:
         self._describe_marker = marker("lgtmaybe-describe", marker_key)
         self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
+        self._head_texts: dict[str, str] = {}
         self._scan_manifests = False
+        self._resolve_fixed = resolve_fixed
+        # Set by mark_reviewed on a complete run only; resolve-on-fix waits for it.
+        self._reviewed_sha: str | None = None
         # The posting identity's login, looked up once (see _posting_login).
         self._login: str | None = None
         self._login_done = False
@@ -149,6 +172,7 @@ class GiteaGateway:
             if reviewable:
                 fetched = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
                 file_contents = {path: text for path, text in fetched if text is not None}
+        self._head_texts = file_contents
 
         return PRContext(
             diff=diff,
@@ -177,16 +201,23 @@ class GiteaGateway:
         summary has to live somewhere re-runnable, and an issue comment is that
         place. Findings already carrying one of our hidden ids on the PR are
         dropped before posting, which is what keeps a re-run from duplicating
-        every inline comment it made last time.
+        every inline comment it made last time. Last, our comments whose finding
+        is now fixed are resolved, after everything else posted.
         """
         if diff is None and findings:
             diff = self._fetch_pr_diff()
 
         commentable: CommentableLines = build_commentable_lines(diff or "")
         inline, demoted, broad = self._partition_findings(findings, commentable)
+        resolving = (
+            self._resolve_fixed
+            and self._reviewed_sha is not None
+            and self._reviewed_sha == self._head_sha
+        )
+        comments = self._own_review_comments() if inline or resolving else []
 
         if inline:
-            inline = unposted(inline, self._existing_finding_keys())
+            inline = unposted(inline, self._existing_finding_keys(comments))
 
         if inline:
             resp = self._client.post(
@@ -203,6 +234,8 @@ class GiteaGateway:
 
         body = f"{summary}{render_demoted(demoted)}{render_broad(broad)}\n\n{self._marker}"
         self._upsert_comment(body, self._marker)
+        if resolving:
+            self._resolve_fixed_comments(findings, comments)
 
     def post_issue_comment(self, body: str) -> None:
         """Post a standalone comment to the PR conversation."""
@@ -246,6 +279,15 @@ class GiteaGateway:
     def set_scan_manifests(self, enabled: bool) -> None:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled
+
+    def mark_reviewed(self, head_sha: str | None) -> None:
+        """Record that this run reviewed ``head_sha`` completely (None: it did not).
+
+        No watermark is written, since incremental review is not offered. It is
+        the gate for resolve-on-fix: a partial run or a failure notice is missing
+        findings, not reporting them fixed, so neither may resolve a comment.
+        """
+        self._reviewed_sha = head_sha
 
     def apply_pr_labels(self, labels: list[str]) -> None:
         """Add lgtmaybe's labels to the PR, best-effort.
@@ -303,6 +345,20 @@ class GiteaGateway:
             permission = self._get_json(
                 f"{self._api}/collaborators/{quote(login, safe='')}/permission"
             ).get("permission")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                # A personal token reads any account's permission (a stranger
+                # answers "read"), so a refusal points at the token: Forgejo's
+                # automatic job token is refused here.
+                _log.warning(
+                    "permission check for %s refused (403): this token cannot read "
+                    "collaborator permissions, so slash commands are ignored. Map a "
+                    "personal access token to GITEA_TOKEN to enable them.",
+                    login,
+                )
+            else:
+                _log.warning("permission check for %s failed: %s", login, exc)
+            return False
         except (httpx.HTTPError, ValueError, AttributeError) as exc:
             _log.warning("permission check for %s failed: %s", login, exc)
             return False
@@ -365,17 +421,32 @@ class GiteaGateway:
         login = self._posting_login()
         return login is not None and (item.get("user") or {}).get("login") == login
 
-    def _existing_finding_keys(self) -> list[set[str]]:
+    def _existing_finding_keys(self, comments: list[dict[str, Any]]) -> list[set[str]]:
         """Every hidden finding id already posted on this PR by us.
 
-        Only reviews the posting identity wrote are read: anyone can paste our
-        hidden ids (the identity is a prose-free hash a PR author can compute),
-        and counting theirs would let them hide a finding before it is made.
-
-        Best-effort: a failure here means a duplicate comment, which is far
-        better than failing the whole review.
+        ``comments`` come from ``_own_review_comments``, so only reviews the
+        posting identity wrote count: anyone can paste our hidden ids (the
+        identity is a prose-free hash a PR author can compute), and counting
+        theirs would let them hide a finding before it is made. A comment we
+        resolved as fixed stops suppressing, so a finding that comes back posts
+        again; one a person resolved still suppresses, as their call to leave it.
         """
+        login = self._posting_login()
         keys: list[set[str]] = []
+        for comment in comments:
+            if login is not None and (comment.get("resolver") or {}).get("login") == login:
+                continue
+            if found := finding_keys(comment.get("body") or ""):
+                keys.append(found)
+        return keys
+
+    def _own_review_comments(self) -> list[dict[str, Any]]:
+        """Every inline comment on the reviews the posting identity wrote.
+
+        Best-effort: a failure here means a duplicate comment and nothing
+        resolved, which is far better than failing the whole review.
+        """
+        out: list[dict[str, Any]] = []
         try:
             # Gitea reviews are immutable, so every past lgtmaybe run left its
             # own review object and there is no flat "all review comments for
@@ -392,12 +463,83 @@ class GiteaGateway:
                 for comments in pool.map(
                     lambda rid: self._list(f"{self._pr_api}/reviews/{rid}/comments"), review_ids
                 ):
-                    for comment in comments:
-                        if found := finding_keys(comment.get("body") or ""):
-                            keys.append(found)
+                    out.extend(comments)
         except Exception as exc:  # noqa: BLE001 — dedupe is best-effort
             _log.warning("reading existing review comments failed: %s", exc)
-        return keys
+        return out
+
+    def _resolve_fixed_comments(
+        self, findings: list[ReviewFinding], comments: list[dict[str, Any]]
+    ) -> None:
+        """Resolve each of our open finding comments whose finding is now fixed.
+
+        Fixed means this run no longer produced either hidden id and the line
+        the comment sits on has changed. A 404 means the server has no resolve
+        endpoint, and a 401 or 403 is the identity's, so either stops the rest.
+        Never fails the review.
+        """
+        current = current_finding_keys(findings)
+        for comment in comments:
+            comment_id = comment.get("id")
+            keys = finding_keys(comment.get("body") or "")
+            if comment.get("resolver") or comment_id is None or not keys or keys & current:
+                continue
+            if not self._is_outdated(comment):
+                continue
+            try:
+                resp = self._client.post(
+                    f"{self._api}/pulls/comments/{comment_id}/resolve",
+                    headers=self._headers,
+                    timeout=_TIMEOUT,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status in (404, 405):
+                    _log.warning(
+                        "this server cannot resolve review comments (Gitea 1.26 or later "
+                        "can; Forgejo cannot yet), so fixed findings stay open. Set "
+                        "resolve_fixed: false to stop trying. (%s)",
+                        exc,
+                    )
+                    return
+                if status in (401, 403):
+                    _log.warning(
+                        "resolving review comments is not permitted for this identity, so "
+                        "fixed findings stay open. Give the token write access to the "
+                        "repository, or set resolve_fixed: false to stop trying. (%s)",
+                        exc,
+                    )
+                    return
+                _log.warning("resolving comment %s failed: %s", comment_id, exc)
+            except Exception as exc:  # noqa: BLE001 — one comment never blocks the rest
+                _log.warning("resolving comment %s failed: %s", comment_id, exc)
+
+    def _is_outdated(self, comment: dict[str, Any]) -> bool:
+        """Whether the line a finding comment was posted on has changed since.
+
+        The comment's ``commit_id`` is the head it was posted against; the file
+        is read there and at our head. Fails closed: an old-file (LEFT) comment
+        (pushes do not change the base), an unreadable side, or any missing
+        field reads as not outdated, so nothing is resolved without evidence.
+        """
+        head = self._head_sha
+        posted_at = comment.get("commit_id")
+        path = comment.get("path")
+        line = comment.get("position")
+        if not head or not isinstance(posted_at, str) or not posted_at or posted_at == head:
+            return False
+        if not isinstance(path, str) or not path or not isinstance(line, int):
+            return False
+        before = self._read_file(path, posted_at)
+        if not isinstance(before, str):
+            return False
+        after = self._head_texts[path] if path in self._head_texts else self._read_file(path, head)
+        if after is None:
+            return True  # the file is gone from the head
+        if not isinstance(after, str):
+            return False
+        return line_changed(before, after, line)
 
     def _upsert_comment(self, body: str, family: str) -> None:
         """Edit our previous comment in this marker family, or post a new one."""
@@ -450,6 +592,11 @@ class GiteaGateway:
 
     def _get_file_content(self, path: str, ref: str) -> str | None:
         """One file's text at ``ref``, or None when absent or undecodable."""
+        text = self._read_file(path, ref)
+        return text if isinstance(text, str) else None
+
+    def _read_file(self, path: str, ref: str) -> _Text:
+        """One file's text at ``ref``: None when it is not there, else unreadable."""
         try:
             resp = self._client.get(
                 # quote() the path, keeping `/` as a real separator — an
@@ -460,18 +607,20 @@ class GiteaGateway:
                 params={"ref": ref},
                 timeout=_TIMEOUT,
             )
-            if resp.status_code != 200:
+            if resp.status_code == 404:
                 return None
+            if resp.status_code != 200:
+                return _Unreadable.unreadable
             payload = resp.json()
             content = payload.get("content")
             if not isinstance(content, str):
-                return None
+                return _Unreadable.unreadable
             # Gitea returns base64 like GitHub; a binary file simply won't decode
             # as UTF-8, and is not reviewable anyway.
             return base64.b64decode(content).decode("utf-8")
         except Exception as exc:  # noqa: BLE001 — a missing file is not fatal
             _log.debug("fetching %s failed: %s", path, exc)
-            return None
+            return _Unreadable.unreadable
 
     def _get_json(self, url: str) -> Any:
         resp = self._client.get(url, headers=self._headers, timeout=_TIMEOUT)

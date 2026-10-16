@@ -72,8 +72,13 @@ class TestProviderCapabilities:
     """
 
     def test_every_protocol_is_claimed_by_exactly_one_side(self) -> None:
-        """A new protocol forgotten here fails against the other adapter below."""
+        """A new protocol forgotten here fails against the other adapter below.
+
+        A name claimed by both sides would silently drop out of the gateway
+        conformance checklist, so exclusivity is asserted, not just presence.
+        """
         assert all(hasattr(ports, name) for name in PROVIDER_CAPABILITIES)
+        assert not (set(PROVIDER_CAPABILITIES) & set(CAPABILITIES))
 
     @pytest.mark.parametrize("name", PROVIDER_CAPABILITIES)
     def test_capabilities_are_runtime_checkable(self, name: str) -> None:

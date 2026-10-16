@@ -30,7 +30,8 @@ for why it matters.
     - `write:repository` also covers reading. Gitea files two endpoints under
       the *repository* category, not *issue*: the review endpoint lgtmaybe
       posts inline comments through (`POST /pulls/{index}/reviews`), and the
-      commit-status endpoint. So a token with only `read:repository` is refused
+      commit-status endpoint. Resolving a fixed finding's comment is filed
+      there too. So a token with only `read:repository` is refused
       on the one call the setup exists to make.
     - `write:issue` covers the summary comment and the PR labels.
     - `read:user` lets lgtmaybe ask Gitea who the token is (`GET /user`). Only
@@ -82,7 +83,8 @@ The review itself works in full:
   not create them);
 - the [`fail_on`](../reference/glossary.md#fail-on) merge gate (as a commit
   status);
-- the `/review`, `/improve`, `/ask`, `/describe` and `/diagram` slash commands.
+- the `/review`, `/improve`, `/ask`, `/describe` and `/diagram` slash commands;
+- resolve-on-fix, on Gitea 1.26 or later (see below).
 
 A slash command runs only for a commenter with write access to the repository.
 Gitea's workflow `if:` cannot read the commenter's role the way GitHub's
@@ -95,7 +97,7 @@ These are unavailable on Gitea, and lgtmaybe skips them rather than failing:
 | Not available | Why | What happens instead |
 |---|---|---|
 | Incremental review | Gitea's compare endpoint returns commit metadata, not a unified diff | Every run is a full review |
-| Resolve-on-fix | Gitea has no thread-resolution API | Fixed findings' comments stay open |
+| Resolve-on-fix before Gitea 1.26 | The resolve-comment endpoint arrived in 1.26 | Fixed findings' comments stay open |
 | 👎 feedback (`learn_feedback`) | Not implemented in the Gitea adapter | A downvoted finding can be posted again on a later run |
 | Symbol resolution | No base-branch clone in the Gitea adapter | Reflection judges cross-file findings without the symbol's definition |
 | Keyless cloud auth | The OIDC/WIF exchange is built into the GitHub composite action | Use an API key, or `ollama` for a local model |
@@ -104,6 +106,15 @@ A submitted Gitea review cannot be edited. So lgtmaybe reads the hidden finding
 IDs already on the pull request, and does not post the same finding twice. The
 summary lives in an ordinary comment, which is editable, so it updates in place
 on each run.
+
+On Gitea 1.26 or later, lgtmaybe also resolves its own comment once a finding is
+fixed. Gitea has no "outdated" flag, so lgtmaybe reads the file at the commit
+the comment was posted on and at the new head. It resolves the comment only when
+the finding is no longer reported **and** the flagged line changed. It never does
+so after a run that failed or finished only partly. Gitea cannot reply in a
+review thread, so no "looks resolved" reply is posted. An older server answers
+the resolve call with a 404: lgtmaybe logs it once, and the comments stay open.
+Set `resolve_fixed: false` to leave every comment for a person to resolve.
 
 ## Security: Who Can Change the Workflow
 

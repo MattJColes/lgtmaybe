@@ -45,6 +45,7 @@ SCAN_TARGETS = (
     "scripts/",
     ".github/workflows/",
     "docs/",
+    "examples/",
     "action.yml",
 )
 

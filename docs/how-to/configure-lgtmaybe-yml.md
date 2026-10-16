@@ -850,7 +850,9 @@ Other [forges](../reference/glossary.md#forge) (code hosts) work differently:
   thread *Resolved* only when the finding is no longer reported **and** the
   flagged line changed. It never does so after a run that failed or finished
   only partly.
-- Gitea's API can't resolve threads, so Gitea ignores this setting.
+- Gitea 1.26 or later works like Azure DevOps: lgtmaybe compares the file at
+  the comment's commit against the file now. Forgejo and older Gitea have no
+  endpoint to resolve a comment, so there the comments stay open.
 
 The local CLI has no conversations, so it ignores this setting too.
 

@@ -1084,6 +1084,16 @@ class LiteLLMProvider:
         """
         return bool(self._temperature_dropped)
 
+    def note_withheld_temperature(self, model: str, why: str) -> None:
+        """Record a temperature withheld before a call was ever made.
+
+        The factory's public way to seed ``temperature_dropped``: a temperature
+        withheld at build time (Claude under extended thinking) never rides a
+        request, so no call can ever report it missing. Adapter-only, beyond
+        the frozen ``ProviderClient`` port, like ``temperature_dropped`` above.
+        """
+        self._mark_temperature_dropped(model, why)
+
     def _note_temperature_reach(self, model: str, kwargs: Mapping[str, Any]) -> None:
         """Record whether litellm will strip this request's ``temperature``.
 

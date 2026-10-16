@@ -621,7 +621,10 @@ class TestCapabilities:
             assert isinstance(gateway, getattr(ports, name)), name
 
     def test_does_not_claim_what_gitea_cannot_do(self) -> None:
-        """Gitea has no resolvable review threads; claiming it would break the caller."""
+        """Gitea cannot reply in a review thread, so the validated-resolve flow is not claimed.
+
+        Resolve-on-fix still runs, inside ``post_review`` (see TestResolveOnFix).
+        """
         from lgtmaybe.core import ports
 
         gateway = GiteaGateway.__new__(GiteaGateway)
@@ -649,6 +652,22 @@ class TestPermissions:
             return_value=httpx.Response(403, json={"message": "forbidden"})
         )
         assert _gateway(httpx.Client()).has_repo_write("stranger") is False
+
+    @respx.mock
+    def test_a_refused_lookup_names_the_token_as_the_likely_cause(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Forgejo's automatic job token gets a 403 here, while a personal token
+        reads any account's permission (a stranger answers "read"). So a 403
+        points at the token, and the log says so rather than blaming the
+        commenter."""
+        respx.get(f"{API}/collaborators/maintainer/permission").mock(
+            return_value=httpx.Response(403, json={"message": "token does not have the scope"})
+        )
+        with caplog.at_level("WARNING", logger="lgtmaybe.gitea.gateway"):
+            assert _gateway(httpx.Client()).has_repo_write("maintainer") is False
+        assert "cannot read collaborator permissions" in caplog.text
+        assert "personal access token" in caplog.text
 
 
 class TestLabels:
@@ -806,3 +825,260 @@ class TestForgedFindingIds:
         assert reviews.called, "the forged id suppressed a finding never posted"
         posted = json.loads(reviews.calls[0].request.content)["comments"]
         assert any("Hardcoded password" in c["body"] for c in posted)
+
+
+class TestResolveOnFix:
+    """Gitea 1.26+ resolves a review comment; ours is resolved once its finding is fixed.
+
+    Fixed means two things together, as on every forge: this complete run no
+    longer produced the finding, and the line it was posted on has changed since.
+    Gitea has no "outdated" flag, so the file is read at the comment's commit and
+    at the head.
+    """
+
+    OLD = 'import os\npassword = "hunter2"\n\ndef main():\n'
+    FIXED = 'import os\npassword = os.environ["PASSWORD"]\n\ndef main():\n'
+
+    @staticmethod
+    def _b64(text: str) -> dict[str, str]:
+        import base64
+
+        return {"content": base64.b64encode(text.encode()).decode(), "encoding": "base64"}
+
+    def _comment(self, **overrides: object) -> dict[str, object]:
+        from lgtmaybe.core.findings import finding_fingerprint
+
+        fingerprint = finding_fingerprint("app.py", "Hardcoded password")
+        comment: dict[str, object] = {
+            "id": 31,
+            "body": f"Hardcoded password\n<!-- lgtmaybe-finding:{fingerprint} -->",
+            "path": "app.py",
+            "position": 2,
+            "original_position": 0,
+            "commit_id": "old111",
+            "resolver": None,
+            "user": {"login": BOT},
+        }
+        comment.update(overrides)
+        return comment
+
+    def _stub(
+        self,
+        *,
+        head_text: str | None = None,
+        comments: list[dict[str, object]] | None = None,
+        review_author: str = BOT,
+        resolve_status: int = 204,
+    ) -> respx.Route:
+        """Context, one past review holding ``comments``, the summary, and the resolve route."""
+        if head_text is None:
+            respx.route(
+                method="GET",
+                url__startswith=f"{API}/contents/",
+                params__contains={"ref": "head456"},
+            ).mock(return_value=httpx.Response(404, json={"message": "not found"}))
+        else:
+            respx.route(
+                method="GET",
+                url__startswith=f"{API}/contents/",
+                params__contains={"ref": "head456"},
+            ).mock(return_value=httpx.Response(200, json=self._b64(head_text)))
+        respx.route(
+            method="GET", url__startswith=f"{API}/contents/", params__contains={"ref": "old111"}
+        ).mock(return_value=httpx.Response(200, json=self._b64(self.OLD)))
+        _stub_context_routes()
+        respx.get(f"{PR_URL}/reviews").mock(
+            return_value=httpx.Response(200, json=[{"id": 5, "user": {"login": review_author}}])
+        )
+        respx.get(f"{PR_URL}/reviews/5/comments").mock(
+            return_value=httpx.Response(
+                200, json=comments if comments is not None else [self._comment()]
+            )
+        )
+        respx.route(method="GET", url__startswith=f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{API}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={"id": 1})
+        )
+        respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+        return respx.route(method="POST", url__regex=rf"{API}/pulls/comments/\d+/resolve").mock(
+            return_value=httpx.Response(resolve_status)
+        )
+
+    def _complete_run(
+        self, findings: list[ReviewFinding] | None = None, **kwargs: object
+    ) -> GiteaGateway:
+        gateway = GiteaGateway(
+            host=HOST, repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client(), **kwargs
+        )
+        ctx = gateway.get_pr_context()
+        gateway.mark_reviewed(ctx.head_sha)
+        gateway.post_review(findings or [], "👍 LGTM!", diff=DIFF)
+        return gateway
+
+    @staticmethod
+    def _finding() -> ReviewFinding:
+        return ReviewFinding(
+            path="app.py",
+            line=2,
+            side="RIGHT",
+            severity=Severity.high,
+            title="Hardcoded password",
+            body="Move it to the environment.",
+            anchor='password = "hunter2"',
+            anchored=True,
+        )
+
+    @respx.mock
+    def test_a_fixed_finding_is_resolved(self) -> None:
+        resolve = self._stub(head_text=self.FIXED)
+
+        self._complete_run()
+
+        assert resolve.call_count == 1
+        assert resolve.calls[0].request.url.path.endswith("/pulls/comments/31/resolve")
+
+    @respx.mock
+    def test_a_finding_this_run_still_produced_stays_open(self) -> None:
+        resolve = self._stub(head_text=self.FIXED)
+
+        self._complete_run([self._finding()])
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_a_gone_finding_whose_line_did_not_change_stays_open(self) -> None:
+        """Absent but untouched: the model missed it this time, it was not fixed."""
+        resolve = self._stub(head_text="# moved down\n" + self.OLD)
+
+        self._complete_run()
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_a_finding_whose_file_was_deleted_is_resolved(self) -> None:
+        resolve = self._stub(head_text=None)
+
+        self._complete_run()
+
+        assert resolve.call_count == 1
+
+    @respx.mock
+    @pytest.mark.parametrize("reviewed", ["unmarked", None])
+    def test_an_incomplete_run_resolves_nothing(self, reviewed: str | None) -> None:
+        """A partial run or failure notice is missing findings, not reporting them fixed."""
+        resolve = self._stub(head_text=self.FIXED)
+        gateway = _gateway(httpx.Client())
+        gateway.get_pr_context()
+        if reviewed is None:
+            gateway.mark_reviewed(None)
+
+        gateway.post_review([], "partial", diff=DIFF)
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_resolve_fixed_off_resolves_nothing(self) -> None:
+        resolve = self._stub(head_text=self.FIXED)
+
+        self._complete_run(resolve_fixed=False)
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_an_already_resolved_comment_is_left_alone(self) -> None:
+        resolve = self._stub(
+            head_text=self.FIXED, comments=[self._comment(resolver={"login": "alice"})]
+        )
+
+        self._complete_run()
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_a_left_side_comment_is_never_resolved(self) -> None:
+        """Pushes do not change the base, so an old-file line never goes outdated."""
+        resolve = self._stub(
+            head_text=self.FIXED, comments=[self._comment(position=0, original_position=2)]
+        )
+
+        self._complete_run()
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_someone_elses_review_carrying_our_ids_is_never_resolved(self) -> None:
+        resolve = self._stub(head_text=self.FIXED, review_author="mallory")
+
+        self._complete_run()
+
+        assert not resolve.called
+
+    @respx.mock
+    def test_a_server_without_the_resolve_api_stops_after_one_try(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Forgejo and Gitea before 1.26 answer 404: comments stay open, the review posts."""
+        resolve = self._stub(
+            head_text=self.FIXED,
+            comments=[self._comment(), self._comment(id=32)],
+            resolve_status=404,
+        )
+
+        self._complete_run()
+
+        assert resolve.call_count == 1
+        assert "1.26" in caplog.text
+
+    @respx.mock
+    def test_a_refused_resolve_stops_and_names_the_permission(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        resolve = self._stub(
+            head_text=self.FIXED,
+            comments=[self._comment(), self._comment(id=32)],
+            resolve_status=403,
+        )
+
+        self._complete_run()
+
+        assert resolve.call_count == 1
+        assert "resolve_fixed: false" in caplog.text
+
+    @respx.mock
+    def test_a_finding_we_resolved_posts_again_when_it_comes_back(self) -> None:
+        """Our resolve stops the comment suppressing; a regression is a new finding."""
+        self._stub(head_text=self.OLD, comments=[self._comment(resolver={"login": BOT})])
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+
+        self._complete_run([self._finding()])
+
+        assert reviews.call_count == 1
+
+    @respx.mock
+    def test_a_finding_a_person_resolved_is_not_posted_again(self) -> None:
+        """A person resolving it is a decision to leave it, so it keeps suppressing."""
+        self._stub(head_text=self.OLD, comments=[self._comment(resolver={"login": "alice"})])
+        reviews = respx.post(f"{PR_URL}/reviews").mock(return_value=httpx.Response(200, json={}))
+
+        self._complete_run([self._finding()])
+
+        assert not reviews.called
+
+    @respx.mock
+    def test_the_cli_passes_the_resolve_fixed_setting_through(self) -> None:
+        from lgtmaybe.cli import _GATEWAY_BUILDERS
+        from lgtmaybe.core.forge import Forge, PRLocator
+        from lgtmaybe.core.models import Provider, ReviewConfig
+
+        resolve = self._stub(head_text=self.FIXED)
+        cfg = ReviewConfig(provider=Provider.ollama, model="llama3", resolve_fixed=False)
+        located = PRLocator(forge=Forge.gitea, host=HOST, repo=REPO, number=PR_NUMBER)
+        gateway = _GATEWAY_BUILDERS[Forge.gitea](located, TOKEN, cfg)
+        ctx = gateway.get_pr_context()
+        gateway.mark_reviewed(ctx.head_sha)  # type: ignore[attr-defined]
+
+        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+
+        assert not resolve.called

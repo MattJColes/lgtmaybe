@@ -14,6 +14,7 @@
 - [Post as lgtmaybe[bot]](https://lgtmaybe.coles.codes/how-to/post-as-a-github-app/): Post lgtmaybe reviews as lgtmaybe[bot] with the public App, or use a self-managed GitHub App.
 - [Review stacked pull requests](https://lgtmaybe.coles.codes/how-to/review-stacked-pull-requests/): How lgtmaybe reviews a stack of pull requests, where each one builds on the one below.
 - [Review on Azure DevOps](https://lgtmaybe.coles.codes/how-to/review-on-azure-devops/): Post lgtmaybe reviews to Azure DevOps Repos pull requests from Azure Pipelines with the azure-pipelines command - token, pipeline setup, and how it differs from GitHub.
+- [Review on Forgejo](https://lgtmaybe.coles.codes/how-to/review-on-forgejo/): Post lgtmaybe reviews to Forgejo and Codeberg pull requests from Forgejo Actions - the workflow, the runner label, the token, and a fallback for runners without Docker.
 - [Review on Gitea](https://lgtmaybe.coles.codes/how-to/review-on-gitea/): Post lgtmaybe reviews to Gitea pull requests from Gitea Actions - token scopes, the workflow, and which GitHub features Gitea cannot serve.
 - [Review on GitLab](https://lgtmaybe.coles.codes/how-to/review-on-gitlab/): Post lgtmaybe reviews to GitLab merge requests from GitLab CI with the gitlab-ci command - token, job setup, and how it differs from GitHub.
 - [Review with OpenAI](https://lgtmaybe.coles.codes/how-to/review-with-openai/): Set up lgtmaybe pull-request reviews with OpenAI - add OPENAI_API_KEY, pick a model, and run as a GitHub Action or locally.

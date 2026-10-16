@@ -185,12 +185,18 @@ def local_head_file_reader(cwd: Path | None = None) -> Callable[[str], str | Non
     ``git show HEAD:<path>``, so branch mode serves the exact text its
     ``base...HEAD`` diff describes. A path HEAD does not hold (a file the
     branch deletes, an untracked one) reads as None, like a missing file.
+    Paths that escape the root are refused: git resolves ``HEAD:../x``
+    against its own cwd, so without the guard a subdirectory cwd would let
+    a climbing path reach a blob.
     """
+    root = (Path(cwd) if cwd is not None else local_repo_root()).resolve()
 
     def read(path: str) -> str | None:
         try:
+            target = (root / path).resolve()
+            target.relative_to(root)  # refuse paths that climb out of the repo
             return _git(cwd, "show", f"HEAD:{path}")
-        except ValueError:
+        except (OSError, ValueError):
             return None
 
     return read

@@ -57,8 +57,7 @@ class TestPartitionFindings:
 
     def test_a_broad_finding_is_routed_to_its_own_group(self) -> None:
         commentable: CommentableLines = {("a.py", 2, "RIGHT")}
-        finding = _finding("t")
-        finding = finding.model_copy(update={"broad": True})
+        finding = _finding("t").model_copy(update={"broad": True})
 
         placeable, demoted, broad = partition_findings([finding], commentable, self._place)
 

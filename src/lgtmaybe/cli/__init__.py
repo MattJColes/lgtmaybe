@@ -301,6 +301,7 @@ _GATEWAY_BUILDERS: dict[Forge, Callable[[PRLocator, str, ReviewConfig], ReviewGa
         pr_number=located.number,
         token=token,
         marker_key=_marker_key(cfg),
+        resolve_fixed=cfg.resolve_fixed,
         scheme=located.scheme,
     ),
     Forge.azure_devops: lambda located, token, cfg: AzureDevOpsGateway(
@@ -920,7 +921,10 @@ def run_local_review(
     prints what this returns, and the MCP server hands it to a coding agent.
     Builds the provider straight from config/runtime (no token, no gateway) and
     resets the profiler, so a long-lived caller measures each review alone.
-    Failures propagate; each caller decides how to surface them.
+    A ``LocalGitError`` from building the context is converted here to a
+    ``click.ClickException``, so both callers (the ``review`` command and the
+    MCP tools) report the clean git message; every other failure propagates
+    for the caller to surface.
     """
     profiler.reset()
     # Wire a read-only working-tree reader so reflection can resolve a deferred
@@ -1282,7 +1286,14 @@ def _change_url(repo: str, number: int) -> str:
 
     The path segment is what ``core.forge`` discriminates on, so it has to match
     the host's own convention: GitHub singularises ``pull``, Gitea pluralises it.
+
+    Forgejo (a Gitea fork, same API and URL shape) sets ``FORGEJO_SERVER_URL``
+    beside the ``GITHUB_*`` aliases from forgejo-runner v7. It is read first, so
+    a Forgejo run never rests on the alias and is never taken for GHES.
     """
+    forgejo = os.environ.get("FORGEJO_SERVER_URL", "").rstrip("/")
+    if forgejo:
+        return f"{forgejo}/{repo}/pulls/{number}"
     server = os.environ.get("GITHUB_SERVER_URL", "").rstrip("/")
     if not server or server == "https://github.com":
         return f"https://github.com/{repo}/pull/{number}"

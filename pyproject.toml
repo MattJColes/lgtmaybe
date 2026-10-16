@@ -1,6 +1,6 @@
 [project]
 name = "lgtmaybe"
-version = "2.13.0"
+version = "2.14.0"
 description = "Provider-agnostic PR reviewer — seven hosted providers, ollama, and any OpenAI-compatible endpoint, one flag, no keys in secrets for cloud."
 readme = "README.md"
 license = { text = "MIT" }
@@ -131,9 +131,10 @@ pythonpath = ["src", "."]
 # default gate. They are DESELECTED here and opted into with `pytest -m e2e`
 # (a command-line -m overrides this one). Markers are registered so the strict
 # warning filter below never trips on an unknown mark.
-addopts = "-m 'not e2e'"
+addopts = "-m 'not e2e and not forgejo_contract'"
 markers = [
     "e2e: live end-to-end test against a local model server (deselected by default; run with -m e2e)",
+    "forgejo_contract: the Gitea adapter against a live Forgejo (deselected by default; run with -m forgejo_contract)",
 ]
 # Code-quality gate: using a deprecated API (ours, the stdlib's, or a dependency's
 # triggered on our hot path) is a hard error, not silent noise. This is fully

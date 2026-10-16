@@ -16,6 +16,12 @@ gitea.dedupe:
     has: { field: name, regex: '^_existing_finding_keys$' }
   files: [src/lgtmaybe/gitea/**/*.py]
 
+gitea.resolve:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_resolve_fixed_comments$' }
+  files: [src/lgtmaybe/gitea/**/*.py]
+
 gitea.positions:
   rule:
     kind: function_definition
@@ -27,3 +33,16 @@ gitea.capabilities:
     kind: class_definition
     has: { field: name, regex: '^GiteaGateway$' }
   files: [src/lgtmaybe/gitea/**/*.py]
+
+gitea.forgejo-host:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_change_url$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+gitea.forgejo-workflow:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^runs-on$' }
+  language: yaml
+  files: [examples/forgejo/lgtmaybe.yml]

@@ -89,9 +89,9 @@ explanation, and sometimes a suggested fix:
 - **On a pull or merge request**, findings appear on the changed lines, with
   one summary naming the model. A re-run on the same commit updates that
   summary. A new commit gets a new summary. lgtmaybe does not repeat findings
-  it already posted. A clean review gets a 👍 **LGTM!**. GitHub and GitLab
-  resolve a finding's conversation once a later run shows it fixed; Gitea
-  cannot. See [Where It Posts](#where-it-posts).
+  it already posted. A clean review gets a 👍 **LGTM!**. GitHub, GitLab, Azure
+  DevOps and Gitea 1.26+ resolve a finding's conversation once a later run
+  shows it fixed. See [Where It Posts](#where-it-posts).
 - **On the CLI**, `lgtmaybe review` prints findings without posting them.
   Choose readable output (the default), JSON (`--json`), instructions for a
   coding agent (`--format agent`), or a SARIF log for GitHub code scanning
@@ -176,7 +176,8 @@ Three help commands show the options:
 To post reviews on real pull requests, set up the
 [GitHub Action](#use-as-a-github-action). On another host, use
 [GitLab CI](docs/how-to/review-on-gitlab.md),
-[Gitea Actions](docs/how-to/review-on-gitea.md) or
+[Gitea Actions](docs/how-to/review-on-gitea.md),
+[Forgejo Actions](docs/how-to/review-on-forgejo.md) or
 [Azure Pipelines](docs/how-to/review-on-azure-devops.md).
 [Getting Started](docs/tutorial/getting-started.md) has the full walkthrough,
 and [Choose a review model](docs/how-to/choose-a-review-model.md) compares
@@ -207,6 +208,7 @@ above works on any host below.
 | GitHub | GitHub Action (`MattJColes/lgtmaybe@v2`) | `GITHUB_TOKEN` | [GitHub Action](docs/how-to/use-as-github-action.md) |
 | GitLab | GitLab CI job (`lgtmaybe gitlab-ci`) | `GITLAB_TOKEN` | [Review on GitLab](docs/how-to/review-on-gitlab.md) |
 | Gitea | Gitea Actions (same container) | `GITEA_TOKEN` | [Review on Gitea](docs/how-to/review-on-gitea.md) |
+| Forgejo, Codeberg | Forgejo Actions (same container) | `GITEA_TOKEN` | [Review on Forgejo](docs/how-to/review-on-forgejo.md) |
 | Azure DevOps | Azure Pipelines job (`lgtmaybe azure-pipelines`) | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) |
 | None | `lgtmaybe review` on your local diff | n/a | [Install the CLI](docs/how-to/install-the-cli.md) |
 
@@ -219,7 +221,7 @@ do with the result:
 |---|---|---|---|---|
 | Inline comments + summary | ✅ | ✅ | ✅ | ✅ |
 | Slash commands | ✅ | ✅ | ✅ | not yet |
-| Auto-resolve a fixed finding | ✅ | ✅ | ✗ no thread API | not yet |
+| Auto-resolve a fixed finding | ✅ | ✅ | ✅ 1.26+ | ✅ |
 | Incremental re-review | ✅ | ✅ | ✗ no compare diff | not yet |
 | Learn from 👎 on a finding | ✅ reactions | ✅ award emoji | ✗ | not yet |
 | Keyless cloud auth (OIDC/WIF) | ✅ | ✗ use an API key | ✗ use an API key | ✗ use an API key |
@@ -244,6 +246,7 @@ the docs root.
 - [Post as lgtmaybe[bot]](docs/how-to/post-as-a-github-app.md)
 - [Review on GitLab](docs/how-to/review-on-gitlab.md)
 - [Review on Gitea](docs/how-to/review-on-gitea.md)
+- [Review on Forgejo](docs/how-to/review-on-forgejo.md)
 - [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md)
 - [Review with OpenAI](docs/how-to/review-with-openai.md)
 - [Review with Claude (Anthropic)](docs/how-to/review-with-anthropic.md)
@@ -347,6 +350,10 @@ changes:
   reimplements the same runtime. See
   [Review on Gitea](docs/how-to/review-on-gitea.md) and
   [`examples/gitea/`](examples/gitea/).
+- **Forgejo and Codeberg:** Forgejo is a Gitea fork with the same API, so
+  Forgejo Actions runs the same container through the Gitea adapter. See
+  [Review on Forgejo](docs/how-to/review-on-forgejo.md) and
+  [`examples/forgejo/`](examples/forgejo/).
 - **Azure DevOps:** an Azure Pipelines job running `lgtmaybe azure-pipelines`,
   added as a build validation branch policy. See
   [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) and

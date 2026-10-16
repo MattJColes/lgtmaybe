@@ -122,8 +122,11 @@ host.** Host differences: `docs/explanation/architecture.md` and
   `cli._GATEWAY_BUILDERS` maps forge to adapter. Host is carried because
   self-hosted GitLab/Gitea is the norm.
 - **GitHub** is the complete adapter. **Gitea** (`gitea/gateway.py`) lacks
-  incremental review and thread resolution (its API cannot serve them); its
-  summary is an issue comment because a submitted Gitea review is immutable.
+  incremental review (its API cannot serve it); its summary is an issue comment
+  because a submitted Gitea review is immutable. Resolve-on-fix works like Azure
+  DevOps (gated on `mark_reviewed(head)`, line compared at the comment's
+  `commit_id`), on Gitea 1.26+ only: Forgejo and older Gitea 404, which stops
+  it. No reply endpoint, so it never claims `SupportsThreadResolution`.
 - **GitLab** (`gitlab/gateway.py`): one discussion per finding, an upserted
   summary note. Thread resolution is plain REST, gated on the validated
   allowlist and scoped to the increment. Incremental needs a single-parent chain

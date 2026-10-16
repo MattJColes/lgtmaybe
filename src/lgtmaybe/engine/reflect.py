@@ -207,9 +207,10 @@ def reflect_findings(
     lockfile advisory). The ones on a finding's own path ground that finding,
     because the auditor otherwise has nothing to verify it against.
 
-    ``notices``, when supplied, collects a line per pass whose diff had to be
-    trimmed to fit the input budget, so the caller can surface it in the
-    review summary instead of only the log.
+    ``notices``, when supplied, collects one entry per pass whose diff had to
+    be trimmed to fit the input budget. Callers read only whether it grew (the
+    summary wording lives in the engine); it stays a list, not a flag, so the
+    deferral recursion can mark its own passes through the same out-param.
     """
     if not findings:
         return []
@@ -440,12 +441,14 @@ def _budgeted_diff(
     ctx: PRContext,
     room: int,
 ) -> tuple[str, bool]:
-    """The diff for the audit prompt, trimmed to the flagged files' patches.
+    """The diff for the audit prompt, narrowed to the flagged files' patches.
 
-    Only the patches carrying a finding are kept, walked in diff order while
-    they fit in *room* tokens; the walk stops at the first flagged patch that
-    does not fit (the same narrowing the deferral recheck uses). Returns the
-    diff and whether anything was trimmed.
+    Unflagged files are filtered by design (the audit only needs the code its
+    findings sit on), and that is not trimming. Trimming is budget-driven loss
+    only: a flagged patch that does not fit *room* is skipped and the walk
+    continues, so one oversized early patch cannot crowd later flagged files
+    out of the audit (the diff is attacker-controlled, and its order is the
+    attacker's). Returns the diff and whether any flagged patch was cut.
     """
     flagged = {f.path for f in findings}
     kept: list[str] = []
@@ -453,12 +456,11 @@ def _budgeted_diff(
     trimmed = False
     for path, patch in split_by_file(ctx.diff, ctx.changed_files):
         if path not in flagged:
-            trimmed = True
             continue
         cost = count_tokens(patch)
         if used + cost > room:
             trimmed = True
-            break
+            continue
         kept.append(patch)
         used += cost
     return "".join(kept), trimmed

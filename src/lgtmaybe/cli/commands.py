@@ -42,6 +42,7 @@ from lgtmaybe.config import detect, store
 from lgtmaybe.config.loader import LOCAL_SETUP_HINT, ProviderNotConfigured, load_config
 from lgtmaybe.core.models import Provider, ReviewConfig, ReviewPreset, Severity
 from lgtmaybe.core.ports import ProviderTruncated
+from lgtmaybe.providers import federation
 from lgtmaybe.providers.factory import DEFAULT_OLLAMA_BASE
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -738,6 +739,21 @@ def comment(
     execute_comment(event, cfg, runtime)
 
 
+def _federate_or_fail() -> None:
+    """Turn the runner's OIDC ID token into keyless cloud credentials, when asked.
+
+    A Forgejo job runs this image directly, with no composite action to do the
+    exchange first. Runs before any provider is built, so ambient credential
+    resolution finds the result. A failure is a construction failure: nothing
+    can be posted yet, so it surfaces as a clean CLI error.
+    """
+    try:
+        updates = federation.federate_ci_credentials(os.environ)
+    except federation.FederationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    os.environ.update(updates)
+
+
 @main.command()
 def action() -> None:
     """GitHub Action entrypoint: route by event, read inputs from env.
@@ -749,6 +765,7 @@ def action() -> None:
     if event_name == "pull_request_review_comment":
         return
 
+    _federate_or_fail()
     inputs = action_inputs()
     cfg = _load_cfg(
         inputs["config_path"],
