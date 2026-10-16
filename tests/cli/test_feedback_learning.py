@@ -12,7 +12,6 @@ run.
 
 from __future__ import annotations
 
-from lgtmaybe.cli import run_review
 from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import (
     PRContext,
@@ -21,6 +20,7 @@ from lgtmaybe.core.models import (
     Severity,
 )
 from lgtmaybe.engine.suppress import apply_suppressions
+from lgtmaybe.review import run_review
 from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub
 

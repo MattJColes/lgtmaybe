@@ -214,6 +214,7 @@ _OUTPUT_MODULES = (
     "gitlab/gateway.py",
     "providers/credentials.py",
     "providers/litellm_provider.py",
+    "review.py",
 )
 _LOG_METHODS = frozenset({"debug", "info", "warning", "error", "exception", "critical"})
 

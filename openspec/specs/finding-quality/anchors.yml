@@ -22,7 +22,7 @@ quality.learned-feedback:
   rule:
     kind: function_definition
     has: { field: name, regex: '^_apply_learned_feedback$' }
-  files: [src/lgtmaybe/cli/**/*.py]
+  files: [src/lgtmaybe/review.py]
 
 quality.rules:
   rule:

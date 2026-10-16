@@ -13,7 +13,6 @@ import json
 import httpx
 import respx
 
-from lgtmaybe.cli import run_review
 from lgtmaybe.core.models import (
     Provider,
     ProviderResult,
@@ -24,6 +23,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import Message
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.github import RestGitHubGateway
+from lgtmaybe.review import run_review
 from tests.fakes import FakeProvider
 
 REPO = "owner/repo"

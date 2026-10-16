@@ -7,9 +7,11 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from lgtmaybe.cli import RuntimeOptions, build_review_context, main, run_review
+import lgtmaybe.review as review_module
+from lgtmaybe.cli import RuntimeOptions, build_review_context, main
 from lgtmaybe.core.models import PRContext, ReviewConfig, ReviewFinding
 from lgtmaybe.engine import INCOMPLETE_MARKER
+from lgtmaybe.review import run_review
 from tests.fakes import FakeEngine, FakeGitHub, FakeProvider
 
 
@@ -575,7 +577,7 @@ class TestGitHubReviewErrorSurfacing:
             lambda cfg, runtime: (github, RecordingEngine(), FakeProvider()),
         )
         monkeypatch.setattr(
-            cli_module,
+            review_module,
             "run_diagram",
             lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("diagram failed")),
         )

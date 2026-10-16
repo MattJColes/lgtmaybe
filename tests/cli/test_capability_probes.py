@@ -1,4 +1,4 @@
-"""The CLI probes gateway capabilities through the ``Supports*`` protocols only.
+"""The CLI and the review use case probe gateways through ``Supports*`` only.
 
 A ``getattr(gateway, "method", None)`` probe turns a renamed adapter method into
 a silently disabled feature that neither mypy nor any test notices. Probing with
@@ -13,8 +13,17 @@ import ast
 from pathlib import Path
 
 import lgtmaybe.cli
+import lgtmaybe.review
 
 CLI_DIR = Path(lgtmaybe.cli.__file__).parent
+# The review use case makes most of the probes the CLI used to make, so it is
+# held to the same rule.
+REVIEW_MODULE = Path(lgtmaybe.review.__file__)
+
+
+def _scanned_files() -> list[Path]:
+    return [*sorted(CLI_DIR.rglob("*.py")), REVIEW_MODULE]
+
 
 # Dynamic attribute lookups the CLI may make, keyed by the object looked up on.
 # None of them is a gateway: platform signal names and an optional stream API.
@@ -49,9 +58,9 @@ def _lookups_in(tree: ast.AST) -> list[tuple[int, str]]:
 
 
 def _dynamic_lookups() -> list[tuple[str, int, str]]:
-    """Every ``getattr``/``hasattr`` call in the CLI package as (file, line, target)."""
+    """Every ``getattr``/``hasattr`` call in the CLI and review use case as (file, line, target)."""
     found = []
-    for path in sorted(CLI_DIR.rglob("*.py")):
+    for path in _scanned_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         found.extend((path.name, line, target) for line, target in _lookups_in(tree))
     return found
@@ -82,6 +91,12 @@ def test_the_scanner_ignores_methods_and_allowlisted_targets() -> None:
 def test_the_scan_sees_the_cli_package() -> None:
     """Guard the guard: an empty walk would pass the test below vacuously."""
     assert any(target in ALLOWED_TARGETS for _file, _line, target in _dynamic_lookups())
+
+
+def test_the_scan_covers_the_review_use_case() -> None:
+    """Its probes moved out of the CLI package; the scan must follow them."""
+    assert REVIEW_MODULE in _scanned_files()
+    assert "isinstance(github, Supports" in REVIEW_MODULE.read_text(encoding="utf-8")
 
 
 def test_the_cli_never_probes_a_gateway_by_attribute_name() -> None:

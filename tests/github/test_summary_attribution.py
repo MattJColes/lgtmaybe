@@ -7,7 +7,6 @@ import json
 import httpx
 import pytest
 
-from lgtmaybe.cli import run_review
 from lgtmaybe.core.findings import finding_identity
 from lgtmaybe.core.models import (
     PRContext,
@@ -18,6 +17,7 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.engine.engine import LLMReviewEngine
 from lgtmaybe.github import RestGitHubGateway
+from lgtmaybe.review import run_review
 from tests.fakes import FakeProvider
 
 OLD = "a" * 40

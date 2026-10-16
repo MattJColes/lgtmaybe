@@ -16,7 +16,7 @@ cli.run-review:
   rule:
     kind: function_definition
     has: { field: name, regex: '^run_review$' }
-  files: [src/lgtmaybe/cli/**/*.py]
+  files: [src/lgtmaybe/review.py]
 
 cli.graceful-interrupt:
   rule:

@@ -52,7 +52,7 @@ cli.existing-overview:
   - rule:
       kind: function_definition
       has: { field: name, regex: '^existing_overview_note$' }
-    files: [src/lgtmaybe/cli/**/*.py]
+    files: [src/lgtmaybe/review.py]
 
 cli.starter-workflow-diagrams:
   rule:

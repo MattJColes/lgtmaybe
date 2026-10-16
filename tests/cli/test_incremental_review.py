@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from lgtmaybe.cli import resolve_auto_incremental, run_review
+from lgtmaybe.cli import resolve_auto_incremental
 from lgtmaybe.core.models import (
     ActiveFinding,
     PRContext,
@@ -21,6 +21,7 @@ from lgtmaybe.core.models import (
     ReviewFinding,
     Severity,
 )
+from lgtmaybe.review import run_review
 from tests.conftest import make_cfg
 from tests.fakes import FakeGitHub, FakeProvider
 
@@ -421,8 +422,8 @@ def test_explicit_config_wins_over_auto() -> None:
 def test_run_describe_posts_via_the_idempotent_upsert() -> None:
     import json as _json
 
-    from lgtmaybe.cli import run_describe
     from lgtmaybe.core.models import ProviderResult
+    from lgtmaybe.review import run_describe
     from tests.fakes import FakeGitHub, FakeProvider
 
     github = FakeGitHub()
@@ -471,8 +472,8 @@ def test_an_edit_refreshes_the_overview_only_as_a_retarget() -> None:
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
     import json as _json
 
-    from lgtmaybe.cli import run_diagram
     from lgtmaybe.core.models import ProviderResult
+    from lgtmaybe.review import run_diagram
     from tests.fakes import FakeGitHub, FakeProvider
 
     github = FakeGitHub()
@@ -524,8 +525,8 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
     """A gateway lacking post_diagram_comment still gets the body via a plain comment."""
     import json as _json
 
-    from lgtmaybe.cli import run_diagram
     from lgtmaybe.core.models import PRContext, ProviderResult
+    from lgtmaybe.review import run_diagram
 
     class PlainGateway:
         def __init__(self) -> None:
@@ -577,8 +578,8 @@ def test_run_diagram_falls_back_to_issue_comment_without_upsert() -> None:
 def test_required_diagram_fails_without_a_completion_aware_gateway() -> None:
     import json as _json
 
-    from lgtmaybe.cli import run_diagram
     from lgtmaybe.core.models import PRContext, ProviderResult
+    from lgtmaybe.review import run_diagram
 
     class PlainGateway:
         def get_pr_context(self) -> PRContext:
@@ -620,8 +621,8 @@ def test_manual_diagram_fails_when_the_gateway_cannot_post() -> None:
     failure to post it propagates: a diagram asked for must not vanish."""
     import json as _json
 
-    from lgtmaybe.cli import run_diagram
     from lgtmaybe.core.models import PRContext, ProviderResult
+    from lgtmaybe.review import run_diagram
 
     class ReadOnlyGateway:
         def get_pr_context(self) -> PRContext:

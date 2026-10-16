@@ -21,6 +21,7 @@ from lgtmaybe.core.ports import GitHubGateway, ProviderClient, ReviewEngine
 from lgtmaybe.engine.injection import wrap_diff_for_question
 from lgtmaybe.engine.parse import parse_structured
 from lgtmaybe.engine.redact import redact
+from lgtmaybe.review import run_describe, run_diagram, run_review
 
 
 class SlashCommand(StrEnum):
@@ -129,10 +130,7 @@ def dispatch(
             cfg = cfg.model_copy(update={"incremental": False, "triage_model": None})
         # Route through the shared pipeline so a slash-triggered review gets
         # the same incremental handling and reviewed-watermark stamping as an
-        # event-triggered one. Imported lazily — lgtmaybe.cli imports this
-        # module's callers, so a module-level import would be circular.
-        from lgtmaybe.cli import run_review
-
+        # event-triggered one.
         run_review(github=github, engine=engine, cfg=cfg, dry_run=False)
         return
 
@@ -141,17 +139,12 @@ def dispatch(
         return
 
     if parsed.name is SlashCommand.describe:
-        # Same lazy import as run_review above, for the same circularity reason.
-        from lgtmaybe.cli import run_describe
-
         run_describe(github, provider, cfg)
         return
 
     if parsed.name is SlashCommand.diagram:
         # No arguments — the overview is always description + high-impact areas
         # + the Mermaid/text diagrams, each section gated only by config.
-        from lgtmaybe.cli import run_diagram
-
         run_diagram(github, provider, cfg)
 
 

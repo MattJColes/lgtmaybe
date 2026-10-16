@@ -191,7 +191,7 @@ _WARMUP_MIN_TOKENS = 2048
 # reports itself as a failed call). Invisible in rendered Markdown, so it costs
 # the review body nothing, and machine-readable, so the posting step can make
 # the incompleteness *visible on the PR* rather than leaving it in a body edit
-# nobody is notified about (see cli.run_review). Its own marker family:
+# nobody is notified about (see review.run_review). Its own marker family:
 # deliberately disjoint from the summary/finding/reviewed markers the GitHub
 # adapter matches on.
 INCOMPLETE_MARKER = "<!-- lgtmaybe-incomplete -->"
