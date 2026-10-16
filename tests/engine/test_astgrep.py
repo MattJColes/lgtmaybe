@@ -313,6 +313,33 @@ def test_the_subprocess_does_not_inherit_the_parent_env(tmp_path: Path, monkeypa
     assert captured["timeout"] == astgrep_module._SCAN_TIMEOUT
 
 
+def test_the_subprocess_home_is_pinned_to_a_file_targets_parent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A single-file target (boundaries scans PR-head files one at a time)
+    pins HOME to the file's directory, not the file itself."""
+    import lgtmaybe.engine.astgrep as astgrep_module
+
+    target = tmp_path / "app.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _Proc:
+        stdout = "[]"
+
+    def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setattr(astgrep_module.subprocess, "run", fake_run)
+
+    assert astgrep_module._default_runner("ast-grep", "language: python\n", target) == "[]"
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env.get("HOME") == str(tmp_path)
+
+
 @pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep binary not installed")
 def test_real_ast_grep_finds_definitions_across_languages(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
