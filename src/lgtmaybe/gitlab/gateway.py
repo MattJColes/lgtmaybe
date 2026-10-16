@@ -350,7 +350,7 @@ class GitLabGateway:
         except (httpx.HTTPError, ValueError) as exc:
             _log.info("reading the review watermark failed — full review: %s", exc)
             return None
-        return _last_match(REVIEWED_MARKER, note)
+        return last_match(REVIEWED_MARKER, note.get("body")) if note is not None else None
 
     def last_completed_sha(self, *, diagram_required: bool) -> str | None:
         """The latest head whose required review outputs all posted.
@@ -369,7 +369,7 @@ class GitLabGateway:
         except (httpx.HTTPError, ValueError) as exc:
             _log.info("reading the diagram watermark failed — full review: %s", exc)
             return None
-        return _last_match(DIAGRAMMED_MARKER, note)
+        return last_match(DIAGRAMMED_MARKER, note.get("body")) if note is not None else None
 
     def compare_diff(self, base_sha: str, head_sha: str) -> str | None:
         """The unified diff of the commits pushed since ``base_sha``, or None.
@@ -720,22 +720,18 @@ class GitLabGateway:
         return self._notes_cache
 
     def _find_note(self, family: str) -> int | None:
-        """The id of our existing note in ``family``, or None."""
-        note = self._family_note(family)
+        """The id of our own newest note in ``family``, or None.
+
+        Our own, because anyone can post a note carrying the marker: a planted
+        note as the upsert target would 403 on every run, and its stamp would
+        be carried into ours. No own note, or an unknown identity, means a
+        fresh note is posted.
+        """
+        note = self._own_note(family)
         if note is None:
             return None
         note_id = note.get("id")
         return int(note_id) if note_id is not None else None
-
-    def _family_note(self, family: str) -> dict[str, Any] | None:
-        """The note an upsert in ``family`` would edit: our own newest, or None.
-
-        Our own, because anyone can post a note carrying the marker: a planted
-        note as the target would 403 on every run, and its stamp would be
-        carried into ours. The same note ``_own_note`` reads back. No own note,
-        or an unknown identity, means a fresh note is posted.
-        """
-        return self._own_note(family)
 
     def _carried_marker(self, family: str, pattern: re.Pattern[str]) -> str | None:
         """The stamp already on our own note an upsert in ``family`` will edit.
@@ -746,7 +742,8 @@ class GitLabGateway:
         only costs the next run a full review.
         """
         try:
-            return _last_match(pattern, self._family_note(family))
+            note = self._own_note(family)
+            return last_match(pattern, note.get("body")) if note is not None else None
         except (httpx.HTTPError, ValueError) as exc:
             _log.warning("reading the previous %s note failed: %s", family, exc)
             return None
@@ -956,14 +953,6 @@ def _newest(notes: list[dict[str, Any]]) -> dict[str, Any] | None:
         for index, note in enumerate(notes)
     ]
     return notes[max(ranked)[1]]
-
-
-def _last_match(pattern: re.Pattern[str], note: dict[str, Any] | None) -> str | None:
-    """The last capture of ``pattern`` in a note's body, or None.
-
-    The last, because the adapter always appends its own stamp after the body.
-    """
-    return None if note is None else last_match(pattern, note.get("body"))
 
 
 def _unusable_increment(comparison: dict[str, Any], base_sha: str, head_sha: str) -> str | None:

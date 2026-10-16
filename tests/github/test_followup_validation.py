@@ -31,9 +31,7 @@ def test_list_active_findings_returns_only_our_unresolved_roots(monkeypatch) -> 
     monkeypatch.setattr(
         gateway,
         "_walk_review_threads",
-        lambda fields: iter(
-            [_node("ACTIVE"), _node("DONE", resolved=True), _node("HUMAN", ours=False)]
-        ),
+        lambda: iter([_node("ACTIVE"), _node("DONE", resolved=True), _node("HUMAN", ours=False)]),
     )
 
     findings = gateway.list_active_findings()
@@ -48,7 +46,7 @@ def test_only_explicitly_fixed_thread_ids_are_resolved(monkeypatch) -> None:
     resolved: list[str] = []
     replied: list[str] = []
     monkeypatch.setattr(
-        gateway, "_walk_review_threads", lambda fields: iter([_node("FIXED"), _node("UNCERTAIN")])
+        gateway, "_walk_review_threads", lambda: iter([_node("FIXED"), _node("UNCERTAIN")])
     )
     monkeypatch.setattr(gateway, "_resolve_thread", resolved.append)
     monkeypatch.setattr(gateway, "_mark_comment_resolved", lambda comment_id, body: None)
@@ -68,7 +66,7 @@ def test_validated_resolution_reuses_the_active_finding_read(monkeypatch) -> Non
     gateway = _gateway()
     walks = 0
 
-    def walk(fields: str):
+    def walk():
         nonlocal walks
         walks += 1
         return iter([_node("FIXED"), _node("UNCERTAIN")])
@@ -94,7 +92,7 @@ def test_validated_resolution_honours_the_incremental_scope(monkeypatch) -> None
     monkeypatch.setattr(
         gateway,
         "_walk_review_threads",
-        lambda fields: iter([_node("OUTSIDE", path="a.py"), _node("INSIDE", path="b.py")]),
+        lambda: iter([_node("OUTSIDE", path="a.py"), _node("INSIDE", path="b.py")]),
     )
     monkeypatch.setattr(gateway, "_resolve_thread", resolved.append)
     monkeypatch.setattr(gateway, "_mark_comment_resolved", lambda comment_id, body: None)

@@ -30,7 +30,7 @@ from typing import Any, NamedTuple
 from lgtmaybe.core.models import DiagramResult, PRContext, ReviewConfig
 from lgtmaybe.core.ports import ProviderClient
 
-from .describe import markdown_text, single_line, structured_call, structured_comment
+from .describe import markdown_text, single_line, structured_call
 from .prompt import PLAIN_LANGUAGE, language_directive
 
 _DIAGRAM_SYSTEM = (
@@ -133,19 +133,7 @@ def _diagram_system(cfg: ReviewConfig) -> str:
 
 def build_diagram(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
     """Make one provider call and render its typed graph as a Markdown comment."""
-    return structured_comment(
-        ctx,
-        cfg,
-        provider,
-        system=_diagram_system(cfg),
-        diff_preamble=_DIFF_PREAMBLE,
-        task_suffix=_TASK_SUFFIX,
-        result_model=DiagramResult,
-        wanted=_has_diagram,
-        render=lambda diagram, _has_intent: _render(diagram),
-        label="diagram",
-        fallback=_invalid_diagram,
-    )
+    return render_diagram_comment(diagram_result(ctx, cfg, provider))
 
 
 def diagram_result(

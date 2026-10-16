@@ -573,6 +573,18 @@ def _apply_learned_feedback(github: ReviewGateway, ctx: PRContext, cfg: ReviewCo
     return ctx.model_copy(update={"feedback_downvotes": frozenset(downvoted)})
 
 
+def _fetch_context(gateway: ReviewGateway, cfg: ReviewConfig) -> PRContext:
+    """Fetch the PR context, arming the manifest prefetch when the gateway can.
+
+    Dependency manifests are fetched only when a scanner will read them — an
+    optional capability, probed like every other, so a gateway implementing
+    just the frozen port still works.
+    """
+    if isinstance(gateway, SupportsScanManifests):
+        gateway.set_scan_manifests(cfg.static_analysis.enabled)
+    return gateway.get_pr_context()
+
+
 def run_review(
     *,
     github: ReviewGateway,
@@ -600,12 +612,7 @@ def run_review(
     without the adapter methods) falls back to a full review.
     """
     if ctx is None:
-        # Dependency manifests are fetched only when a scanner will read them —
-        # an optional capability, probed like every other, so a gateway
-        # implementing just the frozen port still works.
-        if isinstance(github, SupportsScanManifests):
-            github.set_scan_manifests(cfg.static_analysis.enabled)
-        ctx = github.get_pr_context()
+        ctx = _fetch_context(github, cfg)
     overview_note = None
     if diagram_required and not dry_run:
         # Checked here, on whichever context this run holds, so a failed
@@ -770,12 +777,11 @@ def _incremental_context(
     compare_diff = getattr(github, "compare_diff", None)
     if compare_diff is None or (last_completed_sha is None and last_reviewed_sha is None):
         return ctx, None, None
+    last_sha: str | None = None
     if last_completed_sha is not None:
         last_sha = last_completed_sha(diagram_required=diagram_required)
     elif last_reviewed_sha is not None:
         last_sha = last_reviewed_sha()
-    else:  # guarded above; keeps the optional callable narrowed for type-checkers
-        return ctx, None, None
     if not last_sha:
         return ctx, None, None
     if last_sha == ctx.head_sha:
@@ -1102,14 +1108,12 @@ def execute_review(
     # a short comment rather than failing silently — then we exit non-zero.
     try:
         if diagram:
-            if isinstance(github, SupportsScanManifests):
-                github.set_scan_manifests(cfg.static_analysis.enabled)
             # A failed prefetch means run_review fetches and surfaces the
             # failure itself. Fetching here lets the review and the change
             # overview share one current-head context. A refused diff is
             # not retried by run_review — it is the same answer twice.
             try:
-                ctx = github.get_pr_context()
+                ctx = _fetch_context(github, cfg)
             except DiffUnavailable:
                 raise
             except Exception:
