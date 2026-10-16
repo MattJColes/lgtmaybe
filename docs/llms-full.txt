@@ -10482,7 +10482,7 @@ Whoever triggers a review, a malicious PR can't use it to do harm. On GitHub,
 lgtmaybe triggers on `pull_request_target` (so it has the secrets it needs) but
 never checks out or executes PR code. It fetches the diff through the host's
 API and treats it as untrusted input. That second part is what does the work,
-and it holds the same way on Gitea and on GitLab, which has no
+and it holds the same way on Gitea. It also holds on GitLab, which has no
 `pull_request_target` of its own. So opening the gate wide is a
 cost decision, not a security one. The full boundary (secret
 [redaction](../reference/glossary.md#redaction), prompt-injection defence, and
