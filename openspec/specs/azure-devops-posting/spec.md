@@ -226,7 +226,10 @@ resolving SHALL never fail the review.
 The adapter SHALL declare file contents, description, diagram, and conversation
 reading, and SHALL NOT claim incremental review, thread resolution, labels,
 checks, feedback, or base checkout, so the caller degrades to a full review
-without them.
+without them. The thread resolution left unclaimed is the caller-directed
+capability, where the caller lists active finding threads and nominates which
+to resolve; the adapter's own resolve-on-fix above works over plain REST and
+needs no capability claim.
 <!-- anchor: azure-devops.capabilities -->
 
 #### Scenario: incremental review is probed
