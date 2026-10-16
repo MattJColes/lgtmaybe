@@ -232,16 +232,17 @@ def _is_private(name: str) -> bool:
     return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
 
 
-def _cross_package_private_imports() -> list[tuple[str, str, str]]:
+def _cross_package_private_imports(root: Path = _SRC_PACKAGE) -> list[tuple[str, str, str]]:
     """Every import of a ``_name`` (or a ``_module`` on the path) that crosses a subpackage.
 
     Covers ``from lgtmaybe.<pkg>... import _name``, a private module on either
-    import form's path (``import lgtmaybe.<pkg>._mod``), and the package root
+    import form's path (``import lgtmaybe.<pkg>._mod``, or a root-level
+    ``import lgtmaybe._mod``), and the package root
     (``from lgtmaybe import _name``, whose subpackage is ``""``).
     """
     found: list[tuple[str, str, str]] = []
-    for path in sorted(_SRC_PACKAGE.rglob("*.py")):
-        relative = path.relative_to(_SRC_PACKAGE.parent).with_suffix("")
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root.parent).with_suffix("")
         parts = list(relative.parts)
         is_package = parts[-1] == "__init__"
         if is_package:
@@ -267,7 +268,7 @@ def _cross_package_private_imports() -> list[tuple[str, str, str]]:
                     continue
                 if _top_level_subpackage(source) == _top_level_subpackage(importer):
                     continue
-                if any(_is_private(part) for part in source.split(".")[2:]):
+                if any(_is_private(part) for part in source.split(".")[1:]):
                     found.append((importer, source, ""))
                 found.extend((importer, source, name) for name in names if _is_private(name))
     return found
@@ -283,3 +284,42 @@ def test_no_private_names_imported_across_packages() -> None:
             for importer, source, name in offenders
         )
     )
+
+
+def test_cross_package_private_import_scan_covers_every_import_form(tmp_path: Path) -> None:
+    """Each import form is reported across subpackages; same-package and dunders are not."""
+    root = tmp_path / "lgtmaybe"
+    sources = {
+        "engine/a.py": (
+            "from lgtmaybe.core.x import _name\n"
+            "import lgtmaybe.core._mod\n"
+            "from lgtmaybe.engine._mod import y\n"
+            "from lgtmaybe import _root\n"
+            "import lgtmaybe._helpers\n"
+            "from ..core.x import _relative\n"
+            "from lgtmaybe.core.x import __all__\n"
+            "from lgtmaybe.engine._own import _same\n"
+        ),
+        "core/b.py": (
+            "from lgtmaybe.core._mod import _same_package\n"
+            "import lgtmaybe.core._mod\n"
+            "from lgtmaybe.engine._mod import y\n"
+        ),
+        "_helpers.py": "from lgtmaybe._helpers import _self\n",
+    }
+    for relative, text in sources.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    found = _cross_package_private_imports(root)
+
+    assert len(found) == len(set(found)), f"reported twice: {found}"
+    assert set(found) == {
+        ("lgtmaybe.engine.a", "lgtmaybe.core.x", "_name"),
+        ("lgtmaybe.engine.a", "lgtmaybe.core._mod", ""),
+        ("lgtmaybe.engine.a", "lgtmaybe", "_root"),
+        ("lgtmaybe.engine.a", "lgtmaybe._helpers", ""),
+        ("lgtmaybe.engine.a", "lgtmaybe.core.x", "_relative"),
+        ("lgtmaybe.core.b", "lgtmaybe.engine._mod", ""),
+    }
