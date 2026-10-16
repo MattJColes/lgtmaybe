@@ -1039,10 +1039,22 @@ def test_dedupe_anchored_beats_higher_severity_unanchored() -> None:
 
 
 def _per_lens_provider(by_section: dict[str, list[dict[str, object]]]) -> FakeProvider:
-    """A provider answering each lens by the section header in its final block."""
+    """A provider answering each lens by the section header in its final block.
+
+    The reflection call gets keep-everything verdicts, so tests can run with
+    the auditor in the loop without the auditor dropping anything.
+    """
 
     class _Provider(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            prompt = "\n".join(str(m.get("content", "")) for m in messages)
+            if _REFLECT_MARKER in prompt:
+                return ProviderResult(
+                    text=json.dumps({i: True for i in range(50)}),
+                    input_tokens=5,
+                    output_tokens=5,
+                )
             lens = str(messages[-1]["content"])
             found = next((f for header, f in by_section.items() if header in lens), [])
             return ProviderResult(text=json.dumps(found), input_tokens=1, output_tokens=1)
@@ -1112,30 +1124,33 @@ def test_a_suppressed_finding_does_not_displace_another_at_its_line() -> None:
     assert "1 finding suppressed" in summary
 
 
+# Issue #752's opposed pair: a correctness fix and a ponytail cut on one line.
+_OPPOSED_FIX = {
+    "path": "a.py",
+    "line": 2,
+    "severity": "low",
+    "title": "guard is wrong",
+    "body": "the bounds check uses the wrong index",
+    "failure_scenario": "With an empty list the guard reads index 0 and raises.",
+}
+_OPPOSED_CUT = {
+    "path": "a.py",
+    "line": 2,
+    "severity": "medium",
+    "title": "delete this guard",
+    "body": "the caller already validates this",
+}
+
+
 def test_an_opposed_pair_reaches_arbitration_before_the_location_merge() -> None:
     # Issue #752: dedupe picked by severity and collapsed an opposed pair before
     # either referee saw it, so the code-cutting advice posted and the fix on the
     # same line was lost. The pair must be arbitrated before the merge: the lens
     # that cuts code yields to the one that fixes.
-    guard_is_wrong = {
-        "path": "a.py",
-        "line": 2,
-        "severity": "low",
-        "title": "guard is wrong",
-        "body": "the bounds check uses the wrong index",
-        "failure_scenario": "With an empty list the guard reads index 0 and raises.",
-    }
-    cut_the_guard = {
-        "path": "a.py",
-        "line": 2,
-        "severity": "medium",
-        "title": "delete this guard",
-        "body": "the caller already validates this",
-    }
     provider = _per_lens_provider(
         {
-            "## Correctness & logic": [guard_is_wrong],
-            "## Ponytail": [cut_the_guard],
+            "## Correctness & logic": [_OPPOSED_FIX],
+            "## Ponytail": [_OPPOSED_CUT],
         }
     )
     cfg = ReviewConfig(
@@ -1149,6 +1164,32 @@ def test_an_opposed_pair_reaches_arbitration_before_the_location_merge() -> None
     findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
 
     assert [f.title for f in findings] == ["guard is wrong"]
+
+
+def test_an_opposed_pair_is_arbitrated_again_after_reflection() -> None:
+    # The backstop's second run: with the auditor in the loop the pair must
+    # still not both post. The fix wins the merge (arbitration runs first),
+    # reflection sees the fix alone, and the post-reflection referee runs on
+    # what survived the audit.
+    provider = _per_lens_provider(
+        {
+            "## Correctness & logic": [_OPPOSED_FIX],
+            "## Ponytail": [_OPPOSED_CUT],
+        }
+    )
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",  # reflect defaults on
+        preset="full",
+        categories=[ReviewCategory.correctness, ReviewCategory.ponytail],
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["guard is wrong"]
+    reflection = _reflection_calls(provider)
+    assert len(reflection) == 1, "reflection must run on the arbitrated winner"
+    assert "delete this guard" not in _all_text(reflection[0])
 
 
 def _code_health_finding(category: str | None) -> list[dict[str, object]]:
