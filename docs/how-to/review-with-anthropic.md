@@ -55,13 +55,13 @@ way, the key is never persisted to config.
 
 Pass litellm's native Anthropic name as the model. `claude-sonnet-4-6` is a
 strong default. Use an Opus-class model (such as `claude-opus-5-5`) for the
-deepest review at a higher price, or a Haiku-class model (such as
+deepest review, at a higher price. Use a Haiku-class model (such as
 `claude-haiku-4-5`) to cut cost on smaller PRs.
 
-Under the default `fast` preset, a Sonnet or Opus review model has its
-reflection (false-positive audit) pass run on `claude-haiku-4-5`, so your key
-needs access to that model too. Set `reflect_model` to choose a different
-auditor.
+Under the default `fast` [preset](../reference/glossary.md#preset), a Sonnet or
+Opus review model runs its [reflection](../reference/glossary.md#reflection)
+(false-positive audit) pass on `claude-haiku-4-5`. So your key needs access to
+that model too. Set `reflect_model` to choose a different auditor.
 
 ## Want It Through a Gateway Instead?
 

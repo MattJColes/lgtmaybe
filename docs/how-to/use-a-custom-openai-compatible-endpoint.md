@@ -4,11 +4,12 @@ description: Point lgtmaybe at any OpenAI-compatible server - vLLM, llama.cpp, L
 
 # Local Models and Other OpenAI-Compatible Providers
 
-Many model servers speak the OpenAI `/v1` wire format: local and self-hosted
-runtimes like [vLLM][vllm], [llama.cpp][llamacpp] and [LM Studio][lmstudio],
-plus hosted APIs like [DeepSeek][deepseek] and many proxies. The
-`openai-compatible` provider points lgtmaybe at any of them: you supply the base
-URL and, if the server wants one, a key.
+Many model servers speak the OpenAI `/v1` wire format (the request and reply
+shape of OpenAI's API). They include local and self-hosted runtimes like
+[vLLM][vllm], [llama.cpp][llamacpp] and [LM Studio][lmstudio]. They also include
+hosted APIs like [DeepSeek][deepseek] and many proxies. The `openai-compatible`
+provider points lgtmaybe at any of them. You supply the base URL and, if the
+server wants one, a key.
 
 Use this provider when the model you want is not in the built-in provider list.
 
@@ -51,9 +52,9 @@ newer, and size it to your RAM/VRAM. See
 
 ## How It Works
 
-`--provider openai-compatible` routes through litellm's OpenAI client but sends
+`--provider openai-compatible` routes through litellm's OpenAI client. It sends
 requests to the `--api-base` you give instead of `api.openai.com`. The base URL
-is required (`--api-base` or `OPENAI_COMPATIBLE_API_BASE`); the API key is
+is required (`--api-base` or `OPENAI_COMPATIBLE_API_BASE`). The API key is
 optional:
 
 - **Hosted endpoints** (DeepSeek, a paid proxy) need a key. Pass `--api-key` or
@@ -65,11 +66,15 @@ optional:
 A key you supply is read from the environment or `--api-key` and is never
 persisted to config.
 
-Because the endpoint might be a slow local model, `openai-compatible` gets the
-same generous 1800-second per-call timeout as ollama (scaled for queueing, see
-[Concurrency](#concurrency-what-each-server-can-actually-take)), and the same
-default output ceiling of 16384 tokens per call. For a fast hosted endpoint like
-DeepSeek you can lower the timeout with `--timeout` (or `timeout:` in config).
+The endpoint might be a slow local model. So `openai-compatible` gets the same
+defaults as ollama:
+
+- the same generous 1800-second per-call timeout (scaled for queueing, see
+  [Concurrency](#concurrency-what-each-server-can-actually-take));
+- the same default output ceiling of 16384 tokens per call.
+
+For a fast hosted endpoint like DeepSeek, you can lower the timeout with
+`--timeout` (or `timeout:` in config).
 
 ## DeepSeek (Hosted, Keyed)
 
@@ -128,10 +133,10 @@ lgtmaybe review \
 
 ## Concurrency: What Each Server Can Actually Take
 
-lgtmaybe fans out across a pool sized by `max_concurrency`, 6 by default on
-every provider. That is a ceiling on what it will have in flight; whether your
-server runs the calls together is up to the server, and the three above differ
-sharply:
+lgtmaybe [fans out](../reference/glossary.md#fan-out) its calls across a pool
+sized by `max_concurrency`, 6 by default on every provider. That is a ceiling on
+what it will have in flight. Whether your server runs the calls together is up
+to the server, and the three above differ sharply:
 
 | Server | Concurrent by default? | Raising it |
 |---|---|---|
@@ -140,18 +145,19 @@ sharply:
 | **LM Studio** | No, single slot | Not exposed; set `max_concurrency` to 1 |
 
 The llama.cpp trap fails as a quality problem rather than an error. `-np`
-divides the context you asked for: `-c 32768 -np 4` leaves each slot 8k, and a
-lgtmaybe review prompt is comfortably larger than that, so the diff is silently
-truncated and the model reviews something it was never fully shown. Size `-c` as
-`slots × per-slot context`:
+divides the context you asked for: `-c 32768 -np 4` leaves each slot 8k. A
+lgtmaybe review prompt is comfortably larger than that. So the diff is silently
+truncated, and the model reviews something it was never fully shown. Size `-c`
+as `slots × per-slot context`:
 
 ```bash
 llama-server -m ./model.gguf --port 8000 -np 4 -c 131072   # 4 slots × 32k each
 ```
 
-vLLM allocates KV blocks dynamically rather than up front, so concurrent
-requests each keep the full `--max-model-len`. That makes it the local server to
-choose when review latency matters:
+vLLM allocates KV blocks (its per-request memory for the context) dynamically
+rather than up front. So concurrent requests each keep the full
+`--max-model-len`. That makes it the local server to choose when review latency
+matters:
 
 ```bash
 vllm serve <model> --port 8000 --max-model-len 32768
@@ -160,14 +166,19 @@ lgtmaybe review --provider openai-compatible --model <model> \
 ```
 
 **Queueing does not cost you a timeout.** A queued request's clock starts when it
-is sent, not when a slot frees, so lgtmaybe scales the `openai-compatible`
-default timeout (1800 seconds) by the fan-out width: `1800 × 6` at the default,
-bounded by `max_review_seconds` (3600 seconds; `0` disables the deadline and the
-bound with it). It is never trimmed below the 1800-second provider default, so a
-deadline set lower than that does not shrink it. The bound applies to the budget,
-not the wall clock: the deadline gates when a call may start, and does not cut a
-running call short. An explicit `timeout` is used exactly as written, at any
-width. Each run logs the number it resolved and the width it assumed:
+is sent, not when a slot frees. So lgtmaybe scales the `openai-compatible`
+default timeout (1800 seconds) by the fan-out width:
+
+- At the default width, it is `1800 × 6`.
+- That is bounded by `max_review_seconds` (3600 seconds). `0` disables the
+  deadline and the bound with it.
+- It is never trimmed below the 1800-second provider default. A deadline set
+  lower than that does not shrink it.
+- The bound applies to the budget, not the wall clock. The deadline gates when a
+  call may start, and does not cut a running call short.
+- An explicit `timeout` is used exactly as written, at any width.
+
+Each run logs the number it resolved and the width it assumed:
 
 ```
 per-call budget resolved  timeout_s=3600  timeout_source="provider default"  concurrency=6
@@ -191,36 +202,45 @@ model: deepseek-chat
 api_base: https://api.deepseek.com/v1
 ```
 
-With that file in place, `lgtmaybe review` needs no flags. In the GitHub Action,
-set the same values as inputs (or in `.lgtmaybe.yml`) and pass `api_key` from a
-secret for hosted endpoints; see
-[`examples/workflows/review-openai-compatible.yml`][wf]. Leave `api_key` empty for
-a keyless server on the runner host, reached from the Action's container at
+With that file in place, `lgtmaybe review` needs no flags.
+
+In the GitHub Action, set the same values as inputs (or in `.lgtmaybe.yml`). For
+hosted endpoints, pass `api_key` from a secret. See
+[`examples/workflows/review-openai-compatible.yml`][wf]. Leave `api_key` empty
+for a keyless server on the runner host. The Action's container reaches it at
 `http://host.docker.internal:<port>/v1`.
 
 ## Gateways That Don't Support JSON Mode (`response_format`)
 
-To keep models returning clean findings instead of prose, lgtmaybe asks for
-structured output through the OpenAI `response_format` parameter (JSON mode).
-Most endpoints honour it. Some enterprise gateways and custom proxies don't:
-they either ignore it, so the model answers with the JSON in a ```` ```json ````
-fence or surrounded by prose, or reject the request with a `400 Bad Request`.
+lgtmaybe wants models to return clean findings instead of prose. So it asks
+for structured output through the OpenAI `response_format` parameter (JSON
+mode). Most endpoints honour it. Some enterprise gateways and custom proxies
+don't. They do one of two things:
 
-lgtmaybe handles the first case for you: the parser strips fences and pulls the
-JSON out of surrounding prose, so a gateway that ignores `response_format` still
-produces a normal review.
+- ignore it, so the model answers with the JSON in a ```` ```json ```` fence or
+  surrounded by prose;
+- or reject the request with a `400 Bad Request`.
+
+lgtmaybe handles the first case for you. The parser strips fences and pulls
+the JSON out of surrounding prose. So a gateway that ignores `response_format`
+still produces a normal review.
 
 A third case is common with LM Studio serving a "thinking" model (e.g.
 qwen3.x): the server accepts `response_format`, but the schema-constrained
-decoder returns empty content. lgtmaybe handles this too. It retries an empty
-reply once with the schema sent as a forced tool call instead; if the model
-answers empty under that as well, lgtmaybe stops sending a schema to that model
-and the parser reads the findings from plain text. No flag needed.
+decoder returns empty content. lgtmaybe handles this too:
 
-When a gateway rejects `response_format` with a `400`, lgtmaybe recognises some
-refusals that name the parameter and steps down by itself. If yours still fails,
-turn structured output off so the request never carries the parameter. The
-prompt still asks for JSON and the lenient parser still does its job:
+1. It retries an empty reply once, with the schema sent as a forced tool call
+   instead.
+2. If the model answers empty under that as well, lgtmaybe stops sending a
+   schema to that model. The parser reads the findings from plain text.
+
+No flag needed.
+
+When a gateway rejects `response_format` with a `400`, lgtmaybe recognises
+some refusals that name the parameter. It then steps down by itself. If yours
+still fails, turn structured output off so the request never carries the
+parameter. The prompt still asks for JSON and the lenient parser still does its
+job:
 
 ```bash
 lgtmaybe review \

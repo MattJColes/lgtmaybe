@@ -5,9 +5,10 @@ description: Post lgtmaybe reviews to Azure DevOps Repos pull requests from Azur
 # Review Pull Requests on Azure DevOps
 
 lgtmaybe posts reviews to Azure DevOps Repos as well as GitHub, GitLab and
-Gitea. The review itself is identical (same lenses, same reflection pass, same
-findings) because none of it depends on the host. Only the adapter that reads
-the change and posts the comments differs.
+Gitea. The review itself is identical, because none of it depends on the host.
+It runs the same [lenses](../reference/glossary.md#lens), the same
+[reflection](../reference/glossary.md#reflection) pass, and produces the same
+findings. Only the adapter that reads the change and posts the comments differs.
 
 Azure DevOps Services is supported: `dev.azure.com/{organisation}` and the
 legacy `{organisation}.visualstudio.com`. Azure DevOps Server (on-premises) is
@@ -16,14 +17,14 @@ not supported yet.
 ## Set It Up
 
 Azure Pipelines runs a pull request build from the YAML in the pull request
-itself, so the job that holds the model key must not live in the repository
+itself. So the job that holds the model key must not live in the repository
 being reviewed. The setup below keeps it in a template in a separate, protected
 repository, and the reviewed repository only extends it. Read
 [Security: who can change the pipeline](#security-who-can-change-the-pipeline)
 before choosing anything simpler.
 
 1. **Create a protected template repository.** For example
-   `Platform/pipeline-templates`. Add branch policies to its `main` branch so
+   `Platform/pipeline-templates`. Add branch policies to its `main` branch, so
    nobody can change it without a review from someone trusted with the secrets.
    Commit
    [`examples/azure-devops/lgtmaybe-review.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/azure-devops/lgtmaybe-review.yml)
@@ -41,13 +42,13 @@ before choosing anything simpler.
 4. **Let the pipeline comment.** lgtmaybe posts with the job's own token,
    `System.AccessToken`. In *Project settings → Repositories → Security*,
    select the project's build service identity
-   (`<Project> Build Service (<Organisation>)`) on the reviewed repository and
-   allow **Contribute to pull requests**, and nothing broader.
+   (`<Project> Build Service (<Organisation>)`) on the reviewed repository.
+   Allow **Contribute to pull requests**, and nothing broader.
 
 5. **Add the pipeline to the reviewed repository.** Copy
    [`examples/azure-devops/azure-pipelines.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/azure-devops/azure-pipelines.yml),
-   point its `resources.repositories` entry at your template repository, and
-   create a pipeline from it. Approve its access to the template repository and
+   and point its `resources.repositories` entry at your template repository.
+   Create a pipeline from it. Approve its access to the template repository and
    the variable group on the first run.
 
 6. **Run it on pull requests.** Azure Repos starts pull request builds from a
@@ -99,19 +100,25 @@ jobs:
 ```
 
 Secret variables, `System.AccessToken` included, reach a script only when they
-are mapped under `env:`, which is why both are listed there. The template takes
+are mapped under `env:`. That is why both are listed there. The template takes
 no parameters on purpose: a parameter would let the pull request's YAML pass
 steps into the job that holds the secrets.
 
-`azure-pipelines` finds the pull request from the predefined variables
-`SYSTEM_COLLECTIONURI`, `SYSTEM_TEAMPROJECT`, `BUILD_REPOSITORY_NAME` and
-`SYSTEM_PULLREQUEST_PULLREQUESTID`. On a build that is not validating a pull
-request there is no id, and lgtmaybe fails with an error naming the missing
-variable rather than guessing. A pipeline building a GitHub repository is
-refused too: those pull requests live on GitHub, so use the
-[GitHub Action](use-as-github-action.md). Azure Pipelines always sets
-`BUILD_REPOSITORY_PROVIDER`; when it is unset (running the command by hand),
-the repository is treated as Azure Repos.
+`azure-pipelines` finds the pull request from these predefined variables:
+
+- `SYSTEM_COLLECTIONURI`;
+- `SYSTEM_TEAMPROJECT`;
+- `BUILD_REPOSITORY_NAME`;
+- `SYSTEM_PULLREQUEST_PULLREQUESTID`.
+
+A build that is not validating a pull request has no id. There, lgtmaybe fails
+with an error naming the missing variable rather than guessing.
+
+A pipeline building a GitHub repository is refused too. Those pull requests
+live on GitHub, so use the [GitHub Action](use-as-github-action.md).
+
+Azure Pipelines always sets `BUILD_REPOSITORY_PROVIDER`. When it is unset
+(running the command by hand), lgtmaybe treats the repository as Azure Repos.
 
 Configure the review with the command's flags: `--provider`, `--model`,
 `--fallback-model`, `--api-key`, `--api-base` and `--config`.
@@ -148,14 +155,14 @@ lgtmaybe reads the Azure DevOps token from one of two variables:
 
 When both are set, `AZURE_DEVOPS_TOKEN` wins. Use a personal access token when
 the comments should come from a named account rather than the build service.
-Either way the token travels only in the `Authorization` header and is never
+Either way, the token travels only in the `Authorization` header and is never
 logged.
 
 ## Try It Locally First
 
 Reviewing a pull request by URL happens in the pipeline, where the token and
 the pull request live. Locally, `lgtmaybe review` reviews the branch you have
-checked out against the remote primary branch, and prints the findings instead
+checked out against the remote primary branch. It prints the findings instead
 of posting them:
 
 ```bash
@@ -166,34 +173,49 @@ lgtmaybe review --provider anthropic --model claude-sonnet-4-6
 
 ## How It Differs from GitHub
 
-Azure DevOps serves no unified diff. lgtmaybe reads the pull request's latest
-iteration, lists the files it changes against the merge base, fetches each
-file's text before and after, and builds the diff itself. Lockfiles, vendored
-and binary files are listed as changed but never fetched, and a file side over
-1 MB is treated like a binary. A pull request changing more than 300 files is
-not reviewed; lgtmaybe says so instead of reviewing part of it. The same goes
-when Azure DevOps reports no merge base for the pull request. A file Azure
-DevOps keeps throttling or failing to return is retried, then left out on its
-own and named under **Files not reviewed** in the summary; a 401 or 403 fails
-the review, since that means the token is wrong.
+Azure DevOps serves no unified diff (the standard text format for a change),
+so lgtmaybe builds the diff itself:
 
-Each finding is its own comment thread on the changed line, left **active** so
-a "resolve all comments" branch policy can hold the merge until someone deals
-with it. The summary is a general thread that is edited in place on each run.
-It is created **closed**, so it never holds a merge on its own. A finding whose
-thread is already open, or marked *Won't fix* or *Closed*, is not posted again;
-a finding whose thread was marked *Resolved* and that comes back is.
+1. It reads the pull request's latest iteration (Azure DevOps's name for one
+   version of the pull request: one when it opens, then one per push).
+2. It lists the files that iteration changes against the merge base.
+3. It fetches each file's text before and after.
+4. It builds the diff from the two.
 
-On a later run, a finding thread lgtmaybe opened is marked *Resolved*, with a
-`✅ Looks resolved.` reply, when the finding is no longer reported **and** the
-line it was posted on has changed since. Azure DevOps has no "this code moved"
-flag, so lgtmaybe records the iteration each thread was posted at and compares
-the file then with the file now. Threads anyone else opened are never touched,
-and nothing is resolved after a run that failed or finished only partly. The
-token needs the same *Contribute to pull requests* permission it already uses
-to post. Set `resolve_fixed: false` in `.lgtmaybe.yml` to resolve threads by
-hand. A thread posted by an earlier lgtmaybe version may carry no iteration,
-and one that doesn't stays open for a person to resolve.
+Its limits and failure handling:
+
+- Lockfiles, vendored and binary files are listed as changed but never fetched.
+- A file side over 1 MB is treated like a binary.
+- A pull request changing more than 300 files is not reviewed. lgtmaybe says so
+  instead of reviewing part of it.
+- When Azure DevOps reports no merge base for the pull request, the same
+  applies: lgtmaybe says so and does not review it.
+- lgtmaybe retries a file Azure DevOps keeps throttling or failing to return.
+  If it still fails, lgtmaybe leaves that file out on its own and names it under
+  **Files not reviewed** in the summary.
+- A 401 or 403 fails the review, since that means the token is wrong.
+
+Each finding is its own comment thread on the changed line. lgtmaybe leaves it
+**active**, so a "resolve all comments" branch policy can hold the merge until
+someone deals with it. The summary is a general thread that is edited in place on each run.
+It is created **closed**, so it never holds a merge on its own. lgtmaybe does not
+post a finding again when its thread is already open, or marked *Won't fix* or
+*Closed*. It does post a finding again when its thread was marked *Resolved*
+and the finding comes back.
+
+On a later run, lgtmaybe marks a finding thread it opened *Resolved*, with a
+`✅ Looks resolved.` reply. It does this when the finding is no longer reported
+**and** the line it was posted on has changed since. Azure DevOps has no "this
+code moved" flag. So lgtmaybe records the iteration each thread was posted at,
+and compares the file then with the file now.
+
+- Threads anyone else opened are never touched.
+- Nothing is resolved after a run that failed or finished only partly.
+- The token needs the same *Contribute to pull requests* permission it already
+  uses to post.
+- Set `resolve_fixed: false` in `.lgtmaybe.yml` to resolve threads by hand.
+- A thread posted by an earlier lgtmaybe version may carry no iteration. One
+  that doesn't stays open for a person to resolve.
 
 These are not available yet:
 
@@ -216,8 +238,8 @@ key, or `ollama` against a model on the agent.
 
 A pull request build in Azure Pipelines runs the YAML from the pull request's
 own merge result. This is the opposite of GitHub's `pull_request_target`, where
-the base branch's workflow runs. Anyone who can push a branch and open a pull
-request can therefore rewrite a pipeline file in that repository, keep its
+the base branch's workflow runs. So anyone who can push a branch and open a pull
+request can rewrite a pipeline file in that repository. They can keep its
 variable mappings, and send every secret those steps can read to a server of
 their choosing. `checkout: none` does not help: the YAML itself is the part the
 pull request controls.
@@ -234,8 +256,8 @@ secret. Otherwise use the setup above:
 - **Builds of pull requests from forks get no secrets by default. Keep that
   setting off.**
 - Grant the build service only **Contribute to pull requests** on the reviewed
-  repository, and keep *Limit job authorization scope to current project*
-  turned on. Any pipeline can map its own `System.AccessToken`, so its
+  repository. Keep *Limit job authorization scope to current project* turned
+  on. Any pipeline can map its own `System.AccessToken`, so its
   permissions are what a rewritten pipeline could use.
 - Prefer `System.AccessToken` over a personal access token. If you must use a
   personal access token, give it only **Code (Read & write)** on this
