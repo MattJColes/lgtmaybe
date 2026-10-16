@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -185,7 +186,16 @@ def test_the_glossary_and_style_guide_are_gated() -> None:
 
 def test_the_checker_cli_exits_by_result(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([str(_ROOT / "docs/how-to/write-docs.md")]) == 0
-    assert main([str(_ROOT / sorted(NOT_YET_PASSING)[0])]) == 1
+    # A throwaway failing page, so the test outlives NOT_YET_PASSING emptying.
+    # Closed before main() reads it: Windows cannot reopen a file still held open.
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".md", dir=_ROOT, encoding="utf-8", delete=False
+    ) as page:
+        page.write("This has a dash \u2014 here.\n")
+    try:
+        assert main([page.name]) == 1
+    finally:
+        Path(page.name).unlink()
     assert main([str(_ROOT / "docs/no-such-page.md")]) == 1
     assert "not a file inside the repository" in capsys.readouterr().err
     assert main([]) == 0
