@@ -137,6 +137,20 @@ def test_review_config_accepts_timeout() -> None:
     assert cfg.timeout == 600
 
 
+def test_review_config_accepts_the_smallest_timeout() -> None:
+    # 1 is the floor: the accepted range is "any positive number of seconds".
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3", timeout=1)
+    assert cfg.timeout == 1
+
+
+@pytest.mark.parametrize("timeout", [0, -30])
+def test_review_config_rejects_non_positive_timeout(timeout: int) -> None:
+    # 0 means "off" for other knobs (max_tokens, max_review_seconds), but a 0s
+    # per-call timeout fails every request at once, so it is rejected outright.
+    with pytest.raises(ValidationError, match="timeout must be a positive number of seconds"):
+        ReviewConfig(provider=Provider.ollama, model="llama3", timeout=timeout)
+
+
 def test_review_config_recursive_defaults_true() -> None:
     # RLM-style hunk walk for over-budget files is active by default.
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")

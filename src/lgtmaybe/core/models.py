@@ -1276,6 +1276,18 @@ class ReviewConfig(_Strict):
     # skip the schema instead of failing the same way.
     retry_without_schema: bool = True
 
+    @field_validator("timeout")
+    @classmethod
+    def _timeout_is_positive(cls, value: int | None) -> int | None:
+        # 0 reads as "off" for every other duration knob, but a 0s per-call
+        # timeout fails every request at once, so reject it at the boundary.
+        if value is not None and value <= 0:
+            raise ValueError(
+                f"timeout must be a positive number of seconds (got {value}); "
+                "leave it unset for the provider-aware default"
+            )
+        return value
+
     @model_validator(mode="after")
     def _apply_project_stage(self) -> ReviewConfig:
         # Only a default moves: a floor the user set is theirs, whatever the stage.
