@@ -730,7 +730,7 @@ def _zizmor_output_hidden_first() -> str:
                     },
                     {
                         "symbolic": {
-                            "key": {"Local": {"verbatim_path": "./.github/workflows/ci.yml"}},
+                            "key": {"Local": {"verbatim_path": "./.github/workflows/deploy.yml"}},
                             "kind": "Primary",
                         },
                         "concrete": {"location": {"start_point": {"row": 11, "column": 20}}},
@@ -751,6 +751,7 @@ def test_zizmor_anchors_to_the_primary_location_not_the_hidden_one(monkeypatch) 
     findings = run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
 
     assert len(findings) == 1
+    assert findings[0].path == ".github/workflows/deploy.yml"
     assert findings[0].line == 12  # Primary row 11, not the Hidden row 6 (line 7)
 
 
