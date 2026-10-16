@@ -2651,6 +2651,83 @@ def test_on_diff_scan_findings_are_capped_most_severe_first(monkeypatch) -> None
     assert findings[0].severity is Severity.critical
 
 
+def test_model_findings_survive_the_scan_cap(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The cap rebuilds all_findings as non-scan findings plus the capped
+    scans; a model finding present when the cap triggers must ride through
+    that recombination, neither dropped nor duplicated."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
+    )
+    model_note = ReviewFinding(
+        path="f.py",
+        line=2,
+        severity=Severity.medium,
+        title="model note",
+        body="on the added line",
+        anchor="new",
+    )
+    provider = _provider_for([model_note], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    assert len(findings) == MAX_SCAN_FINDINGS + 1
+    assert [f.title for f in findings].count("model note") == 1
+
+
+def test_suppressed_scan_findings_do_not_spend_cap_slots(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The cap runs after suppression: a hit a team ignored can never post, so
+    it must not spend a cap slot — the slot goes to the next on-diff hit."""
+    from lgtmaybe.core.findings import finding_fingerprint
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    # _finding_mode_cfg overrides land on the static-analysis sub-config, so
+    # the fingerprint list goes on the ReviewConfig itself.
+    cfg = _finding_mode_cfg().model_copy(
+        update={"ignore_fingerprints": [finding_fingerprint("f.py", "gitleaks: s-0")]}
+    )
+
+    findings, _summary = engine.review(_HINT_CTX, cfg)
+
+    titles = {f.title for f in findings}
+    assert len(findings) == MAX_SCAN_FINDINGS
+    assert "gitleaks: s-0" not in titles
+    # The slot s-0 vacated: the first hit past the cap posts through it.
+    assert "gitleaks: s-20" in titles
+
+
+def test_scan_cap_considered_count_is_the_pre_cap_count(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`considered` must report the scan findings that existed before the cap,
+    not the capped survivors it was measured against."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    with caplog.at_level(logging.INFO, logger="lgtmaybe.engine.engine"):
+        engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    capped = [r for r in caplog.records if "capped" in r.getMessage()]
+    assert capped, "the cap must have logged"
+    assert getattr(capped[0], "kept", None) == MAX_SCAN_FINDINGS
+    assert getattr(capped[0], "considered", None) == MAX_SCAN_FINDINGS + 5
+
+
 # ---------------------------------------------------------------------------
 # summary template (F5b)
 # ---------------------------------------------------------------------------
