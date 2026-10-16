@@ -138,6 +138,68 @@ class TestActionRouting:
         called = self._run_diagram_gate(tmp_path, monkeypatch, action="synchronized", auto="false")
         assert called == []
 
+    def _run_edited(self, tmp_path, monkeypatch, *, changes: dict) -> tuple:
+        """Run the action for an ``edited`` event; return (result, github, diagrams, cfgs)."""
+        import lgtmaybe.cli as cli_module
+
+        github = FakeGitHub()
+        engine = FakeEngine(FakeProvider())
+        cfgs: list = []
+
+        def build(cfg, runtime):
+            cfgs.append(cfg)
+            return github, engine, FakeProvider()
+
+        monkeypatch.setattr(cli_module, "build_review_context", build)
+        diagrams: list[bool] = []
+        monkeypatch.setattr(
+            cli_module,
+            "run_diagram",
+            lambda github, provider, cfg, ctx=None, completed_sha=None: diagrams.append(True),
+        )
+        event = _write_event(
+            tmp_path,
+            {
+                "action": "edited",
+                "changes": changes,
+                "repository": {"full_name": "org/repo"},
+                "pull_request": {"number": 3},
+            },
+        )
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+        monkeypatch.setenv("INPUT_PROVIDER", "ollama")
+        monkeypatch.setenv("INPUT_MODEL", "llama3")
+        result = CliRunner().invoke(main, ["action"])
+        return result, github, diagrams, cfgs
+
+    def test_a_retargeted_pr_gets_a_full_review_and_a_fresh_overview(self, tmp_path, monkeypatch):
+        """When the PR below a stacked PR merges, GitHub retargets the one above:
+        an ``edited`` event with ``changes.base``. Its diff changed but its head
+        did not, so it is reviewed in full (an incremental run would see the same
+        head and do nothing)."""
+        result, github, diagrams, cfgs = self._run_edited(
+            tmp_path, monkeypatch, changes={"base": {"ref": {"from": "feature-a"}}}
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(github.posted) == 1
+        assert diagrams == [True]
+        assert cfgs[0].incremental is False
+
+    @pytest.mark.parametrize("changes", [{"title": {"from": "old"}}, {"body": {"from": "x"}}, {}])
+    def test_an_edit_that_leaves_the_base_alone_reviews_nothing(
+        self, tmp_path, monkeypatch, changes
+    ):
+        """A title or description edit changes no code: no review, no model call."""
+        result, github, diagrams, cfgs = self._run_edited(tmp_path, monkeypatch, changes=changes)
+
+        assert result.exit_code == 0, result.output
+        assert github.posted == []
+        assert diagrams == []
+        assert cfgs == []
+        assert "base branch did not change" in result.output
+
     @pytest.mark.parametrize(
         ("action", "expected"),
         [("synchronize", True), ("synchronized", True), ("opened", False)],

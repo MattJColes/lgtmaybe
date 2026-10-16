@@ -125,14 +125,28 @@ def pr_event_action(event: dict[str, Any]) -> str:
     return _EVENT_ACTION_ALIASES.get(action, action)
 
 
+def base_changed(event: dict[str, Any]) -> bool:
+    """Whether a pull-request event moved the PR onto another base branch.
+
+    GitHub sends this as ``edited`` with ``changes.base``: a retarget, as when
+    the PR below a stacked PR merges and the one above moves onto its base. The
+    head is unchanged but the diff is not. Every other ``edited`` (title,
+    description) changes no code.
+    """
+    changes = event.get("changes")
+    return isinstance(changes, dict) and "base" in changes
+
+
 def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
     """Whether the action run should post or refresh the change overview.
 
     The overview's own sections (description, High Impact Areas) are config
     toggles inside it, not separate events: they ride this one comment, so a
-    push refreshes all of them together or none of them.
+    push refreshes all of them together or none of them. ``edited`` reaches
+    here only as a retarget (see :func:`base_changed`), which changes the diff
+    the overview describes.
     """
-    return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
+    return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize", "edited")
 
 
 def existing_overview_note(github: ReviewGateway, ctx: PRContext, cfg: ReviewConfig) -> str | None:

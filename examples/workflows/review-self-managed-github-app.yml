@@ -8,6 +8,10 @@ name: lgtmaybe (self-managed app)
 
 on:
   pull_request_target:
+    # `edited` catches a retarget: when the PR below a stacked PR merges, the
+    # one above moves onto its base, with the same head and a new diff. Other
+    # edits (title, description) are filtered out below and start no job.
+    types: [opened, synchronize, reopened, edited]
   issue_comment:
     types: [created]
 
@@ -26,6 +30,7 @@ jobs:
     # /REVIEW and `/review full` both pass.
     if: >-
       (github.event_name == 'pull_request_target' &&
+       (github.event.action != 'edited' || github.event.changes.base) &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&

@@ -22,6 +22,7 @@ from lgtmaybe.cli import (
     _RUNTIME_INPUTS,
     RuntimeOptions,
     action_inputs,
+    base_changed,
     build_provider_engine,
     config_cmd,
     execute_comment,
@@ -748,9 +749,15 @@ def action() -> None:
         execute_comment(event, cfg, runtime)
         return
 
-    # incremental=None (auto): review only the new commits on a synchronize
-    # push, do a full review on open/reopen. Explicit config/input wins.
     event_action = pr_event_action(event)
+    if event_action == "edited" and not base_changed(event):
+        # Workflows listen for `edited` to catch a retarget; a title or
+        # description edit changes no code, so it costs no review.
+        click.echo("Pull request edited, but its base branch did not change: nothing to review.")
+        return
+    # incremental=None (auto): review only the new commits on a synchronize
+    # push, do a full review on open/reopen and on a retarget (same head, new
+    # diff). Explicit config/input wins.
     cfg = resolve_auto_incremental(cfg, event_action=event_action)
     runtime = replace(runtime, pr_url=pr_url_from_event(event))
     # The change overview refreshes on a synchronize push too, so a replacement
