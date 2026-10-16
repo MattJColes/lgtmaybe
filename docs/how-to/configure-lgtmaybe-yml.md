@@ -346,7 +346,7 @@ timeout: 3600   # an hour per call, e.g. for a big model on CPU
 ```
 
 CLI: `--timeout`; Action input: `timeout`. See
-[Run locally with ollama](run-locally-with-ollama.md#slow-models-and-timeouts).
+[Run locally](run-locally.md#slow-models-and-timeouts).
 
 ### structured_output
 

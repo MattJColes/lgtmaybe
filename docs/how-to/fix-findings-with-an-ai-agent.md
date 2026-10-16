@@ -91,5 +91,5 @@ on the PR itself, set up the [GitHub Action](use-as-github-action.md).
 
 - [Use from a coding agent over MCP](use-from-a-coding-agent-over-mcp.md) - let
   the agent call the review as a tool, with no files in between
-- [Run locally with ollama](run-locally-with-ollama.md) - the local CLI setup
+- [Run locally](run-locally.md) - the local CLI setup with ollama, llama.cpp or vLLM
 - [What gets reviewed](../explanation/what-gets-reviewed.md) - scope, caps, and output formats

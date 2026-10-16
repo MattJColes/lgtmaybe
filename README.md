@@ -194,8 +194,8 @@ models.
 | `bedrock` | Ambient AWS creds via GitHub OIDC, no static key | [Bedrock](docs/how-to/review-with-bedrock-oidc.md) |
 | `vertex` | Ambient GCP creds via Workload Identity Federation, no key | [Vertex](docs/how-to/review-with-vertex-wif.md) |
 | `azure` | Resource endpoint, plus `AZURE_API_KEY` or keyless Entra (Azure AD) creds via GitHub OIDC | [Azure](docs/how-to/review-with-azure.md) |
-| `ollama` | None: local only, zero cost | [ollama](docs/how-to/run-locally-with-ollama.md) |
-| `openai-compatible` | Any OpenAI `/v1` endpoint via `--api-base` (DeepSeek, llama.cpp, LM Studio, vLLM). Key optional: `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for local servers | [Local & OpenAI-compatible](docs/how-to/use-a-custom-openai-compatible-endpoint.md) |
+| `ollama` | None: local only, zero cost | [Run locally](docs/how-to/run-locally.md) |
+| `openai-compatible` | Any OpenAI `/v1` endpoint via `--api-base` (DeepSeek, llama.cpp, LM Studio, vLLM). Key optional: `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, or none for local servers | [Run locally](docs/how-to/run-locally.md), [OpenAI-compatible](docs/how-to/use-a-custom-openai-compatible-endpoint.md) |
 
 ## Where It Posts
 
@@ -254,8 +254,8 @@ the docs root.
 - [Review with Bedrock OIDC](docs/how-to/review-with-bedrock-oidc.md)
 - [Review with Vertex WIF](docs/how-to/review-with-vertex-wif.md)
 - [Review with Azure OpenAI](docs/how-to/review-with-azure.md)
-- [Run locally with ollama](docs/how-to/run-locally-with-ollama.md)
-- [Local models & other OpenAI providers](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
+- [Run locally (ollama, llama.cpp, vLLM)](docs/how-to/run-locally.md)
+- [Other OpenAI-compatible providers](docs/how-to/use-a-custom-openai-compatible-endpoint.md)
 - [Configure .lgtmaybe.yml](docs/how-to/configure-lgtmaybe-yml.md)
 - [Add a custom review lens](docs/how-to/add-a-custom-lens.md)
 - [Scope instructions to a directory](docs/how-to/scope-review-instructions-to-a-directory.md)
@@ -332,9 +332,9 @@ API-key provider live in [`examples/workflows/`](examples/workflows/). Cloud
 providers (Bedrock, Vertex, Azure) are **keyless**: pass `aws_role_arn`,
 `gcp_wif_provider`, or `azure_client_id` and the action does the OIDC/WIF
 exchange for you (it needs `id-token: write`). See
-[Use as a GitHub Action](docs/how-to/use-as-github-action.md). ollama is local
-only, so run it through the [CLI](docs/how-to/run-locally-with-ollama.md)
-instead.
+[Use as a GitHub Action](docs/how-to/use-as-github-action.md). A local model
+(ollama, llama.cpp, vLLM) runs on your own machine, so run it through the
+[CLI](docs/how-to/run-locally.md) instead.
 
 ### Not on GitHub?
 

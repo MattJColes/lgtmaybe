@@ -562,7 +562,7 @@ network recovers, but a dead-end failure surfaces fast.
 
     Local throughput is decided by `OLLAMA_NUM_PARALLEL`, llama.cpp's `-np` or
     vLLM's batching. Raising those costs memory per slot; see
-    [running locally](../how-to/run-locally-with-ollama.md). Drop
+    [running locally](../how-to/run-locally.md#concurrency-on-a-local-server). Drop
     `max_concurrency` to 1 for a very slow local model, where six queued calls
     could each wait out the timeout. The pool is shared across batches. So wall
     time is `ceil(batches × lenses / workers)` call-latencies rather than

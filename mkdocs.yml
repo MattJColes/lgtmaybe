@@ -12,11 +12,14 @@ exclude_docs: |
   generate_reference.py
   generate_llms_txt.py
   whats_new.py
+  redirects.py
 
 # Builds the homepage's What's New list and the Changelog page from
-# CHANGELOG.md at build time, so a release never leaves them stale.
+# CHANGELOG.md at build time, so a release never leaves them stale, and keeps
+# renamed pages' old URLs working.
 hooks:
   - docs/whats_new.py
+  - docs/redirects.py
 
 theme:
   name: material
@@ -110,7 +113,7 @@ nav:
           - Review with Vertex WIF: how-to/review-with-vertex-wif.md
           - Review with Azure OpenAI: how-to/review-with-azure.md
       - Local & self-hosted:
-          - Run locally with ollama: how-to/run-locally-with-ollama.md
+          - Run locally (ollama, llama.cpp, vLLM): how-to/run-locally.md
           - Other OpenAI-compatible servers: how-to/use-a-custom-openai-compatible-endpoint.md
       - Configure & extend:
           - Configure .lgtmaybe.yml: how-to/configure-lgtmaybe-yml.md
