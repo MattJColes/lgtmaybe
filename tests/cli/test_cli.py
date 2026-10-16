@@ -686,7 +686,7 @@ class TestLocalReviewErrors:
         def hung_default_base(cwd=None):
             raise LocalGitError("git rev-parse origin/HEAD timed out after 120s")
 
-        monkeypatch.setattr(cli_module, "_default_base", hung_default_base)
+        monkeypatch.setattr(cli_module, "default_base", hung_default_base)
 
         with pytest.raises(click.ClickException, match="timed out"):
             cli_module.execute_local_diagram(

@@ -182,7 +182,7 @@ def test_default_base_falls_back_to_head_with_no_main_master_or_remote(tmp_path:
     """A repo with no remote and no main/master branch resolves the base to HEAD
     (an empty comparison) rather than raising — the last link in the fallback
     chain origin/HEAD → origin/main → origin/master → main → master → HEAD."""
-    from lgtmaybe.local import _default_base
+    from lgtmaybe.local import default_base
 
     _git(tmp_path, "init", "-b", "trunk")
     _git(tmp_path, "config", "user.email", "t@example.com")
@@ -192,7 +192,7 @@ def test_default_base_falls_back_to_head_with_no_main_master_or_remote(tmp_path:
     _git(tmp_path, "add", "app.py")
     _git(tmp_path, "commit", "-m", "base")
 
-    assert _default_base(tmp_path) == "HEAD"
+    assert default_base(tmp_path) == "HEAD"
 
 
 def test_branch_mode_collects_commit_subjects(repo: Path) -> None:

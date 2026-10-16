@@ -26,6 +26,7 @@ from lgtmaybe.core.diff import is_reviewable
 from lgtmaybe.core.diffparse import changed_line_index, split_by_file
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
+    SCAN_CATEGORY_PREFIX,
     PRContext,
     ProviderResult,
     PRStack,
@@ -101,7 +102,6 @@ from .selftalk import drop_self_talk
 from .severity import clamp_to_category_ceiling
 from .static_analysis import (
     MAX_SCAN_FINDINGS,
-    SCAN_CATEGORY_PREFIX,
     UNANCHORABLE_SCAN_CATEGORIES,
     ToolFinding,
     format_hints,

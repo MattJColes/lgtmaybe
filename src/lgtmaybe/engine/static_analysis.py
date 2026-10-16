@@ -49,7 +49,7 @@ from typing import Any, NamedTuple
 from lgtmaybe.core.diff import is_scannable_manifest
 from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
-    _SCAN_CATEGORY_PREFIX,
+    SCAN_CATEGORY_PREFIX,
     ReviewConfig,
     ReviewFinding,
     Severity,
@@ -106,12 +106,6 @@ _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.osv_scanner: ToolMode.hint,
 }
 
-# Category prefix for a finding that came from a tool rather than a lens. Keeps
-# `finding_rules` able to target a specific scanner, and keeps scan findings out
-# of the built-in defect categories whose failure_scenario gate they'd fail.
-# Defined in core.models so the CustomLens validator can reserve it there.
-SCAN_CATEGORY_PREFIX = _SCAN_CATEGORY_PREFIX
-
 # Scanners whose findings can never anchor to a changed line, by construction.
 # A CVE is about the dependency, not about a position in a resolved lockfile —
 # and lockfiles are not reviewable, so their patches never reach the diff the
@@ -119,7 +113,7 @@ SCAN_CATEGORY_PREFIX = _SCAN_CATEGORY_PREFIX
 # scan findings to changed lines; the stricter unanchored severity floor then
 # keeps them to advisories worth acting on.
 UNANCHORABLE_SCAN_CATEGORIES: frozenset[str] = frozenset(
-    {f"{_SCAN_CATEGORY_PREFIX}{StaticAnalysisTool.osv_scanner.value}"}
+    {f"{SCAN_CATEGORY_PREFIX}{StaticAnalysisTool.osv_scanner.value}"}
 )
 
 # Every tool that grades its own findings names the rungs from this set, and on

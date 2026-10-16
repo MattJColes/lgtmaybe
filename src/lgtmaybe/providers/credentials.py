@@ -56,7 +56,7 @@ _ENV_VAR: dict[Provider, str] = {
 }
 
 
-def _default_gcp_probe() -> bool:
+def default_gcp_probe() -> bool:
     """Detect ambient GCP credentials.
 
     Covers the CI/WIF env vars (``GOOGLE_APPLICATION_CREDENTIALS``) and a project
@@ -149,7 +149,7 @@ def resolve_credentials(
         return AuthConfig(api_base=api_base)
 
     if provider is Provider.vertex:
-        probe = ambient_probe if ambient_probe is not None else _default_gcp_probe
+        probe = ambient_probe if ambient_probe is not None else default_gcp_probe
         if not probe():
             raise ValueError(
                 "vertex requires ambient GCP credentials. "

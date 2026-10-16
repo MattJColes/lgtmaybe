@@ -6,7 +6,9 @@ objectively outdated, never on opinion:
 - importing any lgtmaybe module must not trigger a DeprecationWarning (i.e. we
   are not calling deprecated stdlib / dependency APIs on an import path);
 - the deprecation gate in pyproject must stay wired, so nobody can silently
-  drop it.
+  drop it;
+- no module imports a private (``_name``) symbol from a different top-level
+  subpackage of lgtmaybe, so a package's private helpers stay its own.
 
 Newer-version availability and CVE scanning are intentionally *not* here — they
 depend on the outside world at time-of-check and so can't be deterministic. They
@@ -15,6 +17,7 @@ live in scheduled background tooling (Dependabot + the audit workflow).
 
 from __future__ import annotations
 
+import ast
 import importlib
 import os
 import pkgutil
@@ -31,6 +34,7 @@ import lgtmaybe
 
 _PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 _UV_LOCK = Path(__file__).resolve().parent.parent / "uv.lock"
+_SRC_PACKAGE = Path(lgtmaybe.__file__).resolve().parent
 
 
 def _all_module_names() -> list[str]:
@@ -216,3 +220,50 @@ def test_no_default_encoding_io() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def _top_level_subpackage(module: str) -> str:
+    """The first component under ``lgtmaybe`` (``lgtmaybe.engine.x`` -> ``engine``)."""
+    parts = module.split(".")
+    return parts[1] if len(parts) > 1 else ""
+
+
+def _cross_package_private_imports() -> list[tuple[str, str, str]]:
+    """Every ``from lgtmaybe.<pkg>... import _name`` that crosses a subpackage."""
+    found: list[tuple[str, str, str]] = []
+    for path in sorted(_SRC_PACKAGE.rglob("*.py")):
+        relative = path.relative_to(_SRC_PACKAGE.parent).with_suffix("")
+        parts = list(relative.parts)
+        is_package = parts[-1] == "__init__"
+        if is_package:
+            parts.pop()
+        importer = ".".join(parts)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.level:
+                # Resolve a relative import against the importing module's package.
+                base = parts if is_package else parts[:-1]
+                base = base[: len(base) - (node.level - 1)]
+                source = ".".join([*base, *([node.module] if node.module else [])])
+            else:
+                source = node.module or ""
+            if source != "lgtmaybe" and not source.startswith("lgtmaybe."):
+                continue
+            if _top_level_subpackage(source) == _top_level_subpackage(importer):
+                continue
+            for alias in node.names:
+                name = alias.name
+                if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+                    found.append((importer, source, name))
+    return found
+
+
+def test_no_private_names_imported_across_packages() -> None:
+    """A ``_name`` is private to its subpackage; another subpackage must not import it."""
+    offenders = _cross_package_private_imports()
+    assert not offenders, (
+        "private names imported across lgtmaybe subpackages (make them public): "
+        + ", ".join(f"{importer} imports {source}.{name}" for importer, source, name in offenders)
+    )

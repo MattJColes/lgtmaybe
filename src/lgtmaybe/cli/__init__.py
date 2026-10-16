@@ -75,7 +75,7 @@ from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
 from lgtmaybe.local import (
     LocalGitError,
-    _default_base,
+    default_base,
     local_file_reader,
     local_pr_context,
     local_repo_root,
@@ -1068,7 +1068,7 @@ def _no_local_changes(ctx: PRContext, *, base: str | None, uncommitted: bool) ->
         return None
     if uncommitted:
         return "no uncommitted changes vs HEAD: nothing to review"
-    resolved = base or _default_base(None)
+    resolved = base or default_base(None)
     if base is None and resolved == "HEAD":
         raise click.ClickException(
             "no changes vs HEAD: found no origin/HEAD, origin/main, origin/master, "
