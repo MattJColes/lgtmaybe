@@ -381,7 +381,7 @@ def test_ponytail_follows_the_ponytail_5_ladder(block: str) -> None:
     assert block.index("already in this codebase") < block.index("standard library")
     assert "new dependency" in block
     # Verify before reporting: the code really is unused, its callers really exist.
-    assert "really" in block
+    assert "really is unused" in block
 
 
 @pytest.mark.parametrize("block", _ponytail_blocks(), ids=["focused", "code-health"])
@@ -494,6 +494,18 @@ def test_prompt_covers_ci_and_iac_misconfiguration() -> None:
     assert "iam" in prompt
     assert "container" in prompt
     assert "pinned" in prompt or "sha" in prompt  # unpinned third-party actions
+
+
+def test_prompt_flags_controls_that_only_look_enforced() -> None:
+    """A YAML `environment:` key with no required reviewers is not an approval
+    gate, a budget alert is not a spending cap, and a step that cannot fail is
+    not a check. Each reads as a control and enforces nothing."""
+    prompt = _built_in_prompt(ReviewCategory.security).lower()
+    assert "approval gate" in prompt
+    assert "required reviewers" in prompt
+    assert "spending cap" in prompt
+    assert "continue-on-error" in prompt
+    assert "|| true" in prompt
 
 
 def test_prompt_flags_weak_tests_not_just_missing_ones() -> None:
@@ -1036,3 +1048,34 @@ def test_architecture_example_points_a_dependency_outward() -> None:
     block = build_lens_block(ReviewCategory.architecture)
     assert "from billing.adapters.stripe import StripeClient" in block
     assert '"suggestion": null' in block
+
+
+def test_findings_are_written_for_any_engineer() -> None:
+    """Every lens (built-in, pack or custom) writes for an engineer new to the
+    codebase: plain words, a term explained the first time, and why it matters."""
+    preamble = build_shared_preamble().lower()
+    for phrase in (
+        "new to this codebase",
+        "plain words",
+        "say what it means",
+        "why it matters",
+    ):
+        assert phrase in preamble, phrase
+
+
+@pytest.mark.parametrize(
+    ("module", "constant"),
+    [
+        ("lgtmaybe.engine.describe", "_DESCRIBE_SYSTEM"),
+        ("lgtmaybe.engine.high_impact", "_HIGH_IMPACT_SYSTEM"),
+        ("lgtmaybe.engine.diagram", "_DIAGRAM_SYSTEM"),
+    ],
+)
+def test_the_overview_prompts_share_the_plain_language_rule(module: str, constant: str) -> None:
+    """The change overview sits beside the findings, so it reads the same way."""
+    import importlib
+
+    from lgtmaybe.engine.prompt import PLAIN_LANGUAGE
+
+    system = getattr(importlib.import_module(module), constant)
+    assert PLAIN_LANGUAGE in system

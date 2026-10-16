@@ -93,3 +93,9 @@ prompt.architecture:
     kind: assignment
     has: { field: left, regex: '^_ARCHITECTURE_SECTION$' }
   files: [src/lgtmaybe/engine/prompt.py]
+
+prompt.plain-language:
+  rule:
+    kind: assignment
+    has: { field: left, regex: '^PLAIN_LANGUAGE$' }
+  files: [src/lgtmaybe/engine/prompt.py]

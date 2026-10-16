@@ -189,4 +189,15 @@ def test_every_pr_builds_the_docs_but_only_main_deploys() -> None:
     workflow = (_ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
 
     assert "pull_request:" in workflow
-    assert "if: github.event_name != 'pull_request'" in workflow
+    # The upload step and the deploy job are each gated, not merely the file.
+    import yaml
+
+    jobs = yaml.safe_load(workflow)["jobs"]
+    gate = "github.event_name != 'pull_request'"
+    (upload,) = [
+        step
+        for step in jobs["build"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-pages-artifact")
+    ]
+    assert upload.get("if") == gate
+    assert jobs["deploy"].get("if") == gate
