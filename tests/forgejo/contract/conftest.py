@@ -148,10 +148,12 @@ def forgejo() -> Iterator[Forgejo]:
     )
     yield Forgejo(url, admin, owner, token, writer, reader, repo)
     # Checked, so a leak on a long-lived instance is visible rather than silent.
-    _ok(admin.delete(f"{url}/api/v1/repos/{owner}/{repo}"))
-    for login in (writer, reader):
-        _ok(admin.delete(f"{url}/api/v1/admin/users/{login}"))
-    admin.close()
+    try:
+        _ok(admin.delete(f"{url}/api/v1/repos/{owner}/{repo}"))
+        for login in (writer, reader):
+            _ok(admin.delete(f"{url}/api/v1/admin/users/{login}"))
+    finally:
+        admin.close()
 
 
 @pytest.fixture
