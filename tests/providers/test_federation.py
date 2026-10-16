@@ -127,6 +127,24 @@ class TestFailures:
         assert "api-version" not in message
         assert "idtoken" not in message
 
+    def test_a_network_failure_names_only_the_exception(self, tmp_path: Path) -> None:
+        def handle(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError(f"cannot reach {request.url}", request=request)
+
+        env = {
+            **RUNNER_ENV,
+            "INPUT_AWS_ROLE_ARN": "arn:aws:iam::1:role/r",
+            "AWS_REGION": "us-east-1",
+        }
+
+        with pytest.raises(FederationError, match="ConnectError") as excinfo:
+            federate_ci_credentials(
+                env, client=httpx.Client(transport=httpx.MockTransport(handle)), workdir=tmp_path
+            )
+
+        assert "idtoken" not in str(excinfo.value)
+        assert REQUEST_TOKEN not in str(excinfo.value)
+
     def test_a_response_without_a_token_fails(self, tmp_path: Path) -> None:
         endpoint = TokenEndpoint(body={"count": 0})
         env = {**RUNNER_ENV, "INPUT_AZURE_CLIENT_ID": "c", "INPUT_AZURE_TENANT_ID": "t"}
@@ -160,6 +178,18 @@ class TestBedrock:
         assert updates["AWS_ROLE_SESSION_NAME"] == "lgtmaybe"
         token_file = Path(updates["AWS_WEB_IDENTITY_TOKEN_FILE"])
         assert token_file.read_text(encoding="utf-8") == ID_TOKEN
+
+    def test_the_sdk_default_region_satisfies_the_input_set(self, tmp_path: Path) -> None:
+        """botocore also reads AWS_DEFAULT_REGION, so a runner that sets only it works."""
+        env = {
+            **RUNNER_ENV,
+            "INPUT_AWS_ROLE_ARN": "arn:aws:iam::1:role/r",
+            "AWS_DEFAULT_REGION": "eu-central-1",
+        }
+
+        updates = _federate(env, TokenEndpoint(), tmp_path)
+
+        assert updates["AWS_ROLE_ARN"] == "arn:aws:iam::1:role/r"
 
     def test_an_ambient_region_satisfies_the_input_set(self, tmp_path: Path) -> None:
         env = {
@@ -268,6 +298,18 @@ class TestVertex:
         assert credentials.retrieve_subject_token(None) == ID_TOKEN
 
 
+def test_two_clouds_in_one_run_each_get_their_own_audience(tmp_path: Path) -> None:
+    env = {**TestBedrock.ENV, **TestAzure.ENV}
+    endpoint = TokenEndpoint()
+
+    updates = _federate(env, endpoint, tmp_path)
+
+    assert endpoint.audiences == ["sts.amazonaws.com", "api://AzureADTokenExchange"]
+    assert updates["AWS_ROLE_ARN"] == TestBedrock.ENV["INPUT_AWS_ROLE_ARN"]
+    assert updates["AZURE_CLIENT_ID"] == "client-id"
+    assert updates["AWS_WEB_IDENTITY_TOKEN_FILE"] != updates["AZURE_FEDERATED_TOKEN_FILE"]
+
+
 class TestSecrecy:
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
     def test_token_files_are_owner_only(self, tmp_path: Path) -> None:
@@ -281,8 +323,15 @@ class TestSecrecy:
         ):
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
-    def test_each_run_writes_into_a_fresh_directory(self) -> None:
-        """No workdir given: a private temporary directory, never a shared path."""
+    def test_each_run_writes_into_a_fresh_directory(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No workdir given: a private temporary directory, never a shared path,
+        removed when the process exits (a pip-installed host runner keeps /tmp)."""
+        import atexit
+
+        registered: list[tuple[object, tuple[object, ...]]] = []
+        monkeypatch.setattr(
+            atexit, "register", lambda fn, *args, **_kw: registered.append((fn, args))
+        )
         endpoint = TokenEndpoint()
 
         updates = federate_ci_credentials(dict(TestAzure.ENV), client=endpoint.client())
@@ -291,3 +340,25 @@ class TestSecrecy:
         assert token_dir.name.startswith("lgtmaybe-oidc-")
         if sys.platform != "win32":
             assert stat.S_IMODE(os.stat(token_dir).st_mode) == 0o700
+        ((cleanup, args),) = registered
+        cleanup(*args)
+        assert not token_dir.exists()
+
+    def test_a_client_it_creates_is_closed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        real_client = httpx.Client
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"value": ID_TOKEN})
+        )
+        made: list[httpx.Client] = []
+
+        def make(*_args: object, **_kwargs: object) -> httpx.Client:
+            made.append(real_client(transport=transport))
+            return made[-1]
+
+        monkeypatch.setattr(httpx, "Client", make)
+
+        federate_ci_credentials(dict(TestAzure.ENV), workdir=tmp_path)
+
+        assert [client.is_closed for client in made] == [True]

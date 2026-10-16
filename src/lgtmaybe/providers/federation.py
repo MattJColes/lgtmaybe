@@ -20,8 +20,10 @@ is never federated twice.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import shutil
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -68,7 +70,12 @@ def _requests(env: Mapping[str, str]) -> list[_Request]:
     """Every federation the inputs ask for, checked as a set before any request."""
     requests: list[_Request] = []
     if _input(env, "INPUT_AWS_ROLE_ARN"):
-        if not (_input(env, "INPUT_AWS_REGION") or env.get("AWS_REGION")):
+        region = (
+            _input(env, "INPUT_AWS_REGION")
+            or env.get("AWS_REGION")
+            or env.get("AWS_DEFAULT_REGION")
+        )
+        if not region:
             raise FederationError(
                 "INPUT_AWS_ROLE_ARN is set but no region is: set INPUT_AWS_REGION "
                 "(or AWS_REGION) to the Bedrock region."
@@ -148,8 +155,22 @@ def federate_ci_credentials(
         ):
             raise FederationError(_MISSING_TOKEN.format(input=request.trigger))
 
-    directory = workdir or Path(tempfile.mkdtemp(prefix="lgtmaybe-oidc-"))
-    http = client or httpx.Client()
+    if workdir is None:
+        workdir = Path(tempfile.mkdtemp(prefix="lgtmaybe-oidc-"))
+        # The SDKs re-read these files whenever they refresh, so they must
+        # outlive this call; they are removed at exit instead. A container is
+        # thrown away anyway, but a pip-installed host runner keeps /tmp.
+        atexit.register(shutil.rmtree, workdir, ignore_errors=True)
+    if client is not None:
+        return _federate(env, requests, client, workdir)
+    with httpx.Client() as http:
+        return _federate(env, requests, http, workdir)
+
+
+def _federate(
+    env: Mapping[str, str], requests: list[_Request], http: httpx.Client, directory: Path
+) -> dict[str, str]:
+    """Fetch one token per request and return the SDK variables for each cloud."""
     updates: dict[str, str] = {}
     for request in requests:
         token = _fetch_id_token(env, request.audience, http)
