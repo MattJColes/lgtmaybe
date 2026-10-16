@@ -184,9 +184,11 @@ def find_existing_overview(
 
 def finding_bullet(f: ReviewFinding) -> str:
     """One finding as a Markdown list item — shared by both body sections."""
+    # The path is model-written like the prose around it, and the gateways post
+    # this section after stripping only the review watermark.
     return (
         f"- **[{f.severity.upper()}{finding_badge(f)}] {model_prose(f.title)}** "
-        f"(`{f.path}`): {model_prose(f.body)}"
+        f"({code_span(strip_markers(f.path))}): {model_prose(f.body)}"
     )
 
 
