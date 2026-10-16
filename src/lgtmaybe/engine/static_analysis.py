@@ -821,14 +821,20 @@ def _osv_findings(data: dict[str, Any], root: Path) -> list[ToolFinding]:
 def _zizmor_finding(item: dict[str, Any]) -> ToolFinding:
     """Map one zizmor audit hit onto the shared scale.
 
-    Two shape traps, both load-bearing: ``start_point.row`` is **0-based**, and
-    the path hides under a single-key enum wrapper (``Local``/``Remote``) whose
-    inner key varies by input kind — so read the one value rather than guessing
-    the name.
+    Three shape traps, all load-bearing: ``start_point.row`` is **0-based**, the
+    path hides under a single-key enum wrapper (``Local``/``Remote``) whose
+    inner key varies by input kind, and the first location is usually the
+    ``Hidden`` one ("this step" / "this workflow") — the ``Primary`` one points
+    at the offending line, so anchoring on ``locations[0]`` lands the comment
+    on an unchanged line and the engine drops it as off-diff.
     """
-    location = item.get("locations") or [{}]
-    concrete = location[0].get("concrete", {}).get("location", {})
-    key = location[0].get("symbolic", {}).get("key", {})
+    locations = item.get("locations") or [{}]
+    chosen = next(
+        (loc for loc in locations if loc.get("symbolic", {}).get("kind") == "Primary"),
+        locations[0],
+    )
+    concrete = chosen.get("concrete", {}).get("location", {})
+    key = chosen.get("symbolic", {}).get("key", {})
     inner: Any = next(iter(key.values()), {}) if isinstance(key, dict) else {}
     path = next(iter(inner.values()), "") if isinstance(inner, dict) else ""
     severity = str(item.get("determinations", {}).get("severity", "")).upper()
