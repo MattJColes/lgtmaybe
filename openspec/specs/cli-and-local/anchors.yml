@@ -24,44 +24,6 @@ cli.graceful-interrupt:
     has: { field: name, regex: '^graceful_interrupt$' }
   files: [src/lgtmaybe/cli/**/*.py]
 
-cli.slash:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^parse_command$' }
-    files: [src/lgtmaybe/cli/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^dispatch$' }
-    files: [src/lgtmaybe/cli/**/*.py]
-
-cli.diagram-sequence:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_sequence_views$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
-cli.overview-high-impact:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^build_overview$' }
-    files: [src/lgtmaybe/engine/overview.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^path_signals$' }
-    files: [src/lgtmaybe/engine/high_impact.py]
-
-cli.review-comment-noop:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^action$' }
-  files: [src/lgtmaybe/cli/**/*.py]
-
-cli.response-style:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_answer_question$' }
-  files: [src/lgtmaybe/cli/slash.py]
-
 cli.profile-output:
   rule:
     kind: function_definition
@@ -129,43 +91,6 @@ cli.utf8-boundaries:
       kind: function_definition
       has: { field: name, regex: '^_git$' }
     files: [src/lgtmaybe/local/__init__.py]
-
-cli.starter-workflow-diagrams:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^should_auto_diagram$' }
-  files: [src/lgtmaybe/cli/**/*.py]
-
-cli.existing-overview:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^find_existing_overview$' }
-    files: [src/lgtmaybe/core/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^existing_overview_note$' }
-    files: [src/lgtmaybe/cli/**/*.py]
-
-cli.docs-homepage-diagram:
-  rule:
-    kind: fenced_code_block
-    regex: 'flowchart LR'
-  language: markdown
-  files: [docs/index.md]
-
-cli.docs-homepage-diagram-breadth:
-  rule:
-    kind: fenced_code_block
-    regex: '(?s)Order events.*Notification worker'
-  language: markdown
-  files: [docs/index.md]
-
-cli.docs-homepage-overview:
-  rule:
-    kind: atx_heading
-    has: { field: heading_content, regex: '^Start here$' }
-  language: markdown
-  files: [docs/index.md]
 
 distribution.action-major:
   rule:

@@ -34,12 +34,6 @@ engine.repair:
     has: { field: name, regex: '^repair_findings$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
-engine.model-escalation:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_escalate_model$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
 engine.schemaless-retry:
   rule:
     kind: function_definition
@@ -74,64 +68,6 @@ engine.size-cap:
     has: { field: name, regex: '^passes_size_cap$' }
   files: [src/lgtmaybe/engine/**/*.py]
 
-engine.input-budget:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_fit_input_budget$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
-engine.recursive-walk:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^split_patch_into_hunks$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^split_hunk_by_budget$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^batch_files$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-
-engine.truncation-detection:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_remedy_oversized$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
-engine.timeout-split:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^_review_split$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^_split_batch$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-
-engine.reasoning-ceiling:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^_reasoning_exhausted_reason$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
-engine.reasoning-step-down:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^_retry_lower_effort$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^lower_reasoning_effort$' }
-    files: [src/lgtmaybe/providers/**/*.py]
-
-engine.reasoning-off:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^disable_reasoning$' }
-  files: [src/lgtmaybe/providers/**/*.py]
-
 engine.mid-review-retrieval:
   rule:
     kind: function_definition
@@ -147,34 +83,6 @@ engine.context-expansion:
       kind: function_definition
       has: { field: name, regex: '^trailing_context_lines$' }
     files: [src/lgtmaybe/engine/**/*.py]
-
-engine.triage:
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^triage_files$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^always_escalate$' }
-    files: [src/lgtmaybe/engine/**/*.py]
-
-engine.static-analysis:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^run_static_analysis$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
-engine.tool-findings:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^tool_review_findings$' }
-  files: [src/lgtmaybe/engine/**/*.py]
-
-engine.scan-manifests:
-  rule:
-    kind: function_definition
-    has: { field: name, regex: '^is_scannable_manifest$' }
-  files: [src/lgtmaybe/core/diff.py]
 
 engine.profile-findings:
   rule:

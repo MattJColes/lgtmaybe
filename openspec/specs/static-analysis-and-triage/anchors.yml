@@ -1,0 +1,29 @@
+# ast-grep anchors for static-analysis-and-triage - see "Living specs" in AGENTS.md.
+
+engine.triage:
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^triage_files$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+  - rule:
+      kind: function_definition
+      has: { field: name, regex: '^always_escalate$' }
+    files: [src/lgtmaybe/engine/**/*.py]
+
+engine.static-analysis:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^run_static_analysis$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+engine.scan-manifests:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^is_scannable_manifest$' }
+  files: [src/lgtmaybe/core/diff.py]
+
+engine.tool-findings:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^tool_review_findings$' }
+  files: [src/lgtmaybe/engine/**/*.py]

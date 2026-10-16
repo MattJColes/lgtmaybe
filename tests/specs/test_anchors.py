@@ -149,3 +149,45 @@ def test_requirement_sections_respect_the_size_cap() -> None:
                     f"{spec}: section '{section.anchor_id}' is {size} lines "
                     f"(cap {SECTION_LINE_CAP}) — split it or tighten the prose"
                 )
+
+
+def _review_workflow_input_budget() -> int:
+    """The `max_input_tokens` this repo's own review workflow runs with."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "lgtmaybe.yml").read_text(encoding="utf-8")
+    )
+    budgets = [
+        int(step["with"]["max_input_tokens"])
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if "max_input_tokens" in (step.get("with") or {})
+    ]
+    assert budgets, "the review workflow no longer sets max_input_tokens"
+    return min(budgets)
+
+
+def test_each_spec_fits_the_spec_lens_budget() -> None:
+    """The spec lens reads a matched spec only when one of its files fits an
+    eighth of `max_input_tokens`, costed as the loader costs it. A spec.md over
+    that is never read when this repo reviews itself, and the summary says so on
+    every PR that matches it: split the capability instead of letting it grow.
+
+    Counted with cl100k_base directly rather than `retrieve.redacted_cost`, whose
+    memoized counter other tests switch to the character estimate."""
+    import tiktoken
+
+    from lgtmaybe.engine.redact import redact
+
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    except Exception as exc:  # egress-restricted runner: no BPE file to load
+        pytest.skip(f"cl100k_base unavailable: {exc}")
+    budget = _review_workflow_input_budget() // 8
+    over = {
+        spec.parent.name: cost
+        for spec in _spec_files()
+        if (cost := len(encoding.encode(redact(spec.read_text(encoding="utf-8"))))) > budget
+    }
+    assert not over, f"specs over the {budget}-token spec budget, split them: {over}"
