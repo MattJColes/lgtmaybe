@@ -147,13 +147,21 @@ def forgejo() -> Iterator[Forgejo]:
         )
     )
     yield Forgejo(url, admin, owner, token, writer, reader, repo)
-    # Checked, so a leak on a long-lived instance is visible rather than silent.
+    # Every delete is attempted, then any failure is reported, so a leak on a
+    # long-lived instance is visible and one failure does not strand the rest.
+    failures: list[str] = []
     try:
-        _ok(admin.delete(f"{url}/api/v1/repos/{owner}/{repo}"))
-        for login in (writer, reader):
-            _ok(admin.delete(f"{url}/api/v1/admin/users/{login}"))
+        for path in (
+            f"/api/v1/repos/{owner}/{repo}",
+            *(f"/api/v1/admin/users/{login}" for login in (writer, reader)),
+        ):
+            try:
+                _ok(admin.delete(f"{url}{path}"))
+            except (AssertionError, httpx.HTTPError) as exc:
+                failures.append(str(exc))
     finally:
         admin.close()
+    assert not failures, f"contract cleanup failed: {failures}"
 
 
 @pytest.fixture
