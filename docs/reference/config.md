@@ -153,6 +153,7 @@ Everything the engine needs about a pull request. Fetched via the GitHub REST AP
 | `repo` | string | Yes | — | Repo |
 | `risk` | RiskAssessment / null | No | `null` |  |
 | `scan_contents` | object | No | — | Scan Contents |
+| `stack` | PRStack / null | No | `null` |  |
 | `title` | string | No | `` | Title |
 
 ## Raw JSON schemas
@@ -1337,6 +1338,52 @@ The canonical machine-readable schemas. These are the source of truth for provid
 ```json
 {
   "$defs": {
+    "PRStack": {
+      "additionalProperties": false,
+      "description": "Where a pull request sits in a stack of pull requests, each built on the last.\n\n``position`` counts from the bottom (1 is the layer that targets\n``base_ref``, the branch the whole stack lands on). ``below`` and ``above``\nare the other open layers, each ordered bottom to top. A layer's diff shows\nonly its own changes, so what the other layers change is not shown to it.",
+      "properties": {
+        "above": {
+          "items": {
+            "$ref": "#/$defs/StackLayer"
+          },
+          "title": "Above",
+          "type": "array"
+        },
+        "base_ref": {
+          "title": "Base Ref",
+          "type": "string"
+        },
+        "below": {
+          "items": {
+            "$ref": "#/$defs/StackLayer"
+          },
+          "title": "Below",
+          "type": "array"
+        },
+        "complete": {
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "position": {
+          "minimum": 1,
+          "title": "Position",
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "position",
+        "size",
+        "base_ref"
+      ],
+      "title": "PRStack",
+      "type": "object"
+    },
     "RiskAssessment": {
       "additionalProperties": false,
       "description": "A change's risk verdict: its level, the ranked reasons, and the gaps.\n\n``level`` None means the assessment itself failed and nothing is claimed.\n``unassessed`` lists changed code files whose blast radius was not measured,\nso a ``low`` verdict can never pass for a measured clean result.",
@@ -1421,6 +1468,34 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "text"
       ],
       "title": "RiskReason",
+      "type": "object"
+    },
+    "StackLayer": {
+      "additionalProperties": false,
+      "description": "Another pull request in the same stack: its number, title and changed files.\n\nWritten by whoever opened that PR, so untrusted like a diff: the engine\nredacts and wraps it before it reaches a model.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "number": {
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "title": "StackLayer",
       "type": "object"
     }
   },
@@ -1510,6 +1585,17 @@ The canonical machine-readable schemas. These are the source of truth for provid
       },
       "title": "Scan Contents",
       "type": "object"
+    },
+    "stack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PRStack"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "title": {
       "default": "",

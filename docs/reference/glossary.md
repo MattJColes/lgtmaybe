@@ -233,6 +233,13 @@ The [lens](#lens) that checks a change against a written specification the
 repository keeps, such as an OpenSpec, Spec Kit or Kiro spec. It only runs when
 it finds a spec that matches the pull request.
 
+## Stacked Pull Requests
+
+A chain of small pull requests, each built on the one below it and merged
+bottom up. Each one shows only its own changes. lgtmaybe tells the model where a
+pull request sits in its stack. See
+[Review Stacked Pull Requests](../how-to/review-stacked-pull-requests.md).
+
 ## Static-Analysis Fusion
 
 A step, on by default, that runs installed tools, such as ruff, bandit,

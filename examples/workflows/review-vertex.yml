@@ -8,6 +8,10 @@ name: lgtmaybe (vertex)
 
 on:
   pull_request_target:
+    # `edited` catches a retarget: when the PR below a stacked PR merges, the
+    # one above moves onto its base, with the same head and a new diff. Other
+    # edits (title, description) are filtered out below and start no job.
+    types: [opened, synchronize, reopened, edited]
   issue_comment:
     types: [created]
 
@@ -21,8 +25,10 @@ permissions:
 # that run from cancelling the review job that posted it. A new push still
 # cancels an in-flight review — two pushes are both
 # pull_request_target, so they still collide.
+# A title or description edit gets a group of its own (its run id), so the
+# run it starts, which runs no job, cannot cancel a review either.
 concurrency:
-  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -41,6 +47,7 @@ jobs:
     # /REVIEW and `/review full` both pass.
     if: >-
       (github.event_name == 'pull_request_target' &&
+       (github.event.action != 'edited' || github.event.changes.base) &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&

@@ -388,3 +388,25 @@ def test_the_dogfood_config_is_valid_and_fits_this_repo() -> None:
     for rule in config.directory_rules:
         for context_file in rule.context_files:
             assert (_REPO_ROOT / context_file).is_file(), context_file
+
+
+def test_workflows_review_a_retarget_and_start_no_job_for_other_edits() -> None:
+    """A stacked PR moves onto its parent's base when the parent merges: an
+    `edited` event with `changes.base`, same head, new diff. The workflows listen
+    for `edited` to catch it, so every other edit (a title, a description) must
+    start no job, and must not join a running review's concurrency group, where
+    cancel-in-progress would kill that review."""
+    for path in _workflows():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        on = workflow.get("on", workflow.get(True))
+        assert on["pull_request_target"] == {
+            "types": ["opened", "synchronize", "reopened", "edited"]
+        }, path.name
+
+        flat = " ".join(workflow["jobs"]["review"]["if"].split())
+        pr_event = "github.event_name == 'pull_request_target'"
+        (pr_arm,) = [arm for arm in _top_level_arms(flat) if pr_event in arm]
+        assert "(github.event.action != 'edited' || github.event.changes.base)" in pr_arm, path.name
+
+        if "concurrency" in workflow:  # joins before the job guard runs
+            assert "github.event.changes.base" in workflow["concurrency"]["group"], path.name

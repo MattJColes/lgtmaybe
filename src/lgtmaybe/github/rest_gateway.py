@@ -25,6 +25,7 @@ from tenacity import Retrying, retry_if_result, stop_after_attempt
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
+    REVIEWED_DIFF_MARKER,
     REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
@@ -52,7 +53,9 @@ from lgtmaybe.core.models import (
     SPLITTING_LABEL,
     ActiveFinding,
     PRContext,
+    PRStack,
     ReviewFinding,
+    StackLayer,
 )
 from lgtmaybe.core.ports import DiffUnavailable
 
@@ -113,6 +116,7 @@ _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 # Defined in core.comment so every forge stamps the same wire format.
 _REVIEWED_MARKER = REVIEWED_MARKER
 _DIAGRAMMED_MARKER = DIAGRAMMED_MARKER
+_REVIEWED_DIFF_MARKER = REVIEWED_DIFF_MARKER
 
 
 # Concurrency for the per-file head-content fetch. The contents are independent
@@ -123,6 +127,15 @@ _CONTENT_FETCH_WORKERS = 8
 # these are writes (reply, resolve, marker rewrite) against one PR, and GitHub
 # is stricter about concurrent mutations than concurrent reads.
 _RESOLVE_WORKERS = 4
+
+
+# How many other layers of a stack to name, each side of this PR. Each costs a
+# lookup or two, and a model reading ten layer summaries is past the point where
+# they help; a chain walk also stops here, so a cycle cannot run away.
+_MAX_STACK_LAYERS = 8
+# Layers fetched at once. Each layer is one or two independent GETs, so a deep
+# stack must not pay them one after another on the context fetch.
+_STACK_FETCH_WORKERS = 4
 
 
 def _head_ref(meta: dict[str, Any]) -> str:
@@ -240,6 +253,9 @@ class RestGitHubGateway:
         # never record "reviewed up to head" — the next run would then skip
         # commits nobody reviewed.
         self._reviewed_sha: str | None = None
+        # The whole PR diff's fingerprint at that head, stamped beside it and
+        # only with it (see mark_reviewed_diff).
+        self._reviewed_diff: str | None = None
         # Watermark reads and pre-post lookup share one paginated scan. A
         # successful post invalidates it so later reads see the new native summary.
         # _done distinguishes a cached missing match from an unfetched list.
@@ -330,8 +346,10 @@ class RestGitHubGateway:
         # from the pool would narrow content fetching to
         # _CONTENT_FETCH_WORKERS - 1 for as long as the count runs — turning an
         # overlap into a slowdown on exactly the wide PRs the pool sizing is for.
-        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 1) as pool:
+        with ThreadPoolExecutor(max_workers=_CONTENT_FETCH_WORKERS + 2) as pool:
             open_threads = pool.submit(self.count_open_finding_threads)
+            # Like the count: metadata on its own slot, overlapping the fetches.
+            stack = pool.submit(self._fetch_stack, meta)
             if scannable:
                 scanned = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), scannable)
                 scan_contents = {path: text for path, text in scanned if text is not None}
@@ -339,6 +357,7 @@ class RestGitHubGateway:
                 results = pool.map(lambda p: (p, self._get_file_content(p, head_sha)), reviewable)
                 file_contents = {path: content for path, content in results if content is not None}
             open_finding_threads = open_threads.result()
+            pr_stack = stack.result()
 
         return PRContext(
             diff=diff,
@@ -354,6 +373,133 @@ class RestGitHubGateway:
             commit_messages=self._fetch_commit_subjects(),
             head_branch=_head_ref(meta),
             open_finding_threads=open_finding_threads,
+            stack=pr_stack,
+        )
+
+    # ------------------------------------------------------------------
+    # Stacked pull requests (adapter-only, read into PRContext.stack)
+    # ------------------------------------------------------------------
+
+    def _fetch_stack(self, meta: dict[str, Any]) -> PRStack | None:
+        """Where this PR sits in a stack of pull requests, or None.
+
+        GitHub's native stacks put a ``stack`` object on the PR; the stacks API
+        then lists every layer bottom to top. Older tools (Graphite, ghstack,
+        git-town) stack by basing each PR on the branch of the one below, so
+        without the object the chain is walked by branch name. Best-effort
+        context: any failure is logged and the review goes on without it.
+        """
+        try:
+            native = meta.get("stack")
+            if isinstance(native, dict):
+                return self._native_stack(native)
+            return self._chained_stack(meta)
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, IndexError) as exc:
+            _log.warning("could not read the pull request's stack", extra={"error": str(exc)})
+            return None
+
+    def _native_stack(self, native: dict[str, Any]) -> PRStack | None:
+        listing = self._get_json(f"{self._api}/stacks/{int(native['number'])}")
+        numbers = [
+            int(pr["number"])
+            for pr in listing["pull_requests"]
+            if pr.get("state", "open") == "open"
+        ]
+        if self._pr_number not in numbers:
+            return None
+        at = numbers.index(self._pr_number)
+        below = numbers[:at][-_MAX_STACK_LAYERS:]
+        above = numbers[at + 1 :][:_MAX_STACK_LAYERS]
+        layers = self._stack_layers([(number, None) for number in below + above])
+        # Position and size from the listing, not the payload: the block names the
+        # listing's layers, and the payload can still count ones no longer open.
+        return PRStack(
+            position=at + 1,
+            size=len(numbers),
+            base_ref=str(native["base"]["ref"]),
+            below=layers[: len(below)],
+            above=layers[len(below) :],
+        )
+
+    def _chained_stack(self, meta: dict[str, Any]) -> PRStack | None:
+        """The chain of open PRs this one is based on, and those based on it.
+
+        Same-repository only: a fork's branch names say nothing about this
+        repository's branches. A side ends naturally at the default branch or a
+        step with no match (a branch no PR heads, a last layer). An ambiguous
+        step, a branch already seen or the layer cap also end it, but leave the
+        stack ``complete=False``: its position, size and base are then guesses,
+        and the engine does not present them as facts.
+        """
+        head = meta.get("head") or {}
+        if (head.get("repo") or {}).get("full_name") != self._repo:
+            return None
+        base = meta["base"]
+        default = (base.get("repo") or {}).get("default_branch")
+        ref, head_ref = str(base["ref"]), str(head["ref"])
+        owner = quote(self._repo.split("/", 1)[0], safe="")
+        seen = {head_ref}
+        # (number, title) per layer while walking: each step depends on the one
+        # before, but the layers' file lists do not, so they are fetched after.
+        below: list[tuple[int, str | None]] = []
+        complete = True
+        while ref != default:
+            if ref in seen or len(below) == _MAX_STACK_LAYERS:
+                complete = False
+                break
+            parents = self._get_json(
+                f"{self._api}/pulls?state=open&head={owner}:{quote(ref, safe='')}&per_page=2"
+            )
+            if len(parents) != 1:
+                complete = complete and not parents
+                break
+            seen.add(ref)
+            below.insert(0, (int(parents[0]["number"]), parents[0].get("title")))
+            ref = str(parents[0]["base"]["ref"])
+        above: list[tuple[int, str | None]] = []
+        tip = head_ref
+        while True:
+            children = self._get_json(
+                f"{self._api}/pulls?state=open&base={quote(tip, safe='')}&per_page=2"
+            )
+            if len(children) != 1:
+                complete = complete and not children
+                break
+            child_head = children[0]["head"]
+            tip = str(child_head["ref"])
+            if (child_head.get("repo") or {}).get("full_name") != self._repo:
+                break  # a fork's PR is not a layer: this side ends here
+            if tip in seen or len(above) == _MAX_STACK_LAYERS:
+                complete = False
+                break
+            seen.add(tip)
+            above.append((int(children[0]["number"]), children[0].get("title")))
+        if not below and not above:
+            return None
+        layers = self._stack_layers(below + above)
+        return PRStack(
+            position=len(below) + 1,
+            size=len(below) + 1 + len(above),
+            base_ref=ref,
+            below=layers[: len(below)],
+            above=layers[len(below) :],
+            complete=complete,
+        )
+
+    def _stack_layers(self, layers: list[tuple[int, str | None]]) -> list[StackLayer]:
+        """Fetch several layers at once, keeping their bottom-to-top order."""
+        if not layers:
+            return []
+        with ThreadPoolExecutor(max_workers=min(len(layers), _STACK_FETCH_WORKERS)) as pool:
+            return list(pool.map(lambda layer: self._stack_layer(*layer), layers))
+
+    def _stack_layer(self, number: int, title: str | None = None) -> StackLayer:
+        """Another layer's number, title and changed files (the first page)."""
+        if title is None:
+            title = str(self._get_json(f"{self._api}/pulls/{number}").get("title") or "")
+        files = self._get_json(f"{self._api}/pulls/{number}/files?per_page=100")
+        return StackLayer(
+            number=number, title=title, files=[str(item["filename"]) for item in files]
         )
 
     def post_review(
@@ -388,12 +534,17 @@ class RestGitHubGateway:
             # Only that family: the summary carries the engine's own lenses and
             # risk markers, and finding prose is already stripped of every one.
             content = strip_markers(
-                f"{summary}{render_demoted(demoted_findings)}{render_broad(broad)}",
-                _REVIEWED_MARKER,
+                strip_markers(
+                    f"{summary}{render_demoted(demoted_findings)}{render_broad(broad)}",
+                    _REVIEWED_MARKER,
+                ),
+                _REVIEWED_DIFF_MARKER,
             )
             body = f"{content}\n\n{self._marker}"
             if self._reviewed_sha:
                 body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+                if self._reviewed_diff:
+                    body += f"\n<!-- lgtmaybe-diff:{self._reviewed_diff} -->"
             return body
 
         body = build_body(demoted)
@@ -711,6 +862,24 @@ class RestGitHubGateway:
         _review_id, body, _commit_id = entry
         return last_match(_REVIEWED_MARKER, body)
 
+    def last_reviewed_diff(self) -> str | None:
+        """The PR diff fingerprint stamped beside the watermark, or None.
+
+        Read from the same summary as ``last_reviewed_sha`` and only when that
+        summary carries a watermark, so it always describes that head. None on a
+        missing marker or an HTTP failure, and the caller then reviews.
+        """
+        try:
+            entry = self._find_existing_review_entry()
+        except httpx.HTTPError:
+            return None
+        if entry is None:
+            return None
+        _review_id, body, _commit_id = entry
+        if last_match(_REVIEWED_MARKER, body) is None:
+            return None
+        return last_match(_REVIEWED_DIFF_MARKER, body)
+
     def last_completed_sha(self, *, diagram_required: bool) -> str | None:
         """Return the latest head whose required review outputs were posted.
 
@@ -838,6 +1007,14 @@ class RestGitHubGateway:
         watermark.
         """
         self._reviewed_sha = head_sha
+
+    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
+        """Prepare the PR diff fingerprint stamped beside the reviewed marker.
+
+        In-memory only, like ``mark_reviewed``, and stamped only when a head is:
+        a run that completes nothing records no fingerprint either.
+        """
+        self._reviewed_diff = fingerprint
 
     def _anchor_sha(self) -> str | None:
         """The PR's current head SHA, for anchoring re-run inline comments.

@@ -95,6 +95,7 @@ nav:
           - Choose a review model: how-to/choose-a-review-model.md
           - Use as a GitHub Action: how-to/use-as-github-action.md
           - Post as lgtmaybe[bot]: how-to/post-as-a-github-app.md
+          - Review stacked pull requests: how-to/review-stacked-pull-requests.md
           - Review on Azure DevOps: how-to/review-on-azure-devops.md
           - Review on Gitea: how-to/review-on-gitea.md
           - Review on GitLab: how-to/review-on-gitlab.md

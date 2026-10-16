@@ -30,6 +30,7 @@ import click
 from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
 from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
+from lgtmaybe.core.diff import diff_fingerprint
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
 from lgtmaybe.core.forge import parse_pr_url as locate_pr
@@ -124,14 +125,30 @@ def pr_event_action(event: dict[str, Any]) -> str:
     return _EVENT_ACTION_ALIASES.get(action, action)
 
 
-def should_auto_diagram(cfg: ReviewConfig, *, event_action: str) -> bool:
+def base_changed(event: dict[str, Any]) -> bool:
+    """Whether a pull-request event moved the PR onto another base branch.
+
+    GitHub sends this as ``edited`` with ``changes.base``: a retarget, as when
+    the PR below a stacked PR merges and the one above moves onto its base. The
+    head is unchanged but the diff is not. Every other ``edited`` (title,
+    description) changes no code.
+    """
+    changes = event.get("changes")
+    return isinstance(changes, dict) and "base" in changes
+
+
+def should_auto_diagram(cfg: ReviewConfig, *, event_action: str, retargeted: bool = False) -> bool:
     """Whether the action run should post or refresh the change overview.
 
     The overview's own sections (description, High Impact Areas) are config
     toggles inside it, not separate events: they ride this one comment, so a
-    push refreshes all of them together or none of them.
+    push refreshes all of them together or none of them. A retarget (see
+    :func:`base_changed`) changes the diff the overview describes, so it
+    refreshes too; any other ``edited`` does not.
     """
-    return cfg.auto_diagram and event_action in ("opened", "reopened", "synchronize")
+    return cfg.auto_diagram and (
+        event_action in ("opened", "reopened", "synchronize") or retargeted
+    )
 
 
 def existing_overview_note(github: ReviewGateway, ctx: PRContext, cfg: ReviewConfig) -> str | None:
@@ -584,11 +601,11 @@ def run_review(
         # prefetch upstream cannot bypass it.
         overview_note = existing_overview_note(github, ctx, cfg)
         diagram_required = overview_note is None
-    review_ctx, incremental_since, already_complete = _incremental_context(
+    review_ctx, incremental_since, nothing_to_review = _incremental_context(
         github, ctx, cfg, diagram_required=diagram_required
     )
-    if already_complete:
-        return [], f"Head {ctx.head_sha[:7]} is already complete; nothing changed."
+    if nothing_to_review is not None:
+        return [], nothing_to_review
     if cfg.risk.enabled and ctx.risk is None:
         # Assessed on `ctx`, the WHOLE pull request, not on `review_ctx`, which
         # incremental scoping may have narrowed: every surface (summary, labels,
@@ -633,6 +650,11 @@ def run_review(
         mark_reviewed = getattr(github, "mark_reviewed", None)
         if mark_reviewed is not None:
             mark_reviewed(ctx.head_sha if complete else None)
+        mark_reviewed_diff = getattr(github, "mark_reviewed_diff", None)
+        if callable(mark_reviewed_diff):
+            # The WHOLE pull request's diff, never the increment: the next run
+            # compares it against its own whole diff (see _incremental_context).
+            mark_reviewed_diff(diff_fingerprint(ctx.diff) if complete else None)
         if incremental_since is not None:
             set_scope = getattr(github, "set_incremental_scope", None)
             if set_scope is not None:
@@ -715,41 +737,73 @@ def _incremental_context(
     cfg: ReviewConfig,
     *,
     diagram_required: bool = False,
-) -> tuple[PRContext, str | None, bool]:
-    """Return ``(context, completed_sha, already_complete)`` for this run.
+) -> tuple[PRContext, str | None, str | None]:
+    """Return ``(context, completed_sha, nothing_to_review)`` for this run.
 
     Incremental only when ``cfg.incremental`` is truthy (None = auto resolves
     upstream, and unresolved auto means full), the gateway has the adapter
     methods (``last_completed_sha`` / ``compare_diff`` — fakes and the frozen
     port don't), a completion watermark exists, the head moved since, and the
-    compare yields a usable increment. A matching head sets the final flag;
-    every degraded case returns the full context with no completed SHA.
+    compare yields a usable increment. Every degraded case returns the full
+    context with no completed SHA.
+
+    ``nothing_to_review`` is the reason this run has no work, or None: the head
+    is the completed one, or a new head whose whole diff fingerprints the same
+    as the completed head's (a rebase that only moved the PR, as GitHub does to
+    every stacked PR above one that merges).
     """
     if not cfg.incremental:
-        return ctx, None, False
+        return ctx, None, None
     last_completed_sha = getattr(github, "last_completed_sha", None)
     last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
     compare_diff = getattr(github, "compare_diff", None)
     if compare_diff is None or (last_completed_sha is None and last_reviewed_sha is None):
-        return ctx, None, False
+        return ctx, None, None
     if last_completed_sha is not None:
         last_sha = last_completed_sha(diagram_required=diagram_required)
     elif last_reviewed_sha is not None:
         last_sha = last_reviewed_sha()
     else:  # guarded above; keeps the optional callable narrowed for type-checkers
-        return ctx, None, False
+        return ctx, None, None
     if not last_sha:
-        return ctx, None, False
+        return ctx, None, None
     if last_sha == ctx.head_sha:
-        return ctx, None, True
+        return ctx, None, f"Head {ctx.head_sha[:7]} is already complete; nothing changed."
+    if _diff_unchanged_since(github, ctx, last_sha):
+        _log.info("diff unchanged since the last review", extra={"since": last_sha})
+        return (
+            ctx,
+            None,
+            f"Head {ctx.head_sha[:7]} has the same diff as the completed {last_sha[:7]} "
+            "(for example a rebase that only moved the pull request onto a new base): "
+            "the diff is unchanged, so there is nothing new to review.",
+        )
     increment = compare_diff(last_sha, ctx.head_sha)
     if not increment or not increment.strip():
-        return ctx, None, False
+        return ctx, None, None
     _log.info(
         "incremental review",
         extra={"since": last_sha, "head": ctx.head_sha},
     )
-    return ctx.model_copy(update={"diff": increment}), last_sha, False
+    return ctx.model_copy(update={"diff": increment}), last_sha, None
+
+
+def _diff_unchanged_since(github: ReviewGateway, ctx: PRContext, last_sha: str) -> bool:
+    """Whether ``ctx``'s whole diff fingerprints the same as ``last_sha``'s did.
+
+    Only when the stamped fingerprint belongs to ``last_sha`` itself: with a
+    diagram required, the last completed head can be older than the last
+    reviewed one, whose fingerprint then describes a different head. A gateway
+    without the pair (every forge but GitHub) never skips.
+    """
+    last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
+    last_reviewed_diff = getattr(github, "last_reviewed_diff", None)
+    if not callable(last_reviewed_sha) or not callable(last_reviewed_diff):
+        return False
+    if last_reviewed_sha() != last_sha:
+        return False
+    stamped = last_reviewed_diff()
+    return stamped is not None and stamped == diff_fingerprint(ctx.diff)
 
 
 def _diff_paths(diff: str) -> set[str]:

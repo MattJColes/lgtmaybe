@@ -35,7 +35,7 @@ Reviews SHALL reuse the latest matching token-authenticated actor/provider/model
 summary across all pages when its native commit equals the reviewed commit.
 Unknown authenticated identity SHALL fail closed. A completed different-commit
 review SHALL create a fresh summary at its reviewed commit, preserving history
-and one-for-one inline dedupe; its hidden marker carries the incremental watermark.
+and one-for-one inline dedupe; its hidden markers carry the incremental watermark and the whole diff's fingerprint.
 When GitHub rejects a rerun position with 422, later comments SHALL post; rejected
 findings SHALL remain in the body. Other posting failures SHALL remain fatal.
 <!-- anchor: github.post-review -->
@@ -316,6 +316,12 @@ Posting SHALL be ordered so the review lands before any comment lgtmaybe emits.
 - **THEN** that run's concurrency group differs from the active
   `pull_request_target` review's, and at job scope an author failing the guard
   does not enter a group at all
+
+#### Scenario: a title or description edit arrives mid-review
+
+- **WHEN** an `edited` event that leaves the base branch alone starts a run
+- **THEN** it starts no job, and at workflow scope its group is its own, so it
+  cancels no review
 
 #### Scenario: a newer push arrives mid-review
 

@@ -167,7 +167,7 @@ The Action SHALL NOT post its automatic change overview when the pull request al
 
 ### Requirement: Starter workflows enable the automatic change overview
 
-The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events from the full current PR context (unless the PR already diagrams the change, below), post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
+The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events, and on an `edited` event that moves the base branch, from the full current PR context (unless the PR already diagrams the change, below), post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
 <!-- anchor: cli.starter-workflow-diagrams -->
 
 #### Scenario: New repository adopts a supplied workflow

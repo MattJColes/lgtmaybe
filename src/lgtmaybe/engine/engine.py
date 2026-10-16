@@ -28,12 +28,14 @@ from lgtmaybe.core.logging import get_logger
 from lgtmaybe.core.models import (
     PRContext,
     ProviderResult,
+    PRStack,
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
     ReviewPreset,
     ReviewResult,
     RiskAssessment,
+    StackLayer,
     StaticAnalysisTool,
     ToolMode,
     is_unrecoverable,
@@ -68,6 +70,7 @@ from .injection import (
     wrap_intent,
     wrap_not_shown,
     wrap_spec,
+    wrap_stack,
 )
 from .parse import ParseError, parse_findings, parse_needs
 from .profiling import profiler
@@ -775,6 +778,10 @@ class _Run:
     # so it has to derive its own not-shown manifest rather than inherit the
     # batch's — which would leave a piece silently unaware of its siblings' files.
     changed_files: tuple[str, ...] = ()
+    # The PR's place in its stack (`injection.wrap_stack`), redacted, or None
+    # outside a stack. The same for every batch and lens, so it rides the shared
+    # prefix of every call, split pieces and deferral re-runs included.
+    stack_block: str | None = None
 
 
 class _OnOversized(Protocol):
@@ -878,7 +885,9 @@ def _lens_messages(
     # block, and it varies per batch exactly like the hints do, so it is warmed
     # once by the primer and read by lenses 2..N.
     prefix = "\n\n".join(
-        part for part in (dir_block, hint_block, hidden_block, wrapped) if part is not None
+        part
+        for part in (dir_block, hint_block, run.stack_block, hidden_block, wrapped)
+        if part is not None
     )
     suffix = lens.user_block if context is None else f"{context}\n\n{lens.user_block}"
     if spec is not None:
@@ -1300,6 +1309,7 @@ class LLMReviewEngine:
             concurrency=concurrency_cap(cfg),
             cfg=cfg,
             changed_files=tuple(ctx.changed_files),
+            stack_block=wrap_stack(_redacted_stack(ctx.stack)),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
         # Hints on scan-only files (dependency lockfiles and manifests the review
@@ -1593,7 +1603,11 @@ class LLMReviewEngine:
                 filtered = apply_finding_rules(filtered, cfg)
 
         summary_line = _summary_line(
-            len(filtered), cfg, risk, temperature_dropped=self._temperature_dropped()
+            len(filtered),
+            cfg,
+            risk,
+            temperature_dropped=self._temperature_dropped(),
+            stack=ctx.stack,
         )
         profiler.record_returned_findings(len(filtered))
 
@@ -2894,6 +2908,7 @@ def _summary_line(
     risk: RiskAssessment | None = None,
     *,
     temperature_dropped: bool = False,
+    stack: PRStack | None = None,
 ) -> str:
     """The review summary line: the user's template, or the built-in default.
 
@@ -2902,9 +2917,12 @@ def _summary_line(
     a review. ``{risk}`` renders the risk-of-change segment (empty when off);
     ``{temperature}`` likewise renders ``temperature not sent`` when the
     configured temperature never reached the model, and nothing otherwise.
+    ``{stack}`` renders the PR's layer in a stack of pull requests ("layer 2 of
+    3 in a stack"), and nothing outside a stack.
     """
     version = package_version()
     segment = risk_segment(risk) if risk is not None else ""
+    stack_segment = _stack_segment(stack)
     temperature = _TEMPERATURE_SEGMENT if temperature_dropped else ""
     if cfg.summary_template:
         try:
@@ -2914,6 +2932,7 @@ def _summary_line(
                 model=cfg.model,
                 version=version,
                 risk=segment,
+                stack=stack_segment,
                 temperature=temperature,
             )
         except (KeyError, IndexError, ValueError) as exc:
@@ -2923,10 +2942,45 @@ def _summary_line(
             )
     plural = _plural(count)
     risk_part = f" · {segment}" if segment else ""
+    stack_part = f" · {stack_segment}" if stack_segment else ""
     temperature_part = f" · {temperature}" if temperature else ""
     return (
-        f"{count} finding{plural}{risk_part} · provider {cfg.provider} · model {cfg.model}"
-        f"{temperature_part} · lgtmaybe {version}"
+        f"{count} finding{plural}{risk_part}{stack_part} · provider {cfg.provider} · "
+        f"model {cfg.model}{temperature_part} · lgtmaybe {version}"
+    )
+
+
+def _stack_segment(stack: PRStack | None) -> str:
+    """The summary's stack segment: an exact position only when both ends were found."""
+    if stack is None:
+        return ""
+    if stack.complete:
+        return f"layer {stack.position} of {stack.size} in a stack"
+    return f"in a stack of at least {stack.size}"
+
+
+def _redacted_stack(stack: PRStack | None) -> PRStack | None:
+    """*stack* with every title and path redacted, like the diff, before egress."""
+    if stack is None:
+        return None
+
+    def clean(layers: list[StackLayer]) -> list[StackLayer]:
+        return [
+            layer.model_copy(
+                update={
+                    "title": redact(layer.title),
+                    "files": [redact(path) for path in layer.files],
+                }
+            )
+            for layer in layers
+        ]
+
+    return stack.model_copy(
+        update={
+            "base_ref": redact(stack.base_ref),
+            "below": clean(stack.below),
+            "above": clean(stack.above),
+        }
     )
 
 

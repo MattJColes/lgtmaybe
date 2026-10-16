@@ -29,8 +29,8 @@ default setup.
 has a ready-to-copy workflow for every cloud and API-key provider.
 
 Alongside the review, lgtmaybe posts a
-[change overview](../reference/glossary.md#change-overview) comment on opened, reopened and
-pushed-to pull requests (`auto_diagram`, on by default). It holds:
+[change overview](../reference/glossary.md#change-overview) comment on opened, reopened,
+pushed-to and retargeted pull requests (`auto_diagram`, on by default). It holds:
 
 - a description;
 - a [risk-of-change](../reference/glossary.md#risk-of-change) rating;
@@ -146,6 +146,7 @@ name: lgtmaybe
 
 on:
   pull_request_target:
+    types: [opened, synchronize, reopened, edited]
   issue_comment:
     types: [created]
 
@@ -155,8 +156,9 @@ permissions:
 
 # One run per PR and event type: a new push cancels an in-flight review, but
 # the overview's own issue_comment event cannot cancel the review that posted it.
+# A title or description edit gets a group of its own, so it cancels nothing.
 concurrency:
-  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -165,6 +167,7 @@ jobs:
     # and a comment only starts a job when it carries a slash command.
     if: >-
       (github.event_name == 'pull_request_target' &&
+       (github.event.action != 'edited' || github.event.changes.base) &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
       (github.event.issue.pull_request &&
        contains(fromJson('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
@@ -185,8 +188,12 @@ jobs:
 
 What each part does:
 
-- `on:` runs the job when a PR is opened, reopened or pushed to
-  (`pull_request_target`), and when someone posts a comment (`issue_comment`).
+- `on:` runs the job when a PR is opened, reopened, pushed to or moved onto
+  another base branch (`pull_request_target`), and when someone posts a comment
+  (`issue_comment`). The move matters for
+  [stacked pull requests](review-stacked-pull-requests.md). The `edited` event
+  also fires for a new title or description, so the `if:` below skips any edit
+  that leaves the base branch alone.
 - `permissions:` lets the job read the repository and write review comments on
   the PR.
 - `concurrency:` keeps one run per PR and event type. A new push cancels an
@@ -295,7 +302,7 @@ review question for the model, such as security or correctness. The
 | Input | Default | Description |
 |---|---|---|
 | `preset` | `fast` | `fast` runs five calls (security, correctness, code health, artefacts for tests and documentation, and architecture) on every provider; `full` runs one call per lens. An explicit `categories` list in `.lgtmaybe.yml` overrides it |
-| `incremental` | auto | Review only the commits added since the last completed review on `synchronize` pushes, and the whole PR elsewhere. `true`/`false` forces it. Falls back to a full review after a force-push or when there is no earlier review. `/review full` forces a full re-review on demand |
+| `incremental` | auto | Review only the commits added since the last completed review on `synchronize` pushes, and the whole PR elsewhere. `true`/`false` forces it. Falls back to a full review after a force-push or when there is no earlier review. A push that only moves the PR onto a new base, leaving its diff unchanged, is skipped. A retargeted PR gets a full review. `/review full` forces a full re-review on demand |
 | `recursive` | `true` | Review a file whose diff exceeds `max_input_tokens` [hunk](../reference/glossary.md#hunk) by hunk instead of sending it whole. Set `false` to disable |
 | `spec_review` | `true` | Check the diff against a committed spec (OpenSpec, GitHub Spec Kit, Kiro). Runs only when a spec is detected and matches the PR, so a repository without specs pays nothing |
 | `static_analysis` | `true` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) in a sandbox with no network over the changed files. Every tool feeds the model untrusted hints to confirm or discard; set `static_analysis.tool_mode` in `.lgtmaybe.yml` to make a tool post directly. Set `false` to turn it off. The image bundles every tool and an offline vulnerability database |
@@ -308,7 +315,7 @@ review question for the model, such as security or correctness. The
 
 | Input | Default | Description |
 |---|---|---|
-| `auto_diagram` | `true` | On an opened, reopened, or pushed-to PR, post or refresh the change overview comment. Set `false` to opt out of the whole comment |
+| `auto_diagram` | `true` | On an opened, reopened, pushed-to or retargeted PR, post or refresh the change overview comment. Set `false` to opt out of the whole comment |
 | `auto_describe` | `true` | Head the change overview with a structured description (title, change type, summary, per-file walkthrough, intent check). Set `false` to drop the section; `/describe` still works |
 | `high_impact` | `true` | Include the High Impact Areas section: infrastructure, security posture, outage risk, data migrations, backups and recovery, compatibility, observability, dependencies, cost, and compliance. Set `false` to drop the section and its model call |
 | `risk` | `true` | Rate the PR's risk of change (low/medium/high/critical) from importer counts, sensitive paths, size, and untested code. Deterministic, no model call. Shown on the summary line, in the overview, as a hidden `lgtmaybe-risk` marker, and (with `pr_labels`) as a `risk/<level>` label |

@@ -410,6 +410,20 @@ def test_auto_diagram_on_pr_change_events_when_enabled() -> None:
     assert should_auto_diagram(make_cfg(auto_diagram=False), event_action="reopened") is False
 
 
+def test_an_edit_refreshes_the_overview_only_as_a_retarget() -> None:
+    """The retarget rule travels with the gate, not with each caller: an
+    ``edited`` that is not a retarget (a title change) never refreshes it."""
+    from lgtmaybe.cli import should_auto_diagram
+
+    on = make_cfg(auto_diagram=True)
+    assert should_auto_diagram(on, event_action="edited") is False
+    assert should_auto_diagram(on, event_action="edited", retargeted=True) is True
+    assert (
+        should_auto_diagram(make_cfg(auto_diagram=False), event_action="edited", retargeted=True)
+        is False
+    )
+
+
 def test_run_diagram_posts_via_the_idempotent_upsert() -> None:
     import json as _json
 
@@ -626,3 +640,115 @@ def test_pr_labels_skipped_on_dry_run_and_plain_gateway() -> None:
 
     run_review(github=github, engine=engine, cfg=make_cfg(pr_labels=True), dry_run=False)
     run_review(github=github, engine=engine, cfg=make_cfg(pr_labels=True), dry_run=True)
+
+
+# ---------------------------------------------------------------------------
+# A rebase that leaves the PR's diff unchanged (a stacked PR whose parent
+# merged) is not a new change to review.
+# ---------------------------------------------------------------------------
+
+
+class FingerprintFakeGitHub(IncrementalFakeGitHub):
+    """Adds the diff-fingerprint pair the GitHub gateway offers."""
+
+    def __init__(
+        self,
+        ctx: PRContext | None = None,
+        *,
+        reviewed_sha: str | None = None,
+        reviewed_diff: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(ctx, **kwargs)  # type: ignore[arg-type]
+        self._reviewed_sha = reviewed_sha
+        self._reviewed_diff = reviewed_diff
+        self.marked_diffs: list[str | None] = []
+
+    def last_reviewed_sha(self) -> str | None:
+        return self._reviewed_sha
+
+    def last_reviewed_diff(self) -> str | None:
+        return self._reviewed_diff
+
+    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
+        self.marked_diffs.append(fingerprint)
+
+
+def _rebased(diff: str) -> str:
+    return diff.replace("@@ -1 +1,2 @@", "@@ -7 +7,2 @@")
+
+
+def test_a_rebase_that_leaves_the_diff_unchanged_is_a_no_op() -> None:
+    from lgtmaybe.core.diff import diff_fingerprint
+
+    github = FingerprintFakeGitHub(
+        CTX,
+        last_sha="head1111",
+        reviewed_sha="head1111",
+        reviewed_diff=diff_fingerprint(_rebased(FULL_DIFF)),
+        compare_result=None,  # a rebase never compares as "ahead"
+    )
+    engine = RecordingEngine()
+
+    findings, summary = run_review(
+        github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False
+    )
+
+    assert findings == []
+    assert engine.reviewed_ctxs == []
+    assert github.posted == []
+    assert "diff is unchanged" in summary
+    assert "head111" in summary
+
+
+def test_a_rebase_that_changes_the_diff_is_reviewed() -> None:
+    github = FingerprintFakeGitHub(
+        CTX,
+        last_sha="head1111",
+        reviewed_sha="head1111",
+        reviewed_diff="0" * 16,
+        compare_result=None,
+    )
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
+
+    assert engine.reviewed_ctxs[0].diff == FULL_DIFF
+
+
+def test_a_fingerprint_from_an_unfinished_head_never_skips() -> None:
+    """With a diagram required, the last COMPLETED head can be older than the
+    last reviewed one. The fingerprint belongs to the reviewed head, so it says
+    nothing about whether the completed one's diff matches."""
+    from lgtmaybe.core.diff import diff_fingerprint
+
+    github = FingerprintFakeGitHub(
+        CTX,
+        last_sha="head0000",
+        reviewed_sha="head1111",
+        reviewed_diff=diff_fingerprint(FULL_DIFF),
+        compare_result=None,
+    )
+    engine = RecordingEngine()
+
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
+
+    assert engine.reviewed_ctxs[0].diff == FULL_DIFF
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_a_review_stamps_the_whole_pr_diff_fingerprint(complete: bool) -> None:
+    """Stamped from the FULL diff, never the increment, and only on a run that
+    completes the head (the same rule as the watermark)."""
+    from lgtmaybe.cli import INCOMPLETE_MARKER
+    from lgtmaybe.core.diff import diff_fingerprint
+
+    github = FingerprintFakeGitHub(
+        CTX, last_sha="head1111", reviewed_sha="head1111", compare_result=INC_DIFF
+    )
+    summary = "summary" if complete else f"summary\n{INCOMPLETE_MARKER}"
+    engine = RecordingEngine(summary=summary)
+
+    run_review(github=github, engine=engine, cfg=make_cfg(incremental=True), dry_run=False)
+
+    assert github.marked_diffs == [diff_fingerprint(FULL_DIFF) if complete else None]
