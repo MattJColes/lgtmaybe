@@ -3749,9 +3749,7 @@ def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> Non
             reasoning_effort="medium",
             temperature=0.0,
         )
-        cfg = make_cfg(
-            provider=Provider.anthropic, model="claude-sonnet-4-5", reflect=False
-        )
+        cfg = make_cfg(provider=Provider.anthropic, model="claude-sonnet-4-5", reflect=False)
         _findings, summary = LLMReviewEngine(built).review(_CTX, cfg)
 
     assert _TEMPERATURE_SEGMENT in summary
