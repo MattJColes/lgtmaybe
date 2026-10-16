@@ -21,8 +21,13 @@ on:
   issue_comment:
     types: [created]
 
+# Every comment lgtmaybe posts with a personal token starts a run of this
+# workflow, and concurrency applies before the job's `if`. A comment that does
+# not start with `/` (all of lgtmaybe's) therefore gets a group of its own, so
+# it cannot cancel the slash command that posted it; real commands still
+# replace each other, and a new push still replaces an in-flight review.
 concurrency:
-  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}${{ github.event_name == 'issue_comment' && !startsWith(github.event.comment.body, '/') && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:

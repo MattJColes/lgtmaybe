@@ -75,6 +75,11 @@ review instead of calling a method that cannot work.
 - **WHEN** a caller probes the adapter for thread resolution
 - **THEN** the check fails and resolve-on-fix is skipped
 
+#### Scenario: Forgejo offers no resolve API either
+- **WHEN** the adapter serves a Forgejo pull request
+- **THEN** thread resolution is still not claimed, because Forgejo resolves a
+  conversation only through a browser-session web route
+
 ### Requirement: Forgejo is served by the Gitea adapter
 
 A Forgejo pull request SHALL be reviewed and posted through the Gitea adapter,
@@ -101,6 +106,24 @@ a run that sets `FORGEJO_SERVER_URL`.
 - **THEN** the run is not refused as GitHub Enterprise Server, whatever
   `GITHUB_API_URL` holds
 
+### Requirement: The Actions event is read under either runtime name
+
+The `action` entrypoint SHALL read the event name and payload path from
+`GITHUB_EVENT_NAME` and `GITHUB_EVENT_PATH`, falling back to
+`FORGEJO_EVENT_NAME` and `FORGEJO_EVENT_PATH`, so it depends on neither
+forgejo-runner's aliases nor their absence. With neither path set it SHALL fail
+naming both variables.
+<!-- anchor: gitea.forgejo-event-env -->
+
+#### Scenario: a runner sets only the Forgejo names
+- **WHEN** a run sets `FORGEJO_EVENT_NAME` and `FORGEJO_EVENT_PATH` but no
+  `GITHUB_*` event variables
+- **THEN** the event is routed and reviewed exactly as with the `GITHUB_` names
+
+#### Scenario: no event path at all
+- **WHEN** neither `GITHUB_EVENT_PATH` nor `FORGEJO_EVENT_PATH` is set
+- **THEN** the run exits non-zero naming both
+
 ### Requirement: The Forgejo starter workflow never runs pull-request code
 
 The supplied Forgejo workflow SHALL trigger on `pull_request_target` and
@@ -124,3 +147,18 @@ the job token is a user's documented opt-in edit.
 - **WHEN** a user maps `GITEA_TOKEN` to `secrets.FORGEJO_TOKEN`
 - **THEN** reviews still post and re-runs still de-duplicate, while slash
   commands are ignored because the commenter's permission cannot be read
+
+### Requirement: lgtmaybe's own comments cannot cancel a slash command
+
+The supplied Forgejo workflows SHALL give each `issue_comment` run whose body
+does not start with `/` a concurrency group of its own, because a comment
+posted with a personal token starts a run and workflow-level concurrency
+applies before the job's `if`. Slash commands SHALL still share a group per
+pull request.
+<!-- anchor: gitea.forgejo-comment-concurrency -->
+
+#### Scenario: a slash command posts its reply
+- **WHEN** `/review` posts its summary comment while the command's run is
+  still going
+- **THEN** the run that comment starts is skipped in its own group and the
+  command finishes
