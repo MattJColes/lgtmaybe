@@ -409,13 +409,6 @@ class SupportsModelEscalation(Protocol):
         ...
 
 
-@runtime_checkable
-class SupportsModelName(Protocol):
-    """Expose the configured primary model, so disclosures can name it."""
-
-    model: str
-
-
 class ReviewEngine(Protocol):
     """Port: turn a PR context + config into findings and a summary."""
 

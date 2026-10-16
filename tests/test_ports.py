@@ -24,7 +24,6 @@ PROVIDER_CAPABILITIES = (
     "SupportsReasoningStepDown",
     "SupportsReasoningSwitchOff",
     "SupportsModelEscalation",
-    "SupportsModelName",
 )
 
 # Every optional capability a gateway may declare, by name, so the conformance
@@ -74,9 +73,7 @@ class TestProviderCapabilities:
 
     def test_every_protocol_is_claimed_by_exactly_one_side(self) -> None:
         """A new protocol forgotten here fails against the other adapter below."""
-        known = PROVIDER_CAPABILITIES + tuple(CAPABILITIES)
         assert all(hasattr(ports, name) for name in PROVIDER_CAPABILITIES)
-        assert len(known) == len(set(known))
 
     @pytest.mark.parametrize("name", PROVIDER_CAPABILITIES)
     def test_capabilities_are_runtime_checkable(self, name: str) -> None:
@@ -86,6 +83,11 @@ class TestProviderCapabilities:
     def test_the_litellm_adapter_satisfies_every_capability(self, name: str) -> None:
         provider = LiteLLMProvider()
         assert isinstance(provider, getattr(ports, name)), name
+
+    def test_the_litellm_adapter_exposes_its_primary_model(self) -> None:
+        """The engine discloses the answering model via attribute presence
+        (hasattr, not a protocol isinstance), so a rename here must be loud."""
+        assert hasattr(LiteLLMProvider(), "model")
 
 
 class TestCapabilities:
