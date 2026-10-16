@@ -1,4 +1,4 @@
-# ast-grep anchors for review-pipeline — see "Living specs" in CLAUDE.md.
+# ast-grep anchors for review-pipeline — see "Living specs" in AGENTS.md.
 
 engine.lenses-marker:
   rule:

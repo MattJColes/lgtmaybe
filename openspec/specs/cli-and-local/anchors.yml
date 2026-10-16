@@ -1,4 +1,4 @@
-# ast-grep anchors for cli-and-local — see "Living specs" in CLAUDE.md.
+# ast-grep anchors for cli-and-local — see "Living specs" in AGENTS.md.
 
 cli.review-command:
   rule:

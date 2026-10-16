@@ -29,7 +29,7 @@ See proposal.md for motivation. What this builds on:
 - No model call, no new dependency, no new comment.
 
 **Non-Goals:**
-- Auto-approve. CLAUDE.md is explicit that enforcement rides a Check Run and
+- Auto-approve. AGENTS.md is explicit that enforcement rides a Check Run and
   approval state is never set. The marker and label let teams build a gate.
 - A `fail_on`-style Check Run keyed on risk. The marker makes this possible
   later. Not in this change.
@@ -66,7 +66,7 @@ Alternatives rejected:
 - `git grep` for the module stem. Matches comments and strings, and common
   stems like `utils` collide across packages.
 - A language server or full import graph. Heavy, per-language setup, and
-  CLAUDE.md warns against speculative frameworks.
+  AGENTS.md warns against speculative frameworks.
 
 ast-grep respects `.gitignore` by default, so `node_modules` and virtualenvs are
 skipped.
@@ -99,7 +99,7 @@ are never put in a prompt. Rendered paths strip backticks, the same as
 `RiskAssessment` (in `core/models.py`) holds the level, reasons (each with its
 factor, level and text) and the unassessed paths. It lives in `engine/`, not an
 adapter, so GitHub, GitLab, Gitea and the local CLI all get it (see "Forges" in
-CLAUDE.md).
+AGENTS.md).
 
 **D5. Assess before scoping.** `run_review` calls `assess_risk` on the context as
 fetched, before incremental, triage or `max_files` narrowing, so size is
