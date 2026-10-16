@@ -11,35 +11,35 @@ description: Provider-agnostic AI code review for pull and merge requests on Git
 </div>
 
 lgtmaybe reviews pull and merge requests on **GitHub, GitLab, Gitea, and Azure
-DevOps**. It can also review a local Git diff. Choose a hosted
-model, ollama, or another OpenAI-compatible endpoint. It posts inline comments
-and one summary, or prints findings locally.
+DevOps**, or a local Git diff. Choose a hosted model, ollama, or another
+OpenAI-compatible endpoint. It posts inline comments and one summary, or prints
+findings locally.
 
 It reads the diff and a little surrounding code, but comments only on changed
-lines. It never checks out or runs the change. Generated files and binaries are
-skipped, secrets are redacted, and all author-supplied text is treated as
-untrusted.
+lines. It never checks out or runs the change. It skips generated files and
+binaries, [redacts](reference/glossary.md#redaction) secrets, and treats all
+author-supplied text as untrusted.
 
 It checks for:
 
 - **Correctness and security:** logic errors, missed `await`s, injection, auth mistakes, and leaked secrets.
 - **Code health:** performance problems, needless complexity, deprecations, and risky dependencies.
 - **Tests and documentation:** missing or weak tests, stale comments, and undocumented APIs.
-- **Intent:** whether the change does what its title, description, and commits say it does.
+- **Intent:** whether the change does what its title, description, and commits say.
 - **Ponytail:** code you don't need, and simpler or standard-library ways to do the job.
 - **Architecture:** coupling, wrong-way dependencies, and broken subclass contracts that will be hard to undo.
 
-Findings are graded `info` to `critical` and land on the changed line
-they refer to. A clean change gets a 👍 **LGTM!**.
+Each [finding](reference/glossary.md#finding) is graded `info` to `critical`
+and lands on the changed line it refers to. A clean change gets a 👍 **LGTM!**.
 
-![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterised-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
+![An inline lgtmaybe comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterised-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 
 Slash commands can refresh a review (`/review`, `/improve`), answer a question
 (`/ask`), post a structured description (`/describe`), or post
 [a change overview](how-to/generate-a-change-diagram.md) (`/diagram`). The
 overview rates the risk of change, lists high-impact areas, and draws a
-flowchart, plus a sequence diagram when the change alters a runtime flow. Run
-`lgtmaybe diagram` to print a text version locally.
+flowchart, plus a sequence diagram when the change alters a runtime flow.
+`lgtmaybe diagram` prints a text version locally.
 
 ```mermaid
 flowchart LR
@@ -99,7 +99,8 @@ on any host below.
 | None | `lgtmaybe review` locally | n/a | [Install the CLI](how-to/install-the-cli.md) |
 
 The same review runs on every host. They differ in thread resolution,
-incremental reviews, and keyless cloud auth. See
+[incremental reviews](reference/glossary.md#incremental-review), and keyless
+cloud auth. See
 [Architecture](explanation/architecture.md#code-hosts-forges) for the details.
 
 ## For AI Agents

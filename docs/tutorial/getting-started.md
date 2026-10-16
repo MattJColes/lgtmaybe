@@ -4,10 +4,18 @@ description: Run your first lgtmaybe review locally with ollama, with no API key
 
 # Getting Started with lgtmaybe
 
-This tutorial walks you through your first review using **ollama**, which runs
+This tutorial walks you through your first review using **ollama**. ollama runs
 the model on your own machine, costs nothing, and needs no API keys. By the end
-you will have reviewed a branch and seen the findings in your terminal, with no
-GitHub token and no pull request.
+you will have reviewed a branch and seen the findings in your terminal. You need
+no GitHub token and no pull request.
+
+Two words first:
+
+- A [finding](../reference/glossary.md#finding) is one issue the review
+  reports. It has a [severity](../reference/glossary.md#severity), a title and
+  an explanation, and sometimes a suggested fix.
+- A [lens](../reference/glossary.md#lens) is one focused review question, such
+  as "is this secure?". lgtmaybe runs several lenses and merges their findings.
 
 ## What You Need
 
@@ -29,10 +37,10 @@ brew trust MattJColes/tap   # current Homebrew requires trusting third-party tap
 brew install lgtmaybe
 ```
 
-[Install the CLI](../how-to/install-the-cli.md) explains the `brew trust` step,
-the Windows (WinGet) install, and which providers the base install covers.
-API-key and local providers work out of the box; keyless cloud providers need a
-`pip` extra.
+[Install the CLI](../how-to/install-the-cli.md) explains three things: the
+`brew trust` step, the Windows (WinGet) install, and which providers the base
+install covers. API-key and local providers work out of the box. Keyless cloud
+providers need a `pip` extra.
 
 Verify the install:
 
@@ -72,9 +80,11 @@ Next: lgtmaybe review
 ```
 
 Press Enter twice. Before it writes anything, it sends the model one tiny
-request, so a stopped server or a model you have not pulled fails here, not
-halfway through a review. The file holds only the provider and model; if you
-later use a hosted provider, its API key stays in your environment.
+request. A stopped server or a model you have not pulled fails here, not
+halfway through a review.
+
+The file holds only the provider and model. If you later use a hosted provider,
+its API key stays in your environment.
 
 If ollama is on another machine, answer `n`, choose `ollama`, and enter its
 address. You can also skip `config init` and pass `--provider ollama --model
@@ -89,10 +99,11 @@ From inside a git repo, on a branch with some changes, run:
 lgtmaybe review
 ```
 
-lgtmaybe diffs your current branch against the remote primary branch
-(`origin/HEAD`, falling back to `origin/main` / `origin/master`, then a local
-`main` / `master`). It sends the diff, with some surrounding lines for context,
-to your local qwen3.6:27b model and prints the findings to your terminal:
+lgtmaybe diffs your current branch against the remote primary branch. It tries
+`origin/HEAD` first, then falls back to `origin/main` / `origin/master`, then a
+local `main` / `master`. It sends the diff, with some surrounding lines for
+context, to your local qwen3.6:27b model. Then it prints the findings to your
+terminal:
 
 ```console
 src/app.py:14  [MEDIUM] Missing None check before use (confidence 8/10)
@@ -101,15 +112,21 @@ src/app.py:14  [MEDIUM] Missing None check before use (confidence 8/10)
 1 finding · risk low (no risk signals) · provider ollama · model qwen3.6:27b · lgtmaybe 2.11.1
 ```
 
-Each finding shows its file and line, severity, and title, then the
-explanation. The last line counts the findings, rates the risk of the change,
-and names the model and lgtmaybe version.
+Each finding shows its file and line, severity and title, then the explanation.
+The last line does three things:
 
-To review the whole worktree (your branch's commits plus uncommitted edits),
-add `--working`. To review only the uncommitted edits, add `--uncommitted`. To
-diff against a different base, pass `--base main`.
+- counts the findings
+- rates the [risk of the change](../reference/glossary.md#risk-of-change)
+- names the model and lgtmaybe version
 
-`lgtmaybe review --help` lists the everyday options; `--help-all` adds the
+Three flags change what gets reviewed:
+
+- `--working` reviews the whole worktree (your branch's commits plus
+  uncommitted edits).
+- `--uncommitted` reviews only the uncommitted edits.
+- `--base main` diffs against a different base.
+
+`lgtmaybe review --help` lists the everyday options. `--help-all` adds the
 advanced tuning ones.
 
 ## Step 5: Change the Output Format
@@ -121,23 +138,25 @@ advanced tuning ones.
 lgtmaybe review --json
 ```
 
-`--format agent` prints the findings as correction instructions an AI coding
-agent can read and apply, for a local review-and-fix loop. See
+`--format agent` prints the findings as correction instructions that an AI
+coding agent can read and apply. Use it for a local review-and-fix loop. See
 [Fix findings with an AI agent](../how-to/fix-findings-with-an-ai-agent.md).
 
-`--format sarif` prints a SARIF 2.1.0 log you can upload to GitHub code
-scanning or open in an IDE. See
+`--format sarif` prints a [SARIF](../reference/glossary.md#sarif) 2.1.0 log.
+You can upload it to GitHub code scanning or open it in an IDE. See
 [Upload findings as SARIF](../how-to/upload-findings-as-sarif.md).
 
 ## Step 6: See the Whole Change
 
-`lgtmaybe diagram` sends the same local diff to three concurrent model calls and
-prints the **change overview**:
+`lgtmaybe diagram` sends the same local diff to three concurrent model calls.
+It prints the
+[**change overview**](../reference/glossary.md#change-overview):
 
 - a description of what you changed
 - a risk-of-change rating (computed locally, no model call)
-- a **High Impact Areas** section calling out anything that could bite, such as
-  infrastructure, security posture, outage risk, migrations, or backups
+- a [**High Impact Areas**](../reference/glossary.md#high-impact-areas) section
+  calling out anything that could bite, such as infrastructure, security
+  posture, outage risk, migrations, or backups
 - a diagram of the components your change touches, plus a sequence diagram
   when it alters a run-time flow
 
@@ -146,11 +165,14 @@ lgtmaybe diagram
 ```
 
 It takes the same `--base` / `--working` / `--uncommitted` flags as `review`.
-Run `review` then `diagram` before you open a pull request: the first tells you
-what's wrong with the change, the second what the change is and what it could
-break. The diagrams print as Mermaid source plus a text rendering for the
-terminal. Paste the Mermaid into a GitHub comment or
-[mermaid.live](https://mermaid.live) to see it drawn. See
+
+Run `review` then `diagram` before you open a pull request. The first tells you
+what's wrong with the change. The second tells you what the change is and what
+it could break.
+
+The diagrams print as Mermaid source plus a text rendering for the terminal.
+Paste the Mermaid into a GitHub comment or [mermaid.live](https://mermaid.live)
+to see it drawn. See
 [Generate a change overview](../how-to/generate-a-change-diagram.md).
 
 ## Step 7: Post Reviews on Real Pull Requests
@@ -173,17 +195,23 @@ every host; only the setup differs:
 lgtmaybe ran its pipeline over your local diff:
 
 1. **Fetch:** read the diff from your local repo with `git`.
-2. **Filter:** skipped generated files, binaries, and lockfiles, and redacted
-   anything that looked like a secret.
-3. **Review:** sent four concurrent model calls (security, correctness, code
-   health, and artefacts for tests and documentation), each asking for findings
-   as JSON.
-4. **Parse and anchor:** validated each reply against the findings schema and
-   pinned every finding to the changed line it quotes.
-5. **Reflect:** asked the model to audit its own findings and dropped the ones
-   it could not stand behind.
+2. **Filter:** skipped generated files, binaries, and lockfiles. It
+   [redacted](../reference/glossary.md#redaction) anything that looked like a
+   secret.
+3. **Review:** sent five concurrent model calls, one per concern: security,
+   correctness, code health, artefacts (tests and documentation), and
+   architecture. This is the default `fast`
+   [preset](../reference/glossary.md#preset). Each call asked for findings as
+   JSON.
+4. **Parse and anchor:** validated each reply against the findings schema. It
+   pinned every finding to the changed line it quotes (its
+   [anchor](../reference/glossary.md#anchor)).
+5. **Reflect:** asked the model to audit its own findings
+   ([reflection](../reference/glossary.md#reflection)). It dropped the ones the
+   model could not stand behind.
 6. **Filter findings:** dropped defect findings with no concrete failure
-   scenario and anything below the severity floor (`low` by default).
+   scenario. It also dropped anything below the severity floor (`low` by
+   default).
 7. **Render:** printed the findings. The GitHub Action posts them to the pull
    request instead.
 
