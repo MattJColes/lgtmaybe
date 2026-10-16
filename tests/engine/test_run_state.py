@@ -244,3 +244,40 @@ class TestEveryModelCallIsCharged:
         with pytest.raises(ReviewIncompleteError):
             LLMReviewEngine(_Runaway()).review(_ALPHA, _cfg(max_review_tokens=10_000))
         assert calls == ["lens"], "the runaway spent the budget, so the second lens never ran"
+
+    def test_the_reflection_call_is_charged_to_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reflection runs after the fan-out, so no skip can show its spend:
+        read the run's own tally instead. The audit goes through the run's
+        metered provider like every other call, so the tally holds the lens
+        call's tokens and the audit's."""
+        from lgtmaybe.engine import engine as engine_module
+
+        states: list[engine_module._RunState] = []
+
+        class _SpiedState(engine_module._RunState):
+            def __init__(self, **fields: Any) -> None:
+                super().__init__(**fields)
+                states.append(self)
+
+        monkeypatch.setattr(engine_module, "_RunState", _SpiedState)
+
+        class _CostlyAudit:
+            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+                if model == "reflect-m":
+                    # Unparseable on purpose: reflection then keeps everything.
+                    return ProviderResult(text="no verdict", input_tokens=7_000, output_tokens=0)
+                return ProviderResult(text=_findings_json(1), input_tokens=30, output_tokens=12)
+
+        LLMReviewEngine(_CostlyAudit()).review(
+            _ALPHA,
+            _cfg(
+                categories=[ReviewCategory.security],
+                reflect=True,
+                reflect_model="reflect-m",
+                max_review_tokens=1_000_000,
+            ),
+        )
+        assert len(states) == 1
+        assert states[0].tokens_spent() == 30 + 12 + 7_000

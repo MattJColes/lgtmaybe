@@ -773,9 +773,13 @@ class _RunState:
 
     Built fresh for every review and carried on its :class:`_Run`, never on the
     engine: one engine may serve two reviews at once, and each summary must
-    describe its own run alone. Written from the fan-out's worker threads. A
-    set's ``add`` and a dict's plain store are single operations; the counters
-    below are a read, an add and a store, so they go through :attr:`lock`.
+    describe its own run alone. Written from the fan-out's worker threads.
+
+    The sets and ``escalated`` are written directly: a set's ``add`` and a
+    dict's plain store are single operations, so they need no lock. The
+    counters (``flooded``, ``self_talk`` and the token tally) are a read, an
+    add and a store, so they change only through the methods below, which hold
+    the lock themselves. No caller ever takes it by hand.
     """
 
     # Batches an oversized-payload failure (wall timeout or output ceiling)
@@ -804,20 +808,30 @@ class _RunState:
     # Lenses that only parsed once the provider's JSON schema was taken off
     # the request (see _retry_without_schema). Keyed by lens likewise.
     re_asked: set[str] = field(default_factory=set)
-    # Findings dropped per lens by the per-lens bound. Two batches' primers
-    # flooding at once would otherwise lose an update and under-report the
-    # drop in the summary notice.
+    # Findings dropped per lens by the per-lens bound (see add_flooded). Two
+    # batches' primers flooding at once would otherwise lose an update and
+    # under-report the drop in the summary notice.
     flooded: dict[str, int] = field(default_factory=dict)
-    # Same shape and same lock: findings dropped per lens for being the
-    # model's note to itself (see selftalk.py and _stamp_and_bound).
+    # Same shape: findings dropped per lens for being the model's note to
+    # itself (see add_self_talk, selftalk.py and _stamp_and_bound).
     self_talk: dict[str, int] = field(default_factory=dict)
-    lock: threading.Lock = field(default_factory=threading.Lock)
-    # Read and written only through charge() and tokens_spent(), under `lock`.
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    # Read and written only through charge() and tokens_spent().
     _tokens: int = field(default=0, init=False)
+
+    def add_flooded(self, lens_id: str, dropped: int) -> None:
+        """Count *dropped* findings the per-lens bound cut from *lens_id*."""
+        with self._lock:
+            self.flooded[lens_id] = self.flooded.get(lens_id, 0) + dropped
+
+    def add_self_talk(self, lens_id: str, dropped: int) -> None:
+        """Count *dropped* self-talk findings removed from *lens_id*."""
+        with self._lock:
+            self.self_talk[lens_id] = self.self_talk.get(lens_id, 0) + dropped
 
     def charge(self, tokens: int) -> None:
         """Add one model call's billable tokens to this review's spend."""
-        with self.lock:
+        with self._lock:
             self._tokens += tokens
 
     def tokens_spent(self) -> int:
@@ -827,7 +841,7 @@ class _RunState:
         like :meth:`Profiler.total_tokens`, and for the same reason: it is the
         one count every provider route agrees on.
         """
-        with self.lock:
+        with self._lock:
             return self._tokens
 
 
@@ -2761,8 +2775,7 @@ class LLMReviewEngine:
         # Dropped first so it cannot take a slot from a genuine finding below.
         findings, self_talk = drop_self_talk(findings)
         if self_talk:
-            with run.state.lock:
-                run.state.self_talk[lens.id] = run.state.self_talk.get(lens.id, 0) + len(self_talk)
+            run.state.add_self_talk(lens.id, len(self_talk))
             _log.warning(
                 "dropped findings carrying the model's own repair note",
                 extra={
@@ -2779,8 +2792,7 @@ class LLMReviewEngine:
         # same selection policy `_dedupe` uses.
         kept = sorted(findings, key=lambda f: -f.severity.rank)[:cap]
         dropped = len(findings) - len(kept)
-        with run.state.lock:
-            run.state.flooded[lens.id] = run.state.flooded.get(lens.id, 0) + dropped
+        run.state.add_flooded(lens.id, dropped)
         _log.warning(
             "lens exceeded the per-lens finding bound — dropping the least severe",
             extra={"lens": lens.id, "returned": len(findings), "kept": cap, "dropped": dropped},
