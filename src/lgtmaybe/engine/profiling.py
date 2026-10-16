@@ -202,9 +202,9 @@ class Profiler:
         never reached the model — and report zeros. A **truncation** is the
         exception that matters: it reached the model and generated all the way to
         the ceiling, so it is routinely the most expensive call in the whole run.
-        Reporting it as free made it invisible to :meth:`total_tokens`, and so to
-        `max_review_tokens` — the runaway calls the spend ceiling exists to stop
-        were precisely the ones it could not see. It also printed the single
+        Reporting it as free made it invisible to :meth:`total_tokens` and the
+        cost line. (The `max_review_tokens` ceiling charges failures the same
+        way, on the engine's own per-review tally.) It also printed the single
         costliest row of ``--profile`` as ``0 / 0``, which is exactly the row a
         reader is looking at.
         """
@@ -244,10 +244,13 @@ class Profiler:
         (litellm's ``prompt_tokens_details.cached_tokens`` is a subset of
         ``prompt_tokens``; Anthropic reports it alongside), so adding them would
         double-count on some routes and not others. Input + output is the one
-        figure every route agrees on — which is what a budget needs to be.
+        figure every route agrees on. The engine's per-review budget tally
+        counts the same way.
 
-        Backs :attr:`ReviewConfig.max_review_tokens`, so it is read from the
-        fan-out threads: the lock is not decoration.
+        Process-wide, for ``--profile`` and the CLI's total line only. It does
+        NOT back :attr:`ReviewConfig.max_review_tokens`: two reviews in one
+        process would each be charged for the other's calls. The engine keeps
+        that tally per run instead.
         """
         with self._lock:
             return sum(c.input_tokens + c.output_tokens for c in self.calls)

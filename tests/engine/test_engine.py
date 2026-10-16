@@ -3909,7 +3909,7 @@ class TestFloodedAccountingUnderConcurrency:
     """`_stamp_and_bound` runs inside the fan-out's worker threads, so its
     per-lens drop counter is written concurrently. A plain
     `d[k] = d.get(k, 0) + n` is a read-modify-write, not an atomic op like the
-    `set.add()` the engine's other per-run state uses: two batches whose primer
+    `set.add()` the run's other state uses: two batches whose primer
     (always the first lens) floods at the same instant can lose one update, and
     the summary notice then under-reports how many findings were dropped.
     """
@@ -3926,12 +3926,24 @@ class TestFloodedAccountingUnderConcurrency:
     def test_concurrent_bounds_on_one_lens_do_not_lose_counts(self) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
-        from lgtmaybe.engine.engine import _Lens
+        from lgtmaybe.engine.engine import _Lens, _Run, _RunState
 
-        engine = LLMReviewEngine(FakeProvider())
-        engine._flooded = self._SlowStoreDict()
-        engine._flooded_lock = threading.Lock()
-        engine._max_findings_per_lens = 1
+        provider = FakeProvider()
+        engine = LLMReviewEngine(provider)
+        state = _RunState(flooded=self._SlowStoreDict())
+        run = _Run(
+            model="m",
+            response_format=None,
+            language=None,
+            project="",
+            deadline_at=None,
+            budget_at=None,
+            retrieval_budget=None,
+            concurrency=8,
+            cfg=make_cfg(max_findings_per_lens=1),
+            provider=provider,
+            state=state,
+        )
         lens = _Lens(id="security", user_block="")
         # 4 findings in, cap of 1 out ⇒ 3 dropped per call.
         findings = [
@@ -3948,9 +3960,11 @@ class TestFloodedAccountingUnderConcurrency:
         calls = 24
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(lambda _: engine._stamp_and_bound(list(findings), lens), range(calls)))
+            list(
+                pool.map(lambda _: engine._stamp_and_bound(list(findings), lens, run), range(calls))
+            )
 
-        assert engine._flooded["security"] == 3 * calls
+        assert state.flooded["security"] == 3 * calls
 
 
 class TestBoundaryScansOverlap:
