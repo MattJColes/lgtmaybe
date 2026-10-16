@@ -45,10 +45,6 @@ gitlab.incremental:
       kind: function_definition
       has: { field: name, regex: '^last_reviewed_sha$' }
     files: [src/lgtmaybe/gitlab/**/*.py]
-  - rule:
-      kind: function_definition
-      has: { field: name, regex: '^mark_reviewed$' }
-    files: [src/lgtmaybe/gitlab/**/*.py]
 
 gitlab.feedback:
   rule:

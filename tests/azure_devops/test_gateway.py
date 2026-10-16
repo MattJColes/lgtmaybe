@@ -26,6 +26,7 @@ from lgtmaybe.azure_devops import gateway as gateway_module
 from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.core.ports import DiffUnavailable
+from tests.fakes import submission
 
 HOST = "dev.azure.com"
 REPO = "acme/My Project/api"
@@ -363,7 +364,7 @@ class TestTokenHandling:
         fake = FakeAzureDevOps()
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert fake.requests
         identity = [r for r in fake.requests if r.url.path.endswith("/_apis/connectionData")]
@@ -737,7 +738,7 @@ class TestFetchResilience:
             httpx.Response(500) for _ in range(gateway_module._FETCH_ATTEMPTS)
         ]
         gateway = _gateway()
-        gateway.post_review([], "0 findings", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([], "0 findings", diff=gateway.get_pr_context().diff))
 
         summary = fake.created[-1]["comments"][0]["content"]
         assert "could not be read" in summary
@@ -761,7 +762,7 @@ class TestPositions:
         fake = FakeAzureDevOps()
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         thread = fake.created[0]
         assert thread["status"] == "active"
@@ -783,7 +784,7 @@ class TestPositions:
         removed = FINDING.model_copy(
             update={"path": "gone.py", "line": 2, "side": "LEFT", "anchor": "also = 2"}
         )
-        gateway.post_review([removed], "1 finding", diff=diff)
+        gateway.post_review(submission([removed], "1 finding", diff=diff))
 
         assert fake.created[0]["threadContext"] == {
             "filePath": "/gone.py",
@@ -797,7 +798,7 @@ class TestPositions:
         fake.install()
         gateway = _gateway()
         guess = FINDING.model_copy(update={"line": 999, "anchored": False, "title": "Unplaceable"})
-        gateway.post_review([guess], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([guess], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len(fake.created) == 1, "only the summary is posted"
         summary = fake.created[0]
@@ -811,7 +812,7 @@ class TestPositions:
         fake.install()
         fake.reject_threads_at.add("/app.py")
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         summary = fake.created[-1]["comments"][0]["content"]
         assert "Additional findings" in summary
@@ -829,7 +830,9 @@ class TestPositions:
         gateway = _gateway()
 
         with pytest.raises(httpx.HTTPStatusError):
-            gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+            gateway.post_review(
+                submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+            )
 
     @respx.mock
     def test_a_finding_thread_records_the_iteration_it_was_posted_at(self) -> None:
@@ -837,7 +840,7 @@ class TestPositions:
         fake = FakeAzureDevOps()
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert fake.created[0]["pullRequestThreadContext"] == {
             "changeTrackingId": 1,
@@ -851,7 +854,7 @@ class TestPositions:
         fake.install()
         fake.reject_tracking = True
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         posted = [t for t in fake.created if t.get("threadContext")]
         assert len(posted) == 1
@@ -867,7 +870,7 @@ class TestPositions:
         fake.reject_tracking = True
         fake.reject_tracking_status = status
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert [t for t in fake.created if t.get("threadContext")] == []
         assert "Hardcoded password" in fake.created[-1]["comments"][0]["content"]
@@ -876,7 +879,7 @@ class TestPositions:
     def test_post_review_builds_the_diff_itself_when_not_given_one(self) -> None:
         fake = FakeAzureDevOps()
         fake.install()
-        _gateway().post_review([FINDING], "1 finding")
+        _gateway().post_review(submission([FINDING], "1 finding"))
 
         assert fake.created[0]["threadContext"]["filePath"] == "/app.py"
 
@@ -888,7 +891,7 @@ class TestSummary:
         fake = FakeAzureDevOps()
         fake.install()
         summary = "0 findings · risk high\n<!-- lgtmaybe-risk:high -->"
-        _gateway(marker_key="anthropic/m").post_review([], summary, diff="")
+        _gateway(marker_key="anthropic/m").post_review(submission([], summary, diff=""))
 
         created = fake.created[0]
         assert created["status"] == "closed"
@@ -904,8 +907,8 @@ class TestSummary:
         gateway = _gateway()
         diff = gateway.get_pr_context().diff
 
-        gateway.post_review([FINDING], "first run", diff=diff)
-        _gateway().post_review([FINDING], "second run", diff=diff)
+        gateway.post_review(submission([FINDING], "first run", diff=diff))
+        _gateway().post_review(submission([FINDING], "second run", diff=diff))
 
         assert len(fake.threads) == 2, "one finding thread and one summary thread"
         summary = next(t for t in fake.threads if not t.get("threadContext"))
@@ -933,7 +936,7 @@ class TestSummary:
         fake = FakeAzureDevOps(threads=[_thread(5, "old\n\n<!-- lgtmaybe -->")])
         fake.install()
         fake.forbid_edits = True
-        _gateway().post_review([], "👍 LGTM!", diff="")
+        _gateway().post_review(submission([], "👍 LGTM!", diff=""))
 
         assert fake.created[-1]["comments"][0]["content"].startswith("👍 LGTM!")
 
@@ -947,7 +950,7 @@ class TestSummary:
         )
 
         with pytest.raises(httpx.HTTPStatusError):
-            _gateway().post_review([], "updated", diff="")
+            _gateway().post_review(submission([], "updated", diff=""))
         assert not fake.created
 
     @respx.mock
@@ -960,7 +963,7 @@ class TestSummary:
             ]
         )
         fake.install()
-        _gateway().post_review([], "updated", diff="")
+        _gateway().post_review(submission([], "updated", diff=""))
 
         assert [(tid, cid) for tid, cid, _c in fake.edited] == [(6, 1)]
         assert not [r for r in fake.requests if "/threads/5/" in r.url.path]
@@ -985,7 +988,7 @@ class TestSummary:
             return real_edit(request)
 
         respx.route(method="PATCH", url__startswith=f"{THREADS}/").mock(side_effect=edit_only_ours)
-        _gateway().post_review([], "updated", diff="")
+        _gateway().post_review(submission([], "updated", diff=""))
 
         assert [(tid, cid) for tid, cid, _c in fake.edited] == [(6, 1)]
         assert not fake.created
@@ -996,7 +999,7 @@ class TestSummary:
         thread["isDeleted"] = True
         fake = FakeAzureDevOps(threads=[thread])
         fake.install()
-        _gateway().post_review([], "fresh", diff="")
+        _gateway().post_review(submission([], "fresh", diff=""))
 
         assert not fake.edited
         assert fake.created[-1]["comments"][0]["content"].startswith("fresh")
@@ -1025,7 +1028,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[self._posted_finding_thread()])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert [t for t in fake.created if t.get("threadContext")] == []
 
@@ -1034,7 +1037,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[self._posted_finding_thread(status="wontFix")])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert [t for t in fake.created if t.get("threadContext")] == []
 
@@ -1044,7 +1047,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[self._posted_finding_thread(status="fixed")])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
@@ -1053,7 +1056,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[self._posted_finding_thread(isDeleted=True)])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
@@ -1064,7 +1067,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[planted])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
@@ -1073,7 +1076,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[self._posted_finding_thread(author={})])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
@@ -1084,7 +1087,7 @@ class TestDedupe:
         fake.install()
         fake.identity_status = 401
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
@@ -1094,8 +1097,8 @@ class TestDedupe:
         fake.install()
         gateway = _gateway()
         diff = gateway.get_pr_context().diff
-        gateway.post_review([FINDING], "1 finding", diff=diff)
-        gateway.post_review([FINDING], "1 finding", diff=diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=diff))
+        gateway.post_review(submission([FINDING], "1 finding", diff=diff))
         gateway.post_describe_comment("A description")
 
         assert fake.identity_calls == 1
@@ -1109,7 +1112,7 @@ class TestDedupe:
             '@@ -1,1 +1,3 @@\n import os\n+password = "hunter2"\n+password = "hunter2"\n'
         )
         findings = [FINDING, FINDING.model_copy(update={"line": 3})]
-        _gateway().post_review(findings, "2 findings", diff=diff)
+        _gateway().post_review(submission(findings, "2 findings", diff=diff))
 
         posted = [t for t in fake.created if t.get("threadContext")]
         assert len(posted) == 1
@@ -1121,7 +1124,7 @@ class TestDedupe:
         fake = FakeAzureDevOps(threads=[_thread(7, _forged_comment(FINDING))])
         fake.install()
         gateway = _gateway()
-        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
+        gateway.post_review(submission([FINDING], "1 finding", diff=gateway.get_pr_context().diff))
 
         assert len([t for t in fake.created if t.get("threadContext")]) == 1
 
@@ -1180,8 +1183,9 @@ class TestResolveOnFix:
         gateway: AzureDevOpsGateway, findings: list[ReviewFinding] | None = None
     ) -> None:
         ctx = gateway.get_pr_context()
-        gateway.mark_reviewed(ctx.head_sha)
-        gateway.post_review(findings or [], "summary", diff=ctx.diff)
+        gateway.post_review(
+            submission(findings or [], "summary", diff=ctx.diff, completed_sha=ctx.head_sha)
+        )
 
     @respx.mock
     def test_a_gone_finding_on_a_changed_line_is_resolved_then_replied_to(self) -> None:
@@ -1299,8 +1303,7 @@ class TestResolveOnFix:
         fake = self._fake(self._posted())
         gateway = _gateway()
         ctx = gateway.get_pr_context()
-        gateway.mark_reviewed(None)
-        gateway.post_review([], "partial", diff=ctx.diff)
+        gateway.post_review(submission([], "partial", diff=ctx.diff))
 
         assert fake.status_changes == []
 
@@ -1308,7 +1311,7 @@ class TestResolveOnFix:
     def test_a_failure_notice_resolves_nothing(self) -> None:
         fake = self._fake(self._posted())
         gateway = _gateway()
-        gateway.post_review([], "⚠️ lgtmaybe review failed: boom")
+        gateway.post_review(submission([], "⚠️ lgtmaybe review failed: boom"))
 
         assert fake.status_changes == []
 

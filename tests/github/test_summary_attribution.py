@@ -18,7 +18,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.engine.engine import LLMReviewEngine
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.review import run_review
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, submission
 
 OLD = "a" * 40
 HEAD = "b" * 40
@@ -147,9 +147,8 @@ def test_unknown_authenticated_identity_never_reuses_or_updates_a_summary(payloa
         )
         with pytest.raises(RuntimeError):
             gateway.last_completed_sha(diagram_required=False)
-        gateway.mark_reviewed(HEAD)
         with pytest.raises(RuntimeError):
-            gateway.post_review([], "Complete summary")
+            gateway.post_review(submission([], "Complete summary", completed_sha=HEAD))
     assert writes == []
 
 
@@ -219,8 +218,7 @@ def test_untrusted_latest_marker_cannot_redirect_an_authenticated_summary_update
             marker_key="openrouter/test",
             resolve_fixed=False,
         )
-        gateway.mark_reviewed(HEAD)
-        gateway.post_review([], "Authenticated summary")
+        gateway.post_review(submission([], "Authenticated summary", completed_sha=HEAD))
     assert writes == ["/repos/owner/repo/pulls/42/reviews/99"]
 
 
@@ -292,8 +290,9 @@ def test_a_forged_id_in_someone_elses_inline_comment_does_not_hide_a_finding() -
             marker_key="openrouter/test",
             resolve_fixed=False,
         )
-        gateway.mark_reviewed(HEAD)
-        gateway.post_review([_INJECTION], "1 finding", diff=_INJECTION_DIFF)
+        gateway.post_review(
+            submission([_INJECTION], "1 finding", diff=_INJECTION_DIFF, completed_sha=HEAD)
+        )
 
     assert [c["path"] for c in inline] == ["app.py"], "a stranger's id must not suppress it"
 
@@ -370,7 +369,9 @@ def test_a_thread_someone_else_opened_is_never_one_of_our_findings() -> None:
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         gateway = RestGitHubGateway("owner/repo", 42, "synthetic", client=client)
         assert gateway.count_open_finding_threads() == 1
-        assert [thread_id for thread_id, *_ in gateway._fixed_threads(set())] == ["ours"]
+        assert [thread_id for thread_id, *_ in gateway._fixed_threads(set(), None, None)] == [
+            "ours"
+        ]
         assert [f.thread_id for f in gateway.list_active_findings()] == ["ours"]
         assert gateway.list_downvoted_fingerprints() == {"aaaaaaaaaaaa"}
         threads[1]["comments"]["nodes"][0]["viewerDidAuthor"] = False

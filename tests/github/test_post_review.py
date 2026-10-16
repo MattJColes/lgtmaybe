@@ -15,6 +15,7 @@ from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway, rest_gateway
 from lgtmaybe.github.rest_gateway import _RESOLVE_WORKERS
+from tests.fakes import submission
 
 REPO = "owner/repo"
 PR_NUMBER = 42
@@ -79,7 +80,7 @@ def test_post_review_creates_review_with_marker_and_batched_comments() -> None:
 
     client = httpx.Client()
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=client)
-    gw.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "Summary text", diff=SAMPLE_DIFF))
 
     assert len(created_bodies) == 1
     review_body = created_bodies[0]
@@ -107,9 +108,8 @@ def test_initial_review_salvages_a_comment_rejected_by_github() -> None:
         return_value=httpx.Response(422, json={"message": "line is not in the diff"})
     )
     gateway = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gateway.mark_reviewed("def")
 
-    gateway.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+    gateway.post_review(submission(FINDINGS, "Summary text", diff=SAMPLE_DIFF, completed_sha="def"))
 
     assert reviews.call_count == 2
     retry = json.loads(reviews.calls[1].request.content)
@@ -161,7 +161,7 @@ def test_post_review_updates_existing_review_on_second_call() -> None:
 
     client = httpx.Client()
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=client)
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF))
 
     # Must have updated, not created
     assert len(create_calls) == 0, "Should not POST a new review when one already exists"
@@ -220,7 +220,7 @@ def test_post_review_finds_existing_review_past_first_page() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF))
 
     assert len(create_calls) == 0, "must not duplicate a review that exists on a later page"
     assert len(updated_bodies) == 1
@@ -274,7 +274,7 @@ def test_post_review_skips_findings_outside_diff() -> None:
 
     client = httpx.Client()
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=client)
-    gw.post_review(out_of_diff_findings, "Summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(out_of_diff_findings, "Summary", diff=SAMPLE_DIFF))
 
     assert len(created_bodies) == 1
     assert created_bodies[0].get("comments", []) == []
@@ -311,7 +311,7 @@ def test_post_review_drops_finding_on_expanded_context_line() -> None:
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(findings, "Summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(findings, "Summary", diff=SAMPLE_DIFF))
 
     assert created_bodies[0].get("comments", []) == []
 
@@ -349,7 +349,7 @@ def test_post_review_suggestion_cannot_break_out_of_code_fence() -> None:
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(malicious, "Summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(malicious, "Summary", diff=SAMPLE_DIFF))
 
     comment_body = created_bodies[0]["comments"][0]["body"]
     # Exactly our two fences (the ```suggestion opener and its closer) — the
@@ -388,7 +388,7 @@ def test_post_review_defangs_fences_in_title_and_body() -> None:
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(malicious, "Summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(malicious, "Summary", diff=SAMPLE_DIFF))
 
     comment_body = created_bodies[0]["comments"][0]["body"]
     # No suggestion here, so no fence at all should survive — every ``` is defanged.
@@ -430,7 +430,7 @@ def test_broad_finding_rendered_collapsed_not_inline() -> None:
     ]
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(findings, "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission(findings, "Summary text", diff=SAMPLE_DIFF))
 
     body = created_bodies[0]
     comments = body.get("comments", [])
@@ -465,7 +465,7 @@ def test_post_review_uses_provider_scoped_marker() -> None:
         client=httpx.Client(),
         marker_key="openai/gpt-4.1-mini",
     )
-    gw.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "Summary text", diff=SAMPLE_DIFF))
 
     assert "<!-- lgtmaybe:openai/gpt-4.1-mini -->" in str(created_bodies[0].get("body", ""))
 
@@ -504,7 +504,7 @@ def test_post_review_with_distinct_marker_keys_coexist() -> None:
         client=httpx.Client(),
         marker_key="openai/gpt-4.1-mini",
     )
-    gw.post_review(FINDINGS, "OpenAI summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "OpenAI summary", diff=SAMPLE_DIFF))
 
     assert len(put_calls) == 0, "must not overwrite another provider's review"
     assert len(create_bodies) == 1
@@ -617,7 +617,7 @@ def test_post_review_embeds_finding_fingerprint() -> None:
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture_create)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "Summary text", diff=SAMPLE_DIFF))
 
     fp = finding_fingerprint("src/app.py", "Import order")
     body = created_bodies[0]["comments"][0]["body"]
@@ -637,8 +637,7 @@ def test_resolve_fixed_resolves_outdated_disappeared_thread() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == ["THREAD1"]
     assert len(graphql.replies) == 1
@@ -667,8 +666,7 @@ def test_resolve_fixed_rewrites_fingerprint_to_resolved_marker() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == ["THREAD1"]
     assert len(patched) == 1
@@ -690,8 +688,7 @@ def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     # Must not raise, and resolution is never attempted without retired markers.
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
     assert graphql.unresolved == []
@@ -707,8 +704,7 @@ def test_resolve_fixed_skips_still_present_finding() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
     assert graphql.replies == []
@@ -724,8 +720,7 @@ def test_resolve_fixed_skips_non_outdated_thread() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
 
@@ -739,8 +734,7 @@ def test_resolve_fixed_skips_already_resolved_thread() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
 
@@ -759,8 +753,7 @@ def test_resolve_fixed_ignores_non_lgtmaybe_threads() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
 
@@ -776,7 +769,7 @@ def test_resolve_fixed_disabled_makes_no_graphql_call() -> None:
     gw = RestGitHubGateway(
         repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client(), resolve_fixed=False
     )
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF))
 
     assert graphql.queried is False
     assert graphql.resolved == []
@@ -794,7 +787,7 @@ def test_resolve_fixed_skipped_on_first_review() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(FINDINGS, "Summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "Summary", diff=SAMPLE_DIFF))
 
     assert graphql.queried is False
 
@@ -810,8 +803,8 @@ def test_resolve_fixed_skipped_on_first_review() -> None:
 def test_resolve_fixed_skipped_without_watermark(
     findings: list[ReviewFinding], summary: str, diff: str | None
 ) -> None:
-    """A run with no completion watermark (a failure notice cleared via
-    mark_reviewed(None), or a partial run after a lens failure, SIGTERM or
+    """A run with no completion watermark (a failure notice, whose submission
+    names no completed head, or a partial run after a lens failure, SIGTERM or
     max_review_seconds) has reviewed nothing: an absent finding is not
     evidence of a fix, so threads stay open (#747)."""
     _mark_existing_review()
@@ -820,8 +813,7 @@ def test_resolve_fixed_skipped_without_watermark(
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed(None)
-    gw.post_review(findings, summary, diff=diff)
+    gw.post_review(submission(findings, summary, diff=diff))
 
     assert graphql.queried is False
     assert graphql.resolved == []
@@ -835,8 +827,7 @@ def test_resolve_fixed_swallows_graphql_error() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     # Must not raise.
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
 
 @respx.mock
@@ -875,7 +866,7 @@ def test_unanchored_finding_demoted_to_body_not_inline() -> None:
 
     client = httpx.Client()
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=client)
-    gw.post_review(findings, "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission(findings, "Summary text", diff=SAMPLE_DIFF))
 
     body = created_bodies[0]
     comments = body.get("comments", [])
@@ -1179,7 +1170,7 @@ def test_post_review_empty_findings_skips_diff_fetch() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([], "review failed: provider quota exceeded")  # diff omitted
+    gw.post_review(submission([], "review failed: provider quota exceeded"))  # diff omitted
 
     assert pr_fetches == [], "empty-findings post_review must not fetch the PR diff/context"
 
@@ -1206,7 +1197,7 @@ def test_post_review_diff_none_fetches_bare_diff_only() -> None:
     respx.route(method="GET", url__startswith=PR_URL).mock(side_effect=capture_other)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(FINDINGS, "Summary")  # diff omitted
+    gw.post_review(submission(FINDINGS, "Summary"))  # diff omitted
 
     assert diff_route.called
     assert other_fetches == [], "diff=None must fetch the bare diff, not the whole PR context"
@@ -1251,7 +1242,7 @@ def test_reviews_list_fetched_once_per_run() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     assert gw.last_reviewed_sha() == "def5678"
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF))
 
     assert len(reviews_calls) == 1, "the unchanged reviews list must not be re-paginated"
     assert reviews_calls[0].url.params["per_page"] == "100"
@@ -1288,8 +1279,7 @@ def test_resolve_fixed_threads_are_resolved_concurrently() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert sorted(graphql.resolved) == [f"THREAD{i}" for i in range(4)]
     first_end = next(i for i, e in enumerate(events) if e == "end")
@@ -1317,8 +1307,7 @@ def test_one_failing_thread_does_not_block_the_others() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert sorted(graphql.resolved) == ["THREAD0", "THREAD2"]
 
@@ -1358,8 +1347,7 @@ def test_failed_resolve_posts_no_reply() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.replies == [], "replied on a thread that was never resolved"
     assert graphql.resolved == []
@@ -1376,8 +1364,7 @@ def test_missing_comment_id_never_attempts_resolution() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
     assert graphql.replies == []
@@ -1400,8 +1387,7 @@ def test_failed_resolve_and_marker_restore_never_fail_the_review() -> None:
     respx.route(method="PATCH").mock(side_effect=lambda request: next(patches))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == []
     assert graphql.replies == []
@@ -1436,8 +1422,7 @@ def test_reply_failure_still_rewrites_the_fingerprint_marker() -> None:
     respx.route(method="PATCH").mock(side_effect=capture_patch)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert graphql.resolved == ["THREAD1"]
     assert patched, "resolved thread kept its active fingerprint marker"
@@ -1495,8 +1480,7 @@ def test_forbidden_resolve_is_attempted_once_per_run() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     # Deterministic: the barrier forces the whole first wave through the check,
     # so this is exactly the worst case — and threads beyond it are still skipped.
@@ -1682,7 +1666,7 @@ def test_inline_comment_title_carries_lens_and_confidence() -> None:
     created = _capture_created_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([_badged()], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([_badged()], "Summary text", diff=SAMPLE_DIFF))
 
     body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
     assert body.startswith("**[MEDIUM · security · 80%] Import order**")
@@ -1695,7 +1679,7 @@ def test_inline_comment_badge_omits_confidence_when_unscored() -> None:
     created = _capture_created_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([_badged(confidence=None)], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([_badged(confidence=None)], "Summary text", diff=SAMPLE_DIFF))
 
     body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
     assert body.startswith("**[MEDIUM · security] Import order**")
@@ -1709,7 +1693,7 @@ def test_inline_comment_badge_renders_a_zero_score() -> None:
     created = _capture_created_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([_badged(confidence=0)], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([_badged(confidence=0)], "Summary text", diff=SAMPLE_DIFF))
 
     body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
     assert body.startswith("**[MEDIUM · security · 0%] Import order**")
@@ -1721,7 +1705,7 @@ def test_inline_comment_has_no_badge_without_a_category() -> None:
     created = _capture_created_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review(FINDINGS, "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission(FINDINGS, "Summary text", diff=SAMPLE_DIFF))
 
     fp = finding_fingerprint("src/app.py", "Import order")
     identity = finding_identity(FINDINGS[0])
@@ -1739,7 +1723,7 @@ def test_demoted_finding_carries_the_badge() -> None:
     created = _capture_created_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([_badged(anchored=False)], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([_badged(anchored=False)], "Summary text", diff=SAMPLE_DIFF))
 
     rendered = str(created[0].get("body", ""))
     assert "### Additional findings" in rendered
@@ -1752,7 +1736,7 @@ def test_broad_finding_carries_the_badge() -> None:
     created = _capture_created_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([_badged(broad=True)], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([_badged(broad=True)], "Summary text", diff=SAMPLE_DIFF))
 
     rendered = str(created[0].get("body", ""))
     assert "Broader observations" in rendered
@@ -1768,11 +1752,11 @@ def test_badge_leaves_the_hidden_markers_byte_identical() -> None:
 
     scored, unscored = _badged(), _badged(confidence=None)
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.post_review([scored], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([scored], "Summary text", diff=SAMPLE_DIFF))
     scored_body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
 
     created.clear()
-    gw.post_review([unscored], "Summary text", diff=SAMPLE_DIFF)
+    gw.post_review(submission([unscored], "Summary text", diff=SAMPLE_DIFF))
     unscored_body = str(created[0]["comments"][0]["body"])  # type: ignore[index]
 
     assert "· security · 80%" in scored_body
@@ -1816,8 +1800,7 @@ def test_pre_badge_comment_still_dedupes_against_a_badged_finding() -> None:
     _mark_existing_review()
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed("deadbee")
-    gw.post_review([finding], "New summary", diff=SAMPLE_DIFF)
+    gw.post_review(submission([finding], "New summary", diff=SAMPLE_DIFF, completed_sha="deadbee"))
 
     assert posted == [], "a pre-badge comment must still suppress its re-post"
 
@@ -1835,9 +1818,8 @@ def test_completed_new_head_preserves_old_native_review(native_commit: str | Non
     created = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
     updated = respx.put(f"{REVIEWS_URL}/99").mock(return_value=httpx.Response(200))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("b" * 40)
 
-    gateway.post_review([], "Clean summary")
+    gateway.post_review(submission([], "Clean summary", completed_sha="b" * 40))
 
     payload = json.loads(created.calls[0].request.content)
     assert payload == {
@@ -1868,9 +1850,8 @@ def test_completed_same_native_head_updates_without_duplicate() -> None:
     update = respx.put(f"{REVIEWS_URL}/99").mock(return_value=httpx.Response(200))
     create = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("b" * 40)
 
-    gateway.post_review([], "Clean summary")
+    gateway.post_review(submission([], "Clean summary", completed_sha="b" * 40))
 
     assert update.called
     assert not create.called
@@ -1914,9 +1895,8 @@ def test_latest_provider_summary_across_pages_drives_completion_and_updates() ->
     update = respx.put(f"{REVIEWS_URL}/101").mock(return_value=httpx.Response(200))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
     assert gateway.last_completed_sha(diagram_required=False) == "b" * 40
-    gateway.mark_reviewed("b" * 40)
 
-    gateway.post_review([], "Latest summary")
+    gateway.post_review(submission([], "Latest summary", completed_sha="b" * 40))
 
     assert update.called
 
@@ -1930,9 +1910,8 @@ def test_initial_completed_review_binds_actual_commit_despite_a_newer_pr_head() 
         return_value=httpx.Response(200, json={"head": {"sha": "c" * 40}})
     )
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("b" * 40)
 
-    gateway.post_review([], "Clean summary")
+    gateway.post_review(submission([], "Clean summary", completed_sha="b" * 40))
 
     assert json.loads(create.calls[0].request.content)["commit_id"] == "b" * 40
 
@@ -1973,9 +1952,12 @@ def test_new_native_summary_preserves_one_for_one_inline_dedupe() -> None:
     )
     summary = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("new")
 
-    gateway.post_review([FINDINGS[0], FINDINGS[0]], "Two occurrences", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission(
+            [FINDINGS[0], FINDINGS[0]], "Two occurrences", diff=SAMPLE_DIFF, completed_sha="new"
+        )
+    )
 
     payload = json.loads(summary.calls[0].request.content)
     assert len(payload["comments"]) == 1, "one occurrence was already posted by us"
@@ -2009,9 +1991,8 @@ def test_new_head_findings_post_in_the_one_review_not_one_call_each() -> None:
         for i, line in enumerate((2, 5, 6) * 20)
     ]
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("new")
 
-    gateway.post_review(findings, "60 findings", diff=SAMPLE_DIFF)
+    gateway.post_review(submission(findings, "60 findings", diff=SAMPLE_DIFF, completed_sha="new"))
 
     assert not inline.called
     assert summary.call_count == 1
@@ -2039,10 +2020,11 @@ def test_inline_failure_never_publishes_complete_new_native_summary() -> None:
     # or neither: there is no state where completion published without them.
     respx.post(REVIEWS_URL).mock(return_value=httpx.Response(500))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("new")
 
     with pytest.raises(httpx.HTTPStatusError):
-        gateway.post_review(FINDINGS, "Complete summary", diff=SAMPLE_DIFF)
+        gateway.post_review(
+            submission(FINDINGS, "Complete summary", diff=SAMPLE_DIFF, completed_sha="new")
+        )
 
     assert not inline.called
     assert gateway.last_completed_sha(diagram_required=False) is None
@@ -2065,10 +2047,9 @@ def test_summary_creation_failure_is_fatal_and_keeps_old_completion() -> None:
     )
     respx.post(REVIEWS_URL).mock(return_value=httpx.Response(500))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("new")
 
     with pytest.raises(httpx.HTTPStatusError):
-        gateway.post_review([], "Complete summary")
+        gateway.post_review(submission([], "Complete summary", completed_sha="new"))
 
     assert gateway.last_completed_sha(diagram_required=False) == "a" * 40
 
@@ -2092,9 +2073,8 @@ def test_incomplete_new_head_does_not_create_a_complete_native_summary() -> None
     create = respx.post(REVIEWS_URL).mock(return_value=httpx.Response(201, json={"id": 100}))
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
     respx.get(PR_URL).mock(return_value=httpx.Response(200, json=_pr_detail()))
-    gateway.mark_reviewed(None)
 
-    gateway.post_review([], "<!-- lgtmaybe-incomplete -->")
+    gateway.post_review(submission([], "<!-- lgtmaybe-incomplete -->"))
 
     assert "lgtmaybe-reviewed:" not in json.loads(update.calls[0].request.content)["body"]
     assert not create.called
@@ -2123,9 +2103,10 @@ def test_rejected_new_head_inline_finding_remains_in_fresh_native_summary() -> N
         side_effect=[httpx.Response(422), httpx.Response(201, json={"id": 100})]
     )
     gateway = RestGitHubGateway(REPO, PR_NUMBER, TOKEN, resolve_fixed=False)
-    gateway.mark_reviewed("b" * 40)
 
-    gateway.post_review(FINDINGS, "Complete summary", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission(FINDINGS, "Complete summary", diff=SAMPLE_DIFF, completed_sha="b" * 40)
+    )
 
     assert len(json.loads(summary.calls[0].request.content)["comments"]) == 1
     payload = json.loads(summary.calls[1].request.content)

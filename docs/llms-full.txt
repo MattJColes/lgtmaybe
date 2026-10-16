@@ -10435,8 +10435,9 @@ adapter satisfies one by having the right methods. It never inherits from it.
   a `ProviderResult` (text plus token usage).
 - `ReviewGateway` has three:
     - `get_pr_context()` fetches the change diff and metadata.
-    - `post_review(findings, summary)` posts batched inline comments and a
-      summary.
+    - `post_review(submission)` posts batched inline comments and a
+      summary. The `ReviewSubmission` carries everything the post acts on (see
+      [One Submission per Post](#one-submission-per-post)).
     - `post_issue_comment(body)` posts a standalone comment. `/ask` and failure
       notices use it, and it is the describe/diagram fallback.
 - `ReviewEngine` has `review(ctx, cfg)`, which returns `(findings, summary)`.
@@ -10489,7 +10490,6 @@ feature at all.
 | `SupportsLabels` | ✅ | ✅ | ✅ | not yet |
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
-| `SupportsCompletionMark`: hear whether a run finished, to gate resolve-on-fix | ✅ | ✅ | ✅ | ✅ |
 | `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
 | `SupportsDiffFingerprint`: skip a rebase that left the diff unchanged | ✅ | not yet | ✗ no compare diff | not yet |
 | `SupportsScanManifests`: fetch dependency manifests for scanning | ✅ | ✅ | ✅ | ✅ |
@@ -10499,6 +10499,31 @@ feature at all.
 
 `tests/test_ports.py` asserts each adapter claims exactly the capabilities in
 this table, no more and no fewer. That keeps this table honest.
+
+### One Submission per Post
+
+`post_review` takes a single `ReviewSubmission` (in `core/models.py`). It is a
+frozen value that holds everything the post acts on:
+
+- the findings, the summary and the full change diff they anchor to;
+- the completed head: the
+  [watermark](../reference/glossary.md#watermark), and the gate for
+  resolve-on-fix;
+- the diff fingerprint stamped beside it;
+- the incremental scope: the files resolve-on-fix may touch;
+- the threads follow-up validation proved fixed.
+
+A gateway reads the fields its host supports and ignores the rest.
+
+This is the one change made to the frozen port, and the reason is on record.
+These inputs used to reach the gateway through four setter calls made before
+`post_review`. They had to run in the right order, and only comments in
+`run_review` said what that order was. The gateway also held their values
+between calls, so a failure notice posted later on the same gateway could
+inherit them. The setters had widened the port without anyone seeing it.
+
+Now a submission with no completed head stamps nothing and resolves nothing,
+on every forge. A failure or skip notice always posts one of those.
 
 ### Where the Hosts Differ
 

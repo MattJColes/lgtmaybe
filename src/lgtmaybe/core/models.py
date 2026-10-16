@@ -955,6 +955,45 @@ class PRContext(_Strict):
     stack: PRStack | None = None
 
 
+class ReviewSubmission(_Strict):
+    """Everything one ``ReviewGateway.post_review`` call acts on, in one value.
+
+    It replaces the setters a gateway used to be primed with before posting
+    (issue #833). Those had to run in an order the port could not express, and
+    they left per-review state on the gateway, where a later failure notice
+    could read it. A gateway reads the fields its host supports and ignores the
+    rest.
+
+    ``completed_sha`` is the head this run reviewed completely. It is None for
+    a partial run or any notice, and such a post never stamps completion and
+    never resolves a thread: findings a failed call never produced are not
+    evidence of fixes.
+
+    ``diff`` is the full PR diff the findings anchor to (None: the adapter
+    fetches it when there is anything to anchor). ``diff_fingerprint`` is
+    stamped beside the watermark and only with it. ``incremental_scope`` lists
+    the files an incremental run re-reviewed; resolve-on-fix stays inside them
+    (None: a full review, no limit). ``validated_fixed_threads`` is the
+    allowlist follow-up validation proved fixed (None: no validation ran).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    findings: list[ReviewFinding] = Field(default_factory=list)
+    summary: str
+    diff: str | None = None
+    completed_sha: str | None = None
+    diff_fingerprint: str | None = None
+    incremental_scope: frozenset[str] | None = None
+    validated_fixed_threads: frozenset[str] | None = None
+
+    @model_validator(mode="after")
+    def _fingerprint_needs_completion(self) -> ReviewSubmission:
+        if self.diff_fingerprint is not None and self.completed_sha is None:
+            raise ValueError("a diff fingerprint is stamped only with a completed head")
+        return self
+
+
 class ReviewConfig(_Strict):
     """How to run one review: provider/model, severity floor, filters, caps."""
 

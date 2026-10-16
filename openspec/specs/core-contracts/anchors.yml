@@ -8,10 +8,14 @@ core.provider-port:
   files: [src/lgtmaybe/**/*.py]
 
 core.gateway-port:
-  rule:
-    kind: class_definition
-    has: { field: name, regex: '^ReviewGateway$' }
-  files: [src/lgtmaybe/**/*.py]
+  - rule:
+      kind: class_definition
+      has: { field: name, regex: '^ReviewGateway$' }
+    files: [src/lgtmaybe/**/*.py]
+  - rule:
+      kind: class_definition
+      has: { field: name, regex: '^ReviewSubmission$' }
+    files: [src/lgtmaybe/core/**/*.py]
 
 core.engine-port:
   rule:

@@ -139,7 +139,6 @@ _EVERY_FORGE = {
     "SupportsDiagram",
     "SupportsConversation",
     "SupportsScanManifests",
-    "SupportsCompletionMark",
 }
 SHIPPED_GATEWAYS: dict[type, set[str]] = {
     RestGitHubGateway: set(CAPABILITIES),
@@ -165,16 +164,20 @@ class TestShippedGatewayCapabilities:
         claimed = {name for name in CAPABILITIES if isinstance(gateway, getattr(ports, name))}
         assert claimed == SHIPPED_GATEWAYS[gateway_type]
 
-    def test_completion_mark_is_its_own_capability(self) -> None:
-        """Gitea and Azure DevOps stamp completion as their resolve-on-fix gate
-        without offering incremental review, so the stamp is its own group."""
-        assert hasattr(ports.SupportsCompletionMark, "mark_reviewed")
-        # An incremental review still needs somewhere to stamp its watermark.
-        assert issubclass(ports.SupportsIncremental, ports.SupportsCompletionMark)
+    @pytest.mark.parametrize("gateway_type", SHIPPED_GATEWAYS, ids=lambda t: t.__name__)
+    def test_no_gateway_is_primed_before_it_posts(self, gateway_type: type) -> None:
+        """Completion, scope and the resolve allowlist ride ``ReviewSubmission``
+        (#833); a pre-post setter would bring back hidden per-review state."""
+        for setter in (
+            "mark_reviewed",
+            "mark_reviewed_diff",
+            "set_incremental_scope",
+            "set_validated_fixed_threads",
+        ):
+            assert not hasattr(gateway_type, setter), setter
 
-    def test_the_diff_fingerprint_pair_has_a_home(self) -> None:
-        """The CLI reads and writes it, so a rename must be loud, not a skipped no-op."""
+    def test_the_diff_fingerprint_reader_has_a_home(self) -> None:
+        """The CLI reads it, so a rename must be loud, not a skipped no-op."""
         assert hasattr(ports.SupportsDiffFingerprint, "last_reviewed_diff")
-        assert hasattr(ports.SupportsDiffFingerprint, "mark_reviewed_diff")
         # It only means anything beside the watermark it fingerprints.
         assert issubclass(ports.SupportsDiffFingerprint, ports.SupportsIncremental)

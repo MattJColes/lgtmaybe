@@ -208,7 +208,7 @@ changed only when the diff from that iteration's head to ours replaces or
 removes it, or the file is gone; `trackingCriteria`'s original position SHALL
 win once present. A thread with no recorded iteration, a left-side thread, or
 any read failure SHALL stay open. Nothing SHALL be resolved unless
-`mark_reviewed` named the fetched head, so a partial run or a failure notice
+the submission's completed head is the fetched head, so a partial run or a failure notice
 resolves nothing. A 401 or 403 SHALL stop resolving with one warning, and
 resolving SHALL never fail the review.
 <!-- anchor: azure-devops.resolve -->

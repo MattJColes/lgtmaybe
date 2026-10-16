@@ -68,7 +68,7 @@ from lgtmaybe.core.diff import (
 )
 from lgtmaybe.core.diffbuild import binary_file_patch, file_patch, has_unsafe_path_chars
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReviewFinding
+from lgtmaybe.core.models import PRContext, ReviewFinding, ReviewSubmission
 from lgtmaybe.core.ports import DiffUnavailable
 
 _log = get_logger(__name__)
@@ -229,8 +229,6 @@ class AzureDevOpsGateway:
         # summary so the review never reads as covering them.
         self._unread: list[str] = []
         self._resolve_fixed = resolve_fixed
-        # Set by mark_reviewed on a complete run only; resolve-on-fix waits for it.
-        self._reviewed_sha: str | None = None
         self._latest_iteration_id: int | None = None
         # Each iteration's head commit, so a thread's posting iteration can be
         # turned into the file text it was posted against.
@@ -333,19 +331,20 @@ class AzureDevOpsGateway:
             open_finding_threads=self.count_open_finding_threads(),
         )
 
-    def post_review(
-        self,
-        findings: list[ReviewFinding],
-        summary: str,
-        diff: str | None = None,
-    ) -> None:
+    def post_review(self, submission: ReviewSubmission) -> None:
         """Post each new finding as a positioned thread, then upsert the summary.
 
         Findings already carrying one of our hidden ids on an unresolved thread
         are skipped, so a re-run adds only what is new. A thread Azure DevOps
         rejects is demoted into the summary rather than lost. Last, our finding
         threads that are now fixed are resolved, after everything else posted.
+
+        No watermark is written, since incremental review is not offered. The
+        submission's ``completed_sha`` is the gate for resolve-on-fix instead: a
+        partial run or a failure notice is missing findings, not reporting them
+        fixed, so neither may resolve a thread.
         """
+        findings, summary, diff = submission.findings, submission.summary, submission.diff
         if diff is None and findings:
             diff = self._diff if self._diff is not None else self.get_pr_context().diff
 
@@ -365,7 +364,7 @@ class AzureDevOpsGateway:
         )
         self._upsert(body, self._marker, threads)
         if self._resolve_fixed:
-            self._resolve_fixed_threads(findings, threads)
+            self._resolve_fixed_threads(findings, threads, submission.completed_sha)
 
     def post_issue_comment(self, body: str) -> None:
         """Open a standalone general thread on the pull request."""
@@ -423,15 +422,6 @@ class AzureDevOpsGateway:
     def set_scan_manifests(self, enabled: bool) -> None:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled
-
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Record that this run reviewed ``head_sha`` completely (None: it did not).
-
-        No watermark is written, since incremental review is not offered. It is
-        the gate for resolve-on-fix: a partial run or a failure notice is missing
-        findings, not reporting them fixed, so neither may resolve a thread.
-        """
-        self._reviewed_sha = head_sha
 
     def reply_in_thread(self, thread_id: str, body: str) -> None:
         """Reply to the comment that opened an existing thread."""
@@ -823,7 +813,10 @@ class AzureDevOpsGateway:
     # ------------------------------------------------------------------
 
     def _resolve_fixed_threads(
-        self, findings: list[ReviewFinding], threads: list[dict[str, Any]]
+        self,
+        findings: list[ReviewFinding],
+        threads: list[dict[str, Any]],
+        completed_sha: str | None,
     ) -> None:
         """Resolve, then reply in, each of our finding threads that is now fixed.
 
@@ -832,7 +825,7 @@ class AzureDevOpsGateway:
         on a thread that stays open. A 401 or 403 is the identity's, not the
         thread's, so the first one stops the rest. Never fails the review.
         """
-        if self._reviewed_sha is None or self._reviewed_sha != self._head_sha:
+        if completed_sha is None or completed_sha != self._head_sha:
             return
         try:
             fixed = self._fixed_thread_ids(findings, threads)

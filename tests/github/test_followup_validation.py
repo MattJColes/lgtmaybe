@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from lgtmaybe.github import RestGitHubGateway
+from tests.fakes import submission
 
 
 def _gateway() -> RestGitHubGateway:
@@ -54,9 +57,9 @@ def test_only_explicitly_fixed_thread_ids_are_resolved(monkeypatch) -> None:
         gateway, "reply_in_thread", lambda thread_id, body: replied.append(thread_id)
     )
 
-    gateway.set_validated_fixed_threads({"FIXED"})
-    gateway.mark_reviewed("abc123")
-    gateway._resolve_fixed_threads([])
+    gateway._resolve_fixed_threads(
+        submission(completed_sha="abc123", validated_fixed_threads={"FIXED"})
+    )
 
     assert resolved == ["FIXED"]
     assert replied == ["FIXED"]
@@ -77,16 +80,20 @@ def test_validated_resolution_reuses_the_active_finding_read(monkeypatch) -> Non
     monkeypatch.setattr(gateway, "reply_in_thread", lambda thread_id, body: None)
 
     gateway.list_active_findings()
-    gateway.set_validated_fixed_threads({"FIXED"})
-    gateway.mark_reviewed("abc123")
-    gateway._resolve_fixed_threads([])
+    gateway._resolve_fixed_threads(
+        submission(completed_sha="abc123", validated_fixed_threads={"FIXED"})
+    )
 
     assert walks == 1
 
 
-def test_validated_resolution_honours_the_incremental_scope(monkeypatch) -> None:
+@pytest.mark.parametrize("read_first", [True, False], ids=["after-validation-read", "fresh"])
+def test_validated_resolution_honours_the_incremental_scope(monkeypatch, read_first) -> None:
     """A validated thread on a file the increment did not re-review has no fresh
-    evidence behind it, so it stays open; one on a re-reviewed file resolves."""
+    evidence behind it, so it stays open; one on a re-reviewed file resolves.
+
+    The same on a fresh gateway that never read the active findings: nothing is
+    primed before posting, so the submission alone decides (#833)."""
     gateway = _gateway()
     resolved: list[str] = []
     monkeypatch.setattr(
@@ -98,10 +105,14 @@ def test_validated_resolution_honours_the_incremental_scope(monkeypatch) -> None
     monkeypatch.setattr(gateway, "_mark_comment_resolved", lambda comment_id, body: None)
     monkeypatch.setattr(gateway, "reply_in_thread", lambda thread_id, body: None)
 
-    gateway.list_active_findings()
-    gateway.set_validated_fixed_threads({"OUTSIDE", "INSIDE"})
-    gateway.set_incremental_scope({"b.py"})
-    gateway.mark_reviewed("abc123")
-    gateway._resolve_fixed_threads([])
+    if read_first:
+        gateway.list_active_findings()
+    gateway._resolve_fixed_threads(
+        submission(
+            completed_sha="abc123",
+            validated_fixed_threads={"OUTSIDE", "INSIDE"},
+            incremental_scope={"b.py"},
+        )
+    )
 
     assert resolved == ["INSIDE"]

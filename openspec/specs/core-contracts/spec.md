@@ -29,13 +29,22 @@ API only — change-request code is never checked out or executed (fork safety
 under `pull_request_target`). Richer behaviour an adapter may not have — file
 reads, incremental re-review, thread resolution, labels, checks, feedback — is
 declared by a separate optional `Supports*` capability protocol, and a caller
-SHALL degrade gracefully when a gateway does not offer one.
+SHALL degrade gracefully when a gateway does not offer one. `post_review` SHALL
+take one frozen `ReviewSubmission` carrying everything the post acts on (the
+findings, summary and diff, the completed head, the diff fingerprint, the
+incremental scope and the validated-fixed allowlist), so no gateway is primed
+by setter calls or keeps per-review state between posts.
 <!-- anchor: core.gateway-port -->
 
 #### Scenario: review round-trip through the port
 - **WHEN** a review runs against a PR
 - **THEN** context arrives via `get_pr_context()` and results leave via
-  `post_review(findings, summary)` — no other GitHub access from the engine
+  `post_review(submission)` — no other GitHub access from the engine
+
+#### Scenario: a notice completes nothing
+- **WHEN** a failure or skip notice posts through `post_review`
+- **THEN** its submission names no completed head, so it stamps no watermark
+  and resolves no thread, whatever an earlier post on that gateway carried
 
 ### Requirement: Engine port
 

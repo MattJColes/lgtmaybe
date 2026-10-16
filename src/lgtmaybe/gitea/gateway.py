@@ -60,7 +60,7 @@ from lgtmaybe.core.diff import (
     line_changed,
 )
 from lgtmaybe.core.logging import get_logger
-from lgtmaybe.core.models import PRContext, ReviewFinding
+from lgtmaybe.core.models import PRContext, ReviewFinding, ReviewSubmission
 from lgtmaybe.core.paginate import paginate_pages
 
 _log = get_logger(__name__)
@@ -129,8 +129,6 @@ class GiteaGateway:
         self._head_texts: dict[str, str] = {}
         self._scan_manifests = False
         self._resolve_fixed = resolve_fixed
-        # Set by mark_reviewed on a complete run only; resolve-on-fix waits for it.
-        self._reviewed_sha: str | None = None
         # The posting identity's login, looked up once (see _posting_login).
         self._login: str | None = None
         self._login_done = False
@@ -190,12 +188,7 @@ class GiteaGateway:
             head_branch=(meta.get("head") or {}).get("ref") or "",
         )
 
-    def post_review(
-        self,
-        findings: list[ReviewFinding],
-        summary: str,
-        diff: str | None = None,
-    ) -> None:
+    def post_review(self, submission: ReviewSubmission) -> None:
         """Post inline comments as a review, and the summary as an upserted comment.
 
         Split in two because a Gitea review cannot be edited afterwards: the
@@ -204,7 +197,13 @@ class GiteaGateway:
         dropped before posting, which is what keeps a re-run from duplicating
         every inline comment it made last time. Last, our comments whose finding
         is now fixed are resolved, after everything else posted.
+
+        No watermark is written, since incremental review is not offered. The
+        submission's ``completed_sha`` is the gate for resolve-on-fix instead: a
+        partial run or a failure notice is missing findings, not reporting them
+        fixed, so neither may resolve a comment.
         """
+        findings, summary, diff = submission.findings, submission.summary, submission.diff
         if diff is None and findings:
             diff = self._fetch_pr_diff()
 
@@ -212,8 +211,8 @@ class GiteaGateway:
         inline, demoted, broad = self._partition_findings(findings, commentable)
         resolving = (
             self._resolve_fixed
-            and self._reviewed_sha is not None
-            and self._reviewed_sha == self._head_sha
+            and submission.completed_sha is not None
+            and submission.completed_sha == self._head_sha
         )
         comments = self._own_review_comments() if inline or resolving else []
 
@@ -280,15 +279,6 @@ class GiteaGateway:
     def set_scan_manifests(self, enabled: bool) -> None:
         """Also fetch dependency-manifest text on the next context fetch."""
         self._scan_manifests = enabled
-
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Record that this run reviewed ``head_sha`` completely (None: it did not).
-
-        No watermark is written, since incremental review is not offered. It is
-        the gate for resolve-on-fix: a partial run or a failure notice is missing
-        findings, not reporting them fixed, so neither may resolve a comment.
-        """
-        self._reviewed_sha = head_sha
 
     def apply_pr_labels(self, labels: list[str]) -> None:
         """Add lgtmaybe's labels to the PR, best-effort.

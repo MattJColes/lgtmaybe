@@ -22,6 +22,7 @@ from lgtmaybe.core.comment import render_inline_body
 from lgtmaybe.core.findings import finding_fingerprint, finding_identity
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
+from tests.fakes import submission
 
 REPO = "owner/repo"
 PR_NUMBER = 42
@@ -204,8 +205,7 @@ def _mount(pr: _FakePR) -> None:
 
 def _run_diff(findings: list[ReviewFinding], diff: str, summary: str = "Summary text") -> None:
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
-    gw.mark_reviewed(HEAD_SHA)
-    gw.post_review(findings, summary, diff=diff)
+    gw.post_review(submission(findings, summary, diff=diff, completed_sha=HEAD_SHA))
 
 
 def _run(findings: list[ReviewFinding], summary: str) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lgtmaybe.core.models import PRContext, ReviewFinding
+from lgtmaybe.core.models import PRContext, ReviewFinding, ReviewSubmission
 
 _DEFAULT_CTX = PRContext(
     diff="--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n",
@@ -19,6 +19,8 @@ class FakeGitHub:
 
     def __init__(self, ctx: PRContext | None = None) -> None:
         self._ctx = _DEFAULT_CTX if ctx is None else ctx
+        # Every submission as posted, and its (findings, summary) / diff views.
+        self.submissions: list[ReviewSubmission] = []
         self.posted: list[tuple[list[ReviewFinding], str]] = []
         self.posted_diffs: list[str | None] = []
         self.comments: list[str] = []
@@ -35,11 +37,10 @@ class FakeGitHub:
     def get_pr_context(self) -> PRContext:
         return self._ctx
 
-    def post_review(
-        self, findings: list[ReviewFinding], summary: str, diff: str | None = None
-    ) -> None:
-        self.posted.append((findings, summary))
-        self.posted_diffs.append(diff)
+    def post_review(self, submission: ReviewSubmission) -> None:
+        self.submissions.append(submission)
+        self.posted.append((submission.findings, submission.summary))
+        self.posted_diffs.append(submission.diff)
 
     def post_issue_comment(self, body: str) -> None:
         """In-thread reply — beyond the frozen port, used by slash commands."""
@@ -77,3 +78,12 @@ class FakeGitHub:
     def reply_in_thread(self, thread_id: str, body: str) -> None:
         """Record a resolve-on-fix reply posted to a review thread."""
         self.replies.append((thread_id, body))
+
+
+def submission(
+    findings: list[ReviewFinding] | None = None, summary: str = "", **fields: object
+) -> ReviewSubmission:
+    """A ``ReviewSubmission`` with the old positional shape, for terse gateway tests."""
+    return ReviewSubmission.model_validate(
+        {"findings": findings or [], "summary": summary, **fields}
+    )

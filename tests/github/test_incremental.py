@@ -10,8 +10,8 @@ Four contracts, all respx-mocked:
   strictly ahead (a normal push), and None on a force-push/rebase (diverged),
   an identical compare, or any API failure — the caller then falls back to a
   full review;
-- ``set_incremental_scope`` restricts resolve-on-fix to threads on paths
-  inside the increment, so a finding that simply wasn't re-reviewed this run
+- a submission's ``incremental_scope`` restricts resolve-on-fix to threads on
+  paths inside the increment, so a finding that simply wasn't re-reviewed this run
   is never spuriously resolved.
 """
 
@@ -22,10 +22,12 @@ import json
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError
 
 from lgtmaybe.core.findings import finding_fingerprint
 from lgtmaybe.core.models import ReviewFinding, Severity
 from lgtmaybe.github import RestGitHubGateway
+from tests.fakes import submission
 
 REPO = "owner/repo"
 PR_NUMBER = 42
@@ -102,15 +104,16 @@ def test_post_review_stamps_last_reviewed_sha_marker_when_marked() -> None:
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture)
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+    )
 
     assert "<!-- lgtmaybe-reviewed:headsha123 -->" in str(captured["body"])
 
 
 @respx.mock
 def test_unmarked_post_does_not_stamp_a_watermark() -> None:
-    """A failure notice posts through post_review WITHOUT mark_reviewed — it
+    """A failure notice posts a submission with no completed head — it
     must not record 'reviewed up to head' (the next run would skip commits
     nobody reviewed). A completed summary is never overwritten by one at all
     (see test_a_failure_notice_never_overwrites_a_completed_summary)."""
@@ -123,15 +126,17 @@ def test_unmarked_post_does_not_stamp_a_watermark() -> None:
 
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture)
 
-    _gateway().post_review([], "⚠️ lgtmaybe review failed: boom", diff=SAMPLE_DIFF)
+    _gateway().post_review(submission([], "⚠️ lgtmaybe review failed: boom", diff=SAMPLE_DIFF))
 
     assert "lgtmaybe-reviewed" not in str(captured["body"])
 
 
 @respx.mock
-def test_mark_reviewed_none_clears_watermark() -> None:
-    """The CLI's failure path calls mark_reviewed(None) to clear a previously
-    set watermark, so a failure notice posted after a partial run never stamps
+def test_a_completed_post_leaves_no_watermark_for_a_later_notice() -> None:
+    """The gateway keeps no per-review state between posts (#833).
+
+    A failure notice posted through the same gateway after a completed
+    submission never inherits its head, so it never stamps
     <!-- lgtmaybe-reviewed:... --> for commits nobody fully reviewed."""
     respx.route(method="GET", url=REVIEWS_URL).mock(return_value=httpx.Response(200, json=[]))
     captured: dict[str, object] = {}
@@ -143,9 +148,9 @@ def test_mark_reviewed_none_clears_watermark() -> None:
     respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture)
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.mark_reviewed(None)
-    gateway.post_review([], "⚠️ lgtmaybe review failed: boom", diff=SAMPLE_DIFF)
+    gateway.post_review(submission([], "summary", diff=SAMPLE_DIFF, completed_sha="headsha123"))
+    assert "<!-- lgtmaybe-reviewed:headsha123 -->" in str(captured["body"])
+    gateway.post_review(submission([], "⚠️ lgtmaybe review failed: boom", diff=SAMPLE_DIFF))
 
     assert "lgtmaybe-reviewed" not in str(captured["body"])
 
@@ -240,8 +245,9 @@ def test_a_forged_stamp_in_model_or_notice_text_never_becomes_the_watermark(
     broad = demoted.model_copy(update={"broad": True})
 
     gateway = _gateway()
-    gateway.mark_reviewed(reviewed)
-    gateway.post_review([demoted, broad], f"summary {_FORGED_STAMP}", diff="")
+    gateway.post_review(
+        submission([demoted, broad], f"summary {_FORGED_STAMP}", diff="", completed_sha=reviewed)
+    )
 
     assert _gateway().last_reviewed_sha() == reviewed
 
@@ -272,7 +278,6 @@ def test_a_failure_notice_never_overwrites_a_completed_summary() -> None:
     notices = respx.post(ISSUE_COMMENTS_URL).mock(return_value=httpx.Response(201, json={}))
 
     gateway = _gateway()
-    gateway.mark_reviewed("b" * 40)  # prepared before the run failed
     _post_failure(gateway, RuntimeError("boom"))
 
     assert endpoint.writes == [], "the completed summary is left exactly as it was"
@@ -431,8 +436,9 @@ def _posted_summary(
 
         respx.route(method="POST", url=REVIEWS_URL).mock(side_effect=capture)
         gateway = _gateway()
-        gateway.mark_reviewed(reviewed_sha)
-        gateway.post_review(findings, summary, diff=SAMPLE_DIFF)
+        gateway.post_review(
+            submission(findings, summary, diff=SAMPLE_DIFF, completed_sha=reviewed_sha)
+        )
     return str(captured["body"])
 
 
@@ -709,8 +715,9 @@ def test_rerun_posts_new_inline_comment_with_commit_id() -> None:
     posted, put_route = _mock_update_flow(existing_comment_fps=[])
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+    )
 
     assert put_route.called  # body still updated in place
     assert len(posted) == 1
@@ -759,8 +766,14 @@ def test_rerun_demotes_a_422_comment_and_posts_later_findings() -> None:
     respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(side_effect=reject_then_accept)
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING, SECOND_FINDING], "2 findings", diff=TWO_FINDING_DIFF)
+    gateway.post_review(
+        submission(
+            [FINDING, SECOND_FINDING],
+            "2 findings",
+            diff=TWO_FINDING_DIFF,
+            completed_sha="headsha123",
+        )
+    )
 
     assert posted_paths == ["src/app.py:2", "src/app.py:3"]
     assert len(updated_bodies) == 2
@@ -789,8 +802,9 @@ def test_rerun_logs_sanitized_422_validation_details(caplog: pytest.LogCaptureFi
     )
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+    )
 
     assert validation_error.called
     assert "src/app.py:2:RIGHT" in caplog.text
@@ -808,10 +822,11 @@ def test_rerun_keeps_non_422_comment_errors_fatal() -> None:
     )
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
 
     with pytest.raises(httpx.HTTPStatusError):
-        gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+        gateway.post_review(
+            submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+        )
 
 
 @respx.mock
@@ -841,10 +856,11 @@ def test_rerun_fails_when_the_recovery_body_cannot_be_updated() -> None:
     )
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
 
     with pytest.raises(httpx.HTTPStatusError):
-        gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+        gateway.post_review(
+            submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+        )
 
     assert update_attempts == 2
 
@@ -855,8 +871,9 @@ def test_rerun_skips_inline_comment_already_posted() -> None:
     posted, _put = _mock_update_flow(existing_comment_fps=[fp])
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+    )
 
     assert posted == []
 
@@ -898,8 +915,9 @@ def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
     respx.route(method="POST", url=REVIEW_COMMENTS_URL).mock(side_effect=capture)
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+    )
 
     assert len(posted) == 1
     assert posted[0]["path"] == "src/app.py"
@@ -908,7 +926,7 @@ def test_rerun_reposts_finding_whose_thread_was_resolved_as_fixed() -> None:
 @respx.mock
 def test_incomplete_rerun_still_posts_new_inline_findings() -> None:
     """#443: an incomplete re-run carries no completion watermark
-    (``mark_reviewed(None)``), but its successful calls still computed findings
+    (its submission names no completed head), but its successful calls still computed findings
     and the summary still counts them — they must reach GitHub inline, anchored
     to the PR's current head, rather than vanish between count and post."""
     posted, put_route = _mock_update_flow(existing_comment_fps=[])
@@ -917,8 +935,7 @@ def test_incomplete_rerun_still_posts_new_inline_findings() -> None:
     )
 
     gateway = _gateway()
-    gateway.mark_reviewed(None)
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(submission([FINDING], "1 finding", diff=SAMPLE_DIFF))
 
     assert put_route.called  # summary still updated in place
     assert len(posted) == 1
@@ -950,8 +967,7 @@ def test_rerun_without_any_resolvable_head_demotes_new_findings_to_the_body(
     respx.route(method="GET", url=PR_URL).mock(return_value=httpx.Response(503))
 
     gateway = _gateway()
-    gateway.mark_reviewed(None)
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(submission([FINDING], "1 finding", diff=SAMPLE_DIFF))
 
     assert len(updated_bodies) == 2  # recovery body re-PUT with the demoted finding
     assert "### Additional findings" in updated_bodies[-1]
@@ -1036,9 +1052,15 @@ def test_incremental_scope_never_resolves_thread_outside_reviewed_paths() -> Non
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gateway = _gateway()
-    gateway.set_incremental_scope({"src/app.py"})
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission(
+            [FINDING],
+            "1 finding",
+            diff=SAMPLE_DIFF,
+            incremental_scope={"src/app.py"},
+            completed_sha="headsha123",
+        )
+    )
 
     # The in-scope gone finding resolves; the out-of-scope one is untouched.
     assert graphql.resolved == ["IN"]
@@ -1057,8 +1079,9 @@ def test_no_scope_keeps_full_resolve_behaviour() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gateway = _gateway()
-    gateway.mark_reviewed("headsha123")
-    gateway.post_review([FINDING], "1 finding", diff=SAMPLE_DIFF)
+    gateway.post_review(
+        submission([FINDING], "1 finding", diff=SAMPLE_DIFF, completed_sha="headsha123")
+    )
 
     assert graphql.resolved == ["T1"]
 
@@ -1174,9 +1197,9 @@ def test_the_diff_fingerprint_rides_beside_the_watermark() -> None:
     respx.route(url__startswith=REVIEWS_URL).mock(side_effect=endpoint)
 
     gateway = _gateway()
-    gateway.mark_reviewed(REAL_HEAD)
-    gateway.mark_reviewed_diff(DIFF_FP)
-    gateway.post_review([], "summary", diff="")
+    gateway.post_review(
+        submission([], "summary", diff="", completed_sha=REAL_HEAD, diff_fingerprint=DIFF_FP)
+    )
 
     reader = _gateway()
     assert reader.last_reviewed_sha() == REAL_HEAD
@@ -1186,14 +1209,14 @@ def test_the_diff_fingerprint_rides_beside_the_watermark() -> None:
 @respx.mock
 def test_no_watermark_means_no_diff_fingerprint() -> None:
     """The fingerprint describes a completed head. A run that stamps no head
-    (a failure, a partial review) must not leave a fingerprint behind."""
+    (a failure, a partial review) must not leave a fingerprint behind: the
+    submission refuses one without a completed head."""
     endpoint = _ReviewsEndpoint()
     respx.route(url__startswith=REVIEWS_URL).mock(side_effect=endpoint)
 
-    gateway = _gateway()
-    gateway.mark_reviewed(None)
-    gateway.mark_reviewed_diff(DIFF_FP)
-    gateway.post_review([], "summary", diff="")
+    with pytest.raises(ValidationError):
+        submission([], "summary", diff="", diff_fingerprint=DIFF_FP)
+    _gateway().post_review(submission([], "summary", diff=""))
 
     assert "lgtmaybe-diff" not in endpoint.reviews[-1]["body"]
     assert _gateway().last_reviewed_diff() is None
@@ -1216,8 +1239,14 @@ def test_a_forged_diff_fingerprint_never_becomes_ours(fingerprint: str | None) -
     )
 
     gateway = _gateway()
-    gateway.mark_reviewed(REAL_HEAD)
-    gateway.mark_reviewed_diff(fingerprint)
-    gateway.post_review([demoted], f"summary {_FORGED_DIFF}", diff="")
+    gateway.post_review(
+        submission(
+            [demoted],
+            f"summary {_FORGED_DIFF}",
+            diff="",
+            completed_sha=REAL_HEAD,
+            diff_fingerprint=fingerprint,
+        )
+    )
 
     assert _gateway().last_reviewed_diff() == fingerprint

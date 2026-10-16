@@ -61,6 +61,7 @@ from lgtmaybe.core.models import (
     PRContext,
     PRStack,
     ReviewFinding,
+    ReviewSubmission,
     StackLayer,
 )
 from lgtmaybe.core.ports import DiffUnavailable
@@ -228,28 +229,14 @@ class RestGitHubGateway:
         # and only if a symbol deferral actually needs it). _done guards the one-shot.
         self._base_root: Path | None = None
         self._base_root_done = False
-        # Incremental-review scope: when set (via set_incremental_scope), only
-        # this run's reviewed paths. Resolve-on-fix then skips threads on other
-        # paths — a finding absent merely because its file wasn't re-reviewed
-        # this run must never be spuriously resolved. None = full review.
-        self._incremental_paths: set[str] | None = None
-        self._validated_fixed_thread_ids: set[str] | None = None
+        # Read cache of list_active_findings, for resolving the threads a
+        # submission's validated allowlist names without re-walking them.
         self._active_findings: list[ActiveFinding] | None = None
         self._review_threads_cache: list[dict[str, Any]] | None = None
         # Whether to fetch dependency manifests for the vulnerability scanner
         # (set via set_scan_manifests). Off by default so the overwhelming
         # majority of runs — static analysis is opt-in — pay no extra API calls.
         self._scan_manifests = False
-        # Head SHA this run actually reviewed (set via mark_reviewed by the
-        # orchestrator on the success path only). Drives the reviewed-SHA stamp
-        # and re-run inline-comment posting. Deliberately NOT inferred inside
-        # post_review: a failure notice posts through the same method and must
-        # never record "reviewed up to head" — the next run would then skip
-        # commits nobody reviewed.
-        self._reviewed_sha: str | None = None
-        # The whole PR diff's fingerprint at that head, stamped beside it and
-        # only with it (see mark_reviewed_diff).
-        self._reviewed_diff: str | None = None
         # Watermark reads and pre-post lookup share one paginated scan. A
         # successful post invalidates it so later reads see the new native summary.
         # _done distinguishes a cached missing match from an unfetched list.
@@ -496,25 +483,28 @@ class RestGitHubGateway:
             number=number, title=title, files=[str(item["filename"]) for item in files]
         )
 
-    def post_review(
-        self,
-        findings: list[ReviewFinding],
-        summary: str,
-        diff: str | None = None,
-    ) -> None:
+    def post_review(self, submission: ReviewSubmission) -> None:
         """Post (or update) a single review with batched inline comments.
 
         A completed review at a new commit gets a fresh native summary carrying
         its not-yet-posted inline comments in the same single POST; reruns at
         that commit update it in-place. Older summaries retain their history.
 
-        The ``diff`` parameter is optional; when omitted the method fetches just
+        ``submission.completed_sha`` drives the reviewed-SHA stamp, re-run
+        inline-comment posting and resolve-on-fix. It is never inferred here: a
+        failure notice posts through the same method with no completed head and
+        must never record "reviewed up to head", or the next run would skip
+        commits nobody reviewed.
+
+        ``submission.diff`` is optional; when omitted the method fetches just
         the PR diff (one ``.diff``-Accept GET — never the full ``get_pr_context``
         fan-out) to build the commentable-line index. With no findings there is
         nothing to anchor, so even that fetch is skipped — a failure notice must
         not re-fetch anything (and must still post when a fetch is exactly what
         failed).
         """
+        findings, summary, diff = submission.findings, submission.summary, submission.diff
+        reviewed_sha = submission.completed_sha
         if diff is None and findings:
             diff = self._fetch_pr_diff()
 
@@ -535,10 +525,10 @@ class RestGitHubGateway:
                 _REVIEWED_DIFF_MARKER,
             )
             body = f"{content}\n\n{self._marker}"
-            if self._reviewed_sha:
-                body += f"\n{reviewed_marker(self._reviewed_sha)}"
-                if self._reviewed_diff:
-                    body += f"\n{reviewed_diff_marker(self._reviewed_diff)}"
+            if reviewed_sha:
+                body += f"\n{reviewed_marker(reviewed_sha)}"
+                if submission.diff_fingerprint:
+                    body += f"\n{reviewed_diff_marker(submission.diff_fingerprint)}"
             return body
 
         body = build_body(demoted)
@@ -547,9 +537,7 @@ class RestGitHubGateway:
         reviews_url = f"{self._pr_api}/reviews"
 
         new_commit = (
-            existing is not None
-            and self._reviewed_sha is not None
-            and existing[2] != self._reviewed_sha
+            existing is not None and reviewed_sha is not None and existing[2] != reviewed_sha
         )
         if existing is not None and not new_commit:
             # Update the existing review body (inline comments cannot be changed
@@ -570,9 +558,7 @@ class RestGitHubGateway:
             # PR's current head: an incomplete run stamps no watermark, but the
             # findings its successful calls produced are real and still belong
             # inline — anchoring them to nothing silently dropped them (#443).
-            rejected = self._post_new_inline_comments(
-                inline, self._reviewed_sha or self._anchor_sha()
-            )
+            rejected = self._post_new_inline_comments(inline, reviewed_sha or self._anchor_sha())
             if rejected:
                 resp = self._client.put(
                     update_url,
@@ -596,8 +582,8 @@ class RestGitHubGateway:
                 "event": "COMMENT",
                 "comments": comments,
             }
-            if self._reviewed_sha is not None:
-                payload["commit_id"] = self._reviewed_sha
+            if reviewed_sha is not None:
+                payload["commit_id"] = reviewed_sha
             resp = self._post(
                 reviews_url,
                 headers=self._json_headers,
@@ -608,7 +594,7 @@ class RestGitHubGateway:
                 # One bad position refuses the whole review; the per-comment path
                 # isolates it (and dedupes again, one-for-one, from scratch).
                 rejected = self._post_new_inline_comments(
-                    inline, self._reviewed_sha or self._anchor_sha()
+                    inline, reviewed_sha or self._anchor_sha()
                 )
                 payload["body"] = build_body([*demoted, *rejected])
                 payload["comments"] = []
@@ -623,7 +609,7 @@ class RestGitHubGateway:
         # (and whose code changed) is fixed — collapse it. Best-effort, so a
         # GraphQL hiccup never fails an otherwise-successful review.
         if existing is not None and self._resolve_fixed:
-            self._resolve_fixed_threads(findings)
+            self._resolve_fixed_threads(submission)
         self._existing_review_entry = None
         self._existing_review_done = False
 
@@ -949,16 +935,6 @@ class RestGitHubGateway:
         """
         self._scan_manifests = enabled
 
-    def set_incremental_scope(self, paths: set[str] | None) -> None:
-        """Restrict resolve-on-fix to threads on *paths* (None = no restriction).
-
-        Set by the incremental-review path with the files actually re-reviewed
-        this run: a finding on any other file is absent from this run's
-        findings only because its hunks weren't in the increment, so its
-        conversation must stay open rather than be spuriously resolved.
-        """
-        self._incremental_paths = paths
-
     def list_active_findings(self) -> list[ActiveFinding]:
         """Read our unresolved finding roots for explicit follow-up validation."""
         active: list[ActiveFinding] = []
@@ -984,34 +960,12 @@ class RestGitHubGateway:
         self._active_findings = active
         return active
 
-    def set_validated_fixed_threads(self, thread_ids: set[str]) -> None:
-        """Restrict hybrid resolve-on-fix to explicitly validated thread ids."""
-        self._validated_fixed_thread_ids = set(thread_ids)
-
-    def mark_reviewed(self, head_sha: str | None) -> None:
-        """Prepare the reviewed marker for the next successful review post.
-
-        This setter changes only in-memory request state; GitHub receives the
-        marker atomically inside ``post_review``. The CLI's failure path calls
-        ``mark_reviewed(None)`` so a later failure notice never stamps
-        ``core.comment.reviewed_marker`` — a failed run must not move the
-        watermark.
-        """
-        self._reviewed_sha = head_sha
-
-    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
-        """Prepare the PR diff fingerprint stamped beside the reviewed marker.
-
-        In-memory only, like ``mark_reviewed``, and stamped only when a head is:
-        a run that completes nothing records no fingerprint either.
-        """
-        self._reviewed_diff = fingerprint
-
     def _anchor_sha(self) -> str | None:
         """The PR's current head SHA, for anchoring re-run inline comments.
 
         The fallback when the completion watermark is absent — i.e. an
-        incomplete run, whose ``mark_reviewed(None)`` correctly suppresses the
+        incomplete run, whose submission names no completed head and so
+        correctly suppresses the
         watermark stamp but must not also suppress the findings the run did
         compute. The head cached by ``get_pr_context``, with the same lazy
         metadata fetch ``get_file_contents`` uses when no context was fetched;
@@ -1323,7 +1277,7 @@ class RestGitHubGateway:
     # resolve a review thread).
     # ------------------------------------------------------------------
 
-    def _resolve_fixed_threads(self, findings: list[ReviewFinding]) -> None:
+    def _resolve_fixed_threads(self, submission: ReviewSubmission) -> None:
         """Resolve our prior conversations whose finding is gone and code changed.
 
         A thread is "fixed" when neither of its hidden ids (fingerprint or
@@ -1345,11 +1299,13 @@ class RestGitHubGateway:
         # No completion watermark, no resolving: an incomplete run (or a failure
         # notice) is missing findings its failed calls never produced, and those
         # absences are not evidence of fixes (#747). Azure DevOps gates alike.
-        if self._reviewed_sha is None:
+        if submission.completed_sha is None:
             return
         try:
-            current = current_finding_keys(findings)
-            fixed = self._fixed_threads(current)
+            current = current_finding_keys(submission.findings)
+            fixed = self._fixed_threads(
+                current, submission.validated_fixed_threads, submission.incremental_scope
+            )
         except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
             _log.warning("auto-resolve of fixed conversations failed: %s", exc)
             return
@@ -1453,43 +1409,47 @@ class RestGitHubGateway:
             return 0
         return open_threads
 
-    def _fixed_threads(self, current: set[str]) -> list[tuple[str, int | None, str]]:
+    def _fixed_threads(
+        self,
+        current: set[str],
+        validated: frozenset[str] | None,
+        scope: frozenset[str] | None,
+    ) -> list[tuple[str, int | None, str]]:
         """Our unresolved, outdated conversations whose finding is gone.
+
+        ``validated`` is the submission's allowlist (None: no validation ran,
+        so the implicit gone-and-outdated rule applies); ``scope`` the files an
+        incremental run re-reviewed (None: no limit). An incremental run
+        validated its own increment only: a thread on any other file has no
+        fresh evidence behind it (#753).
 
         Each entry is ``(thread_id, opening comment's REST id or None, opening
         comment's body)`` — the comment id/body feed the resolved-marker rewrite.
         """
-        if self._validated_fixed_thread_ids is not None and self._active_findings is not None:
+        if validated is not None and self._active_findings is not None:
             return [
                 (finding.thread_id, finding.comment_id, finding.body)
                 for finding in self._active_findings
-                if finding.thread_id in self._validated_fixed_thread_ids
-                # An incremental run validated its own increment only: a thread
-                # on any other file has no fresh evidence behind it (#753).
-                and (self._incremental_paths is None or finding.path in self._incremental_paths)
+                if finding.thread_id in validated and (scope is None or finding.path in scope)
             ]
 
         fixed: list[tuple[str, int | None, str]] = []
         for node in self._walk_review_threads():
             if node.get("isResolved"):
                 continue
-            if self._validated_fixed_thread_ids is not None:
-                if node.get("id") not in self._validated_fixed_thread_ids:
+            if scope is not None and node.get("path") not in scope:
+                continue
+            if validated is not None:
+                if node.get("id") not in validated:
                     continue
-            else:
-                if not node.get("isOutdated"):
-                    continue
-                if (
-                    self._incremental_paths is not None
-                    and node.get("path") not in self._incremental_paths
-                ):
-                    continue
+            elif not node.get("isOutdated"):
+                continue
             first = _first_comment(node)
             first_body = first.get("body", "")
             keys = finding_keys(first_body)
             if not keys:
                 continue  # not one of ours
-            if self._validated_fixed_thread_ids is None and keys & current:
+            if validated is None and keys & current:
                 continue  # still flagged this run (however worded) — leave it open
             fixed.append((node["id"], first.get("databaseId"), first_body))
         return fixed

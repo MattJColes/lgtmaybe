@@ -39,7 +39,7 @@ from lgtmaybe.engine.engine import (
 from lgtmaybe.engine.engine import LLMReviewEngine as EngineClass
 from lgtmaybe.engine.redact import REDACTED_PLACEHOLDER
 from tests.conftest import make_cfg
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, submission
 
 _REFLECT_MARKER = "auditing another reviewer"
 
@@ -3263,7 +3263,7 @@ def test_a_confirmed_lockfile_advisory_reaches_the_posted_review(monkeypatch, an
         respx.post(reviews_url).mock(side_effect=capture)
         RestGitHubGateway(
             repo="org/repo", pr_number=3, token="t", client=httpx.Client()
-        ).post_review(findings, summary, diff=_LOCKFILE_CTX.diff)
+        ).post_review(submission(findings, summary, diff=_LOCKFILE_CTX.diff))
 
     (review,) = posted
     assert review.get("comments", []) == []
@@ -3374,7 +3374,7 @@ def test_reflection_can_verify_a_lockfile_advisory_against_the_hint(monkeypatch)
         respx.post(reviews_url).mock(side_effect=capture)
         RestGitHubGateway(
             repo="org/repo", pr_number=3, token="t", client=httpx.Client()
-        ).post_review(findings, summary, diff=_LOCKFILE_CTX.diff)
+        ).post_review(submission(findings, summary, diff=_LOCKFILE_CTX.diff))
 
     (review,) = posted
     assert advisory.title in review["body"]

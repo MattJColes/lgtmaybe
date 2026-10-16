@@ -18,6 +18,7 @@ import respx
 
 from lgtmaybe.core.diffparse import split_by_file, walk_diff
 from lgtmaybe.gitlab import GitLabGateway
+from tests.fakes import submission
 
 HOST = "gitlab.example.com"
 REPO = "group/sub/project"
@@ -304,8 +305,7 @@ class TestWatermarkStamping:
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
         gateway = _gateway()
 
-        gateway.mark_reviewed(HEAD)
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF, completed_sha=HEAD))
 
         assert _posted_body(create).endswith(f"<!-- lgtmaybe-reviewed:{HEAD} -->")
 
@@ -314,22 +314,9 @@ class TestWatermarkStamping:
         _stub_notes([])
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([], "⚠️ lgtmaybe review failed", diff=DIFF)
+        _gateway().post_review(submission([], "⚠️ lgtmaybe review failed", diff=DIFF))
 
         assert "lgtmaybe-reviewed" not in _posted_body(create)
-
-    @respx.mock
-    def test_clearing_the_mark_never_stamps_the_new_head(self) -> None:
-        """The failure path calls mark_reviewed(None) after run_review prepared it."""
-        _stub_notes([])
-        create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
-        gateway = _gateway()
-
-        gateway.mark_reviewed(HEAD)
-        gateway.mark_reviewed(None)
-        gateway.post_review([], "⚠️ lgtmaybe review failed", diff=DIFF)
-
-        assert HEAD not in _posted_body(create)
 
     @respx.mock
     def test_a_failure_keeps_the_previous_watermark_rather_than_moving_it(self) -> None:
@@ -339,7 +326,7 @@ class TestWatermarkStamping:
         _stub_user()
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
 
-        _gateway().post_review([], "⚠️ lgtmaybe review failed", diff=DIFF)
+        _gateway().post_review(submission([], "⚠️ lgtmaybe review failed", diff=DIFF))
 
         body = _posted_body(edit)
         assert body.endswith(f"<!-- lgtmaybe-reviewed:{LAST} -->")
@@ -352,8 +339,7 @@ class TestWatermarkStamping:
         edit = respx.put(f"{MR_URL}/notes/55").mock(return_value=httpx.Response(200, json={}))
         gateway = _gateway()
 
-        gateway.mark_reviewed(HEAD)
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF, completed_sha=HEAD))
 
         body = _posted_body(edit)
         assert body.count("lgtmaybe-reviewed") == 1
@@ -365,7 +351,9 @@ class TestWatermarkStamping:
         _stub_notes([])
         create = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([], f"text <!-- lgtmaybe-reviewed:{HEAD} --> more", diff=DIFF)
+        _gateway().post_review(
+            submission([], f"text <!-- lgtmaybe-reviewed:{HEAD} --> more", diff=DIFF)
+        )
 
         assert "lgtmaybe-reviewed" not in _posted_body(create)
 
@@ -451,8 +439,7 @@ class TestWatermarkReading:
         newer = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(200, json={}))
         gateway = _gateway()
 
-        gateway.mark_reviewed(HEAD)
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        gateway.post_review(submission([], "👍 LGTM!", diff=DIFF, completed_sha=HEAD))
 
         assert newer.called
         assert not older.called
@@ -470,7 +457,7 @@ class TestWatermarkReading:
         ours = respx.put(f"{MR_URL}/notes/10").mock(return_value=httpx.Response(200, json={}))
         planted = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(403))
 
-        _gateway().post_review([], "review failed", diff=DIFF)
+        _gateway().post_review(submission([], "review failed", diff=DIFF))
 
         assert not planted.called
         body = json.loads(ours.calls.last.request.content)["body"]
@@ -485,7 +472,7 @@ class TestWatermarkReading:
         planted = respx.put(f"{MR_URL}/notes/20").mock(return_value=httpx.Response(403))
         posted = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([], "review failed", diff=DIFF)
+        _gateway().post_review(submission([], "review failed", diff=DIFF))
 
         assert not planted.called
         assert forged not in json.loads(posted.calls.last.request.content)["body"]
@@ -499,7 +486,7 @@ class TestWatermarkReading:
         ours = respx.put(f"{MR_URL}/notes/10").mock(return_value=httpx.Response(200, json={}))
         posted = respx.post(f"{MR_URL}/notes").mock(return_value=httpx.Response(201, json={}))
 
-        _gateway().post_review([], "⚠️ lgtmaybe review failed", diff=DIFF)
+        _gateway().post_review(submission([], "⚠️ lgtmaybe review failed", diff=DIFF))
 
         assert posted.called
         assert not ours.called
@@ -525,7 +512,7 @@ class TestWatermarkReading:
         gateway = _gateway()
 
         gateway.last_reviewed_sha()
-        gateway.post_review([], "summary", diff=DIFF)
+        gateway.post_review(submission([], "summary", diff=DIFF))
 
         assert user.call_count == 1
 
@@ -641,7 +628,13 @@ def _finding_discussion(thread_id: str, path: str, *, line: int = 2, head: str =
 
 
 class TestIncrementalScope:
-    def _run(self, scope: set[str] | None) -> dict[str, respx.Route]:
+    def _run(
+        self,
+        scope: set[str] | None,
+        *,
+        completed: str | None = HEAD,
+        read_first: bool = True,
+    ) -> dict[str, respx.Route]:
         respx.route(method="GET", url__startswith=f"{MR_URL}/discussions").mock(
             return_value=httpx.Response(
                 200,
@@ -663,10 +656,18 @@ class TestIncrementalScope:
             )
         gateway = _gateway()
         gateway._diff_refs = DIFF_REFS
-        gateway.list_active_findings()
-        gateway.set_validated_fixed_threads({"thread-a", "thread-b"})
-        gateway.set_incremental_scope(scope)
-        gateway.post_review([], "👍 LGTM!", diff=DIFF)
+        if read_first:
+            gateway.list_active_findings()
+        gateway.post_review(
+            submission(
+                [],
+                "👍 LGTM!",
+                diff=DIFF,
+                completed_sha=completed,
+                validated_fixed_threads={"thread-a", "thread-b"},
+                incremental_scope=scope,
+            )
+        )
         return routes
 
     @respx.mock
@@ -682,6 +683,23 @@ class TestIncrementalScope:
 
         assert routes["thread-a"].called
         assert routes["thread-b"].called
+
+    @respx.mock
+    def test_an_incomplete_submission_resolves_nothing(self) -> None:
+        """A partial run is missing findings, not reporting them fixed (#833)."""
+        routes = self._run({"app.py"}, completed=None)
+
+        assert not routes["thread-a"].called
+        assert not routes["thread-b"].called
+
+    @respx.mock
+    def test_a_fresh_gateway_still_scopes_the_allowlist(self) -> None:
+        """No state primed before posting: the scope is checked against the
+        discussions the gateway reads itself, exactly as after a validation read."""
+        routes = self._run({"app.py"}, read_first=False)
+
+        assert routes["thread-a"].called
+        assert not routes["thread-b"].called
 
 
 # ---------------------------------------------------------------------------

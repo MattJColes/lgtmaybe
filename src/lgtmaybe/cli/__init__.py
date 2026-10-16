@@ -40,6 +40,7 @@ from lgtmaybe.core.models import (
     ReviewConfig,
     ReviewFinding,
     ReviewPreset,
+    ReviewSubmission,
     Severity,
 )
 from lgtmaybe.core.ports import (
@@ -48,7 +49,6 @@ from lgtmaybe.core.ports import (
     ReviewEngine,
     ReviewGateway,
     SupportsBaseCheckout,
-    SupportsCompletionMark,
     SupportsFileContents,
     SupportsIncremental,
     SupportsPermissions,
@@ -792,17 +792,15 @@ def _post_notice(github: ReviewGateway, notice: str) -> None:
     summary; the comment alone then carries the notice.
     """
     try:
-        # run_review may have prepared the reviewed watermark before the post
-        # failed — clear it so the failure notice doesn't carry it and the next
-        # incremental run re-reviews the commits whose findings never posted.
-        if isinstance(github, SupportsCompletionMark):
-            github.mark_reviewed(None)
         # A summary carrying a watermark is the record of the last head that WAS
         # reviewed — its demoted findings and the watermark itself. Writing the
         # notice over it erased both; the PR comment below discloses the
         # failure instead, and the watermark stays where that success left it.
         if not isinstance(github, SupportsIncremental) or github.last_reviewed_sha() is None:
-            github.post_review([], notice)
+            # No completed head: a notice never moves the watermark and never
+            # resolves a thread, so the next incremental run re-reviews the
+            # commits whose findings never posted.
+            github.post_review(ReviewSubmission(summary=notice))
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
         # the original error is still surfaced by the caller's ClickException.

@@ -93,6 +93,16 @@ Detail: `docs/explanation/architecture.md` and `ARCHITECTURE.md`.
   and dry-run drop in.
 - **Deliberately skipped** (do not add without a written reason): repository
   pattern, event bus, plugin framework.
+- **`post_review` takes one `ReviewSubmission`** (`core/models.py`, issue
+  #833; the one change to the frozen port since it froze). Written reason:
+  completion (`completed_sha`), the diff fingerprint, the incremental scope and
+  the validated-fixed allowlist used to reach the gateway through setters that
+  had to run in an order only comments in `review.run_review` recorded. They
+  left per-review state on the gateway, where a later failure notice could
+  read it, and widened the port invisibly. Now everything the post acts on
+  rides the call, gateways read what they support and keep nothing, and **no
+  completed head means stamp nothing and resolve nothing**. Never add a
+  pre-post setter back: add a submission field.
 - **Line anchoring (do not trust model arithmetic):** every finding carries a
   verbatim `anchor`; `engine._snap_findings` re-anchors `line` to the matching
   changed line. An unmatched anchor marks it `anchored=False` and the adapter
@@ -124,7 +134,7 @@ host.** Host differences: `docs/explanation/architecture.md` and
 - **GitHub** is the complete adapter. **Gitea** (`gitea/gateway.py`) lacks
   incremental review (its API cannot serve it); its summary is an issue comment
   because a submitted Gitea review is immutable. Resolve-on-fix works like Azure
-  DevOps (gated on `mark_reviewed(head)`, line compared at the comment's
+  DevOps (gated on the submission's completed head, line compared at the comment's
   `commit_id`), on Gitea 1.26+ only: Forgejo and older Gitea 404, which stops
   it. No reply endpoint, so it never claims `SupportsThreadResolution`.
 - **GitLab** (`gitlab/gateway.py`): one discussion per finding, an upserted
@@ -140,7 +150,7 @@ host.** Host differences: `docs/explanation/architecture.md` and
   trusts only live, non-`fixed` threads whose root comment our identity
   (`authenticatedUser.id`) wrote, and **none when the identity is unknown**.
   Upserts edit only our own marked threads (identity unknown: try each and let
-  the host's 403 decide). Resolve-on-fix is gated on `mark_reviewed(head)`, so a
+  the host's 403 decide). Resolve-on-fix is gated on the submission's completed head, so a
   partial run or failure notice resolves nothing. Incremental, labels, checks
   and feedback are unbuilt and **unclaimed**. Token: `AZURE_DEVOPS_TOKEN` else
   `SYSTEM_ACCESSTOKEN`.
@@ -246,9 +256,9 @@ docstrings.
   per-model lookup bought nothing.
 - **Incremental review** (`incremental` default None = auto: on for
   `synchronize` and `gitlab-ci`): reviews only commits since the watermark.
-  `mark_reviewed` stamps it on success only: **a failure never moves it**. Falls
+  `ReviewSubmission.completed_sha` stamps it on success only: **a failure never moves it**. Falls
   back to full on no watermark, force-push, same head or API failure.
-  Resolve-on-fix is scoped to the increment (`set_incremental_scope`), so an
+  Resolve-on-fix is scoped to the increment (`ReviewSubmission.incremental_scope`), so an
   un-re-reviewed finding is never resolved; LEFT-side findings are dropped
   (their lines are relative to the last-reviewed head, not the base).
   `/review full` forces a full review.
