@@ -969,10 +969,7 @@ class RestGitHubGateway:
     def list_active_findings(self) -> list[ActiveFinding]:
         """Read our unresolved finding roots for explicit follow-up validation."""
         active: list[ActiveFinding] = []
-        for node in self._walk_review_threads(
-            "id isResolved isOutdated path "
-            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
-        ):
+        for node in self._walk_review_threads():
             if node.get("isResolved"):
                 continue
             first = _first_comment(node)
@@ -1166,13 +1163,12 @@ class RestGitHubGateway:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _walk_review_threads(self, node_fields: str) -> Iterator[dict[str, Any]]:
+    def _walk_review_threads(self) -> Iterator[dict[str, Any]]:
         """Yield every review thread on the PR, following GraphQL pagination.
 
-        ``node_fields`` remains for call-site readability; the first walk fetches
-        the union of every caller's fields and later walks reuse it.
+        The first walk fetches the union of every caller's fields
+        (``_THREAD_NODE_FIELDS``) and later walks reuse the cache.
         """
-        del node_fields
         if self._review_threads_cache is not None:
             yield from self._review_threads_cache
             return
@@ -1454,9 +1450,7 @@ class RestGitHubGateway:
         """
         open_threads = 0
         try:
-            for node in self._walk_review_threads(
-                "isResolved comments(first:1){ nodes{ body viewerDidAuthor } }"
-            ):
+            for node in self._walk_review_threads():
                 if node.get("isResolved"):
                     continue
                 if finding_keys(_first_comment(node).get("body", "") or ""):
@@ -1483,10 +1477,7 @@ class RestGitHubGateway:
             ]
 
         fixed: list[tuple[str, int | None, str]] = []
-        for node in self._walk_review_threads(
-            "id isResolved isOutdated path "
-            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
-        ):
+        for node in self._walk_review_threads():
             if node.get("isResolved"):
                 continue
             if self._validated_fixed_thread_ids is not None:
@@ -1593,10 +1584,7 @@ class RestGitHubGateway:
         suppression time), so a downvote can't hide a serious vulnerability.
         """
         downvoted: set[str] = set()
-        for node in self._walk_review_threads(
-            "comments(first:1){ nodes{ body viewerDidAuthor "
-            "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
-        ):
+        for node in self._walk_review_threads():
             first = _first_comment(node)
             fingerprint, _identity = stamped_ids(first.get("body", "") or "")
             if fingerprint is None:

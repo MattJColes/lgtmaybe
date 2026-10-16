@@ -81,14 +81,16 @@ def _describe_system(cfg: ReviewConfig) -> str:
     )
 
 
-def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
-    """One provider call → the Markdown body of the PR-description comment.
+def _has_description(data: dict[str, Any]) -> bool:
+    """Whether a parsed object is a usable description: a title to head it."""
+    return isinstance(data.get("title"), str) and bool(data["title"])
 
-    Structured output with a lenient parser; when no description object can be
-    parsed the model's prose is posted escaped (one line, no HTML, no hidden
-    markers), so a weak model still yields a usable and inert comment.
-    """
-    return structured_comment(
+
+def _describe_call(
+    ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient
+) -> tuple[DescribeResult | None, str, bool]:
+    """One describe call: (parsed description, raw text, whether intent was sent)."""
+    return structured_call(
         ctx,
         cfg,
         provider,
@@ -96,12 +98,23 @@ def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClien
         diff_preamble=_DIFF_PREAMBLE,
         task_suffix=_TASK_SUFFIX,
         result_model=DescribeResult,
-        wanted=lambda data: isinstance(data.get("title"), str) and bool(data["title"]),
-        render=lambda desc, has_intent: render_description(
-            _changed_only(desc, ctx), has_intent=has_intent
-        ),
+        wanted=_has_description,
         label="describe",
     )
+
+
+def build_description(ctx: PRContext, cfg: ReviewConfig, provider: ProviderClient) -> str:
+    """One provider call → the Markdown body of the PR-description comment.
+
+    Structured output with a lenient parser; when no description object can be
+    parsed the model's prose is posted escaped (one line, no HTML, no hidden
+    markers), so a weak model still yields a usable and inert comment.
+    """
+    parsed, raw, has_intent = _describe_call(ctx, cfg, provider)
+    if parsed is None:
+        _log.info("describe output unstructured; posting escaped prose")
+        return prose_text(strip_markers(raw))
+    return render_description(_changed_only(parsed, ctx), has_intent=has_intent)
 
 
 def describe_result(
@@ -113,17 +126,7 @@ def describe_result(
     takes the typed object rather than describe's own rendered Markdown. None
     when nothing parsed — the overview renders its own "unavailable" line.
     """
-    parsed, _raw, has_intent = structured_call(
-        ctx,
-        cfg,
-        provider,
-        system=_describe_system(cfg),
-        diff_preamble=_DIFF_PREAMBLE,
-        task_suffix=_TASK_SUFFIX,
-        result_model=DescribeResult,
-        wanted=lambda data: isinstance(data.get("title"), str) and bool(data["title"]),
-        label="describe",
-    )
+    parsed, _raw, has_intent = _describe_call(ctx, cfg, provider)
     return (_changed_only(parsed, ctx) if parsed is not None else None), has_intent
 
 
@@ -136,48 +139,6 @@ def _changed_only(desc: DescribeResult, ctx: PRContext) -> DescribeResult:
     changed = set(ctx.changed_files)
     rows = [entry for entry in desc.walkthrough if entry.path in changed]
     return desc.model_copy(update={"walkthrough": rows})
-
-
-def structured_comment(
-    ctx: PRContext,
-    cfg: ReviewConfig,
-    provider: ProviderClient,
-    *,
-    system: str,
-    diff_preamble: str,
-    task_suffix: str,
-    result_model: type[_M],
-    wanted: Callable[[dict[str, Any]], bool],
-    render: Callable[[_M, bool], str],
-    label: str,
-    fallback: Callable[[str], str] | None = None,
-) -> str:
-    """The shared one-call scaffold behind describe and diagram.
-
-    Renders what ``structured_call`` returns: on a parse the *render* result
-    (with whether an intent block was sent), otherwise a caller-supplied safe
-    fallback, or by default the model's own prose escaped with
-    ``prose_text(strip_markers(...))``, inert the same way the structured
-    sections are, because a weak model can echo diff content verbatim.
-    """
-    parsed, raw, has_intent = structured_call(
-        ctx,
-        cfg,
-        provider,
-        system=system,
-        diff_preamble=diff_preamble,
-        task_suffix=task_suffix,
-        result_model=result_model,
-        wanted=wanted,
-        label=label,
-    )
-    if parsed is None:
-        if fallback is None:
-            _log.info("%s output unstructured; posting escaped prose", label)
-            return prose_text(strip_markers(raw))
-        _log.info("%s output did not match its schema — using safe fallback", label)
-        return fallback(raw)
-    return render(parsed, has_intent)
 
 
 def structured_call(
@@ -200,9 +161,9 @@ def structured_call(
     diff — delimited with injection.py's own markers — then leniently parses
     the first JSON object *wanted* accepts into *result_model*.
 
-    The typed seam under every overview section: callers that render Markdown
-    directly go through ``structured_comment``, while the overview needs the
-    object itself to lay several sections out in one comment.
+    The typed seam under every overview section: the overview needs the
+    object itself to lay several sections out in one comment, while describe
+    and diagram render their own Markdown from what it parsed.
     """
     intent = _intent_text(ctx)
     parts: list[str] = []
