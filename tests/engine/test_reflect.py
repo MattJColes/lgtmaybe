@@ -1106,3 +1106,84 @@ def test_fitting_diff_is_sent_whole_with_no_trim_notice() -> None:
 
     assert notices == []
     assert _CTX.diff in _user_text(provider.calls[0])
+
+
+def test_scan_hint_block_counts_against_the_input_budget() -> None:
+    """The hint block rides the audit's own message, so its tokens come out of
+    the diff's room: uncounted, a hinted audit spends the hint on top of a
+    prompt already sized to fill max_input_tokens and can be rejected."""
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    on_b = _LOW_CONF.model_copy(update={"path": "b.py"})
+    ctx = _CTX.model_copy(
+        update={
+            "diff": _big_patch("a.py", 250) + _big_patch("b.py", 250),
+            "changed_files": ["a.py", "b.py"],
+        }
+    )
+    # The budget is exactly the unhinted prompt's size, so the hint has nowhere
+    # to live unless something gives.
+    plain = _fake_with_verdict({0: True, 1: True})
+    reflect_findings(
+        [_HIGH, on_b], ctx, _CFG.model_copy(update={"max_input_tokens": 1_000_000}), plain
+    )
+    budget = count_tokens("\n".join(str(m["content"]) for m in plain.calls[0]["messages"]))
+    cfg = _CFG.model_copy(update={"max_input_tokens": budget})
+    hinted = _fake_with_verdict({0: True, 1: True})
+    notices: list[str] = []
+    hint = ToolFinding(
+        tool="osv-scanner",
+        path="a.py",
+        line=1,
+        rule="GHSA-1234",
+        message="jinja2 2.4.1: sandbox escape",
+        severity=Severity.high,
+    )
+
+    reflect_findings([_HIGH, on_b], ctx, cfg, hinted, scan_hints=[hint], notices=notices)
+
+    prompt = "\n".join(str(m["content"]) for m in hinted.calls[0]["messages"])
+    assert count_tokens(prompt) <= budget
+    assert "===HINTS_START===" in prompt  # the hint really rode along
+    assert "+added line 0 in b.py" not in prompt  # the diff gave way for it
+    assert notices
+
+
+def test_recheck_pass_that_trims_appends_its_own_notice() -> None:
+    """The deferral recheck threads the same notices list, so a recheck whose
+    diff again overruns the budget reports itself too; dropping the argument
+    in the recursive call would under-report trimming on deferred runs."""
+    ctx = _CTX.model_copy(
+        update={
+            "diff": _big_patch("a.py", 250) + _big_patch("unrelated.py", 10),
+            "changed_files": ["a.py", "unrelated.py"],
+        }
+    )
+    cfg = _CFG.model_copy(update={"max_input_tokens": 500})
+    provider = _ScriptedProvider(
+        [_needs_envelope(0, ["other.py"]), _envelope([(0, True)])]
+    )
+    fetcher = _RecordingFetcher({"other.py": "verified_definition = 42\n"})
+    notices: list[str] = []
+
+    reflect_findings([_HIGH], ctx, cfg, provider, fetch_file=fetcher, notices=notices)
+
+    assert len(provider.calls) == 2  # audit, then the deferral recheck
+    assert len(notices) == 2  # one per pass: the recheck reports its own trim
+
+
+def test_room_exhausted_by_findings_sends_an_empty_diff() -> None:
+    """When the findings JSON plus system prompt already fill the budget, room
+    is zero or below and no patch fits, so the audit runs against an empty
+    diff block. Pinned as deliberate: an empty trimmed diff also arises
+    legitimately (a scan-hint finding's file is never in the diff), and the
+    trim notice tells the user the auditor saw none of it."""
+    cfg = _CFG.model_copy(update={"max_input_tokens": 1})
+    provider = _fake_with_verdict({0: True})
+    notices: list[str] = []
+
+    survivors = reflect_findings([_HIGH], _CTX, cfg, provider, notices=notices)
+
+    assert _HIGH in survivors
+    assert _CTX.diff not in _user_text(provider.calls[0])
+    assert notices
