@@ -42,6 +42,8 @@ _SIMPLE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"npm_[A-Za-z0-9]{36,}"),
     # PyPI API tokens: pypi- followed by a long base64 macaroon.
     re.compile(r"pypi-[A-Za-z0-9_-]{16,}"),
+    # GitLab PATs: glpat- followed by base62/underscore (GitLab is a forge we read).
+    re.compile(r"glpat-[A-Za-z0-9_\-]{20,}"),
 ]
 
 # PEM private-key blocks (RSA/EC/OPENSSH/generic) — the one multi-line pattern,
@@ -77,25 +79,40 @@ def _replace_pem(m: re.Match[str]) -> str:
 # Capturing-group patterns — only the named ``secret`` group is replaced, so the
 # surrounding key name / scheme stays readable in the diff.
 _VALUE_PATTERNS: list[re.Pattern[str]] = [
-    # Generic high-entropy assignments: api_key = "..." or token = "..." (value ≥ 16 chars)
+    # Generic high-entropy assignments: api_key = "..." or token = "..." (value ≥ 16 chars).
+    # Keys may be dict-subscripted, so an optional closing quote and bracket sit
+    # between the key name and the `=`: headers["X-Api-Key"] = "...".
     re.compile(
         r"(?i)(?:api[_\-]?key|api[_\-]?secret|secret[_\-]?access[_\-]?key|"
-        r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|token)"
-        r'["\']?\s*[=:]\s*["\']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})["\']?'
+        r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|"
+        r"client[_\-]?secret|private[_\-]?key|token|secret)"
+        r"[\"']?\]?\s*[=:]\s*[\"']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})[\"']?"
     ),
     # Quoted password / passphrase literals: password = "hunter2" (value ≥ 4 chars).
     # Quotes required so we don't swallow prose like "password reset"; the key may
-    # be quoted too (JSON). The value never crosses a line end: an unterminated
-    # quote must not swallow the following diff lines up to the next quote. An
-    # escaped quote is part of the value, not its end, or the tail would leak.
+    # be quoted too (JSON), or dict-subscripted (headers["X-Password"]). The value
+    # never crosses a line end: an unterminated quote must not swallow the following
+    # diff lines up to the next quote. An escaped quote is part of the value, not
+    # its end, or the tail would leak.
     re.compile(
-        r"(?i)(?:password|passwd|passphrase|pwd)[\"']?\s*[=:]\s*"
+        r"(?i)(?:password|passwd|passphrase|pwd)[\"']?\]?\s*[=:]\s*"
         r"(?P<q>[\"'])(?P<secret>(?:[^\"'\n\\]|\\.){4,})(?P=q)"
     ),
-    # Authorization headers carrying a Bearer/Basic credential. Tolerates a quoted
-    # key and a quoted value, e.g. JSON `"Authorization": "Bearer <token>"`.
+    # Unquoted connection-string passwords: Server=db;Password=hunter2;User ID=sa
+    # (ADO.NET / JDBC). The value is bare and ends at `;`, a quote, whitespace or
+    # line end. It must also carry a digit and contain no brackets or parens:
+    # attribute copies (`x.password = user.password;`) and calls
+    # (`password = get_password()`) are ordinary code, not credential literals.
     re.compile(
-        r"(?i)[\"']?authorization[\"']?\s*[=:]\s*[\"']?(?:bearer|basic)\s+"
+        r"(?i)(?:password|passwd|pwd)[\"']?\]?\s*[=:]\s*"
+        r"(?=[^\s;\"'()\[\]]*\d)"
+        r"(?P<secret>[^\s;\"'()\[\]]{4,})(?=[;\"'\s]|$)"
+    ),
+    # Authorization headers carrying a Bearer/Basic credential. Tolerates a quoted
+    # key and a quoted value, e.g. JSON `"Authorization": "Bearer <token>"`, or a
+    # dict subscript: headers["Authorization"] = "Bearer ...".
+    re.compile(
+        r"(?i)[\"']?authorization[\"']?\]?\s*[=:]\s*[\"']?(?:bearer|basic)\s+"
         r"(?P<secret>[A-Za-z0-9\-._~+/=]{16,})"
     ),
     # Credentials embedded in connection-string URLs: scheme://user:secret@host.
