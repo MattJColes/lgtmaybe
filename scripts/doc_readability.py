@@ -79,6 +79,18 @@ def _strip_front_matter(text: str) -> str:
     return text
 
 
+def _outside_fences(text: str) -> str:
+    """The page with its fenced code blocks removed."""
+    kept: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if _FENCE.match(line):
+            in_fence = not in_fence
+        elif not in_fence:
+            kept.append(line)
+    return "\n".join(kept)
+
+
 def _clean(unit: str) -> str:
     unit = _IMAGE.sub("", unit)
     unit = _INLINE_CODE.sub("CODE", unit)
@@ -162,9 +174,11 @@ def check_page(text: str, *, path: str) -> list[Problem]:
 
     if path != _GLOSSARY:
         prose = " ".join(units)
+        # A link inside a code example is not a link the reader can follow.
+        linkable = _outside_fences(_strip_front_matter(text))
         for pattern, anchor in KEY_TERMS.items():
             used = re.search(pattern, prose, flags=re.IGNORECASE)
-            linked = re.search(rf"glossary\.md#{re.escape(anchor)}\b", text)
+            linked = re.search(rf"glossary\.md#{re.escape(anchor)}\b", linkable)
             if used and not linked:
                 problems.append(
                     Problem(
@@ -201,8 +215,13 @@ def main(argv: list[str]) -> int:
         return _summary(root)
     failed = False
     for arg in argv:
-        path = Path(arg).resolve().relative_to(root).as_posix()
-        for problem in check_page((root / path).read_text(encoding="utf-8"), path=path):
+        resolved = Path(arg).resolve()
+        if not resolved.is_file() or not resolved.is_relative_to(root):
+            print(f"{arg}: not a file inside the repository", file=sys.stderr)
+            failed = True
+            continue
+        path = resolved.relative_to(root).as_posix()
+        for problem in check_page(resolved.read_text(encoding="utf-8"), path=path):
             print(problem)
             failed = True
     return 1 if failed else 0

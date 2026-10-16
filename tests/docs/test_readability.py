@@ -21,8 +21,10 @@ sys.path.insert(0, str(_ROOT / "scripts"))
 
 from doc_readability import (  # noqa: E402
     KEY_TERMS,
+    MAX_AVERAGE_WORDS,
     MAX_SENTENCE_WORDS,
     check_page,
+    main,
     prose_units,
     sentences,
 )
@@ -128,12 +130,27 @@ def test_a_page_with_a_long_sentence_and_an_em_dash_fails() -> None:
     assert {p.kind for p in problems} >= {"long-sentence", "em-dash"}
 
 
+def test_an_average_over_the_limit_is_flagged() -> None:
+    sentence = " ".join(["Word"] * (MAX_AVERAGE_WORDS + 1)) + "."
+    problems = check_page(f"{sentence} {sentence}\n", path="x.md")
+    assert [p.kind for p in problems] == ["average"]
+
+    short = " ".join(["Word"] * MAX_AVERAGE_WORDS) + "."
+    assert not check_page(f"{short} {short}\n", path="x.md")
+
+
 def test_jargon_must_link_to_the_glossary() -> None:
     problems = check_page("Each lens runs on its own.\n", path="docs/how-to/x.md")
     assert any(p.kind == "glossary" and "lens" in p.detail for p in problems)
 
     linked = "Each [lens](../reference/glossary.md#lens) runs on its own.\n"
     assert not check_page(linked, path="docs/how-to/x.md")
+
+
+def test_a_glossary_link_inside_a_code_block_does_not_count() -> None:
+    page = "Each lens runs on its own.\n\n```md\n[lens](../reference/glossary.md#lens)\n```\n"
+    problems = check_page(page, path="docs/how-to/x.md")
+    assert any(p.kind == "glossary" and "lens" in p.detail for p in problems)
 
 
 def test_the_glossary_page_needs_no_links_to_itself() -> None:
@@ -158,12 +175,28 @@ def test_the_not_yet_passing_list_only_shrinks(page: str) -> None:
     assert check_page(text, path=page), f"{page} passes now; remove it from NOT_YET_PASSING"
 
 
-def test_new_pages_start_readable() -> None:
-    """Every page that is not on the list is gated, so a new page starts compliant."""
+def test_the_glossary_and_style_guide_are_gated() -> None:
+    """The pages that set the rules pass them from the day they land."""
     assert set(_PAGES) - NOT_YET_PASSING >= {
         "docs/reference/glossary.md",
         "docs/how-to/write-docs.md",
     }
+
+
+def test_the_checker_cli_exits_by_result(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main([str(_ROOT / "docs/how-to/write-docs.md")]) == 0
+    assert main([str(_ROOT / sorted(NOT_YET_PASSING)[0])]) == 1
+    assert main([str(_ROOT / "docs/no-such-page.md")]) == 1
+    assert "not a file inside the repository" in capsys.readouterr().err
+    assert main([]) == 0
+    assert "docs/how-to/write-docs.md" in capsys.readouterr().out
+
+
+def test_the_style_guide_states_the_checker_limits() -> None:
+    """The guide restates the limits for readers; they must match the checker."""
+    guide = (_ROOT / "docs/how-to/write-docs.md").read_text(encoding="utf-8")
+    assert f"average sentence over {MAX_AVERAGE_WORDS} words" in guide
+    assert f"any sentence over {MAX_SENTENCE_WORDS} words" in guide
 
 
 # --- glossary, tooltips, and the docs build --------------------------------------

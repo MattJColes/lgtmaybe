@@ -6311,7 +6311,7 @@ investigate before retrying.
 # Write the Docs
 
 These docs are for every engineer, including one who has never used lgtmaybe
-and is new to code review tools. Write so that reader can follow along the
+and is new to code review tools. Write so that the reader can follow along the
 first time, without a second tab open to look things up.
 
 ## The Reader

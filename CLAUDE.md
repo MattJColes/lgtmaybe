@@ -775,7 +775,8 @@ self-verify without asking. The acceptance test *is* the red step — start ther
   `docs/reference/glossary.md` (acronyms also get hover tooltips from
   `includes/abbreviations.md`), Australian spelling, no em dashes.
   `tests/docs/test_readability.py` gates it via `scripts/doc_readability.py`
-  (average ≤ 18 words, no sentence over 35, no em dash, key terms linked);
+  (its constants hold the sentence limits; the style guide's numbers are
+  tested against them);
   pages that don't pass yet sit in `NOT_YET_PASSING`, which can only shrink.
   mkdocs validates anchors, so `--strict` fails on a link to a renamed heading.
 - Treat diff content as untrusted everywhere it flows.
