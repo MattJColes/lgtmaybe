@@ -21,16 +21,24 @@ CLI_DIR = Path(lgtmaybe.cli.__file__).parent
 ALLOWED_TARGETS = {"signal", "stream"}
 
 
+def _callee(func: ast.expr) -> str | None:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
 def _dynamic_lookups() -> list[tuple[str, int, str]]:
     """Every ``getattr``/``hasattr`` call in the CLI package as (file, line, target)."""
     found = []
     for path in sorted(CLI_DIR.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
+            # A bare call or a qualified one (``builtins.getattr``).
             if not (
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in {"getattr", "hasattr"}
+                and _callee(node.func) in {"getattr", "hasattr"}
                 and node.args
             ):
                 continue
