@@ -551,6 +551,49 @@ def test_html_password_input_not_redacted() -> None:
     assert redact(text) == text
 
 
+def test_password_literal_embedding_the_word_redacted() -> None:
+    """The identifier-copy guard must spare only reference-shaped values.
+
+    `hunter2password` embeds the word with no dot or underscore separator, so
+    it cannot be a variable reference and must not ride the guard out."""
+    conn = "Server=db,1433;Password=" + "hunter" + "2password;User ID=sa;"
+    result = redact(f'+cs = "{conn}"\n')
+    assert "hunter" + "2password" not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "User ID=sa" in result
+
+
+def test_spaced_password_comparison_quoted_redacted() -> None:
+    """`password == "literal"` is a secret comparison; it must redact like `=`."""
+    result = redact('+if password == "hunter2pass":\n')
+    assert "hunter2pass" not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_spaced_password_comparison_unquoted_redacted() -> None:
+    text = "+assert password == hunter2pass123\n"
+    result = redact(text)
+    assert "hunter2pass123" not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_unquoted_password_with_parens_redacted() -> None:
+    """A credential literal may contain parens; only a value ending in one
+    (a call or subscript) stays reviewable."""
+    conn = "Server=db,1433;Password=" + "Tr0ub" + "(4)dor;User ID=sa;"
+    result = redact(f'+cs = "{conn}"\n')
+    assert "Tr0ub" + "(4)dor" not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "User ID=sa" in result
+
+
+def test_password_subscript_copy_not_redacted() -> None:
+    """`payload["password"]` is a lookup, not a literal; the value ends in `]`,
+    which is the subscript shape the trailing-character rule excludes."""
+    text = '+password = payload["password"]\n'
+    assert redact(text) == text
+
+
 def test_gitlab_pat_redacted() -> None:
     """GitLab is a supported forge, so its bare PAT prefix must be scrubbed."""
     result = redact(f'+gl = "{_GITLAB_PAT}"\n')
@@ -561,6 +604,15 @@ def test_gitlab_pat_redacted() -> None:
 def test_glpat_with_short_suffix_not_redacted() -> None:
     text = '+tag = "glpat-mini"\n'
     assert redact(text) == text
+
+
+def test_glpat_suffix_length_boundary() -> None:
+    """Pin the 20-character floor from both sides: 19 is prose, 20 is a PAT."""
+    short = '+t = "glpat-' + "A" * 19 + '"\n'
+    assert redact(short) == short
+    result = redact('+t = "glpat-' + "A" * 20 + '"\n')
+    assert "glpat-" + "A" * 20 not in result
+    assert REDACTED_PLACEHOLDER in result
 
 
 def test_bracketed_api_key_header_redacted() -> None:

@@ -301,7 +301,8 @@ def test_multi_batch_reflection_prompt_fits_the_budget_and_notices_the_trim() ->
     diff reflection receives, which can run several times the model-fitted
     input budget and get the audit rejected outright (the findings then ship
     unaudited). The audit is trimmed to the flagged files, its prompt fits the
-    budget, and the summary says the diff was trimmed."""
+    budget, and the summary says the diff was trimmed. The flagged file's own
+    patch overruns the room here, so the trim is a genuine budget cut."""
 
     def patch(path: str, lines: int) -> str:
         body = "".join(f"+added line {i} in {path}\n" for i in range(lines))
@@ -311,7 +312,9 @@ def test_multi_batch_reflection_prompt_fits_the_budget_and_notices_the_trim() ->
         )
 
     ctx = PRContext(
-        diff="".join(patch(path, 250) for path in ("a.py", "b.py", "c.py")),
+        diff="".join(
+            patch(path, lines) for path, lines in (("a.py", 800), ("b.py", 250), ("c.py", 250))
+        ),
         changed_files=["a.py", "b.py", "c.py"],
         base_sha="abc",
         head_sha="def",
@@ -2752,6 +2755,79 @@ def test_a_scan_finding_on_a_file_the_cap_dropped_still_posts(monkeypatch) -> No
 
     assert [(f.path, f.line) for f in findings] == [("g.py", 2)]
     assert "unchanged" not in summary.lower()
+    # The cap must actually have dropped g.py, or the test proves nothing about
+    # scan_scope: if g.py survived into file_patches the finding would snap
+    # against the ordinary reviewed_diff. The notice names the 1-of-2 cap, and
+    # the model's prompt must not carry g.py's content.
+    assert "top 1 of 2" in summary
+    assert "gnew" not in _first_user_diff(provider)
+
+
+def test_a_scan_finding_on_a_file_triage_skipped_still_posts(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The triage half of issue #750: triage narrows file_patches after the
+    scan corpus was built, so a scan finding on a skipped file must still snap
+    against the diff the corpus saw and post. (Triage is stubbed to skip g.py:
+    the real floor escalates any file a scanner flagged, so only a stub can
+    produce a skipped file that carries a scan finding.)"""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_scan_hit(path="g.py", line=2)],
+    )
+
+    def skip_g_py(file_patches, *_args):  # type: ignore[no-untyped-def]
+        return [(p, patch) for p, patch in file_patches if p != "g.py"], ["g.py"]
+
+    monkeypatch.setattr("lgtmaybe.engine.engine.triage_files", skip_g_py)
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = _finding_mode_cfg().model_copy(update={"triage_model": "tiny"})
+
+    findings, summary = engine.review(_CAP_CTX, cfg)
+
+    assert [(f.path, f.line) for f in findings] == [("g.py", 2)]
+    assert "unchanged" not in summary.lower()
+    # Triage really removed g.py from the model's reading list.
+    assert "gnew" not in _first_user_diff(provider)
+
+
+# Both files change the SAME line text, at different new-file line numbers
+# (f.py: 2, g.py: 41); g.py's head text repeats the line at its line 3 so the
+# scanner can report a line that sits nearer f.py's match than g.py's.
+_SAME_TEXT_CTX = PRContext(
+    diff=(
+        'diff --git a/f.py b/f.py\n@@ -1,2 +1,2 @@\n ctx\n-value = "old"\n+value = "same"\n'
+        "diff --git a/g.py b/g.py\n@@ -39,3 +39,3 @@\n ctx\n ctx\n"
+        '-value = "old"\n+value = "same"\n'
+    ),
+    changed_files=["f.py", "g.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=3,
+    file_contents={
+        "f.py": ' ctx\nvalue = "same"\n',
+        "g.py": "\n".join(["pad"] * 2 + ['value = "same"'] + ["pad"] * 37 + ['value = "same"'])
+        + "\n",
+    },
+)
+
+
+def test_a_scan_snap_never_crosses_files_on_identical_changed_lines(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Scan findings snap against the joined per-file patches, and an anchor
+    must only ever match its own file's patch. Two files expose the same
+    changed-line text (and each patch restarts its @@ numbering), so a snap
+    that matched anchor content without file boundaries would pull g.py's
+    finding onto f.py's line 2 (nearer the scanner's reported line 3)."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_scan_hit(path="g.py", line=3)],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_SAME_TEXT_CTX, _finding_mode_cfg())
+
+    assert [(f.path, f.line) for f in findings] == [("g.py", 41)]
 
 
 # ---------------------------------------------------------------------------
@@ -3741,7 +3817,7 @@ def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> Non
         ],
         usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
     )
-    with patch("litellm.completion", return_value=response):
+    with patch("litellm.completion", return_value=response) as completion:
         built = build_provider(
             Provider.anthropic,
             "claude-sonnet-4-5",
@@ -3752,6 +3828,9 @@ def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> Non
         cfg = make_cfg(provider=Provider.anthropic, model="claude-sonnet-4-5", reflect=False)
         _findings, summary = LLMReviewEngine(built).review(_CTX, cfg)
 
+    # The cause, not just the symptom: the requests themselves carry no
+    # temperature, so the segment is the factory's withhold and nothing else.
+    assert all("temperature" not in call.kwargs for call in completion.call_args_list)
     assert _TEMPERATURE_SEGMENT in summary
 
 

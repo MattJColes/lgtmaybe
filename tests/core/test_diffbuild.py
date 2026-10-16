@@ -161,6 +161,17 @@ class TestPatchFromHunks:
 
         assert patch == "diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n"
 
+    def test_a_mode_change_with_hunks_keeps_both(self) -> None:
+        patch = patch_from_hunks(
+            old_path="run.sh",
+            new_path="run.sh",
+            old_mode="100644",
+            new_mode="100755",
+            hunks="@@ -1 +1 @@\n-a\n+b\n",
+        )
+
+        assert "old mode 100644\nnew mode 100755\n--- a/run.sh\n+++ b/run.sh\n" in patch
+
     def test_hunks_without_a_final_newline_gain_one(self) -> None:
         assert patch_from_hunks(
             old_path="a.py", new_path="a.py", hunks="@@ -1 +1 @@\n-a\n+b"
