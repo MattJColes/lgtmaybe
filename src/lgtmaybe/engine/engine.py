@@ -40,6 +40,8 @@ from lgtmaybe.core.models import (
     StaticAnalysisTool,
     ToolMode,
     is_unrecoverable,
+    schema_dropped_on,
+    temperature_dropped_on,
 )
 from lgtmaybe.core.ports import (
     Message,
@@ -47,14 +49,7 @@ from lgtmaybe.core.ports import (
     ProviderInputTooLarge,
     ProviderTruncated,
     ProviderWallTimeout,
-    SupportsInputBudget,
-    SupportsModelEscalation,
-    SupportsReasoningStepDown,
-    SupportsReasoningSwitchOff,
-    SupportsResponseFormatDrop,
-    SupportsResponseFormatStatus,
-    SupportsSchemaDropReport,
-    SupportsTemperatureDropReport,
+    SupportsRecovery,
 )
 from lgtmaybe.core.version import package_version
 
@@ -779,7 +774,8 @@ class _RunState:
     dict's plain store are single operations, so they need no lock. The
     counters (``flooded``, ``self_talk`` and the token tally) are a read, an
     add and a store, so they change only through the methods below, which hold
-    the lock themselves. No caller ever takes it by hand.
+    the lock themselves; the two degradation flags go the same way. No caller
+    ever takes it by hand.
     """
 
     # Batches an oversized-payload failure (wall timeout or output ceiling)
@@ -815,6 +811,14 @@ class _RunState:
     # Same shape: findings dropped per lens for being the model's note to
     # itself (see add_self_talk, selftalk.py and _stamp_and_bound).
     self_talk: dict[str, int] = field(default_factory=dict)
+    # Whether any call of this review went out without the structured-output
+    # schema it asked for, or without the configured temperature. Read off each
+    # call's result (or a failed call's exception) as it returns, never asked of
+    # the adapter afterwards: the adapter is shared, and "dropped this run" there
+    # would mean every review it has ever served. Set only through
+    # note_degradation, and only ever to True.
+    schema_dropped: bool = False
+    temperature_dropped: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     # Read and written only through charge() and tokens_spent().
     _tokens: int = field(default=0, init=False)
@@ -833,6 +837,12 @@ class _RunState:
         """Add one model call's billable tokens to this review's spend."""
         with self._lock:
             self._tokens += tokens
+
+    def note_degradation(self, *, schema_dropped: bool, temperature_dropped: bool) -> None:
+        """Record what one call lost on the way to the model."""
+        with self._lock:
+            self.schema_dropped = self.schema_dropped or schema_dropped
+            self.temperature_dropped = self.temperature_dropped or temperature_dropped
 
     def tokens_spent(self) -> int:
         """Billable tokens (input + output) this review's calls have spent.
@@ -854,8 +864,11 @@ class _MeteredProvider:
     profiler records, without a tally parameter threaded through every module
     that makes one. A failed call is charged what it reports spending, the way
     the profiler's ``record_error`` charges it: a truncation reached the model
-    and is usually the costliest call of the run. Capability probes stay on the
-    engine's own provider; this wrapper only speaks the ``ProviderClient`` port.
+    and is usually the costliest call of the run. What each call lost (its
+    schema, its temperature) is recorded on the same pass, from the result or
+    the failed call's exception, for the same reason. Recovery probes stay on
+    the engine's own provider; this wrapper only speaks the ``ProviderClient``
+    port.
     """
 
     def __init__(self, inner: ProviderClient, state: _RunState) -> None:
@@ -869,8 +882,16 @@ class _MeteredProvider:
             spent = getattr(exc, "input_tokens", None) or 0
             spent += getattr(exc, "output_tokens", None) or 0
             self._state.charge(spent)
+            self._state.note_degradation(
+                schema_dropped=schema_dropped_on(exc),
+                temperature_dropped=temperature_dropped_on(exc),
+            )
             raise
         self._state.charge(result.input_tokens + result.output_tokens)
+        self._state.note_degradation(
+            schema_dropped=result.schema_dropped,
+            temperature_dropped=result.temperature_dropped,
+        )
         return result
 
 
@@ -1090,29 +1111,6 @@ class ReviewIncompleteError(Exception):
 class LLMReviewEngine:
     """Review engine that runs the full pipeline against an injected ProviderClient."""
 
-    def _schema_dropped(self) -> bool:
-        """Whether the adapter gave up on structured output during this run.
-
-        Probed through ``SupportsSchemaDropReport``, like ``lower_reasoning_effort``
-        below: it is an optional capability beyond the frozen ``ProviderClient``
-        port, so a provider that cannot answer simply never reports a drop
-        rather than every fake in the suite growing a method to say "no".
-        """
-        if not isinstance(self._provider, SupportsSchemaDropReport):
-            return False
-        return bool(self._provider.schema_dropped())
-
-    def _temperature_dropped(self) -> bool:
-        """Whether a configured temperature never reached the model this run.
-
-        Probed like ``_schema_dropped``, for the same reason: only the
-        litellm adapter can know, so a provider without the capability never
-        reports a drop.
-        """
-        if not isinstance(self._provider, SupportsTemperatureDropReport):
-            return False
-        return bool(self._provider.temperature_dropped())
-
     def __init__(
         self,
         provider: ProviderClient,
@@ -1138,6 +1136,17 @@ class LLMReviewEngine:
         # SYMBOL (not a path), this maps it to the file that defines it so the
         # fetcher above can pull it. None keeps the prior path-only behaviour.
         self._resolve_symbol = resolve_symbol
+
+    def _recovery(self) -> SupportsRecovery | None:
+        """The adapter's recovery steps, or None when it offers none.
+
+        One probe for every step the engine may ask of the adapter (see
+        ``SupportsRecovery``), beyond the frozen one-method ``ProviderClient``
+        port. A provider without it simply never takes those steps, rather than
+        every fake in the suite growing them; the engine still decides which step
+        a failure gets.
+        """
+        return self._provider if isinstance(self._provider, SupportsRecovery) else None
 
     def _risk(self, ctx: PRContext, cfg: ReviewConfig) -> RiskAssessment | None:
         """The risk-of-change verdict for the summary; None when risk is off."""
@@ -1166,10 +1175,11 @@ class LLMReviewEngine:
         """
         if "max_input_tokens" in cfg.model_fields_set:
             return cfg
-        if not isinstance(self._provider, SupportsInputBudget):
+        recovery = self._recovery()
+        if recovery is None:
             return cfg
         try:
-            budget = self._provider.input_budget()
+            budget = recovery.input_budget()
         except Exception:  # noqa: BLE001 — a capability lookup must never fail a review
             _log.warning("could not read the model's input budget", exc_info=True)
             return cfg
@@ -1239,7 +1249,7 @@ class LLMReviewEngine:
         ):
             # The most common error, not the last — see _build_notices.
             detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
-            hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
+            hint = f" {_SCHEMA_DROP_NOTE}" if prepared.run.state.schema_dropped else ""
             raise ReviewIncompleteError(
                 f"review incomplete: every review call failed ({detail}). "
                 "Check the provider credentials/quota, model, and timeout "
@@ -1462,16 +1472,16 @@ class LLMReviewEngine:
 
                 filtered = apply_finding_rules(filtered, cfg)
 
+        state = prepared.run.state
         summary_line = _summary_line(
             len(filtered),
             cfg,
             risk,
-            temperature_dropped=self._temperature_dropped(),
+            temperature_dropped=state.temperature_dropped,
             stack=ctx.stack,
         )
         profiler.record_returned_findings(len(filtered))
 
-        state = prepared.run.state
         notices = _build_notices(
             _NoticeState(
                 cfg=cfg,
@@ -1490,7 +1500,7 @@ class LLMReviewEngine:
                 repaired=sorted(state.repaired),
                 flooded=dict(state.flooded),
                 re_asked=sorted(state.re_asked),
-                schema_dropped=self._schema_dropped(),
+                schema_dropped=state.schema_dropped,
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
                 off_diff=off_diff,
@@ -1566,7 +1576,6 @@ class LLMReviewEngine:
         )
 
         # 1. Redact secrets from the diff before it leaves this process.
-        #    (see _schema_dropped below for the other adapter-only probe)
         with profiler.stage("redact"):
             clean_diff = redact(ctx.diff)
 
@@ -2506,9 +2515,8 @@ class LLMReviewEngine:
             # Past a ceiling: the run is already stopping, and the notice it will
             # carry is the truncation's, not a skip's — this call never happened.
             return [], reason
-        step_down = None
-        if isinstance(self._provider, SupportsReasoningStepDown):
-            step_down = self._provider.lower_reasoning_effort()
+        recovery = self._recovery()
+        step_down = recovery.lower_reasoning_effort() if recovery is not None else None
         if not step_down:
             return [], reason
         _log.warning(
@@ -2537,9 +2545,7 @@ class LLMReviewEngine:
         # the price. A model whose thinking is a switch does not answer to a
         # dial, so the one further step is to off — and it is taken BEFORE the
         # model changes, because switching model says nothing about the failure.
-        switch_off = None
-        if isinstance(self._provider, SupportsReasoningSwitchOff):
-            switch_off = self._provider.disable_reasoning()
+        switch_off = recovery.disable_reasoning() if recovery is not None else None
         if not switch_off or switch_off == step_down:
             # No switch on this route, or the step-down already was it (a
             # configured `minimal` steps to `none`): a second request at the
@@ -2614,12 +2620,11 @@ class LLMReviewEngine:
         """
         if _skip_reason(run, lens) is not None:
             return [], reason
-        # An optional capability, like `lower_reasoning_effort`: which litellm
-        # model string a configured fallback resolves to is the adapter's
-        # knowledge, and a provider without a second model simply never answers.
-        target = None
-        if isinstance(self._provider, SupportsModelEscalation):
-            target = self._provider.escalate_model()
+        # A recovery step, like `lower_reasoning_effort`: which litellm model
+        # string a configured fallback resolves to is the adapter's knowledge,
+        # and a provider without a second model answers None.
+        recovery = self._recovery()
+        target = recovery.escalate_model() if recovery is not None else None
         if not target:
             return [], reason
         _log.warning(
@@ -2656,10 +2661,10 @@ class LLMReviewEngine:
         cannot be proved should not be made.
         """
         answered = result.model
-        # Attribute presence, not a protocol isinstance: runtime-checkable
-        # protocols check members with hasattr anyway, and saying that directly
-        # keeps the probe honest for an adapter that is not a Protocol.
-        asked = self._provider.model if hasattr(self._provider, "model") else None
+        # The adapter's resolved primary, not `run.model`: the result names the
+        # litellm model string, which the raw configured name never equals.
+        recovery = self._recovery()
+        asked = recovery.model if recovery is not None else None
         if answered and asked and answered != asked:
             run.state.escalated[lens.id] = answered
 
@@ -2735,27 +2740,29 @@ class LLMReviewEngine:
         would re-send the request that just failed, byte for byte — a wasted
         full-diff call, and exactly what ``engine.rescue`` forbids.
 
-        Probed through ``SupportsResponseFormatStatus`` and **fail-open**, like
-        every other adapter probe: an adapter that cannot answer is assumed to
-        have sent what it was given, so the recovery keeps working rather than
-        silently switching itself off.
+        Probed through ``SupportsRecovery`` and **fail-open**, like every other
+        adapter probe: an adapter that cannot answer is assumed to have sent what
+        it was given, so the recovery keeps working rather than silently
+        switching itself off.
         """
-        if not isinstance(self._provider, SupportsResponseFormatStatus):
+        recovery = self._recovery()
+        if recovery is None:
             return True
-        return bool(self._provider.sends_response_format(model))
+        return bool(recovery.sends_response_format(model))
 
     def _drop_response_format(self, model: str) -> None:
         """Tell the adapter this model's schema mode is not working.
 
-        Probed through ``SupportsResponseFormatDrop``, and the first of the
-        adapter probes that WRITES. It stays off the frozen
-        ``ProviderClient`` port for the same reason the read-only ones do: the
-        knowledge is adapter-shaped (which litellm model string keys the drop),
-        and a provider that cannot honour it should simply not remember rather
-        than every fake in the suite growing a no-op.
+        Probed through ``SupportsRecovery``, and the one recovery step that
+        WRITES. It stays off the frozen ``ProviderClient`` port for the same
+        reason the read-only ones do: the knowledge is adapter-shaped (which
+        litellm model string keys the drop), and a provider that cannot honour it
+        should simply not remember rather than every fake in the suite growing a
+        no-op.
         """
-        if isinstance(self._provider, SupportsResponseFormatDrop):
-            self._provider.drop_response_format(model, "unparseable-output")
+        recovery = self._recovery()
+        if recovery is not None:
+            recovery.drop_response_format(model, "unparseable-output")
 
     def _stamp_and_bound(
         self, findings: list[ReviewFinding], lens: _Lens, run: _Run

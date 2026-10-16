@@ -40,7 +40,7 @@ from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine, clear_interrupt, request_interrupt
 from lgtmaybe.engine.engine import ReviewIncompleteError
 from lgtmaybe.providers.litellm_provider import _EFFORT_FLOOR, LiteLLMProvider
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, RecoveringFakeProvider
 
 _TWO_FILE_DIFF = """diff --git a/one.py b/one.py
 --- a/one.py
@@ -482,7 +482,7 @@ def test_a_piece_that_fails_is_still_reported() -> None:
 _FALLBACK = "the-fallback"
 
 
-class _SplitsThenPieceBFlakes(FakeProvider):
+class _SplitsThenPieceBFlakes(RecoveringFakeProvider):
     """Truncates the whole batch, answers piece a, 429s piece b exactly once.
 
     The shape of issue #759: the split WORKED — the payload shrank and one piece
@@ -564,7 +564,7 @@ def test_a_flaked_piece_keeps_its_retry_when_the_fallback_flakes_too() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _TruncatesUntilEffortDrops(FakeProvider):
+class _TruncatesUntilEffortDrops(RecoveringFakeProvider):
     """Spends the whole ceiling thinking until asked to think less.
 
     The provider's own shape: it holds the configured effort and hands back the
@@ -664,9 +664,9 @@ def test_a_model_reasoning_at_its_own_default_still_gets_the_retry() -> None:
 
 def test_a_second_reasoning_bound_truncation_reports_and_stops() -> None:
     """One graded attempt, not a walk down the ladder — the same posture as the
-    split's one level. This provider offers no off switch (`disable_reasoning`
-    is feature-detected, like the step-down itself), so the second cut is the
-    end of the road for it."""
+    split's one level. This provider offers no off switch (its
+    `disable_reasoning` answers None), so the second cut is the end of the
+    road for it."""
     provider = _TruncatesUntilEffortDrops(answers_at=_TruncatesUntilEffortDrops._NEVER)
 
     with pytest.raises(ReviewIncompleteError) as exc_info:

@@ -55,8 +55,11 @@ from lgtmaybe.core.models import (
     Provider,
     ProviderResult,
     attempts_of,
+    schema_dropped_on,
     stamp_attempts,
+    stamp_degradation,
     stamp_unrecoverable,
+    temperature_dropped_on,
 )
 from lgtmaybe.core.ports import (
     Message,
@@ -801,7 +804,11 @@ class LiteLLMProvider:
         self.default_opts: dict[str, Any] = default_opts
         # Where each model's structured output stands on the ladder (see
         # `_SchemaMode`): enforcement preserved by another mechanism, or given
-        # up. Keyed by MODEL, not by provider instance. One instance serves
+        # up. A learned fact about the MODEL that routes its later calls, never
+        # a report of what a review lost: that rides each call's result
+        # (`ProviderResult.schema_dropped`), because this instance outlives any
+        # one review and is shared by every review in the process. Keyed by
+        # MODEL, not by provider instance. One instance serves
         # the primary and the fallback, and the triage/review/reflect slots
         # share its credentials, so an instance-wide flag let a rejection by
         # any one of them silently downgrade the others to prompt-instructed
@@ -816,11 +823,14 @@ class LiteLLMProvider:
         # instead of reading a marker the sibling set before it finished.
         self._route_params: dict[str, frozenset[str] | None] = {}
         self._rejected_params: dict[str, set[str]] = {}
-        # Models a configured `temperature` never reached — stripped by litellm
-        # before the request (see `_litellm_drops_temperature`), or refused by
-        # the model and re-sent without it. Keyed by MODEL like the schema sets:
-        # the fallback and the triage/reflect slots share this instance.
-        self._temperature_dropped: set[str] = set()
+        # Whether the factory withheld the configured `temperature` before this
+        # client existed (see `note_withheld_temperature`): a build-time fact
+        # about every call this instance makes, so each one reports it.
+        self._temperature_withheld = False
+        # Models whose lost temperature has been logged, so the warning fires
+        # once per model rather than once per lens. Logging only: what a call
+        # lost is reported on its own result, never read back from here.
+        self._temperature_announced: set[str] = set()
         # Memo of the drop lookup, keyed by what decides it (route, value, effort).
         self._temperature_reach: dict[tuple[str, str, str], bool] = {}
         # Memoized supports-cache-control answers: the review fans out many
@@ -872,8 +882,8 @@ class LiteLLMProvider:
     def input_budget(self) -> int | None:
         """How many prompt tokens this provider's model can take, or None.
 
-        Adapter-only, feature-detected by the engine like ``escalate_model``:
-        the engine's batching budget (``max_input_tokens``) defaults to a flat
+        Part of ``SupportsRecovery``, beside ``escalate_model``: the engine's
+        batching budget (``max_input_tokens``) defaults to a flat
         number, and this is what lets it fit that default to the model instead
         of learning the window from a refused prompt — or, on ollama, never
         learning it at all, because the server silently truncates to ``num_ctx``.
@@ -1020,14 +1030,14 @@ class LiteLLMProvider:
         It steps down rather than stopping outright (see :meth:`_demote_schema`),
         because the engine's evidence is against the mechanism that produced the
         reply, not against enforcement itself. The name is unchanged: the engine
-        feature-detects this method by it, and what the engine means — "stop
-        trusting this schema mode" — is exactly what a demotion does.
+        calls this method by it (``SupportsRecovery``), and what the engine
+        means — "stop trusting this schema mode" — is exactly what a demotion
+        does.
 
-        Hence the first engine→adapter *setter*, where ``schema_dropped`` and
-        ``lower_reasoning_effort`` are read-only probes. It stays off the frozen
-        ``ProviderClient`` port for the same reason they do: the engine
-        feature-detects it, and an adapter that cannot honour it simply never
-        remembers.
+        The one engine→adapter *setter* among the recovery steps, where
+        ``sends_response_format`` and ``lower_reasoning_effort`` are read-only.
+        It stays off the frozen ``ProviderClient`` port for the same reason they
+        do: an adapter that cannot honour it simply never remembers.
 
         Keyed exactly as ``complete`` resolves the model, so the entry matches
         the one ``_call`` looks up — a factory-built provider carries the
@@ -1063,39 +1073,50 @@ class LiteLLMProvider:
         """
         return self._mode_of(self._resolve_model(model)) is not _SchemaMode.NONE
 
-    def schema_dropped(self) -> bool:
-        """Whether any model lost ``response_format`` during this run.
-
-        Adapter-only, beyond the frozen ``ProviderClient`` port, like
-        ``lower_reasoning_effort`` above: the engine feature-detects it so it can
-        name the downgrade in the review notice when calls also failed. A port
-        method would oblige every fake and every future adapter to answer a
-        question only this one can.
-        """
-        return any(mode is _SchemaMode.NONE for mode in self._schema_modes.values())
-
-    def temperature_dropped(self) -> bool:
-        """Whether a configured ``temperature`` never reached a model this run.
-
-        Adapter-only and feature-detected, exactly like ``schema_dropped``: the
-        engine reads it to say the review may not be reproducible, which is what
-        the ``temperature: 0.0`` default exists to buy and what a silent drop
-        quietly takes away.
-        """
-        return bool(self._temperature_dropped)
-
     def note_withheld_temperature(self, model: str, why: str) -> None:
         """Record a temperature withheld before a call was ever made.
 
-        The factory's public way to seed ``temperature_dropped``: a temperature
-        withheld at build time (Claude under extended thinking) never rides a
-        request, so no call can ever report it missing. Adapter-only, beyond
-        the frozen ``ProviderClient`` port, like ``temperature_dropped`` above.
+        The factory's public way to say so: a temperature withheld at build
+        time (Claude under extended thinking) never rides a request, so no
+        request could show it missing. From here on every call this instance
+        makes reports ``temperature_dropped`` on its result, like a temperature
+        the route stripped. Adapter-only, beyond the frozen ``ProviderClient``
+        port: only the factory that built this client calls it.
         """
-        self._mark_temperature_dropped(model, why)
+        self._temperature_withheld = True
+        self._announce_temperature_drop(model, why)
 
-    def _note_temperature_reach(self, model: str, kwargs: Mapping[str, Any]) -> None:
-        """Record whether litellm will strip this request's ``temperature``.
+    def _degradation(
+        self,
+        model: str,
+        kwargs: Mapping[str, Any],
+        *,
+        schema_asked: bool,
+        temperature_asked: bool,
+    ) -> dict[str, bool]:
+        """What the call just made to *model* lost on the way, for its result.
+
+        Read off *kwargs* after the call, because every recovery rewrites that
+        one dict in place: what it holds now is the last request that went out.
+        The schema counts as kept while a forced tool call carries it. Per call,
+        never per instance, so two reviews sharing this client each hear only
+        about their own calls.
+        """
+        schema_dropped = (
+            schema_asked
+            and kwargs.get("response_format") is None
+            and not _is_schema_tool(kwargs.get("tools"))
+        )
+        if temperature_asked:
+            temperature_dropped = "temperature" not in kwargs or self._temperature_stripped(
+                model, kwargs
+            )
+        else:
+            temperature_dropped = self._temperature_withheld
+        return {"schema_dropped": schema_dropped, "temperature_dropped": temperature_dropped}
+
+    def _temperature_stripped(self, model: str, kwargs: Mapping[str, Any]) -> bool:
+        """Whether litellm will strip this request's ``temperature``.
 
         Read-only on *kwargs*: this discloses, it never changes what is sent.
         Memoised on the three things the answer depends on, because the lens
@@ -1103,20 +1124,21 @@ class LiteLLMProvider:
         mid-run (the step-down retries), which can change the answer.
         """
         temperature = kwargs.get("temperature")
-        if temperature is None or model in self._temperature_dropped:
-            return
+        if temperature is None:
+            return False
         effort = kwargs.get("reasoning_effort")
         key = (model, repr(temperature), repr(effort))
         if key not in self._temperature_reach:
             self._temperature_reach[key] = _litellm_drops_temperature(model, temperature, effort)
         if self._temperature_reach[key]:
-            self._mark_temperature_dropped(model, "route-unsupported")
+            self._announce_temperature_drop(model, "route-unsupported")
+        return self._temperature_reach[key]
 
-    def _mark_temperature_dropped(self, model: str, why: str) -> None:
-        """Record — and announce, once per model — a temperature that never arrived."""
-        if model in self._temperature_dropped:
+    def _announce_temperature_drop(self, model: str, why: str) -> None:
+        """Log, once per model, a temperature that never arrived."""
+        if model in self._temperature_announced:
             return
-        self._temperature_dropped.add(model)
+        self._temperature_announced.add(model)
         _log.warning(
             "configured temperature not sent to this model — reviews may not be reproducible",
             extra={"model": model, "reason": why},
@@ -1238,7 +1260,7 @@ class LiteLLMProvider:
     def escalate_model(self) -> str | None:
         """The resolved fallback model, for a caller that owns the escalation.
 
-        Feature-detected from the engine exactly as ``lower_reasoning_effort`` is,
+        Part of ``SupportsRecovery`` exactly as ``lower_reasoning_effort`` is,
         and off the frozen :class:`ProviderClient` port for the same reason: which
         litellm model string a configured fallback resolves to is adapter
         knowledge, and a provider that has no second model should simply not
@@ -1304,10 +1326,19 @@ class LiteLLMProvider:
             # bill, not just its own part of it.
             spent = attempts_of(exc)
             spent_cost = getattr(exc, "cost_usd", None)
+            # What the primary lost travels the same way: its requests went out,
+            # so a schema or temperature they dropped was this call's loss too.
+            primary_schema = schema_dropped_on(exc)
+            primary_temperature = temperature_dropped_on(exc)
             try:
                 result = self._complete_with_retry(messages, self.fallback_model, **merged)
             except BaseException as fallback_exc:
                 stamp_attempts(fallback_exc, spent + attempts_of(fallback_exc))
+                stamp_degradation(
+                    fallback_exc,
+                    schema_dropped=primary_schema or schema_dropped_on(fallback_exc),
+                    temperature_dropped=primary_temperature or temperature_dropped_on(fallback_exc),
+                )
                 fallback_cost = _merged_cost(spent_cost, getattr(fallback_exc, "cost_usd", None))
                 if fallback_cost is not None:
                     # setattr via a named constant, not an attribute assignment:
@@ -1320,6 +1351,8 @@ class LiteLLMProvider:
                 update={
                     "attempts": result.attempts + spent,
                     "cost_usd": _merged_cost(spent_cost, result.cost_usd),
+                    "schema_dropped": primary_schema or result.schema_dropped,
+                    "temperature_dropped": primary_temperature or result.temperature_dropped,
                 }
             )
 
@@ -1346,6 +1379,11 @@ class LiteLLMProvider:
         def count_request() -> None:
             nonlocal attempts
             attempts += 1
+
+        # What the caller asked for, before any recovery rewrites `kwargs`: the
+        # result reports what of it never reached the model (see _degradation).
+        schema_asked = kwargs.get("response_format") is not None
+        temperature_asked = "temperature" in kwargs
 
         # Attempts share one deadline derived from the per-request timeout (the
         # fallback model, when configured, gets its own fresh budget — it is a
@@ -1401,10 +1439,19 @@ class LiteLLMProvider:
             # channel carries whether any later attempt could have helped, which
             # is what stops the engine's rescue wave re-billing a dead key.
             stamp_attempts(exc, attempts)
+            stamp_degradation(
+                exc,
+                **self._degradation(
+                    model, kwargs, schema_asked=schema_asked, temperature_asked=temperature_asked
+                ),
+            )
             if _is_unrecoverable(exc):
                 stamp_unrecoverable(exc)
             raise
-        return result.model_copy(update={"attempts": attempts})
+        degraded = self._degradation(
+            model, kwargs, schema_asked=schema_asked, temperature_asked=temperature_asked
+        )
+        return result.model_copy(update={"attempts": attempts, **degraded})
 
     def _retry_after_empty_reply(
         self,
@@ -1462,7 +1509,6 @@ class LiteLLMProvider:
         out, so the reported attempt count matches the number of model calls this
         made — including the re-sends below, each a second billed request.
         """
-        self._note_temperature_reach(model, kwargs)
         while True:
             count_request()
             try:
@@ -1510,7 +1556,7 @@ class LiteLLMProvider:
             # own default.
             kwargs.pop("temperature")
             self._rejected_params.setdefault(model, set()).add("temperature")
-            self._mark_temperature_dropped(model, "rejected")
+            self._announce_temperature_drop(model, "rejected")
             return True
         # Sent on every call (see `complete`), and drop_params leaves it on the
         # `openai/` route, so a strict OpenAI-compatible server ("Extra inputs

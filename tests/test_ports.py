@@ -14,20 +14,11 @@ from lgtmaybe.gitlab import GitLabGateway
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
 # Optional capabilities the ENGINE probes on the provider adapter, by name.
-# One protocol per capability because the engine probes each independently:
-# an adapter may implement any subset, so a group would switch off a
-# capability its siblings do not share. Kept explicit so a new protocol added
-# to either side without a conformance test fails loudly against the other.
-PROVIDER_CAPABILITIES = (
-    "SupportsInputBudget",
-    "SupportsSchemaDropReport",
-    "SupportsTemperatureDropReport",
-    "SupportsResponseFormatStatus",
-    "SupportsResponseFormatDrop",
-    "SupportsReasoningStepDown",
-    "SupportsReasoningSwitchOff",
-    "SupportsModelEscalation",
-)
+# One protocol: the adapter-side halves of the engine's recovery steps, kept
+# together so the engine's whole dependency on the adapter is in one place.
+# Kept explicit so a new protocol added to either side without a conformance
+# test fails loudly against the other.
+PROVIDER_CAPABILITIES = ("SupportsRecovery",)
 
 # Every optional capability a gateway may declare, by name, so the conformance
 # test below fails loudly when one is added without being wired up.
@@ -92,10 +83,20 @@ class TestProviderCapabilities:
         provider = LiteLLMProvider()
         assert isinstance(provider, getattr(ports, name)), name
 
-    def test_the_litellm_adapter_exposes_its_primary_model(self) -> None:
-        """The engine discloses the answering model via attribute presence
-        (hasattr, not a protocol isinstance), so a rename here must be loud."""
-        assert hasattr(LiteLLMProvider(), "model")
+    def test_the_recovery_protocol_names_the_primary_model(self) -> None:
+        """The engine discloses a second answering model by comparing it with
+        the adapter's primary, read through the protocol rather than a bare
+        ``hasattr``, so a rename here must be loud."""
+        assert hasattr(ports.SupportsRecovery, "model")
+        assert LiteLLMProvider(model="openai/gpt-4o").model == "openai/gpt-4o"
+
+    def test_what_a_call_lost_is_not_a_capability(self) -> None:
+        """Schema and temperature drops ride each result, never the adapter, so
+        no protocol may ask the adapter for a "dropped this run" report."""
+        for name in PROVIDER_CAPABILITIES:
+            protocol = getattr(ports, name)
+            assert not hasattr(protocol, "schema_dropped")
+            assert not hasattr(protocol, "temperature_dropped")
 
 
 class TestCapabilities:

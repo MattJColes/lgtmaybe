@@ -74,6 +74,16 @@
       "default": null,
       "title": "Reasoning Tokens"
     },
+    "schema_dropped": {
+      "default": false,
+      "title": "Schema Dropped",
+      "type": "boolean"
+    },
+    "temperature_dropped": {
+      "default": false,
+      "title": "Temperature Dropped",
+      "type": "boolean"
+    },
     "text": {
       "title": "Text",
       "type": "string"

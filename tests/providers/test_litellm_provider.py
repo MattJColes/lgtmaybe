@@ -17,7 +17,7 @@ import litellm
 import pytest
 from pydantic import BaseModel
 
-from lgtmaybe.core.models import ProviderResult
+from lgtmaybe.core.models import ProviderResult, schema_dropped_on, temperature_dropped_on
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
@@ -401,7 +401,7 @@ class TestRouteSchemaSupport:
         assert sent[0]["tool_choice"]["function"]["name"] == "lgtmaybe_structured_output"
         # Enforcement was kept, by another mechanism — not given up.
         assert provider.sends_response_format("zai/glm-4.6")
-        assert not provider.schema_dropped()
+        assert not result.schema_dropped
 
     def test_a_route_with_no_structured_output_mechanism_drops_the_schema_up_front(self) -> None:
         sent: list[dict[str, Any]] = []
@@ -415,14 +415,14 @@ class TestRouteSchemaSupport:
             patch("litellm.completion", side_effect=capture),
         ):
             provider = LiteLLMProvider()
-            provider.complete(
+            result = provider.complete(
                 [{"role": "user", "content": "hi"}], "some/route", response_format=_Schema
             )
 
         assert len(sent) == 1
         assert "response_format" not in sent[0] and "tools" not in sent[0]
         # Given up, and said so: the engine reads this to name the downgrade.
-        assert provider.schema_dropped()
+        assert result.schema_dropped
         assert not provider.sends_response_format("some/route")
 
     def test_a_route_that_takes_the_schema_sends_it_unchanged(self) -> None:
@@ -445,6 +445,38 @@ class TestRouteSchemaSupport:
 
         assert sent[0]["response_format"] is _Schema
         assert "tools" not in sent[0]
+
+    def test_a_failed_call_reports_the_schema_it_had_already_dropped(self) -> None:
+        """The drop is decided before the request, so a call that then fails has
+        still lost its schema, and that is the likeliest cause of the failure.
+        The exception carries it, since there is no result to carry it on."""
+
+        def fail(**kwargs: Any) -> Any:
+            raise litellm.BadRequestError(
+                message="the model is unavailable", model="some/route", llm_provider="x"
+            )
+
+        with (
+            patch("litellm.get_supported_openai_params", return_value=self._BARE),
+            patch("litellm.completion", side_effect=fail),
+            pytest.raises(litellm.BadRequestError) as exc_info,
+        ):
+            LiteLLMProvider().complete(
+                [{"role": "user", "content": "hi"}], "some/route", response_format=_Schema
+            )
+
+        assert schema_dropped_on(exc_info.value)
+        assert not temperature_dropped_on(exc_info.value)
+
+    def test_a_call_that_never_asked_for_a_schema_drops_none(self) -> None:
+        """`structured_output: false` sends no schema, so nothing was lost."""
+        with (
+            patch("litellm.get_supported_openai_params", return_value=self._BARE),
+            patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
+        ):
+            result = LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "some/route")
+
+        assert not result.schema_dropped
 
     def test_a_capability_lookup_failure_leaves_the_schema_on(self) -> None:
         """Unknown route ⇒ trial by request, exactly as before: the 400 path
@@ -625,7 +657,7 @@ class TestTemperatureReach:
 
     _MESSAGES: ClassVar[list[Any]] = [{"role": "user", "content": "hi"}]
 
-    def _run(self, model: str, **opts: Any) -> tuple[LiteLLMProvider, list[dict[str, Any]]]:
+    def _run(self, model: str, **opts: Any) -> tuple[ProviderResult, list[dict[str, Any]]]:
         sent: list[dict[str, Any]] = []
 
         def capture(**kwargs: Any) -> Any:
@@ -633,30 +665,29 @@ class TestTemperatureReach:
             return _fake_response('{"findings": []}')
 
         with patch("litellm.completion", side_effect=capture):
-            provider = LiteLLMProvider(model=model, **opts)
-            provider.complete(self._MESSAGES, "ignored")
-        return provider, sent
+            result = LiteLLMProvider(model=model, **opts).complete(self._MESSAGES, "ignored")
+        return result, sent
 
     def test_a_bedrock_model_without_sampling_params_is_flagged(self) -> None:
-        provider, sent = self._run("bedrock/us.openai.gpt-5.5", temperature=0.0)
+        result, sent = self._run("bedrock/us.openai.gpt-5.5", temperature=0.0)
 
-        assert provider.temperature_dropped()
+        assert result.temperature_dropped
         # Disclosure only: the request still carries exactly what it did before
         # — litellm is what strips it, and what this adapter hands it is unchanged.
         assert sent[0]["temperature"] == 0.0
 
     def test_a_gpt5_model_with_reasoning_active_is_flagged(self) -> None:
-        provider, _ = self._run("openai/gpt-5.5", temperature=0.0)
-        assert provider.temperature_dropped()
+        result, _ = self._run("openai/gpt-5.5", temperature=0.0)
+        assert result.temperature_dropped
 
     def test_a_gpt5_model_with_reasoning_off_is_not_flagged(self) -> None:
         """The one condition under which litellm forwards a non-1 temperature."""
-        provider, _ = self._run("openai/gpt-5.5", temperature=0.0, reasoning_effort="none")
-        assert not provider.temperature_dropped()
+        result, _ = self._run("openai/gpt-5.5", temperature=0.0, reasoning_effort="none")
+        assert not result.temperature_dropped
 
     def test_a_claude_model_that_removed_sampling_is_flagged(self) -> None:
-        provider, _ = self._run("anthropic/claude-mythos-5", temperature=0.0)
-        assert provider.temperature_dropped()
+        result, _ = self._run("anthropic/claude-mythos-5", temperature=0.0)
+        assert result.temperature_dropped
 
     @pytest.mark.parametrize(
         "model",
@@ -669,26 +700,26 @@ class TestTemperatureReach:
         ],
     )
     def test_a_route_that_takes_the_temperature_is_not_flagged(self, model: str) -> None:
-        provider, sent = self._run(model, temperature=0.0)
-        assert not provider.temperature_dropped()
+        result, sent = self._run(model, temperature=0.0)
+        assert not result.temperature_dropped
         assert sent[0]["temperature"] == 0.0
 
     def test_no_configured_temperature_is_never_flagged(self) -> None:
         """Nothing was configured, so nothing was lost."""
-        provider, sent = self._run("bedrock/us.openai.gpt-5.5")
-        assert not provider.temperature_dropped()
+        result, sent = self._run("bedrock/us.openai.gpt-5.5")
+        assert not result.temperature_dropped
         assert "temperature" not in sent[0]
 
     def test_a_failed_lookup_is_not_flagged_and_never_fails_the_call(self) -> None:
         """Instrumentation must never be the reason a review does not run."""
         with patch("litellm.get_optional_params", side_effect=RuntimeError("map exploded")):
-            provider, sent = self._run("bedrock/us.openai.gpt-5.5", temperature=0.0)
-        assert not provider.temperature_dropped()
+            result, sent = self._run("bedrock/us.openai.gpt-5.5", temperature=0.0)
+        assert not result.temperature_dropped
         assert len(sent) == 1
 
     def test_an_unknown_route_is_not_flagged(self) -> None:
-        provider, _ = self._run("totally-unknown/xyz", temperature=0.0)
-        assert not provider.temperature_dropped()
+        result, _ = self._run("totally-unknown/xyz", temperature=0.0)
+        assert not result.temperature_dropped
 
     def test_a_temperature_the_model_refused_is_flagged(self) -> None:
         """The other way it goes missing: the route forwards it and the model
@@ -704,9 +735,12 @@ class TestTemperatureReach:
 
         with patch("litellm.completion", side_effect=reject):
             provider = LiteLLMProvider(model="openai/gpt-4o", temperature=0.0)
-            provider.complete(self._MESSAGES, "ignored")
+            first = provider.complete(self._MESSAGES, "ignored")
+            # Remembered for the model, so a later call goes out without it too.
+            later = provider.complete(self._MESSAGES, "ignored")
 
-        assert provider.temperature_dropped()
+        assert first.temperature_dropped
+        assert later.temperature_dropped
 
     def test_the_lookup_is_paid_once_per_model_not_once_per_lens(self) -> None:
         """The fan-out sends the same shape many times; the answer is a pure
@@ -717,10 +751,9 @@ class TestTemperatureReach:
             patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
         ):
             provider = LiteLLMProvider(model="bedrock/us.openai.gpt-5.5", temperature=0.0)
-            for _ in range(5):
-                provider.complete(self._MESSAGES, "ignored")
+            results = [provider.complete(self._MESSAGES, "ignored") for _ in range(5)]
 
-        assert provider.temperature_dropped()
+        assert all(result.temperature_dropped for result in results)
         assert lookup.call_count == 2, "with and without the temperature, once"
 
     def test_a_changed_reasoning_effort_re_derives_the_answer(self) -> None:
@@ -729,9 +762,8 @@ class TestTemperatureReach:
         retries change the effort mid-run. A memo keyed on the model alone would
         reuse the `none` answer for the `high` call and miss the drop.
 
-        `none` first, deliberately: once a model is flagged the flag is sticky
-        and no later call looks again, so a `high`-then-`none` order would
-        never reach the second lookup.
+        Each call is judged for itself, so a drop at `high` never colours a
+        later call at `none`.
         """
         real = litellm.get_optional_params
         with (
@@ -739,20 +771,45 @@ class TestTemperatureReach:
             patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
         ):
             provider = LiteLLMProvider(model="openai/gpt-5.5", temperature=0.0)
-            provider.complete(self._MESSAGES, "ignored", reasoning_effort="none")
-            assert not provider.temperature_dropped(), "`none` keeps the temperature"
-            provider.complete(self._MESSAGES, "ignored", reasoning_effort="high")
+            high = provider.complete(self._MESSAGES, "ignored", reasoning_effort="high")
+            none = provider.complete(self._MESSAGES, "ignored", reasoning_effort="none")
 
         assert lookup.call_count == 4, "both lookups, once per effort"
-        assert provider.temperature_dropped(), "`high` drops it"
+        assert high.temperature_dropped, "`high` drops it"
+        assert not none.temperature_dropped, "`none` keeps the temperature"
 
     def test_the_build_site_seeds_the_record_through_the_public_surface(self) -> None:
         """The factory withholds the temperature before the client exists, so it
-        records the loss on the adapter's public surface: the drop record is
-        the adapter's to own, and a builder reaching into a private method
+        records the loss on the adapter's public surface, and every call the
+        client makes reports it: a builder reaching into a private method
         couples the two classes at an implementation detail."""
         provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5")
 
         provider.note_withheld_temperature("anthropic/claude-sonnet-4-5", "withheld-under-thinking")
 
-        assert provider.temperature_dropped()
+        with patch("litellm.completion", return_value=_fake_response('{"findings": []}')):
+            result = provider.complete(self._MESSAGES, "ignored")
+        assert result.temperature_dropped
+
+    def test_a_failed_call_reports_the_temperature_it_never_sent(self) -> None:
+        """The strip is decided before the request, so a call that then fails
+        lost its temperature all the same; the exception says so."""
+        with (
+            patch("litellm.completion", side_effect=RuntimeError("upstream exploded")),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            LiteLLMProvider(model="bedrock/us.openai.gpt-5.5", temperature=0.0).complete(
+                self._MESSAGES, "ignored"
+            )
+
+        assert temperature_dropped_on(exc_info.value)
+
+    def test_a_per_call_temperature_is_not_reported_withheld(self) -> None:
+        """The build-time withhold is about the configured default; a caller
+        that sends its own temperature on a call has it judged on its own."""
+        provider = LiteLLMProvider(model="anthropic/claude-sonnet-4-5")
+        provider.note_withheld_temperature("anthropic/claude-sonnet-4-5", "withheld-under-thinking")
+
+        with patch("litellm.completion", return_value=_fake_response('{"findings": []}')):
+            result = provider.complete(self._MESSAGES, "ignored", temperature=0.0)
+        assert not result.temperature_dropped

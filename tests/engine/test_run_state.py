@@ -21,9 +21,11 @@ from lgtmaybe.core.models import (
     ReviewConfig,
     ReviewFinding,
     Severity,
+    stamp_degradation,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
+from lgtmaybe.engine.engine import _SCHEMA_DROP_NOTE, _TEMPERATURE_SEGMENT
 from lgtmaybe.engine.profiling import profiler
 from tests.conftest import make_cfg
 
@@ -145,6 +147,78 @@ class TestConcurrentReviewsOnOneEngine:
         assert "Bounded a lens" not in beta_summary
         assert "max_review_tokens" not in beta_summary
         assert provider.calls["beta"] == 2
+
+
+class _DegradingForAlpha:
+    """Reports alpha's calls degraded and beta's intact, on ONE shared provider.
+
+    Alpha's first call answers with the temperature withheld; every later alpha
+    call fails having lost the schema, stamped on the exception the way the
+    litellm adapter stamps a failed call. Beta's first call is held open until
+    alpha's whole review has finished, so a drop recorded anywhere shared (the
+    adapter, the engine) would be read back into beta's summary.
+    """
+
+    def __init__(self) -> None:
+        self.beta_in_call = threading.Event()
+        self.alpha_done = threading.Event()
+        self._lock = threading.Lock()
+        self.calls: dict[str, int] = {"alpha": 0, "beta": 0}
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        review = "alpha" if "alpha change" in _user_text(messages) else "beta"
+        with self._lock:
+            self.calls[review] += 1
+            first = self.calls[review] == 1
+        if review == "alpha":
+            if first:
+                return ProviderResult(
+                    text=_findings_json(1),
+                    input_tokens=1,
+                    output_tokens=1,
+                    temperature_dropped=True,
+                )
+            exc = RuntimeError("upstream exploded")
+            stamp_degradation(exc, schema_dropped=True, temperature_dropped=False)
+            raise exc
+        if first:
+            self.beta_in_call.set()
+            assert self.alpha_done.wait(timeout=30), "alpha never finished"
+        return ProviderResult(text=_findings_json(1), input_tokens=1, output_tokens=1)
+
+
+class TestConcurrentReviewsReportTheirOwnDegradation:
+    def test_schema_and_temperature_drops_stay_with_the_review_that_had_them(self) -> None:
+        """Two reviews on one engine and one provider: each summary discloses
+        only the drops its own calls reported."""
+        provider = _DegradingForAlpha()
+        engine = LLMReviewEngine(provider)
+        outcome: dict[str, tuple[list[ReviewFinding], str] | BaseException] = {}
+
+        def run_beta() -> None:
+            try:
+                outcome["beta"] = engine.review(_BETA, _cfg())
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the main thread
+                outcome["beta"] = exc
+
+        beta = threading.Thread(target=run_beta)
+        beta.start()
+        assert provider.beta_in_call.wait(timeout=30), "beta never reached its first call"
+        try:
+            _, alpha_summary = engine.review(_ALPHA, _cfg())
+        finally:
+            provider.alpha_done.set()
+            beta.join(timeout=30)
+
+        result = outcome["beta"]
+        if isinstance(result, BaseException):
+            raise result
+        _, beta_summary = result
+
+        assert _SCHEMA_DROP_NOTE in alpha_summary
+        assert _TEMPERATURE_SEGMENT in alpha_summary
+        assert _SCHEMA_DROP_NOTE not in beta_summary
+        assert _TEMPERATURE_SEGMENT not in beta_summary
 
 
 class TestEngineKeepsNoRunState:

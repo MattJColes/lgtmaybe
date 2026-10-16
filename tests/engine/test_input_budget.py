@@ -22,7 +22,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import Message
 from lgtmaybe.engine import LLMReviewEngine
 from lgtmaybe.engine.compress import count_tokens
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, RecoveringFakeProvider
 
 # Two equal-sized files, padded so the per-file token count is well clear of
 # the counting noise between tokenizers (CI has the real encoder; an
@@ -90,7 +90,7 @@ def _cfg(**overrides: Any) -> ReviewConfig:
     )
 
 
-class _Counting(FakeProvider):
+class _Counting(RecoveringFakeProvider):
     def __init__(self, budget: int | None) -> None:
         super().__init__()
         self._budget = budget

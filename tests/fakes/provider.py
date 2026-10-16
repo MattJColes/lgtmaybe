@@ -50,3 +50,34 @@ class FakeProvider:
             return routed
         text = json.dumps([f.model_dump(mode="json") for f in self._findings])
         return ProviderResult(text=text, input_tokens=10, output_tokens=20)
+
+
+class RecoveringFakeProvider(FakeProvider):
+    """A FakeProvider that also offers ``SupportsRecovery``, every step declined.
+
+    The engine probes the recovery steps as one protocol, so a fake that wants
+    to take one step (a step-down, an escalation) inherits the neutral answer
+    for the rest: no budget opinion, the schema still sent, nothing remembered,
+    no lower effort, no off switch, no second model. Each neutral answer is the
+    one the engine treats exactly like a provider that offers no recovery.
+    """
+
+    model: str = ""
+
+    def input_budget(self) -> int | None:
+        return None
+
+    def sends_response_format(self, model: str) -> bool:
+        return True
+
+    def drop_response_format(self, model: str, why: str) -> None:
+        return None
+
+    def lower_reasoning_effort(self) -> dict[str, Any] | None:
+        return None
+
+    def disable_reasoning(self) -> dict[str, Any] | None:
+        return None
+
+    def escalate_model(self) -> str | None:
+        return None

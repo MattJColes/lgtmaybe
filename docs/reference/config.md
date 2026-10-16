@@ -132,6 +132,8 @@ The normalised return value of one LLM completion, including token usage.
 | `output_ceiling` | integer / null | No | `null` | Output Ceiling |
 | `output_tokens` | integer | Yes | — | Output Tokens |
 | `reasoning_tokens` | integer / null | No | `null` | Reasoning Tokens |
+| `schema_dropped` | boolean | No | `False` | Schema Dropped |
+| `temperature_dropped` | boolean | No | `False` | Temperature Dropped |
 | `text` | string | Yes | — | Text |
 
 ## PRContext
@@ -1319,6 +1321,16 @@ The canonical machine-readable schemas. These are the source of truth for provid
       ],
       "default": null,
       "title": "Reasoning Tokens"
+    },
+    "schema_dropped": {
+      "default": false,
+      "title": "Schema Dropped",
+      "type": "boolean"
+    },
+    "temperature_dropped": {
+      "default": false,
+      "title": "Temperature Dropped",
+      "type": "boolean"
     },
     "text": {
       "title": "Text",
