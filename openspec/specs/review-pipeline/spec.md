@@ -612,9 +612,10 @@ config, ignore files or inline ignore pragmas from the PR-authored corpus.
 ### Requirement: Scan-only file texts never reach a prompt
 
 Dependency manifests and lockfiles fetched for scanning SHALL travel in their
-own context channel, separate from reviewed file texts. They MUST NOT enter the
-diff, any prompt, a hint block, or the reflection pass, and they are fetched
-only when a scanner will read them.
+own context channel, separate from reviewed file texts. Their text MUST NOT
+enter the diff, any prompt, a hint block, or the reflection pass (only a
+scanner's own redacted hint about them may), and they are fetched only when a
+scanner will read them.
 <!-- anchor: engine.scan-manifests -->
 
 #### Scenario: a PR changes a lockfile
@@ -642,6 +643,12 @@ whole files and only the diff is under review.
 - **WHEN** gitleaks reports a credential and no `tool_mode` is configured
 - **THEN** the hit reaches the lens calls as a hint and nothing posts without
   the model
+
+#### Scenario: a hint is about a file no batch holds
+- **WHEN** a `hint`-mode tool reports an advisory against a lockfile
+- **THEN** it rides the first batch's security lens (else correctness, else the
+  summary names the drop) once, on that lens's own block, and a confirmed
+  finding renders in the review body
 
 #### Scenario: a scanner hits a line the PR changed
 - **WHEN** a `finding`-mode tool reports a credential on a changed line

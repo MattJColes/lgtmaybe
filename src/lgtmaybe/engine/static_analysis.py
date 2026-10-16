@@ -86,11 +86,13 @@ MAX_SCAN_FINDINGS = 20
 # user who wants a tool to post directly opts it in per tool, e.g.
 # `tool_mode: {gitleaks: finding}`.
 #
+# Hints on files no batch holds (an osv-scanner advisory against a lockfile,
+# which is never reviewed) ride the first batch's security lens instead; see
+# `engine._unbatched_hint_block`.
+#
 # The trade-off, stated honestly: in hint mode the model can talk itself out of
-# a real hit (a committed secret is there or it isn't), and an osv-scanner
-# advisory against a lockfile has no batch to ride on, because lockfiles are
-# never reviewed, so it reaches the review only in `finding` mode. That is why
-# `finding` mode stays available.
+# a real hit (a committed secret is there or it isn't). That is why `finding`
+# mode stays available, to post a tool's hits with no model in the way.
 _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.ruff: ToolMode.hint,
     StaticAnalysisTool.bandit: ToolMode.hint,

@@ -2671,6 +2671,205 @@ def test_a_model_copy_rejected_by_reflection_does_not_take_the_scan_hit_with_it(
 
 
 # ---------------------------------------------------------------------------
+# unbatched hints: lockfile advisories ride the security lens, once per review
+# ---------------------------------------------------------------------------
+
+_LOCK_FILES = [f"mod{i}.py" for i in range(4)]
+_MULTI_BATCH_LOCK_CTX = PRContext(
+    diff="".join(
+        f"diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{f}\n"
+        f"@@ -1,2 +1,3 @@\n context\n+added in {f}\n context\n"
+        for f in _LOCK_FILES
+    )
+    + "diff --git a/uv.lock b/uv.lock\n@@ -1 +1,2 @@\n a\n+b\n",
+    changed_files=[*_LOCK_FILES, "uv.lock"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=3,
+    file_contents={f: "context\nadded\ncontext\n" for f in _LOCK_FILES},
+    scan_contents={"uv.lock": "a\nb\n"},
+)
+
+
+def _lockfile_cfg(**overrides: object) -> ReviewConfig:
+    base: dict[str, object] = {
+        "provider": Provider.ollama,
+        "model": "llama3",
+        "max_input_tokens": 60,  # forces several batches
+    }
+    base.update(overrides)
+    return ReviewConfig(**base)  # type: ignore[arg-type]
+
+
+def _lens_of(call: dict, cfg: ReviewConfig) -> str:
+    """Which lens a review call speaks for, from its final (lens) block."""
+    from lgtmaybe.engine.engine import _build_lenses
+
+    block = str(call["messages"][-1]["content"])
+    (lens_id,) = [
+        lens.id for lens in _build_lenses(cfg, has_intent=False) if block.endswith(lens.user_block)
+    ]
+    return lens_id
+
+
+def _calls_mentioning(provider: FakeProvider, text: str) -> list[dict]:
+    return [c for c in _review_calls(provider) if text in _all_text(c)]
+
+
+def test_an_unbatched_lockfile_hint_reaches_only_the_first_security_call(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A lockfile is never reviewed, so its advisories have no batch of their own.
+    They ride the security lens, once per review, on the first batch."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = _lockfile_cfg()
+
+    LLMReviewEngine(provider).review(_MULTI_BATCH_LOCK_CTX, cfg)
+
+    prefixes = {c["messages"][1]["content"] for c in _review_calls(provider)}
+    assert len(prefixes) > 1, "test setup: expected several batches"
+    (call,) = _calls_mentioning(provider, "GHSA-1234")
+    assert _lens_of(call, cfg) == ReviewCategory.security.value
+    assert "added in mod0.py" in call["messages"][1]["content"], "not the first batch"
+    # On the lens's own uncached block, never the shared prefix.
+    assert "GHSA-1234" not in call["messages"][1]["content"]
+    lens_block = call["messages"][-1]["content"]
+    assert "===HINTS_START===" in lens_block
+    assert lens_block.index("===HINTS_START===") < lens_block.index("GHSA-1234")
+    assert "lockfile" in lens_block.lower()
+    assert "uv.lock" in lens_block
+
+
+def test_unbatched_hints_are_redacted(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    secret = "AKIAIOSFODNN7EXAMPLE"
+    leaky = ToolFinding(
+        tool="osv-scanner",
+        path="uv.lock",
+        line=1,
+        rule="GHSA-1234",
+        message=f"token {secret} leaked",
+        severity=Severity.high,
+    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [leaky])
+    provider = _provider_for([], reflection_keeps_all=True)
+
+    LLMReviewEngine(provider).review(_MULTI_BATCH_LOCK_CTX, _lockfile_cfg())
+
+    assert all(secret not in _all_text(c) for c in provider.calls)
+    (call,) = _calls_mentioning(provider, REDACTED_PLACEHOLDER + " leaked")
+    assert "===HINTS_START===" in call["messages"][-1]["content"]
+
+
+def test_unbatched_hints_leave_the_shared_prefix_byte_identical(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Sibling lenses read the batch prefix from cache; one lens's extra block
+    must not make it differ between them."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+
+    LLMReviewEngine(provider).review(
+        _LOCKFILE_CTX, ReviewConfig(provider=Provider.ollama, model="llama3")
+    )
+
+    calls = _review_calls(provider)
+    assert len(calls) > 1
+    assert len({c["messages"][0]["content"] for c in calls}) == 1
+    assert len({c["messages"][1]["content"] for c in calls}) == 1
+    assert len(_calls_mentioning(provider, "GHSA-1234")) == 1
+
+
+def test_with_no_security_lens_correctness_carries_unbatched_hints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = _lockfile_cfg(categories=[ReviewCategory.correctness, ReviewCategory.performance])
+
+    LLMReviewEngine(provider).review(_MULTI_BATCH_LOCK_CTX, cfg)
+
+    (call,) = _calls_mentioning(provider, "GHSA-1234")
+    assert _lens_of(call, cfg) == ReviewCategory.correctness.value
+
+
+def test_with_no_carrier_lens_the_summary_names_the_dropped_hints(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = _lockfile_cfg(categories=[ReviewCategory.performance])
+
+    _findings, summary = LLMReviewEngine(provider).review(_MULTI_BATCH_LOCK_CTX, cfg)
+
+    assert _calls_mentioning(provider, "GHSA-1234") == []
+    assert "1 static-analysis hint" in summary
+
+
+@pytest.mark.parametrize("anchor", ["jinja2 2.4.1", None])
+def test_a_confirmed_lockfile_advisory_reaches_the_posted_review(monkeypatch, anchor) -> None:  # type: ignore[no-untyped-def]
+    """End to end: the model confirms the osv hint against uv.lock, and the
+    finding survives the engine and lands in the posted review. A lockfile is
+    not in the reviewed diff, so it can never anchor; it is demoted to the review
+    body, and the stricter unanchored floor must not drop it (it is not a guess
+    about a line, there is no line to have)."""
+    import httpx
+    import respx
+
+    from lgtmaybe.github import RestGitHubGateway
+
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_osv_hit()]
+    )
+    advisory = ReviewFinding(
+        path="uv.lock",
+        line=1,
+        severity=Severity.medium,  # below the unanchored floor (high)
+        title="jinja2 2.4.1 has a sandbox escape advisory",
+        body="GHSA-1234 affects the pinned jinja2. Upgrade it.",
+        failure_scenario="A template author escapes the sandbox and runs code.",
+        anchor=anchor,
+    )
+    advisory_text = json.dumps([advisory.model_dump(mode="json")])
+
+    class _Confirming(FakeProvider):
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            self.calls.append({"messages": messages, "model": model, "opts": opts})
+            if _REFLECT_MARKER in messages[0]["content"]:
+                return ProviderResult(text='{"0": true}', input_tokens=1, output_tokens=1)
+            text = advisory_text if "GHSA-1234" in messages[-1]["content"] else "[]"
+            return ProviderResult(text=text, input_tokens=1, output_tokens=1)
+
+    findings, summary = LLMReviewEngine(_Confirming()).review(
+        _LOCKFILE_CTX, ReviewConfig(provider=Provider.ollama, model="llama3")
+    )
+
+    assert [(f.path, f.anchored) for f in findings] == [("uv.lock", False)]
+    assert "LGTM" not in summary
+
+    reviews_url = "https://api.github.com/repos/org/repo/pulls/3/reviews"
+    posted: list[dict] = []
+    with respx.mock:
+        respx.get(reviews_url).mock(return_value=httpx.Response(200, json=[]))
+
+        def capture(request: httpx.Request) -> httpx.Response:
+            posted.append(json.loads(request.content))
+            return httpx.Response(201, json={"id": 1, "body": posted[-1].get("body", "")})
+
+        respx.post(reviews_url).mock(side_effect=capture)
+        RestGitHubGateway(
+            repo="org/repo", pr_number=3, token="t", client=httpx.Client()
+        ).post_review(findings, summary, diff=_LOCKFILE_CTX.diff)
+
+    (review,) = posted
+    assert review.get("comments", []) == []
+    assert advisory.title in review["body"]
+
+
+# ---------------------------------------------------------------------------
 # secret scanning narrows the security lens
 # ---------------------------------------------------------------------------
 

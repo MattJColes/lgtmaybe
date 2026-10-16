@@ -13,9 +13,9 @@ import logging
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
@@ -280,6 +280,9 @@ class _NoticeState:
     suppressed: int
     off_diff: int
     open_finding_threads: int
+    # Static-analysis hints on files no batch holds (lockfiles) that found no
+    # security or correctness call to carry them.
+    unbatched_hints_dropped: int = 0
     # Findings dropped per lens because their prose was the model's note to
     # itself about its output format (see selftalk.py).
     self_talk: dict[str, int] = field(default_factory=dict)
@@ -462,6 +465,16 @@ def _build_notices(state: _NoticeState) -> list[str]:
             lambda count: (
                 f"🔍 {count} scan finding{_plural(count)} skipped: on unchanged "
                 "lines outside this PR's diff. Run the tool over the repository to see them."
+            ),
+        ),
+        (
+            state.unbatched_hints_dropped,
+            lambda count: (
+                f"🧰 {count} static-analysis hint{_plural(count)} skipped: "
+                f"{_plural(count, 'it is', 'they are')} on dependency lockfiles or manifests "
+                "the diff does not show, and no security or correctness review call ran to "
+                "read them. Add `security` to `categories`, or set the tool to `finding` in "
+                "`static_analysis.tool_mode` to post them directly."
             ),
         ),
         (
@@ -1289,6 +1302,31 @@ class LLMReviewEngine:
             changed_files=tuple(ctx.changed_files),
         )
         workers = _resolve_workers(cfg, len(batches) * len(lenses))
+        # Hints on scan-only files (dependency lockfiles and manifests the review
+        # never reads line by line) have no batch to join, so the per-batch
+        # filter below would lose them. They ride ONE lens call instead: the
+        # first batch's security lens (correctness when the run has no security
+        # lens), on that lens's own uncached block, so the shared prefix every
+        # sibling lens reads from cache stays byte-identical.
+        batched_paths = {path for batch in batches for path, _ in batch}
+        unbatched = [
+            h for h in sa_hints if h.path in ctx.scan_contents and h.path not in batched_paths
+        ]
+        carrier = _unbatched_hint_carrier(lenses) if unbatched and batches else None
+        unbatched_dropped = len(unbatched) if carrier is None else 0
+        if unbatched_dropped:
+            _log.info(
+                "unbatched static-analysis hints had no lens to carry them",
+                extra={"count": unbatched_dropped},
+            )
+        carrier_lens = (
+            replace(
+                carrier,
+                user_block=f"{_unbatched_hint_block(unbatched)}\n\n{carrier.user_block}",
+            )
+            if carrier is not None
+            else None
+        )
         per_batch: list[tuple[bool, list[_PreparedCall]]] = []
         for batch_num, batch in enumerate(batches, start=1):
             batch_diff = "\n".join(patch for _, patch in batch)
@@ -1345,7 +1383,9 @@ class LLMReviewEngine:
                         hint_block,
                         dir_block,
                         batch_num,
-                        lens,
+                        carrier_lens
+                        if carrier_lens is not None and batch_num == 1 and lens is carrier
+                        else lens,
                         batch,
                         spec_block=spec_block,
                         hidden_block=hidden_block,
@@ -1410,6 +1450,18 @@ class LLMReviewEngine:
         #    model placed on slightly different wrong lines collapse correctly.
         with profiler.stage("snap"):
             all_findings = _snap_findings(all_findings, reviewed_diff)
+            # A finding on a scan-only file (a lockfile advisory the model
+            # confirmed from an unbatched hint) has no reviewed line to sit on:
+            # the file is never in the reviewed diff. Mark it unanchored, so
+            # every gateway demotes it to the review body rather than guessing
+            # a line, and exempt it from the unanchored floor in step 9.
+            no_line_paths = set(ctx.scan_contents) - {path for path, _ in file_patches}
+            all_findings = [
+                f.model_copy(update={"anchored": False})
+                if f.path in no_line_paths and f.anchored
+                else f
+                for f in all_findings
+            ]
 
         # 6b. Scope scan findings to the change. The tools read whole files, so
         #     they see pre-existing code the PR never touched; an anchor that
@@ -1517,7 +1569,11 @@ class LLMReviewEngine:
         #    stricter unanchored floor — a finding the engine could not anchor is a
         #    low-confidence guess, so surface it only when it's high/critical.
         with profiler.stage("filter"):
-            filtered = [f for f in all_findings if _passes_severity_floor(f, cfg)]
+            filtered = [
+                f
+                for f in all_findings
+                if _passes_severity_floor(f, cfg, no_line_paths=no_line_paths)
+            ]
 
             # 9b. Declarative post-processing (finding_rules, default none): the
             #     team's drop / severity-remap rules, applied last so they see
@@ -1556,6 +1612,7 @@ class LLMReviewEngine:
                 suppressed=suppressed,
                 off_diff=off_diff,
                 open_finding_threads=ctx.open_finding_threads,
+                unbatched_hints_dropped=unbatched_dropped,
                 self_talk=dict(self._self_talk),
                 spec_unfit=list(spec_context.unfit),
                 spec_reviewed=clean_spec is not None,
@@ -3233,17 +3290,48 @@ def _is_scan_finding(finding: ReviewFinding) -> bool:
     return (finding.category or "").startswith(SCAN_CATEGORY_PREFIX)
 
 
-def _passes_severity_floor(finding: ReviewFinding, cfg: ReviewConfig) -> bool:
+def _passes_severity_floor(
+    finding: ReviewFinding,
+    cfg: ReviewConfig,
+    *,
+    no_line_paths: Collection[str] = frozenset(),
+) -> bool:
     """Whether a finding clears the severity floors and may be surfaced.
 
     Two floors: the plain ``min_severity`` for every finding, plus the stricter
     ``unanchored_min_severity`` for ones the engine could not anchor (a failed
     anchor is a low-confidence guess). Extracted so the on-demand replay benchmark
     asserts against the exact predicate production uses — no drift.
+
+    ``no_line_paths`` are scan-only files (lockfiles) a model finding can never
+    anchor to, because they are never in the reviewed diff. A model finding there
+    is not a guess about a line, so only the plain floor applies; a tool's own
+    direct-post finding keeps the stricter one.
     """
+    no_line = finding.path in no_line_paths and not _is_scan_finding(finding)
     return finding.severity >= cfg.min_severity and (
-        finding.anchored or finding.severity >= cfg.unanchored_min_severity
+        finding.anchored or no_line or finding.severity >= cfg.unanchored_min_severity
     )
+
+
+def _unbatched_hint_carrier(lenses: Sequence[_Lens]) -> _Lens | None:
+    """The lens that carries hints no batch holds: security, else correctness."""
+    by_id = {lens.id: lens for lens in lenses}
+    return by_id.get(ReviewCategory.security.value) or by_id.get(ReviewCategory.correctness.value)
+
+
+_UNBATCHED_HINTS_LEAD = (
+    "The static-analysis hints below are about files the diff does not show: "
+    "dependency lockfiles and manifests, which are never reviewed line by line. "
+    "Confirm or discard each one like any other hint. Report a confirmed advisory "
+    "against the lockfile path the hint names (for example `uv.lock`), quoting the "
+    "affected package and version as the `anchor`."
+)
+
+
+def _unbatched_hint_block(hints: Sequence[ToolFinding]) -> str:
+    """The trusted lead-in plus the redacted, wrapped hints for the carrier lens."""
+    return f"{_UNBATCHED_HINTS_LEAD}\n\n{wrap_hints(redact(format_hints(list(hints))))}"
 
 
 def _filter_missing_failure_scenarios(

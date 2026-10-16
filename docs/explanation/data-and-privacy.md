@@ -54,7 +54,9 @@ pass follows. These calls can contain:
   ([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)):
   redacted findings from tools run locally over the changed files. The tools
   run in a sandbox with no network, so the file text never leaves the machine
-  through them. Only the redacted hints reach the model.
+  through them. Only the redacted hints reach the model. A hint about a
+  lockfile names the package, version and advisory; the lockfile text itself
+  is never sent.
 - **Matching specification text**, when a repository has a supported spec
   workflow and the change matches a committed spec. The
   [spec lens](../reference/glossary.md#spec-lens) sends a bounded, redacted

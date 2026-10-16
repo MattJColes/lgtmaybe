@@ -4075,10 +4075,14 @@ It is on by default. Each tool feeds the review in one of two modes:
   with `tool_mode`.
 
 Every tool takes one path by default, so the model sees each hit next to the
-code it is about. The trade-off: in hint mode the model can discard a real hit,
-such as a committed credential. An osv-scanner advisory about a lockfile also
-needs `finding` mode, because lockfiles are never reviewed, so the hint has no
-batch to join. Set `tool_mode` to make a tool post directly:
+code it is about. Lockfiles are never reviewed line by line, so a hint about
+one (such as an osv-scanner advisory against `uv.lock`) goes to the security
+lens once per review. A finding the model confirms there shows in the review
+body, because a lockfile has no reviewed line to comment on.
+
+The trade-off: in hint mode the model can discard a real hit, such as a
+committed credential. Set `tool_mode` to make a tool post directly, with no
+model call:
 
 ```yaml
 static_analysis:
@@ -4141,10 +4145,11 @@ finding_rules:
 **osv-scanner** answers a question a model can't: does a pinned dependency
 have a published advisory? That depends on what was disclosed this week, past
 any model's knowledge cutoff. osv-scanner reads the manifests and lockfiles the
-PR changes through a scan-only channel. That channel never enters the diff, a
-prompt or reflection. Its findings are about a dependency rather than a line, so
-they render in the review body. By default only `high` and `critical`
-advisories show (`unanchored_min_severity`).
+PR changes through a scan-only channel. The file text never enters the diff, a
+prompt or reflection. By default its advisories go to the security lens as
+hints, and an advisory the model confirms shows in the review body. With
+`tool_mode: {osv-scanner: finding}` the advisories post directly instead, and
+only `high` and `critical` ones show (`unanchored_min_severity`).
 
 It needs a local vulnerability database, since the sandbox has no network. The
 Action image bakes one in at build time. On the CLI, point
@@ -10573,7 +10578,9 @@ pass follows. These calls can contain:
   ([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)):
   redacted findings from tools run locally over the changed files. The tools
   run in a sandbox with no network, so the file text never leaves the machine
-  through them. Only the redacted hints reach the model.
+  through them. Only the redacted hints reach the model. A hint about a
+  lockfile names the package, version and advisory; the lockfile text itself
+  is never sent.
 - **Matching specification text**, when a repository has a supported spec
   workflow and the change matches a committed spec. The
   [spec lens](../reference/glossary.md#spec-lens) sends a bounded, redacted

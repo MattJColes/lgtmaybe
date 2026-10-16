@@ -247,12 +247,16 @@ docstrings.
   `hint` mode (`_DEFAULT_MODE`), an untrusted HINTS block the model confirms,
   contextualises or discards, so nothing posts without the model. `finding`
   mode (skip the model, post directly) is a per-tool opt-in via
-  `static_analysis.tool_mode`; the trade-off is that a hint can be discarded,
-  and a lockfile advisory has no batch to ride. `_scanner_covers` drops a
-  lens's secret/advisory ask only for a `finding`-mode scanner. **Tool output
-  is always redacted and never posted verbatim.** A missing tool is skipped,
-  so a minimal install runs nothing. Tests stub the engine's runner
-  (`tests/conftest.py`) so installed linters never leak into prompts.
+  `static_analysis.tool_mode`; the trade-off is that a hint can be discarded.
+  Hints on files no batch holds (lockfile advisories) ride the first batch's
+  security lens (else correctness, else named in the summary) on its own
+  uncached block, **never the shared prefix**; a confirmed finding there is
+  demoted to the review body and exempt from the unanchored floor.
+  `_scanner_covers` drops a lens's secret/advisory ask only for a
+  `finding`-mode scanner. **Tool output is always redacted and never posted
+  verbatim.** A missing tool is skipped, so a minimal install runs nothing.
+  Tests stub the engine's runner (`tests/conftest.py`) so installed linters
+  never leak into prompts.
 
 **Lenses**
 
