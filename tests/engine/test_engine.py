@@ -2659,9 +2659,7 @@ def test_model_findings_survive_the_scan_cap(monkeypatch) -> None:  # type: igno
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
     model_note = ReviewFinding(
         path="f.py",
         line=2,
@@ -2686,9 +2684,7 @@ def test_suppressed_scan_findings_do_not_spend_cap_slots(monkeypatch) -> None:  
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
     # _finding_mode_cfg overrides land on the static-analysis sub-config, so
@@ -2714,9 +2710,7 @@ def test_scan_cap_considered_count_is_the_pre_cap_count(
     from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
 
     scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
@@ -2836,7 +2830,6 @@ def test_a_scan_snap_never_crosses_files_on_identical_changed_lines(monkeypatch)
     findings, _summary = engine.review(_SAME_TEXT_CTX, _finding_mode_cfg())
 
     assert [(f.path, f.line) for f in findings] == [("g.py", 41)]
-
 
 
 # ---------------------------------------------------------------------------
@@ -3834,9 +3827,7 @@ def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> Non
             reasoning_effort="medium",
             temperature=0.0,
         )
-        cfg = make_cfg(
-            provider=Provider.anthropic, model="claude-sonnet-4-5", reflect=False
-        )
+        cfg = make_cfg(provider=Provider.anthropic, model="claude-sonnet-4-5", reflect=False)
         _findings, summary = LLMReviewEngine(built).review(_CTX, cfg)
 
     # The cause, not just the symptom: the requests themselves carry no

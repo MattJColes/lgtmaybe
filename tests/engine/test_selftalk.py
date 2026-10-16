@@ -135,10 +135,7 @@ def test_a_bug_report_pairing_both_phrases_is_kept() -> None:
     """Issue #761: a user-facing bug report carries both phrases, yet is not a note."""
     finding = _finding(
         title="Formatting error returns 500",
-        body=(
-            "The endpoint returns 500 instead of a 400 telling the client to "
-            "send valid JSON."
-        ),
+        body=("The endpoint returns 500 instead of a 400 telling the client to send valid JSON."),
     )
     assert not is_self_talk(finding)
 

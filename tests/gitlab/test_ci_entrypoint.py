@@ -74,9 +74,7 @@ class TestMRUrlFromCIEnv:
         with pytest.raises(Exception, match="CI_PROJECT_PATH"):
             mr_url_from_ci_env()
 
-    def test_accepts_a_server_url_at_the_host_root(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_accepts_a_server_url_at_the_host_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _set(monkeypatch, CI_SERVER_URL="https://gitlab.example.com")
 
         assert mr_url_from_ci_env() == (

@@ -1211,9 +1211,7 @@ def test_recheck_pass_that_trims_appends_its_own_notice() -> None:
         }
     )
     cfg = _CFG.model_copy(update={"max_input_tokens": 500})
-    provider = _ScriptedProvider(
-        [_needs_envelope(0, ["other.py"]), _envelope([(0, True)])]
-    )
+    provider = _ScriptedProvider([_needs_envelope(0, ["other.py"]), _envelope([(0, True)])])
     fetcher = _RecordingFetcher({"other.py": "verified_definition = 42\n"})
     notices: list[str] = []
 
