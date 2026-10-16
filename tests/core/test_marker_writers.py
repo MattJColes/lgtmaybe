@@ -10,6 +10,7 @@ the round trip. A gateway never spells a marker out itself.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -65,8 +66,16 @@ def test_reviewed_diff_marker_round_trips() -> None:
 def test_watermark_families_are_disjoint() -> None:
     """One family's writer is never read back as another family's marker."""
     sha = "abc1234"
-    assert REVIEWED_MARKER.search(diagrammed_marker(sha)) is None
-    assert DIAGRAMMED_MARKER.search(reviewed_marker(sha)) is None
+    fingerprint = diff_fingerprint("diff --git a/x b/x\n+added\n")
+    writers = {
+        REVIEWED_MARKER: reviewed_marker(sha),
+        DIAGRAMMED_MARKER: diagrammed_marker(sha),
+        REVIEWED_DIFF_MARKER: reviewed_diff_marker(fingerprint),
+    }
+    for reader in writers:
+        for owner, written in writers.items():
+            if owner is not reader:
+                assert reader.search(written) is None, (reader.pattern, written)
 
 
 def _finding() -> ReviewFinding:
@@ -121,13 +130,17 @@ def _docstring_nodes(tree: ast.Module) -> set[int]:
     return ids
 
 
+# A marker family's prefix, e.g. ``lgtmaybe-reviewed:``.
+_FAMILY = re.compile(r"lgtmaybe-[a-z-]+:")
+
+
 def _gateway_sources() -> list[Path]:
     root = Path(lgtmaybe.__file__).parent
     return sorted(p for pkg in _GATEWAY_PACKAGES for p in (root / pkg).rglob("*.py"))
 
 
 def test_gateway_sources_are_found() -> None:
-    assert len(_gateway_sources()) >= len(_GATEWAY_PACKAGES)
+    assert {p.parent.name for p in _gateway_sources()} >= set(_GATEWAY_PACKAGES)
 
 
 @pytest.mark.parametrize("path", _gateway_sources(), ids=lambda p: f"{p.parent.name}/{p.name}")
@@ -135,7 +148,9 @@ def test_no_gateway_spells_out_a_hidden_marker(path: Path) -> None:
     """Gateways stamp markers through the ``core.comment`` writers only.
 
     Docstrings may describe a marker; code may not build one, f-string parts
-    included, because a hand-built marker is the drift this file guards.
+    included, because a hand-built marker is the drift this file guards. A
+    constant counts when it opens a comment naming lgtmaybe, or names a marker
+    family (``lgtmaybe-<family>:``) on its own, as an f-string part would.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     docstrings = _docstring_nodes(tree)
@@ -145,13 +160,7 @@ def test_no_gateway_spells_out_a_hidden_marker(path: Path) -> None:
         if isinstance(node, ast.Constant)
         and isinstance(node.value, str)
         and id(node) not in docstrings
-        and "<!--" in node.value
-        and "lgtmaybe" in node.value
+        and (("<!--" in node.value and "lgtmaybe" in node.value) or _FAMILY.search(node.value))
     ]
 
     assert not offenders, f"{path.name} builds a hidden marker by hand: {offenders}"
-
-
-@pytest.mark.parametrize("path", _gateway_sources(), ids=lambda p: f"{p.parent.name}/{p.name}")
-def test_no_gateway_names_the_watermark_family(path: Path) -> None:
-    assert "lgtmaybe-reviewed:" not in path.read_text(encoding="utf-8")
