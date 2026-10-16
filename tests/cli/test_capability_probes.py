@@ -20,13 +20,32 @@ CLI_DIR = Path(lgtmaybe.cli.__file__).parent
 # None of them is a gateway: platform signal names and an optional stream API.
 ALLOWED_TARGETS = {"signal", "stream"}
 
+_LOOKUPS = {"getattr", "hasattr"}
 
-def _callee(func: ast.expr) -> str | None:
+
+def _is_lookup(func: ast.expr) -> bool:
+    """A bare ``getattr``/``hasattr``, or one qualified as ``builtins.getattr``.
+
+    Any other attribute call (``obj.getattr(...)``) is someone's own method,
+    not the builtin, so it is not a probe.
+    """
     if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return None
+        return func.id in _LOOKUPS
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr in _LOOKUPS
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "builtins"
+    )
+
+
+def _lookups_in(tree: ast.AST) -> list[tuple[int, str]]:
+    """Every builtin ``getattr``/``hasattr`` call in ``tree`` as (line, target)."""
+    return [
+        (node.lineno, ast.unparse(node.args[0]))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _is_lookup(node.func) and node.args
+    ]
 
 
 def _dynamic_lookups() -> list[tuple[str, int, str]]:
@@ -34,17 +53,30 @@ def _dynamic_lookups() -> list[tuple[str, int, str]]:
     found = []
     for path in sorted(CLI_DIR.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            # A bare call or a qualified one (``builtins.getattr``).
-            if not (
-                isinstance(node, ast.Call)
-                and _callee(node.func) in {"getattr", "hasattr"}
-                and node.args
-            ):
-                continue
-            target = ast.unparse(node.args[0])
-            found.append((path.name, node.lineno, target))
+        found.extend((path.name, line, target) for line, target in _lookups_in(tree))
     return found
+
+
+def _offending(lookups: list[tuple[int, str]]) -> list[str]:
+    return [target for _line, target in lookups if target not in ALLOWED_TARGETS]
+
+
+def test_the_scanner_reports_bare_qualified_and_hasattr_probes() -> None:
+    tree = ast.parse(
+        "import builtins\n"
+        'getattr(gateway, "x")\n'
+        'builtins.getattr(gateway, "x")\n'
+        'hasattr(gateway, "x")\n'
+    )
+    assert _lookups_in(tree) == [(2, "gateway"), (3, "gateway"), (4, "gateway")]
+    assert _offending(_lookups_in(tree)) == ["gateway", "gateway", "gateway"]
+
+
+def test_the_scanner_ignores_methods_and_allowlisted_targets() -> None:
+    tree = ast.parse('obj.getattr(gateway)\ngetattr(signal, "SIGTERM")\n')
+    # A method named getattr is not the builtin, so it is not scanned at all.
+    assert _lookups_in(tree) == [(2, "signal")]
+    assert _offending(_lookups_in(tree)) == []
 
 
 def test_the_scan_sees_the_cli_package() -> None:
