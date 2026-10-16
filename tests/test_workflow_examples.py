@@ -345,3 +345,46 @@ def test_dogfood_config_caps_what_one_call_may_generate() -> None:
         f"max_tokens={cap} does not bound the runaway it exists to bound "
         f"({_RUNAWAY_OUTPUT} tokens, 21 minutes, one lens)"
     )
+
+
+def test_the_dogfood_config_is_valid_and_fits_this_repo() -> None:
+    """lgtmaybe reviewing itself loads its own config, so check it here, not in a review.
+
+    Loading it here catches a schema error (ReviewConfig forbids unknown keys)
+    in CI, before a dogfood review trips on it. Beyond loading, it must keep
+    the review off files that are noise to review here, and point every
+    directory rule at context files that exist.
+    """
+    from lgtmaybe.config.loader import load_config
+    from lgtmaybe.engine.engine import passes_path_filters
+
+    config = load_config(
+        config_path=_REPO_ROOT / ".lgtmaybe.yml", provider="openrouter", model="any"
+    )
+
+    def reviewed(path: str) -> bool:
+        return passes_path_filters(path, include=config.include_paths, exclude=config.exclude_paths)
+
+    # Planted bugs, generated snapshots, and the release-please changelog.
+    for path in (
+        "evals/fixtures/badcode/diff.txt",
+        "evals/fixtures/cross-file-fp/repo/src/links/models.py",
+        "tests/snapshots/ReviewConfig.json",
+        "CHANGELOG.md",
+    ):
+        assert not reviewed(path), path
+    # What a fixture expects decides what the eval scores, so it stays reviewed.
+    for path in (
+        "evals/fixtures/badcode/expected.json",
+        "src/lgtmaybe/engine/redact.py",
+        "tests/engine/test_redact.py",
+    ):
+        assert reviewed(path), path
+
+    assert config.project.stage == "production"
+    for path in ("src/lgtmaybe/engine/injection.py", "src/lgtmaybe/engine/redact.py"):
+        assert path in config.risk.core_paths, path
+    assert config.directory_rules, ".lgtmaybe.yml lost its directory rules"
+    for rule in config.directory_rules:
+        for context_file in rule.context_files:
+            assert (_REPO_ROOT / context_file).is_file(), context_file
