@@ -46,6 +46,14 @@ from lgtmaybe.core.ports import (
     ProviderInputTooLarge,
     ProviderTruncated,
     ProviderWallTimeout,
+    SupportsInputBudget,
+    SupportsModelEscalation,
+    SupportsReasoningStepDown,
+    SupportsReasoningSwitchOff,
+    SupportsResponseFormatDrop,
+    SupportsResponseFormatStatus,
+    SupportsSchemaDropReport,
+    SupportsTemperatureDropReport,
 )
 from lgtmaybe.core.version import package_version
 
@@ -931,23 +939,25 @@ class LLMReviewEngine:
     def _schema_dropped(self) -> bool:
         """Whether the adapter gave up on structured output during this run.
 
-        Feature-detected, like ``lower_reasoning_effort``: it is an adapter-only
-        method beyond the frozen ``ProviderClient`` port, so a provider that
-        cannot answer simply never reports a drop rather than every fake in the
-        suite growing a method to say "no".
+        Probed through ``SupportsSchemaDropReport``, like ``lower_reasoning_effort``
+        below: it is an optional capability beyond the frozen ``ProviderClient``
+        port, so a provider that cannot answer simply never reports a drop
+        rather than every fake in the suite growing a method to say "no".
         """
-        probe = getattr(self._provider, "schema_dropped", None)
-        return bool(probe()) if callable(probe) else False
+        if not isinstance(self._provider, SupportsSchemaDropReport):
+            return False
+        return bool(self._provider.schema_dropped())
 
     def _temperature_dropped(self) -> bool:
         """Whether a configured temperature never reached the model this run.
 
-        Feature-detected like ``_schema_dropped``, for the same reason: only the
-        litellm adapter can know, so a provider without the method never reports
-        a drop.
+        Probed like ``_schema_dropped``, for the same reason: only the
+        litellm adapter can know, so a provider without the capability never
+        reports a drop.
         """
-        probe = getattr(self._provider, "temperature_dropped", None)
-        return bool(probe()) if callable(probe) else False
+        if not isinstance(self._provider, SupportsTemperatureDropReport):
+            return False
+        return bool(self._provider.temperature_dropped())
 
     def __init__(
         self,
@@ -1002,11 +1012,10 @@ class LLMReviewEngine:
         """
         if "max_input_tokens" in cfg.model_fields_set:
             return cfg
-        probe = getattr(self._provider, "input_budget", None)
-        if probe is None:
+        if not isinstance(self._provider, SupportsInputBudget):
             return cfg
         try:
-            budget = probe()
+            budget = self._provider.input_budget()
         except Exception:  # noqa: BLE001 — a capability lookup must never fail a review
             _log.warning("could not read the model's input budget", exc_info=True)
             return cfg
@@ -2309,16 +2318,17 @@ class LLMReviewEngine:
         Returns the retry's ``(findings, error)``. The cut call's salvage is
         merged by the caller, exactly as the split's is.
         """
-        # Adapter-only, like `post_issue_comment` on the GitHub side: the effort
-        # lives in provider-shaped opts (a flat `reasoning_effort`, or
-        # OpenRouter's nested `reasoning` object), and the engine has no business
-        # knowing which. A provider without it simply never steps down.
+        # An optional capability, like `post_issue_comment` on the GitHub side:
+        # the effort lives in provider-shaped opts (a flat `reasoning_effort`,
+        # or OpenRouter's nested `reasoning` object), and the engine has no
+        # business knowing which. A provider without it simply never steps down.
         if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             # Past a ceiling: the run is already stopping, and the notice it will
             # carry is the truncation's, not a skip's — this call never happened.
             return [], reason
-        lower = getattr(self._provider, "lower_reasoning_effort", None)
-        step_down = lower() if callable(lower) else None
+        step_down = None
+        if isinstance(self._provider, SupportsReasoningStepDown):
+            step_down = self._provider.lower_reasoning_effort()
         if not step_down:
             return [], reason
         _log.warning(
@@ -2347,8 +2357,9 @@ class LLMReviewEngine:
         # the price. A model whose thinking is a switch does not answer to a
         # dial, so the one further step is to off — and it is taken BEFORE the
         # model changes, because switching model says nothing about the failure.
-        off = getattr(self._provider, "disable_reasoning", None)
-        switch_off = off() if callable(off) else None
+        switch_off = None
+        if isinstance(self._provider, SupportsReasoningSwitchOff):
+            switch_off = self._provider.disable_reasoning()
         if not switch_off or switch_off == step_down:
             # No switch on this route, or the step-down already was it (a
             # configured `minimal` steps to `none`): a second request at the
@@ -2425,11 +2436,12 @@ class LLMReviewEngine:
         """
         if run is not None and _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
             return [], reason
-        # Adapter-only, like `lower_reasoning_effort`: which litellm model string
-        # a configured fallback resolves to is the adapter's knowledge, and a
-        # provider without a second model simply never answers.
-        probe = getattr(self._provider, "escalate_model", None)
-        target = probe() if callable(probe) else None
+        # An optional capability, like `lower_reasoning_effort`: which litellm
+        # model string a configured fallback resolves to is the adapter's
+        # knowledge, and a provider without a second model simply never answers.
+        target = None
+        if isinstance(self._provider, SupportsModelEscalation):
+            target = self._provider.escalate_model()
         if not target:
             return [], reason
         _log.warning(
@@ -2467,7 +2479,10 @@ class LLMReviewEngine:
         cannot be proved should not be made.
         """
         answered = result.model
-        asked = getattr(self._provider, "model", None)
+        # Attribute presence, not a protocol isinstance: runtime-checkable
+        # protocols check members with hasattr anyway, and saying that directly
+        # keeps the probe honest for an adapter that is not a Protocol.
+        asked = self._provider.model if hasattr(self._provider, "model") else None
         if answered and asked and answered != asked:
             self._escalated[lens.id] = answered
 
@@ -2543,26 +2558,27 @@ class LLMReviewEngine:
         would re-send the request that just failed, byte for byte — a wasted
         full-diff call, and exactly what ``engine.rescue`` forbids.
 
-        Feature-detected and **fail-open**, like every other adapter probe: an
-        adapter that cannot answer is assumed to have sent what it was given, so
-        the recovery keeps working rather than silently switching itself off.
+        Probed through ``SupportsResponseFormatStatus`` and **fail-open**, like
+        every other adapter probe: an adapter that cannot answer is assumed to
+        have sent what it was given, so the recovery keeps working rather than
+        silently switching itself off.
         """
-        probe = getattr(self._provider, "sends_response_format", None)
-        return bool(probe(model)) if callable(probe) else True
+        if not isinstance(self._provider, SupportsResponseFormatStatus):
+            return True
+        return bool(self._provider.sends_response_format(model))
 
     def _drop_response_format(self, model: str) -> None:
         """Tell the adapter this model's schema mode is not working.
 
-        Feature-detected like ``schema_dropped`` and ``lower_reasoning_effort``,
-        and the first of the three that WRITES. It stays off the frozen
-        ``ProviderClient`` port for the same reason they do: the knowledge is
-        adapter-shaped (which litellm model string keys the drop), and a provider
-        that cannot honour it should simply not remember rather than every fake
-        in the suite growing a no-op.
+        Probed through ``SupportsResponseFormatDrop``, and the first of the
+        adapter probes that WRITES. It stays off the frozen
+        ``ProviderClient`` port for the same reason the read-only ones do: the
+        knowledge is adapter-shaped (which litellm model string keys the drop),
+        and a provider that cannot honour it should simply not remember rather
+        than every fake in the suite growing a no-op.
         """
-        drop = getattr(self._provider, "drop_response_format", None)
-        if callable(drop):
-            drop(model, "unparseable-output")
+        if isinstance(self._provider, SupportsResponseFormatDrop):
+            self._provider.drop_response_format(model, "unparseable-output")
 
     def _stamp_and_bound(self, findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
         """Stamp the originating lens, then bound what one call may contribute.
