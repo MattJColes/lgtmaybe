@@ -448,7 +448,7 @@ def parse_findings(raw: str) -> list[ReviewFinding]:
     # the schema (a symptom reported in place of the cause).
     if _is_unterminated(_strip_think_blocks(raw)):
         raise ParseError(
-            "Response ended mid-JSON — the model ran out of output tokens",
+            "Response ended mid-JSON: the model ran out of output tokens",
             shape=ParseFailure.truncated,
             recovered=_recover_complete_findings(raw),
         )

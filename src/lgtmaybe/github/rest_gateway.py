@@ -288,7 +288,7 @@ class RestGitHubGateway:
         except (KeyError, TypeError) as exc:
             raise RuntimeError(
                 f"PR metadata for {self._repo}#{self._pr_number} is missing the "
-                f"base/head SHA — unexpected GitHub API response ({exc})."
+                f"base/head SHA, an unexpected GitHub API response ({exc})."
             ) from exc
         self._head_sha = head_sha  # cache for on-demand get_file_contents fetches
 

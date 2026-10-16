@@ -171,7 +171,7 @@ class GitLabGateway:
         if not base_sha or not head_sha:
             raise RuntimeError(
                 f"Merge request metadata for {self._repo}!{self._pr_number} is missing the "
-                "base/head SHA — unexpected GitLab API response."
+                "base/head SHA, an unexpected GitLab API response."
             )
         self._head_sha = head_sha
         self._diff_refs = {

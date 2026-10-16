@@ -290,7 +290,7 @@ def _sequence_views(
     text_lines: list[str] = []
     for index, (source, target, label, reply) in enumerate(steps, start=1):
         arrow = "-->>" if reply else "->>"
-        mermaid_lines.append(f"    {source}{arrow}{target}: {_sequence_label(label) or '—'}")
+        mermaid_lines.append(f"    {source}{arrow}{target}: {_sequence_label(label) or '-'}")
         text_arrow = "-->" if reply else "->"
         suffix = f": {label}" if label else ""
         text_lines.append(

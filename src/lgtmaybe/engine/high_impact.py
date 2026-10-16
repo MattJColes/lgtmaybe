@@ -279,15 +279,15 @@ def render_high_impact(
         missed = [path for path in paths if path not in covered.get(area, set())]
         if missed:
             floored.append(
-                f"- **{AREA_LABELS[area]}** — touched: {_paths(missed, changed)} "
+                f"- **{AREA_LABELS[area]}**: touched {_paths(missed, changed)} "
                 "(not assessed by the model)"
             )
 
     lines = [HIGH_IMPACT_HEADING, "", *reported, *floored]
     if result is None:
-        lines += ["", "_Model assessment unavailable — showing path signals only._"]
+        lines += ["", "_Model assessment unavailable. Showing path signals only._"]
     elif not reported and not floored:
-        lines += [f"None detected — checked: {_CHECKED}."]
+        lines += [f"None detected. Checked: {_CHECKED}."]
     elif result.notes:
         lines += ["", f"_{markdown_text(result.notes)}_"]
     return "\n".join(lines)
@@ -316,7 +316,7 @@ def _reported_lines(result: HighImpactResult, changed: set[str]) -> list[str]:
             parts.append(f" · {area.severity}")
         # The headline is a fragment, so it needs a stop before the prose that
         # follows it — otherwise the two run together into one long sentence.
-        parts.append(f" — {markdown_text(area.title).rstrip('.')}")
+        parts.append(f": {markdown_text(area.title).rstrip('.')}")
         if paths:
             parts.append(f" ({_paths(paths, changed)})")
         if area.why or area.check:

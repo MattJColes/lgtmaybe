@@ -479,7 +479,7 @@ def build_review_context(
     build_gateway = gateway_builder(located.forge)
     if build_gateway is None:
         raise ValueError(
-            f"{located.forge} is not supported yet — lgtmaybe can only post reviews to "
+            f"{located.forge} is not supported yet: lgtmaybe can only post reviews to "
             f"{', '.join(sorted(_GATEWAY_BUILDERS))} so far."
         )
 
@@ -617,8 +617,8 @@ def run_review(
         findings = [f for f in findings if f.side == "RIGHT"]
         validation_summary = _validate_prior_findings(github, provider, cfg, review_ctx, findings)
         summary += (
-            f"\n\n_Incremental review of the changes since {incremental_since[:7]} — "
-            "earlier findings stay open until fixed._"
+            f"\n\n_Incremental review of the changes since {incremental_since[:7]}. "
+            "Earlier findings stay open until fixed._"
         )
         if validation_summary:
             summary += f"\n\n{validation_summary}"
@@ -992,14 +992,14 @@ def _no_local_changes(ctx: PRContext, *, base: str | None, uncommitted: bool) ->
     if ctx.diff.strip():
         return None
     if uncommitted:
-        return "no uncommitted changes vs HEAD — nothing to review"
+        return "no uncommitted changes vs HEAD: nothing to review"
     resolved = base or _default_base(None)
     if base is None and resolved == "HEAD":
         raise click.ClickException(
-            "no changes vs HEAD — found no origin/HEAD, origin/main, origin/master, "
+            "no changes vs HEAD: found no origin/HEAD, origin/main, origin/master, "
             "main or master to compare against; pass --base <branch>"
         )
-    return f"no changes vs {resolved} — nothing to review; pass --base <branch> to compare another"
+    return f"no changes vs {resolved}: nothing to review; pass --base <branch> to compare another"
 
 
 def _build_context_or_fail(
@@ -1139,7 +1139,7 @@ def _post_skipped(github: ReviewGateway, exc: DiffUnavailable) -> None:
     nobody.
     """
     notice = (
-        "ℹ️ lgtmaybe did not review this pull request — GitHub would not serve "
+        "ℹ️ lgtmaybe did not review this pull request: GitHub would not serve "
         f"its diff, so **none of its content was seen**.\n\n> {exc.reason}\n\n"
         "GitHub stops rendering a diff past 300 files or 20,000 lines. lgtmaybe "
         "reads pull request content through that API only (never a checkout), "
@@ -1231,15 +1231,15 @@ def mr_url_from_ci_env() -> str:
     server = os.environ.get("CI_SERVER_URL", "").rstrip("/") or (host and f"https://{host}")
     if not server:
         raise click.ClickException(
-            "CI_SERVER_HOST is not set — lgtmaybe cannot tell which GitLab to post to."
+            "CI_SERVER_HOST is not set, so lgtmaybe cannot tell which GitLab to post to."
         )
     project = os.environ.get("CI_MERGE_REQUEST_PROJECT_PATH") or os.environ.get("CI_PROJECT_PATH")
     if not project:
-        raise click.ClickException("CI_PROJECT_PATH is not set — no project to review.")
+        raise click.ClickException("CI_PROJECT_PATH is not set: no project to review.")
     iid = os.environ.get("CI_MERGE_REQUEST_IID")
     if not iid:
         raise click.ClickException(
-            "CI_MERGE_REQUEST_IID is not set — this pipeline is not for a merge request. "
+            "CI_MERGE_REQUEST_IID is not set: this pipeline is not for a merge request. "
             'Run the job with `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"`.'
         )
     return f"{server}/{project}/-/merge_requests/{iid}"

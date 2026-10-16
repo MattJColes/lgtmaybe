@@ -179,7 +179,7 @@ def finding_bullet(f: ReviewFinding) -> str:
     """One finding as a Markdown list item — shared by both body sections."""
     return (
         f"- **[{f.severity.upper()}{finding_badge(f)}] {model_prose(f.title)}** "
-        f"(`{f.path}`) — {model_prose(f.body)}"
+        f"(`{f.path}`): {model_prose(f.body)}"
     )
 
 
@@ -219,8 +219,8 @@ def render_broad(broad: list[ReviewFinding]) -> str:
         "",
         "<details><summary>Broader observations</summary>",
         "",
-        "_These are wider-reaching — a redesign, an infra/contract change, or one "
-        "needing independent verification — so they're collected here rather than "
+        "_These are wider-reaching (a redesign, an infra/contract change, or one "
+        "needing independent verification), so they're collected here rather than "
         "pinned to a line:_",
         "",
     ]
