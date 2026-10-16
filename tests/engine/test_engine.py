@@ -3729,6 +3729,41 @@ def test_the_summary_is_byte_identical_when_the_temperature_arrived() -> None:
     assert kept.startswith("👍 LGTM!")
 
 
+def test_anthropic_extended_thinking_discloses_the_withheld_temperature() -> None:
+    """`--provider anthropic` with extended thinking and an explicit temperature
+    is the one configuration whose temperature is withheld before the adapter
+    exists, so no call can ever report it dropped. The factory must seed the
+    adapter's own drop record at build time, or the summary segment the two
+    tests above assert on never appears for this setup."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from lgtmaybe.providers.factory import build_provider
+
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"findings": []}'), finish_reason="stop"
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+    )
+    with patch("litellm.completion", return_value=response):
+        built = build_provider(
+            Provider.anthropic,
+            "claude-sonnet-4-5",
+            api_key="k",
+            reasoning_effort="medium",
+            temperature=0.0,
+        )
+        cfg = make_cfg(
+            provider=Provider.anthropic, model="claude-sonnet-4-5", reflect=False
+        )
+        _findings, summary = LLMReviewEngine(built).review(_CTX, cfg)
+
+    assert _TEMPERATURE_SEGMENT in summary
+
+
 def test_summary_template_can_place_the_temperature_segment() -> None:
     """``{temperature}`` works like ``{risk}``: the segment when there is one,
     empty otherwise."""
