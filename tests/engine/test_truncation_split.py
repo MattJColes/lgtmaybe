@@ -1091,9 +1091,7 @@ def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None
         message="hint only for two.py",
         severity=Severity.medium,
     )
-    monkeypatch.setattr(
-        "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hint_two]
-    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hint_two])
     cfg = ReviewConfig(
         provider=Provider.openrouter,
         model="deepseek/deepseek-v4-pro",
