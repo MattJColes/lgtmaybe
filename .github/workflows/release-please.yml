@@ -62,6 +62,36 @@ jobs:
           git commit -m "chore: sync uv.lock with the version bump" -- uv.lock
           git push
 
+  # Thank the people behind each release. release-please writes the notes from
+  # conventional commits, which carry no author; GitHub's generate-notes API
+  # knows who opened each PR, so ask it and append a Contributors section to
+  # the release (never to CHANGELOG.md, which the docs' What's New list parses).
+  # Nothing depends on this job: if it fails, the run shows red and every
+  # publish job still goes ahead.
+  contributors:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # edit the release notes
+    steps:
+      # Pinned, like homebrew.yml's token-bearing checkout: this job writes.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # every tag, to find the previous release's
+      - name: Append contributors to the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          prev=$(git tag --list 'lgtmaybe-v*' --sort=-v:refname | grep -vxF "$TAG" | head -n 1)
+          args=(-f tag_name="$TAG")
+          if [ -n "$prev" ]; then args+=(-f previous_tag_name="$prev"); fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body > generated.md
+          gh release view "$TAG" --json body --jq .body > current.md
+          python3 scripts/release_contributors.py generated.md current.md > notes.md
+          gh release edit "$TAG" --notes-file notes.md
+
   # PyPI publish — inline (top-level) so OIDC trusted publishing matches the
   # `release-please.yml` publisher. Runs on a fresh release or a manual dispatch.
   pypi:
