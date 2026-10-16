@@ -154,6 +154,13 @@ def test_a_glossary_link_inside_a_code_block_does_not_count() -> None:
     assert any(p.kind == "glossary" and "lens" in p.detail for p in problems)
 
 
+def test_a_link_to_a_longer_entry_does_not_count() -> None:
+    """#lens-pack is its own entry; it does not explain "lens"."""
+    page = "Each lens runs on its own; see [lens packs](../reference/glossary.md#lens-pack).\n"
+    problems = check_page(page, path="docs/how-to/x.md")
+    assert any(p.kind == "glossary" and "#lens" in p.detail for p in problems)
+
+
 def test_the_glossary_page_needs_no_links_to_itself() -> None:
     assert not check_page("A lens is one focused question.\n", path="docs/reference/glossary.md")
 

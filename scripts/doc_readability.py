@@ -151,12 +151,11 @@ def check_page(text: str, *, path: str) -> list[Problem]:
     all_sentences = [s for unit in units for s in sentences(unit)]
     problems: list[Problem] = []
 
-    for sentence in all_sentences:
-        words = word_count(sentence)
+    counts = [word_count(s) for s in all_sentences]
+    for sentence, words in zip(all_sentences, counts, strict=True):
         if words > MAX_SENTENCE_WORDS:
             problems.append(Problem("long-sentence", f"{words} words: {sentence[:120]}", path))
 
-    counts = [word_count(s) for s in all_sentences]
     if counts:
         average = sum(counts) / len(counts)
         if average > MAX_AVERAGE_WORDS:
@@ -178,7 +177,8 @@ def check_page(text: str, *, path: str) -> list[Problem]:
         linkable = _outside_fences(_strip_front_matter(text))
         for pattern, anchor in KEY_TERMS.items():
             used = re.search(pattern, prose, flags=re.IGNORECASE)
-            linked = re.search(rf"glossary\.md#{re.escape(anchor)}\b", linkable)
+            # Not followed by "-": a link to #lens-pack is not a link to #lens.
+            linked = re.search(rf"glossary\.md#{re.escape(anchor)}(?![-\w])", linkable)
             if used and not linked:
                 problems.append(
                     Problem(
