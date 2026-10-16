@@ -61,7 +61,8 @@ branch of the PR below it, so it can miss `main` entirely:
 
 `.github/workflows/stack-retarget.yml` stops this. When a PR merges, it moves
 every open PR based on the merged branch onto the merged PR's own base, and
-comments on each one. Merge the new base into a retargeted branch before you
+comments on each one. It runs main's copy of the workflow, so it also covers
+layers whose branches were cut before it existed. Merge the new base into a retargeted branch before you
 merge it, so its diff shows only that layer.
 
 GitHub starts no workflow for a merge made with another workflow's
@@ -81,8 +82,12 @@ fix: escape the describe fallback text before posting it (#791)
 END_COMMIT_OVERRIDE
 ```
 
+Write the marker words only in the block itself. The tool reads from the first
+`BEGIN_COMMIT_OVERRIDE` in the body. If the words appear earlier in the
+description, it parses the wrong text and skips the commit.
+
 You can edit the override after the merge. release-please reads it on its next
-run.
+run, which is the next push to `main`.
 
 ## The Homebrew Formula
 

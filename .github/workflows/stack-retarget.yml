@@ -8,12 +8,15 @@ name: stack-retarget
 # this way). This moves every open child onto the merged PR's own base as soon
 # as it merges, so each layer squash-merges to main under its own title.
 #
-# Plain pull_request: a merge from this repository already gets a write token,
-# and a fork's merge is skipped below. Nothing is checked out or run, only REST
-# calls. Branch names are author-chosen, so they reach the shell through env,
-# never `${{ }}`.
+# pull_request_target, because it always runs main's copy of this file. A
+# plain pull_request run uses the PR's merge ref, so a layer based on a branch
+# cut before this workflow existed never ran it (#806 to #811 merged into a
+# dead branch that way). The usual pull_request_target risk does not apply:
+# nothing is checked out or run, only REST calls, a fork's merge is skipped
+# below, and branch names are author-chosen, so they reach the shell through
+# env, never `${{ }}`.
 on:
-  pull_request:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [closed]
 
 permissions: {}

@@ -34,11 +34,13 @@ def _run() -> str:
     return "\n".join(step.get("run", "") for step in _job()["steps"])
 
 
-def test_it_fires_when_a_pull_request_closes() -> None:
-    """Plain `pull_request`: a same-repository merge already gets a write
-    token, so the riskier `pull_request_target` buys nothing here."""
+def test_it_fires_from_main_when_a_pull_request_closes() -> None:
+    """`pull_request_target`, because it always runs main's copy of the
+    workflow. A `pull_request` run uses the PR's merge ref, and a stack layer
+    based on a branch cut before this file existed never ran it: #806 to #811
+    merged into a dead branch after it landed."""
     # PyYAML reads the bare `on:` key as True.
-    assert _load()[True] == {"pull_request": {"types": ["closed"]}}
+    assert _load()[True] == {"pull_request_target": {"types": ["closed"]}}
 
 
 def test_it_acts_only_on_a_merge_from_this_repository() -> None:
