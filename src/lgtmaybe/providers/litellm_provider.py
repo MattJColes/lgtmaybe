@@ -176,6 +176,17 @@ _EXPIRED_CREDENTIAL_MARKERS = (
 _COST_ATTR = "cost_usd"
 
 
+class ProviderReturnedNoChoices(Exception):
+    """An HTTP-200 response whose ``choices`` list is empty.
+
+    Raised by ``_map_response`` so the failure names itself instead of surfacing
+    as a bare ``IndexError`` out of ``response.choices[0]``. The adapter owns
+    the type (not core.ports) because the engine has no remedy for it: no
+    payload change fixes a body this malformed, and the endpoint returns it
+    identically on every retry.
+    """
+
+
 def _mentions(exc: BaseException, markers: tuple[str, ...]) -> bool:
     """True when *exc*'s message mentions any of *markers* (case-insensitively)."""
     msg = str(exc).lower()
@@ -231,7 +242,11 @@ def _is_permanent(exc: BaseException) -> bool:
     # litellm's ContextWindowExceededError is translated into it before the
     # BadRequestError check there could claim it — so the engine keeps the
     # remedy it holds and the adapter cannot: a smaller payload.
-    return isinstance(exc, ProviderInputTooLarge)
+    if isinstance(exc, ProviderInputTooLarge):
+        return True
+    # The same logic for a body that never contained an answer: re-sending the
+    # identical request just re-bills the identical malformed response.
+    return isinstance(exc, ProviderReturnedNoChoices)
 
 
 # How long to back off between attempts, by what failed.
@@ -1548,6 +1563,13 @@ class LiteLLMProvider:
     def _map_response(
         self, response: Any, model: str, ceiling: int | None = None
     ) -> ProviderResult:
+        # A 200 with no choices is malformed, not empty; permanent, so it fails
+        # here rather than as a bare IndexError on the line below.
+        if not getattr(response, "choices", None):
+            raise ProviderReturnedNoChoices(
+                f"model {model} returned no choices: the endpoint answered HTTP 200 with "
+                "an empty choices list, so there is no answer to read"
+            )
         # Some providers return null content (e.g. a model that answered only via
         # a reasoning channel under JSON mode); treat that as empty, not a crash.
         message = response.choices[0].message
