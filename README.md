@@ -6,9 +6,10 @@
 
 AI code review for **GitHub, GitLab, Gitea, and Azure DevOps**, or your local
 Git diff. Choose from seven hosted providers, ollama, or any OpenAI-compatible
-endpoint. On a pull or merge request, lgtmaybe posts inline findings and a
-summary; the CLI prints findings locally. Bedrock, Vertex, and Azure support
-keyless cloud auth.
+endpoint. A [finding](docs/reference/glossary.md#finding) is one issue the
+review reports. On a pull or merge request, lgtmaybe posts its findings as
+inline comments plus one summary. The CLI prints findings locally. Bedrock,
+Vertex, and Azure support keyless cloud auth.
 
 📖 **Full documentation:** <https://lgtmaybe.coles.codes/>
 
@@ -18,7 +19,9 @@ lgtmaybe fetches a pull or merge request's diff through the code host API, or
 reads your local Git diff. It reads surrounding lines for context and comments
 only on changed lines. It never checks out or runs pull request code.
 
-Findings are graded from `info` to `critical`. The built-in lenses look for:
+Each finding has a [severity](docs/reference/glossary.md#severity) from `info`
+to `critical`. A [lens](docs/reference/glossary.md#lens) is one focused review
+question for the model. The built-in lenses look for:
 
 - **Correctness and security:** logic errors, missed `await`s, injection,
   broken authorisation, leaked secrets, and CI configuration risks.
@@ -38,17 +41,28 @@ Findings are graded from `info` to `critical`. The built-in lenses look for:
 [What gets reviewed](docs/explanation/what-gets-reviewed.md) has the full scope
 and examples.
 
-Generated files, lockfiles, vendored code, and binaries are skipped. The diff
-is treated as untrusted input, and detected secrets are redacted before any
+lgtmaybe skips generated files, lockfiles, vendored code, and binaries. It
+treats the diff as untrusted input. It
+[redacts](docs/reference/glossary.md#redaction) detected secrets before any
 model call. See [Data and Privacy](docs/explanation/data-and-privacy.md) for
-what is sent to a provider and how prompt injection is handled.
+what lgtmaybe sends to a provider and how it handles
+[prompt injection](docs/reference/glossary.md#prompt-injection).
 
-**Fast by default.** The `fast` preset covers all ten everyday categories in
-five model calls: security, correctness, code health, artefacts (tests and
-documentation), and architecture. `--preset full` runs each category separately for a deeper audit. A committed
+**Fast by default.** A [preset](docs/reference/glossary.md#preset) sets how
+many model calls a review spends. The `fast` preset covers all ten everyday
+categories in five model calls:
+
+- security
+- correctness
+- code health
+- artefacts (tests and documentation)
+- architecture
+
+`--preset full` runs each category separately for a deeper audit. A committed
 spec that matches the change adds one spec-review call. All calls share one
-concurrency limit, and providers that support prompt caching reuse the diff
-prefix. Add `--profile` to see time and token use.
+concurrency limit. Providers that support
+[prompt caching](docs/reference/glossary.md#prompt-cache) reuse the diff prefix.
+Add `--profile` to see time and token use.
 
 **Large changes stay bounded.** The main controls are:
 
@@ -56,7 +70,8 @@ prefix. Add `--profile` to see time and token use.
   reports the rest as skipped.
 - `max_input_tokens` (default 100k, fitted down to the model's context window
   when left unset) splits the diff into batches.
-- `recursive` (on by default) reviews an oversized file hunk by hunk;
+- `recursive` (on by default) reviews an oversized file one
+  [hunk](docs/reference/glossary.md#hunk) (block of changed lines) at a time.
   `--no-recursive` turns this off.
 - `max_concurrency` (default 6) limits simultaneous model calls. Local server
   settings also affect how many calls can run at once.
@@ -73,25 +88,34 @@ explanation, and sometimes a suggested fix:
 
 - **On a pull or merge request**, findings appear on the changed lines, with
   one summary naming the model. A re-run on the same commit updates that
-  summary, a new commit gets a new one, and findings already posted are not
-  repeated. A clean review gets a 👍 **LGTM!**. GitHub and GitLab resolve a
-  finding's conversation once a later run shows it fixed; Gitea cannot. See
-  [Where It Posts](#where-it-posts).
+  summary. A new commit gets a new summary. lgtmaybe does not repeat findings
+  it already posted. A clean review gets a 👍 **LGTM!**. GitHub and GitLab
+  resolve a finding's conversation once a later run shows it fixed; Gitea
+  cannot. See [Where It Posts](#where-it-posts).
 - **On the CLI**, `lgtmaybe review` prints findings without posting them.
   Choose readable output (the default), JSON (`--json`), instructions for a
   coding agent (`--format agent`), or a SARIF log for GitHub code scanning
   (`--format sarif`).
 
-Slash commands on a pull or merge request: `/review` and `/improve` refresh the
-review, `/ask <question>` answers in the conversation, `/describe` posts a
-structured description, and `/diagram` posts a change overview. The overview
-covers the risk of change, high-impact areas, and a Mermaid flowchart, plus a
-sequence diagram when the change alters a runtime flow. Run `lgtmaybe diagram`
-for a local text version. See
+Slash commands are comments such as `/review` that you post on a pull or merge
+request:
+
+- `/review` and `/improve` refresh the review.
+- `/ask <question>` answers in the conversation.
+- `/describe` posts a structured description.
+- `/diagram` posts a [change overview](docs/reference/glossary.md#change-overview).
+
+The overview covers the
+[risk of change](docs/reference/glossary.md#risk-of-change),
+[high impact areas](docs/reference/glossary.md#high-impact-areas), and a
+Mermaid flowchart. It adds a sequence diagram when the change alters a runtime
+flow. Run `lgtmaybe diagram` for a local text version. See
 [Generate a change overview](docs/how-to/generate-a-change-diagram.md).
 
-On GitHub and GitLab, a push triggers an incremental review of only the new commits.
-Optional `triage_model` lets a cheap model skip plainly non-substantive files.
+On GitHub and GitLab, a push triggers an
+[incremental review](docs/reference/glossary.md#incremental-review) of only the
+new commits. Optional `triage_model` lets a cheap model skip plainly
+non-substantive files.
 Optional `static_analysis` runs installed tools: ruff, bandit, mypy, and semgrep
 feed hints to the model, while gitleaks, zizmor, ast-grep, and osv-scanner post
 deterministic findings directly. See
@@ -123,26 +147,35 @@ lgtmaybe config init        # detects ollama or your API key, checks it, saves i
 lgtmaybe review
 ```
 
-`config init` finds a running ollama (and its pulled models) or a provider API
-key in your environment, suggests a current model, checks it with one tiny
-request, and saves the provider and model (never the key). You can skip it and
-pass `--provider ollama --model qwen3.6:27b` instead; with neither, `review`
-stops at once and says so rather than guessing a model.
+`config init` does four things:
+
+- It finds a running ollama (and its pulled models) or a provider API key in
+  your environment.
+- It suggests a current model.
+- It checks that model with one tiny request.
+- It saves the provider and model (never the key).
+
+You can skip it and pass `--provider ollama --model qwen3.6:27b` instead. With
+neither, `review` stops at once and says so rather than guessing a model.
 
 You need no GitHub token and no pull request: `lgtmaybe review` reads your
 local `git` diff and prints the findings. `lgtmaybe diagram` takes the same
-flags and prints the change overview: what the change is, its high-impact
-areas, and a picture of the components it touches and the flow it alters. Run
-`review` then `diagram` before opening a pull request. See
+flags and prints the change overview. It shows what the change is, its
+high-impact areas, and a picture of the components it touches and the flow it
+alters. Run `review` then `diagram` before opening a pull request. See
 [Generate a change overview](docs/how-to/generate-a-change-diagram.md). To run
 the review from your Git hooks on every push, use the
 [pre-commit hooks](docs/how-to/review-before-you-commit.md).
 
-`lgtmaybe --help` lists every command with usage examples,
-`lgtmaybe review --help` shows the everyday options, and
-`lgtmaybe review --help-all` adds the advanced tuning ones. To post reviews on real pull
-requests, set up the [GitHub Action](#use-as-a-github-action), or on another
-host, [GitLab CI](docs/how-to/review-on-gitlab.md),
+Three help commands show the options:
+
+- `lgtmaybe --help` lists every command with usage examples.
+- `lgtmaybe review --help` shows the everyday options.
+- `lgtmaybe review --help-all` adds the advanced tuning ones.
+
+To post reviews on real pull requests, set up the
+[GitHub Action](#use-as-a-github-action). On another host, use
+[GitLab CI](docs/how-to/review-on-gitlab.md),
 [Gitea Actions](docs/how-to/review-on-gitea.md) or
 [Azure Pipelines](docs/how-to/review-on-azure-devops.md).
 [Getting Started](docs/tutorial/getting-started.md) has the full walkthrough,
@@ -176,8 +209,10 @@ above works on any host below.
 | Azure DevOps | Azure Pipelines job (`lgtmaybe azure-pipelines`) | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](docs/how-to/review-on-azure-devops.md) |
 | None | `lgtmaybe review` on your local diff | n/a | [Install the CLI](docs/how-to/install-the-cli.md) |
 
-The review is the same everywhere: same lenses, same reflection pass, same
-findings. What differs is what each host's API can do with the result:
+The review is the same everywhere: the same lenses, the same
+[reflection](docs/reference/glossary.md#reflection) pass (the model checks its
+own findings), and the same findings. What differs is what each host's API can
+do with the result:
 
 | | GitHub | GitLab | Gitea | Azure DevOps |
 |---|---|---|---|---|
@@ -327,10 +362,10 @@ still runs as the Action in your workflow; the App changes only the GitHub
 author identity. See [Post as lgtmaybe[bot]](docs/how-to/post-as-a-github-app.md).
 
 > **🔧 Choose who can trigger reviews.** Reviews can run for everyone, trusted
-> contributors, or just admins. The example workflows default to trusted
-> contributors (`OWNER`, `MEMBER`, `COLLABORATOR`), and it's a one-line change
-> to open it up or tighten it. With ollama this is free; on a hosted provider it
-> also keeps token spend predictable. See
+> contributors, or only admins. The example workflows default to trusted
+> contributors (`OWNER`, `MEMBER`, `COLLABORATOR`). A one-line change opens it
+> up or tightens it. With ollama this is free; on a hosted provider it also
+> keeps token spend predictable. See
 > [Who can trigger a review](docs/how-to/use-as-github-action.md#who-can-trigger-a-review)
 > and [Trust and Cost](docs/explanation/trust-and-cost.md).
 
