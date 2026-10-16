@@ -7,9 +7,7 @@ def _gateway() -> RestGitHubGateway:
     return RestGitHubGateway(repo="owner/repo", pr_number=1, token="test")
 
 
-def _node(
-    thread_id: str, *, resolved: bool = False, ours: bool = True, path: str = "a.py"
-) -> dict:
+def _node(thread_id: str, *, resolved: bool = False, ours: bool = True, path: str = "a.py") -> dict:
     markers = "<!-- lgtmaybe-finding:abc123 -->\n<!-- lgtmaybe-identity:def456 -->" if ours else ""
     return {
         "id": thread_id,
@@ -100,9 +98,7 @@ def test_validated_resolution_honours_the_incremental_scope(monkeypatch) -> None
     )
     monkeypatch.setattr(gateway, "_resolve_thread", resolved.append)
     monkeypatch.setattr(gateway, "_mark_comment_resolved", lambda comment_id, body: None)
-    monkeypatch.setattr(
-        gateway, "reply_in_thread", lambda thread_id, body: None
-    )
+    monkeypatch.setattr(gateway, "reply_in_thread", lambda thread_id, body: None)
 
     gateway.list_active_findings()
     gateway.set_validated_fixed_threads({"OUTSIDE", "INSIDE"})
