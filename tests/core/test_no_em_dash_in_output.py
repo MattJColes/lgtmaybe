@@ -140,6 +140,7 @@ def test_every_summary_notice() -> None:
             re_asked=["architecture"],
             schema_dropped=True,
             reflection_skipped="Review interrupted (termination signal)",
+            reflection_trimmed=True,
             flooded={"security": 3},
             suppressed=1,
             off_diff=1,
