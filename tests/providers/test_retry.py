@@ -2571,16 +2571,11 @@ class TestTheLadderStepsOnlyToLevelsTheModelAccepts:
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
 
-    def test_an_undeclared_model_keeps_todays_ladder(self) -> None:
-        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="low")
-
-        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
-        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
-
-    def test_a_provider_built_without_capability_info_keeps_todays_ladder(self) -> None:
-        """No levels and no default resolved — a model the map does not
-        describe steps exactly as the plain ladder says."""
-        provider = LiteLLMProvider(model="openai/x", reasoning_effort="low")
+    @pytest.mark.parametrize("model", ["openai/gpt-5.5", "openai/x"])
+    def test_an_undeclared_model_keeps_todays_ladder(self, model: str) -> None:
+        """No levels and no default resolved: the plain ladder decides, whatever
+        the model string names."""
+        provider = LiteLLMProvider(model=model, reasoning_effort="low")
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
         assert provider.disable_reasoning() == {"reasoning_effort": "none"}
