@@ -283,6 +283,63 @@ def test_malformed_runner_output_is_tolerated(tmp_path: Path) -> None:
     assert resolve("foo") == []
 
 
+def test_the_subprocess_does_not_inherit_the_parent_env(tmp_path: Path, monkeypatch) -> None:
+    """The runner shells out over untrusted text (boundaries scans PR-head
+    files), so it gets the same scrubbed environment as static analysis and the
+    risk scan: no credentials to leak, HOME pinned inside the scan tree."""
+
+    import lgtmaybe.engine.astgrep as astgrep_module
+
+    monkeypatch.setenv("LGTMAYBE_TEST_SENTINEL", "a-secret")
+    captured: dict[str, object] = {}
+
+    class _Proc:
+        stdout = "[]"
+
+    def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setattr(astgrep_module.subprocess, "run", fake_run)
+
+    assert astgrep_module._default_runner("ast-grep", "language: python\n", tmp_path) == "[]"
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "LGTMAYBE_TEST_SENTINEL" not in env
+    assert env.get("PATH")  # the binary itself still resolves
+    assert env.get("HOME") == str(tmp_path)  # pinned to the scanned tree, not the user's
+    # The hard timeout is the sandbox's other half and stays as it was.
+    assert captured["timeout"] == astgrep_module._SCAN_TIMEOUT
+
+
+def test_the_subprocess_home_is_pinned_to_a_file_targets_parent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A single-file target (boundaries scans PR-head files one at a time)
+    pins HOME to the file's directory, not the file itself."""
+    import lgtmaybe.engine.astgrep as astgrep_module
+
+    target = tmp_path / "app.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class _Proc:
+        stdout = "[]"
+
+    def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setattr(astgrep_module.subprocess, "run", fake_run)
+
+    assert astgrep_module._default_runner("ast-grep", "language: python\n", target) == "[]"
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env.get("HOME") == str(tmp_path)
+
+
 @pytest.mark.skipif(shutil.which("ast-grep") is None, reason="ast-grep binary not installed")
 def test_real_ast_grep_finds_definitions_across_languages(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
