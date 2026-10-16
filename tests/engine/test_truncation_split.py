@@ -27,11 +27,13 @@ from typing import Any
 import pytest
 
 from lgtmaybe.core.models import (
+    DirectoryRule,
     PRContext,
     Provider,
     ProviderResult,
     ReviewCategory,
     ReviewConfig,
+    Severity,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine, clear_interrupt, request_interrupt
@@ -1068,3 +1070,52 @@ def test_a_parser_detected_truncation_that_split_cleanly_reports_no_failure() ->
     )
 
     assert "results may be incomplete" not in summary
+
+
+def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Issue #768: a piece must not inherit the batch's per-file blocks.
+
+    A piece shows a subset of the batch's files, so the batch's blocks are
+    wrong for it twice over: the intent/spec not-visible lists omit the sibling
+    piece's files (the very omission recomputing the HIDDEN block prevents),
+    and the hints and directory rules cover files the piece cannot see. Every
+    per-batch block is rebuilt for the piece's own file set.
+    """
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    hint_two = ToolFinding(
+        tool="bandit",
+        path="two.py",
+        line=2,
+        rule="B307",
+        message="hint only for two.py",
+        severity=Severity.medium,
+    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hint_two])
+    cfg = ReviewConfig(
+        provider=Provider.openrouter,
+        model="deepseek/deepseek-v4-pro",
+        categories=[ReviewCategory.security, ReviewCategory.intent],
+        reflect=False,
+        directory_rules=[
+            DirectoryRule(paths=["one.py"], instructions="RULE ONE ONLY"),
+            DirectoryRule(paths=["two.py"], instructions="RULE TWO ONLY"),
+        ],
+    )
+    ctx = _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]).model_copy(
+        update={"title": "ship the two-file change"}
+    )
+
+    provider = _TruncatesUntilSmaller()
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    ones = [d for d in provider.diffs if _shows(d, "one.py") and not _shows(d, "two.py")]
+    assert ones, "the batch split into per-file pieces"
+    # Rules and hints never cover a file the piece cannot see.
+    assert all("RULE TWO ONLY" not in d for d in ones)
+    assert all("hint only for two.py" not in d for d in ones)
+    # The intent lens's piece names the sibling file as NOT SHOWN, so a promise
+    # delivered in two.py is "not shown", never "undone".
+    intent_piece = next(d for d in ones if "===INTENT_START===" in d)
+    intent_block = intent_piece.split("===INTENT_START===")[1].split("===INTENT_END===")[0]
+    assert "two.py" in intent_block
