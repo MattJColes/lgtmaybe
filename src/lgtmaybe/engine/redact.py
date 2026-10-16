@@ -76,8 +76,23 @@ def _replace_pem(m: re.Match[str]) -> str:
     return "\n".join([REDACTED_PLACEHOLDER] * (m.group(0).count("\n") + 1))
 
 
+def _replace_value(m: re.Match[str]) -> str:
+    """Replace only the captured ``secret`` group, preserving the key name / scheme."""
+    full = m.group(0)
+    start = m.start("secret") - m.start()
+    end = m.end("secret") - m.start()
+    return full[:start] + REDACTED_PLACEHOLDER + full[end:]
+
+
 # Capturing-group patterns — only the named ``secret`` group is replaced, so the
 # surrounding key name / scheme stays readable in the diff.
+#
+# Shared key tail: an optional closing quote and dict-subscript bracket, then
+# whitespace and the `=`/`:` separator. `==` is accepted too, so a spaced
+# comparison against a literal (`password == "hunter2"`) redacts exactly like
+# an assignment instead of leaking past the first `=`.
+_KEY_TAIL = r"[\"']?\]?\s*(?:==|[:=])\s*"
+
 _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # Generic high-entropy assignments: api_key = "..." or token = "..." (value ≥ 16 chars).
     # Keys may be dict-subscripted, so an optional closing quote and bracket sit
@@ -86,7 +101,8 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
         r"(?i)(?:api[_\-]?key|api[_\-]?secret|secret[_\-]?access[_\-]?key|"
         r"session[_\-]?token|access[_\-]?token|secret[_\-]?key|"
         r"client[_\-]?secret|private[_\-]?key|token|secret)"
-        r"[\"']?\]?\s*[=:]\s*[\"']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})[\"']?"
+        + _KEY_TAIL +
+        r"[\"']?(?P<secret>[A-Za-z0-9\-_/+=]{16,})[\"']?"
     ),
     # Quoted password / passphrase literals: password = "hunter2" (value ≥ 4 chars).
     # Quotes required so we don't swallow prose like "password reset"; the key may
@@ -95,27 +111,32 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # diff lines up to the next quote. An escaped quote is part of the value, not
     # its end, or the tail would leak.
     re.compile(
-        r"(?i)(?:password|passwd|passphrase|pwd)[\"']?\]?\s*[=:]\s*"
+        r"(?i)(?:password|passwd|passphrase|pwd)" + _KEY_TAIL +
         r"(?P<q>[\"'])(?P<secret>(?:[^\"'\n\\]|\\.){4,})(?P=q)"
     ),
     # Unquoted connection-string passwords: Server=db;Password=hunter2;User ID=sa
     # (ADO.NET / JDBC). The value is bare and ends at `;`, a quote, whitespace or
-    # line end, and contains no brackets or parens: calls
-    # (`password = get_password()`) are ordinary code, not credential literals.
-    # Identifier copies (`x.password = user.password;`, `password =
-    # hashed_password`) are also ordinary code, so the value must not itself
-    # name a password; a digit requirement would miss digit-less literals like
-    # `Password=hunter-two;`.
+    # line end. Parens and brackets may appear inside the value, but it must not
+    # END with one: calls (`password = get_password()`) and subscript copies
+    # (`password = payload["password"]`) do, and are ordinary code, while a
+    # literal like `Password=Tr0ub(4)dor;` still scrubs. Identifier copies
+    # (`x.password = user.password;`, `password = hashed_password`) are also
+    # ordinary code, so the guard below skips only reference-shaped values: the
+    # whole value is identifier-like and `password`/`passwd`/`pwd` sits in it as
+    # its own dot/underscore component. A literal that merely embeds the word
+    # (`Password=hunter2password;`) has no such separator and still redacts.
     re.compile(
-        r"(?i)(?:password|passwd|pwd)[\"']?\]?\s*[=:]\s*"
-        r"(?![^\s;\"'()\[\]]*(?:password|passwd|pwd))"
-        r"(?P<secret>[^\s;\"'()\[\]]{4,})(?=[;\"'\s]|$)"
+        r"(?i)(?:password|passwd|pwd)" + _KEY_TAIL +
+        r"(?!(?:[A-Za-z0-9_.]*[._])?(?:password|passwd|pwd)"
+        r"(?:[._][A-Za-z0-9_.]*)?(?=[;\"'\s]|$))"
+        r"(?P<secret>[^\s;\"\']{3,}[^\s;\"\'()\[\]])(?=[;\"'\s]|$)"
     ),
     # Authorization headers carrying a Bearer/Basic credential. Tolerates a quoted
     # key and a quoted value, e.g. JSON `"Authorization": "Bearer <token>"`, or a
     # dict subscript: headers["Authorization"] = "Bearer ...".
     re.compile(
-        r"(?i)[\"']?authorization[\"']?\]?\s*[=:]\s*[\"']?(?:bearer|basic)\s+"
+        r"(?i)[\"']?authorization" + _KEY_TAIL +
+        r"[\"']?(?:bearer|basic)\s+"
         r"(?P<secret>[A-Za-z0-9\-._~+/=]{16,})"
     ),
     # Credentials embedded in connection-string URLs: scheme://user:secret@host.
@@ -127,14 +148,6 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     # Only the key value is scrubbed; AccountName/EndpointSuffix stay readable.
     re.compile(r"(?i)(?:Account|Shared(?:Access)?)Key\s*=\s*(?P<secret>[A-Za-z0-9/+]{32,}={0,2})"),
 ]
-
-
-def _replace_value(m: re.Match[str]) -> str:
-    """Replace only the captured ``secret`` group, preserving the key name / scheme."""
-    full = m.group(0)
-    start = m.start("secret") - m.start()
-    end = m.end("secret") - m.start()
-    return full[:start] + REDACTED_PLACEHOLDER + full[end:]
 
 
 @lru_cache(maxsize=128)
