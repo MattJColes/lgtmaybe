@@ -104,6 +104,11 @@ else's with a log line and no model call. So opening the comment arm (the
 `issue_comment` half of the `if:`) to everyone, or adding `CONTRIBUTOR`, changes
 who triggers a run, not who can spend the model through one.
 
+A second floor: a command runs only on a comment's `created` action. An edit or
+a delete re-delivers the comment's original text and author, and lgtmaybe
+ignores that event, so a maintainer tidying an old command cannot re-spend a
+review.
+
 The slash-command half of the comment arm saves runner time rather than
 tokens. `issue_comment` fires on every comment on every pull request. Without
 the check, a comment with no slash command still claims a runner, pulls the

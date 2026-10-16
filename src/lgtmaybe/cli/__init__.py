@@ -1154,6 +1154,14 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
     """
     from lgtmaybe.cli.slash import dispatch, parse_command
 
+    # An edited or deleted comment re-delivers its original body and author, so
+    # a workflow without a `types: [created]` filter would re-run a paid review
+    # on a maintainer tidying an old command.
+    action = event.get("action", "created")
+    if action != "created":
+        click.echo(f"Comment event is '{action}', not 'created'; ignoring.")
+        return
+
     parsed = parse_command(event.get("comment", {}).get("body", ""))
     if parsed is None:
         click.echo("No lgtmaybe slash command found; ignoring.")
