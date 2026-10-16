@@ -2577,21 +2577,13 @@ class TestTheLadderStepsOnlyToLevelsTheModelAccepts:
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
         assert provider.disable_reasoning() == {"reasoning_effort": "none"}
 
-    def test_a_fake_without_the_capability_attributes_keeps_todays_ladder(self) -> None:
-        """The probes are borrowed unbound onto engine fakes carrying only the
-        three attributes `_effort_override` has always read."""
-        fake = SimpleNamespace(
-            default_opts={"reasoning_effort": "low"},
-            model="openai/x",
-            _effort_override_supported=True,
-        )
+    def test_a_provider_built_without_capability_info_keeps_todays_ladder(self) -> None:
+        """No levels and no default resolved — a model the map does not
+        describe steps exactly as the plain ladder says."""
+        provider = LiteLLMProvider(model="openai/x", reasoning_effort="low")
 
-        assert LiteLLMProvider.lower_reasoning_effort(fake) == {  # type: ignore[arg-type]
-            "reasoning_effort": "minimal"
-        }
-        assert LiteLLMProvider.disable_reasoning(fake) == {  # type: ignore[arg-type]
-            "reasoning_effort": "none"
-        }
+        assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
+        assert provider.disable_reasoning() == {"reasoning_effort": "none"}
 
 
 class TestOpenAICompatibleToolRejectionWording:

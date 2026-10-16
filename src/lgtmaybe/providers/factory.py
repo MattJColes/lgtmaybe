@@ -279,9 +279,17 @@ def declared_effort_capability(
         return None, None
 
 
-def _honour_param_support(provider: Provider, model: str, opts: dict[str, Any]) -> None:
+def _honour_param_support(
+    provider: Provider, model: str, opts: dict[str, Any], dropped: list[str]
+) -> list[str]:
     """Say (once, up front) which configured params this model will discard, and
     re-route the one that has a native home on OpenRouter.
+
+    *dropped* is the precomputed answer of :func:`dropped_params` for *opts*
+    plus the ``reasoning_effort`` probe the caller also needs, so the lookup is
+    paid once; only params the user actually configured are announced, so the
+    probe itself stays silent. Returns *dropped* minus anything re-routed, for
+    the caller's capability question.
 
     The OpenRouter branch is a DELIBERATE, narrowly scoped exception to the
     "litellm normalises every provider to one `completion()` call" decision in
@@ -299,21 +307,23 @@ def _honour_param_support(provider: Provider, model: str, opts: dict[str, Any]) 
     branch where litellm has already been observed to drop the flat param, and
     the flat param is removed when it is.
     """
-    dropped = dropped_params(provider, model, opts)
-    if provider is Provider.openrouter and "reasoning_effort" in dropped:
+    configured = [name for name in dropped if name in opts]
+    if provider is Provider.openrouter and "reasoning_effort" in configured:
         effort = opts.pop("reasoning_effort")
         if effort in _OPENROUTER_REASONING_EFFORTS:
             opts["extra_body"] = {**opts.get("extra_body", {}), "reasoning": {"effort": effort}}
+            configured.remove("reasoning_effort")
             dropped.remove("reasoning_effort")
-    if dropped:
+    if configured:
         _log.warning(
             "configured params are not supported by this model and will be ignored",
             extra={
                 "provider": provider.value,
                 "model": litellm_model_string(provider, model),
-                "ignored_params": dropped,
+                "ignored_params": configured,
             },
         )
+    return dropped
 
 
 # Efforts that switch a Claude model's extended thinking OFF rather than on.
@@ -397,8 +407,11 @@ def build_provider(
     # Before anything the factory itself adds (timeout, credentials, ollama's own
     # options), so what is judged is exactly what the USER configured — and it is
     # judged here because this is where the litellm model string the capability
-    # map keys on comes into existence.
-    _honour_param_support(provider, model, opts)
+    # map keys on comes into existence. The effort rides along in the same lookup
+    # (probed even when unconfigured) so the map is consulted once, not twice.
+    dropped = _honour_param_support(
+        provider, model, opts, dropped_params(provider, model, [*opts, "reasoning_effort"])
+    )
     withheld_temperature = _withhold_temperature_under_thinking(provider, model, opts)
 
     opts["timeout"] = (
@@ -469,9 +482,7 @@ def build_provider(
     # construction: `dropped_params` returns [] both when the param is supported
     # and when the lookup fails, so only a map that positively omits it marks the
     # route incapable.
-    effort_supported = "reasoning_effort" not in dropped_params(
-        provider, model, ["reasoning_effort"]
-    )
+    effort_supported = "reasoning_effort" not in dropped
     # Same place, same reason, same fail-open rule: which rungs the step-down
     # may land on, resolved once here rather than on every retry.
     effort_levels, default_effort = declared_effort_capability(provider, model)

@@ -640,15 +640,18 @@ def test_a_model_reasoning_at_its_own_default_still_gets_the_retry() -> None:
     class _UnconfiguredReasoner(_TruncatesUntilEffortDrops):
         # An OpenRouter route with nothing configured — the shape all three
         # models arrived in, and the one where the effort rides nested.
-        model = "openrouter/z-ai/glm-4.7-flash"
-        default_opts: dict[str, Any] = {}
-        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+        def __init__(self) -> None:
+            super().__init__(effort=None, answers_at=_EFFORT_FLOOR)
+            self._adapter = LiteLLMProvider(model="openrouter/z-ai/glm-4.7-flash")
+
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            return self._adapter.lower_reasoning_effort()
 
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             nested = opts.get("extra_body", {}).get("reasoning", {})
             return super().complete(messages, model, reasoning_effort=nested.get("effort"))
 
-    provider = _UnconfiguredReasoner(effort=None, answers_at=_EFFORT_FLOOR)
+    provider = _UnconfiguredReasoner()
 
     findings, summary = LLMReviewEngine(provider).review(
         _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
@@ -768,16 +771,21 @@ def test_the_off_switch_reaches_an_openrouter_route_through_the_real_adapter() -
     out nested, and so does off — the flat param would be dropped there."""
 
     class _GlmThroughOpenRouter(_TruncatesUntilReasoningIsOff):
-        model = "openrouter/z-ai/glm-5.3-flash"
-        default_opts: dict[str, Any] = {}
-        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
-        disable_reasoning = LiteLLMProvider.disable_reasoning
+        def __init__(self) -> None:
+            super().__init__(effort=None, answers_at="none")
+            self._adapter = LiteLLMProvider(model="openrouter/z-ai/glm-5.3-flash")
+
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            return self._adapter.lower_reasoning_effort()
+
+        def disable_reasoning(self) -> dict[str, Any] | None:
+            return self._adapter.disable_reasoning()
 
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             nested = opts.get("extra_body", {}).get("reasoning", {})
             return super().complete(messages, model, reasoning_effort=nested.get("effort"))
 
-    provider = _GlmThroughOpenRouter(effort=None, answers_at="none")
+    provider = _GlmThroughOpenRouter()
 
     findings, _summary = LLMReviewEngine(provider).review(
         _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
@@ -853,12 +861,16 @@ def test_an_incapable_route_reports_rather_than_re_sending_the_same_request() ->
     be byte-identical to the first, billed twice for one answer."""
 
     class _IncapableRoute(_TruncatesUntilEffortDrops):
-        model = "openai/gpt-5.5"
-        default_opts: dict[str, Any] = {}
-        _effort_override_supported = False
-        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+        def __init__(self) -> None:
+            super().__init__(effort=None, answers_at=_EFFORT_FLOOR)
+            self._adapter = LiteLLMProvider(
+                model="openai/gpt-5.5", effort_override_supported=False
+            )
 
-    provider = _IncapableRoute(effort=None, answers_at=_EFFORT_FLOOR)
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            return self._adapter.lower_reasoning_effort()
+
+    provider = _IncapableRoute()
 
     with pytest.raises(ReviewIncompleteError):
         LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
