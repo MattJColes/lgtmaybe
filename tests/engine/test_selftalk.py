@@ -73,6 +73,15 @@ def test_every_model_authored_field_is_scanned(field: str) -> None:
     assert is_self_talk(_finding(**{field: _LEAKED_BODY}))
 
 
+def test_a_note_owning_its_formatting_error_is_self_talk() -> None:
+    """The broken half can rest on the formatting error alone when the reply owns it."""
+    body = (
+        "My response had a formatting error near the end. Output a clean, "
+        "valid JSON findings array instead."
+    )
+    assert is_self_talk(_finding(body=body))
+
+
 # ---------------------------------------------------------------------------
 # what must NOT be dropped: one half of the note alone is ordinary review prose
 # ---------------------------------------------------------------------------
@@ -95,6 +104,18 @@ def test_every_model_authored_field_is_scanned(field: str) -> None:
 )
 def test_a_genuine_finding_carrying_one_half_of_the_note_is_kept(body: str) -> None:
     assert not is_self_talk(_finding(body=body))
+
+
+def test_a_bug_report_pairing_both_phrases_is_kept() -> None:
+    """Issue #761: a user-facing bug report carries both phrases, yet is not a note."""
+    finding = _finding(
+        title="Formatting error returns 500",
+        body=(
+            "The endpoint returns 500 instead of a 400 telling the client to "
+            "send valid JSON."
+        ),
+    )
+    assert not is_self_talk(finding)
 
 
 def test_an_ordinary_finding_is_kept() -> None:
