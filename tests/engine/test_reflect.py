@@ -1072,13 +1072,15 @@ def test_multi_batch_diff_audit_prompt_stays_within_input_budget() -> None:
     user = _user_text(provider.calls[0])
     assert "+added line 0 in a.py" in user  # the flagged file's patch survives
     assert "+added line 0 in b.py" not in user  # unflagged batches are dropped
-    assert notices, "a trimmed audit must report itself"
+    # The narrowing fit, so no trim notice: raising max_input_tokens would
+    # change nothing here (the flagged patch already fit).
+    assert notices == []
 
 
 def test_flagged_files_that_overrun_the_room_are_cut_in_diff_order() -> None:
     """When even the flagged files' patches overrun the room left after the
-    system prompt and findings, the walk stops at the first patch that does
-    not fit, so the audit still runs within the budget."""
+    system prompt and findings, the ones that do not fit are skipped, so the
+    audit still runs within the budget."""
     on_c = _LOW_CONF.model_copy(update={"path": "c.py"})
     patches = [_big_patch("a.py", 250), _big_patch("b.py", 250), _big_patch("c.py", 250)]
     ctx = _CTX.model_copy(
@@ -1106,6 +1108,55 @@ def test_fitting_diff_is_sent_whole_with_no_trim_notice() -> None:
 
     assert notices == []
     assert _CTX.diff in _user_text(provider.calls[0])
+
+
+def test_fitting_diff_with_unflagged_files_narrows_without_a_trim_notice() -> None:
+    """Narrowing the audit diff to the flagged files is by design, not budget
+    pressure: a multi-file diff that fits the budget entirely must not report
+    itself as trimmed, or the summary tells the user to raise
+    max_input_tokens for a diff that already fit."""
+    ctx = _CTX.model_copy(
+        update={
+            "diff": _big_patch("a.py", 10) + _big_patch("b.py", 10),
+            "changed_files": ["a.py", "b.py"],
+        }
+    )
+    provider = _fake_with_verdict({0: True})
+    notices: list[str] = []
+
+    reflect_findings([_HIGH], ctx, _CFG, provider, notices=notices)
+
+    user = _user_text(provider.calls[0])
+    assert "+added line 0 in a.py" in user  # the flagged patch is sent
+    assert "+added line 0 in b.py" not in user  # the unflagged one is filtered
+    assert notices == []  # filtering unflagged files is not a trim
+
+
+def test_an_oversized_flagged_patch_is_skipped_not_fatal_to_later_ones() -> None:
+    """A flagged patch too big for the room is skipped and the walk continues,
+    so one huge early file cannot crowd every later flagged file out of the
+    audit: the diff is attacker-controlled, and stopping at the first overflow
+    made the cut ordering attacker-steerable."""
+    on_a = _LOW_CONF.model_copy(update={"path": "a.py"})
+    on_c = _LOW_CONF.model_copy(update={"path": "c.py"})
+    ctx = _CTX.model_copy(
+        update={
+            "diff": _big_patch("a.py", 800) + _big_patch("b.py", 10) + _big_patch("c.py", 10),
+            "changed_files": ["a.py", "b.py", "c.py"],
+        }
+    )
+    cfg = _CFG.model_copy(update={"max_input_tokens": 6_000})
+    provider = _fake_with_verdict({0: True, 1: True})
+    notices: list[str] = []
+
+    reflect_findings([on_a, on_c], ctx, cfg, provider, notices=notices)
+
+    user = _user_text(provider.calls[0])
+    assert "+added line 0 in a.py" not in user  # the oversized patch is skipped
+    assert "+added line 0 in c.py" in user  # the later small one is still audited
+    assert notices  # the skip is reported as a trim
+    prompt = "\n".join(str(m["content"]) for m in provider.calls[0]["messages"])
+    assert count_tokens(prompt) <= 6_000
 
 
 def test_scan_hint_block_counts_against_the_input_budget() -> None:

@@ -301,7 +301,8 @@ def test_multi_batch_reflection_prompt_fits_the_budget_and_notices_the_trim() ->
     diff reflection receives, which can run several times the model-fitted
     input budget and get the audit rejected outright (the findings then ship
     unaudited). The audit is trimmed to the flagged files, its prompt fits the
-    budget, and the summary says the diff was trimmed."""
+    budget, and the summary says the diff was trimmed. The flagged file's own
+    patch overruns the room here, so the trim is a genuine budget cut."""
 
     def patch(path: str, lines: int) -> str:
         body = "".join(f"+added line {i} in {path}\n" for i in range(lines))
@@ -311,7 +312,9 @@ def test_multi_batch_reflection_prompt_fits_the_budget_and_notices_the_trim() ->
         )
 
     ctx = PRContext(
-        diff="".join(patch(path, 250) for path in ("a.py", "b.py", "c.py")),
+        diff="".join(
+            patch(path, lines) for path, lines in (("a.py", 800), ("b.py", 250), ("c.py", 250))
+        ),
         changed_files=["a.py", "b.py", "c.py"],
         base_sha="abc",
         head_sha="def",
