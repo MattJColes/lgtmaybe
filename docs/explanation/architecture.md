@@ -80,9 +80,11 @@ the resolved forge to its adapter.
 ### Required Surface vs Optional Capabilities
 
 `ReviewGateway` is deliberately three methods. Everything richer is an optional
-`Supports*` protocol. The CLI probes for each one and skips it when absent. So
-an adapter is useful long before it is complete. It can also be honest about
-what its host cannot do, instead of failing at run time.
+`Supports*` protocol. The CLI probes for each one with `isinstance` and skips it
+when absent. So an adapter is useful long before it is complete. It can also be
+honest about what its host cannot do, instead of failing at run time. A group
+is all or nothing: an adapter missing one of its methods does not get the
+feature at all.
 
 | Capability | GitHub | GitLab | Gitea | Azure DevOps |
 |---|---|---|---|---|
@@ -92,15 +94,16 @@ what its host cannot do, instead of failing at run time.
 | `SupportsLabels` | ✅ | ✅ | ✅ | not yet |
 | `SupportsChecks`: check run / commit status | ✅ | ✅ | ✅ | not yet |
 | `SupportsThreadResolution`: auto-resolve a fixed finding | ✅ GraphQL | ✅ REST | ✗ no API | not yet |
+| `SupportsCompletionMark`: hear whether a run finished, to gate resolve-on-fix | ✅ | ✅ | ✅ | ✅ |
 | `SupportsIncremental`: review only new commits | ✅ | ✅ | ✗ no compare diff | not yet |
+| `SupportsDiffFingerprint`: skip a rebase that left the diff unchanged | ✅ | not yet | ✗ no compare diff | not yet |
 | `SupportsScanManifests`: fetch dependency manifests for scanning | ✅ | ✅ | ✅ | ✅ |
 | `SupportsPermissions`: only writers run slash commands | ✅ | ✗ no slash commands | ✅ | ✗ no slash commands |
 | `SupportsFeedback`: learn from 👎 reactions | ✅ | ✅ award emoji | ✗ | not yet |
 | `SupportsBaseCheckout`: clone base for symbol lookup | ✅ | ✗ | ✗ | not yet |
 
-`tests/test_ports.py` asserts the GitHub adapter satisfies every capability.
-The GitLab, Gitea and Azure DevOps tests assert those adapters do **not** claim
-what they cannot serve. That keeps this table honest.
+`tests/test_ports.py` asserts each adapter claims exactly the capabilities in
+this table, no more and no fewer. That keeps this table honest.
 
 ### Where the Hosts Differ
 

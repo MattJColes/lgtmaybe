@@ -54,10 +54,19 @@ from lgtmaybe.core.ports import (
     ReviewEngine,
     ReviewGateway,
     SupportsBaseCheckout,
+    SupportsChecks,
+    SupportsCompletionMark,
     SupportsConversation,
+    SupportsDescribe,
+    SupportsDiagram,
+    SupportsDiffFingerprint,
+    SupportsFeedback,
     SupportsFileContents,
+    SupportsIncremental,
+    SupportsLabels,
     SupportsPermissions,
     SupportsScanManifests,
+    SupportsThreadResolution,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
@@ -204,13 +213,10 @@ def run_describe(
     from lgtmaybe.engine.describe import build_description
 
     body = build_description(github.get_pr_context() if ctx is None else ctx, cfg, provider)
-    post = getattr(github, "post_describe_comment", None)
-    if post is not None:
-        post(body)
+    if isinstance(github, SupportsDescribe):
+        github.post_describe_comment(body)
         return
-    post_comment = getattr(github, "post_issue_comment", None)
-    if post_comment is not None:
-        post_comment(body)
+    github.post_issue_comment(body)
 
 
 def run_diagram(
@@ -230,17 +236,14 @@ def run_diagram(
     from lgtmaybe.engine.overview import build_overview
 
     body = build_overview(github.get_pr_context() if ctx is None else ctx, cfg, provider)
-    post = getattr(github, "post_diagram_comment", None)
-    if post is not None:
-        post(body, completed_sha=completed_sha)
+    if isinstance(github, SupportsDiagram):
+        github.post_diagram_comment(body, completed_sha=completed_sha)
         return
     if completed_sha is not None:
         raise RuntimeError("the GitHub gateway cannot persist a diagram completion marker")
-    post_comment = getattr(github, "post_issue_comment", None)
-    if post_comment is not None:
-        post_comment(body)
-        return
-    raise RuntimeError("the GitHub gateway cannot post a diagram")
+    # The required port's plain comment; a failure to post propagates, because
+    # a diagram the user asked for must not vanish silently.
+    github.post_issue_comment(body)
 
 
 def resolve_auto_incremental(cfg: ReviewConfig, *, event_action: str) -> ReviewConfig:
@@ -555,16 +558,13 @@ def _apply_learned_feedback(github: ReviewGateway, ctx: PRContext, cfg: ReviewCo
     security findings, which a downvote can never hide (see ``suppress.py``).
 
     Best-effort: disabled by ``learn_feedback=False``, a no-op on a gateway
-    without the adapter method (fakes, the frozen port), and any error is
+    without ``SupportsFeedback`` (fakes, the frozen port), and any error is
     swallowed so a feedback-read hiccup can never fail the review.
     """
-    if not cfg.learn_feedback:
-        return ctx
-    list_downvoted = getattr(github, "list_downvoted_fingerprints", None)
-    if list_downvoted is None:
+    if not cfg.learn_feedback or not isinstance(github, SupportsFeedback):
         return ctx
     try:
-        downvoted = list_downvoted()
+        downvoted = github.list_downvoted_fingerprints()
     except Exception as exc:  # noqa: BLE001 — best-effort; never fail the review
         _log.warning("reading downvoted findings failed: %s", exc)
         return ctx
@@ -666,20 +666,16 @@ def run_review(
         # adapter state until post_review succeeds, so an interruption here
         # cannot remotely complete the head.
         complete = INCOMPLETE_MARKER not in summary
-        mark_reviewed = getattr(github, "mark_reviewed", None)
-        if mark_reviewed is not None:
-            mark_reviewed(ctx.head_sha if complete else None)
-        mark_reviewed_diff = getattr(github, "mark_reviewed_diff", None)
-        if callable(mark_reviewed_diff):
+        if isinstance(github, SupportsCompletionMark):
+            github.mark_reviewed(ctx.head_sha if complete else None)
+        if isinstance(github, SupportsDiffFingerprint):
             # The WHOLE pull request's diff, never the increment: the next run
             # compares it against its own whole diff (see _incremental_context).
-            mark_reviewed_diff(diff_fingerprint(ctx.diff) if complete else None)
-        if incremental_since is not None:
-            set_scope = getattr(github, "set_incremental_scope", None)
-            if set_scope is not None:
-                # Resolve-on-fix may only touch threads on files this run
-                # actually re-reviewed — absence elsewhere proves nothing.
-                set_scope(_diff_paths(review_ctx.diff))
+            github.mark_reviewed_diff(diff_fingerprint(ctx.diff) if complete else None)
+        if incremental_since is not None and isinstance(github, SupportsIncremental):
+            # Resolve-on-fix may only touch threads on files this run
+            # actually re-reviewed — absence elsewhere proves nothing.
+            github.set_incremental_scope(_diff_paths(review_ctx.diff))
         # Make an incomplete run visible. On a re-run post_review can only PUT
         # the summary onto the review the FIRST run created — a silent edit of an
         # older comment that notifies nobody, while this run's new findings post
@@ -693,22 +689,18 @@ def run_review(
         if INCOMPLETE_MARKER in summary:
             _log.warning("review incomplete — posting a visible notice on the PR")
             github.post_issue_comment(summary)
-        if cfg.pr_labels:
+        if cfg.pr_labels and isinstance(github, SupportsLabels):
             # Effort/risk labels from data already computed — best-effort,
             # and only on gateways that support them (fakes don't).
-            apply_labels = getattr(github, "apply_pr_labels", None)
-            if apply_labels is not None:
-                from lgtmaybe.engine.labels import compute_labels
+            from lgtmaybe.engine.labels import compute_labels
 
-                apply_labels(compute_labels(findings, ctx))
-        if cfg.fail_on is not None:
+            github.apply_pr_labels(compute_labels(findings, ctx))
+        if cfg.fail_on is not None and isinstance(github, SupportsChecks):
             # Merge-gate: create a Check Run so branch protection can require it.
             # Enforcement rides the Check Run, never PR approval state. Best-effort
             # and only on gateways that support it (fakes/plain gateways don't).
-            create_check_run = getattr(github, "create_check_run", None)
-            if create_check_run is not None:
-                conclusion, title, check_summary = _fail_on_check(findings, cfg.fail_on)
-                create_check_run(ctx.head_sha, conclusion, title, check_summary)
+            conclusion, title, check_summary = _fail_on_check(findings, cfg.fail_on)
+            github.create_check_run(ctx.head_sha, conclusion, title, check_summary)
         # Last write of the run, on purpose: the inline comments this posts fire
         # pull_request_review_comment events, so a consumer whose concurrency
         # group isn't discriminated by event name can have the resulting run
@@ -760,29 +752,20 @@ def _incremental_context(
     """Return ``(context, completed_sha, nothing_to_review)`` for this run.
 
     Incremental only when ``cfg.incremental`` is truthy (None = auto resolves
-    upstream, and unresolved auto means full), the gateway has the adapter
-    methods (``last_completed_sha`` / ``compare_diff`` — fakes and the frozen
-    port don't), a completion watermark exists, the head moved since, and the
-    compare yields a usable increment. Every degraded case returns the full
-    context with no completed SHA.
+    upstream, and unresolved auto means full), the gateway is
+    ``SupportsIncremental`` (fakes and the frozen port aren't), a completion
+    watermark exists, the head moved since, and the compare yields a usable
+    increment. Every degraded case returns the full context with no completed
+    SHA.
 
     ``nothing_to_review`` is the reason this run has no work, or None: the head
     is the completed one, or a new head whose whole diff fingerprints the same
     as the completed head's (a rebase that only moved the PR, as GitHub does to
     every stacked PR above one that merges).
     """
-    if not cfg.incremental:
+    if not cfg.incremental or not isinstance(github, SupportsIncremental):
         return ctx, None, None
-    last_completed_sha = getattr(github, "last_completed_sha", None)
-    last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
-    compare_diff = getattr(github, "compare_diff", None)
-    if compare_diff is None or (last_completed_sha is None and last_reviewed_sha is None):
-        return ctx, None, None
-    last_sha: str | None = None
-    if last_completed_sha is not None:
-        last_sha = last_completed_sha(diagram_required=diagram_required)
-    elif last_reviewed_sha is not None:
-        last_sha = last_reviewed_sha()
+    last_sha = github.last_completed_sha(diagram_required=diagram_required)
     if not last_sha:
         return ctx, None, None
     if last_sha == ctx.head_sha:
@@ -796,7 +779,7 @@ def _incremental_context(
             "(for example a rebase that only moved the pull request onto a new base): "
             "the diff is unchanged, so there is nothing new to review.",
         )
-    increment = compare_diff(last_sha, ctx.head_sha)
+    increment = github.compare_diff(last_sha, ctx.head_sha)
     if not increment or not increment.strip():
         return ctx, None, None
     _log.info(
@@ -806,21 +789,19 @@ def _incremental_context(
     return ctx.model_copy(update={"diff": increment}), last_sha, None
 
 
-def _diff_unchanged_since(github: ReviewGateway, ctx: PRContext, last_sha: str) -> bool:
+def _diff_unchanged_since(github: SupportsIncremental, ctx: PRContext, last_sha: str) -> bool:
     """Whether ``ctx``'s whole diff fingerprints the same as ``last_sha``'s did.
 
     Only when the stamped fingerprint belongs to ``last_sha`` itself: with a
     diagram required, the last completed head can be older than the last
     reviewed one, whose fingerprint then describes a different head. A gateway
-    without the pair (every forge but GitHub) never skips.
+    without ``SupportsDiffFingerprint`` (every forge but GitHub) never skips.
     """
-    last_reviewed_sha = getattr(github, "last_reviewed_sha", None)
-    last_reviewed_diff = getattr(github, "last_reviewed_diff", None)
-    if not callable(last_reviewed_sha) or not callable(last_reviewed_diff):
+    if not isinstance(github, SupportsDiffFingerprint):
         return False
-    if last_reviewed_sha() != last_sha:
+    if github.last_reviewed_sha() != last_sha:
         return False
-    stamped = last_reviewed_diff()
+    stamped = github.last_reviewed_diff()
     return stamped is not None and stamped == diff_fingerprint(ctx.diff)
 
 
@@ -837,12 +818,11 @@ def _validate_prior_findings(
     current_findings: list[ReviewFinding],
 ) -> str:
     """Validate active prior findings and install the explicit resolve allowlist."""
-    list_active = getattr(github, "list_active_findings", None)
-    set_fixed = getattr(github, "set_validated_fixed_threads", None)
-    if list_active is None or set_fixed is None:
+    if not isinstance(github, SupportsThreadResolution):
         return ""
+    set_fixed = github.set_validated_fixed_threads
     try:
-        active = list_active()
+        active = github.list_active_findings()
     except Exception as exc:  # noqa: BLE001 - failure leaves every thread open
         _log.warning("reading active findings for validation failed: %s", exc)
         set_fixed(set())
@@ -1247,15 +1227,13 @@ def _post_notice(github: ReviewGateway, notice: str) -> None:
         # run_review may have prepared the reviewed watermark before the post
         # failed — clear it so the failure notice doesn't carry it and the next
         # incremental run re-reviews the commits whose findings never posted.
-        mark_reviewed = getattr(github, "mark_reviewed", None)
-        if mark_reviewed is not None:
-            mark_reviewed(None)
+        if isinstance(github, SupportsCompletionMark):
+            github.mark_reviewed(None)
         # A summary carrying a watermark is the record of the last head that WAS
         # reviewed — its demoted findings and the watermark itself. Writing the
         # notice over it erased both; the PR comment below discloses the
         # failure instead, and the watermark stays where that success left it.
-        last_reviewed = getattr(github, "last_reviewed_sha", None)
-        if last_reviewed is None or last_reviewed() is None:
+        if not isinstance(github, SupportsIncremental) or github.last_reviewed_sha() is None:
             github.post_review([], notice)
     except Exception:
         # Posting the failure notice itself failed — nothing more we can do;
