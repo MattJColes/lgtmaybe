@@ -111,7 +111,7 @@ def render_findings(
 def _render_agent(findings: list[ReviewFinding], summary: str, rerun_hint: str) -> str:
     """Render findings as correction instructions for an AI agent to apply."""
     if not findings:
-        return f"No review findings — nothing to correct. {summary}"
+        return f"No review findings: nothing to correct. {summary}"
 
     lines = [
         "Code review findings for your local changes. Act as the developer and "

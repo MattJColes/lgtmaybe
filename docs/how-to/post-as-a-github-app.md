@@ -94,7 +94,8 @@ To remove access, uninstall the App or remove the repository from the
 installation. To return to `github-actions[bot]`, remove
 `github_identity: lgtmaybe` and `id-token: write` from the workflow (and add
 back `pull-requests: write`). The Action revokes its temporary App token after
-each run, and GitHub expires it anyway if that cleanup cannot run.
+each run, once the review has stopped. A cancelled review gets up to 60 seconds
+to post first. GitHub expires the token anyway if that cleanup cannot run.
 
 The public App intentionally has no `Checks: write` permission, so
 `github_identity: lgtmaybe` cannot be combined with `fail_on`. When lgtmaybe

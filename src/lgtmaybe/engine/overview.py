@@ -44,7 +44,7 @@ _T = TypeVar("_T")
 
 _log = get_logger(__name__)
 
-_DESCRIPTION_UNAVAILABLE = "_Description unavailable — the model returned no usable description._"
+_DESCRIPTION_UNAVAILABLE = "_Description unavailable: the model returned no usable description._"
 
 _OVERVIEW_TITLE = "Change overview"
 

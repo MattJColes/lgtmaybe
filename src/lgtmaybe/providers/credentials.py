@@ -40,7 +40,7 @@ _AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
 _AZURE_KEYLESS_GUIDANCE = (
     "azure requires credentials. Either set AZURE_API_KEY (or pass "
     "--api-key) for key-based auth, or configure keyless Azure AD "
-    "credentials — GitHub OIDC via azure/login (needs id-token: write "
+    "credentials: GitHub OIDC via azure/login (needs id-token: write "
     "and a federated credential on your Entra app), or a local "
     "'az login' / managed identity."
 )

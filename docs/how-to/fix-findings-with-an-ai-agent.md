@@ -83,7 +83,7 @@ lgtmaybe review --provider ollama --model qwen3.6:27b \
   --api-base http://localhost:11434 --format agent --working
 ```
 
-A clean branch prints `No review findings — nothing to correct.` followed by
+A clean branch prints `No review findings: nothing to correct.` followed by
 the summary line. Repeat until you are happy, then open your PR. To post reviews
 on the PR itself, set up the [GitHub Action](use-as-github-action.md).
 

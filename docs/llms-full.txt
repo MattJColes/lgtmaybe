@@ -809,7 +809,8 @@ What each part does:
 - `permissions:` lets the job read the repository and write review comments on
   the PR.
 - `concurrency:` keeps one run per PR and event type. A new push cancels an
-  in-flight review.
+  in-flight review. The cancelled review gets up to 60 seconds to post what it
+  already found, then it is stopped.
 - `if:` is the trust gate described in
   [Who Can Trigger a Review](#who-can-trigger-a-review).
 - `actions/checkout` checks out the base repo only, so lgtmaybe can read your
@@ -1175,7 +1176,8 @@ To remove access, uninstall the App or remove the repository from the
 installation. To return to `github-actions[bot]`, remove
 `github_identity: lgtmaybe` and `id-token: write` from the workflow (and add
 back `pull-requests: write`). The Action revokes its temporary App token after
-each run, and GitHub expires it anyway if that cleanup cannot run.
+each run, once the review has stopped. A cancelled review gets up to 60 seconds
+to post first. GitHub expires the token anyway if that cleanup cannot run.
 
 The public App intentionally has no `Checks: write` permission, so
 `github_identity: lgtmaybe` cannot be combined with `fail_on`. When lgtmaybe
@@ -3149,7 +3151,7 @@ per-call budget resolved  timeout_s=3600  max_tokens=16384  max_tokens_source="p
 If a lens hits it, you get a truncation notice, not a silent clean review:
 
 ```
-response hit the 16384-token `max_tokens` ceiling before finishing — the batch
+response hit the 16384-token `max_tokens` ceiling before finishing. The batch
 is re-reviewed in smaller pieces automatically, so a lens that keeps doing it is
 usually generation instability in the model, which a higher ceiling makes more
 expensive rather than prevents
@@ -3252,7 +3254,7 @@ the `--api-base` URL is reachable.
 
 **Model not found**: run `ollama pull <model>` before using it.
 
-**`review incomplete — every review call failed`**: every lens call timed out or
+**`review incomplete: every review call failed`**: every lens call timed out or
 returned output that wasn't valid JSON. To fix it:
 
 - raise `--timeout`;
@@ -5191,14 +5193,14 @@ service. The Mermaid renders in place. Each text rendering sits in a collapsible
 
 > ### **High Impact Areas**
 >
-> - **Infrastructure** &mdash; New ElastiCache cluster (`infra/redis.tf`). Adds a
+> - **Infrastructure**: New ElastiCache cluster (`infra/redis.tf`). Adds a
 >   managed dependency to the production VPC. _Check:_ security group and
 >   failover settings.
-> - **Availability** &mdash; Cache on the user read path (`api/users.py`). User reads
+> - **Availability**: Cache on the user read path (`api/users.py`). User reads
 >   now depend on Redis. A Redis outage takes reads down with it. _Check:_
 >   confirm a Redis error falls back to the database.
-> - **Backup and recovery** &mdash; touched: `ops/backup_retention.yaml` (not assessed
->   by the model)
+> - **Backup and recovery**: touched `ops/backup_retention.yaml` (not assessed by
+>   the model)
 
 > ### Walkthrough
 >
@@ -5324,7 +5326,7 @@ When nothing qualifies, the section says so and names what it checked:
 
 > ### **High Impact Areas**
 >
-> None detected &mdash; checked: infrastructure, security posture, availability, data
+> None detected. Checked: infrastructure, security posture, availability, data
 > migrations, backups and recovery, compatibility, observability, dependencies,
 > cost, compliance.
 
@@ -5577,7 +5579,7 @@ lgtmaybe review --provider ollama --model qwen3.6:27b \
   --api-base http://localhost:11434 --format agent --working
 ```
 
-A clean branch prints `No review findings — nothing to correct.` followed by
+A clean branch prints `No review findings: nothing to correct.` followed by
 the summary line. Repeat until you are happy, then open your PR. To post reviews
 on the PR itself, set up the [GitHub Action](use-as-github-action.md).
 

@@ -183,7 +183,7 @@ Things worth knowing when a local run misbehaves:
   summary means some lens calls timed out, errored, or returned output that
   would not parse even after one repair attempt. The notice names the lenses
   lost and the most common error. If **every** call fails, the run exits
-  non-zero with `review incomplete — every review call failed` rather than
+  non-zero with `review incomplete: every review call failed` rather than
   printing a false LGTM. Raise `--timeout`, pick a model that follows
   structured-output instructions, or check the debug log.
 - **The fan-out makes several calls per batch**: four under the default `fast`

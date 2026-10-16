@@ -123,7 +123,7 @@ class GiteaGateway:
         except (KeyError, TypeError) as exc:
             raise RuntimeError(
                 f"PR metadata for {self._repo}#{self._pr_number} is missing the "
-                f"base/head SHA — unexpected Gitea API response ({exc})."
+                f"base/head SHA, an unexpected Gitea API response ({exc})."
             ) from exc
         self._head_sha = head_sha
 

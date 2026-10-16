@@ -195,7 +195,7 @@ LENSES_MARKER_PREFIX = "<!-- lgtmaybe-lenses:"
 # The reason string a call skipped by the token ceiling reports. Shared with the
 # summary step, which counts these to tell a budget stop (spend the user chose)
 # apart from the provider failures the generic incomplete notice covers.
-_BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached — call skipped"
+_BUDGET_SKIP_REASON = "token budget (max_review_tokens) reached: call skipped"
 
 # Share of `max_review_seconds` / `max_review_tokens` held back from the lens
 # fan-out so the reflection auditor still runs on a review that overruns, and the
@@ -225,7 +225,7 @@ _REASONING_DOMINANT_SHARE = 0.9
 # The reason string a call skipped by an interruption reports. Worded to name
 # the cause, because the remedy differs from the deadline's: nobody should go
 # hunting for a `max_review_seconds` they never hit.
-_INTERRUPT_SKIP_REASON = "review interrupted (termination signal) — call skipped"
+_INTERRUPT_SKIP_REASON = "review interrupted (termination signal): call skipped"
 
 # A wind-down asked for from OUTSIDE the pipeline — in practice the CLI's
 # SIGTERM/SIGINT handler, when the CI job blows its `timeout-minutes` or a push
@@ -329,13 +329,13 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"📐 {listed} match{_plural(count, 'es', '')} this PR but none of "
             f"{_plural(count, 'its', 'their')} files fit the spec budget ({budget} tokens, "
-            f"an eighth of `max_input_tokens`) — {outcome}. Raise `max_input_tokens` "
+            f"an eighth of `max_input_tokens`), so {outcome}. Raise `max_input_tokens` "
             "or split the spec into smaller files to review against it."
         )
     budget_skips = state.errors.count(_BUDGET_SKIP_REASON)
     if budget_skips:
         notices.append(
-            f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens) — "
+            f"💸 Token budget reached ({cfg.max_review_tokens} billable tokens): "
             f"{budget_skips} of {state.total_calls} review call"
             f"{_plural(budget_skips, ' was', 's were')} skipped, so this review is partial. "
             "Raise `max_review_tokens`, or spend less per run (a `triage_model`, fewer "
@@ -353,7 +353,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             else "timeout or unparseable output"
         )
         lost = ", ".join(sorted(set(state.failed_lenses)))
-        which = f"{lost} — " if lost else ""
+        which = f"{lost}: " if lost else ""
         notices.append(
             f"⚠️ {state.failed_calls} of {state.total_calls} review calls failed "
             f"({which}{detail}); results may be incomplete.\n{INCOMPLETE_MARKER}"
@@ -364,7 +364,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"🔧 {count} lens{_plural(count, many='es')} returned output that did not "
             f"parse and was reformatted by a second call ({listed}). Those findings are "
-            "complete — but a model that keeps doing this is not honouring the output "
+            "complete, but a model that keeps doing this is not honouring the output "
             "schema, which costs an extra call every time. Check the provider log for a "
             "dropped `response_format`, or try a different model."
         )
@@ -374,7 +374,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"🧷 {count} lens{_plural(count, many='es')} returned output that did not parse "
             f"under the provider's JSON schema and answered when re-asked without the schema "
-            f"({listed}). Those findings are complete — but this model's structured-output "
+            f"({listed}). Those findings are complete, but this model's structured-output "
             "mode is producing replies lgtmaybe cannot read, so every affected lens costs two "
             "wasted calls before the one that works. Set `structured_output: false` to skip "
             "them, or use a model whose JSON mode works."
@@ -396,7 +396,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
             f"ceiling on reasoning and was re-run once at a lower `reasoning_effort` "
-            f"({listed}). Those findings come from the lower setting — lower "
+            f"({listed}). Those findings come from the lower setting. Lower "
             "`reasoning_effort` yourself, or raise `max_tokens`, to make that the "
             "first attempt rather than the second."
         )
@@ -407,7 +407,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             f"🧠 {count} lens{_plural(count, many='es')} spent its whole `max_tokens` "
             f"ceiling on reasoning at a lower `reasoning_effort` too, and was re-run "
             f"once with reasoning switched off ({listed}). Those findings come from "
-            "a run without thinking — this model treats `reasoning_effort` as a "
+            "a run without thinking: this model treats `reasoning_effort` as a "
             "switch, so set it to `none` yourself, or raise `max_tokens`, to make "
             "that the first attempt rather than the third."
         )
@@ -418,7 +418,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"\u2934\ufe0f {count} lens{_plural(count, many='es')} could not be answered by "
             f"`{cfg.model}` and {_plural(count, 'was', 'were')} re-run on the fallback model "
-            f"{models} ({listed}). Those findings are complete — but the review only finished "
+            f"{models} ({listed}). Those findings are complete, but the review only finished "
             "because a second model paid for it, and a lens that keeps needing the fallback is "
             "saying it should be the primary."
         )
@@ -437,15 +437,15 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"🗑️ {count} finding{_plural(count)} {_plural(count, 'was', 'were')} dropped because "
             f"the model's reply carried its own repair note inside {_plural(count, 'it', 'them')} "
-            '("discard the corrupted output… output valid JSON only") — '
+            '("discard the corrupted output… output valid JSON only"): '
             f"{listed}. That is the model talking to itself, not a review, and posting it would "
             "put an instruction in front of everyone who reads this thread; whatever genuine "
             "finding it was wrapped around is lost with it. A model that keeps doing this is "
-            "unstable on this workload — try a different model."
+            "unstable on this workload. Try a different model."
         )
     if state.reflection_skipped:
         notices.append(
-            f"⚠️ {state.reflection_skipped} — the self-reflection audit was skipped, "
+            f"⚠️ {state.reflection_skipped}: the self-reflection audit was skipped, "
             "so findings may include false positives."
         )
 
@@ -454,13 +454,13 @@ def _build_notices(state: _NoticeState) -> list[str]:
             state.suppressed,
             lambda count: (
                 f"🙈 {count} finding{_plural(count)} suppressed (ignored fingerprint, "
-                "inline `lgtmaybe: ignore`, or a 👎 from a previous run) — not counted below."
+                "inline `lgtmaybe: ignore`, or a 👎 from a previous run), not counted below."
             ),
         ),
         (
             state.off_diff,
             lambda count: (
-                f"🔍 {count} scan finding{_plural(count)} skipped — on unchanged "
+                f"🔍 {count} scan finding{_plural(count)} skipped: on unchanged "
                 "lines outside this PR's diff. Run the tool over the repository to see them."
             ),
         ),
@@ -469,7 +469,7 @@ def _build_notices(state: _NoticeState) -> list[str]:
             lambda count: (
                 f"💬 {count} earlier lgtmaybe "
                 f"{_plural(count, 'conversation is', 'conversations are')} still unresolved on "
-                "this PR — this run's count covers what it reviewed now, not those."
+                "this PR. This run's count covers what it reviewed now, not those."
             ),
         ),
     )
@@ -824,7 +824,7 @@ def _skip_reason(deadline_at: float | None, budget_at: int | None, lens: _Lens) 
         return _INTERRUPT_SKIP_REASON
     if deadline_at is not None and time.perf_counter() >= deadline_at:
         _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
-        return "review deadline (max_review_seconds) reached — call skipped"
+        return "review deadline (max_review_seconds) reached: call skipped"
     if budget_at is not None and profiler.total_tokens() >= budget_at:
         _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
         return _BUDGET_SKIP_REASON
@@ -1146,7 +1146,7 @@ class LLMReviewEngine:
         #     👍 LGTM over a diff nothing looked at.
         if file_patches and not lenses:
             raise ReviewIncompleteError(
-                "review incomplete — no review lens could run for the configured "
+                "review incomplete: no review lens could run for the configured "
                 "categories (intent needs a stated intent; spec needs a committed "
                 "specification matching this change). Add another category to "
                 "`categories`, or remove the override to run the default set."
@@ -1390,7 +1390,7 @@ class LLMReviewEngine:
             detail = Counter(errors).most_common(1)[0][0] if errors else "no usable output"
             hint = f" {_SCHEMA_DROP_NOTE}" if self._schema_dropped() else ""
             raise ReviewIncompleteError(
-                f"review incomplete — every review call failed ({detail}). "
+                f"review incomplete: every review call failed ({detail}). "
                 "Check the provider credentials/quota, model, and timeout "
                 f"(ollama: a larger model needs a longer --timeout), then retry.{hint}"
             )
@@ -2662,7 +2662,7 @@ class LLMReviewEngine:
             # as if it were that ceiling, sending the reader to raise a number
             # that may not be the one they hit.
             reason = (
-                f"response truncated — the body stopped mid-answer after "
+                f"response truncated: the body stopped mid-answer after "
                 f"{result.output_tokens} output tokens while the route reported a clean "
                 "finish, so the cut was detected from the unterminated body; the batch is "
                 f"re-reviewed in smaller pieces automatically{recovered_note}"
@@ -2769,7 +2769,7 @@ def _reasoning_exhausted_reason(reasoning: int | None, ceiling: int | None) -> s
     # is the same one either way.
     return _ReasoningBoundReason(
         f"ProviderTruncated: spent {reasoning} of the {ceiling}-token `max_tokens` "
-        "ceiling on reasoning, so the batch was not split — a smaller payload cannot "
+        "ceiling on reasoning, so the batch was not split: a smaller payload cannot "
         "shrink a thinking budget. Lower `reasoning_effort`, or raise `max_tokens` if "
         "this model simply thinks bigger than the ceiling"
     )
@@ -3063,8 +3063,8 @@ def _raw_excerpt(text: str) -> str:
 # reader cannot see from the PR.
 _SCHEMA_DROP_NOTE = (
     "The model refused the structured-output schema partway through this run, so "
-    "later calls asked for JSON in the prompt only — a likely cause of the failures "
-    "above. The provider log names which model and why."
+    "later calls asked for JSON in the prompt only. That is a likely cause of the "
+    "failures above. The provider log names which model and why."
 )
 
 # A summary-line segment beside the model, never a notice: unlike a dropped
