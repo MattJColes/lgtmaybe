@@ -72,6 +72,12 @@ flowchart LR
 
 </div>
 
+## What's New
+
+The latest releases, built from the changelog every time the docs publish.
+
+See the [Changelog](https://lgtmaybe.coles.codes/changelog/) for every release.
+
 ## Providers
 
 | Provider | Auth |
