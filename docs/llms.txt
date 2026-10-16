@@ -40,6 +40,7 @@
 
 - [Configuration](https://lgtmaybe.coles.codes/reference/config/): Complete lgtmaybe configuration reference — every ReviewConfig field, enum, and JSON schema, generated from the pydantic models.
 - [Profile output](https://lgtmaybe.coles.codes/reference/profile/): The --profile table and --profile-json payload - every column, the summary lines, what a dash means, and the machine-readable shape to parse instead.
+- [Changelog](https://lgtmaybe.coles.codes/changelog/): Every release, newest first, built from CHANGELOG.md.
 
 ## Explanation
 

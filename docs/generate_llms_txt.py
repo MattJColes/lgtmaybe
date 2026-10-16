@@ -29,6 +29,13 @@ LLMS_FULL_PATH = DOCS / "llms-full.txt"
 
 SITE_URL = "https://lgtmaybe.coles.codes/"
 
+# Pages a build hook generates (docs/whats_new.py), so there is no file on disk
+# to read. They are linked from llms.txt with a fixed description and left out
+# of llms-full.txt, whose committed copy would otherwise go stale every release.
+GENERATED_PAGES = {
+    "changelog.md": "Every release, newest first, built from CHANGELOG.md.",
+}
+
 SUMMARY = (
     "AI code review for GitHub, GitLab, Gitea, Azure DevOps, and local Git diffs. It posts "
     "inline findings and a summary on pull and merge requests, or prints "
@@ -68,12 +75,18 @@ def _front_matter(md_rel: str) -> dict[str, Any]:
     return yaml.safe_load(fm) or {}
 
 
+# The homepage's What's New list is filled in by the build hook; a dump of the
+# raw markdown points at the changelog instead of carrying a stale copy.
+_WHATS_NEW_MARKER = "<!-- whats-new -->"
+_WHATS_NEW_STANDIN = f"See the [Changelog]({SITE_URL}changelog/) for every release."
+
+
 def _body(md_rel: str) -> str:
     """Return a docs page's content with any front-matter stripped."""
     text = (DOCS / md_rel).read_text(encoding="utf-8")
     if text.startswith("---"):
-        return text.split("---", 2)[2].lstrip("\n")
-    return text
+        text = text.split("---", 2)[2].lstrip("\n")
+    return text.replace(_WHATS_NEW_MARKER, _WHATS_NEW_STANDIN)
 
 
 def _page_url(md_rel: str) -> str:
@@ -128,7 +141,10 @@ def generate_index() -> str:
         lines.append(f"## {section_name}")
         lines.append("")
         for title, md_rel in pages:
-            desc = str(_front_matter(md_rel).get("description", "")).strip()
+            desc = (
+                GENERATED_PAGES.get(md_rel)
+                or str(_front_matter(md_rel).get("description", "")).strip()
+            )
             url = _page_url(md_rel)
             lines.append(f"- [{title}]({url}): {desc}" if desc else f"- [{title}]({url})")
         lines.append("")
@@ -153,6 +169,8 @@ def generate_full() -> str:
         "",
     ]
     for _title, md_rel in ordered:
+        if md_rel in GENERATED_PAGES:
+            continue
         parts.append("---")
         parts.append("")
         parts.append(f"<!-- Source: {_page_url(md_rel)} -->")

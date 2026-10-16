@@ -6,6 +6,9 @@ on:
     paths:
       - "docs/**"
       - "mkdocs.yml"
+      # Releases only touch CHANGELOG.md; the What's New list and the
+      # Changelog page are built from it, so a release must rebuild the site.
+      - "CHANGELOG.md"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
