@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -62,6 +63,67 @@ def test_branch_vs_base_ignores_uncommitted_when_not_working(repo: Path) -> None
     assert ctx.changed_files == []
 
 
+# ---------------------------------------------------------------------------
+# head text: the branch diff is base...HEAD, so the engine's text must be
+# HEAD's blob, never the working tree's
+# ---------------------------------------------------------------------------
+
+
+def test_branch_mode_serves_head_text_not_the_working_tree(repo: Path) -> None:
+    """A committed change plus an uncommitted insert above it: the diff is
+    base...HEAD, so serving working-tree text shifted every line the context
+    expansion pads findings with, garbling the code the model saw."""
+    lines = [f"value_{i} = {i}\n" for i in range(1, 36)]
+    (repo / "app.py").write_text("".join(lines), encoding="utf-8")
+    _git(repo, "commit", "-am", "feat: thirty-five lines")
+    lines[29] = "value_30 = 30  # changed\n"  # a committed change at line 30
+    (repo / "app.py").write_text("".join(lines), encoding="utf-8")
+    _git(repo, "commit", "-am", "feat: change line 30")
+    head_text = "".join(lines)
+    # An uncommitted insert of 5 lines at the top shifts the working tree.
+    (repo / "app.py").write_text("# inserted\n" * 5 + head_text, encoding="utf-8")
+
+    ctx = local_pr_context(base="main", working=False, cwd=repo)
+
+    assert "+value_30 = 30  # changed" in ctx.diff
+    assert ctx.file_contents["app.py"] == head_text
+
+
+def test_branch_mode_notes_a_deleted_file(tmp_path: Path) -> None:
+    """A file the branch deletes has no HEAD text to serve, never the stale
+    working-tree copy."""
+    _git(tmp_path, "init", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "config", "commit.gpgsign", "false")
+    (tmp_path / "gone.py").write_text("x = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "gone.py")
+    _git(tmp_path, "commit", "-m", "base")  # gone.py exists at the base
+    _git(tmp_path, "checkout", "-b", "feature")
+    _git(tmp_path, "rm", "gone.py")
+    _git(tmp_path, "commit", "-m", "feat: remove gone")
+    (tmp_path / "gone.py").write_text("x = 1\n", encoding="utf-8")  # back, untracked
+
+    ctx = local_pr_context(base="main", working=False, cwd=tmp_path)
+
+    assert "gone.py" in ctx.changed_files
+    assert "gone.py" not in ctx.file_contents
+
+
+@pytest.mark.parametrize("mode", ["working", "uncommitted"])
+def test_dirty_modes_still_read_the_working_tree(repo: Path, mode: str) -> None:
+    """--working and --uncommitted review the worktree, so their head text stays
+    the working tree's; only branch mode switched to HEAD's blob."""
+    (repo / "app.py").write_text("value_1 = 1\nvalue_2 = 2\n", encoding="utf-8")
+    _git(repo, "commit", "-am", "feat: two lines")
+    dirty = "# inserted\n" * 5 + "value_1 = 1\nvalue_2 = 2\n"
+    (repo / "app.py").write_text(dirty, encoding="utf-8")
+
+    ctx = local_pr_context(working=mode == "working", uncommitted=mode == "uncommitted", cwd=repo)
+
+    assert ctx.file_contents["app.py"] == dirty
+
+
 def test_repo_name_from_remote(repo: Path) -> None:
     _git(repo, "remote", "add", "origin", "git@github.com:owner/myrepo.git")
     (repo / "app.py").write_text("def f():\n    return 2\n")
@@ -75,6 +137,26 @@ def test_repo_name_from_remote(repo: Path) -> None:
 def test_not_a_git_repo_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="git"):
         local_pr_context(base="main", working=False, cwd=tmp_path)
+
+
+def test_git_timeout_raises_local_git_error(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hung git raises the module's own error naming the command; the CLI
+    layer converts it into a clean ClickException (asserted at the cli seam)."""
+    import lgtmaybe.local as local_mod
+    from lgtmaybe.local import LocalGitError
+
+    def hanging_run(*args: object, **kwargs: object) -> NoReturn:
+        raise subprocess.TimeoutExpired(cmd=["git"], timeout=120)
+
+    monkeypatch.setattr(local_mod.subprocess, "run", hanging_run)
+
+    # Not a ValueError subclass: this module's `except ValueError` fallbacks
+    # (repo root, branch, default base) must degrade on a git failure, never
+    # swallow a hung git.
+    assert not issubclass(LocalGitError, ValueError)
+
+    with pytest.raises(LocalGitError, match=r"git log --format=%s timed out"):
+        local_mod._git(repo, "log", "--format=%s")
 
 
 def test_default_base_falls_back_to_head_with_no_main_master_or_remote(tmp_path: Path) -> None:

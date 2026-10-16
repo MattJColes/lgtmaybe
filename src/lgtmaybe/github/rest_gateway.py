@@ -1476,6 +1476,9 @@ class RestGitHubGateway:
                 (finding.thread_id, finding.comment_id, finding.body)
                 for finding in self._active_findings
                 if finding.thread_id in self._validated_fixed_thread_ids
+                # An incremental run validated its own increment only: a thread
+                # on any other file has no fresh evidence behind it (#753).
+                and (self._incremental_paths is None or finding.path in self._incremental_paths)
             ]
 
         fixed: list[tuple[str, int | None, str]] = []

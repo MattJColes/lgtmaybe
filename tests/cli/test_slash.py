@@ -184,7 +184,7 @@ class TestDispatch:
 
     def test_describe_upserts_the_description_comment(self):
         """/describe goes through the idempotent describe upsert, and an
-        unstructured model reply falls back to the raw text body."""
+        unstructured model reply falls back to the escaped prose body."""
         github = FakeGitHub()
         provider = FakeProvider(
             result=ProviderResult(text="## Summary\nAdds a thing.", input_tokens=1, output_tokens=1)

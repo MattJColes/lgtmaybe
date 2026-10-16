@@ -705,6 +705,66 @@ def test_zizmor_findings_parsed_with_severity_and_one_based_lines(monkeypatch) -
     assert findings[0].severity is Severity.high
 
 
+def _zizmor_output_hidden_first() -> str:
+    """Real zizmor output (1.31.1) lists the Hidden location FIRST: "this step"
+    / "this workflow", the step or workflow block around the hit. The Primary
+    location that follows points at the offending line itself."""
+    return json.dumps(
+        [
+            {
+                "ident": "template-injection",
+                "desc": "code injection via template expansion",
+                "determinations": {"severity": "High", "confidence": "High"},
+                "locations": [
+                    {
+                        "symbolic": {
+                            "key": {
+                                "Local": {
+                                    "verbatim_path": "./.github/workflows/ci.yml",
+                                    "subkey": "jobs.build.steps[0]",
+                                }
+                            },
+                            "kind": "Hidden",
+                        },
+                        "concrete": {"location": {"start_point": {"row": 6, "column": 8}}},
+                    },
+                    {
+                        "symbolic": {
+                            "key": {"Local": {"verbatim_path": "./.github/workflows/ci.yml"}},
+                            "kind": "Primary",
+                        },
+                        "concrete": {"location": {"start_point": {"row": 11, "column": 20}}},
+                    },
+                ],
+            }
+        ]
+    )
+
+
+def test_zizmor_anchors_to_the_primary_location_not_the_hidden_one(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Anchoring on locations[0] put the comment on the Hidden row (the step's
+    `- name: build` line), which the PR never changed — the engine then dropped
+    the finding as off-diff and a real template injection went unreported."""
+    run = _FakeRun(outputs={"zizmor": _zizmor_output_hidden_first()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    findings = run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    assert len(findings) == 1
+    assert findings[0].line == 12  # Primary row 11, not the Hidden row 6 (line 7)
+
+
+def test_zizmor_without_a_primary_location_keeps_the_first(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """An audit that reports no Primary kind (older zizmor, or a workflow-level
+    hit) must keep the old behaviour rather than lose the finding."""
+    run = _FakeRun(outputs={"zizmor": _zizmor_output()})
+    _patch_tools(monkeypatch, run, present={"zizmor"})
+
+    findings = run_static_analysis(WORKFLOW_FILES, _cfg(tools=[StaticAnalysisTool.zizmor]))
+
+    assert findings[0].line == 7
+
+
 def test_zizmor_runs_offline(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     run = _FakeRun(outputs={"zizmor": _zizmor_output()})
     _patch_tools(monkeypatch, run, present={"zizmor"})

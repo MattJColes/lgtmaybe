@@ -103,19 +103,23 @@ def always_escalate(path: str, patch: str, hinted_paths: set[str]) -> bool:
 
 def triage_files(
     file_patches: list[tuple[str, str]],
-    sa_hints: list[ToolFinding],
+    sa_findings: list[ToolFinding],
     cfg: ReviewConfig,
     provider: ProviderClient,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """Route *file_patches* through triage: ``(files to review, skipped paths)``.
+
+    *sa_findings* is every static-analysis finding, hint-mode or finding-mode:
+    a direct-post hit must escalate its file too, or triage skipping the file
+    makes the engine drop the hit as off-diff.
 
     Floor files come first (they are the known-risky set), then the surviving
     candidates most-risky-first — so a downstream cap or batch order works on
     the riskiest code. On any triage failure everything is reviewed in the
     original order.
     """
-    hinted = {h.path for h in sa_hints}
-    floor = [(p, patch) for p, patch in file_patches if always_escalate(p, patch, hinted)]
+    flagged = {h.path for h in sa_findings}
+    floor = [(p, patch) for p, patch in file_patches if always_escalate(p, patch, flagged)]
     floor_paths = {p for p, _ in floor}
     candidates = [(p, patch) for p, patch in file_patches if p not in floor_paths]
     if not candidates:

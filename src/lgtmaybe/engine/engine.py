@@ -92,6 +92,7 @@ from .risk import assess_risk, risk_marker, risk_segment
 from .selftalk import drop_self_talk
 from .severity import clamp_to_category_ceiling
 from .static_analysis import (
+    MAX_SCAN_FINDINGS,
     SCAN_CATEGORY_PREFIX,
     UNANCHORABLE_SCAN_CATEGORIES,
     ToolFinding,
@@ -296,6 +297,8 @@ class _NoticeState:
     # the spec lens ran at all (against the specs that did fit).
     spec_unfit: list[str] = field(default_factory=list)
     spec_reviewed: bool = False
+    # The reflection audit's diff had to be trimmed to fit max_input_tokens.
+    reflection_trimmed: bool = False
 
 
 def _build_notices(state: _NoticeState) -> list[str]:
@@ -453,6 +456,15 @@ def _build_notices(state: _NoticeState) -> list[str]:
         notices.append(
             f"⚠️ {state.reflection_skipped}: the self-reflection audit was skipped, "
             "so findings may include false positives."
+        )
+    if state.reflection_trimmed:
+        notices.append(
+            "✂️ The self-reflection audit ran on a trimmed diff: the full diff "
+            f"exceeded `max_input_tokens` ({cfg.max_input_tokens:,}), so only the "
+            "flagged files' patches were kept, in diff order, until the budget "
+            "ran out. Flagged files after the first that did not fit were not "
+            "shown to the audit at all. Raise `max_input_tokens` to audit the "
+            "whole diff."
         )
 
     count_notices: tuple[tuple[int, Callable[[int], str]], ...] = (
@@ -1182,6 +1194,10 @@ class LLMReviewEngine:
         sa_hints: list[ToolFinding] = []
         sa_all: list[ToolFinding] = []
         scan_findings: list[ReviewFinding] = []
+        # The diff exactly as the scan corpus saw it: triage (3c) and the file
+        # cap (3d) narrow file_patches after this, and a scan finding must snap
+        # against what was actually scanned, not the narrower reviewed diff.
+        scan_scope = ""
         if cfg.static_analysis.enabled and (ctx.file_contents or ctx.scan_contents):
             with profiler.stage("static_analysis"):
                 reviewed_paths = {path for path, _ in file_patches}
@@ -1198,18 +1214,21 @@ class LLMReviewEngine:
                 # would bust the shared-prefix cache for nothing.
                 sa_hints, direct = partition_by_mode(sa_all, cfg)
                 scan_findings = tool_review_findings(direct, corpus)
+                scan_scope = "\n".join(patch for _, patch in file_patches)
 
         # 3c. Two-stage triage (default off): a cheap triage_model skips
         #     plainly-non-substantive files and ranks the rest by risk, so the
         #     strong model reviews only what deserves it. A deterministic
         #     security floor (security paths/tokens, static-analysis hits,
         #     large hunks) always escalates past triage, and any triage
-        #     failure reviews everything.
+        #     failure reviews everything. Every static-analysis finding feeds
+        #     the floor, hint-mode or finding-mode: a direct-post hit must stop
+        #     triage skipping its file, or the diff scoping drops the hit.
         skipped_by_triage: list[str] = []
         if cfg.triage_model and file_patches:
             with profiler.stage("triage"):
                 file_patches, skipped_by_triage = triage_files(
-                    file_patches, sa_hints, cfg, self._provider
+                    file_patches, sa_all, cfg, self._provider
                 )
 
         # 3d. File cap: after triage so it drops the lowest-risk survivors,
@@ -1458,8 +1477,15 @@ class LLMReviewEngine:
         #    changed line whose content matches its verbatim `anchor`, so comments
         #    land on the code they describe. Done before dedupe so findings the
         #    model placed on slightly different wrong lines collapse correctly.
+        #    Scan findings snap against `scan_scope` (the diff the corpus saw)
+        #    rather than the reviewed diff: their files can have left file_patches
+        #    at triage (3c) or the file cap (3d), and dropping them as off-diff
+        #    for that would blame unchanged lines that were never the problem.
         with profiler.stage("snap"):
-            all_findings = _snap_findings(all_findings, reviewed_diff)
+            scans_at_snap = [f for f in all_findings if _is_scan_finding(f)]
+            all_findings = _snap_findings(
+                [f for f in all_findings if not _is_scan_finding(f)], reviewed_diff
+            ) + _snap_findings(scans_at_snap, scan_scope)
             # A finding on a scan-only file (a lockfile advisory the model
             # confirmed from an unbatched hint) has no reviewed line to sit on:
             # the file is never in the reviewed diff. Mark it unanchored, so
@@ -1512,6 +1538,20 @@ class LLMReviewEngine:
         if suppressed:
             _log.info("suppressed findings", extra={"count": suppressed})
 
+        # 7a. Cap the scan findings after scoping (6b) and suppression (7): the
+        #     cap bounds posted comments, so findings those stages drop must not
+        #     spend its slots — the slot a suppressed hit vacates goes to the
+        #     next on-diff hit instead. Model findings never count against it.
+        scans = [f for f in all_findings if _is_scan_finding(f)]
+        if len(scans) > MAX_SCAN_FINDINGS:
+            considered = len(scans) + off_diff  # pre-cap count, before reassignment
+            scans = sorted(scans, key=lambda f: f.severity.rank, reverse=True)[:MAX_SCAN_FINDINGS]
+            _log.info(
+                "scan findings capped after diff scoping",
+                extra={"kept": MAX_SCAN_FINDINGS, "considered": considered},
+            )
+            all_findings = [f for f in all_findings if not _is_scan_finding(f)] + scans
+
         # 7b. Evidence gate: built-in defect findings must name a concrete way
         #     the changed code fails. Category is engine-stamped, so lowering the
         #     model-selected severity cannot bypass this check.
@@ -1520,9 +1560,12 @@ class LLMReviewEngine:
 
         # 7c. Merge: a finding can surface under more than one lens (a shell
         #     injection is both a security and a correctness issue), so collapse
-        #     duplicates before reflecting.
+        #     duplicates before reflecting. Arbitration runs first: the merge
+        #     selects by severity, which would let an opposed lens's copy win
+        #     the shared location before either referee saw the pair, posting
+        #     the code-cutting advice and losing the fix (issue #752).
         with profiler.stage("dedupe"):
-            all_findings = _dedupe(all_findings)
+            all_findings = _dedupe(resolve_conflicts(all_findings))
 
         # 8. Self-reflection: filter out low-confidence findings. Reflect against
         #    only the reviewed diff — redacted, and free of skipped/over-cap files.
@@ -1534,6 +1577,8 @@ class LLMReviewEngine:
         # None, or the name of the ceiling that stopped the audit — it feeds the
         # notice below, so a skipped audit always says which knob to raise.
         reflection_skipped: str | None = None
+        # Trim notices from the audit (diff narrowed to fit the input budget).
+        reflection_notices: list[str] = []
         scanned = [f for f in all_findings if _is_scan_finding(f)]
         all_findings = [f for f in all_findings if not _is_scan_finding(f)]
         if cfg.reflect and all_findings:
@@ -1572,6 +1617,7 @@ class LLMReviewEngine:
                         # The hints a lockfile finding was confirmed from: the
                         # auditor's only evidence for a file the diff never shows.
                         scan_hints=unbatched,
+                        notices=reflection_notices,
                     )
 
         # 8a. Arbitrate opposing advice: a lens that cuts code yields to one that
@@ -1638,6 +1684,7 @@ class LLMReviewEngine:
                 self_talk=dict(self._self_talk),
                 spec_unfit=list(spec_context.unfit),
                 spec_reviewed=clean_spec is not None,
+                reflection_trimmed=bool(reflection_notices),
             )
         )
         # Which lenses completed, on every summary shape — hidden, so it costs
@@ -3523,9 +3570,12 @@ def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
     surface nuance — not duplicate inline comments.
 
     Selection policy (deterministic):
-    1. Highest severity wins.
-    2. On a tie: the finding with the longer body wins (more context is more useful).
-    3. On a further tie: the first in input order wins (stable, provider-independent).
+    1. An anchored finding beats an unanchored one: only its line is verified,
+       and an unanchored winner would then fall to the unanchored severity
+       floor, taking the location's real finding with it.
+    2. Highest severity wins.
+    3. On a tie: the finding with the longer body wins (more context is more useful).
+    4. On a further tie: the first in input order wins (stable, provider-independent).
 
     Scan findings are keyed on their title (`tool: rule`) too, so distinct tool
     hits never merge with each other or with a model finding: osv-scanner puts
@@ -3540,6 +3590,11 @@ def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
         existing = best.get(key)
         if existing is None:
             best[key] = finding
+        elif finding.anchored != existing.anchored:
+            # An unanchored finding's line is the model's guess, so it never
+            # displaces an anchored one at the same key (issue #748).
+            if finding.anchored:
+                best[key] = finding
         elif finding.severity.rank > existing.severity.rank:
             best[key] = finding
         elif finding.severity.rank == existing.severity.rank and len(finding.body) > len(

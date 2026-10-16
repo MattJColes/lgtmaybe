@@ -24,7 +24,6 @@ from lgtmaybe.core.models import (
 )
 from lgtmaybe.engine.redact import redact
 from lgtmaybe.engine.static_analysis import (
-    MAX_SCAN_FINDINGS,
     ToolFinding,
     mode_for,
     tool_review_findings,
@@ -118,15 +117,17 @@ def test_finding_for_a_file_with_no_corpus_text_is_dropped() -> None:
     assert tool_review_findings([_finding(path="other.py")], CORPUS) == []
 
 
-def test_findings_are_capped_most_severe_first() -> None:
-    """Direct posts bypass the hint cap; without one, a noisy pack floods the PR."""
-    lows = [_finding(rule=f"low-{i}", severity=Severity.low) for i in range(MAX_SCAN_FINDINGS)]
-    criticals = [_finding(rule="crit", severity=Severity.critical)]
+def test_findings_map_uncapped_the_engine_scopes_before_capping() -> None:
+    """The cap is applied by the engine AFTER it scopes scan findings to the
+    diff: capping here spent the cap on off-diff hits the engine was about to
+    drop, starving the one new hit the PR actually added (issue #751). The
+    mapping itself must return every finding with a valid anchor."""
+    hits = [_finding(rule=f"r{i}") for i in range(60)]
 
-    kept = tool_review_findings(lows + criticals, CORPUS)
+    kept = tool_review_findings(hits, CORPUS)
 
-    assert len(kept) == MAX_SCAN_FINDINGS
-    assert kept[0].severity is Severity.critical
+    assert len(kept) == 60
+    assert all(f.anchor for f in kept)
 
 
 def test_a_secret_in_tool_output_never_reaches_the_finding() -> None:

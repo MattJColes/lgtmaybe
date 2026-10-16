@@ -7,13 +7,13 @@ def _gateway() -> RestGitHubGateway:
     return RestGitHubGateway(repo="owner/repo", pr_number=1, token="test")
 
 
-def _node(thread_id: str, *, resolved: bool = False, ours: bool = True) -> dict:
+def _node(thread_id: str, *, resolved: bool = False, ours: bool = True, path: str = "a.py") -> dict:
     markers = "<!-- lgtmaybe-finding:abc123 -->\n<!-- lgtmaybe-identity:def456 -->" if ours else ""
     return {
         "id": thread_id,
         "isResolved": resolved,
         "isOutdated": True,
-        "path": "a.py",
+        "path": path,
         "comments": {
             "nodes": [
                 {
@@ -84,3 +84,26 @@ def test_validated_resolution_reuses_the_active_finding_read(monkeypatch) -> Non
     gateway._resolve_fixed_threads([])
 
     assert walks == 1
+
+
+def test_validated_resolution_honours_the_incremental_scope(monkeypatch) -> None:
+    """A validated thread on a file the increment did not re-review has no fresh
+    evidence behind it, so it stays open; one on a re-reviewed file resolves."""
+    gateway = _gateway()
+    resolved: list[str] = []
+    monkeypatch.setattr(
+        gateway,
+        "_walk_review_threads",
+        lambda fields: iter([_node("OUTSIDE", path="a.py"), _node("INSIDE", path="b.py")]),
+    )
+    monkeypatch.setattr(gateway, "_resolve_thread", resolved.append)
+    monkeypatch.setattr(gateway, "_mark_comment_resolved", lambda comment_id, body: None)
+    monkeypatch.setattr(gateway, "reply_in_thread", lambda thread_id, body: None)
+
+    gateway.list_active_findings()
+    gateway.set_validated_fixed_threads({"OUTSIDE", "INSIDE"})
+    gateway.set_incremental_scope({"b.py"})
+    gateway.mark_reviewed("abc123")
+    gateway._resolve_fixed_threads([])
+
+    assert resolved == ["INSIDE"]

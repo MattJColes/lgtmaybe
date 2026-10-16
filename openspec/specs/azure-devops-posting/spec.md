@@ -200,8 +200,8 @@ treated as Azure Repos.
 With `resolve_fixed` on, the adapter SHALL set to `fixed`, then reply in, each
 open (`active` or `pending`) finding thread whose root comment the token's own
 identity wrote, when neither of its hidden ids was produced this run and its
-line has changed since it was posted; a validated allowlist, when installed,
-SHALL decide instead. Azure DevOps has no outdated flag, so each finding thread
+line has changed since it was posted. Azure DevOps has no outdated flag, so
+each finding thread
 SHALL be created with a `pullRequestThreadContext` naming the iteration it was
 posted at (retried once without it only on a 400), and the line SHALL count as
 changed only when the diff from that iteration's head to ours replaces or
@@ -223,10 +223,13 @@ resolving SHALL never fail the review.
 
 ### Requirement: Unbuilt capabilities are not claimed
 
-The adapter SHALL declare file contents, description, diagram, conversation
-reading, and thread resolution, and SHALL NOT claim incremental review, labels,
+The adapter SHALL declare file contents, description, diagram, and conversation
+reading, and SHALL NOT claim incremental review, thread resolution, labels,
 checks, feedback, or base checkout, so the caller degrades to a full review
-without them.
+without them. The thread resolution left unclaimed is the caller-directed
+capability, where the caller lists active finding threads and nominates which
+to resolve; the adapter's own resolve-on-fix above works over plain REST and
+needs no capability claim.
 <!-- anchor: azure-devops.capabilities -->
 
 #### Scenario: incremental review is probed
