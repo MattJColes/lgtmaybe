@@ -2070,6 +2070,14 @@ class LLMReviewEngine:
         findings, split_reason = on_oversized(reason, slice_hunks=slice_hunks)
         if split_reason is None:
             return completed + findings, None
+        if isinstance(split_reason, _PiecesReason):
+            # The split worked — the payload shrank and a piece answered — so the
+            # remaining failure is a transient provider blip on one piece, and the
+            # reason already carries that piece's retry. Escalating here re-sends
+            # the request the split just recovered from and replaces the piece
+            # reason with the fallback's own failure, so the rescue wave would
+            # replay the oversized whole batch the split exists to avoid.
+            return completed + findings, split_reason
         # The pieces did not cover the batch either, so the payload was
         # never the whole story. Last rung: the same request, a different
         # model. Any findings the pieces did manage ride along, and the
