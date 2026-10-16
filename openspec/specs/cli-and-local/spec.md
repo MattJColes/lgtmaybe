@@ -34,7 +34,7 @@ The split is rendering only: every option parses the same either way.
 
 ### Requirement: One orchestrator behind every entrypoint
 
-`run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, `action`, and `gitlab-ci` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path, and so SHALL every `gitlab-ci` pipeline with `incremental` unset (GitLab CI has no synchronize action; the missing watermark makes the first pipeline full); explicit `incremental: false`, `gitlab-ci --no-incremental` / `LGTMAYBE_INCREMENTAL=false`, and `/review full` SHALL run a full review.
+`run_review` SHALL orchestrate the shared flow — completed-head read, whole-PR risk assessment, same-head and unchanged-diff no-op, incremental vs full decision, explicit earlier-finding validation, engine call, posting, and completion stamping — so `review`, `comment`, `action`, and `gitlab-ci` never duplicate review logic. Automatic synchronize runs SHALL use the hybrid incremental path, and so SHALL every `gitlab-ci` pipeline with `incremental` unset (GitLab CI has no synchronize action; the missing watermark makes the first pipeline full); explicit `incremental: false`, `gitlab-ci --no-incremental` / `LGTMAYBE_INCREMENTAL=false`, and `/review full` SHALL run a full review.
 <!-- anchor: cli.run-review -->
 
 #### Scenario: Action synchronize event
@@ -424,7 +424,7 @@ uses a legacy Windows encoding.
 
 ### Requirement: Starter workflows enable the automatic change overview
 
-The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events from the full current PR context (unless the PR already diagrams the change, below), post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
+The supplied GitHub Actions starter workflows SHALL rely on the automatic change overview being enabled by default, and the dogfood workflow SHALL keep the same setting while using the faster default review preset. When enabled, the overview SHALL refresh on `opened`, `reopened`, and `synchronize` events, and on an `edited` event that moves the base branch, from the full current PR context (unless the PR already diagrams the change, below), post after the review result, and carry the head marker that proves the end-to-end run completed. When explicitly disabled, the posted review result alone SHALL be the completion watermark.
 <!-- anchor: cli.starter-workflow-diagrams -->
 
 #### Scenario: New repository adopts a supplied workflow

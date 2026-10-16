@@ -1,0 +1,25 @@
+# ast-grep anchors for stacked-pull-requests - see "Living specs" in AGENTS.md.
+
+stack.context:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fetch_stack$' }
+  files: [src/lgtmaybe/github/**/*.py]
+
+stack.prompt-block:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^wrap_stack$' }
+  files: [src/lgtmaybe/engine/**/*.py]
+
+stack.unchanged-rebase:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_diff_unchanged_since$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+stack.retarget:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^base_changed$' }
+  files: [src/lgtmaybe/cli/**/*.py]

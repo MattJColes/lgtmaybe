@@ -169,6 +169,14 @@ host.** Host differences: `docs/explanation/architecture.md` and
   never fails the review.
 - **Clean review:** `👍 LGTM!` as a comment, never approval state, naming the
   model. A bad `summary_template` falls back to the built-in line.
+- **Stacked PRs (GitHub only):** the gateway fills `PRContext.stack` from the
+  native `stack` object, else a same-repository base-branch chain (capped,
+  best-effort, never fails a review); the engine sends it redacted as a STACK
+  block on the shared prefix, zero bytes outside a stack. A
+  `<!-- lgtmaybe-diff:… -->` fingerprint (`core/diff.diff_fingerprint`) rides
+  beside the watermark, so a rebase that leaves the diff unchanged is skipped.
+  `edited` with `changes.base` is a full review; any other `edited` reviews
+  nothing. Detail: `docs/how-to/review-stacked-pull-requests.md`.
 
 ## Security Rules
 
@@ -179,9 +187,10 @@ and what we look for in the PR.
   everywhere they flow; on a fork PR they are attacker-chosen.
 - **Injection defence** (`engine/injection.py`): each untrusted block gets its
   own marker family (`_FAMILIES`: DIFF, INTENT, HINTS, CONTEXT, SPEC,
-  VALIDATION, HIDDEN, SIGNALS) via its `wrap_*` helper, and forged markers of
-  every family are neutralised in every block. Other untrusted text goes through
-  `injection.neutralise`. A new untrusted block gets its own family and a test.
+  VALIDATION, HIDDEN, SIGNALS, STACK) via its `wrap_*` helper, and forged
+  markers of every family are neutralised in every block. Other untrusted text
+  goes through `injection.neutralise`. A new untrusted block gets its own family
+  and a test.
 - **Redaction before egress** (`engine/redact.py`): cloud and SaaS keys, PEM
   blocks, quoted passwords, `Authorization` headers, connection strings.
   Everything sent to a model is redacted, not only the diff.
