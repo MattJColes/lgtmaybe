@@ -7,6 +7,53 @@
 exclude_paths:
   - docs/llms*.txt            # whole-docs corpus + index (generate_llms_txt.py)
   - docs/reference/config.md  # generated from ReviewConfig (generate_reference.py)
+  - tests/snapshots/**        # generated schema snapshots of the models
+  - CHANGELOG.md              # written by release-please
+  # Eval fixtures plant bugs on purpose: a finding on one is noise, not a catch.
+  - evals/fixtures/**
+
+# What this repository is, so the review is calibrated to it. lgtmaybe runs in
+# other people's CI with secrets in scope and reads diffs written by strangers.
+project:
+  stage: production
+  domain: AI code reviewer run in CI
+  notes: >-
+    lgtmaybe reads untrusted pull request diffs while CI secrets and cloud
+    credentials are in scope, and sends redacted diff text to a model
+    provider. A change that weakens prompt-injection wrapping, secret
+    redaction, the fork-safety rule (never check out or run PR code), or
+    structured-output validation is a security regression, even when it
+    looks like a refactor. core/ports.py is a frozen contract that every
+    adapter implements.
+
+# Files the importer scan can't rank as central but are: the hardening that
+# stands between an attacker's diff and our secrets, the frozen ports, and the
+# Action's entrypoint. A change to one is at least `high` risk.
+risk:
+  core_paths:
+    - src/lgtmaybe/engine/injection.py
+    - src/lgtmaybe/engine/redact.py
+    - src/lgtmaybe/core/ports.py
+    - action.yml
+    - Dockerfile
+
+directory_rules:
+  - paths:
+      - src/lgtmaybe/engine/injection.py
+      - src/lgtmaybe/engine/redact.py
+    instructions: >-
+      These files are a security boundary. Treat any change that lets diff or
+      PR text escape its data block, or lets text leave for the model before
+      redaction, as a security finding, even when it looks like a refactor.
+    context_files:
+      - openspec/specs/hardening/spec.md
+  - paths:
+      - tests/**
+    instructions: >-
+      Tests may use hard-coded secrets, fake tokens, injection payloads and
+      deliberately malformed input as fixtures. Flag them only when they could
+      leak a real credential. Prefer findings about missing assertions or a
+      test that cannot fail.
 
 # Bound what one call may generate — and, more to the point, bound what a
 # RUNAWAY call may generate.
