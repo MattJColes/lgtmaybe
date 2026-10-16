@@ -188,7 +188,9 @@ not prove a broken schema mode.
 After the fan-out, findings SHALL be merged and de-duplicated keyed on
 path/line/side, so overlapping lenses never post the same comment twice. The
 merge SHALL run after suppression and the evidence gate, so a copy those drop
-never displaces its location's surviving finding. Scan findings SHALL also be
+never displaces its location's surviving finding. At a shared key the merge
+SHALL prefer an anchored finding over an unanchored one, because an unanchored
+line is the model's guess. Scan findings SHALL also be
 keyed on their title, so distinct tool hits never merge with each other or with
 a model finding.
 <!-- anchor: engine.dedupe -->
@@ -201,6 +203,12 @@ a model finding.
 - **WHEN** a critical finding with no failure scenario and an evidenced medium
   finding share a line
 - **THEN** the evidenced finding survives, and the review is not reported clean
+
+#### Scenario: an unanchored copy would win the location
+- **WHEN** an anchored medium finding and an unanchored medium finding with a
+  longer body share a line
+- **THEN** the anchored finding survives, so the unanchored severity floor
+  cannot empty the review into a false clean verdict
 
 #### Scenario: two advisories at one lockfile line
 - **WHEN** osv-scanner reports two advisories, both at line 1 of `uv.lock`

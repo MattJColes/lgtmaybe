@@ -3523,9 +3523,12 @@ def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
     surface nuance — not duplicate inline comments.
 
     Selection policy (deterministic):
-    1. Highest severity wins.
-    2. On a tie: the finding with the longer body wins (more context is more useful).
-    3. On a further tie: the first in input order wins (stable, provider-independent).
+    1. An anchored finding beats an unanchored one: only its line is verified,
+       and an unanchored winner would then fall to the unanchored severity
+       floor, taking the location's real finding with it.
+    2. Highest severity wins.
+    3. On a tie: the finding with the longer body wins (more context is more useful).
+    4. On a further tie: the first in input order wins (stable, provider-independent).
 
     Scan findings are keyed on their title (`tool: rule`) too, so distinct tool
     hits never merge with each other or with a model finding: osv-scanner puts
@@ -3540,6 +3543,11 @@ def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
         existing = best.get(key)
         if existing is None:
             best[key] = finding
+        elif finding.anchored != existing.anchored:
+            # An unanchored finding's line is the model's guess, so it never
+            # displaces an anchored one at the same key (issue #748).
+            if finding.anchored:
+                best[key] = finding
         elif finding.severity.rank > existing.severity.rank:
             best[key] = finding
         elif finding.severity.rank == existing.severity.rank and len(finding.body) > len(

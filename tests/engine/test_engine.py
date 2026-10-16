@@ -941,6 +941,55 @@ def test_dedupe_tie_break_is_deterministic_by_longer_body() -> None:
     assert findings[0].title == "Long body finding"
 
 
+def test_dedupe_prefers_the_anchored_finding_at_a_shared_location() -> None:
+    # Issue #748: an unanchored finding's line is the model's own guess, so it
+    # must not win a location from the finding whose anchor matched. Before the
+    # fix the unanchored copy won on its longer body, then the unanchored
+    # severity floor dropped it and took the real finding with it: a false LGTM.
+    ctx = PRContext(
+        diff=(
+            "diff --git a/app.py b/app.py\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " def run():\n"
+            "+    y = eval(user_input)\n"
+            "     return y\n"
+        ),
+        changed_files=["app.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    anchored = ReviewFinding(
+        path="app.py",
+        line=2,
+        severity=Severity.medium,
+        title="eval of user input",
+        body="short",
+        anchor="y = eval(user_input)",  # the diff's one changed line
+    )
+    unanchored = ReviewFinding(
+        path="app.py",
+        line=2,
+        severity=Severity.medium,
+        title="longer correctness wording",
+        body="a far longer body that wins the tie under the old severity-then-length policy",
+        anchor="x = not_in_this_diff()",  # matches nothing: line 2 is a guess
+    )
+    provider = _provider_for([anchored, unanchored], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, summary = engine.review(ctx, cfg)
+
+    assert len(findings) == 1
+    assert findings[0].title == "eval of user input"
+    assert findings[0].anchored is True
+    assert "LGTM" not in summary
+
+
 def _per_lens_provider(by_section: dict[str, list[dict[str, object]]]) -> FakeProvider:
     """A provider answering each lens by the section header in its final block."""
 
