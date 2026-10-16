@@ -33,9 +33,11 @@ from urllib.parse import quote
 import httpx
 
 from lgtmaybe.core.comment import (
+    DESCRIBE_MARKER_FAMILY,
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
     REVIEWED_MARKER,
+    diagrammed_marker,
     finding_keys,
     last_match,
     marker,
@@ -43,6 +45,7 @@ from lgtmaybe.core.comment import (
     render_broad,
     render_demoted,
     render_inline_body,
+    reviewed_marker,
     stamped_ids,
     strip_markers,
     unposted,
@@ -124,7 +127,7 @@ class GitLabGateway:
         # what the user configured, while GitHub honoured it.
         self._resolve_fixed = resolve_fixed
         self._marker = marker("lgtmaybe", marker_key)
-        self._describe_marker = marker("lgtmaybe-describe", marker_key)
+        self._describe_marker = marker(DESCRIBE_MARKER_FAMILY, marker_key)
         self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._head_sha: str | None = None
         # The three SHAs every positioned discussion must carry. Cached from the
@@ -239,10 +242,10 @@ class GitLabGateway:
         The summary note carries the incremental-review watermark, under three
         rules:
 
-        - Any ``<!-- lgtmaybe-reviewed:<sha> -->`` already in the summary or the
+        - Any ``REVIEWED_MARKER`` watermark already in the summary or the
           demoted/broad findings is stripped. That text includes model prose,
           and a forged marker there must never become the watermark.
-        - A new ``<!-- lgtmaybe-reviewed:<sha> -->`` is appended only when the
+        - A new ``reviewed_marker(sha)`` is appended only when the
           orchestrator called ``mark_reviewed(sha)`` on the success path. A
           failure notice or partial run calls ``mark_reviewed(None)`` and can
           never stamp the new head.
@@ -275,7 +278,7 @@ class GitLabGateway:
         # of erasing it: those commits were reviewed, and nothing since was.
         watermark = self._reviewed_sha or self._carried_marker(self._marker, REVIEWED_MARKER)
         if watermark:
-            body += f"\n<!-- lgtmaybe-reviewed:{watermark} -->"
+            body += f"\n{reviewed_marker(watermark)}"
         self._upsert_note(body, self._marker)
         if self._resolve_fixed:
             self._resolve_fixed_threads()
@@ -313,7 +316,7 @@ class GitLabGateway:
         stamp = completed_sha or self._carried_marker(self._diagram_marker, DIAGRAMMED_MARKER)
         body = f"{body}\n\n{self._diagram_marker}"
         if stamp:
-            body += f"\n<!-- lgtmaybe-diagrammed:{stamp} -->"
+            body += f"\n{diagrammed_marker(stamp)}"
         self._upsert_note(body, self._diagram_marker)
 
     def list_conversation_comments(self) -> list[tuple[str, str]]:

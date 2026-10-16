@@ -23,11 +23,13 @@ import httpx
 from tenacity import Retrying, retry_if_result, stop_after_attempt
 
 from lgtmaybe.core.comment import (
+    DESCRIBE_MARKER_FAMILY,
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
     REVIEWED_DIFF_MARKER,
     REVIEWED_MARKER,
     current_finding_keys,
+    diagrammed_marker,
     finding_keys,
     last_match,
     marker,
@@ -35,6 +37,9 @@ from lgtmaybe.core.comment import (
     render_broad,
     render_demoted,
     render_inline_body,
+    retire_stamped_ids,
+    reviewed_diff_marker,
+    reviewed_marker,
     split_stamped_ids,
     stamped_ids,
     strip_markers,
@@ -68,7 +73,7 @@ _log = get_logger(__name__)
 # PR's file listing — is not. The timeout exists to cap a hung socket, not to
 # race a slow-but-healthy response into a failed review.
 _TIMEOUT = httpx.Timeout(60.0)
-_MARKER = "<!-- lgtmaybe -->"
+_MARKER = marker("lgtmaybe", None)
 _GRAPHQL_URL = "https://api.github.com/graphql"
 
 # The superset of review-thread fields used across one run. Fetching them once
@@ -98,18 +103,6 @@ _THREADS_QUERY = """
 # Stable name for the merge-gate Check Run (`fail_on`). Teams mark this exact
 # name as a required status check in branch protection, so it must not change.
 _CHECK_RUN_NAME = "lgtmaybe"
-
-# When resolve-on-fix collapses a thread, the original comment's marker is
-# rewritten into this disjoint "resolved" family so the active-marker scan
-# (``_existing_finding_keys``) no longer sees it — a finding that
-# reappears after being fixed posts again instead of being suppressed forever.
-_ACTIVE_MARKER_PREFIX = "<!-- lgtmaybe-finding:"
-_RESOLVED_MARKER_PREFIX = "<!-- lgtmaybe-resolved-fingerprint:"
-
-# The identity family's own resolved-family prefix, mirroring the fingerprint's,
-# so collapsing a thread hides both of a comment's markers from the active scan.
-_ACTIVE_IDENTITY_PREFIX = "<!-- lgtmaybe-identity:"
-_RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 
 # Hidden marker stamped into the summary review body recording the head SHA
 # this review covered, so the next run can review only the commits pushed
@@ -218,7 +211,7 @@ class RestGitHubGateway:
         # comment, and the change diagram, so an update of one never clobbers
         # another. Each is scoped to the provider/model key when there is one.
         self._marker = marker("lgtmaybe", marker_key)
-        self._describe_marker = marker("lgtmaybe-describe", marker_key)
+        self._describe_marker = marker(DESCRIBE_MARKER_FAMILY, marker_key)
         self._diagram_marker = marker(DIAGRAM_MARKER_FAMILY, marker_key)
         self._resolve_fixed = resolve_fixed
         # Per-run cache of "does this login have write+ access?" — feedback
@@ -543,9 +536,9 @@ class RestGitHubGateway:
             )
             body = f"{content}\n\n{self._marker}"
             if self._reviewed_sha:
-                body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+                body += f"\n{reviewed_marker(self._reviewed_sha)}"
                 if self._reviewed_diff:
-                    body += f"\n<!-- lgtmaybe-diff:{self._reviewed_diff} -->"
+                    body += f"\n{reviewed_diff_marker(self._reviewed_diff)}"
             return body
 
         body = build_body(demoted)
@@ -722,7 +715,7 @@ class RestGitHubGateway:
         """
         body = strip_markers(body, _DIAGRAMMED_MARKER).rstrip()
         if completed_sha is not None:
-            body = f"{body}\n\n<!-- lgtmaybe-diagrammed:{completed_sha} -->"
+            body = f"{body}\n\n{diagrammed_marker(completed_sha)}"
         self._upsert_marked_comment(body, self._diagram_marker, preserve=_DIAGRAMMED_MARKER)
 
     def list_conversation_comments(self) -> list[tuple[str, str]]:
@@ -848,7 +841,7 @@ class RestGitHubGateway:
     def last_reviewed_sha(self) -> str | None:
         """The head SHA covered by our previous review, or None.
 
-        Read the hidden ``<!-- lgtmaybe-reviewed:… -->`` marker that
+        Read the hidden ``core.comment.REVIEWED_MARKER`` watermark that
         ``post_review`` stamps into the summary — the LAST one, since the stamp
         is appended after the model prose. No prior marker or an HTTP
         lookup failure returns None, so the caller runs a full review. Invalid
@@ -1001,7 +994,7 @@ class RestGitHubGateway:
         This setter changes only in-memory request state; GitHub receives the
         marker atomically inside ``post_review``. The CLI's failure path calls
         ``mark_reviewed(None)`` so a later failure notice never stamps
-        ``<!-- lgtmaybe-reviewed:... -->`` — a failed run must not move the
+        ``core.comment.reviewed_marker`` — a failed run must not move the
         watermark.
         """
         self._reviewed_sha = head_sha
@@ -1539,9 +1532,7 @@ class RestGitHubGateway:
             # Nothing to retire: a PATCH would put the body back unchanged and
             # leave the finding suppressed, so fail and let the caller reopen.
             raise RuntimeError("the resolved comment carries no trailing id block to rewrite")
-        rewritten = prose + ids.replace(_ACTIVE_MARKER_PREFIX, _RESOLVED_MARKER_PREFIX).replace(
-            _ACTIVE_IDENTITY_PREFIX, _RESOLVED_IDENTITY_PREFIX
-        )
+        rewritten = prose + retire_stamped_ids(ids)
         self._update_review_comment(comment_id, rewritten)
 
     def _restore_comment_active(self, comment_id: int | None, body: str) -> None:
