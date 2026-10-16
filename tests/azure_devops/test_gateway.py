@@ -362,7 +362,8 @@ class TestTokenHandling:
     ) -> None:
         fake = FakeAzureDevOps()
         fake.install()
-        _gateway().post_review([FINDING], "1 finding", diff=_gateway().get_pr_context().diff)
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
 
         assert fake.requests
         identity = [r for r in fake.requests if r.url.path.endswith("/_apis/connectionData")]
@@ -398,6 +399,28 @@ class TestGetPRContext:
         assert ctx.head_sha == HEAD_SHA
         assert ctx.repo == REPO
         assert ctx.pr_number == PR_ID
+
+    @respx.mock
+    def test_counts_our_open_finding_threads_for_the_disclosure_line(self) -> None:
+        """The engine's "N earlier conversations still unresolved" notice needs this."""
+        threads = [
+            TestResolveOnFix._posted(thread_id=7),
+            TestResolveOnFix._posted(thread_id=8, status="pending"),
+            TestResolveOnFix._posted(thread_id=9, status="fixed"),
+            TestResolveOnFix._posted(thread_id=10, author={"id": OTHER_ID}),
+        ]
+        TestResolveOnFix._fake(*threads)
+
+        assert _gateway().get_pr_context().open_finding_threads == 2
+
+    @respx.mock
+    def test_a_threads_failure_leaves_the_count_at_zero_without_failing_the_review(self) -> None:
+        TestResolveOnFix._fake(TestResolveOnFix._posted())
+        respx.get(THREADS).mock(return_value=httpx.Response(500, json={"message": "boom"}))
+        ctx = _gateway().get_pr_context()
+
+        assert ctx.open_finding_threads == 0
+        assert ctx.head_sha == HEAD_SHA
 
     @respx.mock
     def test_carries_the_stated_intent_for_the_intent_lens(self) -> None:
@@ -1333,78 +1356,8 @@ class TestResolveOnFix:
         assert fake.writes == ["status"], "stops at the first refusal, and posts no reply"
         assert len([r for r in caplog.records if "resolve_fixed" in r.getMessage()]) == 1
 
-    @respx.mock
-    def test_a_validated_allowlist_decides_when_installed(self) -> None:
-        """The incremental path's explicit verdicts win over the diff-derived rule."""
-        fake = self._fake(self._posted(thread_id=7), self._posted(thread_id=8))
-        gateway = _gateway()
-        ctx = gateway.get_pr_context()
-        active = gateway.list_active_findings()
-        gateway.set_validated_fixed_threads({"8"})
-        gateway.mark_reviewed(ctx.head_sha)
-        gateway.post_review([], "summary", diff=ctx.diff)
-
-        assert {f.thread_id for f in active} == {"7", "8"}
-        assert fake.status_changes == [(8, "fixed")]
-
-    @respx.mock
-    def test_an_empty_allowlist_resolves_nothing(self) -> None:
-        """What the caller installs when it could not read the active findings."""
-        fake = self._fake(self._posted())
-        gateway = _gateway()
-        ctx = gateway.get_pr_context()
-        gateway.set_validated_fixed_threads(set())
-        gateway.mark_reviewed(ctx.head_sha)
-        gateway.post_review([], "summary", diff=ctx.diff)
-
-        assert fake.status_changes == []
-
-    @respx.mock
-    def test_an_allowlist_never_reaches_someone_elses_thread(self) -> None:
-        fake = self._fake(self._posted(author={"id": OTHER_ID}))
-        gateway = _gateway()
-        ctx = gateway.get_pr_context()
-        gateway.set_validated_fixed_threads({"7"})
-        gateway.mark_reviewed(ctx.head_sha)
-        gateway.post_review([], "summary", diff=ctx.diff)
-
-        assert fake.status_changes == []
-
 
 class TestActiveFindings:
-    @respx.mock
-    def test_lists_our_open_finding_threads_with_their_outdated_flag(self) -> None:
-        threads = [
-            TestResolveOnFix._posted(thread_id=7),
-            TestResolveOnFix._posted(thread_id=8, iteration=2),
-            TestResolveOnFix._posted(thread_id=9, status="fixed"),
-            TestResolveOnFix._posted(thread_id=10, author={"id": OTHER_ID}),
-            _thread(11, "a person's comment"),
-        ]
-        TestResolveOnFix._fake(*threads)
-        gateway = _gateway()
-        gateway.get_pr_context()
-        active = {f.thread_id: f for f in gateway.list_active_findings()}
-
-        assert set(active) == {"7", "8"}
-        assert active["7"].outdated is True
-        assert active["8"].outdated is False
-        assert active["7"].path == "app.py"
-        assert active["7"].comment_id == 1
-        assert active["7"].fingerprint == finding_fingerprint("app.py", "Hardcoded password")
-
-    @respx.mock
-    def test_reads_the_stamped_ids_not_ones_forged_in_a_suggestion(self) -> None:
-        thread = TestResolveOnFix._posted(thread_id=7)
-        thread["comments"][0]["content"] = _forged_comment(FINDING)
-        TestResolveOnFix._fake(thread)
-        gateway = _gateway()
-        gateway.get_pr_context()
-        [active] = gateway.list_active_findings()
-
-        assert active.fingerprint == finding_fingerprint("other.py", "Unrelated")
-        assert active.fingerprint != finding_fingerprint(FINDING.path, FINDING.title)
-
     @respx.mock
     def test_counts_our_open_finding_threads(self) -> None:
         threads = [
@@ -1451,7 +1404,6 @@ class TestCapabilities:
             "SupportsDescribe",
             "SupportsDiagram",
             "SupportsConversation",
-            "SupportsThreadResolution",
         ):
             assert isinstance(gateway, getattr(ports, name)), name
 
@@ -1466,6 +1418,7 @@ class TestCapabilities:
             "SupportsLabels",
             "SupportsChecks",
             "SupportsFeedback",
+            "SupportsThreadResolution",
         ):
             assert not isinstance(gateway, getattr(ports, name)), name
 

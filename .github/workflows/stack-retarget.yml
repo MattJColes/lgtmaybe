@@ -1,0 +1,45 @@
+name: stack-retarget
+
+# A stacked pull request targets the branch of the PR below it. Squash-merging
+# that lower PR leaves its branch behind, and GitHub only retargets the PRs
+# above it when the branch is deleted. An upper PR merged after that lands on
+# the dead branch instead of main: its commit never reaches main, so
+# release-please never puts it in the changelog (#784 to #797 were stranded
+# this way). This moves every open child onto the merged PR's own base as soon
+# as it merges, so each layer squash-merges to main under its own title.
+#
+# Plain pull_request: a merge from this repository already gets a write token,
+# and a fork's merge is skipped below. Nothing is checked out or run, only REST
+# calls. Branch names are author-chosen, so they reach the shell through env,
+# never `${{ }}`.
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  retarget:
+    # A fork's head branch is not a branch here, so it has no children here.
+    if: github.event.pull_request.merged && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Move open children onto the merged base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGED: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" --paginate \
+            -f state=open -f base="$HEAD_REF" --jq '.[].number' > children.txt
+          while read -r pr; do
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$pr" -f base="$BASE_REF" --silent
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --silent -f body="Retargeted from \`$HEAD_REF\` to \`$BASE_REF\` because #$MERGED merged. Merge \`$BASE_REF\` into this branch so the diff shows only this layer.
+
+          ---
+          _Posted by the stack-retarget workflow_"
+            echo "Retargeted #$pr onto $BASE_REF"
+          done < children.txt

@@ -296,6 +296,45 @@ def test_recursive_off_sends_the_oversize_file_whole() -> None:
         assert f"marker_{h}_line_0" in content
 
 
+def test_multi_batch_reflection_prompt_fits_the_budget_and_notices_the_trim() -> None:
+    """Issue #758: a review split across batches joins every batch into the
+    diff reflection receives, which can run several times the model-fitted
+    input budget and get the audit rejected outright (the findings then ship
+    unaudited). The audit is trimmed to the flagged files, its prompt fits the
+    budget, and the summary says the diff was trimmed."""
+
+    def patch(path: str, lines: int) -> str:
+        body = "".join(f"+added line {i} in {path}\n" for i in range(lines))
+        return (
+            f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+            "@@ -1,3 +1,4 @@\n context\n" + body + " context\n"
+        )
+
+    ctx = PRContext(
+        diff="".join(patch(path, 250) for path in ("a.py", "b.py", "c.py")),
+        changed_files=["a.py", "b.py", "c.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    cfg = make_cfg(
+        categories=[ReviewCategory.security],
+        max_input_tokens=6_000,
+        reflect=True,
+    )
+    provider = _provider_for([_HIGH])
+
+    findings, summary = LLMReviewEngine(provider).review(ctx, cfg)
+
+    (reflection,) = _reflection_calls(provider)
+    prompt = "\n".join(str(m["content"]) for m in reflection["messages"])
+    assert count_tokens(prompt) <= 6_000
+    assert "+added line 0 in b.py" not in prompt  # unflagged batches trimmed
+    assert findings, "the audit ran and kept the finding"
+    assert "self-reflection audit ran on a trimmed diff" in summary
+
+
 # ---------------------------------------------------------------------------
 # min_severity filtering
 # ---------------------------------------------------------------------------
@@ -941,6 +980,103 @@ def test_dedupe_tie_break_is_deterministic_by_longer_body() -> None:
     assert findings[0].title == "Long body finding"
 
 
+def test_dedupe_prefers_the_anchored_finding_at_a_shared_location() -> None:
+    # Issue #748: an unanchored finding's line is the model's own guess, so it
+    # must not win a location from the finding whose anchor matched. Before the
+    # fix the unanchored copy won on its longer body, then the unanchored
+    # severity floor dropped it and took the real finding with it: a false LGTM.
+    ctx = PRContext(
+        diff=(
+            "diff --git a/app.py b/app.py\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " def run():\n"
+            "+    y = eval(user_input)\n"
+            "     return y\n"
+        ),
+        changed_files=["app.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    anchored = ReviewFinding(
+        path="app.py",
+        line=2,
+        severity=Severity.medium,
+        title="eval of user input",
+        body="short",
+        anchor="y = eval(user_input)",  # the diff's one changed line
+    )
+    unanchored = ReviewFinding(
+        path="app.py",
+        line=2,
+        severity=Severity.medium,
+        title="longer correctness wording",
+        body="a far longer body that wins the tie under the old severity-then-length policy",
+        anchor="x = not_in_this_diff()",  # matches nothing: line 2 is a guess
+    )
+    provider = _provider_for([anchored, unanchored], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, summary = engine.review(ctx, cfg)
+
+    assert len(findings) == 1
+    assert findings[0].title == "eval of user input"
+    assert findings[0].anchored is True
+    assert "LGTM" not in summary
+
+
+def test_dedupe_anchored_beats_higher_severity_unanchored() -> None:
+    # Anchoredness outranks severity outright: a critical finding whose anchor
+    # matched nothing (its line is the model's guess) must not displace a
+    # medium finding on the diff's verified changed line.
+    ctx = PRContext(
+        diff=(
+            "diff --git a/app.py b/app.py\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " def run():\n"
+            "+    y = eval(user_input)\n"
+            "     return y\n"
+        ),
+        changed_files=["app.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    anchored = ReviewFinding(
+        path="app.py",
+        line=2,
+        severity=Severity.medium,
+        title="eval of user input",
+        body="short",
+        anchor="y = eval(user_input)",  # the diff's one changed line
+    )
+    unanchored = ReviewFinding(
+        path="app.py",
+        line=2,
+        severity=Severity.critical,
+        title="critical wording",
+        body="a far longer body at a higher severity",
+        anchor="x = not_in_this_diff()",  # matches nothing: line 2 is a guess
+    )
+    provider = _provider_for([unanchored, anchored], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    findings, summary = engine.review(ctx, cfg)
+
+    assert len(findings) == 1
+    assert findings[0].title == "eval of user input"
+    assert findings[0].anchored is True
+    assert "LGTM" not in summary
+
+
 def _per_lens_provider(by_section: dict[str, list[dict[str, object]]]) -> FakeProvider:
     """A provider answering each lens by the section header in its final block."""
 
@@ -1013,6 +1149,45 @@ def test_a_suppressed_finding_does_not_displace_another_at_its_line() -> None:
 
     assert [f.title for f in findings] == ["N+1 query"]
     assert "1 finding suppressed" in summary
+
+
+def test_an_opposed_pair_reaches_arbitration_before_the_location_merge() -> None:
+    # Issue #752: dedupe picked by severity and collapsed an opposed pair before
+    # either referee saw it, so the code-cutting advice posted and the fix on the
+    # same line was lost. The pair must be arbitrated before the merge: the lens
+    # that cuts code yields to the one that fixes.
+    guard_is_wrong = {
+        "path": "a.py",
+        "line": 2,
+        "severity": "low",
+        "title": "guard is wrong",
+        "body": "the bounds check uses the wrong index",
+        "failure_scenario": "With an empty list the guard reads index 0 and raises.",
+    }
+    cut_the_guard = {
+        "path": "a.py",
+        "line": 2,
+        "severity": "medium",
+        "title": "delete this guard",
+        "body": "the caller already validates this",
+    }
+    provider = _per_lens_provider(
+        {
+            "## Correctness & logic": [guard_is_wrong],
+            "## Ponytail": [cut_the_guard],
+        }
+    )
+    cfg = ReviewConfig(
+        provider=Provider.ollama,
+        model="llama3",
+        reflect=False,
+        preset="full",
+        categories=[ReviewCategory.correctness, ReviewCategory.ponytail],
+    )
+
+    findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
+
+    assert [f.title for f in findings] == ["guard is wrong"]
 
 
 def _code_health_finding(category: str | None) -> list[dict[str, object]]:
@@ -2339,7 +2514,12 @@ def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: i
 # ---------------------------------------------------------------------------
 
 
-def _scan_hit(path: str = "f.py", line: int = 2):  # type: ignore[no-untyped-def]
+def _scan_hit(  # type: ignore[no-untyped-def]
+    path: str = "f.py",
+    line: int = 2,
+    rule: str = "aws-access-key-id",
+    severity: Severity = Severity.high,
+):
     """A gitleaks hit (posts directly only when opted into finding mode)."""
     from lgtmaybe.engine.static_analysis import ToolFinding
 
@@ -2347,9 +2527,9 @@ def _scan_hit(path: str = "f.py", line: int = 2):  # type: ignore[no-untyped-def
         tool="gitleaks",
         path=path,
         line=line,
-        rule="aws-access-key-id",
+        rule=rule,
         message="AWS Access Key",
-        severity=Severity.high,
+        severity=severity,
     )
 
 
@@ -2429,6 +2609,149 @@ def test_scan_finding_on_an_unchanged_line_is_dropped(monkeypatch) -> None:  # t
 
     assert findings == []
     assert "unchanged" in summary.lower()
+
+
+def test_the_scan_cap_scopes_to_the_diff_before_capping(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A file with many pre-existing hits plus one new one: the cap kept the 20
+    most severe (all on unchanged line 1, all dropped later as off-diff) and cut
+    the new hit on the changed line, so nothing posted (issue #751)."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    olds = [_scan_hit(line=1, rule=f"old-{i}") for i in range(MAX_SCAN_FINDINGS)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [*olds, _scan_hit(line=2, rule="new")],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    assert [f.title for f in findings] == ["gitleaks: new"]
+
+
+def test_on_diff_scan_findings_are_capped_most_severe_first(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The cap moved to after diff scoping, but its job is unchanged: one
+    over-broad rule pack must not open a comment per hit."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    lows = [_scan_hit(line=2, rule=f"low-{i}") for i in range(MAX_SCAN_FINDINGS)]
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [*lows, _scan_hit(line=2, rule="crit", severity=Severity.critical)],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    assert len(findings) == MAX_SCAN_FINDINGS
+    assert findings[0].severity is Severity.critical
+
+
+def test_model_findings_survive_the_scan_cap(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The cap rebuilds all_findings as non-scan findings plus the capped
+    scans; a model finding present when the cap triggers must ride through
+    that recombination, neither dropped nor duplicated."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
+    model_note = ReviewFinding(
+        path="f.py",
+        line=2,
+        severity=Severity.medium,
+        title="model note",
+        body="on the added line",
+        anchor="new",
+    )
+    provider = _provider_for([model_note], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    assert len(findings) == MAX_SCAN_FINDINGS + 1
+    assert [f.title for f in findings].count("model note") == 1
+
+
+def test_suppressed_scan_findings_do_not_spend_cap_slots(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The cap runs after suppression: a hit a team ignored can never post, so
+    it must not spend a cap slot — the slot goes to the next on-diff hit."""
+    from lgtmaybe.core.findings import finding_fingerprint
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+    # _finding_mode_cfg overrides land on the static-analysis sub-config, so
+    # the fingerprint list goes on the ReviewConfig itself.
+    cfg = _finding_mode_cfg().model_copy(
+        update={"ignore_fingerprints": [finding_fingerprint("f.py", "gitleaks: s-0")]}
+    )
+
+    findings, _summary = engine.review(_HINT_CTX, cfg)
+
+    titles = {f.title for f in findings}
+    assert len(findings) == MAX_SCAN_FINDINGS
+    assert "gitleaks: s-0" not in titles
+    # The slot s-0 vacated: the first hit past the cap posts through it.
+    assert "gitleaks: s-20" in titles
+
+
+def test_scan_cap_considered_count_is_the_pre_cap_count(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`considered` must report the scan findings that existed before the cap,
+    not the capped survivors it was measured against."""
+    from lgtmaybe.engine.static_analysis import MAX_SCAN_FINDINGS
+
+    scans = [_scan_hit(line=2, rule=f"s-{i}") for i in range(MAX_SCAN_FINDINGS + 5)]
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: scans)
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    with caplog.at_level(logging.INFO, logger="lgtmaybe.engine.engine"):
+        engine.review(_HINT_CTX, _finding_mode_cfg())
+
+    capped = [r for r in caplog.records if "capped" in r.getMessage()]
+    assert capped, "the cap must have logged"
+    assert getattr(capped[0], "kept", None) == MAX_SCAN_FINDINGS
+    assert getattr(capped[0], "considered", None) == MAX_SCAN_FINDINGS + 5
+
+
+_CAP_CTX = PRContext(
+    diff=(
+        "diff --git a/f.py b/f.py\n@@ -1 +1,2 @@\n old\n+new\n"
+        "diff --git a/g.py b/g.py\n@@ -1 +1,2 @@\n old\n+gnew\n"
+    ),
+    changed_files=["f.py", "g.py"],
+    base_sha="abc",
+    head_sha="def",
+    repo="org/repo",
+    pr_number=3,
+    file_contents={"f.py": "old\nnew\n", "g.py": "old\ngnew\n"},
+)
+
+
+def test_a_scan_finding_on_a_file_the_cap_dropped_still_posts(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The file cap bounds the model's reading list, not the scanners': the
+    corpus was built before the cap, so the finding must snap against the diff
+    as the corpus saw it. Snapping it against the capped reviewed_diff failed to
+    anchor and dropped it with a false "unchanged lines" notice (issue #750)."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_scan_hit(path="g.py", line=2)],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    findings, summary = engine.review(
+        _CAP_CTX, _finding_mode_cfg().model_copy(update={"max_files": 1})
+    )
+
+    assert [(f.path, f.line) for f in findings] == [("g.py", 2)]
+    assert "unchanged" not in summary.lower()
 
 
 # ---------------------------------------------------------------------------

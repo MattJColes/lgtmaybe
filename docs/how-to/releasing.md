@@ -42,11 +42,47 @@ work out the next version.
 
 ## Contents
 
+- [Stacked Pull Requests](#stacked-pull-requests)
 - [The Homebrew Formula](#the-homebrew-formula)
 - [One-Time Setup](#one-time-setup)
 - [Each Release](#each-release)
 - [Rotate the Public App Private Key](#rotate-the-public-app-private-key)
 - [Before Going Public](#before-going-public)
+
+## Stacked Pull Requests
+
+release-please only sees commits that reach `main`. A stacked PR targets the
+branch of the PR below it, so it can miss `main` entirely:
+
+1. The bottom PR squash-merges into `main`. Its branch stays behind.
+2. GitHub retargets the PRs above it only when that branch is deleted.
+3. An upper PR merged now lands on the old branch, not `main`. Its
+   conventional commit never reaches the changelog.
+
+`.github/workflows/stack-retarget.yml` stops this. When a PR merges, it moves
+every open PR based on the merged branch onto the merged PR's own base, and
+comments on each one. Merge the new base into a retargeted branch before you
+merge it, so its diff shows only that layer.
+
+GitHub starts no workflow for a merge made with another workflow's
+`GITHUB_TOKEN`. After a merge like that, check the base of the layers above it.
+
+If a layer has already landed on a dead branch, open one PR that brings that
+branch into `main`. Its squash commit is a single commit, so list every
+stranded layer in the PR body between `BEGIN_COMMIT_OVERRIDE` and
+`END_COMMIT_OVERRIDE`. release-please then reads those lines instead of the
+squash message:
+
+```text
+BEGIN_COMMIT_OVERRIDE
+fix(engine): keep scan findings on files triage dropped (#789)
+
+fix: escape the describe fallback text before posting it (#791)
+END_COMMIT_OVERRIDE
+```
+
+You can edit the override after the merge. release-please reads it on its next
+run.
 
 ## The Homebrew Formula
 

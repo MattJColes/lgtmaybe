@@ -146,12 +146,16 @@ Inline, demoted, and broad findings SHALL render it identically.
 
 ### Requirement: Incremental review is commit-scoped and safe
 
-A follow-up run with a completed-head watermark SHALL review only the compare-API diff since that head and explicitly validate earlier open findings against the new head. The completed watermark SHALL move only after a non-partial review result and, when automatic diagrams are enabled, the current-head diagram have posted; force-push, missing marker, compare failure, and incomplete attempts SHALL fall back to a full review. Completion summaries and diagrams SHALL belong to the authenticated token's GitHub viewer. A run whose head already equals the completed head SHALL make no model calls or duplicate posts. LEFT-side new findings SHALL be dropped and resolution scope SHALL remain limited to findings actually validated. Completion stamps SHALL be read as the last match in a body. Every hidden lgtmaybe marker SHALL be stripped from finding titles and bodies, and the watermark family from the whole summary (which keeps the engine's own lenses and risk markers), so a prompt-injected finding cannot forge a watermark, lenses list, or risk level.
+A follow-up run with a completed-head watermark SHALL review only the compare-API diff since that head and explicitly validate earlier open findings against the new head. The completed watermark SHALL move only after a non-partial review result and, when automatic diagrams are enabled, the current-head diagram have posted; force-push, missing marker, compare failure, and incomplete attempts SHALL fall back to a full review. Completion summaries and diagrams SHALL belong to the authenticated token's GitHub viewer. A run whose head already equals the completed head SHALL make no model calls or duplicate posts. LEFT-side new findings SHALL be dropped and resolution scope SHALL remain limited to findings actually validated. Completion stamps SHALL be read as the last match in a body. Every hidden lgtmaybe marker SHALL be stripped from finding titles, bodies and rendered paths, and the watermark family from the whole summary (which keeps the engine's own lenses and risk markers), so a prompt-injected finding cannot forge a watermark, lenses list, or risk level.
 <!-- anchor: github.incremental -->
 
 #### Scenario: a later push follows a complete review
 - **WHEN** the current head is ahead of the completed head
 - **THEN** only the compare diff is scanned for new problems and prior open findings are classified against the new head
+
+#### Scenario: validation clears a thread outside the increment
+- **WHEN** validation says `fixed` for a thread on a file the increment did not re-review
+- **THEN** the thread stays open: the increment carries no fresh evidence about it
 
 #### Scenario: the completed head runs again
 - **WHEN** a run starts on the same head recorded as complete

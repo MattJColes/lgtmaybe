@@ -42,6 +42,16 @@ _DIFF_FORMAT = (
 )
 
 
+class LocalGitError(Exception):
+    """A git command hung past ``_TIMEOUT`` seconds.
+
+    Deliberately not a ValueError: this module's ``except ValueError``
+    fallbacks (repo root, branch, default base) degrade on a git *failure*
+    and must never swallow a hung git. The CLI layer converts it into a
+    clean ClickException for the user.
+    """
+
+
 def local_pr_context(
     *,
     base: str | None = None,
@@ -65,7 +75,8 @@ def local_pr_context(
     Commit subjects between the base and HEAD are collected in branch and
     working mode (the stated intent for the intent lens); uncommitted edits are
     not described by any commit, so ``uncommitted`` mode collects none. Raises
-    ValueError when git is missing or this is not a git repository.
+    ValueError when git is missing or this is not a git repository, and
+    LocalGitError when a git command hangs.
     """
     if working and uncommitted:
         raise ValueError("--working and --uncommitted are mutually exclusive")
@@ -108,10 +119,12 @@ def local_pr_context(
             diff += _untracked_patches(cwd, untracked)
             changed_files += untracked
 
-    # Working-tree text for the changed files. Static analysis has never run on
-    # the local CLI because nothing populated these; the reader is the same
-    # traversal-guarded one reflection already uses.
-    read = local_file_reader(cwd)
+    # Head text for the changed files. Branch mode reviews base...HEAD, so its
+    # text is HEAD's blob: reading the working tree instead would mix
+    # uncommitted edits into the context expansion and every anchor, garbling
+    # the code the model sees. --working/--uncommitted review the worktree, so
+    # they keep the traversal-guarded working-tree reader reflection uses.
+    read = local_file_reader(cwd) if working or uncommitted else local_head_file_reader(cwd)
     file_contents: dict[str, str] = {}
     scan_contents: dict[str, str] = {}
     for path in changed_files:
@@ -161,6 +174,24 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
             target.relative_to(root)  # refuse paths that climb out of the repo
             return target.read_text(encoding="utf-8", errors="replace")
         except (OSError, ValueError):
+            return None
+
+    return read
+
+
+def local_head_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
+    """A HEAD-blob file reader: the text at HEAD, not the working tree's.
+
+    Same interface as ``local_file_reader``, but the blob comes from
+    ``git show HEAD:<path>``, so branch mode serves the exact text its
+    ``base...HEAD`` diff describes. A path HEAD does not hold (a file the
+    branch deletes, an untracked one) reads as None, like a missing file.
+    """
+
+    def read(path: str) -> str | None:
+        try:
+            return _git(cwd, "show", f"HEAD:{path}")
+        except ValueError:
             return None
 
     return read
@@ -235,7 +266,11 @@ def _untracked_patches(cwd: Path | None, paths: list[str]) -> str:
 
 
 def _git(cwd: Path | None, *args: str) -> str:
-    """Run a git command and return stdout; raise ValueError on failure."""
+    """Run a git command and return stdout.
+
+    Raises ValueError when git fails (not installed, non-zero exit) and
+    LocalGitError when it hangs past ``_TIMEOUT`` seconds.
+    """
     try:
         result = subprocess.run(
             ["git", *_QUOTE_PATH_OFF, *args],
@@ -251,6 +286,8 @@ def _git(cwd: Path | None, *args: str) -> str:
         raise ValueError("git is not installed or not on PATH") from exc
     except subprocess.CalledProcessError as exc:
         raise ValueError(f"git {' '.join(args)} failed: {exc.stderr.strip()}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise LocalGitError(f"git {' '.join(args)} timed out after {_TIMEOUT}s") from exc
     return result.stdout
 
 

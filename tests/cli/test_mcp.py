@@ -163,6 +163,22 @@ class TestReviewChangesTool:
         with pytest.raises(ReviewToolError, match="not a git repository"):
             _tools().review_changes()
 
+    def test_git_timeout_keeps_its_own_message(self, monkeypatch) -> None:
+        """A hung git surfaces with its own message, not the generic
+        "review failed" prefix: run_local_review converts the local module's
+        error at the cli seam before this layer sees it."""
+        from lgtmaybe.local import LocalGitError
+
+        _patch_local(monkeypatch)
+
+        def hung_git(**_kwargs: Any) -> PRContext:
+            raise LocalGitError("git diff timed out after 120s")
+
+        monkeypatch.setattr(cli_module, "local_pr_context", hung_git)
+
+        with pytest.raises(ReviewToolError, match=r"^git diff timed out after 120s"):
+            _tools().review_changes()
+
     def test_config_error_is_a_tool_error(self, monkeypatch) -> None:
         _patch_local(monkeypatch)
 

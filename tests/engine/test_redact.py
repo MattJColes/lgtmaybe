@@ -450,3 +450,166 @@ def test_pem_pattern_is_not_quadratic() -> None:
     start = time.perf_counter()
     redact(pathological)
     assert time.perf_counter() - start < 2.0
+
+
+# ---------------------------------------------------------------------------
+# Assignment-key shapes the generic patterns missed (issue #756)
+# ---------------------------------------------------------------------------
+# Assembled from fragments so the contiguous literal never appears in source.
+
+_CLIENT_SECRET = "c" + "lientsecretvalue1234567890abcd"
+_JSON_SECRET = "s3cr3t" + "-value-0123456789abcdef"
+_GITLAB_PAT = "glpat" + "-AbCdEfGhIjKlMnOpQrSt"
+_HEADER_KEY = "api-key-value" + "-0123456789abcdef"
+_RAW_PRIVATE_KEY = "MIIEvQIBADANBgkqhkiG9w0B" + "AQEFAAOCAQ8AMIIBCgKCAQEA7xPqZmLtK4uX3nDcRfHg"
+
+
+def test_client_secret_assignment_redacted() -> None:
+    result = redact(f'+client_secret = "{_CLIENT_SECRET}"\n')
+    assert _CLIENT_SECRET not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "client_secret" in result
+
+
+def test_json_secret_key_redacted() -> None:
+    result = redact(f'{{"secret": "{_JSON_SECRET}"}}')
+    assert _JSON_SECRET not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_secret_compound_identifiers_not_redacted() -> None:
+    """The bare `secret` key must not fire on plural or compound identifiers;
+    only the tail guard (`=`, `:` right after the key) separates them."""
+    text = (
+        '+secrets = {"db_host": "db.internal.example.com"}\n'
+        '+secret_name = "db-credentials"\n'
+        "+client_secret_hash = challenge_digest\n"
+    )
+    assert redact(text) == text
+
+
+def test_secret_word_in_prose_not_redacted() -> None:
+    text = "+# The secret sauce is ordering imports before use\n"
+    assert redact(text) == text
+
+
+def test_connection_string_unquoted_password_redacted() -> None:
+    """ADO.NET / JDBC style: `Password=hunter2;` with no quotes around the
+    value, inside the quoted connection-string literal."""
+    conn = "Server=db.internal,1433;Password=" + "Hunter" + "2Hunter2;User ID=sa;"
+    result = redact(f'+cs = "{conn}"\n')
+    assert "Hunter" + "2Hunter2" not in result
+    assert REDACTED_PLACEHOLDER in result
+    # The connection-string structure stays readable for the reviewer.
+    assert "Server=db.internal,1433" in result
+    assert "User ID=sa" in result
+
+
+def test_unquoted_password_without_semicolon_redacted() -> None:
+    result = redact("+smtp_password=hunter2pass99\n")
+    assert "hunter2pass99" not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_attribute_password_copy_not_redacted() -> None:
+    """`x.password = user.password` is ordinary code, not a credential literal:
+    a value that itself names a password marks an identifier copy."""
+    text = "+account.password = user.password;\n"
+    assert redact(text) == text
+
+
+def test_password_named_identifier_copy_not_redacted() -> None:
+    """The digit guard is gone, so what keeps `password = hashed_password`
+    reviewable is the value naming a password — pin that guard."""
+    text = "+password = hashed_password\n+self.pwd = other.pwd;\n"
+    assert redact(text) == text
+
+
+def test_unquoted_password_without_digit_redacted() -> None:
+    """A digit-less credential literal must still be scrubbed: requiring a
+    digit let `Password=hunter-two;` egress to the provider."""
+    conn = "Server=db.internal,1433;Password=" + "hunter" + "-two;User ID=sa;"
+    result = redact(f'+cs = "{conn}"\n')
+    assert "hunter" + "-two" not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "Server=db.internal,1433" in result
+
+
+def test_bare_unquoted_password_without_digit_redacted() -> None:
+    result = redact("+smtp_password=huntertwopass\n")
+    assert "huntertwopass" not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_password_function_call_not_redacted() -> None:
+    text = "+password = get_password()\n"
+    assert redact(text) == text
+
+
+def test_html_password_input_not_redacted() -> None:
+    text = '+<input type="password" name="password">\n'
+    assert redact(text) == text
+
+
+def test_gitlab_pat_redacted() -> None:
+    """GitLab is a supported forge, so its bare PAT prefix must be scrubbed."""
+    result = redact(f'+gl = "{_GITLAB_PAT}"\n')
+    assert _GITLAB_PAT not in result
+    assert REDACTED_PLACEHOLDER in result
+
+
+def test_glpat_with_short_suffix_not_redacted() -> None:
+    text = '+tag = "glpat-mini"\n'
+    assert redact(text) == text
+
+
+def test_bracketed_api_key_header_redacted() -> None:
+    """Dict access quotes the key then closes the bracket (`key"] =`), which
+    the single optional quote after the key name could not span."""
+    result = redact(f'+headers["X-Api-Key"] = "{_HEADER_KEY}"\n')
+    assert _HEADER_KEY not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "X-Api-Key" in result
+
+
+def test_bracketed_password_key_redacted() -> None:
+    result = redact('+headers["X-Password"] = "hunter2pass"\n')
+    assert "hunter2pass" not in result
+    assert "X-Password" in result
+
+
+def test_bracketed_authorization_header_redacted() -> None:
+    secret = "eyJ" + "hbGciOiJIUzI1Niexampletokenvalue0123456789"
+    result = redact(f'+headers["Authorization"] = "Bearer {secret}"\n')
+    assert secret not in result
+    assert "Bearer" in result
+
+
+def test_bracketed_token_key_with_compound_name_not_redacted() -> None:
+    """Bracket support must not loosen the tail: `token_issuer` is not `token`."""
+    text = '+config["token_issuer"] = "auth.example.com"\n'
+    assert redact(text) == text
+
+
+def test_private_key_base64_assignment_redacted() -> None:
+    """Raw (non-PEM) base64 keys ride env assignments; the PEM block pattern
+    cannot see them."""
+    result = redact(f'+private_key = "{_RAW_PRIVATE_KEY}"\n')
+    assert _RAW_PRIVATE_KEY not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "private_key" in result
+
+
+def test_private_key_env_reference_not_redacted() -> None:
+    text = '+private_key = os.environ["PRIVATE_KEY"]\n'
+    assert redact(text) == text
+
+
+def test_generic_pattern_unquoted_bare_word_values() -> None:
+    """Pin the generic pattern's unquoted behaviour: the closing quote is
+    optional, so a bare 16-plus-char identifier after a secret-ish key is
+    redacted even though it is ordinary code, while a short value stays
+    (the length floor is the only guard without quotes)."""
+    assert redact("+secret = DATABASE_URL_DEFAULT\n") == "+secret = [REDACTED]\n"
+    assert redact("+token = session_cache_key_v2\n") == "+token = [REDACTED]\n"
+    assert redact("+client_secret = hunter2\n") == "+client_secret = hunter2\n"
