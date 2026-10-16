@@ -91,30 +91,6 @@ See the [Changelog](https://lgtmaybe.coles.codes/changelog/) for every release.
 | `ollama` | None: local only, zero cost |
 | `openai-compatible` | `--api-base` to any OpenAI `/v1` endpoint; key optional (placeholder for keyless local servers) |
 
-## Where It Posts
-
-The model provider and the code host are independent: any provider above works
-on any host below.
-
-| Host | How it runs | Token | Guide |
-|---|---|---|---|
-| GitHub | GitHub Action | `GITHUB_TOKEN` | [GitHub Action](how-to/use-as-github-action.md) |
-| GitLab | GitLab CI job | `GITLAB_TOKEN` | [Review on GitLab](how-to/review-on-gitlab.md) |
-| Gitea | Gitea Actions | `GITEA_TOKEN` | [Review on Gitea](how-to/review-on-gitea.md) |
-| Azure DevOps | Azure Pipelines job | `SYSTEM_ACCESSTOKEN` or `AZURE_DEVOPS_TOKEN` | [Review on Azure DevOps](how-to/review-on-azure-devops.md) |
-| None | `lgtmaybe review` locally | n/a | [Install the CLI](how-to/install-the-cli.md) |
-
-The same review runs on every host. They differ in thread resolution,
-[incremental reviews](reference/glossary.md#incremental-review), and keyless
-cloud auth. See
-[Architecture](explanation/architecture.md#code-hosts-forges) for the details.
-
-## For AI Agents
-
-The site root publishes a curated [`llms.txt`](llms.txt) index of these docs,
-plus a whole-corpus [`llms-full.txt`](llms-full.txt), for LLM crawlers and
-coding agents.
-
 ---
 
 <!-- Source: https://lgtmaybe.coles.codes/tutorial/getting-started/ -->
