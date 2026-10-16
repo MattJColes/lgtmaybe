@@ -29,8 +29,8 @@ It checks for:
 - **Ponytail:** code you don't need, and simpler or standard-library ways to do the job.
 - **Architecture:** coupling, wrong-way dependencies, and broken subclass contracts that will be hard to undo.
 
-Findings are graded `info` to `critical` and land on the line they refer
-to. A clean change gets a 👍 **LGTM!**.
+Findings are graded `info` to `critical` and land on the changed line
+they refer to. A clean change gets a 👍 **LGTM!**.
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterised-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 

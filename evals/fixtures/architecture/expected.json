@@ -31,7 +31,7 @@
   "forbidden": [
     {
       "label": "FP: proposes an interface or abstraction for _format_cents, a private helper with one caller",
-      "line": 29,
+      "line": 28,
       "keywords": [
         "interface",
         "abstraction",

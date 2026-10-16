@@ -915,7 +915,7 @@ Split by whether it can be deterministic, because that decides where it lives:
   planted catch lives in **`counter-advice`**, beside the two cuts it must not
   recommend — trust-boundary validation that looks redundant, and an adapter
   that looks like a pass-through but implements a port. The architecture
-  lens's lives in **`architecture`**: a domain module importing an adapter and
+  lens's planted catches live in **`architecture`**: a domain module importing an adapter and
   an override breaking its shown base contract, beside two restraint traps — a
   seam proposed for a single-caller private helper, and a Liskov claim against
   a base class only the unshown corpus holds.) Beyond recall, a
