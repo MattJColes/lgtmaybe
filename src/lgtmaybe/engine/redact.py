@@ -100,12 +100,15 @@ _VALUE_PATTERNS: list[re.Pattern[str]] = [
     ),
     # Unquoted connection-string passwords: Server=db;Password=hunter2;User ID=sa
     # (ADO.NET / JDBC). The value is bare and ends at `;`, a quote, whitespace or
-    # line end. It must also carry a digit and contain no brackets or parens:
-    # attribute copies (`x.password = user.password;`) and calls
+    # line end, and contains no brackets or parens: calls
     # (`password = get_password()`) are ordinary code, not credential literals.
+    # Identifier copies (`x.password = user.password;`, `password =
+    # hashed_password`) are also ordinary code, so the value must not itself
+    # name a password; a digit requirement would miss digit-less literals like
+    # `Password=hunter-two;`.
     re.compile(
         r"(?i)(?:password|passwd|pwd)[\"']?\]?\s*[=:]\s*"
-        r"(?=[^\s;\"'()\[\]]*\d)"
+        r"(?![^\s;\"'()\[\]]*(?:password|passwd|pwd))"
         r"(?P<secret>[^\s;\"'()\[\]]{4,})(?=[;\"'\s]|$)"
     ),
     # Authorization headers carrying a Bearer/Basic credential. Tolerates a quoted
