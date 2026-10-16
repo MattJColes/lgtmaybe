@@ -19,7 +19,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `api_base` | string / null | No | `null` | Api Base |
 | `auto_describe` | boolean | No | `True` | Auto Describe |
 | `auto_diagram` | boolean | No | `True` | Auto Diagram |
-| `categories` | list[`complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'spec']` | Categories |
+| `categories` | list[`architecture` / `complexity` / `correctness` / `deprecation` / `documentation` / `intent` / `performance` / `ponytail` / `security` / `spec` / `tests`] | No | `['security', 'correctness', 'deprecation', 'tests', 'documentation', 'performance', 'complexity', 'intent', 'ponytail', 'architecture', 'spec']` | Categories |
 | `context_lines` | integer | No | `20` | Context Lines |
 | `directory_rules` | list[DirectoryRule] | No | `[]` | Directory Rules |
 | `exclude_paths` | list[string] | No | `[]` | Exclude Paths |
@@ -402,7 +402,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "string"
     },
     "ReviewCategory": {
-      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
+      "description": "A single review lens. The engine asks for each one in its own LLM call.\n\n``intent`` checks the diff against the PR's stated intent (title, description,\ncommit messages); it only runs when the context carries some stated intent.\n``ponytail`` is the \"lazy senior dev\" lens \u2014 the best code is the code you\nnever wrote \u2014 flagging code that needn't exist at all (YAGNI, reach for the\nstandard library, do it in fewer lines).\n``architecture`` flags design decisions the diff introduces that are\nexpensive to reverse \u2014 coupling across boundaries, dependency direction,\nbroken substitutability, misuse-prone public surface \u2014 each tied to a\nconcrete change scenario.\n``spec`` checks the diff against a specification the repository commits\n(OpenSpec, GitHub Spec Kit, Kiro); like ``intent`` it only runs when there is\nsomething to check against \u2014 here, a detected spec that matches the PR.",
       "enum": [
         "security",
         "correctness",
@@ -413,6 +413,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "complexity",
         "intent",
         "ponytail",
+        "architecture",
         "spec"
       ],
       "title": "ReviewCategory",
@@ -535,7 +536,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "object"
     },
     "ReviewPreset": {
-      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all nine built-in categories in FOUR calls,\none per concern: security, correctness (with stated intent folded in), code\nhealth, and artefacts (tests + documentation). The same four run on every\nprovider \u2014 worker count changes the schedule, not the call count.\n``full`` runs each of the nine categories as its own call for release\nbranches and deep audits. An explicit ``categories`` list always wins over\nthe preset.",
+      "description": "How many model calls a review spends: the everyday path or the deep audit.\n\n``fast`` (the default) covers all ten everyday categories in FIVE calls,\none per concern: security, correctness (with stated intent folded in), code\nhealth, artefacts (tests + documentation), and architecture. The same five\nrun on every provider \u2014 worker count changes the schedule, not the call\ncount. A matched spec adds a sixth.\n``full`` runs each category as its own call for release\nbranches and deep audits. An explicit ``categories`` list always wins over\nthe preset.",
       "enum": [
         "fast",
         "full"
@@ -714,6 +715,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "complexity",
         "intent",
         "ponytail",
+        "architecture",
         "spec"
       ],
       "items": {

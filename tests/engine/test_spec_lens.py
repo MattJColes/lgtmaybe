@@ -103,15 +103,15 @@ class TestLensConstruction:
         lenses = _build_lenses(_cfg(), has_intent=False, has_spec=False)
         assert ReviewCategory.spec.value not in [lens.id for lens in lenses]
 
-    def test_fast_preset_adds_a_fifth_call_when_a_spec_matches(self) -> None:
-        """Four calls is the fast preset's promise for the everyday case. A
+    def test_fast_preset_adds_a_sixth_call_when_a_spec_matches(self) -> None:
+        """Five calls is the fast preset's promise for the everyday case. A
         matched spec is not that case, and its block is too big to bolt onto the
         correctness call that already carries the stated intent."""
-        four = _build_lenses(_cfg(), has_intent=True, has_spec=False)
-        five = _build_lenses(_cfg(), has_intent=True, has_spec=True)
+        everyday = _build_lenses(_cfg(), has_intent=True, has_spec=False)
+        with_spec = _build_lenses(_cfg(), has_intent=True, has_spec=True)
 
-        assert len(four) == 4
-        assert [lens.id for lens in five] == [lens.id for lens in four] + ["spec"]
+        assert len(everyday) == 5
+        assert [lens.id for lens in with_spec] == [lens.id for lens in everyday] + ["spec"]
 
     def test_only_the_spec_lens_carries_spec(self) -> None:
         lenses = _build_lenses(_cfg(), has_intent=True, has_spec=True)
@@ -154,7 +154,7 @@ class TestSpecBlockDelivery:
         prompts = _prompts(provider)
         assert "SPEC_START" not in prompts
         assert "committed-specification" not in prompts
-        assert len(provider.calls) == 4
+        assert len(provider.calls) == 5
 
     def test_the_lens_can_be_turned_off(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -166,7 +166,7 @@ class TestSpecBlockDelivery:
         LLMReviewEngine(provider).review(_ctx(head_branch="payment-links"), _cfg(spec_review=False))
 
         assert "SPEC_START" not in _prompts(provider)
-        assert len(provider.calls) == 4
+        assert len(provider.calls) == 5
 
     def test_a_spec_the_pr_adds_is_read_from_its_head_text(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -329,7 +329,7 @@ class TestSpecAddedByThePR:
 
         prompts = _prompts(provider)
         assert "WHEN a link is created THEN it SHALL expire" in prompts
-        assert len(provider.calls) == 5
+        assert len(provider.calls) == 6
 
     def test_an_unrelated_changed_markdown_file_invents_no_spec(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -348,7 +348,7 @@ class TestSpecAddedByThePR:
         )
 
         assert "SPEC_START" not in _prompts(provider)
-        assert len(provider.calls) == 4
+        assert len(provider.calls) == 5
 
 
 class TestActiveChangesAreNotEvidence:
@@ -370,7 +370,7 @@ class TestActiveChangesAreNotEvidence:
         )
 
         assert "SPEC_START" not in _prompts(provider)
-        assert len(provider.calls) == 4
+        assert len(provider.calls) == 5
         assert "spec budget" not in summary
 
 
@@ -402,7 +402,7 @@ class TestOverBudgetSpec:
         )
 
         assert "SPEC_START" not in _prompts(provider)
-        assert len(provider.calls) == 4
+        assert len(provider.calls) == 5
         assert "`.kiro/specs/payment-links` matches this PR" in summary
         assert "fit the spec budget (10000 tokens" in summary
         assert "the spec lens was skipped" in summary
@@ -420,7 +420,7 @@ class TestOverBudgetSpec:
             _cfg(max_input_tokens=80_000),
         )
 
-        assert len(provider.calls) == 5
+        assert len(provider.calls) == 6
         assert "`.kiro/specs/payment-refunds` matches this PR" in summary
         assert "judged the diff against the rest only" in summary
 
@@ -455,6 +455,6 @@ class TestOverBudgetSpec:
             _ctx(title="deliver add-billing and add-refunds"), _cfg(max_input_tokens=80_000)
         )
 
-        assert len(provider.calls) == 5
+        assert len(provider.calls) == 6
         assert "add-billing" in _prompts(provider)
         assert "spec budget" not in summary

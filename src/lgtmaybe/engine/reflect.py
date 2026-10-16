@@ -121,6 +121,12 @@ is an absence claim about code you cannot see, like any other: the coverage may 
 in an untouched file, so drop it unless the diff itself shows the absence (it deletes the \
 test, or it changes the very test file that fails to cover the new path).
 
+An architecture finding (coupling, dependency direction, broken substitutability, a \
+misuse-prone interface) is a gap type only when the relationship it names is in front of \
+you: an import line in the diff shows both ends of a dependency, but an override is judged \
+only against a base contract shown in the diff or the file text below. When either end is \
+unseen it is a cross-file claim like any other: keep it only if it hedges, at low severity.
+
 Also apply these three drop-rules:
 (a) Drop a finding that asserts library/cloud/framework SEMANTICS the diff does not itself \
 prove — "this SDK call swallows errors", "this API is rate-limited", "this ORM method runs \

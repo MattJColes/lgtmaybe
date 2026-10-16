@@ -78,13 +78,13 @@ result deadlocks once that pool saturates.
 
 #### Scenario: parallel-capable default review
 - **WHEN** a fast review uses cloud auto-concurrency
-- **THEN** the security, correctness, code-health, and artefacts calls share the
-  bounded executor and may overlap
+- **THEN** the security, correctness, code-health, artefacts, and architecture
+  calls share the bounded executor and may overlap
 
 #### Scenario: single-worker review
 - **WHEN** a review sets `max_concurrency: 1` — a very slow local model, or a
   server whose own parallelism is one and whose calls must not queue
-- **THEN** the same four calls run within the single-worker pool, serially
+- **THEN** the same five calls run within the single-worker pool, serially
 
 #### Scenario: deep audit
 - **WHEN** a review uses the `full` preset

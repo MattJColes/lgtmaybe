@@ -184,8 +184,9 @@ budget-scaled context → batch to token budget → fan out one call per review
 lens → parse → merge & dedupe → self-reflect → arbitrate opposing advice →
 filter by severity →
 findings + summary`. The lens set follows the `preset` — `fast` (default)
-covers seven code-focused categories in four calls when the pool can overlap
-work, or three combined calls with one worker; `full` runs all nine — and every
+covers the ten everyday categories in five calls (security, correctness, code
+health, artefacts, architecture) on every provider; `full` runs one call per
+category — and every
 (batch, lens) call shares one pool (`max_concurrency`: 8 cloud, 1
 ollama/openai-compatible) with a cacheable preamble-plus-diff prompt prefix on
 anthropic/bedrock. A soft whole-review deadline (`max_review_seconds`) degrades
@@ -256,7 +257,7 @@ call are merged & de-duped:
   wrote): needless code (YAGNI), reinventing the standard library, code that could
   be far shorter, premature configurability (restrained, `info`/`medium`).
 
-**Custom lenses (BYO)** — beyond the nine built-ins, users define their own
+**Custom lenses (BYO)** — beyond the built-ins, users define their own
 lenses in trusted config (`extra_lenses` inline, or skill files via the loader's
 `lens_paths`). Each `CustomLens` (`id` + `instructions`, optional `title` and a
 worked `example_diff`/`example_finding`) is fanned out as its own focused call

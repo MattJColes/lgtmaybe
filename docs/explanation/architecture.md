@@ -154,14 +154,16 @@ flowchart TD
     compress --> correctness["correctness lens<br/>+ stated intent"]
     compress --> codehealth["code-health lens<br/>performance · complexity · ponytail · deprecation"]
     compress --> artefacts["artefacts lens<br/>tests · documentation"]
+    compress --> design["architecture lens<br/>coupling · dependency direction · substitutability"]
     security --> anchor["re-anchor<br/>snap lines to the real diff"]
     correctness --> anchor
     codehealth --> anchor
     artefacts --> anchor
+    design --> anchor
     anchor --> suppress["suppress<br/>ignored fingerprints · pragmas · 👎"] --> evidence["evidence gate<br/>defects need a failure scenario"] --> dedupe["merge / dedupe"] --> reflect["reflect<br/>validate scenarios · drop low-confidence"] --> arbitrate["arbitrate<br/>no opposite advice on the same code"] --> filter["filter<br/>severity floor · finding rules"] --> post["post<br/>inline comments + summary"]
 ```
 
-The four lens calls shown are the default `fast` grouping, and the same four run
+The five lens calls shown are the default `fast` grouping, and the same five run
 on every provider; worker count decides only whether they overlap. The `full`
 preset fans out one call per category. A spec lens (when a committed spec
 matches the PR) and any custom lenses join the same fan-out.
@@ -184,10 +186,11 @@ matches the PR) and any custom lenses join the same fan-out.
    line maps to nothing and is dropped rather than mis-posted.
 
 3. **prompt + parse**: this stage **fans out one model call per review lens**,
-   and `preset` decides the lens set. `fast` (the default) covers all nine
-   everyday categories in **four calls**, one per concern: security,
+   and `preset` decides the lens set. `fast` (the default) covers all ten
+   everyday categories in **five calls**, one per concern: security,
    correctness (with stated intent when present), code health (performance,
-   complexity, ponytail, deprecation), and artefacts (tests, documentation).
+   complexity, ponytail, deprecation), artefacts (tests, documentation), and
+   architecture.
    `full` runs one call per category. Every (batch, lens) task shares **one
    `ThreadPoolExecutor`** over the synchronous provider port, sized by
    `max_concurrency` (default 6 for every provider, local included), so batches
@@ -283,7 +286,7 @@ matches the PR) and any custom lenses join the same fan-out.
 
 9. **arbitrate**: the deterministic referee behind it (`engine/conflicts.py`),
    which also runs under `--no-reflect`. A finding from a declared-opposed lens
-   pair (ponytail against correctness or security) within three lines of a
+   pair (ponytail against correctness, security or architecture) within three lines of a
    higher-ranked one is dropped, and each drop is logged with the finding and
    the lens that outranked it. See
    [When Lenses Disagree](what-gets-reviewed.md#when-lenses-disagree).

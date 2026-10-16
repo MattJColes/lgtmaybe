@@ -321,10 +321,10 @@ local_diff_options = _stack(
     "--preset",
     default=None,
     type=click.Choice(ReviewPreset),
-    help="Review preset: fast (default) covers all nine categories in four "
+    help="Review preset: fast (default) covers all ten categories in five "
     "calls, one per concern — security, correctness (stated intent folds in), "
-    "code health, artefacts (tests/documentation) — the same four on every "
-    "provider; full runs one call per lens for deep audits",
+    "code health, artefacts (tests/documentation), architecture — the same five "
+    "on every provider; full runs one call per lens for deep audits",
 )
 @click.option(
     "--full",

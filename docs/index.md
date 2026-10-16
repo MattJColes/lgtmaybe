@@ -11,9 +11,9 @@ description: Provider-agnostic AI code review for pull and merge requests on Git
 </div>
 
 lgtmaybe reviews pull and merge requests on **GitHub, GitLab, Gitea, and Azure
-DevOps**. You can also review a local Git diff before pushing. Choose a hosted
-model, ollama, or another OpenAI-compatible endpoint. Reviews on a code host post inline
-comments and one summary; local reviews print findings in your terminal.
+DevOps**. It can also review a local Git diff. Choose a hosted
+model, ollama, or another OpenAI-compatible endpoint. It posts inline comments
+and one summary, or prints findings locally.
 
 It reads the diff and a little surrounding code, but comments only on changed
 lines. It never checks out or runs the change. Generated files and binaries are
@@ -26,10 +26,11 @@ It checks for:
 - **Code health:** performance problems, needless complexity, deprecations, and risky dependencies.
 - **Tests and documentation:** missing or weak tests, stale comments, and undocumented APIs.
 - **Intent:** whether the change does what its title, description, and commits say it does.
-- **Ponytail:** code you don't need, standard-library opportunities, and simpler ways to get the job done.
+- **Ponytail:** code you don't need, and simpler or standard-library ways to do the job.
+- **Architecture:** coupling, wrong-way dependencies, and broken subclass contracts that will be hard to undo.
 
-Findings are graded from `info` to `critical` and land on the changed line
-they refer to. A clean change gets a 👍 **LGTM!**.
+Findings are graded `info` to `critical` and land on the line they refer
+to. A clean change gets a 👍 **LGTM!**.
 
 ![An inline lgtmaybe review comment flagging a [CRITICAL] SQL injection vulnerability, with an explanation and a committable parameterised-query suggestion](assets/marketplace/marketplace-screenshot-1.png){ width="720" }
 

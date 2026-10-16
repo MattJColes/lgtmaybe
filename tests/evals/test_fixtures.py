@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -42,6 +43,7 @@ _FP_FIXTURES = [
     "test-harness",
     "unshown-code-fp",
     "counter-advice",
+    "architecture",
 ]
 
 _VIBE_FILES = {
@@ -663,3 +665,17 @@ def test_counter_advice_plants_a_lean_catch_beside_never_cut_traps() -> None:
     labels = " ".join(f.label for f in manifest.forbidden).lower()
     assert "trust boundary" in labels
     assert "port" in labels
+
+
+def test_architecture_fixture_plants_design_catches_beside_restraint_traps() -> None:
+    """The architecture lens's recall pair (a domain module importing an adapter,
+    an override breaking its shown base contract) sits beside its two restraint
+    traps: a seam proposed for a single-caller private helper, and a Liskov claim
+    against a base class only the unshown corpus holds."""
+    _diff, manifest = _fixture("architecture")
+    expected = " ".join(e.label for e in manifest.expected).lower()
+    assert "adapter" in expected and "substitutability" in expected
+    forbidden = " ".join(f.label for f in manifest.forbidden).lower()
+    assert "one caller" in forbidden and "unshown" in forbidden
+    corpus = Path(__file__).parents[2] / "evals/fixtures/architecture/repo/billing"
+    assert (corpus / "rates.py").is_file() and (corpus / "adapters/stripe.py").is_file()

@@ -1,0 +1,57 @@
+{
+  "name": "architecture",
+  "changed_file": "billing/invoice.py",
+  "expected": [
+    {
+      "label": "Domain Invoice imports the Stripe adapter: the dependency points outward across billing/adapters/",
+      "line": 3,
+      "keywords": [
+        "adapter",
+        "stripe",
+        "dependency",
+        "depends on",
+        "port",
+        "invert",
+        "outward"
+      ]
+    },
+    {
+      "label": "PercentDiscount.apply raises where Discount.apply promises it never raises (broken substitutability)",
+      "line": 19,
+      "keywords": [
+        "liskov",
+        "substitut",
+        "base",
+        "contract",
+        "precondition",
+        "never raises"
+      ]
+    }
+  ],
+  "forbidden": [
+    {
+      "label": "FP: proposes an interface or abstraction for _format_cents, a private helper with one caller",
+      "line": 29,
+      "keywords": [
+        "interface",
+        "abstraction",
+        "formatter class",
+        "strategy",
+        "protocol",
+        "pluggable"
+      ]
+    },
+    {
+      "label": "FP: claims RegionalTax breaks TaxPolicy's contract (the base is unshown, and it is compatible)",
+      "line": 24,
+      "keywords": [
+        "liskov",
+        "substitut",
+        "violates",
+        "contract",
+        "precondition",
+        "base class"
+      ]
+    }
+  ]
+}

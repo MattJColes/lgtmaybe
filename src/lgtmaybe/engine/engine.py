@@ -522,13 +522,13 @@ class _Lens:
 def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False) -> list[_Lens]:
     """All lenses to run: built-ins (grouped per the preset), then user lenses.
 
-    The fast preset runs the nine everyday built-ins as FOUR distinct lenses —
-    security, correctness, code health, artefacts — one per concern, the same set
-    on every provider. The lens set is a property of the preset, not of how many
-    workers happen to be available: a single-worker provider runs the same four
-    calls, serially. This grouping applies only when ``categories`` is the
-    untouched default: a user who explicitly listed lenses asked for exactly
-    those, so the preset never regroups them. The full preset runs every
+    The fast preset runs the ten everyday built-ins as FIVE distinct lenses —
+    security, correctness, code health, artefacts, architecture — one per
+    concern, the same set on every provider. The lens set is a property of the
+    preset, not of how many workers happen to be available: a single-worker
+    provider runs the same five calls, serially. This grouping applies only
+    when ``categories`` is the untouched default: a user who explicitly listed
+    lenses asked for exactly those, so the preset never regroups them. The full preset runs every
     category; an explicit list runs exactly its selected categories. Both skip
     intent when nothing states an intent, and skip spec when no committed
     specification matches the PR.
@@ -536,7 +536,7 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False
     Spec is the one built-in that does not fold into a fast-preset group. It
     carries a large block of its own (requirements, design, task list) and under
     ``fast`` the correctness lens already carries the stated intent; stacking
-    both on one call degrades it. So a matched spec adds a FIFTH call — paid only
+    both on one call degrades it. So a matched spec adds a SIXTH call — paid only
     in repositories that commit a spec the PR is delivering.
 
     """
@@ -578,6 +578,15 @@ def _build_lenses(cfg: ReviewConfig, *, has_intent: bool, has_spec: bool = False
             )
             for group in FAST_GROUPS
         ]
+        # Architecture is its own call, not a code-health member: that group
+        # already carries four concerns, and design findings would be crowded
+        # out by the cheaper performance and complexity nits beside them.
+        lenses.append(
+            _Lens(
+                id=ReviewCategory.architecture.value,
+                user_block=build_lens_block(ReviewCategory.architecture),
+            )
+        )
         if has_spec:
             lenses.append(_spec_lens())
     else:

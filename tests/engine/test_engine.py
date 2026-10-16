@@ -617,8 +617,8 @@ def test_reflect_true_runs_the_reflection_pass() -> None:
     engine.review(_CTX, cfg)
 
     assert len(_reflection_calls(provider)) == 1  # exactly one reflection pass
-    # The default fast preset covers nine categories in four distinct calls.
-    assert len(_review_calls(provider)) == 4
+    # The default fast preset covers ten categories in five distinct calls.
+    assert len(_review_calls(provider)) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -1667,8 +1667,8 @@ def test_review_logs_an_upfront_work_summary(engine_logs) -> None:
 
     starting = [r for r in engine_logs if "review starting" in r.getMessage()]
     assert starting, "expected an up-front 'review starting' log"
-    # The default fast preset queues four distinct lens calls.
-    assert getattr(starting[0], "lenses", None) == 4
+    # The default fast preset queues five distinct lens calls.
+    assert getattr(starting[0], "lenses", None) == 5
 
 
 def test_review_logs_a_heartbeat_as_each_lens_runs(engine_logs) -> None:
@@ -1738,9 +1738,9 @@ def test_custom_lens_runs_as_an_extra_review_call() -> None:
     findings, _ = engine.review(_CTX, cfg)
 
     review_calls = _review_calls(provider)
-    # The default fast preset runs four distinct built-in calls; the custom
+    # The default fast preset runs five distinct built-in calls; the custom
     # lens always adds its own focused call on top.
-    assert len(review_calls) == 4 + 1
+    assert len(review_calls) == 5 + 1
     assert any("Simplify or delete" in _all_text(c) for c in review_calls)
     assert findings  # the custom lens's finding survived the pipeline
 
@@ -3305,7 +3305,7 @@ def test_a_review_with_no_self_talk_raises_no_such_notice() -> None:
 # the summary names the lenses that completed
 # ---------------------------------------------------------------------------
 
-_FAST_LENSES = "artefacts,code-health,correctness,security"
+_FAST_LENSES = "architecture,artefacts,code-health,correctness,security"
 
 
 def test_the_summary_names_every_lens_that_completed() -> None:
@@ -3338,7 +3338,7 @@ def test_a_failed_lens_is_left_out_of_the_lenses_marker() -> None:
     _findings, summary = LLMReviewEngine(_SecurityFails()).review(_CTX, make_cfg())
 
     assert INCOMPLETE_MARKER in summary
-    assert f"{LENSES_MARKER_PREFIX}artefacts,code-health,correctness -->" in summary
+    assert f"{LENSES_MARKER_PREFIX}architecture,artefacts,code-health,correctness -->" in summary
 
 
 _GUARD_FIX = {

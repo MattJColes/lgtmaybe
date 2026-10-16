@@ -116,11 +116,11 @@ def _multi_file_ctx(n_files: int, lines_per_file: int = 40) -> PRContext:
 class TestFlattenedFanOut:
     def test_parallel_fast_correctness_tasks_overlap(self) -> None:
         cfg = ReviewConfig(provider=Provider.openai, model="m", reflect=False)
-        provider = _ConcurrencyTrackingProvider(expect=4)
+        provider = _ConcurrencyTrackingProvider(expect=5)
 
         LLMReviewEngine(provider).review(_multi_file_ctx(1), cfg)
 
-        assert provider.max_in_flight == 4
+        assert provider.max_in_flight == 5
 
     def test_calls_from_different_batches_run_concurrently(self) -> None:
         """The old per-batch pool serialised batches; the flat pool must not.

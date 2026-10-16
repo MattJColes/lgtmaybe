@@ -37,7 +37,7 @@ class TestFastLensGrouping:
     def test_default_preset_is_fast(self) -> None:
         assert make_cfg().preset is ReviewPreset.fast
 
-    _FOUR = ["security", "correctness", "code-health", "artefacts"]
+    _FIVE = ["security", "correctness", "code-health", "artefacts", "architecture"]
 
     @pytest.mark.parametrize(
         "overrides",
@@ -49,17 +49,17 @@ class TestFastLensGrouping:
         ],
         ids=["ollama-auto", "cloud-auto", "cloud-serial", "local-parallel"],
     )
-    def test_fast_builds_the_same_four_lenses_on_every_configuration(
+    def test_fast_builds_the_same_five_lenses_on_every_configuration(
         self, overrides: dict[str, object]
     ) -> None:
         """The lens set is a property of the preset, not of how many workers
-        happen to be available: one concern per call, four calls, everywhere."""
+        happen to be available: one concern per call, five calls, everywhere."""
         lenses = _build_lenses(make_cfg(**overrides), has_intent=False)
-        assert [lens.id for lens in lenses] == self._FOUR
+        assert [lens.id for lens in lenses] == self._FIVE
 
     def test_fast_covers_every_built_in_category(self) -> None:
-        """Four distinct lenses cover the nine everyday categories — nothing that
-        used to be reviewed silently stops being reviewed. Spec is the tenth and
+        """Five distinct lenses cover the ten everyday categories — nothing that
+        used to be reviewed silently stops being reviewed. Spec is the eleventh and
         the exception: it has its own call, and only when a spec matches the PR,
         so it is passed here as present for the coverage claim to mean anything."""
         lenses = _build_lenses(make_cfg(), has_intent=True, has_spec=True)
@@ -104,12 +104,12 @@ class TestFastLensGrouping:
         assert [lens.id for lens in lenses] == ["security", "performance"]
 
     @pytest.mark.parametrize("provider", [Provider.ollama, Provider.openai])
-    def test_fast_review_makes_four_calls_on_any_provider(self, provider: Provider) -> None:
-        """Worker count changes how the four calls are scheduled, never how many
-        there are — a single-slot provider runs the same four, serially."""
+    def test_fast_review_makes_five_calls_on_any_provider(self, provider: Provider) -> None:
+        """Worker count changes how the five calls are scheduled, never how many
+        there are — a single-slot provider runs the same five, serially."""
         fake = FakeProvider()
         LLMReviewEngine(fake).review(_CTX, make_cfg(provider=provider))
-        assert len(fake.calls) == 4
+        assert len(fake.calls) == 5
 
 
 class TestMergedCategoryStamping:

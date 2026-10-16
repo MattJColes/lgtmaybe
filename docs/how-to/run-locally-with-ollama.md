@@ -331,16 +331,18 @@ model: qwen3.6:35b
 timeout: 1800
 ```
 
-The review makes four lens calls under the default `fast` preset (nine under
-`--preset full`). On a default ollama those queue rather than overlap, so a slow
-model takes roughly `lens calls × per-call time`. That is why `fast` is the
-default: four calls instead of nine is the biggest single local speed-up.
+The review makes five lens calls under the default `fast` preset (one per
+category under `--preset full`). On a default ollama those queue rather than
+overlap, so a slow model takes roughly `lens calls × per-call time`. That is why
+`fast` is the default: five calls instead of one per category is the biggest
+single local speed-up.
 
 To go faster, narrow the lenses with `categories:` in `.lgtmaybe.yml` (e.g. just
 `security` and `correctness`), use a smaller model, or give ollama more GPU. If
 you have the VRAM to serve requests in parallel, raise `OLLAMA_NUM_PARALLEL` on
 the ollama server as described [above](#concurrency-on-a-local-server): the same
-four calls then overlap instead of queueing, close to a 4× wall-clock win. Add
+five calls then overlap instead of queueing, close to a 5× wall-clock win with
+`OLLAMA_NUM_PARALLEL=5`. Add
 `--profile` to any run to see the per-call breakdown.
 
 ## Troubleshooting

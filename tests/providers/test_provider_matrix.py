@@ -194,8 +194,8 @@ class TestEngineBehaviourMatrix:
         assert _resolve_workers(cfg, task_count=99) == 6
 
     @pytest.mark.parametrize("provider", list(Provider))
-    def test_fast_preset_makes_four_calls_on_every_provider(self, provider: Provider) -> None:
-        """The fast lens set is four distinct concerns regardless of provider —
+    def test_fast_preset_makes_five_calls_on_every_provider(self, provider: Provider) -> None:
+        """The fast lens set is five distinct concerns regardless of provider —
         auto-concurrency changes the schedule, never the call count."""
         from lgtmaybe.core.models import PRContext, ReviewConfig
         from lgtmaybe.engine import LLMReviewEngine
@@ -212,7 +212,7 @@ class TestEngineBehaviourMatrix:
         cfg = ReviewConfig(provider=provider, model="m", reflect=False)
         fake = FakeProvider()
         LLMReviewEngine(fake).review(ctx, cfg)
-        assert len(fake.calls) == 4
+        assert len(fake.calls) == 5
 
     @pytest.mark.parametrize("provider", list(Provider))
     def test_review_deadline_field_defaults_on_every_provider(self, provider: Provider) -> None:

@@ -58,6 +58,7 @@ _SIGNATURE = {
     ReviewCategory.complexity: "cyclomatic",
     ReviewCategory.intent: "stated intent",
     ReviewCategory.ponytail: "yagni",
+    ReviewCategory.architecture: "liskov",
     ReviewCategory.spec: "committed-specification",
 }
 
@@ -111,6 +112,7 @@ def test_defect_examples_include_a_failure_scenario(category: ReviewCategory) ->
         ReviewCategory.complexity,
         ReviewCategory.intent,
         ReviewCategory.ponytail,
+        ReviewCategory.architecture,
     ],
 )
 def test_gap_examples_use_a_null_failure_scenario(category: ReviewCategory) -> None:
@@ -410,7 +412,7 @@ def test_shared_preamble_never_cuts_protective_code() -> None:
     assert "every edge case" in preamble
 
 
-_ADVISORY = (ReviewCategory.complexity, ReviewCategory.ponytail)
+_ADVISORY = (ReviewCategory.complexity, ReviewCategory.ponytail, ReviewCategory.architecture)
 
 
 @pytest.mark.parametrize("category", list(ReviewCategory), ids=lambda c: c.value)
@@ -998,3 +1000,39 @@ class TestProjectContext:
         preamble = build_shared_preamble(None, False, block)
         assert preamble.startswith(build_shared_preamble().rstrip("\n"))
         assert block in preamble
+
+
+def test_prompt_asks_for_architecture_review() -> None:
+    """The architecture lens: what will this change make hard to change?"""
+    block = build_lens_block(ReviewCategory.architecture).lower()
+    for term in (
+        "expensive to reverse",  # Booch / Johnson: architecture is cost of change
+        "change scenario",  # every finding names one
+        "coupling",
+        "dependency direction",
+        "liskov",
+        "substitut",
+        "sharp edges",
+        "misuse",
+        "port",
+    ):
+        assert term in block, term
+
+
+def test_architecture_proposes_no_abstraction_without_evidence() -> None:
+    """Its own evidence bar, with no mention of any sibling lens: a new seam needs a
+    visible second variant or an existing boundary, and a principle is a label."""
+    block = build_lens_block(ReviewCategory.architecture).lower()
+    assert "second variant" in block
+    assert "existing boundary" in block
+    assert "label, not" in block
+    for sibling in ("ponytail", "yagni", "complexity lens"):
+        assert sibling not in block, sibling
+
+
+def test_architecture_example_points_a_dependency_outward() -> None:
+    """The worked example is the most uniquely architectural shape: a domain module
+    importing an adapter, with the change scenario leading the body."""
+    block = build_lens_block(ReviewCategory.architecture)
+    assert "from billing.adapters.stripe import StripeClient" in block
+    assert '"suggestion": null' in block

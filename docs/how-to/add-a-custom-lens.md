@@ -4,9 +4,12 @@ description: Add a custom review lens to lgtmaybe - a bring-your-own skill file 
 
 # Add a Custom Review Lens (BYO Skills)
 
-lgtmaybe ships ten built-in review lenses: security, correctness, deprecation,
-tests, documentation, performance, complexity, intent, spec, and `ponytail`
-(the "lazy senior dev", write-less-code lens). A **custom lens** adds your own.
+lgtmaybe ships eleven built-in review lenses: security, correctness, deprecation,
+tests, documentation, performance, complexity, intent, spec, `ponytail`
+(the "lazy senior dev", write-less-code lens), and `architecture` (design
+decisions that will be expensive to reverse). A custom lens can't reuse a
+built-in id, so a lens you named `architecture` before it became built-in needs
+a new id. A **custom lens** adds your own.
 It runs alongside the built-ins as its own focused model call, and its findings
 merge into the same review. Use one to enforce a house style or team convention
 the built-in lenses don't cover.
@@ -131,7 +134,7 @@ lens_paths:
 
 | Pack | Lenses | Use it when |
 |---|---|---|
-| `pack:design` | `wrong-abstraction`, `shallow-module`, `information-leakage`, `errors-out-of-existence`, `hidden-state`, `naming` | You want review of structure and taste: the right abstraction, deep modules, explicit state. |
+| `pack:design` | `wrong-abstraction`, `shallow-module`, `information-leakage`, `errors-out-of-existence`, `hidden-state`, `naming` | You want review of structure and taste at a finer grain than the built-in `architecture` lens: the right abstraction, deep modules, explicit state. |
 | `pack:robustness` | `assertions`, `bounded`, `idempotency`, `migrations`, `portability`, `observability` | Operational safety: defensive invariants, bounded work, retry-safe side effects, safe migrations. |
 | `pack:interface` | `api-design`, `type-safety`, `magic-values`, `comment-why` | Contracts and clarity: backward compatibility, tight types, named constants, comments that explain why. |
 | `pack:frontend` | `accessibility`, `i18n` | The diff touches UI or user-facing copy. |

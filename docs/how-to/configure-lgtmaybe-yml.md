@@ -222,8 +222,8 @@ whose context window is smaller. A value you set is used as is.
 
 ### preset
 
-How many model calls the review spends. `fast` (the default) covers the nine
-everyday categories in four calls, one per concern:
+How many model calls the review spends. `fast` (the default) covers the ten
+everyday categories in five calls, one per concern:
 
 | Call | Covers |
 |---|---|
@@ -231,9 +231,10 @@ everyday categories in four calls, one per concern:
 | correctness | correctness, plus stated intent when the PR states one |
 | code health | performance, complexity, ponytail, deprecation |
 | artefacts | tests, documentation |
+| architecture | architecture |
 
-The same four run on every provider. Worker count only changes whether they
-overlap. A fifth `spec` call runs when the repository commits a specification
+The same five run on every provider. Worker count only changes whether they
+overlap. A sixth `spec` call runs when the repository commits a specification
 that matches the PR (see [categories](#categories)).
 
 `full` runs one focused call per category, for release branches and deep
@@ -254,7 +255,7 @@ merged. Fewer categories means fewer calls and fewer tokens, at the cost of
 coverage.
 
 Choose from `security`, `correctness`, `deprecation`, `tests`, `documentation`,
-`performance`, `complexity`, `intent`, `ponytail` and `spec`.
+`performance`, `complexity`, `intent`, `ponytail`, `architecture` and `spec`.
 
 ```yaml
 categories:
@@ -262,7 +263,7 @@ categories:
   - correctness
 ```
 
-Default: all ten. Two of them only run when there is something to check:
+Default: all eleven. Two of them only run when there is something to check:
 
 - `intent` checks the diff against the PR's stated intent: title, description
   and commit names on GitHub, or your `git log` commit names on the CLI. With
@@ -280,6 +281,12 @@ being sent at all, drop `intent` from `categories` and set `auto_diagram: false`
 wrote*. It flags code that needn't exist (YAGNI, reinventing the standard
 library, code that could be far shorter). See
 [What gets reviewed](../explanation/what-gets-reviewed.md#ponytail-the-laziest-senior-dev-in-the-room).
+
+`architecture` flags design decisions the change makes that will be expensive
+to reverse: coupling across boundaries, dependencies pointing the wrong way,
+subclasses that break their base class's contract, and misuse-prone APIs. Each
+finding has to open with the change it would make painful. See
+[What gets reviewed](../explanation/what-gets-reviewed.md#architecture-what-will-this-make-hard-to-change).
 
 ### context_lines
 

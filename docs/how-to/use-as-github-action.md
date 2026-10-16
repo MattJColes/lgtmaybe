@@ -250,7 +250,7 @@ settings can also go in `.lgtmaybe.yml`; an input you set overrides the file.
 
 | Input | Default | Description |
 |---|---|---|
-| `preset` | `fast` | `fast` runs four calls (security, correctness, code health, and artefacts for tests and documentation) on every provider; `full` runs one call per lens. An explicit `categories` list in `.lgtmaybe.yml` overrides it |
+| `preset` | `fast` | `fast` runs five calls (security, correctness, code health, artefacts for tests and documentation, and architecture) on every provider; `full` runs one call per lens. An explicit `categories` list in `.lgtmaybe.yml` overrides it |
 | `incremental` | auto | Review only the commits added since the last completed review on `synchronize` pushes, and the whole PR elsewhere. `true`/`false` forces it. Falls back to a full review after a force-push or when there is no earlier review. `/review full` forces a full re-review on demand |
 | `recursive` | `true` | Review a file whose diff exceeds `max_input_tokens` hunk by hunk instead of sending it whole. Set `false` to disable |
 | `spec_review` | `true` | Check the diff against a committed spec (OpenSpec, GitHub Spec Kit, Kiro). Runs only when a spec is detected and matches the PR, so a repository without specs pays nothing |

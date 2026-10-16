@@ -101,24 +101,20 @@ rejected by strict configuration validation rather than accepted as no-ops.
 - **THEN** config validation fails, rather than the route rejecting every lens
   call mid-review
 
-### Requirement: Nine built-in lenses, provider-aware preset fan-out
+### Requirement: Built-in lenses and preset fan-out
 
-`ReviewCategory` SHALL enumerate the nine built-in lenses. `ReviewPreset` SHALL
-shape their fan-out: `fast` covers the seven code-focused lenses in four calls
-when more than one worker is available and three combined calls for a
-single-worker configuration; `full` runs one call per selected built-in
-category.
+`ReviewCategory` SHALL enumerate the built-in lenses: ten everyday categories
+(security, correctness, deprecation, tests, documentation, performance,
+complexity, intent, ponytail, architecture) plus `spec`. `ReviewPreset` SHALL
+shape their fan-out: `fast` covers the everyday categories in five calls on
+every provider; `full` runs one call per selected built-in category.
 <!-- anchor: core.lenses -->
 
-#### Scenario: parallel-capable default
-- **WHEN** a fast review has effective concurrency greater than one
-- **THEN** correctness is split into two concurrent tasks without creating a
-  new public review category
+#### Scenario: fast default
+- **WHEN** a review runs the `fast` preset with the default categories
+- **THEN** it makes five calls (security, correctness, code health, artefacts,
+  architecture) whatever the worker count
 
-#### Scenario: serial default
-- **WHEN** a fast review has effective concurrency of one
-- **THEN** correctness remains one combined task
-
-#### Scenario: full preset restores artefact checks
+#### Scenario: full preset
 - **WHEN** a review runs with `preset: full`
-- **THEN** tests and documentation run alongside every other built-in lens
+- **THEN** each selected built-in category runs as its own call

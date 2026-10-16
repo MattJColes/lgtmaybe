@@ -346,7 +346,7 @@ The same is true when no spec system is present, which is the common case, so
 a repository without specs pays nothing.
 
 Because it needs its own large block, the spec lens is a call of its own: a
-fifth call under the default `fast` preset, made only when a spec matched. Turn
+sixth call under the default `fast` preset, made only when a spec matched. Turn
 it off with `--no-spec` on the CLI, or `spec_review: false` in `.lgtmaybe.yml`
 or as an Action input.
 
@@ -399,6 +399,54 @@ We take Ponytail's leanness rules, not its whole review: Ponytail 5's own
 `/ponytail-review` also checks bugs, security, load, and tests, which here are
 separate lenses.
 
+## Architecture: What Will This Make Hard to Change?
+
+Architecture is the set of decisions that are expensive to reverse. This lens
+flags only decisions the change itself introduces, graded `info` to `medium`,
+and every finding has to open with a concrete change scenario: "when X changes,
+Y and Z have to change with it". A finding that only names a principle ("this
+violates SRP") is not allowed, because the name explains nothing on its own.
+
+- **Coupling across boundaries**: one module reaching into another's internals,
+  long call chains across a package or service boundary, or mutable state
+  shared between modules. Tight coupling inside one module is fine; the same
+  coupling across a boundary, on something likely to change, is the finding.
+- **Dependencies pointing the wrong way**: domain code importing a framework,
+  adapter, database or HTTP client, an import that closes a cycle, or a stable
+  module starting to depend on a volatile one.
+- **Broken substitutability (Liskov)**: an override that accepts less than its
+  base class, promises less, raises errors the base never did, or quietly does
+  nothing, and callers that branch on a concrete subclass instead. It only
+  claims this when the base class is in front of it.
+- **Misplaced responsibility**: a module gaining a second, unrelated reason to
+  change, logic that mostly works on another object's data, or one concept
+  spread so a single change needs edits in several places.
+- **Sharp edges**: new public surface that is easy to misuse, such as calls
+  that must happen in a hidden order, internal mutable state handed out, or
+  malformed input accepted silently.
+- **Leaky ports**: an interface that forces implementers to stub methods they
+  don't need, or vendor types crossing a port so the core is tied to the vendor.
+
+Its evidence bar keeps it from becoming a lecture. It never proposes a new
+abstraction unless the diff shows a second implementation or caller, or the
+coupling crosses a boundary the repository already has. It reads layers from
+the repository's own paths and documented architecture rather than inventing
+them, skips tests, scripts and private helpers, and hedges to `info` or `low`
+when the claim depends on code it cannot see. Most findings carry no one-click
+suggestion: a structural fix is named in the finding (move the function, invert
+the dependency) instead.
+
+The ideas come from the classic literature on design: Parnas on information
+hiding, Constantine and Yourdon on coupling and cohesion, Liskov and Wing on
+substitutability, Meyer on design by contract, Martin on dependency direction,
+Cockburn's ports and adapters, Evans on bounded contexts, Fowler's refactoring
+catalogue, Bloch on API design, and Khononov on balancing coupling. See
+[ATTRIBUTION.md](https://github.com/MattJColes/lgtmaybe/blob/main/ATTRIBUTION.md).
+The complexity lens asks "is this hard to follow?" and ponytail asks "should
+this exist?"; architecture asks "what will this make hard to change?". For a
+finer grain, the opt-in `pack:design` adds Ousterhout-style checks such as
+shallow modules and information leakage.
+
 ## When Lenses Disagree
 
 Each lens is prompted on its own and none of them names another, so two lenses
@@ -414,18 +462,20 @@ author two contradictory things, so lgtmaybe stops it at four points:
    list, applied to all of them.
 2. **Each lens has its own evidence bar.** The bars keep territories apart
    without lenses knowing about each other: ponytail never collapses an existing
-   boundary, and complexity only suggests extracting duplicated code when the
-   copies have uniform callers (never through a flag argument).
+   boundary, architecture never proposes a new one without a visible second
+   implementation, and complexity only suggests extracting duplicated code when
+   the copies have uniform callers (never through a flag argument).
 3. **Reflection referees.** The self-reflection pass sees every finding at once
    and, when two give opposite advice about the same code, keeps the one higher
-   on the ladder: correctness, security, performance, tests, complexity,
-   ponytail. That is Ponytail 5's own review order (correctness, safety, load,
-   tests, speed, leanness) mapped onto these lenses. A finding whose lens is not
+   on the ladder: correctness, security, performance, tests, architecture,
+   complexity, ponytail. That is Ponytail 5's own review order (correctness,
+   safety, load, tests, speed, leanness) mapped onto these lenses, with design
+   slotted above readability. A finding whose lens is not
    on the ladder, such as a custom or pack lens, is never arbitrated.
 4. **A deterministic backstop.** After reflection (and even with `--no-reflect`),
    `engine/conflicts.py` drops a lower-ranked finding that sits within three
    lines of a higher-ranked one from a lens pair declared opposed, today ponytail
-   against correctness and security. Group ids, custom and pack lenses, and
+   against correctness, security, and architecture. Group ids, custom and pack lenses, and
    scanner hits declare no opposition, so the backstop never guesses about them.
 
 The `counter-advice` eval fixture measures this: it plants a genuine lean catch
@@ -440,13 +490,13 @@ configurable in `.lgtmaybe.yml` (see
 
 | Knob | Default | Effect |
 |---|---|---|
-| `preset` | `fast` | `fast` uses four calls (security, correctness, code health, artefacts) on every provider, plus a fifth spec call when a spec matches; `full` runs one call per lens. |
+| `preset` | `fast` | `fast` uses five calls (security, correctness, code health, artefacts, architecture) on every provider, plus a sixth spec call when a spec matches; `full` runs one call per lens. |
 | `max_files` | 50 | Reviews the top-N changed files and posts a "reviewed top N of M" notice if there are more. |
 | `max_file_diff_lines` | 2000 | Skips any single file whose diff is longer, naming it in the summary. `0` disables. |
 | `max_input_tokens` | 100,000 | Batches the diff so each model call stays within budget. Left at the default, it is capped at what the model's context window can take. |
 | `max_concurrency` | 6, every provider | Concurrent model calls across the whole fan-out (all batches share one pool). Local throughput is set on the server (`OLLAMA_NUM_PARALLEL`, llama.cpp `-np`, vLLM batching); set this to `1` for serial. |
 | `max_review_seconds` | 3600 | Soft wall-clock ceiling: past it, queued calls are skipped and the review posts partial results with a notice. `0` disables. |
-| `categories` | all | Which review lenses run (the nine everyday lenses, plus `spec` when a spec matches). An explicit list overrides the preset grouping and runs each listed lens as its own call. |
+| `categories` | all | Which review lenses run (the ten everyday lenses, plus `spec` when a spec matches). An explicit list overrides the preset grouping and runs each listed lens as its own call. |
 | `context_lines` | 20 | Ceiling on surrounding lines added around each hunk; the budget may use fewer. `0` disables context expansion. |
 | `min_severity` | `low` (`medium` for a [`prototype` project](../how-to/calibrate-reviews-to-your-project.md)) | Drops findings below the floor (`info` → `low` → `medium` → `high` → `critical`). `low` keeps everything except pure-`info` narration. |
 | `include_paths` / `exclude_paths` | none | Glob filters to focus the review. |
@@ -477,13 +527,13 @@ Each finding has:
 | `category` | The lens that raised it |
 | `confidence` | The self-reflection auditor's 0-10 score (absent when reflection is off) |
 
-The nine everyday review categories are security, correctness, deprecation,
-tests, documentation, performance, complexity, intent, and ponytail; `spec` is a
-tenth that runs only when a committed spec matches the PR. The default `fast`
-preset covers the nine in four calls, one per concern: security, correctness
-(with stated intent folded in), code health (performance, complexity, ponytail,
-deprecation), and artefacts (tests, documentation). The same four run on every
-provider; worker count changes only how they are scheduled. `preset: full` runs
+The ten everyday review categories are security, correctness, deprecation,
+tests, documentation, performance, complexity, intent, ponytail, and
+architecture; `spec` is an eleventh that runs only when a committed spec matches
+the PR. The default `fast` preset covers the ten in five calls, one per concern:
+security, correctness (with stated intent folded in), code health (performance,
+complexity, ponytail, deprecation), artefacts (tests, documentation), and
+architecture. The same five run on every provider; worker count changes only how they are scheduled. `preset: full` runs
 each category as its own call, with a worked example of its own finding type.
 
 Security, correctness, deprecation, and performance findings without a concrete

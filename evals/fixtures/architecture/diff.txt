@@ -1,0 +1,47 @@
+diff --git a/billing/invoice.py b/billing/invoice.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/billing/invoice.py
+@@ -0,0 +1,41 @@
++from dataclasses import dataclass
++
++from billing.adapters.stripe import StripeClient
++from billing.rates import TaxPolicy
++
++
++class Discount:
++    def apply(self, amount: int) -> int:
++        """Return the discounted amount. Never raises; the result is never negative."""
++        return amount
++
++
++class PercentDiscount(Discount):
++    def __init__(self, percent: int) -> None:
++        self.percent = percent
++
++    def apply(self, amount: int) -> int:
++        if amount < 100:
++            raise ValueError("percent discounts need at least 100 cents")
++        return amount - amount * self.percent // 100
++
++
++class RegionalTax(TaxPolicy):
++    def rate(self, region: str) -> float:
++        return 0.1 if region == "AU" else 0.0
++
++
++def _format_cents(cents: int) -> str:
++    return f"${cents / 100:.2f}"
++
++
++@dataclass
++class Invoice:
++    amount: int
++    region: str
++
++    def charge(self, discount: Discount) -> str:
++        client = StripeClient()
++        total = discount.apply(self.amount)
++        client.charge(total)
++        return _format_cents(total)
