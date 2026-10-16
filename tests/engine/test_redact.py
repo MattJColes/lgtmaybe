@@ -513,9 +513,32 @@ def test_unquoted_password_without_semicolon_redacted() -> None:
 
 def test_attribute_password_copy_not_redacted() -> None:
     """`x.password = user.password` is ordinary code, not a credential literal:
-    the unquoted form requires a digit so attribute copies stay reviewable."""
+    a value that itself names a password marks an identifier copy."""
     text = "+account.password = user.password;\n"
     assert redact(text) == text
+
+
+def test_password_named_identifier_copy_not_redacted() -> None:
+    """The digit guard is gone, so what keeps `password = hashed_password`
+    reviewable is the value naming a password — pin that guard."""
+    text = "+password = hashed_password\n+self.pwd = other.pwd;\n"
+    assert redact(text) == text
+
+
+def test_unquoted_password_without_digit_redacted() -> None:
+    """A digit-less credential literal must still be scrubbed: requiring a
+    digit let `Password=hunter-two;` egress to the provider."""
+    conn = "Server=db.internal,1433;Password=" + "hunter" + "-two;User ID=sa;"
+    result = redact(f'+cs = "{conn}"\n')
+    assert "hunter" + "-two" not in result
+    assert REDACTED_PLACEHOLDER in result
+    assert "Server=db.internal,1433" in result
+
+
+def test_bare_unquoted_password_without_digit_redacted() -> None:
+    result = redact("+smtp_password=huntertwopass\n")
+    assert "huntertwopass" not in result
+    assert REDACTED_PLACEHOLDER in result
 
 
 def test_password_function_call_not_redacted() -> None:
@@ -580,3 +603,13 @@ def test_private_key_base64_assignment_redacted() -> None:
 def test_private_key_env_reference_not_redacted() -> None:
     text = '+private_key = os.environ["PRIVATE_KEY"]\n'
     assert redact(text) == text
+
+
+def test_generic_pattern_unquoted_bare_word_values() -> None:
+    """Pin the generic pattern's unquoted behaviour: the closing quote is
+    optional, so a bare 16-plus-char identifier after a secret-ish key is
+    redacted even though it is ordinary code, while a short value stays
+    (the length floor is the only guard without quotes)."""
+    assert redact("+secret = DATABASE_URL_DEFAULT\n") == "+secret = [REDACTED]\n"
+    assert redact("+token = session_cache_key_v2\n") == "+token = [REDACTED]\n"
+    assert redact("+client_secret = hunter2\n") == "+client_secret = hunter2\n"
