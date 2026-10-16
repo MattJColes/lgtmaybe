@@ -473,6 +473,90 @@ def test_a_piece_that_fails_is_still_reported() -> None:
 
 
 # ---------------------------------------------------------------------------
+# A flaked piece must keep its retry even when a fallback model is configured
+# ---------------------------------------------------------------------------
+
+_FALLBACK = "the-fallback"
+
+
+class _SplitsThenPieceBFlakes(FakeProvider):
+    """Truncates the whole batch, answers piece a, 429s piece b exactly once.
+
+    The shape of issue #759: the split WORKED — the payload shrank and one piece
+    answered — and the failure that remains is a transient provider blip on the
+    other piece. A fallback model is on offer, and what it does when asked is
+    the fake's parameter, so both halves of the bug are reachable: the fallback
+    truncating (its error replaced the piece reason) and the fallback flaking
+    (the rescue re-ran the oversized whole batch).
+    """
+
+    def __init__(self, fallback_truncates: bool) -> None:
+        super().__init__()
+        self.diffs: list[str] = []
+        self.fallback_model = _FALLBACK
+        self._fallback_truncates = fallback_truncates
+        self._piece_b_flaked = False
+
+    def escalate_model(self) -> str | None:
+        return self.fallback_model
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        diff = "\n".join(str(m.get("content", "")) for m in messages)
+        self.diffs.append(diff)
+        if opts.get("model_override") == _FALLBACK:
+            if self._fallback_truncates:
+                raise ProviderTruncated(_CEILING, text="")
+            raise RuntimeError("rate_limited")
+        if _shows(diff, "one.py", "two.py"):
+            raise ProviderTruncated(_CEILING, text="")
+        if _shows(diff, "two.py") and not self._piece_b_flaked:
+            self._piece_b_flaked = True
+            raise RuntimeError("rate_limited")
+        path = "one.py" if _shows(diff, "one.py") else "two.py"
+        anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
+        return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
+
+
+def test_a_flaked_piece_keeps_its_retry_when_the_fallback_truncates_too() -> None:
+    """The split answered; only a piece flaked — the fallback must not buy the batch.
+
+    Escalating here re-sends the request the split already recovered from, and a
+    fallback that truncates as well reports ITS failure in place of the piece
+    reason, so the rescue wave never re-runs the piece: one file reviewed, a
+    failed-call notice, and the transient blip that caused it all unretried.
+    """
+    provider = _SplitsThenPieceBFlakes(fallback_truncates=True)
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]  # the piece was retried
+    assert "results may be incomplete" not in summary
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1  # never re-sent whole
+
+
+def test_a_flaked_piece_keeps_its_retry_when_the_fallback_flakes_too() -> None:
+    """A fallback that 429s must not turn the rescue onto the whole batch.
+
+    The escalation's error is retryable, so with the piece reason replaced by it
+    the rescue re-ran the call it has — the oversized whole batch, which
+    truncates and splits again: whole, a, b, whole, a, b, the exact replay
+    `_PiecesReason` exists to stop.
+    """
+    provider = _SplitsThenPieceBFlakes(fallback_truncates=False)
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]
+    assert "results may be incomplete" not in summary
+    # The whole batch once, then a, then b's flaked try and its retry — and
+    # that is every call: no escalation, no replay of the batch.
+    assert len(provider.diffs) == 4
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1
+
+
+# ---------------------------------------------------------------------------
 # The reasoning-bound sibling of the split: one step down, then stop.
 # ---------------------------------------------------------------------------
 
