@@ -914,7 +914,10 @@ def run_local_review(
     prints what this returns, and the MCP server hands it to a coding agent.
     Builds the provider straight from config/runtime (no token, no gateway) and
     resets the profiler, so a long-lived caller measures each review alone.
-    Failures propagate; each caller decides how to surface them.
+    A ``LocalGitError`` from building the context is converted here to a
+    ``click.ClickException``, so both callers (the ``review`` command and the
+    MCP tools) report the clean git message; every other failure propagates
+    for the caller to surface.
     """
     profiler.reset()
     # Wire a read-only working-tree reader so reflection can resolve a deferred
