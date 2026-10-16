@@ -187,6 +187,8 @@ every host; only the setup differs:
   See [Review on GitLab](../how-to/review-on-gitlab.md).
 - **Gitea:** add a Gitea Actions workflow.
   See [Review on Gitea](../how-to/review-on-gitea.md).
+- **Forgejo or Codeberg:** add a Forgejo Actions workflow.
+  See [Review on Forgejo](../how-to/review-on-forgejo.md).
 - **Azure DevOps:** add an Azure Pipelines build validation policy.
   See [Review on Azure DevOps](../how-to/review-on-azure-devops.md).
 

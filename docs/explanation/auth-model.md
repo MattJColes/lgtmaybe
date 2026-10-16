@@ -135,7 +135,7 @@ diff and posting the review need a separate credential for the
 |---|---|---|
 | GitHub | `GITHUB_TOKEN` | `contents: read` and `pull-requests: write`. The Action's default token is enough |
 | GitLab | `GITLAB_TOKEN` | A project access token with the `api` scope, Developer role or above |
-| Gitea | `GITEA_TOKEN` | A token with `write:repository`, `write:issue` and `read:user` |
+| Gitea, Forgejo | `GITEA_TOKEN` | A token with `write:repository`, `write:issue` and `read:user` |
 | Azure DevOps | `AZURE_DEVOPS_TOKEN`, else `SYSTEM_ACCESSTOKEN` | A personal access token with Code (Read & write) scope, or the pipeline's own token with *Contribute to pull requests* granted to the build service |
 
 These are always tokens. There is no keyless path to a code host, and lgtmaybe

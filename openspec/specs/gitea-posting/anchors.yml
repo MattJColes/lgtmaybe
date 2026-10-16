@@ -27,3 +27,16 @@ gitea.capabilities:
     kind: class_definition
     has: { field: name, regex: '^GiteaGateway$' }
   files: [src/lgtmaybe/gitea/**/*.py]
+
+gitea.forgejo-host:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_change_url$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+gitea.forgejo-workflow:
+  rule:
+    kind: block_mapping_pair
+    has: { field: key, regex: '^runs-on$' }
+  language: yaml
+  files: [examples/forgejo/lgtmaybe.yml]

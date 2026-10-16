@@ -9,9 +9,10 @@ workflow reviews every pull request (PR) automatically.
 
 !!! tip "Not on GitHub?"
 
-    lgtmaybe runs the same review on GitLab and Gitea. See
-    [Review on GitLab](./review-on-gitlab.md) or
-    [Review on Gitea](./review-on-gitea.md).
+    lgtmaybe runs the same review on GitLab, Gitea and Forgejo. See
+    [Review on GitLab](./review-on-gitlab.md),
+    [Review on Gitea](./review-on-gitea.md) or
+    [Review on Forgejo](./review-on-forgejo.md).
 
 lgtmaybe is listed on the
 [GitHub Marketplace](https://github.com/marketplace/actions/lgtmaybe). It is a
@@ -463,6 +464,8 @@ differences in what each [code host](../reference/glossary.md#code-host) support
   `lgtmaybe gitlab-ci` on merge request pipelines.
 - [Review on Gitea](./review-on-gitea.md): Gitea Actions, running the same
   container as GitHub.
+- [Review on Forgejo](./review-on-forgejo.md): Forgejo Actions and Codeberg,
+  through the Gitea adapter.
 
 Keyless cloud auth (Bedrock, Vertex, Azure) relies on GitHub Actions' OIDC
 token, so it is available only on GitHub. On the other hosts use an API-key

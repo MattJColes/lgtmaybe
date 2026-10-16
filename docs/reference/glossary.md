@@ -91,7 +91,8 @@ code host it becomes an inline comment on the changed line.
 ## Forge
 
 The code's name for a [code host](#code-host). GitHub, GitLab, Gitea and Azure
-DevOps are the forges lgtmaybe supports.
+DevOps are the forges lgtmaybe supports. Forgejo, a Gitea fork, is served as
+Gitea.
 
 ## Head SHA
 

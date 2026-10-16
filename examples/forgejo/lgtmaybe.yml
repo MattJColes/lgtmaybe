@@ -1,0 +1,61 @@
+# Copy into your Forgejo repo at .forgejo/workflows/lgtmaybe.yml
+#
+# Forgejo Actions runs lgtmaybe's container unchanged. Four things to know:
+#
+#   * `runs-on: docker` must name a label one of your runners has. Forgejo
+#     runners have no default labels; `docker` is the usual one for a
+#     Docker-backed runner. On an LXC or host runner, `container:` is ignored:
+#     see the pip fallback in docs/how-to/review-on-forgejo.md.
+#   * The trigger is `pull_request_target`, never `pull_request`. A
+#     `pull_request` run takes its workflow file from the pull request's own
+#     head commit, so a pull request from a branch in this repository could
+#     rewrite this job and send its secrets anywhere. `pull_request_target`
+#     takes the workflow from the base branch instead, and lgtmaybe never
+#     checks out or executes pull-request code: it only reads the diff through
+#     the API.
+#   * Store your token as LGTMAYBE_FORGEJO_TOKEN. Forgejo refuses secret names
+#     starting with FORGEJO_, GITEA_ or GITHUB_, and `secrets.FORGEJO_TOKEN` is
+#     the automatic job token. The step maps your token to the GITEA_TOKEN
+#     variable lgtmaybe reads (Forgejo speaks Gitea's API).
+#   * Repository secrets reach every workflow run in the repository, so anyone
+#     with write access can read them from a workflow on their own branch. Give
+#     write access only to people trusted with these secrets.
+#
+# Add an API key secret for whichever model provider you use, with a spend
+# limit, or use ollama for a fully local review.
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # The issue_comment arm fires on every comment on every pull request, so
+    # require a slash command in the body before claiming a runner. lgtmaybe
+    # itself ignores a command from anyone without write access to the
+    # repository (no model call).
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram')))
+    runs-on: docker
+    container:
+      image: ghcr.io/mattjcoles/lgtmaybe:v2
+    steps:
+      - name: Review
+        run: python -m lgtmaybe action
+        env:
+          GITEA_TOKEN: ${{ secrets.LGTMAYBE_FORGEJO_TOKEN }}
+          INPUT_PROVIDER: anthropic
+          INPUT_MODEL: claude-sonnet-4-6
+          INPUT_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
