@@ -25,6 +25,7 @@ from tenacity import Retrying, retry_if_result, stop_after_attempt
 from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
     DIAGRAMMED_MARKER,
+    REVIEWED_DIFF_MARKER,
     REVIEWED_MARKER,
     current_finding_keys,
     finding_keys,
@@ -113,6 +114,7 @@ _RESOLVED_IDENTITY_PREFIX = "<!-- lgtmaybe-resolved-identity:"
 # Defined in core.comment so every forge stamps the same wire format.
 _REVIEWED_MARKER = REVIEWED_MARKER
 _DIAGRAMMED_MARKER = DIAGRAMMED_MARKER
+_REVIEWED_DIFF_MARKER = REVIEWED_DIFF_MARKER
 
 
 # Concurrency for the per-file head-content fetch. The contents are independent
@@ -240,6 +242,9 @@ class RestGitHubGateway:
         # never record "reviewed up to head" — the next run would then skip
         # commits nobody reviewed.
         self._reviewed_sha: str | None = None
+        # The whole PR diff's fingerprint at that head, stamped beside it and
+        # only with it (see mark_reviewed_diff).
+        self._reviewed_diff: str | None = None
         # Watermark reads and pre-post lookup share one paginated scan. A
         # successful post invalidates it so later reads see the new native summary.
         # _done distinguishes a cached missing match from an unfetched list.
@@ -388,12 +393,17 @@ class RestGitHubGateway:
             # Only that family: the summary carries the engine's own lenses and
             # risk markers, and finding prose is already stripped of every one.
             content = strip_markers(
-                f"{summary}{render_demoted(demoted_findings)}{render_broad(broad)}",
-                _REVIEWED_MARKER,
+                strip_markers(
+                    f"{summary}{render_demoted(demoted_findings)}{render_broad(broad)}",
+                    _REVIEWED_MARKER,
+                ),
+                _REVIEWED_DIFF_MARKER,
             )
             body = f"{content}\n\n{self._marker}"
             if self._reviewed_sha:
                 body += f"\n<!-- lgtmaybe-reviewed:{self._reviewed_sha} -->"
+                if self._reviewed_diff:
+                    body += f"\n<!-- lgtmaybe-diff:{self._reviewed_diff} -->"
             return body
 
         body = build_body(demoted)
@@ -711,6 +721,24 @@ class RestGitHubGateway:
         _review_id, body, _commit_id = entry
         return last_match(_REVIEWED_MARKER, body)
 
+    def last_reviewed_diff(self) -> str | None:
+        """The PR diff fingerprint stamped beside the watermark, or None.
+
+        Read from the same summary as ``last_reviewed_sha`` and only when that
+        summary carries a watermark, so it always describes that head. None on a
+        missing marker or an HTTP failure, and the caller then reviews.
+        """
+        try:
+            entry = self._find_existing_review_entry()
+        except httpx.HTTPError:
+            return None
+        if entry is None:
+            return None
+        _review_id, body, _commit_id = entry
+        if last_match(_REVIEWED_MARKER, body) is None:
+            return None
+        return last_match(_REVIEWED_DIFF_MARKER, body)
+
     def last_completed_sha(self, *, diagram_required: bool) -> str | None:
         """Return the latest head whose required review outputs were posted.
 
@@ -838,6 +866,14 @@ class RestGitHubGateway:
         watermark.
         """
         self._reviewed_sha = head_sha
+
+    def mark_reviewed_diff(self, fingerprint: str | None) -> None:
+        """Prepare the PR diff fingerprint stamped beside the reviewed marker.
+
+        In-memory only, like ``mark_reviewed``, and stamped only when a head is:
+        a run that completes nothing records no fingerprint either.
+        """
+        self._reviewed_diff = fingerprint
 
     def _anchor_sha(self) -> str | None:
         """The PR's current head SHA, for anchoring re-run inline comments.

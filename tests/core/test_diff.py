@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from lgtmaybe.core.diff import build_commentable_lines, is_reviewable, is_scannable_manifest
 
 # ---------------------------------------------------------------------------
@@ -343,3 +345,48 @@ def test_is_reviewable_rejects_protobuf_outputs() -> None:
     assert not is_reviewable("proto/service.pb.h")
     # Control: the .proto source is hand-written.
     assert is_reviewable("proto/service.proto")
+
+
+# ---------------------------------------------------------------------------
+# diff_fingerprint: what a rebase leaves alone
+# ---------------------------------------------------------------------------
+
+_LAYER = (
+    "diff --git a/src/app.py b/src/app.py\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/src/app.py\n"
+    "+++ b/src/app.py\n"
+    "@@ -10,2 +10,3 @@ def handler():\n"
+    "     a = 1\n"
+    "+    b = 2\n"
+    "     return a\n"
+)
+
+
+def test_a_rebase_that_moves_the_layer_keeps_its_fingerprint() -> None:
+    """A stacked PR rebased onto a moved parent shows the same edits at other
+    line numbers, with other blob ids. That is not a change to review."""
+    from lgtmaybe.core.diff import diff_fingerprint
+
+    rebased = _LAYER.replace("index 1111111..2222222", "index 3333333..4444444").replace(
+        "@@ -10,2 +10,3 @@", "@@ -42,2 +42,3 @@"
+    )
+
+    assert diff_fingerprint(rebased) == diff_fingerprint(_LAYER)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        ("+    b = 2", "+    b = 3"),  # the change itself
+        ("     return a", "     return b"),  # the code around it
+        ("def handler():", "def other():"),  # the function it sits in
+        ("src/app.py", "src/main.py"),  # the file
+    ],
+)
+def test_any_change_to_what_a_reviewer_reads_changes_the_fingerprint(
+    edit: tuple[str, str],
+) -> None:
+    from lgtmaybe.core.diff import diff_fingerprint
+
+    assert diff_fingerprint(_LAYER.replace(*edit)) != diff_fingerprint(_LAYER)

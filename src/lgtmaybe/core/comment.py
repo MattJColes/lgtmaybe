@@ -143,6 +143,10 @@ DIAGRAM_MARKER_FAMILY = "lgtmaybe-diagram"
 # the last head whose required overview posted. The capture group is the SHA.
 REVIEWED_MARKER = re.compile(r"<!-- lgtmaybe-reviewed:([0-9a-f]{7,40}) -->")
 DIAGRAMMED_MARKER = re.compile(r"<!-- lgtmaybe-diagrammed:([0-9a-f]{7,40}) -->")
+# Beside the review watermark: the `core.diff.diff_fingerprint` of the whole PR
+# diff at that head. A later head with the same fingerprint (a rebase that only
+# moved the PR onto a new base) has nothing new to review.
+REVIEWED_DIFF_MARKER = re.compile(r"<!-- lgtmaybe-diff:([0-9a-f]{16}) -->")
 
 # A fenced Mermaid diagram — the one kind all three forges render. The info
 # string is what marks it; the word in prose proves nothing. PlantUML is left

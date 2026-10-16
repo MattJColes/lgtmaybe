@@ -16,14 +16,44 @@ on an expanded-context-only line).
 Skip filter: lockfiles, minified bundles, vendored/generated paths, generated
 LLM-index corpora (llms.txt / llms-full.txt), and binary files are dropped before
 review to save tokens and avoid noise.
+
+Diff fingerprint: what a rebase leaves alone, so a stacked PR rebased onto its
+merged parent is not reviewed again.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
 from lgtmaybe.core.diffparse import walk_diff
+
+# ---------------------------------------------------------------------------
+# Diff fingerprint
+# ---------------------------------------------------------------------------
+
+# A hunk header's line ranges. The text after the closing ``@@`` (the enclosing
+# function git names) is kept: it is part of what a reviewer reads.
+_HUNK_RANGES = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
+
+
+def diff_fingerprint(diff: str) -> str:
+    """A short hash of a unified diff that survives a rebase of the same edits.
+
+    When the PR below a stacked PR merges, GitHub rebases the one above: its
+    head commit changes, but its diff shows the same edits, at line numbers and
+    blob ids the new base moved. Those two are left out (``index`` lines and the
+    hunk ranges); every changed, context and header line stays in, so any edit a
+    reviewer would read changes the hash. Lines split on ``\\n`` alone, as
+    ``core/diffparse`` does.
+    """
+    kept = [
+        _HUNK_RANGES.sub("@@", line) for line in diff.split("\n") if not line.startswith("index ")
+    ]
+    return hashlib.sha256("\n".join(kept).encode("utf-8")).hexdigest()[:16]
+
 
 # ---------------------------------------------------------------------------
 # Commentable-line index
