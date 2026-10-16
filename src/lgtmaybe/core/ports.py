@@ -250,8 +250,18 @@ class SupportsIncremental(Protocol):
         """Limit resolve-on-fix to the files this increment re-reviewed."""
         ...
 
+
+@runtime_checkable
+class SupportsScanManifests(Protocol):
+    """Ask the gateway to also fetch dependency-manifest text for scanning.
+
+    Split from ``SupportsIncremental`` (issue #774): Gitea and Azure DevOps
+    serve manifest text without offering incremental review, so the two grow
+    separately.
+    """
+
     def set_scan_manifests(self, enabled: bool) -> None:
-        """Ask the gateway to also fetch dependency-manifest text for scanning."""
+        """Fetch dependency-manifest head text on the next context fetch."""
         ...
 
 
