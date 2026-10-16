@@ -1391,6 +1391,29 @@ class TestFailFastOnPermanentErrors:
 
         assert calls == 1
 
+    def test_response_with_no_choices_fails_fast_with_a_named_error(self) -> None:
+        """An HTTP-200 body with an empty ``choices`` list (seen from a
+        misbehaving OpenAI-compatible endpoint) used to surface as a bare
+        ``IndexError`` out of ``response.choices[0]`` and burn the whole retry
+        ladder; the same body comes back every time, so it must fail once and
+        name itself."""
+        calls = 0
+
+        def no_choices(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(prompt_tokens=5, completion_tokens=0),
+            )
+
+        with patch("litellm.completion", side_effect=no_choices):
+            provider = LiteLLMProvider()
+            with pytest.raises(provider_module.ProviderReturnedNoChoices, match="no choices"):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls == 1
+
     def test_transient_error_retries_up_to_max_attempts(self) -> None:
         """A transient error is retried, but no more than _MAX_ATTEMPTS times."""
         calls = 0
