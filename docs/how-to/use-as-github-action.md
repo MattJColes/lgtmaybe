@@ -190,7 +190,8 @@ What each part does:
 - `permissions:` lets the job read the repository and write review comments on
   the PR.
 - `concurrency:` keeps one run per PR and event type. A new push cancels an
-  in-flight review.
+  in-flight review. The cancelled review gets up to 60 seconds to post what it
+  already found, then it is stopped.
 - `if:` is the trust gate described in
   [Who Can Trigger a Review](#who-can-trigger-a-review).
 - `actions/checkout` checks out the base repo only, so lgtmaybe can read your

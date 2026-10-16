@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
 from lgtmaybe.cli import action_inputs
@@ -238,3 +243,128 @@ def test_docker_run_forwards_the_step_environment_by_env_file() -> None:
     assert "GITHUB_SERVER_URL" in run
     assert "GITHUB_API_URL" in run
     assert not re.search(r"-e\s+INPUT_[A-Z0-9_]+", run)
+
+
+# ---------------------------------------------------------------------------
+# cancellation: stop the review container before its token is revoked
+# ---------------------------------------------------------------------------
+#
+# Cancelling the run step kills the `docker run` client, not the container. The
+# container kept reviewing while the always() revoke step ran, and when its
+# signal finally arrived (the runner's orphan-process cleanup) the graceful
+# wind-down posted with a revoked token: a false "review failed: 401" comment on
+# a commit that was merely superseded (MattJColes/lgtmaybe#741).
+
+_CIDFILE = "${RUNNER_TEMP}/lgtmaybe.cid"
+# GitHub gives always() steps of a cancelled job five minutes in total; the stop
+# must leave the revoke (and any post steps) room inside that window.
+_GITHUB_CANCEL_WINDOW_SECONDS = 300
+
+
+def _step_index(step_id: str) -> int:
+    for index, step in enumerate(_steps()):
+        if step.get("id") == step_id:
+            return index
+    raise AssertionError(f"no step with id {step_id!r}")
+
+
+def _stop_grace_seconds(run: str) -> int:
+    match = re.search(r"docker stop --time (\d+)\b", run)
+    assert match, "the stop must bound its grace period with `docker stop --time N`"
+    return int(match.group(1))
+
+
+def test_docker_run_records_its_container_id_where_the_stop_step_finds_it() -> None:
+    """The container must be findable after the `docker run` client is gone.
+
+    A run-scoped `--name` would collide when matrix jobs of one run share a
+    self-hosted runner's Docker daemon; `RUNNER_TEMP` is per runner and per job.
+    `docker run --cidfile` refuses an existing file, so a stale one is cleared.
+    """
+    run = _run_lgtmaybe_step()["run"]
+
+    assert f'--cidfile "{_CIDFILE}"' in run
+    assert run.index(f'rm -f "{_CIDFILE}"') < run.index("docker run")
+
+
+def test_container_is_stopped_on_every_path_before_the_token_is_revoked() -> None:
+    stop = _step("stop-lgtmaybe-container")
+
+    assert "always()" in str(stop.get("if", ""))
+    # Not gated on the lgtmaybe identity: the App-token path revokes in a post
+    # step and the workflow token dies at job end, both before orphan cleanup.
+    assert "lgtmaybe-token" not in str(stop.get("if", ""))
+    assert stop.get("continue-on-error") is True
+    assert _CIDFILE in stop["run"]
+    assert _step_index("run-lgtmaybe") < _step_index("stop-lgtmaybe-container")
+    assert _step_index("stop-lgtmaybe-container") < _step_index("revoke-lgtmaybe-token")
+
+
+def test_container_stop_grace_period_is_bounded() -> None:
+    grace = _stop_grace_seconds(_step("stop-lgtmaybe-container")["run"])
+
+    # Long enough for the wind-down to post what it has; short enough that the
+    # revoke still runs well inside GitHub's post-cancel window.
+    assert 10 <= grace <= _GITHUB_CANCEL_WINDOW_SECONDS // 3
+
+
+def _run_stop_step(tmp_path: Path, *, cid: str | None, docker_exit: int) -> tuple[int, str]:
+    """Run the stop step's script against a fake `docker` that logs its argv."""
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    if cid is not None:
+        (runner_temp / "lgtmaybe.cid").write_text(cid, encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "docker.log"
+    fake = bin_dir / "docker"
+    fake.write_text(
+        f'#!/usr/bin/env bash\necho "$*" >> "{log}"\n'
+        f'echo "Error: No such container" >&2\nexit {docker_exit}\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(runner_temp),
+    }
+    script = _step("stop-lgtmaybe-container")["run"]
+    result = subprocess.run(
+        ["bash", "-c", script], env=env, capture_output=True, text=True, check=False
+    )
+    assert not (runner_temp / "lgtmaybe.cid").exists(), "the id file is consumed"
+    return result.returncode, log.read_text(encoding="utf-8") if log.exists() else ""
+
+
+_NEEDS_POSIX_BASH = pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("bash") is None,
+    reason="runs the step's bash with a fake docker on PATH",
+)
+
+
+@_NEEDS_POSIX_BASH
+def test_stop_step_stops_the_recorded_container_with_the_bound(tmp_path: Path) -> None:
+    code, calls = _run_stop_step(tmp_path, cid="abc123\n", docker_exit=0)
+    grace = _stop_grace_seconds(_step("stop-lgtmaybe-container")["run"])
+
+    assert code == 0
+    assert calls.strip() == f"stop --time {grace} abc123"
+
+
+@_NEEDS_POSIX_BASH
+def test_stop_step_tolerates_a_container_already_gone(tmp_path: Path) -> None:
+    """The normal path: `--rm` already removed the finished container."""
+    code, calls = _run_stop_step(tmp_path, cid="abc123", docker_exit=1)
+
+    assert code == 0
+    assert "stop" in calls
+
+
+@_NEEDS_POSIX_BASH
+def test_stop_step_is_a_no_op_when_no_container_was_created(tmp_path: Path) -> None:
+    """Cancelled (or skipped) before `docker run` wrote its id file."""
+    code, calls = _run_stop_step(tmp_path, cid=None, docker_exit=0)
+
+    assert code == 0
+    assert calls == ""
