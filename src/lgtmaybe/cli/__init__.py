@@ -67,7 +67,13 @@ from lgtmaybe.engine.profiling import profiler
 from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
-from lgtmaybe.local import _default_base, local_file_reader, local_pr_context, local_repo_root
+from lgtmaybe.local import (
+    LocalGitError,
+    _default_base,
+    local_file_reader,
+    local_pr_context,
+    local_repo_root,
+)
 from lgtmaybe.providers.credentials import resolve_credentials
 from lgtmaybe.providers.factory import (
     build_provider,
@@ -920,7 +926,12 @@ def run_local_review(
     engine, _provider = build_provider_engine(
         cfg, runtime, fetch_file=fetch_file, resolve_symbol=resolve_symbol
     )
-    ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    try:
+        ctx = local_pr_context(base=base, working=working, uncommitted=uncommitted)
+    except LocalGitError as exc:
+        # Converted at this seam so both callers of this function (the review
+        # command and the MCP tools) report the clean message, not a prefix.
+        raise click.ClickException(str(exc)) from exc
     # An empty diff has nothing to review: no model call, and never a 👍 LGTM.
     # Checked after the provider is built so a config error still surfaces first.
     if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
@@ -1014,10 +1025,10 @@ def execute_local_diagram(
     from lgtmaybe.engine.overview import build_overview
 
     ctx = _local_context(base=base, working=working, uncommitted=uncommitted)
-    if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
-        click.echo(nothing)
-        return
     try:
+        if (nothing := _no_local_changes(ctx, base=base, uncommitted=uncommitted)) is not None:
+            click.echo(nothing)
+            return
         _engine, provider = build_provider_engine(cfg, runtime)
         body = build_overview(ctx, cfg, provider)
     except Exception as exc:
