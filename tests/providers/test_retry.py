@@ -2571,27 +2571,14 @@ class TestTheLadderStepsOnlyToLevelsTheModelAccepts:
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
 
-    def test_an_undeclared_model_keeps_todays_ladder(self) -> None:
-        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="low")
+    @pytest.mark.parametrize("model", ["openai/gpt-5.5", "openai/x"])
+    def test_an_undeclared_model_keeps_todays_ladder(self, model: str) -> None:
+        """No levels and no default resolved: the plain ladder decides, whatever
+        the model string names."""
+        provider = LiteLLMProvider(model=model, reasoning_effort="low")
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
         assert provider.disable_reasoning() == {"reasoning_effort": "none"}
-
-    def test_a_fake_without_the_capability_attributes_keeps_todays_ladder(self) -> None:
-        """The probes are borrowed unbound onto engine fakes carrying only the
-        three attributes `_effort_override` has always read."""
-        fake = SimpleNamespace(
-            default_opts={"reasoning_effort": "low"},
-            model="openai/x",
-            _effort_override_supported=True,
-        )
-
-        assert LiteLLMProvider.lower_reasoning_effort(fake) == {  # type: ignore[arg-type]
-            "reasoning_effort": "minimal"
-        }
-        assert LiteLLMProvider.disable_reasoning(fake) == {  # type: ignore[arg-type]
-            "reasoning_effort": "none"
-        }
 
 
 class TestOpenAICompatibleToolRejectionWording:
