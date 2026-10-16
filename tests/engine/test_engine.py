@@ -3719,8 +3719,9 @@ def test_a_dropped_schema_is_named_in_the_notice_when_calls_failed() -> None:
     mid-run rather than being left to find it in the Actions log."""
 
     class _SchemaDroppingProvider(_ProseProvider):
-        def schema_dropped(self) -> bool:
-            return True
+        def complete(self, messages, model, **opts):  # type: ignore[override]
+            result = super().complete(messages, model, **opts)
+            return result.model_copy(update={"schema_dropped": True})
 
     engine = LLMReviewEngine(_SchemaDroppingProvider())
     with pytest.raises(ReviewIncompleteError) as exc_info:
@@ -3735,18 +3736,17 @@ def test_a_clean_review_never_mentions_the_dropped_schema() -> None:
     class _CleanButDropped(FakeProvider):
         def complete(self, messages, model, **opts):  # type: ignore[override]
             self.calls.append({"messages": messages, "model": model, "opts": opts})
-            return ProviderResult(text='{"findings": []}', input_tokens=10, output_tokens=5)
-
-        def schema_dropped(self) -> bool:
-            return True
+            return ProviderResult(
+                text='{"findings": []}', input_tokens=10, output_tokens=5, schema_dropped=True
+            )
 
     _findings, summary = LLMReviewEngine(_CleanButDropped()).review(_CTX, make_cfg())
     assert _SCHEMA_DROP_NOTE not in summary
 
 
 def test_a_provider_that_cannot_answer_is_not_asked_twice() -> None:
-    """Adapter-only, like lower_reasoning_effort: a provider without the method
-    simply never reports a drop, rather than every fake growing one."""
+    """Reported per call, defaulting to False: a provider whose results say
+    nothing simply never reports a drop, rather than every fake growing one."""
     engine = LLMReviewEngine(_ProseProvider())
     with pytest.raises(ReviewIncompleteError) as exc_info:
         engine.review(_CTX, make_cfg())
@@ -3762,13 +3762,15 @@ class _CleanProvider(FakeProvider):
 
 
 class _TemperatureDropped(_CleanProvider):
-    def temperature_dropped(self) -> bool:
-        return True
+    def complete(self, messages, model, **opts):  # type: ignore[override]
+        result = super().complete(messages, model, **opts)
+        return result.model_copy(update={"temperature_dropped": True})
 
 
 class _TemperatureKept(_CleanProvider):
-    def temperature_dropped(self) -> bool:
-        return False
+    def complete(self, messages, model, **opts):  # type: ignore[override]
+        result = super().complete(messages, model, **opts)
+        return result.model_copy(update={"temperature_dropped": False})
 
 
 def test_a_temperature_that_never_reached_the_model_is_a_summary_line_segment() -> None:

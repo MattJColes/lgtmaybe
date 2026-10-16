@@ -135,11 +135,12 @@ the backstop for a gateway route the factory does not recognise.
 
 ### Requirement: A configured temperature that never reaches the model is disclosed
 
-The adapter SHALL record, per model, a configured `temperature` that did not
-reach the model — stripped by litellm's `drop_params` before the request, or
-refused by the model and re-sent without it — and expose it as
-`temperature_dropped()`, adapter-only and feature-detected like
-`schema_dropped()`; the engine SHALL then render a `temperature not sent`
+The adapter SHALL report, on each call's result (or a failed call's
+exception), a configured `temperature` that did not reach the model —
+withheld at build time, stripped by litellm's `drop_params` before the
+request, or refused by the model and re-sent without it — and the schema
+likewise; never as a "dropped this run" flag on the shared adapter. When any
+call of a review reported it, the engine SHALL render a `temperature not sent`
 segment on the summary line beside the model (`{temperature}` in
 `summary_template`), because the determinism default is what makes a review
 reproducible — a segment, never a notice, so a clean review keeps its LGTM. The strip

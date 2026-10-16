@@ -324,7 +324,7 @@ def test_the_schema_goes_as_a_forced_tool_call_up_front() -> None:
     assert len(sent) == 1
     assert "response_format" not in sent[0]
     assert sent[0]["tool_choice"]["function"]["name"] == "lgtmaybe_structured_output"
-    assert not built.schema_dropped()
+    assert not result.schema_dropped
 
 
 @pytest.mark.usefixtures("stored_sign_in")
@@ -333,9 +333,11 @@ def test_the_dropped_temperature_is_disclosed() -> None:
 
     built = build_provider(Provider.chatgpt, "gpt-5.5", temperature=0.0)
     with patch("litellm.completion", return_value=_tool_call_response('{"findings": []}')):
-        built.complete([{"role": "user", "content": "hi"}], "gpt-5.5", response_format=_Findings)
+        result = built.complete(
+            [{"role": "user", "content": "hi"}], "gpt-5.5", response_format=_Findings
+        )
 
-    assert built.temperature_dropped()
+    assert result.temperature_dropped
 
 
 # --- the real wire, against a loopback stand-in for the Codex backend ----------

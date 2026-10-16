@@ -2,6 +2,6 @@
 
 from .engine import FakeEngine
 from .github import FakeGitHub
-from .provider import FakeProvider
+from .provider import FakeProvider, RecoveringFakeProvider
 
-__all__ = ["FakeProvider", "FakeGitHub", "FakeEngine"]
+__all__ = ["FakeProvider", "RecoveringFakeProvider", "FakeGitHub", "FakeEngine"]

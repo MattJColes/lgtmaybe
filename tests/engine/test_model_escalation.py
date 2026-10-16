@@ -28,7 +28,7 @@ from lgtmaybe.core.models import PRContext, ProviderResult, ReviewCategory, Revi
 from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine.engine import LLMReviewEngine, ReviewIncompleteError
 from tests.conftest import make_cfg
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, RecoveringFakeProvider
 
 _CTX = PRContext(
     diff=(
@@ -101,7 +101,7 @@ def _payload_bound() -> ProviderTruncated:
     )
 
 
-class _Escalating(FakeProvider):
+class _Escalating(RecoveringFakeProvider):
     """Truncates on the primary however it is asked; answers on the fallback.
 
     Stands for the real case: a model whose generation runs away on this batch,
@@ -301,7 +301,7 @@ def test_the_adapters_own_fallback_is_disclosed_too() -> None:
     5xx or a bad gateway, and the result names which model answered — so the
     notice fires on that path as well, without the engine being told."""
 
-    class _AdapterRescued(FakeProvider):
+    class _AdapterRescued(RecoveringFakeProvider):
         model = PRIMARY
 
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:

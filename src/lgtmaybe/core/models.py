@@ -730,6 +730,19 @@ class ProviderResult(_Strict):
     # adapter is the one place that holds both the resolved model string and the
     # usage the price is computed from.
     cost_usd: float | None = None
+    # What THIS call lost on the way to the model, reported per call so the
+    # engine can tally it into the review that made the call. Per call rather
+    # than as a "dropped this run" flag on the adapter: one adapter serves every
+    # review in the process, and a flag there would leak one review's drop into
+    # another's summary. `schema_dropped`: the caller asked for structured output
+    # (`response_format`) and the request that produced this text carried no
+    # schema mechanism at all (a forced tool call still counts as carrying it).
+    # `temperature_dropped`: a configured temperature did not reach the model —
+    # withheld before the request, stripped by the route, or refused and re-sent
+    # without it. False from a fake or an adapter that cannot tell, which is the
+    # claim "nothing was lost" only an adapter that knows should contradict.
+    schema_dropped: bool = False
+    temperature_dropped: bool = False
 
 
 # A FAILED call has no ProviderResult to carry `attempts` home on, so the adapter
@@ -786,6 +799,39 @@ def stamp_unrecoverable(exc: BaseException) -> None:
 def is_unrecoverable(exc: BaseException) -> bool:
     """True when the adapter said no later attempt at *exc*'s call can succeed."""
     return getattr(exc, _UNRECOVERABLE_ATTR, False) is True
+
+
+# The same two facts as ``ProviderResult.schema_dropped`` / ``temperature_dropped``,
+# for a FAILED call: a call can lose its schema before it fails (a route that
+# takes none, then a timeout), and that drop is the likeliest cause of the
+# failure, so it must reach the review's notices as surely as a success's does.
+_SCHEMA_DROPPED_ATTR = "lgtmaybe_schema_dropped"
+_TEMPERATURE_DROPPED_ATTR = "lgtmaybe_temperature_dropped"
+
+
+def stamp_degradation(
+    exc: BaseException, *, schema_dropped: bool, temperature_dropped: bool
+) -> None:
+    """Record on *exc* what the failed call lost on the way to the model.
+
+    Best effort, exactly like :func:`stamp_attempts`: an exception type that
+    refuses an attribute just reports that loss as absent. Each is stamped on
+    its own, so refusing one never costs the other.
+    """
+    with suppress(Exception):
+        setattr(exc, _SCHEMA_DROPPED_ATTR, schema_dropped)
+    with suppress(Exception):
+        setattr(exc, _TEMPERATURE_DROPPED_ATTR, temperature_dropped)
+
+
+def schema_dropped_on(exc: BaseException) -> bool:
+    """True when the call that raised *exc* had given up its schema."""
+    return getattr(exc, _SCHEMA_DROPPED_ATTR, False) is True
+
+
+def temperature_dropped_on(exc: BaseException) -> bool:
+    """True when the configured temperature never reached the call that raised *exc*."""
+    return getattr(exc, _TEMPERATURE_DROPPED_ATTR, False) is True
 
 
 RiskLevel = Literal["low", "medium", "high", "critical"]

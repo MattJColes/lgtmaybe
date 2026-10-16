@@ -16,7 +16,13 @@ import httpx
 import litellm
 import pytest
 
-from lgtmaybe.core.models import Provider, ReviewResult, attempts_of, is_unrecoverable
+from lgtmaybe.core.models import (
+    Provider,
+    ReviewResult,
+    attempts_of,
+    is_unrecoverable,
+    temperature_dropped_on,
+)
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.providers import litellm_provider as provider_module
 from lgtmaybe.providers.factory import build_provider
@@ -561,6 +567,32 @@ class TestOutputCeilingTruncation:
 
         assert result.text == '{"findings": []}'
 
+    def test_a_fallback_rescue_still_reports_what_the_primary_lost(self) -> None:
+        """The primary's requests went out without the temperature, so the call
+        as a whole lost it, even though the fallback that answered kept it."""
+        primary = "bedrock/us.openai.gpt-5.5"  # the route strips a non-1 temperature
+
+        def side_effect(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["model"] == primary:
+                return self._truncated()
+            return _fake_response('{"findings": []}')
+
+        with patch("litellm.completion", side_effect=side_effect):
+            provider = LiteLLMProvider(fallback_model="openai/gpt-4o", temperature=0.0)
+            result = provider.complete([{"role": "user", "content": "hi"}], primary)
+
+        assert result.model == "openai/gpt-4o"
+        assert result.temperature_dropped
+
+    def test_a_failed_fallback_carries_what_the_primary_lost(self) -> None:
+        primary = "bedrock/us.openai.gpt-5.5"
+        with patch("litellm.completion", return_value=self._truncated()):
+            provider = LiteLLMProvider(fallback_model="openai/gpt-4o", temperature=0.0)
+            with pytest.raises(ProviderTruncated) as exc_info:
+                provider.complete([{"role": "user", "content": "hi"}], primary)
+
+        assert temperature_dropped_on(exc_info.value)
+
     def test_stop_finish_reason_is_untouched(self) -> None:
         response = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="ok"), finish_reason="stop")],
@@ -781,11 +813,11 @@ class TestSchemaAsToolFallback:
         telling the user structured output was lost."""
         with patch("litellm.completion", side_effect=self._rejects_response_format()):
             provider = LiteLLMProvider()
-            provider.complete(
+            result = provider.complete(
                 [{"role": "user", "content": "hi"}], self.MODEL, response_format=ReviewResult
             )
 
-        assert provider.schema_dropped() is False
+        assert result.schema_dropped is False
         assert provider.sends_response_format(self.MODEL) is True
 
     def test_a_route_that_refuses_tools_too_falls_back_to_plain(self) -> None:
@@ -817,7 +849,7 @@ class TestSchemaAsToolFallback:
 
         assert result.text == '{"findings": []}'
         assert seen == ["rf", "tools", "plain"]
-        assert provider.schema_dropped() is True
+        assert result.schema_dropped is True
 
     def test_a_tool_mode_reply_with_no_tool_call_falls_back_to_plain(self) -> None:
         """A route can accept ``tools`` and ignore them. An empty content with no
@@ -914,7 +946,7 @@ class TestSchemaAsToolFallback:
 
         with patch("litellm.completion", side_effect=side_effect):
             provider = LiteLLMProvider()
-            provider.complete(
+            result = provider.complete(
                 [{"role": "user", "content": "hi"}],
                 self.MODEL,
                 response_format=ReviewResult,
@@ -922,7 +954,7 @@ class TestSchemaAsToolFallback:
             )
 
         assert seen == [caller_tools, caller_tools]
-        assert provider.schema_dropped() is True
+        assert result.schema_dropped is True
 
     def test_a_callers_tool_call_does_not_become_the_answer(self) -> None:
         """Reading arguments off any tool call would hijack a reply that answered
@@ -1748,6 +1780,38 @@ class TestPermanenceIsVisibleToTheEngine:
 
         assert is_unrecoverable(caught.value)
 
+    def test_a_failing_degradation_report_never_masks_the_real_error(self) -> None:
+        """Working out what a failed call lost is disclosure. If it raises, the
+        provider's own error must still propagate with its stamps, not be
+        replaced by the disclosure's."""
+
+        def bad_key(*args: Any, **kwargs: Any) -> Any:
+            raise litellm.AuthenticationError(
+                message="invalid api key", model="m", llm_provider="openai"
+            )
+
+        with (
+            patch("litellm.completion", side_effect=bad_key),
+            patch.object(LiteLLMProvider, "_degradation", side_effect=RuntimeError("map exploded")),
+            pytest.raises(litellm.AuthenticationError) as caught,
+        ):
+            LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openai/m")
+
+        assert attempts_of(caught.value) == 1
+        assert is_unrecoverable(caught.value)
+        assert not temperature_dropped_on(caught.value)
+
+    def test_a_failing_degradation_report_never_fails_a_good_call(self) -> None:
+        with (
+            patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
+            patch.object(LiteLLMProvider, "_degradation", side_effect=RuntimeError("map exploded")),
+        ):
+            result = LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openai/m")
+
+        assert result.text == '{"findings": []}'
+        assert not result.schema_dropped
+        assert not result.temperature_dropped
+
     def test_a_capacity_rate_limit_is_not_stamped(self) -> None:
         """Transient: the engine's rescue wave should still get its go."""
 
@@ -2370,13 +2434,22 @@ class TestSchemaDropIsVisibleAndScoped:
 
         assert (f"bedrock/{reflect}", True) in seen, "the second model never rejected anything"
 
-    def test_the_drop_is_queryable_for_the_review_notice(self) -> None:
+    def test_the_drop_rides_the_call_s_result_for_the_review_notice(self) -> None:
         model = "bedrock/us.anthropic.claude-opus-4-8"
         with patch("litellm.completion", side_effect=self._rejecting(reject_model=model)):
             provider = LiteLLMProvider()
-            assert provider.schema_dropped() is False
-            provider.complete([{"role": "user", "content": "a"}], model, response_format={"x": 1})
-            assert provider.schema_dropped() is True
+            result = provider.complete(
+                [{"role": "user", "content": "a"}], model, response_format={"x": 1}
+            )
+        assert result.schema_dropped is True
+
+    def test_the_adapter_keeps_no_run_report_for_the_engine_to_read_back(self) -> None:
+        """The drop is reported per call, never as adapter state: one adapter
+        serves every review in the process, so a "dropped this run" flag here
+        leaked one review's drop into the next one's summary."""
+        provider = LiteLLMProvider()
+        assert not hasattr(provider, "schema_dropped")
+        assert not hasattr(provider, "temperature_dropped")
 
     def test_the_engine_can_ask_for_the_drop_and_later_calls_honour_it(self) -> None:
         """The one trigger the adapter cannot see for itself: a reply that
@@ -2412,7 +2485,11 @@ class TestSchemaDropIsVisibleAndScoped:
         provider.drop_response_format("claude-haiku-4.5", "unparseable-output")
 
         assert provider.sends_response_format("claude-haiku-4.5") is False
-        assert provider.schema_dropped() is True
+        with patch("litellm.completion", return_value=_fake_response('{"findings": []}')):
+            result = provider.complete(
+                [{"role": "user", "content": "a"}], "claude-haiku-4.5", response_format={"x": 1}
+            )
+        assert result.schema_dropped is True
 
 
 class TestTheFloorRespectsRouteCapability:
@@ -3029,7 +3106,7 @@ class TestTheSchemaLadderIsNeverSkipped:
 
         assert result.text == '{"findings": []}'
         assert seen == ["rf", "tools"], "the tool rung must be tried before the floor"
-        assert provider.schema_dropped() is False, "enforcement was kept, so no downgrade notice"
+        assert result.schema_dropped is False, "enforcement was kept, so no downgrade notice"
 
     def test_an_empty_tool_mode_reply_then_reaches_the_floor(self) -> None:
         """One rung per observation. A model answering empty under the tool call
@@ -3057,7 +3134,7 @@ class TestTheSchemaLadderIsNeverSkipped:
 
         assert result.text == '{"findings": []}'
         assert seen == ["rf", "tools", "tools", "plain"]
-        assert provider.schema_dropped() is True
+        assert result.schema_dropped is True
 
     def test_one_empty_reply_does_not_cost_the_rest_of_the_run(self) -> None:
         """The regression this class exists for: a single blip used to send every
@@ -3078,13 +3155,15 @@ class TestTheSchemaLadderIsNeverSkipped:
 
         with patch("litellm.completion", side_effect=side_effect):
             provider = LiteLLMProvider()
-            for _ in range(4):
+            results = [
                 provider.complete(
                     [{"role": "user", "content": "a"}], self.MODEL, response_format=ReviewResult
                 )
+                for _ in range(4)
+            ]
 
         assert "plain" not in seen, "every call stayed schema-enforced"
-        assert provider.schema_dropped() is False
+        assert not any(result.schema_dropped for result in results)
 
     def test_the_engine_s_ask_demotes_to_the_tool_call_first(self) -> None:
         """``drop_response_format`` is the engine reporting a reply that parsed
@@ -3109,12 +3188,12 @@ class TestTheSchemaLadderIsNeverSkipped:
             )
             provider.drop_response_format(self.MODEL, "unparseable-output")
             assert provider.sends_response_format(self.MODEL) is True
-            provider.complete(
+            result = provider.complete(
                 [{"role": "user", "content": "b"}], self.MODEL, response_format=ReviewResult
             )
 
         assert seen == ["rf", "tools"]
-        assert provider.schema_dropped() is False
+        assert result.schema_dropped is False
 
     def test_a_second_ask_reaches_the_floor(self) -> None:
         seen: list[str] = []
@@ -3136,12 +3215,12 @@ class TestTheSchemaLadderIsNeverSkipped:
             provider.drop_response_format(self.MODEL, "unparseable-output")
             provider.drop_response_format(self.MODEL, "unparseable-output")
             assert provider.sends_response_format(self.MODEL) is False
-            provider.complete(
+            result = provider.complete(
                 [{"role": "user", "content": "b"}], self.MODEL, response_format=ReviewResult
             )
 
         assert seen == ["rf", "plain"]
-        assert provider.schema_dropped() is True
+        assert result.schema_dropped is True
 
     def test_an_ask_with_no_expressible_schema_goes_straight_to_the_floor(self) -> None:
         """A ``response_format`` carrying no JSON Schema cannot become a tool at
@@ -3192,7 +3271,7 @@ class TestLitellmsOwnToolConversionRefused:
             )
 
         assert result.text == '{"findings": []}'
-        assert provider.schema_dropped() is True
+        assert result.schema_dropped is True
 
     def test_a_prose_refusal_of_forced_tool_choice_is_recognised(self) -> None:
         """Bedrock does not always name the field. "tool choice" with a space

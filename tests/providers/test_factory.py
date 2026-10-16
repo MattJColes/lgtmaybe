@@ -9,13 +9,24 @@ from unittest.mock import patch
 
 import pytest
 
-from lgtmaybe.core.models import Provider
+from lgtmaybe.core.models import Provider, ProviderResult
 from lgtmaybe.providers.factory import (
     build_provider,
     declared_effort_capability,
     litellm_model_string,
     resolve_max_tokens,
 )
+from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+
+def _one_call(built: LiteLLMProvider) -> ProviderResult:
+    """One completion through *built*, answered locally: what it reports."""
+    reply = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="{}"), finish_reason="stop")],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    with patch("litellm.completion", return_value=reply):
+        return built.complete([{"role": "user", "content": "hi"}], "")
 
 
 class TestLiteLLMModelString:
@@ -723,12 +734,13 @@ class TestClaudeThinkingSampling:
     def test_a_withheld_temperature_is_disclosed_as_dropped(
         self, provider: Provider, model: str
     ) -> None:
-        """The withhold used to be an INFO log only: `temperature_dropped()`
-        stayed False, so the engine's "temperature not sent" summary segment
-        never appeared — while the same loss on Bedrock (the model rejecting the
-        param, then a re-send without it) was disclosed. The factory records the
-        drop through the adapter's own mechanism, so both losses read one
-        channel. Every Claude route (native, Bedrock, Vertex) seeds the record."""
+        """The withhold used to be an INFO log only: no call reported the
+        temperature dropped, so the engine's "temperature not sent" summary
+        segment never appeared — while the same loss on Bedrock (the model
+        rejecting the param, then a re-send without it) was disclosed. The
+        factory records the drop through the adapter's own mechanism, so both
+        losses ride the same per-call channel. Every Claude route (native,
+        Bedrock, Vertex) seeds the record."""
         built = build_provider(
             provider,
             model,
@@ -736,7 +748,7 @@ class TestClaudeThinkingSampling:
             reasoning_effort="medium",
             temperature=0.0,
         )
-        assert built.temperature_dropped()
+        assert _one_call(built).temperature_dropped
 
     def test_effort_none_keeps_temperature(self) -> None:
         """`none` disables thinking, and a non-thinking request takes a temperature."""
@@ -759,7 +771,7 @@ class TestClaudeThinkingSampling:
         built = build_provider(
             Provider.anthropic, "claude-sonnet-4-5", api_key="k", temperature=0.0
         )
-        assert not built.temperature_dropped()
+        assert not _one_call(built).temperature_dropped
 
     @pytest.mark.parametrize(
         ("provider", "model"),

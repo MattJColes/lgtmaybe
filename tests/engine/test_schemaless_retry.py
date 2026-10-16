@@ -38,7 +38,7 @@ from lgtmaybe.core.models import (
 from lgtmaybe.core.ports import ProviderTruncated
 from lgtmaybe.engine.engine import LLMReviewEngine, ReviewIncompleteError, _response_digest
 from tests.conftest import make_cfg
-from tests.fakes import FakeProvider
+from tests.fakes import FakeProvider, RecoveringFakeProvider
 
 _CTX = PRContext(
     diff=(
@@ -241,7 +241,7 @@ def test_a_model_whose_schema_the_adapter_already_strips_is_not_re_asked() -> No
     byte — the identical retry the rescue wave forbids, at full diff price.
     """
 
-    class _SchemaAlreadyStripped(_NeverComplies):
+    class _SchemaAlreadyStripped(_NeverComplies, RecoveringFakeProvider):
         def sends_response_format(self, model: str) -> bool:
             return False
 
@@ -313,7 +313,7 @@ def test_a_truncated_reply_stays_on_the_truncation_path() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _RecordsTheDrop(_CompliesOnlyWithoutTheSchema):
+class _RecordsTheDrop(_CompliesOnlyWithoutTheSchema, RecoveringFakeProvider):
     def __init__(self) -> None:
         super().__init__()
         self.dropped: list[tuple[str, str]] = []
@@ -340,7 +340,7 @@ def test_a_later_lens_skips_the_schema_after_the_first_one_recovered() -> None:
     break while the recording assertion still passed.
     """
 
-    class _AdapterLike(_CompliesOnlyWithoutTheSchema):
+    class _AdapterLike(_CompliesOnlyWithoutTheSchema, RecoveringFakeProvider):
         """Mirrors the real adapter: it strips the schema for a marked model."""
 
         def __init__(self) -> None:
@@ -376,7 +376,7 @@ def test_a_failed_retry_remembers_nothing() -> None:
     """One unparseable reply is not proof the schema is at fault, and disabling
     it for the rest of the run is a quality regression on every later call."""
 
-    class _NeverCompliesRecording(_NeverComplies):
+    class _NeverCompliesRecording(_NeverComplies, RecoveringFakeProvider):
         def __init__(self) -> None:
             super().__init__()
             self.dropped: list[tuple[str, str]] = []

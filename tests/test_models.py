@@ -17,6 +17,9 @@ from lgtmaybe.core.models import (
     ReviewConfig,
     ReviewFinding,
     Severity,
+    schema_dropped_on,
+    stamp_degradation,
+    temperature_dropped_on,
 )
 
 SNAP_DIR = Path(__file__).parent / "snapshots"
@@ -581,3 +584,21 @@ def test_other_stages_leave_the_severity_floor_alone(stage: str) -> None:
 def test_project_profile_rejects_bad_values(project: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         ReviewConfig.model_validate({"provider": "openai", "model": "gpt-4o", "project": project})
+
+
+class _RefusesSchemaStamp(Exception):
+    """An exception type that rejects one of the two degradation attributes."""
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == "lgtmaybe_schema_dropped":
+            raise AttributeError(name)
+        super().__setattr__(name, value)
+
+
+def test_a_refused_degradation_stamp_does_not_cost_the_other() -> None:
+    """Each attribute is stamped on its own, so a type that refuses one still
+    carries the other home."""
+    exc = _RefusesSchemaStamp("boom")
+    stamp_degradation(exc, schema_dropped=True, temperature_dropped=True)
+    assert not schema_dropped_on(exc)
+    assert temperature_dropped_on(exc)
