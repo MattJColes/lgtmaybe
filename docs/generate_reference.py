@@ -25,8 +25,8 @@ from lgtmaybe.core.models import (
 OUTPUT_PATH = Path(__file__).parent / "reference" / "config.md"
 
 _REFERENCE_DESCRIPTION = (
-    "Complete lgtmaybe configuration reference — every ReviewConfig field, "
-    "enum, and JSON schema, generated from the pydantic models."
+    "Every lgtmaybe configuration key you can set in .lgtmaybe.yml, "
+    "with its type, default and allowed values."
 )
 
 FRONTMATTER = f"---\ndescription: {_REFERENCE_DESCRIPTION}\n---\n"
@@ -123,7 +123,7 @@ def generate() -> str:
         FRONTMATTER,
         BANNER,
         "# Configuration Reference\n",
-        "This reference is generated from the pydantic schemas in `src/lgtmaybe/core/models.py`.\n",
+        "Every key you can set in `.lgtmaybe.yml`, with its type, default and allowed values.\n",
     ]
 
     # ReviewConfig

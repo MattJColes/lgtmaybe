@@ -34,7 +34,7 @@ SITE_URL = "https://lgtmaybe.coles.codes/"
 # to read. They are linked from llms.txt with a fixed description and left out
 # of llms-full.txt, whose committed copy would otherwise go stale every release.
 GENERATED_PAGES = {
-    "changelog.md": "Every release, newest first, built from CHANGELOG.md.",
+    "changelog.md": "Every lgtmaybe release, newest first, with what changed in each.",
 }
 
 SUMMARY = (

@@ -36,6 +36,9 @@ working, then understand why it works.
   a code example to make a sentence shorter. Shorter wording, never fewer facts.
 - **Say what the reader will see.** "The run fails with a message naming the
   missing key" beats "an error occurs".
+- **Leave out how the docs are made.** Readers want to use lgtmaybe, not
+  know how this site is built or kept up to date. Skip lines such as "this list
+  is generated from the changelog".
 
 ## House Style
 

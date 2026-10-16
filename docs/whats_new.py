@@ -111,8 +111,7 @@ def changelog_page(releases: list[Release]) -> str:
     out = [
         "# Changelog",
         "",
-        "Every lgtmaybe release, newest first. Built from `CHANGELOG.md`, which "
-        "release-please writes from conventional commits.",
+        "Every lgtmaybe release, newest first.",
     ]
     for release in releases:
         out += ["", f"## {release.version} {{#{release.anchor}}}", ""]
