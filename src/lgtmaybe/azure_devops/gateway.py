@@ -330,6 +330,7 @@ class AzureDevOpsGateway:
             description=meta.get("description") or "",
             commit_messages=self._fetch_commit_subjects(),
             head_branch=(meta.get("sourceRefName") or "").removeprefix("refs/heads/"),
+            open_finding_threads=self.count_open_finding_threads(),
         )
 
     def post_review(

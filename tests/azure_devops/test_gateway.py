@@ -362,7 +362,8 @@ class TestTokenHandling:
     ) -> None:
         fake = FakeAzureDevOps()
         fake.install()
-        _gateway().post_review([FINDING], "1 finding", diff=_gateway().get_pr_context().diff)
+        gateway = _gateway()
+        gateway.post_review([FINDING], "1 finding", diff=gateway.get_pr_context().diff)
 
         assert fake.requests
         identity = [r for r in fake.requests if r.url.path.endswith("/_apis/connectionData")]
@@ -398,6 +399,28 @@ class TestGetPRContext:
         assert ctx.head_sha == HEAD_SHA
         assert ctx.repo == REPO
         assert ctx.pr_number == PR_ID
+
+    @respx.mock
+    def test_counts_our_open_finding_threads_for_the_disclosure_line(self) -> None:
+        """The engine's "N earlier conversations still unresolved" notice needs this."""
+        threads = [
+            TestResolveOnFix._posted(thread_id=7),
+            TestResolveOnFix._posted(thread_id=8, status="pending"),
+            TestResolveOnFix._posted(thread_id=9, status="fixed"),
+            TestResolveOnFix._posted(thread_id=10, author={"id": OTHER_ID}),
+        ]
+        TestResolveOnFix._fake(*threads)
+
+        assert _gateway().get_pr_context().open_finding_threads == 2
+
+    @respx.mock
+    def test_a_threads_failure_leaves_the_count_at_zero_without_failing_the_review(self) -> None:
+        TestResolveOnFix._fake(TestResolveOnFix._posted())
+        respx.get(THREADS).mock(return_value=httpx.Response(500, json={"message": "boom"}))
+        ctx = _gateway().get_pr_context()
+
+        assert ctx.open_finding_threads == 0
+        assert ctx.head_sha == HEAD_SHA
 
     @respx.mock
     def test_carries_the_stated_intent_for_the_intent_lens(self) -> None:
