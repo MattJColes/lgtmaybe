@@ -296,6 +296,45 @@ def test_recursive_off_sends_the_oversize_file_whole() -> None:
         assert f"marker_{h}_line_0" in content
 
 
+def test_multi_batch_reflection_prompt_fits_the_budget_and_notices_the_trim() -> None:
+    """Issue #758: a review split across batches joins every batch into the
+    diff reflection receives, which can run several times the model-fitted
+    input budget and get the audit rejected outright (the findings then ship
+    unaudited). The audit is trimmed to the flagged files, its prompt fits the
+    budget, and the summary says the diff was trimmed."""
+
+    def patch(path: str, lines: int) -> str:
+        body = "".join(f"+added line {i} in {path}\n" for i in range(lines))
+        return (
+            f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+            "@@ -1,3 +1,4 @@\n context\n" + body + " context\n"
+        )
+
+    ctx = PRContext(
+        diff="".join(patch(path, 250) for path in ("a.py", "b.py", "c.py")),
+        changed_files=["a.py", "b.py", "c.py"],
+        base_sha="abc",
+        head_sha="def",
+        repo="org/repo",
+        pr_number=1,
+    )
+    cfg = make_cfg(
+        categories=[ReviewCategory.security],
+        max_input_tokens=6_000,
+        reflect=True,
+    )
+    provider = _provider_for([_HIGH])
+
+    findings, summary = LLMReviewEngine(provider).review(ctx, cfg)
+
+    (reflection,) = _reflection_calls(provider)
+    prompt = "\n".join(str(m["content"]) for m in reflection["messages"])
+    assert count_tokens(prompt) <= 6_000
+    assert "+added line 0 in b.py" not in prompt  # unflagged batches trimmed
+    assert findings, "the audit ran and kept the finding"
+    assert "self-reflection audit ran on a trimmed diff" in summary
+
+
 # ---------------------------------------------------------------------------
 # min_severity filtering
 # ---------------------------------------------------------------------------
