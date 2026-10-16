@@ -127,6 +127,7 @@ def test_findings_map_uncapped_the_engine_scopes_before_capping() -> None:
     kept = tool_review_findings(hits, CORPUS)
 
     assert len(kept) == 60
+    assert all(f.anchor for f in kept)
 
 
 def test_a_secret_in_tool_output_never_reaches_the_finding() -> None:
