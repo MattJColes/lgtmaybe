@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -1082,7 +1083,9 @@ def test_a_parser_detected_truncation_that_split_cleanly_reports_no_failure() ->
     assert "results may be incomplete" not in summary
 
 
-def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_split_pieces_carry_their_own_blocks_not_the_batchs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Issue #768: a piece must not inherit the batch's per-file blocks.
 
     A piece shows a subset of the batch's files, so the batch's blocks are
@@ -1093,6 +1096,25 @@ def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None
     """
     from lgtmaybe.engine.static_analysis import ToolFinding
 
+    spec_dir = tmp_path / ".kiro" / "specs" / "payment-links"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "requirements.md").write_text(
+        "### Requirement 1\n\n1. WHEN a link is created THEN it SHALL expire in 30 days\n",
+        encoding="utf-8",
+    )
+    (spec_dir / "tasks.md").write_text(
+        "- [ ] 1.1 Add the model\n- [ ] 1.2 Enforce the expiry in one.py\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    hint_one = ToolFinding(
+        tool="bandit",
+        path="one.py",
+        line=2,
+        rule="B101",
+        message="hint only for one.py",
+        severity=Severity.medium,
+    )
     hint_two = ToolFinding(
         tool="bandit",
         path="two.py",
@@ -1101,11 +1123,14 @@ def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None
         message="hint only for two.py",
         severity=Severity.medium,
     )
-    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hint_two])
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [hint_one, hint_two],
+    )
     cfg = ReviewConfig(
         provider=Provider.openrouter,
         model="deepseek/deepseek-v4-pro",
-        categories=[ReviewCategory.security, ReviewCategory.intent],
+        categories=[ReviewCategory.security, ReviewCategory.intent, ReviewCategory.spec],
         reflect=False,
         directory_rules=[
             DirectoryRule(paths=["one.py"], instructions="RULE ONE ONLY"),
@@ -1113,7 +1138,15 @@ def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None
         ],
     )
     ctx = _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]).model_copy(
-        update={"title": "ship the two-file change"}
+        update={
+            "title": "ship the two-file change",
+            # Static analysis only runs when head text travels with the context,
+            # so without this the hint assertions below would hold vacuously.
+            "file_contents": {
+                "one.py": "import os\nprint(os.name)\n",
+                "two.py": "import sys\nprint(sys.argv)\n",
+            },
+        }
     )
 
     provider = _TruncatesUntilSmaller()
@@ -1121,11 +1154,21 @@ def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None
 
     ones = [d for d in provider.diffs if _shows(d, "one.py") and not _shows(d, "two.py")]
     assert ones, "the batch split into per-file pieces"
-    # Rules and hints never cover a file the piece cannot see.
+    # Rules and hints never cover a file the piece cannot see — and the piece's
+    # own file's rule and hint must be there, or a regression that drops
+    # per-piece blocks entirely would pass the negative assertions below.
+    assert all("RULE ONE ONLY" in d for d in ones)
+    assert all("hint only for one.py" in d for d in ones)
     assert all("RULE TWO ONLY" not in d for d in ones)
     assert all("hint only for two.py" not in d for d in ones)
     # The intent lens's piece names the sibling file as NOT SHOWN, so a promise
     # delivered in two.py is "not shown", never "undone".
     intent_piece = next(d for d in ones if "===INTENT_START===" in d)
     intent_block = intent_piece.split("===INTENT_START===")[1].split("===INTENT_END===")[0]
+    assert "ship the two-file change" in intent_block
     assert "two.py" in intent_block
+    # The spec lens's piece gets the same correction: a requirement delivered
+    # in two.py is not shown to it, never undelivered.
+    spec_piece = next(d for d in ones if "===SPEC_START===" in d)
+    spec_block = spec_piece.split("===SPEC_START===")[1].split("===SPEC_END===")[0]
+    assert "two.py" in spec_block

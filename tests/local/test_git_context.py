@@ -8,7 +8,12 @@ from typing import NoReturn
 
 import pytest
 
-from lgtmaybe.local import local_file_reader, local_pr_context, local_repo_root
+from lgtmaybe.local import (
+    local_file_reader,
+    local_head_file_reader,
+    local_pr_context,
+    local_repo_root,
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -122,6 +127,20 @@ def test_dirty_modes_still_read_the_working_tree(repo: Path, mode: str) -> None:
     ctx = local_pr_context(working=mode == "working", uncommitted=mode == "uncommitted", cwd=repo)
 
     assert ctx.file_contents["app.py"] == dirty
+
+
+def test_head_file_reader_refuses_paths_that_escape_the_root(repo: Path) -> None:
+    """The head reader promises the working-tree reader's interface, traversal
+    guard included. Git resolves ``HEAD:../x`` against its cwd, so from a
+    subdirectory it serves a blob for a climbing path; the reader must refuse
+    the path itself, never hand it to git."""
+    (repo / "pkg").mkdir()
+    (repo.parent / "outside.py").write_text("secret = 1\n", encoding="utf-8")
+
+    read = local_head_file_reader(repo / "pkg")
+
+    assert read("../app.py") is None  # git would serve this one
+    assert read("../outside.py") is None
 
 
 def test_repo_name_from_remote(repo: Path) -> None:
