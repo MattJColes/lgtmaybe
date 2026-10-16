@@ -2715,7 +2715,6 @@ def test_a_scan_finding_on_a_file_the_cap_dropped_still_posts(monkeypatch) -> No
     assert "unchanged" not in summary.lower()
 
 
-
 # ---------------------------------------------------------------------------
 # summary template (F5b)
 # ---------------------------------------------------------------------------
