@@ -15,6 +15,7 @@ from pathlib import Path
 from lgtmaybe.core.diff import is_reviewable, is_scannable_manifest
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.models import PRContext
+from lgtmaybe.engine.retrieve import local_file_fetcher
 
 # `git diff` over a large working tree (or a repo whose objects are cold) can
 # take a while; the timeout only caps a hung git, never a slow one.
@@ -166,15 +167,13 @@ def local_file_reader(cwd: Path | None = None) -> Callable[[str], str | None]:
     process's directory: the paths handed to the reader are repo-relative,
     because that is what git reports wherever it runs.
     """
-    root = (Path(cwd) if cwd is not None else local_repo_root()).resolve()
+    fetch = local_file_fetcher(Path(cwd) if cwd is not None else local_repo_root())
 
     def read(path: str) -> str | None:
         try:
-            target = (root / path).resolve()
-            target.relative_to(root)  # refuse paths that climb out of the repo
-            return target.read_text(encoding="utf-8", errors="replace")
-        except (OSError, ValueError):
-            return None
+            return fetch(path)
+        except ValueError:
+            return None  # an embedded null byte in a model-named path: unreadable
 
     return read
 
