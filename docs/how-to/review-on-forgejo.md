@@ -59,6 +59,51 @@ with write access, and the automatic token cannot read anyone's permission. So
 every `/review`, `/ask` or other command is ignored, and the job log says why.
 Reviews post as the `forgejo-actions` user rather than your bot account.
 
+## Keyless Bedrock, Azure and Vertex
+
+Forgejo Actions can give a job an [OIDC](../reference/glossary.md#oidc) ID
+token, as GitHub Actions does. lgtmaybe exchanges it for short-lived cloud
+credentials, so no cloud key is stored anywhere. It needs Forgejo 16 or later,
+and an instance the cloud can reach over the internet. The cloud fetches the
+instance's signing keys to check each token, so a private instance cannot do
+this. Use an API key or ollama there instead.
+
+Add `enable-openid-connect: true` to the job, next to `runs-on`, and set the
+inputs for one cloud. lgtmaybe requests the token with the audience that cloud
+expects:
+
+| Cloud | Inputs | Token audience |
+|---|---|---|
+| Bedrock | `INPUT_AWS_ROLE_ARN`, `INPUT_AWS_REGION` | `sts.amazonaws.com` |
+| Azure | `INPUT_AZURE_CLIENT_ID`, `INPUT_AZURE_TENANT_ID` | `api://AzureADTokenExchange` |
+| Vertex | `INPUT_GCP_WIF_PROVIDER`, optional `INPUT_GCP_SERVICE_ACCOUNT` | `https://iam.googleapis.com/<provider>` |
+
+[`examples/forgejo/lgtmaybe-bedrock.yml`](https://github.com/MattJColes/lgtmaybe/blob/main/examples/forgejo/lgtmaybe-bedrock.yml)
+is a complete Bedrock workflow. If OpenID Connect is off, or an input is
+missing its partner, the run fails before any model call and names the fix.
+
+On the cloud side, follow the setup in
+[Bedrock](review-with-bedrock-oidc.md#one-time-aws-setup),
+[Azure](review-with-azure.md#one-time-azure-setup) or
+[Vertex](review-with-vertex-wif.md#one-time-gcp-setup), with Forgejo's values
+in place of GitHub's:
+
+- **Issuer:** `https://<your instance>/api/actions`, for example
+  `https://codeberg.org/api/actions`.
+- **Subject:** the review runs from your default branch, so the `sub` claim is
+  `repo:<repository>:ref:refs/heads/main` (with your default branch's name).
+  Trust exactly that value.
+- **Repository:** for a repository that enabled Actions on Forgejo 16 or later,
+  `<repository>` uses ids, such as `alice-12/service-34`. Older repositories use
+  `alice/service`. Read the claim from a test token rather than guessing it.
+
+For Vertex, also set `VERTEXAI_PROJECT` (and `VERTEXAI_LOCATION` for a region
+other than `us-central1`) in the step's `env:`. Unlike the GitHub Action, the
+job container passes them through.
+
+The cloud credentials last about an hour, which covers the default review time
+limit. A review that runs longer fails when they expire.
+
 ## Runners Without Docker
 
 A runner using the LXC or host backend ignores `container:`. Install lgtmaybe

@@ -20,9 +20,8 @@
 #     write access only to people trusted with these secrets.
 #
 # Add an API key secret for whichever model provider you use, with a spend
-# limit. Cloud providers with keyless OIDC (Bedrock, Vertex, Azure) are
-# GitHub-only for now; on Gitea use an API key, or ollama for a fully local
-# review.
+# limit. Keyless OIDC for Bedrock, Vertex and Azure works on GitHub and Forgejo
+# only for now; on Gitea use an API key, or ollama for a fully local review.
 name: lgtmaybe
 
 on:

@@ -19,14 +19,14 @@
 
 ## 4. Workload Identity Federation
 
-- [ ] 4.1 Red first: add `tests/providers/test_federation.py` with a stubbed token endpoint (httpx `MockTransport`) covering the gate (no input, no request, environment unchanged), the missing-token error naming `enable-openid-connect: true`, a 403 leaving no token text in the message, an incomplete input set (Azure client ID without tenant ID, Bedrock without a region) failing before any request, and the `0600` file mode on POSIX; then add `providers/federation.py` and verify the tests pass on Ubuntu and Windows (explicit `encoding=` on every file write)
-- [ ] 4.2 Bedrock: assert the `sts.amazonaws.com` audience and the `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_REGION` variables; then check botocore resolves a web-identity provider from them with the STS call stubbed
-- [ ] 4.3 Azure: assert the `api://AzureADTokenExchange` audience and the three `AZURE_*` variables; then check `DefaultAzureCredential` selects workload identity from them
-- [ ] 4.4 Vertex: assert the `https://iam.googleapis.com/<provider>` audience and an `external_account` file with `credential_source.file`, plus impersonation when a service account is given; then check `google.auth.load_credentials_from_file` accepts it
-- [ ] 4.5 Wire federation into the `action` entrypoint before `_build_context_or_fail` and add the six inputs to `_RUNTIME_INPUTS`; verify `tests/cli/test_action.py` (federation is called once, before provider build) and the `action.yml` parity tests still pass
-- [ ] 4.6 Pin the composite action gate: a test that `action.yml`'s `docker run` passes none of `INPUT_AWS_ROLE_ARN`, `INPUT_AZURE_CLIENT_ID`, `INPUT_GCP_WIF_PROVIDER`; verify it fails if one is added
-- [ ] 4.7 Create `openspec/specs/workload-identity-federation/anchors.yml` with one rule per requirement; verify `uv run pytest tests/specs -q`
-- [ ] 4.8 Add a keyless section per cloud to `review-on-forgejo.md` (issuer `https://<instance>/api/actions`, both `sub` formats, audiences, the public-JWKS requirement, the one-hour limit), add `examples/forgejo/lgtmaybe-bedrock.yml`, extend 3.1's test to it, and regenerate the llms files; verify `mkdocs build --strict` and `tests/docs`
+- [x] 4.1 Red first: add `tests/providers/test_federation.py` with a stubbed token endpoint (httpx `MockTransport`) covering the gate (no input, no request, environment unchanged), the missing-token error naming `enable-openid-connect: true`, a 403 leaving no token text in the message, an incomplete input set (Azure client ID without tenant ID, Bedrock without a region) failing before any request, and the `0600` file mode on POSIX; then add `providers/federation.py` and verify the tests pass on Ubuntu and Windows (explicit `encoding=` on every file write)
+- [x] 4.2 Bedrock: assert the `sts.amazonaws.com` audience and the `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_REGION` variables; then check botocore resolves a web-identity provider from them with the STS call stubbed
+- [x] 4.3 Azure: assert the `api://AzureADTokenExchange` audience and the three `AZURE_*` variables; then check `DefaultAzureCredential` selects workload identity from them
+- [x] 4.4 Vertex: assert the `https://iam.googleapis.com/<provider>` audience and an `external_account` file with `credential_source.file`, plus impersonation when a service account is given; then check `google.auth.load_credentials_from_file` accepts it
+- [x] 4.5 Wire federation into the `action` entrypoint before `_build_context_or_fail` reading the six inputs in the federation module (never `_RUNTIME_INPUTS`, see design decision 4); verify `tests/cli/test_action.py` (federation is called once, before provider build) and the `action.yml` parity tests still pass
+- [x] 4.6 Pin the composite action gate: a test that `action.yml`'s `docker run` passes none of `INPUT_AWS_ROLE_ARN`, `INPUT_AZURE_CLIENT_ID`, `INPUT_GCP_WIF_PROVIDER`; verify it fails if one is added
+- [x] 4.7 Create `openspec/specs/workload-identity-federation/anchors.yml` with one rule per requirement; verify `uv run pytest tests/specs -q`
+- [x] 4.8 Add a keyless section per cloud to `review-on-forgejo.md` (issuer `https://<instance>/api/actions`, both `sub` formats, audiences, the public-JWKS requirement, the one-hour limit), add `examples/forgejo/lgtmaybe-bedrock.yml`, extend 3.1's test to it, and regenerate the llms files; verify `mkdocs build --strict` and `tests/docs`
 
 ## 5. Forgejo Contract Test
 

@@ -1,0 +1,29 @@
+federation.gate:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_federate_or_fail$' }
+  files: [src/lgtmaybe/cli/**/*.py]
+
+federation.missing-token:
+  rule:
+    kind: assignment
+    has: { field: left, regex: '^_MISSING_TOKEN$' }
+  files: [src/lgtmaybe/providers/federation.py]
+
+federation.inputs:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_requests$' }
+  files: [src/lgtmaybe/providers/federation.py]
+
+federation.exchange:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^federate_ci_credentials$' }
+  files: [src/lgtmaybe/providers/federation.py]
+
+federation.secrecy:
+  rule:
+    kind: function_definition
+    has: { field: name, regex: '^_fetch_id_token$' }
+  files: [src/lgtmaybe/providers/federation.py]

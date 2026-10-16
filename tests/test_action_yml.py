@@ -368,3 +368,16 @@ def test_stop_step_is_a_no_op_when_no_container_was_created(tmp_path: Path) -> N
 
     assert code == 0
     assert calls == ""
+
+
+def test_the_container_never_receives_the_federation_inputs() -> None:
+    """The composite action federates in its own steps before the container.
+
+    The container's entrypoint federates again whenever these inputs reach it
+    (that is how Forgejo runs go keyless), so forwarding one would request a
+    second token on GitHub.
+    """
+    env = _run_lgtmaybe_step()["env"]
+
+    for name in ("INPUT_AWS_ROLE_ARN", "INPUT_AZURE_CLIENT_ID", "INPUT_GCP_WIF_PROVIDER"):
+        assert name not in env

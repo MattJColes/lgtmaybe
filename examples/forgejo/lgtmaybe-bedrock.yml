@@ -1,0 +1,54 @@
+# Copy into your Forgejo repo at .forgejo/workflows/lgtmaybe.yml
+#
+# Keyless Amazon Bedrock: the job's own OIDC ID token is exchanged for
+# short-lived AWS credentials, so no AWS key is stored anywhere. Read
+# "Keyless Bedrock, Azure and Vertex" in docs/how-to/review-on-forgejo.md for
+# the one-time AWS setup. In short:
+#
+#   * Your Forgejo instance must be reachable from the internet, because AWS
+#     fetches its signing keys from https://<instance>/api/actions.
+#   * Create an IAM OIDC provider for that issuer, audience sts.amazonaws.com,
+#     and a role trusting it, scoped to this repository's `sub` claim.
+#   * Store the role ARN as a repository secret named AWS_ROLE_ARN.
+#
+# Everything else matches examples/forgejo/lgtmaybe.yml: `runs-on` must name a
+# Docker-backed runner label, the trigger is `pull_request_target`, and your
+# Forgejo token is stored as LGTMAYBE_FORGEJO_TOKEN.
+name: lgtmaybe
+
+on:
+  pull_request_target:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: lgtmaybe-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+       (contains(github.event.comment.body, '/review') ||
+        contains(github.event.comment.body, '/improve') ||
+        contains(github.event.comment.body, '/ask') ||
+        contains(github.event.comment.body, '/describe') ||
+        contains(github.event.comment.body, '/diagram')))
+    runs-on: docker
+    # Lets this job request an OIDC ID token. lgtmaybe requests it with the
+    # sts.amazonaws.com audience and hands it to the AWS SDK.
+    enable-openid-connect: true
+    container:
+      image: ghcr.io/mattjcoles/lgtmaybe:v2
+    steps:
+      - name: Review
+        run: python -m lgtmaybe action
+        env:
+          GITEA_TOKEN: ${{ secrets.LGTMAYBE_FORGEJO_TOKEN }}
+          INPUT_PROVIDER: bedrock
+          # A cross-region inference profile id; see
+          # docs/how-to/review-with-bedrock-oidc.md for choosing one.
+          INPUT_MODEL: us.anthropic.claude-sonnet-4-6
+          INPUT_AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          INPUT_AWS_REGION: us-east-1

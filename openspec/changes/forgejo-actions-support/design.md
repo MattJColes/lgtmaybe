@@ -104,10 +104,16 @@ Alternatives considered:
 
 Input names match `action.yml` (`aws_role_arn`, `aws_region`,
 `gcp_wif_provider`, `gcp_service_account`, `azure_client_id`,
-`azure_tenant_id`). They join `_RUNTIME_INPUTS`, so the `ReviewConfig` parity
-tests do not expect them as config fields. On GitHub, `action.yml` does not pass
-them into `docker run`, so the gate in the spec holds by construction. A test
-pins that.
+`azure_tenant_id`). The federation module reads them from the environment
+itself; they do not join `_RUNTIME_INPUTS`, because the `action.yml` parity
+tests would then require them in the composite's container `env:` block, which
+is exactly what must never happen. A test pins that the composite never
+forwards them, so the gate in the spec holds on GitHub by construction.
+
+The spike confirmed the shape against Forgejo 17's real token endpoint: the
+response carries the token as `value`, the runner's query (`api-version`)
+survives the merged `audience` parameter, and `pull_request_target` and
+`issue_comment` runs both get `repo:<repository>:ref:refs/heads/<default>`.
 
 **5. Audiences follow each cloud's own default.** `sts.amazonaws.com` for AWS,
 `api://AzureADTokenExchange` for Entra, and
