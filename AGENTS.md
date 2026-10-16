@@ -138,8 +138,8 @@ host.** Host differences: `docs/explanation/architecture.md` and
   `commit_id`), on Gitea 1.26+ only: Forgejo and older Gitea 404, which stops
   it. No reply endpoint, so it never claims `SupportsThreadResolution`.
 - **GitLab** (`gitlab/gateway.py`): one discussion per finding, an upserted
-  summary note. Thread resolution is plain REST, gated on the validated
-  allowlist and scoped to the increment. Incremental needs a single-parent chain
+  summary note. Thread resolution is plain REST, gated on the submission's
+  completed head and the validated allowlist, and scoped to the increment. Incremental needs a single-parent chain
   back to the watermark, else full review. Read the watermark only from the
   token user's own note; an unmarked post keeps the old one. 👎 feedback reads
   `thumbsdown` award emoji only from Developer+ members (others cannot steer
