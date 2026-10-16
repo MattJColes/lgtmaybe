@@ -7,8 +7,8 @@
 
 - [ ] 2.1 Red first: add `tests/cli/test_action.py` cases for `FORGEJO_SERVER_URL` winning over `GITHUB_SERVER_URL`, the `GITHUB_*`-only fallback, and no GHES refusal when `FORGEJO_SERVER_URL` is set; then change `cli._change_url` and verify the cases pass
 - [ ] 2.2 Name Forgejo beside Gitea in `parse_pr_url`'s unparseable-URL error and `GHES_UNSUPPORTED`; verify `tests/core/test_forge.py` asserts the new text
-- [ ] 2.4 Red first: a `tests/gitea/test_gateway.py` case where the permission call returns 403 and the logged warning names the token's missing permission; then reword the warning in `GiteaGateway.has_repo_write` and verify the case passes
-- [ ] 2.3 Add the `gitea.forgejo-host` rule to `openspec/specs/gitea-posting/anchors.yml` (bound to `_change_url`); verify `uv run pytest tests/specs -q`
+- [ ] 2.3 Red first: a `tests/gitea/test_gateway.py` case where the permission call returns 403 and the logged warning names the token's missing permission; then reword the warning in `GiteaGateway.has_repo_write` and verify the case passes
+- [ ] 2.4 Add the `gitea.forgejo-host` rule to `openspec/specs/gitea-posting/anchors.yml` (bound to `_change_url`); verify `uv run pytest tests/specs -q`
 
 ## 3. Starter Workflow and Docs
 
