@@ -766,6 +766,114 @@ class _PreparedCall:
     task: _ReviewTask
 
 
+@dataclass
+class _RunState:
+    """What one review has done so far: the facts its summary notices report,
+    and the billable tokens its model calls have spent.
+
+    Built fresh for every review and carried on its :class:`_Run`, never on the
+    engine: one engine may serve two reviews at once, and each summary must
+    describe its own run alone. Written from the fan-out's worker threads.
+
+    The sets and ``escalated`` are written directly: a set's ``add`` and a
+    dict's plain store are single operations, so they need no lock. The
+    counters (``flooded``, ``self_talk`` and the token tally) are a read, an
+    add and a store, so they change only through the methods below, which hold
+    the lock themselves. No caller ever takes it by hand.
+    """
+
+    # Batches an oversized-payload failure (wall timeout or output ceiling)
+    # forced us to review in smaller pieces.
+    split_batches: set[int] = field(default_factory=set)
+    # Lenses that only answered after their reasoning effort was stepped down
+    # (see _retry_lower_effort). Keyed by lens so the notice counts lenses,
+    # not calls — the same lens stepping down in two batches is one fact
+    # about the review, not two.
+    stepped_down: set[str] = field(default_factory=set)
+    # Lenses that answered only with reasoning switched off (the rung below
+    # the step-down); kept apart because the summary makes a different claim.
+    reasoning_off: set[str] = field(default_factory=set)
+    # Lenses a SECOND model answered, keyed to the model that answered them.
+    # Two paths land here and the reader cannot tell them apart, which is the
+    # point: the engine escalating a truncation itself (see _escalate_model),
+    # and the adapter switching model on its own for any other failure. Both
+    # are read off the answering model on the result rather than recorded at
+    # the call site, so neither can be disclosed and the other not. A plain
+    # store needs no lock: two batches racing here agree on the value anyway.
+    escalated: dict[str, str] = field(default_factory=dict)
+    # Lenses whose unparseable reply was reformatted into findings by a
+    # second call (see repair.py). Keyed by lens for the same reason as
+    # `stepped_down`: one fact about the review, not one per batch.
+    repaired: set[str] = field(default_factory=set)
+    # Lenses that only parsed once the provider's JSON schema was taken off
+    # the request (see _retry_without_schema). Keyed by lens likewise.
+    re_asked: set[str] = field(default_factory=set)
+    # Findings dropped per lens by the per-lens bound (see add_flooded). Two
+    # batches' primers flooding at once would otherwise lose an update and
+    # under-report the drop in the summary notice.
+    flooded: dict[str, int] = field(default_factory=dict)
+    # Same shape: findings dropped per lens for being the model's note to
+    # itself (see add_self_talk, selftalk.py and _stamp_and_bound).
+    self_talk: dict[str, int] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    # Read and written only through charge() and tokens_spent().
+    _tokens: int = field(default=0, init=False)
+
+    def add_flooded(self, lens_id: str, dropped: int) -> None:
+        """Count *dropped* findings the per-lens bound cut from *lens_id*."""
+        with self._lock:
+            self.flooded[lens_id] = self.flooded.get(lens_id, 0) + dropped
+
+    def add_self_talk(self, lens_id: str, dropped: int) -> None:
+        """Count *dropped* self-talk findings removed from *lens_id*."""
+        with self._lock:
+            self.self_talk[lens_id] = self.self_talk.get(lens_id, 0) + dropped
+
+    def charge(self, tokens: int) -> None:
+        """Add one model call's billable tokens to this review's spend."""
+        with self._lock:
+            self._tokens += tokens
+
+    def tokens_spent(self) -> int:
+        """Billable tokens (input + output) this review's calls have spent.
+
+        The figure `max_review_tokens` is enforced against. Input + output only,
+        like :meth:`Profiler.total_tokens`, and for the same reason: it is the
+        one count every provider route agrees on.
+        """
+        with self._lock:
+            return self._tokens
+
+
+class _MeteredProvider:
+    """The review's provider, charging every call's tokens to that review.
+
+    Every model call a review makes goes through this one object: the lens
+    calls and their retries, split pieces and rescues, the repair re-ask,
+    triage and reflection. So the run's tally sees exactly the calls the
+    profiler records, without a tally parameter threaded through every module
+    that makes one. A failed call is charged what it reports spending, the way
+    the profiler's ``record_error`` charges it: a truncation reached the model
+    and is usually the costliest call of the run. Capability probes stay on the
+    engine's own provider; this wrapper only speaks the ``ProviderClient`` port.
+    """
+
+    def __init__(self, inner: ProviderClient, state: _RunState) -> None:
+        self._inner = inner
+        self._state = state
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        try:
+            result = self._inner.complete(messages, model=model, **opts)
+        except Exception as exc:
+            spent = getattr(exc, "input_tokens", None) or 0
+            spent += getattr(exc, "output_tokens", None) or 0
+            self._state.charge(spent)
+            raise
+        self._state.charge(result.input_tokens + result.output_tokens)
+        return result
+
+
 @dataclass(frozen=True)
 class _Run:
     """The settings that are fixed for a whole review, resolved once per run.
@@ -773,6 +881,12 @@ class _Run:
     Every model call in the fan-out — the first one, an oversized batch's split
     pieces, a deferral's re-run — reads exactly the same values, so they travel
     as one object rather than as seven parameters re-declared at each hop.
+
+    It also carries the review's :class:`_RunState`. The reference is fixed for
+    the run like every other field; the object it points at is the run's
+    mutable record. It rides here rather than as a second parameter because
+    every hop that reads a ceiling also records an outcome, and a parallel
+    argument would be re-declared at each of them.
     """
 
     model: str
@@ -794,6 +908,11 @@ class _Run:
     # (the repair re-ask) — carried rather than re-threaded as parameters that
     # every hop between review() and _complete_lens would have to re-declare.
     cfg: ReviewConfig
+    # The provider every model call of this review goes through: the engine's
+    # own, metered into `state` (see _MeteredProvider).
+    provider: ProviderClient
+    # This review's notices and spend; see _RunState.
+    state: _RunState
     # The PR's full changed-file list. Carried for the same reason as
     # `concurrency`: a split piece shows FEWER files than the batch it came from,
     # so it has to derive its own not-shown manifest rather than inherit the
@@ -815,6 +934,9 @@ class _PreparedReview:
     """
 
     cfg: ReviewConfig
+    # The run every prepared call shares: its metered provider for the calls
+    # after the fan-out (reflection), and its state for the summary notices.
+    run: _Run
     lenses: list[_Lens]
     per_batch: list[tuple[bool, list[_PreparedCall]]]
     workers: int
@@ -884,21 +1006,23 @@ def _split_batch(
     ]
 
 
-def _skip_reason(deadline_at: float | None, budget_at: int | None, lens: _Lens) -> str | None:
+def _skip_reason(run: _Run, lens: _Lens) -> str | None:
     """Why this model call must not be made, or None to go ahead.
 
     Every ceiling is checked at EXECUTION time (tasks queue in the pool long
     before a worker picks them up, and a deferral is decided later still), so the
     figures include everything that landed in the meantime. One function, so the
     first call and a deferral's re-run can never drift apart on when to stop.
+    The spend is this run's own tally, never the process-wide profiler, so a
+    review running beside another is charged only for its own calls.
     """
     if interrupt_requested():
         _log.warning("review interrupted — skipping call", extra={"lens": lens.id})
         return _INTERRUPT_SKIP_REASON
-    if deadline_at is not None and time.perf_counter() >= deadline_at:
+    if run.deadline_at is not None and time.perf_counter() >= run.deadline_at:
         _log.warning("review deadline reached — skipping call", extra={"lens": lens.id})
         return "review deadline (max_review_seconds) reached: call skipped"
-    if budget_at is not None and profiler.total_tokens() >= budget_at:
+    if run.budget_at is not None and run.state.tokens_spent() >= run.budget_at:
         _log.warning("review token budget reached — skipping call", extra={"lens": lens.id})
         return _BUDGET_SKIP_REASON
     return None
@@ -1301,7 +1425,7 @@ class LLMReviewEngine:
                         all_findings,
                         clean_ctx,
                         cfg,
-                        self._provider,
+                        prepared.run.provider,
                         fetch_file=self._fetch_file,
                         resolve_symbol=self._resolve_symbol,
                         # The hints a lockfile finding was confirmed from: the
@@ -1347,6 +1471,7 @@ class LLMReviewEngine:
         )
         profiler.record_returned_findings(len(filtered))
 
+        state = prepared.run.state
         notices = _build_notices(
             _NoticeState(
                 cfg=cfg,
@@ -1358,20 +1483,20 @@ class LLMReviewEngine:
                 total_calls=total_calls,
                 failed_calls=failed_calls,
                 failed_lenses=failed_lenses,
-                split_batches=len(self._split_batches),
-                stepped_down=sorted(self._stepped_down),
-                reasoning_off=sorted(self._reasoning_off),
-                escalated=dict(self._escalated),
-                repaired=sorted(self._repaired),
-                flooded=dict(self._flooded),
-                re_asked=sorted(self._re_asked),
+                split_batches=len(state.split_batches),
+                stepped_down=sorted(state.stepped_down),
+                reasoning_off=sorted(state.reasoning_off),
+                escalated=dict(state.escalated),
+                repaired=sorted(state.repaired),
+                flooded=dict(state.flooded),
+                re_asked=sorted(state.re_asked),
                 schema_dropped=self._schema_dropped(),
                 reflection_skipped=reflection_skipped,
                 suppressed=suppressed,
                 off_diff=off_diff,
                 open_finding_threads=ctx.open_finding_threads,
                 unbatched_hints_dropped=prepared.unbatched_hints_dropped,
-                self_talk=dict(self._self_talk),
+                self_talk=dict(state.self_talk),
                 spec_unfit=prepared.spec_unfit,
                 spec_reviewed=prepared.spec_reviewed,
                 reflection_trimmed=bool(reflection_notices),
@@ -1408,12 +1533,16 @@ class LLMReviewEngine:
             time.perf_counter() + cfg.max_review_seconds if cfg.max_review_seconds else None
         )
         # Soft whole-review token ceiling, the spend-shaped twin of the deadline
-        # above. Measured from the profiler's running total AT THIS INSTANT, not
-        # from zero: the profiler is a process-wide singleton, so a second review
-        # in one process must not inherit the first one's spend as its budget.
-        budget_at = (
-            profiler.total_tokens() + cfg.max_review_tokens if cfg.max_review_tokens else None
-        )
+        # above. Counted on this run's own tally, from zero: every model call
+        # this review makes goes through `provider`, which charges it to
+        # `state`, so neither an earlier review in this process nor one running
+        # beside it on the same engine is charged against this budget.
+        budget_at = cfg.max_review_tokens or None
+        # This review's own record of what happened (notices, spend), built
+        # here and carried on the run, never on `self`: one engine may serve
+        # two reviews at once.
+        state = _RunState()
+        provider = _MeteredProvider(self._provider, state)
 
         # Lens calls stop EARLY, leaving the tail of each ceiling for the
         # auditor. Reflection prunes a bad review, so if the lens fan-out spends
@@ -1435,48 +1564,6 @@ class LLMReviewEngine:
             if budget_at is not None
             else None
         )
-        # Batches an oversized-payload failure (wall timeout or output ceiling)
-        # forced us to review in smaller pieces.
-        # Per-review state (reset here, not in __init__, so a reused engine starts
-        # clean); a set's add is atomic, which is all the fan-out threads need.
-        self._split_batches: set[int] = set()
-        # Lenses that only answered after their reasoning effort was stepped down
-        # (see _retry_lower_effort). Keyed by lens so the notice counts lenses,
-        # not calls — the same lens stepping down in two batches is one fact
-        # about the review, not two.
-        self._stepped_down: set[str] = set()
-        # Lenses that answered only with reasoning switched off (the rung below
-        # the step-down); kept apart because the summary makes a different claim.
-        self._reasoning_off: set[str] = set()
-        # Lenses a SECOND model answered, keyed to the model that answered them.
-        # Two paths land here and the reader cannot tell them apart, which is the
-        # point: the engine escalating a truncation itself (see _escalate_model),
-        # and the adapter switching model on its own for any other failure. Both
-        # are read off the answering model on the result rather than recorded at
-        # the call site, so neither can be disclosed and the other not. A plain
-        # store needs no lock — unlike `_flooded`'s read-add-store, it is one
-        # operation, and two batches racing here agree on the value anyway.
-        self._escalated: dict[str, str] = {}
-        # Lenses whose unparseable reply was reformatted into findings by a
-        # second call (see repair.py). Keyed by lens for the same reason as
-        # `_stepped_down`: one fact about the review, not one per batch.
-        self._repaired: set[str] = set()
-        # Written from the fan-out's worker threads, and unlike the sets above
-        # a dict counter's `read, add, store` is not one atomic operation — two
-        # batches' primers flooding at once would otherwise lose an update and
-        # under-report the drop in the summary notice.
-        self._flooded: dict[str, int] = {}
-        self._flooded_lock = threading.Lock()
-        # Same shape and same lock: findings dropped per lens for being the
-        # model's note to itself (see selftalk.py and _stamp_and_bound).
-        self._self_talk: dict[str, int] = {}
-        # Resolved once per review so every (batch, lens) result reads the same
-        # bound without threading cfg through the fan-out's every hop.
-        self._max_findings_per_lens = cfg.max_findings_per_lens
-        # Lenses that only parsed once the provider's JSON schema was taken off
-        # the request (see _retry_without_schema). Keyed by lens for the same
-        # reason as the two above.
-        self._re_asked: set[str] = set()
 
         # 1. Redact secrets from the diff before it leaves this process.
         #    (see _schema_dropped below for the other adapter-only probe)
@@ -1602,9 +1689,7 @@ class LLMReviewEngine:
         skipped_by_triage: list[str] = []
         if cfg.triage_model and file_patches:
             with profiler.stage("triage"):
-                file_patches, skipped_by_triage = triage_files(
-                    file_patches, sa_all, cfg, self._provider
-                )
+                file_patches, skipped_by_triage = triage_files(file_patches, sa_all, cfg, provider)
 
         # 3d. File cap: after triage so it drops the lowest-risk survivors,
         # rather than whichever paths happened to appear last in the diff.
@@ -1688,6 +1773,8 @@ class LLMReviewEngine:
             retrieval_budget=retrieval_budget,
             concurrency=concurrency_cap(cfg),
             cfg=cfg,
+            provider=provider,
+            state=state,
             changed_files=tuple(ctx.changed_files),
             stack_block=wrap_stack(_redacted_stack(ctx.stack)),
         )
@@ -1788,6 +1875,7 @@ class LLMReviewEngine:
 
         return _PreparedReview(
             cfg=cfg,
+            run=run,
             lenses=lenses,
             per_batch=per_batch,
             workers=workers,
@@ -1954,7 +2042,7 @@ class LLMReviewEngine:
         oversized-payload split, it is offered only when ``batch`` is supplied —
         so a re-run, which passes none, can never defer again.
         """
-        skip = _skip_reason(run.deadline_at, run.budget_at, lens)
+        skip = _skip_reason(run, lens)
         if skip is not None:
             return [], skip
         on_oversized = (
@@ -2048,7 +2136,7 @@ class LLMReviewEngine:
         something else. The cost is a duplicate pair when the re-run repeats itself —
         which dedupe (keyed path/line/side) is exactly what removes.
         """
-        skip = _skip_reason(run.deadline_at, run.budget_at, lens)
+        skip = _skip_reason(run, lens)
         if skip is not None:
             # The lens asked for code we may no longer spend on. Keep what it
             # already found and report the skip: the run IS incomplete, and the
@@ -2312,7 +2400,7 @@ class LLMReviewEngine:
         if len(errors) < len(pieces):
             # At least one piece answered, so the shrink did produce a review —
             # only then is "reviewed in smaller pieces" a true claim.
-            self._split_batches.add(batch_num)
+            run.state.split_batches.add(batch_num)
         # ANY failed piece is still a failed call. Swallowing it because a sibling
         # succeeded would drop the incomplete-results notice while the summary
         # claimed the batch was reviewed — a clean bill of health for code no model
@@ -2356,7 +2444,7 @@ class LLMReviewEngine:
             # one wave, so its outcome is never rescued again.
             again = [review_piece(piece) for piece in flaky]
             if any(error is None for _, error in again):
-                self._split_batches.add(batch_num)
+                run.state.split_batches.add(batch_num)
             remaining = settled + [error for _, error in again if error is not None]
             return [f for found, _ in again for f in found], (
                 str(remaining[-1]) if remaining else None
@@ -2414,7 +2502,7 @@ class LLMReviewEngine:
         # the effort lives in provider-shaped opts (a flat `reasoning_effort`,
         # or OpenRouter's nested `reasoning` object), and the engine has no
         # business knowing which. A provider without it simply never steps down.
-        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run, lens) is not None:
             # Past a ceiling: the run is already stopping, and the notice it will
             # carry is the truncation's, not a skip's — this call never happened.
             return [], reason
@@ -2435,7 +2523,7 @@ class LLMReviewEngine:
             # came from the lower setting, and a retry that truncated again
             # produced no such findings. That run reports the failure it already
             # had — claiming a recovery on top of it would be two wrong notices.
-            self._stepped_down.add(lens.id)
+            run.state.stepped_down.add(lens.id)
             return findings, error
         if not isinstance(error, _ReasoningBoundReason):
             # The lower effort cut for some OTHER reason — the answer outgrew the
@@ -2457,7 +2545,7 @@ class LLMReviewEngine:
             # configured `minimal` steps to `none`): a second request at the
             # same setting is the byte-identical call that just failed.
             return findings, error
-        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run, lens) is not None:
             return findings, error
         _log.warning(
             "the lower effort exhausted the ceiling too — retrying once with reasoning off",
@@ -2474,7 +2562,7 @@ class LLMReviewEngine:
             run=run,
         )
         if error is None:
-            self._reasoning_off.add(lens.id)
+            run.state.reasoning_off.add(lens.id)
         return findings + more, error
 
     def _escalate_model(
@@ -2524,7 +2612,7 @@ class LLMReviewEngine:
         on the result (:meth:`_note_answering_model`), which also catches the
         adapter switching model on its own for a failure that never reaches this.
         """
-        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run, lens) is not None:
             return [], reason
         # An optional capability, like `lower_reasoning_effort`: which litellm
         # model string a configured fallback resolves to is the adapter's
@@ -2553,7 +2641,7 @@ class LLMReviewEngine:
             run=run,
         )
 
-    def _note_answering_model(self, result: ProviderResult, lens: _Lens) -> None:
+    def _note_answering_model(self, result: ProviderResult, lens: _Lens, run: _Run) -> None:
         """Record that a model other than the primary produced this result.
 
         Read off the result rather than stamped at the call site because the
@@ -2573,7 +2661,7 @@ class LLMReviewEngine:
         # keeps the probe honest for an adapter that is not a Protocol.
         asked = self._provider.model if hasattr(self._provider, "model") else None
         if answered and asked and answered != asked:
-            self._escalated[lens.id] = answered
+            run.state.escalated[lens.id] = answered
 
     def _retry_without_schema(
         self,
@@ -2620,7 +2708,7 @@ class LLMReviewEngine:
         not a broken schema mode, and disabling it for the rest of the run would
         be a quality regression on every later call — so nothing is remembered.
         """
-        if _skip_reason(run.deadline_at, run.budget_at, lens) is not None:
+        if _skip_reason(run, lens) is not None:
             return [], reason
         _log.warning(
             "re-asking the lens without the provider's JSON schema",
@@ -2633,7 +2721,7 @@ class LLMReviewEngine:
             # Recorded on the way OUT, like the step-down: a re-run that failed
             # too produced no findings to claim, and marking the model off the
             # back of it would disable structured output on a guess.
-            self._re_asked.add(lens.id)
+            run.state.re_asked.add(lens.id)
             self._drop_response_format(model)
         return findings, error
 
@@ -2669,7 +2757,9 @@ class LLMReviewEngine:
         if isinstance(self._provider, SupportsResponseFormatDrop):
             self._provider.drop_response_format(model, "unparseable-output")
 
-    def _stamp_and_bound(self, findings: list[ReviewFinding], lens: _Lens) -> list[ReviewFinding]:
+    def _stamp_and_bound(
+        self, findings: list[ReviewFinding], lens: _Lens, run: _Run
+    ) -> list[ReviewFinding]:
         """Stamp the originating lens, then bound what one call may contribute.
 
         Both apply to every (batch, lens) result: the normal path, a repaired
@@ -2685,8 +2775,7 @@ class LLMReviewEngine:
         # Dropped first so it cannot take a slot from a genuine finding below.
         findings, self_talk = drop_self_talk(findings)
         if self_talk:
-            with self._flooded_lock:
-                self._self_talk[lens.id] = self._self_talk.get(lens.id, 0) + len(self_talk)
+            run.state.add_self_talk(lens.id, len(self_talk))
             _log.warning(
                 "dropped findings carrying the model's own repair note",
                 extra={
@@ -2695,7 +2784,7 @@ class LLMReviewEngine:
                     "titles": [f.title[:120] for f in self_talk],
                 },
             )
-        cap = self._max_findings_per_lens
+        cap = run.cfg.max_findings_per_lens
         if not cap or len(findings) <= cap:
             return findings
         # Highest severity first, input order preserved within a severity, so
@@ -2703,8 +2792,7 @@ class LLMReviewEngine:
         # same selection policy `_dedupe` uses.
         kept = sorted(findings, key=lambda f: -f.severity.rank)[:cap]
         dropped = len(findings) - len(kept)
-        with self._flooded_lock:
-            self._flooded[lens.id] = self._flooded.get(lens.id, 0) + dropped
+        run.state.add_flooded(lens.id, dropped)
         _log.warning(
             "lens exceeded the per-lens finding bound — dropping the least severe",
             extra={"lens": lens.id, "returned": len(findings), "kept": cap, "dropped": dropped},
@@ -2770,7 +2858,7 @@ class LLMReviewEngine:
         _log.info("reviewing lens", extra={"lens": lens.id})
         started = time.perf_counter()
         try:
-            result = self._provider.complete(messages, model=run.model, **opts)
+            result = run.provider.complete(messages, model=run.model, **opts)
         except Exception as exc:
             # Retryable by default: this is the provider faltering, not us, so the
             # rescue wave gets one more go once the fan-out has drained. Two
@@ -2818,7 +2906,7 @@ class LLMReviewEngine:
                     else (None, None)
                 )
                 return self._remedy_oversized(
-                    self._stamp_and_bound(_salvage_truncated(exc, lens), lens),
+                    self._stamp_and_bound(_salvage_truncated(exc, lens), lens, run),
                     reason,
                     _reasoning_exhausted_reason(reasoning, spent),
                     messages=messages,
@@ -2837,7 +2925,7 @@ class LLMReviewEngine:
                 )
             return [], reason
         elapsed = time.perf_counter() - started
-        self._note_answering_model(result, lens)
+        self._note_answering_model(result, lens, run)
         salvaged = 0
         try:
             findings = parse_findings(result.text)
@@ -2855,7 +2943,7 @@ class LLMReviewEngine:
                 #
                 # Ceilings are re-checked first: these are new model calls, and a
                 # run already past its deadline or budget must not start one.
-                if recover and _skip_reason(run.deadline_at, run.budget_at, lens) is None:
+                if recover and _skip_reason(run, lens) is None:
                     # 1. One reformat attempt at the answer the model already
                     #    produced and was already billed for. A DIFFERENT request
                     #    — the reply plus the schema, no diff — which is why it
@@ -2863,15 +2951,15 @@ class LLMReviewEngine:
                     #    never re-run: that rule is about re-issuing the identical
                     #    request at temperature 0.
                     repaired = repair_findings(
-                        self._provider, run.cfg, result.text, exc.shape, lens.id
+                        run.provider, run.cfg, result.text, exc.shape, lens.id
                     )
                     if repaired is not None:
                         # Complete, not partial: nothing is missing, so this must
                         # not trip the incomplete notice. Reported through its own
                         # notice instead, like a lens that stepped its reasoning
                         # effort down — successful, but worth saying out loud.
-                        self._repaired.add(lens.id)
-                        return self._stamp_and_bound(repaired, lens), None
+                        run.state.repaired.add(lens.id)
+                        return self._stamp_and_bound(repaired, lens, run), None
                     # 2. The reformat could not do it either. If this call sent
                     #    the provider's schema, that enforcement is the remaining
                     #    suspect — re-run the lens once without it.
@@ -2933,7 +3021,7 @@ class LLMReviewEngine:
             # a refused prompt it gives no reason to believe a lone hunk is the
             # unit that must shrink.
             return self._remedy_oversized(
-                self._stamp_and_bound(exc.recovered, lens),
+                self._stamp_and_bound(exc.recovered, lens, run),
                 reason,
                 # The share that decides whether covering less can help, read off
                 # the ceiling the request CARRIED — `output_tokens` here is
@@ -2948,7 +3036,7 @@ class LLMReviewEngine:
                 effort=effort,
                 escalate_to=escalate_to,
             )
-        findings = self._stamp_and_bound(findings, lens)
+        findings = self._stamp_and_bound(findings, lens, run)
         profiler.record_result(
             lens.id,
             batch_num,

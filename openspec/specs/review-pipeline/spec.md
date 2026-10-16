@@ -34,7 +34,8 @@ configured lens could run over (e.g. `categories: [spec]` with no matching spec)
 - **THEN** they are skipped and the summary carries the same partial-results notice
 
 #### Scenario: token budget is exhausted mid-review
-- **WHEN** the run's billable tokens reach `max_review_tokens` with calls queued
+- **WHEN** the review's own billable tokens (never another review's on the same
+  engine or process) reach `max_review_tokens` with calls queued
 - **THEN** they are skipped and the summary names the budget alongside the
   partial-results notice, so a spend stop is never read as a clean review
 

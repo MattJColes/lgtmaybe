@@ -208,8 +208,8 @@ class TestProfiler:
 
 
 class TestTotalTokens:
-    """`total_tokens` backs the max_review_tokens ceiling, so it must count the
-    one figure every provider route agrees on and nothing else."""
+    """`total_tokens` is the profile's spend line, so it must count the one
+    figure every provider route agrees on and nothing else."""
 
     def _record(self, p: Profiler, **usage: int) -> None:
         p.record_call(
@@ -321,10 +321,9 @@ class TestTimedComplete:
         assert (call.input_tokens, call.output_tokens) == (24039, 32768)
         assert call.reasoning_tokens == 516
 
-    def test_a_truncation_is_charged_to_the_token_budget(self) -> None:
-        """`total_tokens` backs `max_review_tokens`, so a runaway that reports
-        zero is a runaway the spend ceiling cannot see — which inverts the whole
-        point of having one."""
+    def test_a_truncation_is_charged_to_the_profile_total(self) -> None:
+        """A runaway that reports zero is a runaway the profile's spend line
+        cannot see. The budget's own tally is pinned in `test_run_state.py`."""
         exc = ProviderTruncated("ceiling", text="", input_tokens=1000, output_tokens=32768)
         profiler.record_error("code-health", 1, 380.1, exc)
         assert profiler.total_tokens() == 33768
