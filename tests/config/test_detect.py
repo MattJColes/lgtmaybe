@@ -27,6 +27,7 @@ def _detect(env: dict[str, str], **kwargs: object) -> list[detect.Detection]:
         "probe_ollama": _no_ollama,
         "aws_probe": lambda _env: False,
         "gcp_probe": lambda: False,
+        "chatgpt_probe": lambda _env: False,
     }
     defaults.update(kwargs)
     return detect.detect(**defaults)  # type: ignore[arg-type]
@@ -80,6 +81,27 @@ def test_ambient_cloud_credentials_are_detected() -> None:
     assert [d.provider for d in found] == [Provider.bedrock, Provider.vertex]
 
 
+def test_a_chatgpt_sign_in_is_detected() -> None:
+    found = _detect({}, chatgpt_probe=lambda _env: True)
+
+    assert [d.provider for d in found] == [Provider.chatgpt]
+    assert "lgtmaybe login chatgpt" in found[0].reason
+
+
+def test_the_default_chatgpt_probe_reads_the_token_dir_from_env(tmp_path: Path) -> None:
+    env = {"CHATGPT_TOKEN_DIR": str(tmp_path)}
+    found = detect.detect(
+        env=env, probe_ollama=_no_ollama, aws_probe=lambda _env: False, gcp_probe=lambda: False
+    )
+    assert found == []
+
+    (tmp_path / "auth.json").write_text("{}", encoding="utf-8")
+    found = detect.detect(
+        env=env, probe_ollama=_no_ollama, aws_probe=lambda _env: False, gcp_probe=lambda: False
+    )
+    assert [d.provider for d in found] == [Provider.chatgpt]
+
+
 def test_explicit_keys_come_before_local_and_ambient_detections() -> None:
     """A key the user exported is the strongest signal; ambient cloud files are
     the weakest (an ~/.aws for another project says little about Bedrock)."""
@@ -88,10 +110,12 @@ def test_explicit_keys_come_before_local_and_ambient_detections() -> None:
         probe_ollama=lambda _base: (),
         aws_probe=lambda _env: True,
         gcp_probe=lambda: True,
+        chatgpt_probe=lambda _env: True,
     )
 
     assert [d.provider for d in found] == [
         Provider.openai,
+        Provider.chatgpt,
         Provider.ollama,
         Provider.azure,
         Provider.bedrock,

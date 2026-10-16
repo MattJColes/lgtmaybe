@@ -83,6 +83,7 @@ flowchart LR
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
 | `zai` | `ZAI_API_KEY` for GLM / Zhipu AI; optional `--api-base` for the China / coding-plan endpoint |
+| `chatgpt` | A ChatGPT Plus or Pro subscription, signed in with `lgtmaybe login chatgpt`; local reviews only |
 | `bedrock` | Ambient AWS creds via GitHub OIDC, no static key |
 | `vertex` | Ambient GCP creds via Workload Identity Federation, no key |
 | `azure` | Resource endpoint, plus `AZURE_API_KEY` or keyless Entra (Azure AD) creds via GitHub OIDC |

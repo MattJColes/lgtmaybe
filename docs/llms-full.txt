@@ -89,6 +89,7 @@ See the [Changelog](https://lgtmaybe.coles.codes/changelog/) for every release.
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
 | `zai` | `ZAI_API_KEY` for GLM / Zhipu AI; optional `--api-base` for the China / coding-plan endpoint |
+| `chatgpt` | A ChatGPT Plus or Pro subscription, signed in with `lgtmaybe login chatgpt`; local reviews only |
 | `bedrock` | Ambient AWS creds via GitHub OIDC, no static key |
 | `vertex` | Ambient GCP creds via Workload Identity Federation, no key |
 | `azure` | Resource endpoint, plus `AZURE_API_KEY` or keyless Entra (Azure AD) creds via GitHub OIDC |
@@ -443,6 +444,7 @@ API-key and local provider:
 | Providers | Covered by base install? |
 |---|---|
 | `openai`, `anthropic`, `openrouter`, `zai`: set the provider's API key in your environment | ✅ Yes |
+| `chatgpt`: run `lgtmaybe login chatgpt` once to sign in with a ChatGPT subscription | ✅ Yes |
 | `ollama`, `openai-compatible`: point `--api-base` at the server (local, or a hosted OpenAI-compatible API) | ✅ Yes |
 | `bedrock`, `vertex`, `azure`: keyless cloud (OIDC/WIF) | ❌ Needs an extra |
 
@@ -2501,6 +2503,112 @@ With that file in place, `lgtmaybe review` needs no flags. See
 
 ---
 
+<!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-a-chatgpt-subscription/ -->
+
+# Review with a ChatGPT Subscription
+
+The `chatgpt` [provider](../reference/glossary.md#provider) reviews with your
+ChatGPT Plus or Pro subscription. You sign in once with a code in your browser.
+There is no API key to create or pay for.
+
+It is for reviews on your own machine: `lgtmaybe review`, `lgtmaybe diagram`
+and `lgtmaybe mcp`. For CI, use the [OpenAI provider](review-with-openai.md)
+with an API key.
+
+## Contents
+
+- [Sign In](#sign-in)
+- [Run a Review](#run-a-review)
+- [Use It from a Coding Agent](#use-it-from-a-coding-agent)
+- [Choosing the Model](#choosing-the-model)
+- [What Differs from the OpenAI Provider](#what-differs-from-the-openai-provider)
+- [Troubleshooting](#troubleshooting)
+
+## Sign In
+
+```bash
+lgtmaybe login chatgpt
+```
+
+lgtmaybe prints a URL and a one-time code. Open the URL, sign in to ChatGPT and
+enter the code. The command waits until you approve it, for up to 15 minutes.
+It then prints where the token is stored.
+
+The sign-in is the same one the Codex CLI uses. lgtmaybe signs in through
+[litellm](https://docs.litellm.ai/), which keeps the token at
+`~/.config/litellm/chatgpt/auth.json` and refreshes it for you. You only sign
+in again if the token is revoked or stops refreshing.
+
+Never share the code. Device codes are a common phishing target.
+
+## Run a Review
+
+```bash
+lgtmaybe review --provider chatgpt --model gpt-5.5
+```
+
+Provider and model are not secrets, so they can live in `.lgtmaybe.yml`:
+
+```yaml
+provider: chatgpt
+model: gpt-5.5
+```
+
+The token stays in litellm's file. lgtmaybe never copies it into its own
+config.
+
+## Use It from a Coding Agent
+
+The [MCP](../reference/glossary.md#mcp) server takes the same flags:
+
+```bash
+claude mcp add lgtmaybe -- lgtmaybe mcp --provider chatgpt --model gpt-5.5
+```
+
+Sign in with `lgtmaybe login chatgpt` before you start the agent. The server
+never asks you to sign in itself. See
+[Use from a Coding Agent over MCP](use-from-a-coding-agent-over-mcp.md).
+
+## Choosing the Model
+
+Pass a model your plan can use in Codex, such as `gpt-5.5` or
+`gpt-5.3-codex`. Use the name without a prefix. lgtmaybe adds the `chatgpt/`
+route for you.
+
+Reviews count against your plan's Codex usage limits. A review sends one
+request per [lens](../reference/glossary.md#lens), several at once. On a large
+change, a Plus plan can hit its limit part-way through. If it does, set
+`max_concurrency: 2` in `.lgtmaybe.yml` or review a smaller change.
+
+## What Differs from the OpenAI Provider
+
+The subscription reaches OpenAI's Codex backend, not the public API. That
+backend accepts fewer request settings:
+
+- **The review format is sent as a tool call.** lgtmaybe still holds the model
+  to its JSON schema. Nothing changes in what gets posted.
+- **`temperature` is ignored.** The default of `0.0` cannot reach the model.
+  So two runs on the same change can differ, and the run log says so.
+- **`max_tokens` is ignored.** The backend applies its own output limit.
+
+The backend is not a published API. OpenAI can change it without notice, and
+an lgtmaybe update may be needed when it does.
+
+## Troubleshooting
+
+**"no sign-in was found"**: run `lgtmaybe login chatgpt`. The message names the
+file it looked for. If you set `CHATGPT_TOKEN_DIR`, check that it points at
+the same directory you signed in with.
+
+**"the ChatGPT sign-in is missing or has expired"**: the stored token could not
+be refreshed. Run `lgtmaybe login chatgpt` again.
+
+**A review in CI fails with "no sign-in was found"**: this is expected. A CI
+runner has no stored sign-in. Use `--provider openai` with an
+`OPENAI_API_KEY` secret there.
+
+---
+
 <!-- Source: https://lgtmaybe.coles.codes/how-to/review-with-bedrock-oidc/ -->
 
 # Review with AWS Bedrock (Keyless OIDC)
@@ -3807,7 +3915,7 @@ described here (`max_tokens`, `reasoning_effort`, `temperature`, `language`,
 ### provider
 
 Which LLM backend, or [provider](../reference/glossary.md#provider), to use. One of `openai`, `openrouter`, `anthropic`, `zai`,
-`bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
+`chatgpt`, `bedrock`, `vertex`, `azure`, `ollama`, `openai-compatible`.
 
 ```yaml
 provider: anthropic
@@ -3829,6 +3937,7 @@ The model identifier for the chosen provider. The format varies by provider:
 | anthropic | `claude-sonnet-4-6`, `claude-haiku-4-5` |
 | openrouter | `anthropic/claude-sonnet-4.6` |
 | zai | `glm-4.6`, `glm-4.7`, `glm-4.5-air` (GLM / Zhipu AI; newer `glm-5.x` IDs pass through too) |
+| chatgpt | `gpt-5.5`, `gpt-5.3-codex` (models your ChatGPT plan can use in Codex - see [Review with a ChatGPT subscription](review-with-a-chatgpt-subscription.md)) |
 | bedrock | `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` (prefer the cross-region inference profile; another provider's name like `gpt-6-sol` is invalid, Bedrock's is `openai.gpt-6-sol` - see [Review with Bedrock](review-with-bedrock-oidc.md)) |
 | vertex | `gemini-3.8-flash`, `gemini-3.1-pro-preview` |
 | azure | your deployment name, e.g. `my-gpt-4o-deployment`, not the upstream model ID - see [Review with Azure](review-with-azure.md) |
@@ -6148,6 +6257,11 @@ client's config file. lgtmaybe itself never writes a key to disk.
 Keyless providers need no key at all: ollama, and Bedrock, Vertex or Azure with
 [ambient cloud credentials](../reference/glossary.md#ambient-credentials).
 
+To review with a ChatGPT subscription, run `lgtmaybe login chatgpt` before you
+start the client. The server never asks you to sign in itself, because that
+prompt would break the client's connection. See
+[Review with a ChatGPT Subscription](review-with-a-chatgpt-subscription.md).
+
 ## Troubleshooting
 
 - **The client says the server failed to start.** Run the same command in a
@@ -7084,7 +7198,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
 | `project` | ProjectProfile | No | — |  |
-| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
+| `provider` | `anthropic` / `azure` / `bedrock` / `chatgpt` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
@@ -7113,6 +7227,7 @@ LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azu
 - `anthropic`
 - `azure`
 - `bedrock`
+- `chatgpt`
 - `ollama`
 - `openai`
 - `openai-compatible`
@@ -7431,7 +7546,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "azure",
         "ollama",
         "openai-compatible",
-        "zai"
+        "zai",
+        "chatgpt"
       ],
       "title": "Provider",
       "type": "string"
@@ -10650,6 +10766,8 @@ a long-lived key you store and rotate by hand.
   short-lived tokens that the environment already provides.
 - Key-based SaaS providers (openai, anthropic, openrouter, zai) need an API key.
   The key lives in a secret store, never in committed config.
+- The `chatgpt` provider uses a ChatGPT Plus or Pro subscription instead of a
+  key. You sign in once on your own machine, so it is for local reviews only.
 - Azure sits between the two. It accepts a resource key but falls back to
   ambient Entra (Azure AD) credentials. It always needs the resource endpoint
   (`AZURE_API_BASE`), because each Azure OpenAI deployment lives at its own URL.
@@ -10732,7 +10850,13 @@ provider has its own rule for where to look:
    `OPENAI_COMPATIBLE_API_KEY`). Local servers (llama.cpp, LM Studio, vLLM)
    need none, and lgtmaybe sends a harmless placeholder key because the
    underlying OpenAI client rejects an empty one.
-7. **openai, anthropic and openrouter** read the key from `--api-key`, or else
+7. **chatgpt** needs a stored sign-in from `lgtmaybe login chatgpt`. litellm
+   keeps the token at `~/.config/litellm/chatgpt/auth.json` (or under
+   `CHATGPT_TOKEN_DIR`) and refreshes it. lgtmaybe renews it once at start-up,
+   before the review's calls run at the same time. With no sign-in, or one that
+   cannot be renewed, lgtmaybe fails with a message naming the login command. A
+   review never starts the browser sign-in itself.
+8. **openai, anthropic and openrouter** read the key from `--api-key`, or else
    from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`. With
    neither, lgtmaybe fails with a message naming the variable to set.
 
@@ -10752,6 +10876,7 @@ provider has its own rule for where to look:
 | anthropic | API key | `ANTHROPIC_API_KEY` env var or `--api-key` |
 | openrouter | API key | `OPENROUTER_API_KEY` env var or `--api-key` |
 | zai | API key (+ optional endpoint) | `ZAI_API_KEY` env var or `--api-key`; optional `ZAI_API_BASE` / `--api-base` for the China / coding-plan endpoint |
+| chatgpt | Subscription sign-in (OAuth token) | `lgtmaybe login chatgpt` once per machine; local reviews only |
 | bedrock | Ambient AWS creds | GitHub OIDC role or local `~/.aws`; IAM needs only `bedrock:InvokeModel*` |
 | vertex | Ambient GCP creds | GitHub WIF or local ADC (`gcloud auth application-default login`) |
 | azure | Ambient Entra creds (keyless) or API key, + endpoint | GitHub OIDC to an Entra federated credential, or local `az login` / managed identity; or `AZURE_API_KEY`. Always with `AZURE_API_BASE` / `--api-base` |

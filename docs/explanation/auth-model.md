@@ -16,6 +16,8 @@ a long-lived key you store and rotate by hand.
   short-lived tokens that the environment already provides.
 - Key-based SaaS providers (openai, anthropic, openrouter, zai) need an API key.
   The key lives in a secret store, never in committed config.
+- The `chatgpt` provider uses a ChatGPT Plus or Pro subscription instead of a
+  key. You sign in once on your own machine, so it is for local reviews only.
 - Azure sits between the two. It accepts a resource key but falls back to
   ambient Entra (Azure AD) credentials. It always needs the resource endpoint
   (`AZURE_API_BASE`), because each Azure OpenAI deployment lives at its own URL.
@@ -98,7 +100,13 @@ provider has its own rule for where to look:
    `OPENAI_COMPATIBLE_API_KEY`). Local servers (llama.cpp, LM Studio, vLLM)
    need none, and lgtmaybe sends a harmless placeholder key because the
    underlying OpenAI client rejects an empty one.
-7. **openai, anthropic and openrouter** read the key from `--api-key`, or else
+7. **chatgpt** needs a stored sign-in from `lgtmaybe login chatgpt`. litellm
+   keeps the token at `~/.config/litellm/chatgpt/auth.json` (or under
+   `CHATGPT_TOKEN_DIR`) and refreshes it. lgtmaybe renews it once at start-up,
+   before the review's calls run at the same time. With no sign-in, or one that
+   cannot be renewed, lgtmaybe fails with a message naming the login command. A
+   review never starts the browser sign-in itself.
+8. **openai, anthropic and openrouter** read the key from `--api-key`, or else
    from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`. With
    neither, lgtmaybe fails with a message naming the variable to set.
 
@@ -118,6 +126,7 @@ provider has its own rule for where to look:
 | anthropic | API key | `ANTHROPIC_API_KEY` env var or `--api-key` |
 | openrouter | API key | `OPENROUTER_API_KEY` env var or `--api-key` |
 | zai | API key (+ optional endpoint) | `ZAI_API_KEY` env var or `--api-key`; optional `ZAI_API_BASE` / `--api-base` for the China / coding-plan endpoint |
+| chatgpt | Subscription sign-in (OAuth token) | `lgtmaybe login chatgpt` once per machine; local reviews only |
 | bedrock | Ambient AWS creds | GitHub OIDC role or local `~/.aws`; IAM needs only `bedrock:InvokeModel*` |
 | vertex | Ambient GCP creds | GitHub WIF or local ADC (`gcloud auth application-default login`) |
 | azure | Ambient Entra creds (keyless) or API key, + endpoint | GitHub OIDC to an Entra federated credential, or local `az login` / managed identity; or `AZURE_API_KEY`. Always with `AZURE_API_BASE` / `--api-base` |

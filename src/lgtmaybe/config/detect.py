@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from lgtmaybe.core.models import Provider
+from lgtmaybe.providers import chatgpt
 from lgtmaybe.providers.credentials import _default_gcp_probe
 from lgtmaybe.providers.factory import DEFAULT_OLLAMA_BASE
 
@@ -40,6 +41,7 @@ SUGGESTED_MODELS: dict[Provider, str | None] = {
     Provider.ollama: "qwen3.6:27b",
     Provider.openai_compatible: None,
     Provider.zai: "glm-4.6",
+    Provider.chatgpt: "gpt-5.5",
 }
 
 # Env vars whose presence means "this provider's key is set", in the order they
@@ -123,16 +125,20 @@ def detect(
     probe_ollama: Callable[[str], tuple[str, ...] | None] | None = None,
     aws_probe: Callable[[Mapping[str, str]], bool] = aws_credentials_present,
     gcp_probe: Callable[[], bool] = _default_gcp_probe,
+    chatgpt_probe: Callable[[Mapping[str, str]], bool] = chatgpt.signed_in,
 ) -> list[Detection]:
     """Every provider the environment looks ready for, strongest signal first.
 
-    Order: exported API keys, then a running ollama, then the cloud providers
+    Order: exported API keys, then a ChatGPT sign-in (as deliberate as an
+    exported key), then a running ollama, then the cloud providers
     whose ambient credentials are only weak evidence (an ``~/.aws`` set up for
     another project says little about Bedrock model access).
     """
     env = os.environ if env is None else env
     probe = probe_ollama if probe_ollama is not None else ollama_models
     found = [Detection(provider, var) for var, provider in _KEY_VARS if env.get(var)]
+    if chatgpt_probe(env):
+        found.append(Detection(Provider.chatgpt, "ChatGPT sign-in from 'lgtmaybe login chatgpt'"))
 
     models = probe(DEFAULT_OLLAMA_BASE)
     if models is not None:

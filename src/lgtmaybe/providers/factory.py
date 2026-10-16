@@ -10,6 +10,7 @@ litellm model-string conventions:
   ollama     → ollama_chat/<model>  (+ api_base)
   openai-compatible → openai/<model>  (+ api_base = custom endpoint)
   zai        → zai/<model>     (GLM / Zhipu AI; optional api_base override)
+  chatgpt    → chatgpt/<model> (ChatGPT subscription; Codex backend, no key)
 """
 
 from __future__ import annotations
@@ -42,7 +43,30 @@ _PREFIXES: dict[Provider, str] = {
     Provider.openai_compatible: "openai",
     # GLM / Zhipu AI on litellm's native zai/ route (e.g. zai/glm-4.6).
     Provider.zai: "zai",
+    # A ChatGPT Plus/Pro subscription on litellm's chatgpt/ route (e.g.
+    # chatgpt/gpt-5.5), signed in with `lgtmaybe login chatgpt`.
+    Provider.chatgpt: "chatgpt",
 }
+
+# Params a route's capability list names but its transform never puts on the
+# wire, keyed by route prefix. litellm's `drop_params` consults the list, so it
+# lets these through, and they vanish later with no warning at all.
+#
+# chatgpt: the route lists the whole OpenAI chat vocabulary, but its Codex
+# transform (`ChatGPTResponsesAPIConfig`) forwards only model, input,
+# instructions, tools, tool_choice, reasoning and a few stream keys. So the
+# schema has to go as a forced tool call, and a temperature or output ceiling
+# is ignored. `tests/providers/test_chatgpt.py` checks this against the real
+# transform.
+_WIRE_STRIPPED: dict[str, frozenset[str]] = {
+    "chatgpt": frozenset({"response_format", "temperature", "max_tokens"}),
+}
+
+
+def wire_stripped_params(model: str) -> frozenset[str]:
+    """The params *model*'s route (a litellm model string) lists but never sends."""
+    return _WIRE_STRIPPED.get(model.split("/", 1)[0], frozenset())
+
 
 # Default per-request timeout (seconds) when the caller doesn't set one. Some
 # providers can't be assumed fast: the ones that can front a slow local server
@@ -221,6 +245,7 @@ def dropped_params(provider: Provider, model: str, params: Iterable[str]) -> lis
         )
     except Exception:  # pragma: no cover - defensive; litellm raises on odd ids
         return []
+    supported -= wire_stripped_params(litellm_model_string(provider, model))
     return sorted(
         name for name in params if name in OPENAI_CHAT_COMPLETION_PARAMS and name not in supported
     )
@@ -399,6 +424,13 @@ def build_provider(
     # litellm's import is multi-second; deferring it here keeps `import
     # lgtmaybe.cli` fast for commands that never build a provider (config, help).
     from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+
+    if provider is Provider.chatgpt:
+        # litellm's token lookup prompts on stdout when no sign-in is usable;
+        # a review must fail instead (see providers/chatgpt.py).
+        from lgtmaybe.providers import chatgpt
+
+        chatgpt.forbid_interactive_login()
 
     resolved_model = litellm_model_string(provider, model)
     resolved_fallback = litellm_model_string(provider, fallback_model) if fallback_model else None

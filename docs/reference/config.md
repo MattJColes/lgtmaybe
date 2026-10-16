@@ -50,7 +50,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `pr_labels` | boolean | No | `False` | Pr Labels |
 | `preset` | `fast` / `full` | No | `fast` |  |
 | `project` | ProjectProfile | No | — |  |
-| `provider` | `anthropic` / `azure` / `bedrock` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
+| `provider` | `anthropic` / `azure` / `bedrock` / `chatgpt` / `ollama` / `openai` / `openai-compatible` / `openrouter` / `vertex` / `zai` | Yes | — |  |
 | `reasoning_effort` | string / null | No | `null` | Reasoning Effort |
 | `recursive` | boolean | No | `True` | Recursive |
 | `reflect` | boolean | No | `True` | Reflect |
@@ -79,6 +79,7 @@ LLM backend selected by `--provider`. Cloud providers (`bedrock`, `vertex`, `azu
 - `anthropic`
 - `azure`
 - `bedrock`
+- `chatgpt`
 - `ollama`
 - `openai`
 - `openai-compatible`
@@ -397,7 +398,8 @@ The canonical machine-readable schemas. These are the source of truth for provid
         "azure",
         "ollama",
         "openai-compatible",
-        "zai"
+        "zai",
+        "chatgpt"
       ],
       "title": "Provider",
       "type": "string"

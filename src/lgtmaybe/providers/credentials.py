@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lgtmaybe.core.models import Provider
+from lgtmaybe.providers import chatgpt
 from lgtmaybe.providers.factory import (
     DEFAULT_OLLAMA_BASE,
     OPENAI_COMPATIBLE_PLACEHOLDER_KEY,
@@ -194,6 +195,20 @@ def resolve_credentials(
         # endpoint). An explicit base overrides it for the China / coding-plan
         # endpoints (e.g. https://open.bigmodel.cn/api/paas/v4).
         return AuthConfig(api_key=key, api_base=api_base or os.environ.get("ZAI_API_BASE"))
+
+    if provider is Provider.chatgpt:
+        # A subscription sign-in, not a key: litellm reads the stored token
+        # itself. Checked and renewed here, once, so a missing or dead sign-in
+        # fails at start-up instead of inside every concurrent lens call.
+        if not chatgpt.signed_in():
+            raise ValueError(
+                "chatgpt uses a ChatGPT Plus or Pro subscription, not an API key, "
+                f"and no sign-in was found at {chatgpt.token_file()}. Run "
+                "'lgtmaybe login chatgpt' once on this machine. It is for local "
+                "reviews only: in CI use --provider openai with an OPENAI_API_KEY."
+            )
+        chatgpt.refresh()
+        return AuthConfig()
 
     if provider is Provider.openai_compatible:
         base = api_base or os.environ.get("OPENAI_COMPATIBLE_API_BASE")

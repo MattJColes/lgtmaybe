@@ -104,6 +104,7 @@ nav:
           - Review with Claude (Anthropic): how-to/review-with-anthropic.md
           - Review with OpenRouter: how-to/review-with-openrouter.md
           - Review with z.ai (GLM): how-to/review-with-zai.md
+          - Review with a ChatGPT subscription: how-to/review-with-a-chatgpt-subscription.md
       - Keyless cloud (OIDC/WIF):
           - Review with Bedrock OIDC: how-to/review-with-bedrock-oidc.md
           - Review with Vertex WIF: how-to/review-with-vertex-wif.md
