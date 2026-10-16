@@ -52,6 +52,7 @@ from lgtmaybe.core.ports import (
     SupportsConversation,
     SupportsFileContents,
     SupportsPermissions,
+    SupportsScanManifests,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
@@ -595,11 +596,10 @@ def run_review(
     """
     if ctx is None:
         # Dependency manifests are fetched only when a scanner will read them —
-        # an adapter-only method, like set_incremental_scope, so a gateway
+        # an optional capability, probed like every other, so a gateway
         # implementing just the frozen port still works.
-        want_manifests = getattr(github, "set_scan_manifests", None)
-        if callable(want_manifests):
-            want_manifests(cfg.static_analysis.enabled)
+        if isinstance(github, SupportsScanManifests):
+            github.set_scan_manifests(cfg.static_analysis.enabled)
         ctx = github.get_pr_context()
     overview_note = None
     if diagram_required and not dry_run:
@@ -1105,9 +1105,8 @@ def execute_review(
     # a short comment rather than failing silently — then we exit non-zero.
     try:
         if diagram:
-            want_manifests = getattr(github, "set_scan_manifests", None)
-            if callable(want_manifests):
-                want_manifests(cfg.static_analysis.enabled)
+            if isinstance(github, SupportsScanManifests):
+                github.set_scan_manifests(cfg.static_analysis.enabled)
             # A failed prefetch means run_review fetches and surfaces the
             # failure itself. Fetching here lets the review and the change
             # overview share one current-head context. A refused diff is

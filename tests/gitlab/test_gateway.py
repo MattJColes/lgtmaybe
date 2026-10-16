@@ -775,6 +775,7 @@ class TestCapabilities:
             "SupportsThreadResolution",
             "SupportsConversation",
             "SupportsIncremental",
+            "SupportsScanManifests",
             "SupportsFeedback",
         ):
             assert isinstance(gateway, getattr(ports, name)), name

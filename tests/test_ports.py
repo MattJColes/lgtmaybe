@@ -30,9 +30,19 @@ def test_production_implementations_do_not_inherit_ports() -> None:
     assert ReviewEngine not in LLMReviewEngine.__mro__
 
 
-def test_the_old_github_only_port_name_still_resolves() -> None:
-    """Renamed when lgtmaybe grew past one forge; the alias keeps adapters importing."""
-    assert GitHubGateway is ReviewGateway
+    def test_the_old_github_only_port_name_still_resolves() -> None:
+        """Renamed when lgtmaybe grew past one forge; the alias keeps adapters importing."""
+        assert GitHubGateway is ReviewGateway
+
+
+def test_scan_manifests_is_its_own_capability() -> None:
+    """Gitea and Azure DevOps serve manifest text without incremental review.
+
+    Bundling ``set_scan_manifests`` into ``SupportsIncremental`` told adapter
+    authors the group was all-or-nothing when it was not.
+    """
+    assert not hasattr(ports.SupportsIncremental, "set_scan_manifests")
+    assert hasattr(ports.SupportsScanManifests, "set_scan_manifests")
 
 
 class TestCapabilities:
