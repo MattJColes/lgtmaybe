@@ -54,8 +54,9 @@ checkout.
   rides the shared review contract ("why it matters", a two-to-four sentence
   `body`) and the describe, high-impact and diagram prompts.
 - **Posting:** the REST review API, batched inline comments plus one summary.
-- **The summary names the model, never a cost.** lgtmaybe does not compute
-  cost.
+- **The summary names the model, never a cost.** The posted review never
+  shows a cost; `--profile` alone reports an operator-local estimate for
+  debugging.
 
 ## Auth Model (Chain of Responsibility)
 
