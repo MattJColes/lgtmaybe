@@ -916,7 +916,7 @@ review question for the model, such as security or correctness. The
 | `incremental` | auto | Review only the commits added since the last completed review on `synchronize` pushes, and the whole PR elsewhere. `true`/`false` forces it. Falls back to a full review after a force-push or when there is no earlier review. `/review full` forces a full re-review on demand |
 | `recursive` | `true` | Review a file whose diff exceeds `max_input_tokens` [hunk](../reference/glossary.md#hunk) by hunk instead of sending it whole. Set `false` to disable |
 | `spec_review` | `true` | Check the diff against a committed spec (OpenSpec, GitHub Spec Kit, Kiro). Runs only when a spec is detected and matches the PR, so a repository without specs pays nothing |
-| `static_analysis` | `false` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) in a sandbox over the changed files. Linters feed the model untrusted hints to confirm or discard; gitleaks, zizmor, ast-grep, and osv-scanner post findings directly with no model call. The image bundles every tool and an offline vulnerability database |
+| `static_analysis` | `true` | Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, semgrep) in a sandbox with no network over the changed files. Every tool feeds the model untrusted hints to confirm or discard; set `static_analysis.tool_mode` in `.lgtmaybe.yml` to make a tool post directly. Set `false` to turn it off. The image bundles every tool and an offline vulnerability database |
 | `mid_review_retrieval` | `false` | Let a lens ask once for read-only files outside the diff, then re-run with them, instead of hedging a cross-file finding. Costs at most one extra call per batch and lens |
 | `symbol_resolution` | `true` | During [reflection](../reference/glossary.md#reflection), use ast-grep in a read-only shallow clone of the base branch to find the definition of a symbol a finding depends on, so cross-file findings are re-judged against the real code |
 | `learn_feedback` | `true` | On a re-run, suppress a finding a human reacted 👎 to on its inline comment. Resolving a thread is not a suppress signal (it means fixed) |
@@ -4061,23 +4061,29 @@ and the local CLI. Action input: `incremental`.
 ### static_analysis
 
 Runs fast, deterministic tools over the changed files
-([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)). Each tool feeds the
-review in one of two modes:
+([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)).
+It is on by default. Each tool feeds the review in one of two modes:
 
-- **`hint`**: the tool's findings become hints the model confirms, puts in
-  context, or discards. This catches mechanical bugs models miss, without
-  posting raw linter noise. lgtmaybe reports only findings the model confirms.
-  Default for ruff, bandit, mypy and semgrep.
+- **`hint`** (the default for every tool): the tool's findings become hints
+  the model confirms, puts in context, or discards. This catches mechanical
+  bugs models miss, without posting raw linter noise. lgtmaybe reports only
+  findings the model confirms.
 - **`finding`**: lgtmaybe posts the tool's findings directly, with no model
-  call. This is free and gives the same result every run. Default for gitleaks,
-  zizmor, ast-grep and osv-scanner.
+  call. This is free and gives the same result every run. You opt each tool in
+  with `tool_mode`.
 
-The split follows the tool. A committed credential is either there or not.
-Asking a model to "confirm or discard" a regex match only adds latency, and a
-chance of talking itself out of a real hit. A lint or SAST (static application
-security testing) heuristic is often technically true and beside the point.
-That is what a model is good at filtering. Override either way with
-`tool_mode`.
+Every tool takes one path by default, so the model sees each hit next to the
+code it is about. The trade-off: in hint mode the model can discard a real hit,
+such as a committed credential. An osv-scanner advisory about a lockfile also
+needs `finding` mode, because lockfiles are never reviewed, so the hint has no
+batch to join. Set `tool_mode` to make a tool post directly:
+
+```yaml
+static_analysis:
+  tool_mode:
+    gitleaks: finding      # post committed secrets directly
+    osv-scanner: finding   # post dependency advisories directly
+```
 
 | Tool | Checks |
 |---|---|
@@ -4096,13 +4102,15 @@ static_analysis:
   tool_min_severity:           # per-tool overrides of the floor
     ruff: medium               # only medium+ from ruff; bandit keeps low
   tool_mode:                   # per-tool overrides of hint vs finding
-    gitleaks: hint             # route secrets through the model instead
+    gitleaks: finding          # post secrets directly, with no model call
   # semgrep_rules: .semgrep.yml  # replace the bundled MIT rule pack
   # ast_grep_rules: .ast-grep/   # your own structural rules
 ```
 
-Default: `enabled: false`, so no tool ever runs. CLI:
-`--static-analysis/--no-static-analysis`; Action input: `static_analysis`.
+Default: `enabled: true`, with every tool in `hint` mode. A tool that is not
+installed is skipped, so a minimal install runs nothing. To turn it off, set
+`enabled: false`, pass `--no-static-analysis`, or set the Action input
+`static_analysis: false`.
 
 **Installing the tools.** A tool that isn't installed is skipped silently.
 `pip install lgtmaybe[static-analysis]` installs ruff, bandit, mypy, semgrep and
@@ -6145,28 +6153,30 @@ credentials.
 
 ### 2. Let Deterministic Tools Do the Deterministic Work
 
-Findings a linter can prove do not need a language model:
+[Static-analysis fusion](../reference/glossary.md#static-analysis-fusion) is
+on by default. Installed tools run over the changed files, and a tool that is
+not installed is skipped. To install them locally:
 
 ```bash
 pip install 'lgtmaybe[static-analysis]'
 ```
 
+By default every tool sends its findings to the lenses as hints to confirm or
+discard. This grounds the model, and tends to cut low-value findings. Hints
+are not free: they add prompt tokens to each lens call, up to 50 per batch.
+
+To post a tool's findings directly, with no model tokens spent on them, opt it
+into `finding` mode:
+
 ```yaml
 static_analysis:
-  enabled: true
+  tool_mode:
+    gitleaks: finding
+    osv-scanner: finding
 ```
 
-With [static-analysis fusion](../reference/glossary.md#static-analysis-fusion)
-on, installed tools run over the changed files at no token cost. They come in
-two kinds:
-
-- **Interpretive tools** (ruff, bandit, mypy, and semgrep with local rules)
-  feed their findings to the lenses as hints to confirm or discard. This
-  grounds the model, and tends to cut low-value findings as well as spend.
-- **Deterministic tools** (gitleaks, zizmor, ast-grep with your own rules,
-  osv-scanner) post their findings directly, with no model call.
-
-A tool that is not installed is skipped.
+To stop the tools and their hints, set `enabled: false`, pass
+`--no-static-analysis`, or set the Action input `static_analysis: false`.
 
 ### 3. Check Prompt Caching Is Working
 
@@ -6889,7 +6899,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `risk` | RiskConfig | No | `{'enabled': True, 'core_paths': []}` |  |
 | `spec_paths` | list[string] | No | `[]` | Spec Paths |
 | `spec_review` | boolean | No | `True` | Spec Review |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': True, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -7406,7 +7416,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "StaticAnalysisConfig": {
       "additionalProperties": false,
-      "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nWhen enabled, the installed tools run over the already-fetched changed-file\ntexts (sandboxed subprocess, scrubbed environment, no network, never a\ncheckout) and their findings enter each lens prompt as untrusted HINTS \u2014\n\"confirm, contextualise, or discard\" \u2014 raising recall on the deterministic\nbugs models miss without posting raw linter noise. A tool that isn't\ninstalled is skipped silently, so the feature degrades to nothing on a\nminimal install.",
+      "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nOn by default: the installed tools run over the already-fetched\nchanged-file texts (sandboxed subprocess, scrubbed environment, no network,\nnever a checkout) and, in the default ``hint`` mode, their findings enter\neach lens prompt as untrusted HINTS (\"confirm, contextualise, or discard\"),\nraising recall on the deterministic bugs models miss without posting raw\nlinter noise. A tool that isn't installed is skipped silently, so the\nfeature degrades to nothing on a minimal install.",
       "properties": {
         "ast_grep_rules": {
           "anyOf": [
@@ -7421,7 +7431,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Ast Grep Rules"
         },
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -7498,7 +7508,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "string"
     },
     "ToolMode": {
-      "description": "How a tool's findings reach the review.\n\n``hint`` is the original fusion behaviour: findings become an untrusted\nHINTS block the model confirms, contextualises, or discards. ``finding``\nskips the model entirely and posts the tool's result as a review comment.\n\nWhich one is right is a property of the tool's precision, not a user\npreference: a secret is present or it isn't, so asking a model to \"confirm\nor discard\" a deterministic regex match only adds cost and doubt. A lint or\na SAST heuristic genuinely benefits from a model judging whether it matters\nhere. Per-tool defaults live in ``engine.static_analysis``; this enum is the\noverride users reach for via ``static_analysis.tool_mode``.",
+      "description": "How a tool's findings reach the review.\n\n``hint`` (the default for every tool): findings become an untrusted HINTS\nblock the model confirms, contextualises, or discards, so every tool takes\none path and the model sees each hit in context. ``finding`` skips the model\nentirely and posts the tool's result as a review comment.\n\n``finding`` is a per-tool opt-in through ``static_analysis.tool_mode``, for a\ntool whose claims need no interpretation: in hint mode the model can discard\na real hit, such as a committed secret. Defaults live in\n``engine.static_analysis``.",
       "enum": [
         "hint",
         "finding"
@@ -7849,7 +7859,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "$ref": "#/$defs/StaticAnalysisConfig",
       "default": {
         "ast_grep_rules": null,
-        "enabled": false,
+        "enabled": true,
         "min_severity": "info",
         "semgrep_rules": null,
         "tool_min_severity": {},
@@ -8764,9 +8774,10 @@ it finds a spec that matches the pull request.
 
 ## Static-Analysis Fusion
 
-An optional step that runs installed tools, such as ruff, bandit and semgrep,
-on the changed files. Their results go to the model as hints to confirm or
-discard. The raw tool output is never posted.
+A step, on by default, that runs installed tools, such as ruff, bandit,
+gitleaks and semgrep, on the changed files. Their results go to the model as
+hints to confirm or discard. The raw tool output is never posted. A tool you
+opt into `finding` mode posts its findings directly instead.
 
 ## Symbol Resolution
 
@@ -8836,6 +8847,14 @@ Before the diff reaches the model it is cleaned:
 - **Secrets are redacted**: anything that looks like a key, token, private key
   or credential is stripped from the diff before it leaves your environment for
   the provider.
+
+By default lgtmaybe also runs any installed static-analysis tools, such as
+ruff, bandit, gitleaks and semgrep, over the changed files
+([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)).
+They run locally in a sandbox with no network. Their results go to the model as
+redacted hints to confirm, put in context, or discard, so a tool's raw output
+is never posted. A tool you opt into `finding` mode posts directly instead; see
+[static_analysis](../how-to/configure-lgtmaybe-yml.md#static_analysis).
 
 ## Correctness & Logic
 
@@ -10548,9 +10567,11 @@ pass follows. These calls can contain:
 - **Configured instructions and reference files**, if `directory_rules` is set.
   Reference files come from the trusted base-branch workspace, are bounded, and
   are redacted before model calls.
-- **Static-analysis hints**, if `static_analysis` is enabled
+- **Static-analysis hints**, unless `static_analysis` is turned off
   ([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)):
-  redacted findings from linters run locally over the changed files.
+  redacted findings from tools run locally over the changed files. The tools
+  run in a sandbox with no network, so the file text never leaves the machine
+  through them. Only the redacted hints reach the model.
 - **Matching specification text**, when a repository has a supported spec
   workflow and the change matches a committed spec. The
   [spec lens](../reference/glossary.md#spec-lens) sends a bounded, redacted

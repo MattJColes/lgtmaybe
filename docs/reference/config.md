@@ -61,7 +61,7 @@ The user-facing configuration model. Fields map directly to `.lgtmaybe.yml` keys
 | `risk` | RiskConfig | No | `{'enabled': True, 'core_paths': []}` |  |
 | `spec_paths` | list[string] | No | `[]` | Spec Paths |
 | `spec_review` | boolean | No | `True` | Spec Review |
-| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': False, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
+| `static_analysis` | StaticAnalysisConfig | No | `{'enabled': True, 'tools': ['ruff', 'bandit', 'semgrep', 'mypy', 'gitleaks', 'zizmor', 'ast-grep', 'osv-scanner'], 'min_severity': 'info', 'tool_min_severity': {}, 'tool_mode': {}, 'semgrep_rules': None, 'ast_grep_rules': None}` |  |
 | `structured_output` | boolean | No | `True` | Structured Output |
 | `summary_template` | string / null | No | `null` | Summary Template |
 | `symbol_resolution` | boolean | No | `True` | Symbol Resolution |
@@ -578,7 +578,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
     },
     "StaticAnalysisConfig": {
       "additionalProperties": false,
-      "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nWhen enabled, the installed tools run over the already-fetched changed-file\ntexts (sandboxed subprocess, scrubbed environment, no network, never a\ncheckout) and their findings enter each lens prompt as untrusted HINTS \u2014\n\"confirm, contextualise, or discard\" \u2014 raising recall on the deterministic\nbugs models miss without posting raw linter noise. A tool that isn't\ninstalled is skipped silently, so the feature degrades to nothing on a\nminimal install.",
+      "description": "Static-analysis fusion: deterministic tool findings as LLM grounding.\n\nOn by default: the installed tools run over the already-fetched\nchanged-file texts (sandboxed subprocess, scrubbed environment, no network,\nnever a checkout) and, in the default ``hint`` mode, their findings enter\neach lens prompt as untrusted HINTS (\"confirm, contextualise, or discard\"),\nraising recall on the deterministic bugs models miss without posting raw\nlinter noise. A tool that isn't installed is skipped silently, so the\nfeature degrades to nothing on a minimal install.",
       "properties": {
         "ast_grep_rules": {
           "anyOf": [
@@ -593,7 +593,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
           "title": "Ast Grep Rules"
         },
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -670,7 +670,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "type": "string"
     },
     "ToolMode": {
-      "description": "How a tool's findings reach the review.\n\n``hint`` is the original fusion behaviour: findings become an untrusted\nHINTS block the model confirms, contextualises, or discards. ``finding``\nskips the model entirely and posts the tool's result as a review comment.\n\nWhich one is right is a property of the tool's precision, not a user\npreference: a secret is present or it isn't, so asking a model to \"confirm\nor discard\" a deterministic regex match only adds cost and doubt. A lint or\na SAST heuristic genuinely benefits from a model judging whether it matters\nhere. Per-tool defaults live in ``engine.static_analysis``; this enum is the\noverride users reach for via ``static_analysis.tool_mode``.",
+      "description": "How a tool's findings reach the review.\n\n``hint`` (the default for every tool): findings become an untrusted HINTS\nblock the model confirms, contextualises, or discards, so every tool takes\none path and the model sees each hit in context. ``finding`` skips the model\nentirely and posts the tool's result as a review comment.\n\n``finding`` is a per-tool opt-in through ``static_analysis.tool_mode``, for a\ntool whose claims need no interpretation: in hint mode the model can discard\na real hit, such as a committed secret. Defaults live in\n``engine.static_analysis``.",
       "enum": [
         "hint",
         "finding"
@@ -1021,7 +1021,7 @@ The canonical machine-readable schemas. These are the source of truth for provid
       "$ref": "#/$defs/StaticAnalysisConfig",
       "default": {
         "ast_grep_rules": null,
-        "enabled": false,
+        "enabled": true,
         "min_severity": "info",
         "semgrep_rules": null,
         "tool_min_severity": {},

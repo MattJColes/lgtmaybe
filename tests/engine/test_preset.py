@@ -200,21 +200,20 @@ def test_lenses_narrow_dependency_health_when_a_scanner_covers_it() -> None:
     def _lens_text(cfg: ReviewConfig) -> str:
         return " ".join(lens.user_block for lens in _build_lenses(cfg, has_intent=False))
 
-    off = ReviewConfig(provider=Provider.ollama, model="llama3")
-    assert "known-vulnerable" in _lens_text(off)
+    # Default: osv-scanner runs as a hint, so the model still reports advisories.
+    default = ReviewConfig(provider=Provider.ollama, model="llama3")
+    assert "known-vulnerable" in _lens_text(default)
 
-    sa = off.static_analysis.model_copy(
-        update={"enabled": True, "tools": [StaticAnalysisTool.osv_scanner]}
-    )
-    on = off.model_copy(update={"static_analysis": sa})
-    assert "known-vulnerable" not in _lens_text(on)
-
-    # Demoted to a hint, the model is back to being the only reporter.
-    hinted = on.model_copy(
+    sa = default.static_analysis.model_copy(
         update={
-            "static_analysis": sa.model_copy(
-                update={"tool_mode": {StaticAnalysisTool.osv_scanner: ToolMode.hint}}
-            )
+            "enabled": True,
+            "tools": [StaticAnalysisTool.osv_scanner],
+            "tool_mode": {StaticAnalysisTool.osv_scanner: ToolMode.finding},
         }
     )
-    assert "known-vulnerable" in _lens_text(hinted)
+    posting = default.model_copy(update={"static_analysis": sa})
+    assert "known-vulnerable" not in _lens_text(posting)
+
+    # Switched off, the opt-in no longer covers anything.
+    off = posting.model_copy(update={"static_analysis": sa.model_copy(update={"enabled": False})})
+    assert "known-vulnerable" in _lens_text(off)

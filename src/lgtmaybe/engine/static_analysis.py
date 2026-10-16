@@ -8,7 +8,8 @@ findings reach the review by the tool's mode: `hint` formats them as untrusted
 HINTS for the lens prompts ("confirm, contextualise, or discard"), raising
 recall on the deterministic bugs LLMs miss while letting the model suppress raw
 linter noise; `finding` maps them straight onto review findings with no model
-call at all, for tools whose claims need no interpretation (see `_DEFAULT_MODE`).
+call at all. Every tool defaults to `hint`; `finding` is a per-tool opt-in (see
+`_DEFAULT_MODE`).
 
 Sandboxing posture:
 
@@ -79,21 +80,26 @@ MAX_SCAN_FINDINGS = 20
 
 # How each tool's findings reach the review when the user has not overridden it.
 #
-# The split is "does this tool make a claim that is true or false with no
-# interpretation?". A secret is committed or it isn't; the user's own structural
-# rule matched or it didn't — routing those through a model to be "confirmed"
-# adds latency and a chance of the model talking itself out of a real hit. A
-# ruff lint or a SAST heuristic is the opposite: often technically true and
-# beside the point, which is exactly what the model is good at filtering.
+# Every tool defaults to `hint`. One path for every tool: the model sees each
+# deterministic hit beside the code it is about, and confirms, contextualises or
+# discards it, so nothing posts without a model having read it in context. A
+# user who wants a tool to post directly opts it in per tool, e.g.
+# `tool_mode: {gitleaks: finding}`.
+#
+# The trade-off, stated honestly: in hint mode the model can talk itself out of
+# a real hit (a committed secret is there or it isn't), and an osv-scanner
+# advisory against a lockfile has no batch to ride on, because lockfiles are
+# never reviewed, so it reaches the review only in `finding` mode. That is why
+# `finding` mode stays available.
 _DEFAULT_MODE: dict[StaticAnalysisTool, ToolMode] = {
     StaticAnalysisTool.ruff: ToolMode.hint,
     StaticAnalysisTool.bandit: ToolMode.hint,
     StaticAnalysisTool.mypy: ToolMode.hint,
     StaticAnalysisTool.semgrep: ToolMode.hint,
-    StaticAnalysisTool.gitleaks: ToolMode.finding,
-    StaticAnalysisTool.zizmor: ToolMode.finding,
-    StaticAnalysisTool.ast_grep: ToolMode.finding,
-    StaticAnalysisTool.osv_scanner: ToolMode.finding,
+    StaticAnalysisTool.gitleaks: ToolMode.hint,
+    StaticAnalysisTool.zizmor: ToolMode.hint,
+    StaticAnalysisTool.ast_grep: ToolMode.hint,
+    StaticAnalysisTool.osv_scanner: ToolMode.hint,
 }
 
 # Category prefix for a finding that came from a tool rather than a lens. Keeps

@@ -124,7 +124,7 @@ def _review(
     top_k: int | None = None,
     categories: list[ReviewCategory] | None = None,
     context_lines: int | None = None,
-    static_analysis: bool = False,
+    static_analysis: bool | None = None,
     triage_model: str | None = None,
     preset: str | None = None,
 ):
@@ -136,10 +136,12 @@ def _review(
         cfg_overrides["categories"] = categories
     if context_lines is not None:
         cfg_overrides["context_lines"] = context_lines
-    if static_analysis:
+    if static_analysis is not None:
         # A/B the F1 fusion: installed tools run over the fixture's head/ text
         # and their findings ground the lens prompts, exactly as in production.
-        cfg_overrides["static_analysis"] = StaticAnalysisConfig(enabled=True)
+        # None keeps the production default (on), so --no-static-analysis is
+        # the off arm.
+        cfg_overrides["static_analysis"] = StaticAnalysisConfig(enabled=static_analysis)
     if triage_model is not None:
         cfg_overrides["triage_model"] = triage_model
     if mid_review_retrieval:
@@ -396,10 +398,11 @@ def main(argv: list[str] | None = None) -> int:
         "--static-analysis",
         dest="static_analysis",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="enable static-analysis fusion (F1) so installed tools (ruff/bandit) "
-        "ground the review with hints over the fixtures' head/ text — run the same "
-        "model with and without to measure the fusion's recall delta",
+        default=None,
+        help="static-analysis fusion (F1): installed tools (ruff/bandit) ground the "
+        "review with hints over the fixtures' head/ text. On by default, as in "
+        "production; run the same model with --no-static-analysis to measure the "
+        "fusion's recall delta",
     )
     ap.add_argument(
         "--triage-model",

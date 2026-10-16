@@ -119,7 +119,7 @@ inputs:
     required: false
     default: ""
   static_analysis:
-    description: "Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, and semgrep) over the changed files in a sandboxed, network-less subprocess. Linters ground the model as untrusted hints to confirm or discard; gitleaks (secrets), zizmor (workflow security), ast-grep (your rules) and osv-scanner (dependency advisories) post findings directly with no model call. Off by default; the image bundles these tools and an offline vulnerability database."
+    description: "Run deterministic tools (ruff, bandit, mypy, gitleaks, zizmor, ast-grep, osv-scanner, and semgrep) over the changed files in a sandboxed, network-less subprocess. Every tool's output grounds the model as untrusted hints to confirm, contextualise or discard; set static_analysis.tool_mode in .lgtmaybe.yml to make a tool post findings directly. On by default; set to false to turn it off. The image bundles these tools and an offline vulnerability database."
     required: false
     default: ""
   auto_describe:

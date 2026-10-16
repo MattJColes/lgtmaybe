@@ -480,23 +480,29 @@ and the local CLI. Action input: `incremental`.
 ### static_analysis
 
 Runs fast, deterministic tools over the changed files
-([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)). Each tool feeds the
-review in one of two modes:
+([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)).
+It is on by default. Each tool feeds the review in one of two modes:
 
-- **`hint`**: the tool's findings become hints the model confirms, puts in
-  context, or discards. This catches mechanical bugs models miss, without
-  posting raw linter noise. lgtmaybe reports only findings the model confirms.
-  Default for ruff, bandit, mypy and semgrep.
+- **`hint`** (the default for every tool): the tool's findings become hints
+  the model confirms, puts in context, or discards. This catches mechanical
+  bugs models miss, without posting raw linter noise. lgtmaybe reports only
+  findings the model confirms.
 - **`finding`**: lgtmaybe posts the tool's findings directly, with no model
-  call. This is free and gives the same result every run. Default for gitleaks,
-  zizmor, ast-grep and osv-scanner.
+  call. This is free and gives the same result every run. You opt each tool in
+  with `tool_mode`.
 
-The split follows the tool. A committed credential is either there or not.
-Asking a model to "confirm or discard" a regex match only adds latency, and a
-chance of talking itself out of a real hit. A lint or SAST (static application
-security testing) heuristic is often technically true and beside the point.
-That is what a model is good at filtering. Override either way with
-`tool_mode`.
+Every tool takes one path by default, so the model sees each hit next to the
+code it is about. The trade-off: in hint mode the model can discard a real hit,
+such as a committed credential. An osv-scanner advisory about a lockfile also
+needs `finding` mode, because lockfiles are never reviewed, so the hint has no
+batch to join. Set `tool_mode` to make a tool post directly:
+
+```yaml
+static_analysis:
+  tool_mode:
+    gitleaks: finding      # post committed secrets directly
+    osv-scanner: finding   # post dependency advisories directly
+```
 
 | Tool | Checks |
 |---|---|
@@ -515,13 +521,15 @@ static_analysis:
   tool_min_severity:           # per-tool overrides of the floor
     ruff: medium               # only medium+ from ruff; bandit keeps low
   tool_mode:                   # per-tool overrides of hint vs finding
-    gitleaks: hint             # route secrets through the model instead
+    gitleaks: finding          # post secrets directly, with no model call
   # semgrep_rules: .semgrep.yml  # replace the bundled MIT rule pack
   # ast_grep_rules: .ast-grep/   # your own structural rules
 ```
 
-Default: `enabled: false`, so no tool ever runs. CLI:
-`--static-analysis/--no-static-analysis`; Action input: `static_analysis`.
+Default: `enabled: true`, with every tool in `hint` mode. A tool that is not
+installed is skipped, so a minimal install runs nothing. To turn it off, set
+`enabled: false`, pass `--no-static-analysis`, or set the Action input
+`static_analysis: false`.
 
 **Installing the tools.** A tool that isn't installed is skipped silently.
 `pip install lgtmaybe[static-analysis]` installs ruff, bandit, mypy, semgrep and

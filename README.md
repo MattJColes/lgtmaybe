@@ -116,9 +116,9 @@ On GitHub and GitLab, a push triggers an
 [incremental review](docs/reference/glossary.md#incremental-review) of only the
 new commits. Optional `triage_model` lets a cheap model skip plainly
 non-substantive files.
-Optional `static_analysis` runs installed tools: ruff, bandit, mypy, and semgrep
-feed hints to the model, while gitleaks, zizmor, ast-grep, and osv-scanner post
-deterministic findings directly. See
+`static_analysis`, on by default, runs any installed tools (ruff, bandit,
+mypy, semgrep, gitleaks, zizmor, ast-grep, osv-scanner) and feeds their results
+to the model as hints to confirm or discard. See
 [Reduce review cost](docs/how-to/reduce-review-cost.md).
 
 <p align="center">

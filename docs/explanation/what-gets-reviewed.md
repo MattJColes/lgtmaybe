@@ -43,6 +43,14 @@ Before the diff reaches the model it is cleaned:
   or credential is stripped from the diff before it leaves your environment for
   the provider.
 
+By default lgtmaybe also runs any installed static-analysis tools, such as
+ruff, bandit, gitleaks and semgrep, over the changed files
+([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)).
+They run locally in a sandbox with no network. Their results go to the model as
+redacted hints to confirm, put in context, or discard, so a tool's raw output
+is never posted. A tool you opt into `finding` mode posts directly instead; see
+[static_analysis](../how-to/configure-lgtmaybe-yml.md#static_analysis).
+
 ## Correctness & Logic
 
 The model is prompted to hunt for the bugs a change introduces and grade them

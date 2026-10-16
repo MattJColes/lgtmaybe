@@ -144,21 +144,43 @@ def test_a_secret_in_tool_output_never_reaches_the_finding() -> None:
     assert "AKIAIOSFODNN7EXAMPLE" not in finding.model_dump_json()
 
 
-def test_deterministic_tools_default_to_posting_and_interpretive_ones_to_hinting() -> None:
+def test_static_analysis_is_on_by_default() -> None:
+    """On by default: a minimal install has no tools, so it degrades to nothing."""
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
 
+    assert cfg.static_analysis.enabled is True
+
+
+def test_every_tool_defaults_to_hint_mode() -> None:
+    """One path for every tool: the model sees each deterministic hit in context
+    and confirms, contextualises or discards it. Nothing posts directly unless
+    the user opts a tool into ``finding`` mode."""
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    assert {tool: mode_for(tool, cfg) for tool in StaticAnalysisTool} == {
+        tool: ToolMode.hint for tool in StaticAnalysisTool
+    }
+
+
+def test_finding_mode_is_an_explicit_per_tool_opt_in() -> None:
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    sa = cfg.static_analysis.model_copy(
+        update={"tool_mode": {StaticAnalysisTool.gitleaks: ToolMode.finding}}
+    )
+    cfg = cfg.model_copy(update={"static_analysis": sa})
+
     assert mode_for(StaticAnalysisTool.gitleaks, cfg) is ToolMode.finding
-    assert mode_for(StaticAnalysisTool.ruff, cfg) is ToolMode.hint
+    assert mode_for(StaticAnalysisTool.zizmor, cfg) is ToolMode.hint
 
 
 def test_tool_mode_overrides_the_built_in_default() -> None:
     cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
     sa = cfg.static_analysis.model_copy(
-        update={"tool_mode": {StaticAnalysisTool.gitleaks: ToolMode.hint}}
+        update={"tool_mode": {StaticAnalysisTool.ruff: ToolMode.finding}}
     )
     cfg = cfg.model_copy(update={"static_analysis": sa})
 
-    assert mode_for(StaticAnalysisTool.gitleaks, cfg) is ToolMode.hint
+    assert mode_for(StaticAnalysisTool.ruff, cfg) is ToolMode.finding
 
 
 def test_a_custom_lens_cannot_impersonate_a_scan_tool() -> None:

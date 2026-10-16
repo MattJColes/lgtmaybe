@@ -2189,6 +2189,20 @@ def _sa_cfg(**overrides: object) -> ReviewConfig:
     return cfg.model_copy(update={"static_analysis": sa})
 
 
+def _finding_mode_cfg(**overrides: object) -> ReviewConfig:
+    """Static analysis with the scanners opted into direct posting.
+
+    Every tool defaults to ``hint``; ``finding`` mode is a per-tool opt-in.
+    """
+    from lgtmaybe.core.models import StaticAnalysisTool, ToolMode
+
+    modes = {
+        StaticAnalysisTool.gitleaks: ToolMode.finding,
+        StaticAnalysisTool.osv_scanner: ToolMode.finding,
+    }
+    return _sa_cfg(tool_mode=modes, **overrides)
+
+
 def _hint(path: str = "f.py", message: str = "eval is dangerous"):  # type: ignore[no-untyped-def]
     from lgtmaybe.engine.static_analysis import ToolFinding
 
@@ -2228,7 +2242,7 @@ def test_hints_enter_the_user_message_wrapped_as_untrusted(monkeypatch) -> None:
     assert "===DIFF_START===" in sent
 
 
-def test_hints_absent_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_hints_absent_when_disabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     calls: list[object] = []
     monkeypatch.setattr(
         "lgtmaybe.engine.engine.run_static_analysis",
@@ -2236,13 +2250,43 @@ def test_hints_absent_by_default(monkeypatch) -> None:  # type: ignore[no-untype
     )
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
-    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
 
-    engine.review(_HINT_CTX, cfg)
+    engine.review(_HINT_CTX, _sa_cfg(enabled=False))
 
     sent = _first_user_diff(provider)
     assert "HINTS" not in sent
     assert calls == []  # disabled: the runner is never invoked
+
+
+def test_static_analysis_runs_by_default(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A default config runs the installed tools and grounds the lenses."""
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_hint()])
+    provider = _provider_for([], reflection_keeps_all=True)
+    engine = LLMReviewEngine(provider)
+
+    engine.review(_HINT_CTX, ReviewConfig(provider=Provider.ollama, model="llama3"))
+
+    assert "B307" in _first_user_diff(provider)
+
+
+def test_a_scanner_hit_is_a_hint_by_default_never_a_direct_post(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """gitleaks and osv-scanner default to hint mode like every other tool: the
+    model sees the hit in context, and nothing posts without the model."""
+    monkeypatch.setattr(
+        "lgtmaybe.engine.engine.run_static_analysis",
+        lambda files, cfg: [_scan_hit(), _osv_hit()],
+    )
+    provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
+    engine = LLMReviewEngine(provider)
+
+    findings, _summary = engine.review(
+        _LOCKFILE_CTX, ReviewConfig(provider=Provider.ollama, model="llama3")
+    )
+
+    assert findings == []
+    sent = _first_user_diff(provider)
+    assert "===HINTS_START===" in sent
+    assert "aws-access-key-id" in sent
 
 
 def test_hints_are_redacted_before_prompting(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -2294,7 +2338,7 @@ def test_raw_hints_are_never_posted_as_findings(monkeypatch) -> None:  # type: i
 
 
 def _scan_hit(path: str = "f.py", line: int = 2):  # type: ignore[no-untyped-def]
-    """A gitleaks hit — a finding-mode tool by default."""
+    """A gitleaks hit (posts directly only when opted into finding mode)."""
     from lgtmaybe.engine.static_analysis import ToolFinding
 
     return ToolFinding(
@@ -2315,7 +2359,7 @@ def test_finding_mode_posts_without_the_model_reporting_it(monkeypatch) -> None:
     provider = _provider_for([], reflection_keeps_all=True)  # model reports nothing
     engine = LLMReviewEngine(provider)
 
-    findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
 
     assert [(f.category, f.line, f.severity) for f in findings] == [
         ("scan:gitleaks", 2, Severity.high)
@@ -2327,7 +2371,7 @@ def test_scan_finding_survives_total_model_failure(monkeypatch) -> None:  # type
         "lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [_scan_hit()]
     )
     engine = LLMReviewEngine(_TimeoutProvider())
-    cfg = _sa_cfg().model_copy(update={"reflect": False})
+    cfg = _finding_mode_cfg().model_copy(update={"reflect": False})
 
     findings, summary = engine.review(_HINT_CTX, cfg)
 
@@ -2343,7 +2387,7 @@ def test_finding_mode_output_never_becomes_a_hint(monkeypatch) -> None:  # type:
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
-    engine.review(_HINT_CTX, _sa_cfg())
+    engine.review(_HINT_CTX, _finding_mode_cfg())
 
     assert "HINTS" not in _first_user_diff(provider)
 
@@ -2360,7 +2404,7 @@ def test_scan_findings_never_reach_reflection(monkeypatch) -> None:  # type: ign
     provider = _provider_for([], reflection_keeps_all=False)  # would drop everything
     engine = LLMReviewEngine(provider)
 
-    findings, _summary = engine.review(_HINT_CTX, _sa_cfg())
+    findings, _summary = engine.review(_HINT_CTX, _finding_mode_cfg())
 
     assert len(findings) == 1, "the auditor must not be able to drop a scan finding"
     assert not any(_REFLECT_MARKER in c["messages"][0]["content"] for c in provider.calls)
@@ -2379,7 +2423,7 @@ def test_scan_finding_on_an_unchanged_line_is_dropped(monkeypatch) -> None:  # t
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
-    findings, summary = engine.review(_HINT_CTX, _sa_cfg())
+    findings, summary = engine.review(_HINT_CTX, _finding_mode_cfg())
 
     assert findings == []
     assert "unchanged" in summary.lower()
@@ -2563,7 +2607,7 @@ def test_dependency_findings_survive_the_off_diff_drop(monkeypatch) -> None:  # 
     provider = _provider_for([], reflection_keeps_all=True)
     engine = LLMReviewEngine(provider)
 
-    findings, _summary = engine.review(_LOCKFILE_CTX, _sa_cfg())
+    findings, _summary = engine.review(_LOCKFILE_CTX, _finding_mode_cfg())
 
     assert [(f.category, f.path) for f in findings] == [("scan:osv-scanner", "uv.lock")]
 
@@ -2585,7 +2629,7 @@ def test_distinct_advisories_at_one_lockfile_line_all_post(monkeypatch) -> None:
     )
     provider = _provider_for([], reflection_keeps_all=True)
 
-    findings, _summary = LLMReviewEngine(provider).review(_LOCKFILE_CTX, _sa_cfg())
+    findings, _summary = LLMReviewEngine(provider).review(_LOCKFILE_CTX, _finding_mode_cfg())
 
     assert sorted(f.title for f in findings) == [
         "osv-scanner: GHSA-1234",
@@ -2619,7 +2663,7 @@ def test_a_model_copy_rejected_by_reflection_does_not_take_the_scan_hit_with_it(
             text = json.dumps([model_copy.model_dump(mode="json")])
             return ProviderResult(text=text, input_tokens=1, output_tokens=1)
 
-    cfg = _sa_cfg(tools=[StaticAnalysisTool.gitleaks])
+    cfg = _finding_mode_cfg(tools=[StaticAnalysisTool.gitleaks])
 
     findings, _summary = LLMReviewEngine(_Provider()).review(_HINT_CTX, cfg)
 
@@ -2641,21 +2685,38 @@ def _security_lens_text(cfg: ReviewConfig) -> str:
 
 
 def test_security_lens_asks_for_secrets_by_default() -> None:
-    """Static analysis is opt-in, so a default run's prompt is unchanged."""
+    """Static analysis is on by default, but every tool is a hint: gitleaks does
+    not post, so the lens must still look for committed secrets."""
     cfg = ReviewConfig(provider=Provider.openai, model="m")
 
+    assert cfg.static_analysis.enabled
     assert "hardcoded secrets" in _security_lens_text(cfg)
+
+
+def test_lenses_ask_for_dependency_health_by_default() -> None:
+    """Likewise osv-scanner: a hint by default, so the advisory ask stays."""
+    from lgtmaybe.engine.engine import _build_lenses
+
+    cfg = ReviewConfig(provider=Provider.openai, model="m")
+
+    assert cfg.static_analysis.enabled
+    text = " ".join(lens.user_block for lens in _build_lenses(cfg, has_intent=False))
+    assert "known-vulnerable" in text
 
 
 def test_gitleaks_in_finding_mode_drops_the_secret_ask() -> None:
     """gitleaks posts committed secrets itself, so the lens stops paying for
     an ask that redaction has already made unanswerable."""
-    from lgtmaybe.core.models import StaticAnalysisConfig, StaticAnalysisTool
+    from lgtmaybe.core.models import StaticAnalysisConfig, StaticAnalysisTool, ToolMode
 
     cfg = ReviewConfig(
         provider=Provider.openai,
         model="m",
-        static_analysis=StaticAnalysisConfig(enabled=True, tools=[StaticAnalysisTool.gitleaks]),
+        static_analysis=StaticAnalysisConfig(
+            enabled=True,
+            tools=[StaticAnalysisTool.gitleaks],
+            tool_mode={StaticAnalysisTool.gitleaks: ToolMode.finding},
+        ),
     )
 
     text = _security_lens_text(cfg)

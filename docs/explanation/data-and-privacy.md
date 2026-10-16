@@ -50,9 +50,11 @@ pass follows. These calls can contain:
 - **Configured instructions and reference files**, if `directory_rules` is set.
   Reference files come from the trusted base-branch workspace, are bounded, and
   are redacted before model calls.
-- **Static-analysis hints**, if `static_analysis` is enabled
+- **Static-analysis hints**, unless `static_analysis` is turned off
   ([static-analysis fusion](../reference/glossary.md#static-analysis-fusion)):
-  redacted findings from linters run locally over the changed files.
+  redacted findings from tools run locally over the changed files. The tools
+  run in a sandbox with no network, so the file text never leaves the machine
+  through them. Only the redacted hints reach the model.
 - **Matching specification text**, when a repository has a supported spec
   workflow and the change matches a committed spec. The
   [spec lens](../reference/glossary.md#spec-lens) sends a bounded, redacted
