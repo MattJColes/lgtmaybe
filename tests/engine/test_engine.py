@@ -45,7 +45,7 @@ _REFLECT_MARKER = "auditing another reviewer"
 
 
 def test_review_delegates_summary_notices_to_the_builder() -> None:
-    source = inspect.getsource(EngineClass.review)
+    source = inspect.getsource(EngineClass._collect_findings)
     assert "_build_notices(" in source
     assert "Token budget reached" not in source
 
