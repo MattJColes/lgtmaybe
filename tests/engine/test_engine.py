@@ -15,12 +15,14 @@ from lgtmaybe.core.models import (
     PRContext,
     Provider,
     ProviderResult,
+    PRStack,
     ReviewCategory,
     ReviewConfig,
     ReviewFinding,
     ReviewPreset,
     ReviewResult,
     Severity,
+    StackLayer,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import LLMReviewEngine, ReviewIncompleteError
@@ -3749,3 +3751,65 @@ def test_a_cut_with_nothing_opposing_it_still_posts() -> None:
     findings, _ = LLMReviewEngine(provider).review(_CTX, cfg)
 
     assert [f.title for f in findings] == [_GUARD_CUT["title"]]
+
+
+# ---------------------------------------------------------------------------
+# A stacked PR: every lens is told where it sits and what the other layers do
+# ---------------------------------------------------------------------------
+
+_STACK = PRStack(
+    position=2,
+    size=3,
+    base_ref="main",
+    below=[StackLayer(number=10, title="Add the user model", files=["src/models.py"])],
+    above=[StackLayer(number=12, title="Wire the API", files=["src/api.py"])],
+)
+
+
+def test_every_lens_is_told_where_the_pr_sits_in_its_stack() -> None:
+    """A layer's diff leaves out the layers below it, so code it uses can look
+    undefined, and a gap a later layer fills can look like a bug. Every lens
+    gets the stack on the shared prefix, once, and the summary names it."""
+    from lgtmaybe.engine.injection import _markers
+
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    _findings, summary = LLMReviewEngine(provider).review(
+        _TWO_FILE_CTX.model_copy(update={"stack": _STACK}), cfg
+    )
+
+    prefixes = _review_prefixes(provider)
+    assert prefixes, "no review calls were made"
+    for prefix in prefixes:
+        assert prefix.count(_markers("STACK")[0]) == 1
+        assert "#10" in prefix and "src/models.py" in prefix
+    assert "layer 2 of 3 in a stack" in summary
+
+
+def test_a_pr_outside_a_stack_sends_exactly_what_it_sent_before() -> None:
+    from lgtmaybe.engine.injection import STACK_PREAMBLE, _markers
+
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+
+    _findings, summary = LLMReviewEngine(provider).review(_TWO_FILE_CTX, cfg)
+
+    for call in provider.calls:
+        text = _all_text(call)
+        assert _markers("STACK")[0] not in text
+        assert STACK_PREAMBLE not in text
+    assert "stack" not in summary
+
+
+def test_the_other_layers_titles_are_redacted() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    leaky = _STACK.model_copy(
+        update={"below": [StackLayer(number=10, title="Use AKIAIOSFODNN7EXAMPLE", files=[])]}
+    )
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX.model_copy(update={"stack": leaky}), cfg)
+
+    for prefix in _review_prefixes(provider):
+        assert "AKIAIOSFODNN7EXAMPLE" not in prefix
