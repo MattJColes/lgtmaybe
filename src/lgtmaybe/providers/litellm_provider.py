@@ -176,6 +176,15 @@ _EXPIRED_CREDENTIAL_MARKERS = (
 _COST_ATTR = "cost_usd"
 
 
+def _merged_cost(spent: float | None, new: float | None) -> float | None:
+    """Two optional prices into one optional total: a call recovered by a
+    fallback or an empty-reply re-send must report the whole bill, not only
+    the recovery's part of it (the same rule `attempts` follows)."""
+    if spent is None and new is None:
+        return None
+    return sum(cost for cost in (spent, new) if cost is not None)
+
+
 class ProviderReturnedNoChoices(Exception):
     """An HTTP-200 response whose ``choices`` list is empty.
 
@@ -1257,25 +1266,19 @@ class LiteLLMProvider:
                 result = self._complete_with_retry(messages, self.fallback_model, **merged)
             except BaseException as fallback_exc:
                 stamp_attempts(fallback_exc, spent + attempts_of(fallback_exc))
-                fallback_cost = getattr(fallback_exc, "cost_usd", None)
-                if spent_cost is not None or fallback_cost is not None:
+                fallback_cost = _merged_cost(spent_cost, getattr(fallback_exc, "cost_usd", None))
+                if fallback_cost is not None:
                     # setattr via a named constant, not an attribute assignment:
                     # the target is typed BaseException (the same reason
                     # models.stamp_attempts sets rather than assigns).
                     with suppress(Exception):
-                        setattr(
-                            fallback_exc,
-                            _COST_ATTR,
-                            sum(cost for cost in (spent_cost, fallback_cost) if cost is not None),
-                        )
+                        setattr(fallback_exc, _COST_ATTR, fallback_cost)
                 raise
-            merged_cost: float | None = None
-            if spent_cost is not None or result.cost_usd is not None:
-                merged_cost = sum(
-                    cost for cost in (spent_cost, result.cost_usd) if cost is not None
-                )
             return result.model_copy(
-                update={"attempts": result.attempts + spent, "cost_usd": merged_cost}
+                update={
+                    "attempts": result.attempts + spent,
+                    "cost_usd": _merged_cost(spent_cost, result.cost_usd),
+                }
             )
 
     def _complete_with_retry(
@@ -1382,7 +1385,7 @@ class LiteLLMProvider:
                 result = self._raw_completion(model, messages, kwargs, count_request)
                 if spent_cost is not None:
                     result = result.model_copy(
-                        update={"cost_usd": spent_cost + (result.cost_usd or 0.0)}
+                        update={"cost_usd": _merged_cost(spent_cost, result.cost_usd)}
                     )
             return result
 
