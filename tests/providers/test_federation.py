@@ -12,6 +12,7 @@ import json
 import os
 import stat
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -106,7 +107,7 @@ class TestFailures:
         endpoint = TokenEndpoint()
         env = {**RUNNER_ENV, "INPUT_AWS_ROLE_ARN": "arn:aws:iam::1:role/r"}
 
-        with pytest.raises(FederationError, match="INPUT_AWS_REGION"):
+        with pytest.raises(FederationError, match="AWS_DEFAULT_REGION"):
             _federate(env, endpoint, tmp_path)
         assert endpoint.requests == []
 
@@ -144,6 +145,7 @@ class TestFailures:
 
         assert "idtoken" not in str(excinfo.value)
         assert REQUEST_TOKEN not in str(excinfo.value)
+        assert "api-version" not in str(excinfo.value)
 
     def test_a_response_without_a_token_fails(self, tmp_path: Path) -> None:
         endpoint = TokenEndpoint(body={"count": 0})
@@ -328,7 +330,7 @@ class TestSecrecy:
         removed when the process exits (a pip-installed host runner keeps /tmp)."""
         import atexit
 
-        registered: list[tuple[object, tuple[object, ...]]] = []
+        registered: list[tuple[Callable[..., object], tuple[object, ...]]] = []
         monkeypatch.setattr(
             atexit, "register", lambda fn, *args, **_kw: registered.append((fn, args))
         )

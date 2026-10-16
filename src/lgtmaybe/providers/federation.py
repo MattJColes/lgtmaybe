@@ -78,7 +78,7 @@ def _requests(env: Mapping[str, str]) -> list[_Request]:
         if not region:
             raise FederationError(
                 "INPUT_AWS_ROLE_ARN is set but no region is: set INPUT_AWS_REGION "
-                "(or AWS_REGION) to the Bedrock region."
+                "(or AWS_REGION, or AWS_DEFAULT_REGION) to the Bedrock region."
             )
         requests.append(_Request("INPUT_AWS_ROLE_ARN", _AWS_AUDIENCE))
     if _input(env, "INPUT_AZURE_CLIENT_ID"):
