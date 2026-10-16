@@ -265,7 +265,7 @@ FORGEJO_CONTRACT_URL=http://localhost:3000 FORGEJO_CONTRACT_ADMIN=maintainer \
 ```
 
 `forgejo-contract.yml` runs them weekly on Forgejo 11 and 17, and on PRs that
-touch `src/lgtmaybe/gitea/`.
+touch `src/lgtmaybe/gitea/` or `tests/forgejo/`.
 
 ### CLI Scenario e2e (tests/e2e/test_cli_scenarios.py)
 

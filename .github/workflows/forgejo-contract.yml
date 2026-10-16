@@ -38,7 +38,10 @@ jobs:
       FORGEJO_CONTRACT_ADMIN: contract-admin
       FORGEJO_CONTRACT_PASSWORD: contract-${{ github.run_id }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
@@ -57,6 +60,8 @@ jobs:
             curl -fsS http://localhost:3000/api/v1/version && break
             sleep 2
           done
+          # Fail here, by name, if Forgejo never answered.
+          curl -fsS http://localhost:3000/api/v1/version >/dev/null
           docker exec -u git forgejo forgejo admin user create --admin \
             --username "$FORGEJO_CONTRACT_ADMIN" --password "$FORGEJO_CONTRACT_PASSWORD" \
             --email admin@example.com --must-change-password=false
