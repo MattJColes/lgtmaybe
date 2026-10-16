@@ -23,7 +23,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import click
 
@@ -1291,12 +1291,23 @@ def mr_url_from_ci_env() -> str:
     Raises with the variable's own name when one is missing — the usual cause is
     a job running on a branch pipeline rather than a merge request one, and
     naming ``CI_MERGE_REQUEST_IID`` points straight at the ``rules:`` fix.
+
+    A server URL with a path is refused: the URL alone cannot tell a sub-path
+    from a nested group, so this is the one place the difference is knowable.
     """
     host = os.environ.get("CI_SERVER_HOST") or ""
     server = os.environ.get("CI_SERVER_URL", "").rstrip("/") or (host and f"https://{host}")
     if not server:
         raise click.ClickException(
             "CI_SERVER_HOST is not set, so lgtmaybe cannot tell which GitLab to post to."
+        )
+    subpath = urlsplit(server).path.strip("/")
+    if subpath:
+        raise click.ClickException(
+            f"CI_SERVER_URL is {server}: a GitLab served under the sub-path /{subpath} is "
+            "not supported. The sub-path would parse into the project path and "
+            "GITLAB_TOKEN would be sent to the wrong endpoint. Serve GitLab at the host "
+            "root, e.g. https://gitlab.example.com/group/proj/-/merge_requests/7."
         )
     project = os.environ.get("CI_MERGE_REQUEST_PROJECT_PATH") or os.environ.get("CI_PROJECT_PATH")
     if not project:
