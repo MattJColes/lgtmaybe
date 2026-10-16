@@ -23,13 +23,18 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import click
 
 from lgtmaybe.azure_devops import AzureDevOpsGateway
 from lgtmaybe.cli.render import flatten_details, render_findings
-from lgtmaybe.core.comment import DIAGRAM_MARKER_FAMILY, find_existing_overview, marker
+from lgtmaybe.core.comment import (
+    DIAGRAM_MARKER_FAMILY,
+    current_finding_keys,
+    find_existing_overview,
+    marker,
+)
 from lgtmaybe.core.diff import diff_fingerprint
 from lgtmaybe.core.diffparse import split_by_file
 from lgtmaybe.core.forge import GHES_UNSUPPORTED, Forge, PRLocator, token_env_vars
@@ -52,6 +57,7 @@ from lgtmaybe.core.ports import (
     SupportsConversation,
     SupportsFileContents,
     SupportsPermissions,
+    SupportsScanManifests,
 )
 from lgtmaybe.core.version import package_version
 from lgtmaybe.engine import (
@@ -567,6 +573,18 @@ def _apply_learned_feedback(github: ReviewGateway, ctx: PRContext, cfg: ReviewCo
     return ctx.model_copy(update={"feedback_downvotes": frozenset(downvoted)})
 
 
+def _fetch_context(gateway: ReviewGateway, cfg: ReviewConfig) -> PRContext:
+    """Fetch the PR context, arming the manifest prefetch when the gateway can.
+
+    Dependency manifests are fetched only when a scanner will read them — an
+    optional capability, probed like every other, so a gateway implementing
+    just the frozen port still works.
+    """
+    if isinstance(gateway, SupportsScanManifests):
+        gateway.set_scan_manifests(cfg.static_analysis.enabled)
+    return gateway.get_pr_context()
+
+
 def run_review(
     *,
     github: ReviewGateway,
@@ -594,13 +612,7 @@ def run_review(
     without the adapter methods) falls back to a full review.
     """
     if ctx is None:
-        # Dependency manifests are fetched only when a scanner will read them —
-        # an adapter-only method, like set_incremental_scope, so a gateway
-        # implementing just the frozen port still works.
-        want_manifests = getattr(github, "set_scan_manifests", None)
-        if callable(want_manifests):
-            want_manifests(cfg.static_analysis.enabled)
-        ctx = github.get_pr_context()
+        ctx = _fetch_context(github, cfg)
     overview_note = None
     if diagram_required and not dry_run:
         # Checked here, on whichever context this run holds, so a failed
@@ -765,12 +777,11 @@ def _incremental_context(
     compare_diff = getattr(github, "compare_diff", None)
     if compare_diff is None or (last_completed_sha is None and last_reviewed_sha is None):
         return ctx, None, None
+    last_sha: str | None = None
     if last_completed_sha is not None:
         last_sha = last_completed_sha(diagram_required=diagram_required)
     elif last_reviewed_sha is not None:
         last_sha = last_reviewed_sha()
-    else:  # guarded above; keeps the optional callable narrowed for type-checkers
-        return ctx, None, None
     if not last_sha:
         return ctx, None, None
     if last_sha == ctx.head_sha:
@@ -839,15 +850,10 @@ def _validate_prior_findings(
         set_fixed(set())
         return ""
 
-    from lgtmaybe.core.findings import finding_fingerprint, finding_identity
     from lgtmaybe.core.models import FindingValidation, FindingValidationStatus
     from lgtmaybe.engine.validate import validate_findings
 
-    current_keys = {
-        key
-        for finding in current_findings
-        for key in (finding_fingerprint(finding.path, finding.title), finding_identity(finding))
-    }
+    current_keys = current_finding_keys(current_findings)
     reproduced = [
         finding
         for finding in active
@@ -1102,15 +1108,12 @@ def execute_review(
     # a short comment rather than failing silently — then we exit non-zero.
     try:
         if diagram:
-            want_manifests = getattr(github, "set_scan_manifests", None)
-            if callable(want_manifests):
-                want_manifests(cfg.static_analysis.enabled)
             # A failed prefetch means run_review fetches and surfaces the
             # failure itself. Fetching here lets the review and the change
             # overview share one current-head context. A refused diff is
             # not retried by run_review — it is the same answer twice.
             try:
-                ctx = github.get_pr_context()
+                ctx = _fetch_context(github, cfg)
             except DiffUnavailable:
                 raise
             except Exception:
@@ -1150,6 +1153,14 @@ def execute_comment(event: dict[str, Any], cfg: ReviewConfig, runtime: RuntimeOp
     supplies api_key/api_base/fallback_model; the PR URL is derived here.
     """
     from lgtmaybe.cli.slash import dispatch, parse_command
+
+    # An edited or deleted comment re-delivers its original body and author, so
+    # a workflow without a `types: [created]` filter would re-run a paid review
+    # on a maintainer tidying an old command.
+    action = event.get("action", "created")
+    if action != "created":
+        click.echo(f"Comment event is '{action}', not 'created'; ignoring.")
+        return
 
     parsed = parse_command(event.get("comment", {}).get("body", ""))
     if parsed is None:
@@ -1291,12 +1302,23 @@ def mr_url_from_ci_env() -> str:
     Raises with the variable's own name when one is missing — the usual cause is
     a job running on a branch pipeline rather than a merge request one, and
     naming ``CI_MERGE_REQUEST_IID`` points straight at the ``rules:`` fix.
+
+    A server URL with a path is refused: the URL alone cannot tell a sub-path
+    from a nested group, so this is the one place the difference is knowable.
     """
     host = os.environ.get("CI_SERVER_HOST") or ""
     server = os.environ.get("CI_SERVER_URL", "").rstrip("/") or (host and f"https://{host}")
     if not server:
         raise click.ClickException(
             "CI_SERVER_HOST is not set, so lgtmaybe cannot tell which GitLab to post to."
+        )
+    subpath = urlsplit(server).path.strip("/")
+    if subpath:
+        raise click.ClickException(
+            f"CI_SERVER_URL is {server}: a GitLab served under the sub-path /{subpath} is "
+            "not supported. The sub-path would parse into the project path and "
+            "GITLAB_TOKEN would be sent to the wrong endpoint. Serve GitLab at the host "
+            "root, e.g. https://gitlab.example.com/group/proj/-/merge_requests/7."
         )
     project = os.environ.get("CI_MERGE_REQUEST_PROJECT_PATH") or os.environ.get("CI_PROJECT_PATH")
     if not project:

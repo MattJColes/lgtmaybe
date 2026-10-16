@@ -54,8 +54,9 @@ checkout.
   rides the shared review contract ("why it matters", a two-to-four sentence
   `body`) and the describe, high-impact and diagram prompts.
 - **Posting:** the REST review API, batched inline comments plus one summary.
-- **The summary names the model, never a cost.** lgtmaybe does not compute
-  cost.
+- **The summary names the model, never a cost.** The posted review never
+  shows a cost; `--profile` alone reports an operator-local estimate for
+  debugging.
 
 ## Auth Model (Chain of Responsibility)
 
@@ -406,7 +407,7 @@ docstrings.
   it is a required completion step and must not stamp the head complete.
   `auto_diagram` is the one switch for the whole comment. Path signals are
   untrusted hints and a floor; High Impact drops model-chosen paths not in
-  `changed_files`. `describe.structured_call` / `structured_comment` is the
+  `changed_files`. `describe.structured_call` is the
   shared one-call scaffold; `describe.markdown_text` escapes every section's
   model prose. Model-authored Mermaid never reaches a fence; sequence labels are
   escaped with Mermaid entity codes. **No D2:** GitHub does not render it.

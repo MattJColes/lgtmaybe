@@ -31,6 +31,7 @@ from lgtmaybe.core.comment import (
     finding_keys,
     last_match,
     marker,
+    partition_findings,
     render_broad,
     render_demoted,
     render_inline_body,
@@ -968,10 +969,7 @@ class RestGitHubGateway:
     def list_active_findings(self) -> list[ActiveFinding]:
         """Read our unresolved finding roots for explicit follow-up validation."""
         active: list[ActiveFinding] = []
-        for node in self._walk_review_threads(
-            "id isResolved isOutdated path "
-            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
-        ):
+        for node in self._walk_review_threads():
             if node.get("isResolved"):
                 continue
             first = _first_comment(node)
@@ -1165,13 +1163,12 @@ class RestGitHubGateway:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _walk_review_threads(self, node_fields: str) -> Iterator[dict[str, Any]]:
+    def _walk_review_threads(self) -> Iterator[dict[str, Any]]:
         """Yield every review thread on the PR, following GraphQL pagination.
 
-        ``node_fields`` remains for call-site readability; the first walk fetches
-        the union of every caller's fields and later walks reuse it.
+        The first walk fetches the union of every caller's fields
+        (``_THREAD_NODE_FIELDS``) and later walks reuse the cache.
         """
-        del node_fields
         if self._review_threads_cache is not None:
             yield from self._review_threads_cache
             return
@@ -1453,9 +1450,7 @@ class RestGitHubGateway:
         """
         open_threads = 0
         try:
-            for node in self._walk_review_threads(
-                "isResolved comments(first:1){ nodes{ body viewerDidAuthor } }"
-            ):
+            for node in self._walk_review_threads():
                 if node.get("isResolved"):
                     continue
                 if finding_keys(_first_comment(node).get("body", "") or ""):
@@ -1482,10 +1477,7 @@ class RestGitHubGateway:
             ]
 
         fixed: list[tuple[str, int | None, str]] = []
-        for node in self._walk_review_threads(
-            "id isResolved isOutdated path "
-            "comments(first:1){ nodes{ body databaseId viewerDidAuthor } }"
-        ):
+        for node in self._walk_review_threads():
             if node.get("isResolved"):
                 continue
             if self._validated_fixed_thread_ids is not None:
@@ -1592,10 +1584,7 @@ class RestGitHubGateway:
         suppression time), so a downvote can't hide a serious vulnerability.
         """
         downvoted: set[str] = set()
-        for node in self._walk_review_threads(
-            "comments(first:1){ nodes{ body viewerDidAuthor "
-            "reactions(content: THUMBS_DOWN, first: 50){ nodes{ user{ login } } } } }"
-        ):
+        for node in self._walk_review_threads():
             first = _first_comment(node)
             fingerprint, _identity = stamped_ids(first.get("body", "") or "")
             if fingerprint is None:
@@ -1667,36 +1656,18 @@ class RestGitHubGateway:
     ]:
         """Split findings into inline comments, body-demoted, and broad findings.
 
-        A finding is posted inline only when it is confidently placed
-        (``anchored``) AND its ``(path, line, side)`` is a real commentable diff
-        line. Anything else — an anchor the engine could not match, or a line
-        outside the diff — is demoted rather than posted on a line we can't stand
-        behind: a comment on the wrong line breaks trust faster than one without a
-        precise line. Inline comments anchor by ``line`` + ``side`` (GitHub's
-        recommended params), not the deprecated ``position`` count.
-
-        A ``broad`` finding (reflection tiered it as redesign / infra / contract /
-        needs-verification) is routed to its own group even when it would anchor,
-        so it renders in the collapsed "Broader observations" block instead of
-        cluttering the must-fix inline list.
+        The placement rule is shared (``core.comment.partition_findings``); only
+        the payload here is GitHub's: inline comments anchor by ``line`` +
+        ``side`` (GitHub's recommended params), not the deprecated ``position``
+        count, and the body renders the same way for every host.
         """
-        inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-        demoted: list[ReviewFinding] = []
-        broad: list[ReviewFinding] = []
-        for f in findings:
-            if f.broad:
-                broad.append(f)
-                continue
-            if not f.anchored or (f.path, f.line, f.side) not in commentable:
-                demoted.append(f)
-                continue
-            # Only the position fields are GitHub's; the body is rendered the
-            # same way for every host.
-            comment: dict[str, Any] = {
+
+        def place(f: ReviewFinding) -> dict[str, Any]:
+            return {
                 "path": f.path,
                 "line": f.line,
                 "side": f.side,
                 "body": render_inline_body(f),
             }
-            inline.append((comment, f))
-        return inline, demoted, broad
+
+        return partition_findings(findings, commentable, place)

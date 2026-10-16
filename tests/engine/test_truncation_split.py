@@ -27,11 +27,13 @@ from typing import Any
 import pytest
 
 from lgtmaybe.core.models import (
+    DirectoryRule,
     PRContext,
     Provider,
     ProviderResult,
     ReviewCategory,
     ReviewConfig,
+    Severity,
 )
 from lgtmaybe.core.ports import Message, ProviderTruncated
 from lgtmaybe.engine import LLMReviewEngine, clear_interrupt, request_interrupt
@@ -473,6 +475,90 @@ def test_a_piece_that_fails_is_still_reported() -> None:
 
 
 # ---------------------------------------------------------------------------
+# A flaked piece must keep its retry even when a fallback model is configured
+# ---------------------------------------------------------------------------
+
+_FALLBACK = "the-fallback"
+
+
+class _SplitsThenPieceBFlakes(FakeProvider):
+    """Truncates the whole batch, answers piece a, 429s piece b exactly once.
+
+    The shape of issue #759: the split WORKED — the payload shrank and one piece
+    answered — and the failure that remains is a transient provider blip on the
+    other piece. A fallback model is on offer, and what it does when asked is
+    the fake's parameter, so both halves of the bug are reachable: the fallback
+    truncating (its error replaced the piece reason) and the fallback flaking
+    (the rescue re-ran the oversized whole batch).
+    """
+
+    def __init__(self, fallback_truncates: bool) -> None:
+        super().__init__()
+        self.diffs: list[str] = []
+        self.fallback_model = _FALLBACK
+        self._fallback_truncates = fallback_truncates
+        self._piece_b_flaked = False
+
+    def escalate_model(self) -> str | None:
+        return self.fallback_model
+
+    def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+        diff = "\n".join(str(m.get("content", "")) for m in messages)
+        self.diffs.append(diff)
+        if opts.get("model_override") == _FALLBACK:
+            if self._fallback_truncates:
+                raise ProviderTruncated(_CEILING, text="")
+            raise RuntimeError("rate_limited")
+        if _shows(diff, "one.py", "two.py"):
+            raise ProviderTruncated(_CEILING, text="")
+        if _shows(diff, "two.py") and not self._piece_b_flaked:
+            self._piece_b_flaked = True
+            raise RuntimeError("rate_limited")
+        path = "one.py" if _shows(diff, "one.py") else "two.py"
+        anchor = "first_change = os.getcwd()" if path == "one.py" else "second_change = sys.maxsize"
+        return ProviderResult(text=_finding_json(path, anchor), input_tokens=5, output_tokens=5)
+
+
+def test_a_flaked_piece_keeps_its_retry_when_the_fallback_truncates_too() -> None:
+    """The split answered; only a piece flaked — the fallback must not buy the batch.
+
+    Escalating here re-sends the request the split already recovered from, and a
+    fallback that truncates as well reports ITS failure in place of the piece
+    reason, so the rescue wave never re-runs the piece: one file reviewed, a
+    failed-call notice, and the transient blip that caused it all unretried.
+    """
+    provider = _SplitsThenPieceBFlakes(fallback_truncates=True)
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]  # the piece was retried
+    assert "results may be incomplete" not in summary
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1  # never re-sent whole
+
+
+def test_a_flaked_piece_keeps_its_retry_when_the_fallback_flakes_too() -> None:
+    """A fallback that 429s must not turn the rescue onto the whole batch.
+
+    The escalation's error is retryable, so with the piece reason replaced by it
+    the rescue re-ran the call it has — the oversized whole batch, which
+    truncates and splits again: whole, a, b, whole, a, b, the exact replay
+    `_PiecesReason` exists to stop.
+    """
+    provider = _SplitsThenPieceBFlakes(fallback_truncates=False)
+    findings, summary = LLMReviewEngine(provider).review(
+        _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]), _cfg()
+    )
+
+    assert sorted(f.path for f in findings) == ["one.py", "two.py"]
+    assert "results may be incomplete" not in summary
+    # The whole batch once, then a, then b's flaked try and its retry — and
+    # that is every call: no escalation, no replay of the batch.
+    assert len(provider.diffs) == 4
+    assert sum(_shows(d, "one.py", "two.py") for d in provider.diffs) == 1
+
+
+# ---------------------------------------------------------------------------
 # The reasoning-bound sibling of the split: one step down, then stop.
 # ---------------------------------------------------------------------------
 
@@ -553,15 +639,18 @@ def test_a_model_reasoning_at_its_own_default_still_gets_the_retry() -> None:
     class _UnconfiguredReasoner(_TruncatesUntilEffortDrops):
         # An OpenRouter route with nothing configured — the shape all three
         # models arrived in, and the one where the effort rides nested.
-        model = "openrouter/z-ai/glm-4.7-flash"
-        default_opts: dict[str, Any] = {}
-        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+        def __init__(self) -> None:
+            super().__init__(effort=None, answers_at=_EFFORT_FLOOR)
+            self._adapter = LiteLLMProvider(model="openrouter/z-ai/glm-4.7-flash")
+
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            return self._adapter.lower_reasoning_effort()
 
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             nested = opts.get("extra_body", {}).get("reasoning", {})
             return super().complete(messages, model, reasoning_effort=nested.get("effort"))
 
-    provider = _UnconfiguredReasoner(effort=None, answers_at=_EFFORT_FLOOR)
+    provider = _UnconfiguredReasoner()
 
     findings, summary = LLMReviewEngine(provider).review(
         _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
@@ -681,16 +770,21 @@ def test_the_off_switch_reaches_an_openrouter_route_through_the_real_adapter() -
     out nested, and so does off — the flat param would be dropped there."""
 
     class _GlmThroughOpenRouter(_TruncatesUntilReasoningIsOff):
-        model = "openrouter/z-ai/glm-5.3-flash"
-        default_opts: dict[str, Any] = {}
-        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
-        disable_reasoning = LiteLLMProvider.disable_reasoning
+        def __init__(self) -> None:
+            super().__init__(effort=None, answers_at="none")
+            self._adapter = LiteLLMProvider(model="openrouter/z-ai/glm-5.3-flash")
+
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            return self._adapter.lower_reasoning_effort()
+
+        def disable_reasoning(self) -> dict[str, Any] | None:
+            return self._adapter.disable_reasoning()
 
         def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
             nested = opts.get("extra_body", {}).get("reasoning", {})
             return super().complete(messages, model, reasoning_effort=nested.get("effort"))
 
-    provider = _GlmThroughOpenRouter(effort=None, answers_at="none")
+    provider = _GlmThroughOpenRouter()
 
     findings, _summary = LLMReviewEngine(provider).review(
         _ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg()
@@ -766,12 +860,14 @@ def test_an_incapable_route_reports_rather_than_re_sending_the_same_request() ->
     be byte-identical to the first, billed twice for one answer."""
 
     class _IncapableRoute(_TruncatesUntilEffortDrops):
-        model = "openai/gpt-5.5"
-        default_opts: dict[str, Any] = {}
-        _effort_override_supported = False
-        lower_reasoning_effort = LiteLLMProvider.lower_reasoning_effort
+        def __init__(self) -> None:
+            super().__init__(effort=None, answers_at=_EFFORT_FLOOR)
+            self._adapter = LiteLLMProvider(model="openai/gpt-5.5", effort_override_supported=False)
 
-    provider = _IncapableRoute(effort=None, answers_at=_EFFORT_FLOOR)
+        def lower_reasoning_effort(self) -> dict[str, Any] | None:
+            return self._adapter.lower_reasoning_effort()
+
+    provider = _IncapableRoute()
 
     with pytest.raises(ReviewIncompleteError):
         LLMReviewEngine(provider).review(_ctx(_ONE_FILE_ONE_HUNK, ["one.py"]), _cfg())
@@ -984,3 +1080,52 @@ def test_a_parser_detected_truncation_that_split_cleanly_reports_no_failure() ->
     )
 
     assert "results may be incomplete" not in summary
+
+
+def test_split_pieces_carry_their_own_blocks_not_the_batchs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Issue #768: a piece must not inherit the batch's per-file blocks.
+
+    A piece shows a subset of the batch's files, so the batch's blocks are
+    wrong for it twice over: the intent/spec not-visible lists omit the sibling
+    piece's files (the very omission recomputing the HIDDEN block prevents),
+    and the hints and directory rules cover files the piece cannot see. Every
+    per-batch block is rebuilt for the piece's own file set.
+    """
+    from lgtmaybe.engine.static_analysis import ToolFinding
+
+    hint_two = ToolFinding(
+        tool="bandit",
+        path="two.py",
+        line=2,
+        rule="B307",
+        message="hint only for two.py",
+        severity=Severity.medium,
+    )
+    monkeypatch.setattr("lgtmaybe.engine.engine.run_static_analysis", lambda files, cfg: [hint_two])
+    cfg = ReviewConfig(
+        provider=Provider.openrouter,
+        model="deepseek/deepseek-v4-pro",
+        categories=[ReviewCategory.security, ReviewCategory.intent],
+        reflect=False,
+        directory_rules=[
+            DirectoryRule(paths=["one.py"], instructions="RULE ONE ONLY"),
+            DirectoryRule(paths=["two.py"], instructions="RULE TWO ONLY"),
+        ],
+    )
+    ctx = _ctx(_TWO_FILE_DIFF, ["one.py", "two.py"]).model_copy(
+        update={"title": "ship the two-file change"}
+    )
+
+    provider = _TruncatesUntilSmaller()
+    LLMReviewEngine(provider).review(ctx, cfg)
+
+    ones = [d for d in provider.diffs if _shows(d, "one.py") and not _shows(d, "two.py")]
+    assert ones, "the batch split into per-file pieces"
+    # Rules and hints never cover a file the piece cannot see.
+    assert all("RULE TWO ONLY" not in d for d in ones)
+    assert all("hint only for two.py" not in d for d in ones)
+    # The intent lens's piece names the sibling file as NOT SHOWN, so a promise
+    # delivered in two.py is "not shown", never "undone".
+    intent_piece = next(d for d in ones if "===INTENT_START===" in d)
+    intent_block = intent_piece.split("===INTENT_START===")[1].split("===INTENT_END===")[0]
+    assert "two.py" in intent_block

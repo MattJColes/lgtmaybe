@@ -54,6 +54,11 @@ rules:
 A branch pipeline has no merge request to review. There, lgtmaybe fails with an
 error naming the missing `CI_MERGE_REQUEST_IID` rather than guessing.
 
+A GitLab served under a sub-path is not supported. Its `CI_SERVER_URL` looks
+like `https://example.com/gitlab`, which the job cannot tell apart from a
+nested group, so it fails with an error naming the sub-path. Serve GitLab at
+the host root instead.
+
 The example job does not clone the repository (`GIT_STRATEGY: none`), so there
 is no `.lgtmaybe.yml` to read. Configure the review with the command's flags:
 `--provider`, `--model`, `--fallback-model`, `--api-key`, `--api-base`,

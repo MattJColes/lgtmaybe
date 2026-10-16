@@ -10,12 +10,30 @@ from lgtmaybe.engine.engine import LLMReviewEngine
 from lgtmaybe.github.rest_gateway import RestGitHubGateway
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
 
+# Optional capabilities the ENGINE probes on the provider adapter, by name.
+# One protocol per capability because the engine probes each independently:
+# an adapter may implement any subset, so a group would switch off a
+# capability its siblings do not share. Kept explicit so a new protocol added
+# to either side without a conformance test fails loudly against the other.
+PROVIDER_CAPABILITIES = (
+    "SupportsInputBudget",
+    "SupportsSchemaDropReport",
+    "SupportsTemperatureDropReport",
+    "SupportsResponseFormatStatus",
+    "SupportsResponseFormatDrop",
+    "SupportsReasoningStepDown",
+    "SupportsReasoningSwitchOff",
+    "SupportsModelEscalation",
+)
+
 # Every optional capability a gateway may declare, by name, so the conformance
 # test below fails loudly when one is added without being wired up.
 CAPABILITIES = [
     name
     for name in dir(ports)
-    if name.startswith("Supports") and getattr(getattr(ports, name), "_is_protocol", False)
+    if name.startswith("Supports")
+    and getattr(getattr(ports, name), "_is_protocol", False)
+    and name not in PROVIDER_CAPABILITIES
 ]
 
 
@@ -33,6 +51,43 @@ def test_production_implementations_do_not_inherit_ports() -> None:
 def test_the_old_github_only_port_name_still_resolves() -> None:
     """Renamed when lgtmaybe grew past one forge; the alias keeps adapters importing."""
     assert GitHubGateway is ReviewGateway
+
+
+def test_scan_manifests_is_its_own_capability() -> None:
+    """Gitea and Azure DevOps serve manifest text without incremental review.
+
+    Bundling ``set_scan_manifests`` into ``SupportsIncremental`` told adapter
+    authors the group was all-or-nothing when it was not.
+    """
+    assert not hasattr(ports.SupportsIncremental, "set_scan_manifests")
+    assert hasattr(ports.SupportsScanManifests, "set_scan_manifests")
+
+
+class TestProviderCapabilities:
+    """The provider-side ``Supports*`` protocols the engine probes with isinstance.
+
+    A capability renamed on the adapter used to vanish silently behind a
+    ``getattr`` probe and switch its recovery step off; these assertions are
+    what make the rename loud instead.
+    """
+
+    def test_every_protocol_is_claimed_by_exactly_one_side(self) -> None:
+        """A new protocol forgotten here fails against the other adapter below."""
+        assert all(hasattr(ports, name) for name in PROVIDER_CAPABILITIES)
+
+    @pytest.mark.parametrize("name", PROVIDER_CAPABILITIES)
+    def test_capabilities_are_runtime_checkable(self, name: str) -> None:
+        assert getattr(ports, name)._is_runtime_protocol
+
+    @pytest.mark.parametrize("name", PROVIDER_CAPABILITIES)
+    def test_the_litellm_adapter_satisfies_every_capability(self, name: str) -> None:
+        provider = LiteLLMProvider()
+        assert isinstance(provider, getattr(ports, name)), name
+
+    def test_the_litellm_adapter_exposes_its_primary_model(self) -> None:
+        """The engine discloses the answering model via attribute presence
+        (hasattr, not a protocol isinstance), so a rename here must be loud."""
+        assert hasattr(LiteLLMProvider(), "model")
 
 
 class TestCapabilities:

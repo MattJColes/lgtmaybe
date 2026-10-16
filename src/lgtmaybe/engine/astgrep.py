@@ -31,6 +31,8 @@ from typing import Any, NamedTuple
 
 from lgtmaybe.core.logging import get_logger
 
+from .static_analysis import scrubbed_env
+
 _log = get_logger(__name__)
 
 # A symbol name -> candidate repo-relative file paths that define it.
@@ -211,6 +213,10 @@ def _default_runner(binary: str, rule_yaml: str, target: Path) -> str:
     try:
         proc = subprocess.run(
             [binary, "scan", "--inline-rules", rule_yaml, "--json=compact", str(target)],
+            # The scan runs over untrusted text (boundaries feeds it PR-head
+            # files), so it gets static analysis' scrubbed env, HOME pinned to
+            # the scanned tree.
+            env=scrubbed_env(target if target.is_dir() else target.parent),
             capture_output=True,
             text=True,
             encoding="utf-8",

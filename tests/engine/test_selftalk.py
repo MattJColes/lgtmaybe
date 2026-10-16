@@ -73,6 +73,29 @@ def test_every_model_authored_field_is_scanned(field: str) -> None:
     assert is_self_talk(_finding(**{field: _LEAKED_BODY}))
 
 
+def test_a_note_owning_its_formatting_error_is_self_talk() -> None:
+    """The broken half can rest on the formatting error alone when the reply owns it."""
+    body = (
+        "My response had a formatting error near the end. Output a clean, "
+        "valid JSON findings array instead."
+    )
+    assert is_self_talk(_finding(body=body))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "My response had formatting errors near the end. Emit a valid JSON findings array.",
+        "The previous reply contained a JSON formatting error mid-way; emit valid JSON only.",
+        "My above output has minor formatting errors. Return a findings object, no prose.",
+    ],
+)
+def test_owned_formatting_error_variants_are_self_talk(body: str) -> None:
+    """Plural and qualified forms of the owned phrase are still the reply
+    owning its breakage, and the owner can sit at any word of the anchor."""
+    assert is_self_talk(_finding(body=body))
+
+
 # ---------------------------------------------------------------------------
 # what must NOT be dropped: one half of the note alone is ordinary review prose
 # ---------------------------------------------------------------------------
@@ -94,6 +117,29 @@ def test_every_model_authored_field_is_scanned(field: str) -> None:
     ],
 )
 def test_a_genuine_finding_carrying_one_half_of_the_note_is_kept(body: str) -> None:
+    assert not is_self_talk(_finding(body=body))
+
+
+def test_a_bug_report_pairing_both_phrases_is_kept() -> None:
+    """Issue #761: a user-facing bug report carries both phrases, yet is not a note."""
+    finding = _finding(
+        title="Formatting error returns 500",
+        body=("The endpoint returns 500 instead of a 400 telling the client to send valid JSON."),
+    )
+    assert not is_self_talk(finding)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Formatting errors return 500; the endpoint should still return valid JSON.",
+        "A JSON formatting error in the payload breaks the parser, which emits no findings array.",
+        "The endpoint logs a formatting error and asks the client to send JSON only.",
+    ],
+)
+def test_ownerless_formatting_error_prose_is_kept(body: str) -> None:
+    """Without the owner, the same words paired with a shape phrase are a
+    user-facing bug report about someone else's parser, never a note."""
     assert not is_self_talk(_finding(body=body))
 
 

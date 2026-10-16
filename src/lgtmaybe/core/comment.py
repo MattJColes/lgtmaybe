@@ -10,10 +10,10 @@ block, and the hidden idempotency markers are the same on all of them. Only the
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TypeVar
 
-from .diff import DIFF_FINGERPRINT_LENGTH
+from .diff import DIFF_FINGERPRINT_LENGTH, CommentableLines
 from .findings import finding_fingerprint, finding_identity
 from .models import ReviewFinding
 
@@ -320,6 +320,35 @@ def current_finding_keys(findings: list[ReviewFinding]) -> set[str]:
         keys.add(finding_fingerprint(f.path, f.title))
         keys.add(finding_identity(f))
     return keys
+
+
+def partition_findings(
+    findings: list[ReviewFinding],
+    commentable: CommentableLines,
+    place: Callable[[ReviewFinding], _T | None],
+) -> tuple[list[tuple[_T, ReviewFinding]], list[ReviewFinding], list[ReviewFinding]]:
+    """Split findings into placeable inline pairs, body-demoted, and broad.
+
+    The rule every adapter shares: a finding goes inline only when it is
+    confidently anchored AND lands on a real commentable diff line; anything
+    else is demoted to the review body, because a comment on a line we cannot
+    stand behind breaks trust faster than one without a precise line. ``place``
+    builds the host's own position payload for a placeable finding and may
+    return None to demote one the host cannot position.
+    """
+    placeable: list[tuple[_T, ReviewFinding]] = []
+    demoted: list[ReviewFinding] = []
+    broad: list[ReviewFinding] = []
+    for f in findings:
+        if f.broad:
+            broad.append(f)
+        elif not f.anchored or (f.path, f.line, f.side) not in commentable:
+            demoted.append(f)
+        elif (payload := place(f)) is None:
+            demoted.append(f)
+        else:
+            placeable.append((payload, f))
+    return placeable, demoted, broad
 
 
 def unposted(

@@ -1391,6 +1391,29 @@ class TestFailFastOnPermanentErrors:
 
         assert calls == 1
 
+    def test_response_with_no_choices_fails_fast_with_a_named_error(self) -> None:
+        """An HTTP-200 body with an empty ``choices`` list (seen from a
+        misbehaving OpenAI-compatible endpoint) used to surface as a bare
+        ``IndexError`` out of ``response.choices[0]`` and burn the whole retry
+        ladder; the same body comes back every time, so it must fail once and
+        name itself."""
+        calls = 0
+
+        def no_choices(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(prompt_tokens=5, completion_tokens=0),
+            )
+
+        with patch("litellm.completion", side_effect=no_choices):
+            provider = LiteLLMProvider()
+            with pytest.raises(provider_module.ProviderReturnedNoChoices, match="no choices"):
+                provider.complete([{"role": "user", "content": "hi"}], "openai/gpt-4o")
+
+        assert calls == 1
+
     def test_transient_error_retries_up_to_max_attempts(self) -> None:
         """A transient error is retried, but no more than _MAX_ATTEMPTS times."""
         calls = 0
@@ -2548,27 +2571,14 @@ class TestTheLadderStepsOnlyToLevelsTheModelAccepts:
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
 
-    def test_an_undeclared_model_keeps_todays_ladder(self) -> None:
-        provider = LiteLLMProvider(model="openai/gpt-5.5", reasoning_effort="low")
+    @pytest.mark.parametrize("model", ["openai/gpt-5.5", "openai/x"])
+    def test_an_undeclared_model_keeps_todays_ladder(self, model: str) -> None:
+        """No levels and no default resolved: the plain ladder decides, whatever
+        the model string names."""
+        provider = LiteLLMProvider(model=model, reasoning_effort="low")
 
         assert provider.lower_reasoning_effort() == {"reasoning_effort": "minimal"}
         assert provider.disable_reasoning() == {"reasoning_effort": "none"}
-
-    def test_a_fake_without_the_capability_attributes_keeps_todays_ladder(self) -> None:
-        """The probes are borrowed unbound onto engine fakes carrying only the
-        three attributes `_effort_override` has always read."""
-        fake = SimpleNamespace(
-            default_opts={"reasoning_effort": "low"},
-            model="openai/x",
-            _effort_override_supported=True,
-        )
-
-        assert LiteLLMProvider.lower_reasoning_effort(fake) == {  # type: ignore[arg-type]
-            "reasoning_effort": "minimal"
-        }
-        assert LiteLLMProvider.disable_reasoning(fake) == {  # type: ignore[arg-type]
-            "reasoning_effort": "none"
-        }
 
 
 class TestOpenAICompatibleToolRejectionWording:

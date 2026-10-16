@@ -38,6 +38,7 @@ from lgtmaybe.core.comment import (
     DIAGRAM_MARKER_FAMILY,
     finding_keys,
     marker,
+    partition_findings,
     render_broad,
     render_demoted,
     render_inline_body,
@@ -322,28 +323,20 @@ class GiteaGateway:
     ]:
         """Split findings into inline comments, body-demoted, and broad findings.
 
-        Same rule as the GitHub adapter — a finding goes inline only when it is
-        confidently anchored AND lands on a real commentable diff line — with
-        Gitea's position vocabulary substituted at the end.
+        The placement rule is shared (``core.comment.partition_findings``); only
+        the payload here is Gitea's position vocabulary.
         """
-        inline: list[tuple[dict[str, Any], ReviewFinding]] = []
-        demoted: list[ReviewFinding] = []
-        broad: list[ReviewFinding] = []
-        for f in findings:
-            if f.broad:
-                broad.append(f)
-                continue
-            if not f.anchored or (f.path, f.line, f.side) not in commentable:
-                demoted.append(f)
-                continue
+
+        def place(f: ReviewFinding) -> dict[str, Any]:
             comment: dict[str, Any] = {"path": f.path, "body": render_inline_body(f)}
             # RIGHT is a line in the new file, LEFT a line in the old one.
             if f.side == "LEFT":
                 comment["old_position"] = f.line
             else:
                 comment["new_position"] = f.line
-            inline.append((comment, f))
-        return inline, demoted, broad
+            return comment
+
+        return partition_findings(findings, commentable, place)
 
     def _posting_login(self) -> str | None:
         """The login this token posts as, looked up once; None when Gitea won't say.
