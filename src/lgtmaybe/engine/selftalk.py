@@ -42,9 +42,13 @@ _BROKEN_ATTEMPT = re.compile(
     r"|\bmeta-?text\b"
     r"|\bnot\s+instructions\s+to\s+follow\b"
     # A formatting error must belong to the model's own reply: a user-facing
-    # bug report ("Formatting error returns 500") carries the bare phrase.
+    # bug report ("Formatting error returns 500") carries the bare phrase, and
+    # only the owner anchor ("my response", "previous reply") separates the
+    # two. Notes also arrive as plurals or with a qualifier word between the
+    # article and the noun ("a JSON formatting error"), so the owned form
+    # allows one.
     r"|\b(?:my|previous|above)\s+(?:response|reply|output|answer)\s+"
-    r"(?:had|has|contains?|contained)\s+(?:an?\s+)?formatting\s+error\b"
+    r"(?:had|has|contains?|contained)\s+(?:an?\s+)?(?:\w+\s+)?formatting\s+errors?\b"
     r"|\bdiscard(?:ed|ing)?\s+(?:all\s+|the\s+|this\s+)?(?:corrupted\s+|garbled\s+|previous\s+|above\s+)?"
     r"(?:output|text|response|attempt)\b",
     re.IGNORECASE,
