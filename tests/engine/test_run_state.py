@@ -355,3 +355,25 @@ class TestEveryModelCallIsCharged:
         )
         assert len(states) == 1
         assert states[0].tokens_spent() == 30 + 12 + 7_000
+
+
+class TestAFailedCallStillReportsItsDegradation:
+    def test_a_temperature_lost_by_a_failed_call_reaches_the_summary(self) -> None:
+        """A failure has no result to carry the drop home on, so it rides the
+        exception, and the run's metered provider must read it from there."""
+
+        class _FailsWithoutTheTemperature:
+            calls = 0
+
+            def complete(self, messages: list[Message], model: str, **opts: Any) -> ProviderResult:
+                type(self).calls += 1
+                if type(self).calls == 1:
+                    return ProviderResult(text=_findings_json(1), input_tokens=1, output_tokens=1)
+                exc = RuntimeError("upstream exploded")
+                stamp_degradation(exc, schema_dropped=False, temperature_dropped=True)
+                raise exc
+
+        _, summary = LLMReviewEngine(_FailsWithoutTheTemperature()).review(_ALPHA, _cfg())
+
+        assert "results may be incomplete" in summary, "the second lens did fail"
+        assert _TEMPERATURE_SEGMENT in summary

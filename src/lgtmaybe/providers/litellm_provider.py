@@ -1115,6 +1115,29 @@ class LiteLLMProvider:
             temperature_dropped = self._temperature_withheld
         return {"schema_dropped": schema_dropped, "temperature_dropped": temperature_dropped}
 
+    def _safe_degradation(
+        self,
+        model: str,
+        kwargs: Mapping[str, Any],
+        *,
+        schema_asked: bool,
+        temperature_asked: bool,
+    ) -> dict[str, bool]:
+        """:meth:`_degradation`, but never the reason a call fails.
+
+        It runs on both the success and the failure path of every call. It only
+        discloses, so a lookup that breaks reports nothing lost (logged at
+        debug) rather than turning a good answer into an error, or replacing a
+        provider's real error with its own.
+        """
+        try:
+            return self._degradation(
+                model, kwargs, schema_asked=schema_asked, temperature_asked=temperature_asked
+            )
+        except Exception:  # noqa: BLE001 — disclosure must never fail or mask a call
+            _log.debug("could not tell what this call lost", exc_info=True)
+            return {"schema_dropped": False, "temperature_dropped": False}
+
     def _temperature_stripped(self, model: str, kwargs: Mapping[str, Any]) -> bool:
         """Whether litellm will strip this request's ``temperature``.
 
@@ -1439,16 +1462,17 @@ class LiteLLMProvider:
             # channel carries whether any later attempt could have helped, which
             # is what stops the engine's rescue wave re-billing a dead key.
             stamp_attempts(exc, attempts)
+            if _is_unrecoverable(exc):
+                stamp_unrecoverable(exc)
+            # Last, and guarded: disclosure must never displace the real error.
             stamp_degradation(
                 exc,
-                **self._degradation(
+                **self._safe_degradation(
                     model, kwargs, schema_asked=schema_asked, temperature_asked=temperature_asked
                 ),
             )
-            if _is_unrecoverable(exc):
-                stamp_unrecoverable(exc)
             raise
-        degraded = self._degradation(
+        degraded = self._safe_degradation(
             model, kwargs, schema_asked=schema_asked, temperature_asked=temperature_asked
         )
         return result.model_copy(update={"attempts": attempts, **degraded})

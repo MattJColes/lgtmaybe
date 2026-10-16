@@ -815,10 +815,12 @@ def stamp_degradation(
     """Record on *exc* what the failed call lost on the way to the model.
 
     Best effort, exactly like :func:`stamp_attempts`: an exception type that
-    refuses attributes just reports nothing lost.
+    refuses an attribute just reports that loss as absent. Each is stamped on
+    its own, so refusing one never costs the other.
     """
     with suppress(Exception):
         setattr(exc, _SCHEMA_DROPPED_ATTR, schema_dropped)
+    with suppress(Exception):
         setattr(exc, _TEMPERATURE_DROPPED_ATTR, temperature_dropped)
 
 

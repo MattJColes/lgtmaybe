@@ -1780,6 +1780,38 @@ class TestPermanenceIsVisibleToTheEngine:
 
         assert is_unrecoverable(caught.value)
 
+    def test_a_failing_degradation_report_never_masks_the_real_error(self) -> None:
+        """Working out what a failed call lost is disclosure. If it raises, the
+        provider's own error must still propagate with its stamps, not be
+        replaced by the disclosure's."""
+
+        def bad_key(*args: Any, **kwargs: Any) -> Any:
+            raise litellm.AuthenticationError(
+                message="invalid api key", model="m", llm_provider="openai"
+            )
+
+        with (
+            patch("litellm.completion", side_effect=bad_key),
+            patch.object(LiteLLMProvider, "_degradation", side_effect=RuntimeError("map exploded")),
+            pytest.raises(litellm.AuthenticationError) as caught,
+        ):
+            LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openai/m")
+
+        assert attempts_of(caught.value) == 1
+        assert is_unrecoverable(caught.value)
+        assert not temperature_dropped_on(caught.value)
+
+    def test_a_failing_degradation_report_never_fails_a_good_call(self) -> None:
+        with (
+            patch("litellm.completion", return_value=_fake_response('{"findings": []}')),
+            patch.object(LiteLLMProvider, "_degradation", side_effect=RuntimeError("map exploded")),
+        ):
+            result = LiteLLMProvider().complete([{"role": "user", "content": "hi"}], "openai/m")
+
+        assert result.text == '{"findings": []}'
+        assert not result.schema_dropped
+        assert not result.temperature_dropped
+
     def test_a_capacity_rate_limit_is_not_stamped(self) -> None:
         """Transient: the engine's rescue wave should still get its go."""
 

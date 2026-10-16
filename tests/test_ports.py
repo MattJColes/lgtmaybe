@@ -12,6 +12,7 @@ from lgtmaybe.gitea import GiteaGateway
 from lgtmaybe.github.rest_gateway import RestGitHubGateway
 from lgtmaybe.gitlab import GitLabGateway
 from lgtmaybe.providers.litellm_provider import LiteLLMProvider
+from tests.fakes import RecoveringFakeProvider
 
 # Optional capabilities the ENGINE probes on the provider adapter, by name.
 # One protocol: the adapter-side halves of the engine's recovery steps, kept
@@ -82,6 +83,12 @@ class TestProviderCapabilities:
     def test_the_litellm_adapter_satisfies_every_capability(self, name: str) -> None:
         provider = LiteLLMProvider()
         assert isinstance(provider, getattr(ports, name)), name
+
+    def test_the_recovering_fake_satisfies_the_recovery_protocol(self) -> None:
+        """Fake-based engine tests take their recovery steps through this fake.
+        A member renamed or dropped here would silently switch those steps off
+        across the suite, so it is held to the protocol like the adapter."""
+        assert isinstance(RecoveringFakeProvider(), ports.SupportsRecovery)
 
     def test_the_recovery_protocol_names_the_primary_model(self) -> None:
         """The engine discloses a second answering model by comparing it with
