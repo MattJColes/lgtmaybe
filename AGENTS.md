@@ -1,956 +1,526 @@
 # AGENTS.md
 
-Guidance for agents working in **lgtmaybe** — a provider-agnostic PR reviewer.
-Read this before writing code. It encodes decisions that are **made, not options**.
+Guidance for agents working in **lgtmaybe**, a provider-agnostic PR reviewer.
+Read it before writing code. It records decisions that are **made, not
+options**: what you must not break, and where to look. For how a feature
+behaves, follow its pointer (`docs/explanation/`, `ARCHITECTURE.md`,
+`openspec/specs/`, or the module docstring).
 
-## What this is
+## What This Is
 
-A PR reviewer that posts inline review comments + a summary. The user picks the
-LLM backend with a `--provider` flag, drops a key into GitHub secrets (or wires
-OIDC/WIF for cloud providers), and gets a review. One core, four distribution
-variants:
+A PR reviewer that posts inline review comments and a summary. The user picks
+the LLM backend with `--provider`, puts a key in GitHub secrets (or wires
+OIDC/WIF for cloud) and gets a review. One core, four distribution variants.
 
-- **PyPI CLI** — `pip install lgtmaybe`
-- **Homebrew CLI** — `brew install MattJColes/tap/lgtmaybe` (after
-  `brew tap MattJColes/tap` + `brew trust MattJColes/tap` — current
-  Homebrew requires trusting third-party taps), from the
-  `MattJColes/homebrew-tap` repo (Homebrew strips `homebrew-`, so the tap is
-  `MattJColes/tap`; the repo is deliberately *not* named `homebrew-lgtmaybe`,
-  which would make the formula `MattJColes/lgtmaybe/lgtmaybe`).
-  The formula (`scripts/update-homebrew-formula.sh`)
-  creates a venv and `pip install`s lgtmaybe + deps from **PyPI wheels** — *not*
-  per-dependency source `resource` stanzas: litellm's tree includes Rust sdists
-  (tokenizers, hf-xet) that can't build in Homebrew's sandbox, and the wheel path
-  sidesteps that (and the 24h `brew update-python-resources` cooldown) entirely.
-  The one wrinkle: the wheels ship prebuilt extension dylibs with `@rpath` ids
-  that Homebrew can't rewrite, so the formula declares **`preserve_rpath`** to
-  keep them (without it `brew install` errors "Failed to fix install linkage" and
-  exits non-zero). It's a plain source formula — no bottle, works on any
-  arch/macOS. `.github/workflows/homebrew.yml` regenerates the formula on each
-  release (release-please **calls** it via `workflow_call`, since a `release:
-  published` event isn't delivered for a `GITHUB_TOKEN` release), **actually
-  `brew trust`s the tap and `brew install`s it as a gate** (so a broken formula is
-  never published — and the gate covers the trust step users must run, instead of
-  disabling it via `HOMEBREW_NO_REQUIRE_TAP_TRUST`, which upstream is removing),
-  then commits to the tap; a daily schedule + `force` dispatch are the safety nets
-- **Windows CLI** — `winget install MattJColes.lgtmaybe`. Each release builds a
-  one-file Python 3.13 executable, smoke-tests the Click command tree, attaches
-  it to the GitHub release, then submits `MattJColes.lgtmaybe` to winget. The
-  executable bundles ast-grep but not the optional cloud-auth SDKs; use pip for
-  keyless Bedrock, Vertex, or Azure.
-- **GitHub Action** — composite action (`action.yml`) that does keyless OIDC/WIF
-  auth, then runs a GHCR image via the `action` entrypoint
+**The wedge:** first-class **Bedrock, Vertex and Azure with keyless OIDC/WIF**.
+Seven hosted providers plus local ollama, one flag, no keys in secrets for
+cloud. We win on auth and simplicity. `openai-compatible` is the escape hatch
+for anything speaking the OpenAI `/v1` format (bring `--api-base`; key
+optional), so the provider list is never a cage.
 
-**The wedge:** first-class **Bedrock + Vertex + Azure with keyless OIDC/WIF**.
-Seven hosted providers (plus local ollama), one flag, no keys in secrets for
-cloud. We win on auth + simplicity. An `openai-compatible` provider is the escape
-hatch for anything else that speaks the OpenAI `/v1` wire format (DeepSeek's API,
-llama.cpp, LM Studio, vLLM) — you bring the `--api-base`, the key is optional —
-so the provider list is never a cage.
+**CI matrix:** Ubuntu and Windows on Python 3.11, the minimum supported version.
+Windows uses locale-default encoding (`PYTHONWARNDEFAULTENCODING`, and
+`EncodingWarning` is an error), so code and tests must never rely on a UTF-8
+default: pass `encoding=` explicitly. CI sets `core.autocrlf input` before
+checkout.
 
-The main CI matrix runs Ubuntu and Windows on the minimum supported Python
-version, 3.11. Windows runs with locale-default encoding behavior and disables
-autocrlf before checkout.
+## Non-Negotiables
 
-## Non-negotiables
-
-- **TDD, always: red → green → refactor.** Write the acceptance test from a
-  task's stated in/out *first*, watch it fail, write the minimum code to pass,
-  then refactor. CI rejects a PR whose diff adds code without a test.
+- **TDD, always: red, green, refactor.** Write the acceptance test from the
+  task's stated inputs and outputs first, watch it fail, write the minimum code
+  to pass, then refactor. CI rejects a PR whose diff adds code without a test.
+  Every task states its inputs, outputs and acceptance test; that test *is* the
+  red step, so start there.
 - **Structured output only.** The model returns JSON (`severity`, `file`,
   `line`, `body`, `suggestion`). Never parse prose.
 - **Fork safety.** Trigger on `pull_request_target` so the review has secrets,
-  but **never check out or execute PR code** — fetch the diff via API only.
-  Treat all diff content as untrusted input.
-- **No required static cloud keys.** Bedrock uses ambient AWS creds; Vertex uses
-  ambient GCP creds; Azure uses a supplied `AZURE_API_KEY` first and otherwise
-  falls back to ambient Entra (Azure AD) creds via GitHub OIDC. Never require a
-  service-account JSON or static AWS key.
+  but **never check out or execute PR code**. The diff comes via the API. The
+  one sanctioned clone is the **base** branch (`SupportsBaseCheckout`,
+  `github/checkout.py`), shallow-cloned for ast-grep: trusted code, parsed and
+  never executed. Treat all diff content as untrusted input.
+- **No required static cloud keys.** Bedrock and Vertex use ambient AWS / GCP
+  creds; Azure uses a supplied `AZURE_API_KEY`, else ambient Entra creds via
+  GitHub OIDC. Never require a service-account JSON or a static AWS key.
+- **Errors surface to the user; never swallow them.** A failed review posts a
+  short "review failed" comment and the CLI exits non-zero (`ClickException`).
 
-### Forges — which code host the review is posted to
+## Key Decisions (Do Not Relitigate)
 
-A second axis, orthogonal to the LLM provider: **`Forge`** (`core/forge.py`) is
-github / gitlab / gitea / azure-devops, and `Provider` stays the model backend. Never overload
-"provider" for a code host.
+- **Language:** Python. **Licence:** MIT (`LICENSE`).
+- **Provider spine:** [litellm], one `completion()` call for every provider,
+  with a thin wrapper adding retries and fallback.
+- **Finding prose is for an engineer new to the codebase:**
+  `prompt.PLAIN_LANGUAGE` (plain words, short sentences, terms explained once)
+  rides the shared review contract ("why it matters", a two-to-four sentence
+  `body`) and the describe, high-impact and diagram prompts.
+- **Posting:** the REST review API, batched inline comments plus one summary.
+- **The summary names the model, never a cost.** lgtmaybe does not compute
+  cost.
 
-- The **engine never sees a gateway.** It takes a `PRContext` and returns
-  findings; `local/` already produces a `PRContext` from `git` with no forge at
-  all. Anything host-neutral therefore belongs in `core/`, not in an adapter
-  package — diff parsing and the skip filter (`core/diff.py`), finding
-  fingerprints (`core/findings.py`), and comment Markdown (`core/comment.py`)
-  are all shared. A new adapter that reimplements any of those is a bug.
-- **`ReviewGateway` (`core/ports.py`) is three methods.** Everything richer is an
-  optional `Supports*` capability protocol the CLI probes for and skips when
-  absent, so an adapter ships useful before it ships complete. Declare only what
-  the host can actually serve — claiming a capability that cannot work is worse
-  than not claiming it.
-- A URL is resolved by `core/forge.parse_pr_url` into a `PRLocator`
-  (forge + host + repo + number); `cli._GATEWAY_BUILDERS` maps forge to adapter.
-  Host is carried because self-hosted GitLab/Gitea is the norm.
-- **GitHub** is the complete adapter. **Gitea** (`gitea/gateway.py`) mirrors it
-  minus incremental review and thread resolution (its API cannot serve either);
-  its summary lives in an editable issue comment because a submitted Gitea review
-  is immutable, and it de-dupes findings by reading the hidden ids already posted.
-  **GitLab** (`gitlab/gateway.py`) is the one whose model really differs: no
-  batched review object, so each finding is its own *discussion* positioned by
-  old/new path + line and the MR's three diff refs; the summary is an upserted
-  note; thread resolution works over plain REST (no GraphQL), gated on the
-  caller's validated allowlist and scoped to the increment's files. GitLab
-  exposes no "lines moved" signal, so `_is_outdated` derives one from the
-  straight compare since the note's positioned head. Incremental review uses
-  the repository compare API reassembled into a unified diff; with no "ahead"
-  status, `_unusable_increment` requires a single-parent commit chain from head
-  back to the watermark (else full review). The watermark is read only from a
-  note the token's own user wrote, and an unmarked post keeps the old one. 👎
-  feedback reads `thumbsdown` award emoji from Developer+ members.
-  **Azure DevOps** (`azure_devops/gateway.py`, Services only, api-version 7.1)
-  serves no unified diff, so the adapter reads the latest iteration's changes
-  against the merge base, fetches both sides via the Items API (unreviewable
-  files never fetched, >1 MB sides shown as binary, >300 files raise
-  `DiffUnavailable`, as does a missing merge base; 429/5xx/timeouts retry, then
-  only that file degrades to binary and is named in the summary; 401/403 fail
-  loudly), and renders the diff with host-neutral `core/diffbuild.py` so the
-  shared parser reads it unchanged. Each finding is an active thread positioned
-  by `threadContext`; summary/describe/diagram are closed general threads edited
-  in place. Identity is `connectionData` `authenticatedUser.id`: de-dupe trusts
-  only live, non-`fixed` threads whose root comment that identity wrote, and
-  trusts none when it is unknown; the upsert edits only our own marked threads,
-  and when the identity is unknown tries every marked thread and lets the
-  host's author check (403) decide. `PRLocator.repo` is `org/project/repo` (decoded). Token:
-  `AZURE_DEVOPS_TOKEN` (PAT, basic) else `SYSTEM_ACCESSTOKEN` (bearer)
-  (`forge.token_env_vars`). Resolve-on-fix sets our own open finding threads
-  to `fixed` (then replies) when the finding is gone and the line changed. ADO
-  has no outdated flag, so each finding thread is posted with a
-  `pullRequestThreadContext` naming its iteration (retried without it if
-  refused with 400), and `_is_outdated` diffs the file from that iteration's head to
-  ours (`trackingCriteria`'s original position wins once ADO re-tracks it). It
-  is gated on `mark_reviewed(head)`, so a partial run or failure notice
-  resolves nothing. Incremental, labels, checks and feedback are unbuilt and
-  unclaimed.
-- **Entrypoints:** GitHub and Gitea Actions share `action` (Gitea reimplements
-  the same env contract; only `GITHUB_SERVER_URL` differs, and
-  `cli._change_url` reads it). GitLab CI has neither an event payload nor
-  `INPUT_*`, so it gets its own `gitlab-ci` command reading `CI_*`; with no
-  `synchronize` action, it resolves unset `incremental` to on
-  (`cli.resolve_ci_incremental`; `--no-incremental` / `LGTMAYBE_INCREMENTAL`
-  override). Azure Pipelines likewise gets `azure-pipelines`, reading
-  `SYSTEM_*`/`BUILD_*` (`cli.pr_url_from_pipelines_env`).
+## Auth Model (Chain of Responsibility)
 
-## Key decisions (do not relitigate)
+| Provider | Auth |
+|---|---|
+| openai / openrouter / anthropic | API key from `secrets.*` / env / `--api-key` |
+| zai (GLM / Zhipu AI) | API key (`ZAI_API_KEY` / `--api-key`); litellm `zai/` route, which lacks `response_format`, so the schema goes as a forced tool call (`_honour_route_schema_support`). Optional `--api-base` / `ZAI_API_BASE` |
+| bedrock | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
+| vertex | ambient GCP creds (WIF, or local ADC) |
+| azure | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); `AZURE_API_KEY` / `--api-key` when supplied, else ambient Entra creds (OIDC via `azure/login`, or local `az login` / managed identity) |
+| ollama | none, just an `api_base`; fully local, zero cost |
+| openai-compatible | requires the endpoint (`--api-base` / `OPENAI_COMPATIBLE_API_BASE`); key **optional** (`--api-key` / `OPENAI_COMPATIBLE_API_KEY`, else a placeholder for keyless local servers). litellm `openai/` route to a custom base |
 
-- **Language:** Python.
-- **Provider spine:** [litellm] — normalises openai, openrouter, anthropic,
-  bedrock, vertex, azure, ollama to one `completion()` call. A thin wrapper on
-  top adds retries / fallback.
-- **License:** MIT (already in `LICENSE`).
-- **Finding prose is written for an engineer new to the codebase:**
-  `prompt.PLAIN_LANGUAGE` (plain words, short sentences, a technical term
-  explained the first time) rides the shared review contract — with "why it
-  matters" and a two-to-four sentence `body` — and the describe, high-impact
-  and diagram system prompts, so the overview reads like the findings.
-- **Posting:** REST review API — batched inline comments + one summary. Every
-  posted finding's title line carries its provenance inside the severity
-  brackets — `**[HIGH · security · 80%] Title**`, the originating lens and the
-  reflection auditor's confidence as a percentage of its 0-10 score
-  (`rest_gateway._finding_badge`, each half
-  omitted when absent; inline, demoted, and broad render it identically). It is
-  visible prose only — never part of the hidden ids below.
-  Same-native-commit updates use a hidden marker; a completed review at another
-  commit creates a fresh native summary, preserving older history. The latest
-  matching summary carries the last-reviewed-SHA watermark driving incremental review; the summary also
-  carries a hidden `<!-- lgtmaybe-lenses:… -->` list of the lenses that
-  completed every call, so a posting gate can require the set it expects
-  instead of inferring completeness from the absence of a failure notice
-  (`engine._lenses_marker`; a failed lens is left out). Each inline comment also carries
-  **two** hidden per-finding ids: `finding_fingerprint(path, title)` — which keys
-  the user-facing channels (`ignore_fingerprints`, 👎 feedback) — and
-  `finding_identity(path, category, anchor)`, which carries **no model prose**.
-  Both re-run dedupe and resolve-on-fix match on **either**: the fingerprint
-  hashes the title, so it changes whenever the model rewords the same finding,
-  and keyed on it alone a re-run re-posts findings it already made. On a
-  re-run, conversations whose finding is gone **and** whose thread GitHub marks
-  outdated are replied to and resolved (`ReviewConfig.resolve_fixed`, default on).
-  Resolving a thread is the one op the REST review API can't do, so it uses the
-  GraphQL API (`resolveReviewThread` / `addPullRequestReviewThreadReply`) —
-  best-effort, never fails the review.
+Resolver order: chosen provider → its API key when supported and supplied →
+else ambient cloud creds if that is its native mode → ollama needs neither →
+openai-compatible needs an `api_base` (key optional) → else **fail with a clear
+"how to auth this provider" message**. Detail: `docs/explanation/auth-model.md`.
 
-### Auth model — resolved by provider (chain of responsibility)
+## Architecture: Ports and Adapters
 
-| Provider               | Auth                                                              |
-|------------------------|------------------------------------------------------------------|
-| openai / openrouter / anthropic | API key from `secrets.*` / env / `--api-key`            |
-| zai (GLM / Zhipu AI)   | API key (`ZAI_API_KEY` / `--api-key`); litellm-native `zai/` route (its param list omits `response_format`, so the schema goes as a forced tool call — `_honour_route_schema_support` reads litellm's per-route list before the first call). Optional `--api-base` / `ZAI_API_BASE` override for the China / coding-plan endpoint |
-| bedrock                | ambient AWS creds (GitHub OIDC role, or local `~/.aws`); IAM `bedrock:InvokeModel*` only |
-| vertex                 | ambient GCP creds (WIF, or local ADC)                            |
-| azure                  | needs the resource endpoint (`--api-base` / `AZURE_API_BASE`); `AZURE_API_KEY` / `--api-key` when supplied → else ambient Entra creds (GitHub OIDC federation via `azure/login`, or local `az login` / managed identity) |
-| ollama                 | none — just an `api_base` (localhost, host.docker.internal, tailscale host); fully local, zero cost |
-| openai-compatible      | requires the endpoint (`--api-base` / `OPENAI_COMPATIBLE_API_BASE`); key **optional** — `--api-key` / `OPENAI_COMPATIBLE_API_KEY`, else a placeholder for keyless local servers (llama.cpp / LM Studio / vLLM). litellm `openai/` route to a custom base |
+Detail: `docs/explanation/architecture.md` and `ARCHITECTURE.md`.
 
-Resolver order: chosen provider → use its API key when supported and supplied →
-else try ambient cloud creds if that's its native mode → ollama needs neither →
-openai-compatible needs an `api_base` (key optional, placeholder when absent) →
-else **fail with a clear
-"how to auth this provider" message**.
+- **`core/ports.py` is frozen.** Everything downstream codes against it.
+  litellm and the forge gateways are adapters; `cli.build_review_context` wires
+  the real ones; `python -m lgtmaybe` (the Docker ENTRYPOINT) is the Click CLI.
+  Structured logging serves CI debugging.
+- **The engine is a pipeline** of composable stages: `fetch → compress → prompt
+  → parse → re-anchor → merge/dedupe → reflect → arbitrate → filter → post`,
+  fanning out one concurrent model call per lens.
+- **Provider choice:** strategy plus factory (`--provider` picks the strategy, a
+  factory builds the `ProviderClient`). **Credentials:** chain of
+  responsibility. **Dependency injection:** ports go into the engine, so fakes
+  and dry-run drop in.
+- **Deliberately skipped** (do not add without a written reason): repository
+  pattern, event bus, plugin framework.
+- **Line anchoring (do not trust model arithmetic):** every finding carries a
+  verbatim `anchor`; `engine._snap_findings` re-anchors `line` to the matching
+  changed line. An unmatched anchor marks it `anchored=False` and the adapter
+  **demotes it to the review body** (`core/comment.render_demoted`): a
+  wrong-line comment breaks trust faster than an imprecise one. No anchor:
+  trust the model's line.
 
-## Architecture — ports & adapters (hexagonal)
+## Forges (Code Hosts)
 
-This is what lets tracks build in parallel against frozen contracts.
+`Forge` (`core/forge.py`: github / gitlab / gitea / azure-devops) is a second
+axis, orthogonal to the LLM `Provider`. **Never overload "provider" for a code
+host.** Host differences: `docs/explanation/architecture.md` and
+`docs/how-to/review-on-*.md`.
 
-- `core/ports.py` — the ports (interfaces). **Frozen in the foundation step.**
-- litellm / github classes — the adapters.
-- **Engine is a pipeline:** `fetch → compress → prompt → parse → re-anchor →
-  merge/dedupe → reflect → arbitrate → filter → post`, as composable stages. The prompt/parse
-  stage **fans out per `ReviewCategory`** — one concurrent model call per lens —
-  then merges + de-dupes the findings, and a **self-reflection pass**
-  (`engine/reflect.py`) drops the model's own low-confidence findings before posting.
-- **Line anchoring (don't trust model arithmetic):** LLMs miscount diff line
-  numbers, so every finding carries a verbatim `anchor` (the flagged line, no
-  +/- marker). After parse, `engine._snap_findings` re-anchors `line` to the real
-  changed line whose content matches the anchor (`core/diffparse.changed_line_index`;
-  exact → whitespace-normalised → unique-substring match, nearest-to-model-line
-  tiebreak). When an anchor matches **nothing**, the line is a guess: the finding
-  is marked `anchored=False` and the GitHub adapter **demotes it to the review body**
-  (`rest_gateway._render_demoted`) rather than post an inline comment on a wrong
-  line — a wrong-line comment breaks trust faster than a finding without a precise
-  line. No anchor → trust the model's line (back-compat). The on-demand eval
-  harness reports an `anchored` rate per fixture so the match rate is measurable.
-- **Provider choice:** strategy + factory. The `--provider` flag selects a
-  strategy; a small factory builds the `ProviderClient` (litellm keeps it tiny).
-- **Credential resolution:** chain of responsibility (see auth table).
-- **Dependency injection:** inject ports into the engine — this is what makes
-  fakes + dry-run drop in.
+- **The engine never sees a gateway.** It takes a `PRContext` and returns
+  findings (`local/` builds one from `git` with no forge). Host-neutral code
+  belongs in `core/`, never an adapter: diff parsing and the skip filter
+  (`core/diff.py`), fingerprints (`core/findings.py`), comment Markdown
+  (`core/comment.py`), diff rendering (`core/diffbuild.py`). **An adapter that
+  reimplements any of those is a bug.**
+- **`ReviewGateway` (`core/ports.py`) is three methods** (`get_pr_context`,
+  `post_review`, `post_issue_comment`). Anything richer is an
+  optional `Supports*` protocol the CLI probes for and skips when absent.
+  Declare only what the host can serve: a capability that cannot work is worse
+  than none.
+- `core/forge.parse_pr_url` gives a `PRLocator` (forge, host, repo, number);
+  `cli._GATEWAY_BUILDERS` maps forge to adapter. Host is carried because
+  self-hosted GitLab/Gitea is the norm.
+- **GitHub** is the complete adapter. **Gitea** (`gitea/gateway.py`) lacks
+  incremental review and thread resolution (its API cannot serve them); its
+  summary is an issue comment because a submitted Gitea review is immutable.
+- **GitLab** (`gitlab/gateway.py`): one discussion per finding, an upserted
+  summary note. Thread resolution is plain REST, gated on the validated
+  allowlist and scoped to the increment. Incremental needs a single-parent chain
+  back to the watermark, else full review. Read the watermark only from the
+  token user's own note; an unmarked post keeps the old one. 👎 feedback reads
+  `thumbsdown` award emoji only from Developer+ members (others cannot steer
+  it).
+- **Azure DevOps** (`azure_devops/gateway.py`, Services, api-version 7.1):
+  builds the diff from both sides with `core/diffbuild.py`. 401/403 fail loudly;
+  a file that keeps failing on 429/5xx degrades to binary and is named. De-dupe
+  trusts only live, non-`fixed` threads whose root comment our identity
+  (`authenticatedUser.id`) wrote, and **none when the identity is unknown**.
+  Upserts edit only our own marked threads (identity unknown: try each and let
+  the host's 403 decide). Resolve-on-fix is gated on `mark_reviewed(head)`, so a
+  partial run or failure notice resolves nothing. Incremental, labels, checks
+  and feedback are unbuilt and **unclaimed**. Token: `AZURE_DEVOPS_TOKEN` else
+  `SYSTEM_ACCESSTOKEN`.
+- **Entrypoints:** GitHub and Gitea Actions share `action` (only
+  `GITHUB_SERVER_URL` differs, read by `cli._change_url`). GitLab CI uses
+  `gitlab-ci` (reads `CI_*`; unset `incremental` resolves to on,
+  `cli.resolve_ci_incremental`). Azure Pipelines uses `azure-pipelines`
+  (`SYSTEM_*`/`BUILD_*`).
 
-**Deliberately skipped** (don't add without a written reason): repository
-pattern, event bus, plugin framework.
+## Posting and Re-runs
 
-## Parallel build structure
+- **Provenance badge** (`core/comment.finding_badge`): `**[HIGH · security ·
+  80%] Title**`. Visible prose only, **never part of the hidden ids**.
+- **Hidden summary markers:** watermark (`<!-- lgtmaybe-reviewed:<sha> -->`),
+  risk level, and `<!-- lgtmaybe-lenses:… -->` (`engine._lenses_marker`; a
+  failed lens is left out) so a gate can require the lens set it expects. A
+  same-commit update edits in place; a review at a new commit posts a fresh
+  summary, preserving history.
+- **Incremental posting (GitHub):** new findings ride the new commit's one
+  native review, de-duped against our own posted ids; a 422 falls back to one comment
+  each. A same-commit re-run posts individual review comments, because the
+  review-update endpoint cannot add inline comments.
+- **Two hidden ids per comment:** `finding_fingerprint(path, title)` keys the
+  user-facing channels (`ignore_fingerprints`, 👎 feedback);
+  `finding_identity(finding)` hashes path, category, side and anchor, so it
+  holds no model prose (`core/findings.py`). Dedupe and
+  resolve-on-fix **match on either**. Never key on the fingerprint alone: a
+  reworded title would be re-posted.
+- **Resolve-on-fix** (`resolve_fixed`, default on): only when the finding is
+  gone **and** the thread is outdated. GitHub uses GraphQL, best-effort; it
+  never fails the review.
+- **Clean review:** `👍 LGTM!` as a comment, never approval state, naming the
+  model. A bad `summary_template` falls back to the built-in line.
 
-1. **Foundation (sequential, first):** freeze the contracts in `core/ports.py`,
-   plus structured logging for CI debugging. Everything downstream codes against
-   these frozen ports.
-2. **Parallel tracks**, each against frozen contracts:
-   - **Track A** — provider/litellm wrapper: retries, fallback.
-   - **Track B** — github adapter + diff handling; **skip generated/binary files**
-     (lockfiles, minified, vendored).
-   - **Track C** — hardening: **prompt-injection defense** (PR text trying to
-     steer the reviewer — `engine/injection.py` wraps the diff as untrusted data
-     **and neutralises forged `DIFF_START`/`DIFF_END` delimiters** so an attacker
-     diff can't break out of the data block; the stated-intent block gets the
-     same treatment via `wrap_intent`, with both marker families neutralised in
-     both blocks), **secret redaction in diffs before
-     they leave for the LLM** (`engine/redact.py` covers AWS/OpenAI/GitHub
-     (classic + fine-grained)/Slack/Google/Stripe keys, PEM private-key blocks,
-     and quoted password / `Authorization` / connection-string credentials),
-     fork-PR exposure (already handled by `pull_request_target` + no checkout).
-   - **CLI track** — PyPI packaging; a local `lgtmaybe review` of your `git` diff
-     (prints findings, no GitHub) for local dev. Diffs the branch against the
-     remote primary branch — base resolution `origin/HEAD` → `origin/main` →
-     `origin/master` → `main` → `master` (`--base` overrides); `--working`
-     reviews the whole worktree (branch commits + uncommitted edits) against the
-     merge-base with that same base; `--uncommitted` reviews only the
-     working-tree edits vs HEAD (mutually exclusive with `--working`, no stated
-     intent); commit subjects vs the base feed the intent lens in branch and
-     working mode. Output `--format human` (default) / `json` (`--json`) / `agent`
-     (correction instructions an AI coding agent can read and apply). Non-secret
-     defaults (provider, model, severity floor, caps) persist in a user-level
-     config — `lgtmaybe config init|show|get|set|path` (`config/store.py`,
-     `~/.config/lgtmaybe/config.yml`); **API keys are never persisted** — they
-     stay in the environment.
-3. **Integration (sequential, last) — DONE:** the tracks are wired together.
-   `cli.build_review_context` swaps the fakes for the real `LiteLLMProvider` +
-   `RestGitHubGateway`; `python -m lgtmaybe` (the Docker ENTRYPOINT) is the live
-   Click CLI. Delivered in this step:
-   - **`review` command** — full PR review, posts inline comments + summary.
-   - **`comment` command** — handles the `issue_comment` event and routes slash
-     commands to the same engine/provider: `/review` + `/improve` post a review,
-     `/ask <q>` replies in-thread (`post_issue_comment`, an adapter-only method
-     beyond the frozen port), and `/describe` posts a **standalone structured
-     description** (`engine/describe.py`: title, change type, summary, per-file
-     walkthrough table, intent check when the PR states one; structured output
-     with a raw-text fallback) via `post_describe_comment` — an idempotent upsert
-     that edits our previous description in place.
-   - **The change overview (`/diagram`, `auto_diagram`)** — ONE comment via
-     `post_diagram_comment` (its own idempotent upsert + disjoint marker family),
-     composed by `engine/overview.py` from **three concurrent structured calls**
-     on one `ThreadPoolExecutor`, in reading order:
-     1. the **description** (the same `engine/describe.py` call, `describe_result`
-        for the typed object; `ReviewConfig.auto_describe`, default **on** — it
-        rides this comment, so it refreshes on every push);
-     2. **High Impact Areas** (`engine/high_impact.py`, `ReviewConfig.high_impact`,
-        default **on**) — a bold `### **High Impact Areas**` section answering
-        "what could this break beyond itself" over ten areas (infrastructure,
-        security, availability/outage, data_migration, backup_and_recovery,
-        compatibility, observability, dependencies, cost, compliance). Two
-        sources: the model, plus **deterministic path signals** (`path_signals`,
-        per-area regexes) that ground the call as untrusted hints
-        (`injection.wrap_path_signals`, its own neutralised `SIGNALS` family —
-        filenames are attacker-chosen on a fork PR) **and floor the output**: an
-        area with signals the model ignored is still listed "(not assessed by the
-        model)", and a failed/unparseable call renders the floor alone. An empty
-        result names what was checked rather than vanishing. Model-chosen paths
-        not in `changed_files` are dropped;
-     3. the **diagrams** (`engine/diagram.py`: from one structured call returning
-        typed nodes/edges/steps, a Mermaid **flowchart** of what the PR touches
-        *and* a Mermaid **sequence diagram** of the run-time flow it alters —
-        structure answers "what does this touch", sequence "what happens, in what
-        order"; the sequence view is omitted when the model returns no steps.
-        Both render natively on GitHub, each with a text rendering that is the
-        terminal view and the fallback; model-authored Mermaid never reaches a
-        fence, and sequence labels are escaped with Mermaid entity codes).
-     Between the description and High Impact Areas sits a deterministic **Risk
-     of Change** section (`engine/risk.py`, below) — no call, so it adds nothing
-     to the fan-out.
-     The description heads the comment (the diagram's own title is suppressed);
-     with `auto_describe` off the diagram header returns. Sections 1 and 2 are
-     **best-effort** — a failure renders a visible "unavailable" line, never a
-     silent gap — while the diagram call keeps propagating, because the automatic
-     overview is a **required completion step** (a failure must not stamp the head
-     complete). With both sections and risk off, the body is byte-identical to
-     `build_diagram` and costs one call. `auto_diagram` (Action input, default
-     **on**) is the one switch for the whole comment; `should_auto_diagram` gates
-     it to opened/reopened/synchronize, and `existing_overview_note` then stands it
-     down when the PR already diagrams the change — a Mermaid fence in the
-     description or a comment not carrying this setup's own diagram marker
-     (`core/comment.find_existing_overview`, fed by the gateways'
-     `SupportsConversation`). The review summary names the skip and `/diagram`;
-     slash commands never consult it. The local `lgtmaybe diagram` command prints
-     the same body (no GitHub) — a terminal can't render Mermaid, which is what the
-     text rendering is for. **No D2:** GitHub doesn't render it in Markdown.
-     The shared one-call scaffold is `describe.structured_call` (typed result) /
-     `structured_comment` (rendered Markdown); `describe.markdown_text` escapes
-     every section's model prose.
-   - **Guards (in the engine):** generated/binary files skipped via
-     `is_reviewable`; the user's `include_paths` allowlist / `exclude_paths`
-     denylist globs applied right after it (`engine.passes_path_filters`;
-     exclude wins, `**/`-prefixed patterns also match at the repo root);
-     **file cap** reviews the top-N and posts a "reviewed top N of M" notice.
-   - **Context expansion:** `get_pr_context` also fetches the head text of
-     reviewable files via the API (read-only, never a checkout) into
-     `PRContext.file_contents`; the engine (`compress.expand_hunks`) pads each
-     hunk with budget-scaled surrounding lines, capped by
-     `ReviewConfig.context_lines` (default 20, `0` disables), redacted like the
-     diff. The pad is **asymmetric** (`compress.trailing_context_lines`): the
-     full budget goes before each hunk, a quarter of it (floored at one line)
-     after — the enclosing signature/setup explains a change better than what
-     follows. Inline positions stay bound to the **real** diff, so a finding on a
-     context-only line maps to nothing and is dropped — never mis-posted.
-   - **Recursive walk (RLM):** when a single file's diff exceeds
-     `max_input_tokens`, the engine **walks it hunk-by-hunk** instead of sending it
-     whole (where the model's context drops the tail) — `compress.split_patch_into_hunks`
-     decomposes the over-budget file into per-hunk mini-diffs (each carrying its
-     file header, so finding line/side still bind to the real diff) that
-     `batch_files(recursive=True)` then batches normally. Nothing is dropped and
-     each call's context stays small — better recall on big files, especially for
-     smaller models. Files within budget are reviewed whole (context preserved).
-     `ReviewConfig.recursive` (default **on**; CLI `--recursive/--no-recursive`,
-     Action input `recursive`). A defaulted `max_input_tokens` is first
-     **fitted to the model's window** (`engine._fit_input_budget`, off the
-     adapter's feature-detected `input_budget()`: litellm's model map, or
-     ollama's `num_ctx`, less the output ceiling) — a configured value is left
-     alone. Token counts are one `cl100k_base` encoder for every model: litellm's
-     tokenizer registry resolves to the same encoding for every provider, so a
-     per-model lookup bought nothing; the on-demand A/B benchmark `python -m evals.ab
-     --sweep recursive=false,true`
-     measures recall + token cost of the walk vs sending whole against a live model.
-   - **Incremental review (commit-scoped):** on a re-run, `run_review` reads a
-     hidden watermark (`<!-- lgtmaybe-reviewed:<head_sha> -->`, stamped into the
-     summary comment by `mark_reviewed` on the success path only — a failure
-     never moves it) and reviews only the compare-API diff of the commits since
-     (`rest_gateway.compare_diff`, read-only). Falls back to a full review on
-     no-watermark / force-push (compare not "ahead") / same head / API failure.
-     New findings ride the new commit's one native review (deduped against
-     our own already-posted ids; a 422 falls back to one comment each); a
-     same-commit re-run posts them as individual review comments, because the
-     review-update endpoint can't add inline comments; resolve-on-fix is
-     scoped to the increment's files (`set_incremental_scope`) so an
-     un-re-reviewed finding is never spuriously resolved; LEFT-side findings
-     are dropped (their line numbers are relative to the last-reviewed head,
-     not the PR base). `ReviewConfig.incremental` (default None = auto: on for
-     the Action's `synchronize` event and every `gitlab-ci` pipeline, full
-     elsewhere; Action input
-     `incremental`); `/review full` forces a full re-review.
-   - **Static-analysis fusion (default off):** with `static_analysis.enabled`,
-     installed deterministic tools (the eight in `StaticAnalysisTool` — ruff,
-     bandit, mypy, semgrep-with-local-rules, gitleaks, zizmor, ast-grep,
-     osv-scanner — `pip install lgtmaybe[static-analysis]`) run over the already-fetched
-     changed-file texts in a temp dir (`engine/static_analysis.py`; sandboxed
-     subprocess: scrubbed env, no network — semgrep only ever runs with local
-     `semgrep_rules`, never `--config auto` — hard timeout, never a checkout).
-     Findings are mapped onto the shared Severity scale, floored by
-     `static_analysis.min_severity`, redacted, and wrapped as an untrusted
-     HINTS block (`injection.wrap_hints`, its own neutralised marker family)
-     prepended to each batch's lens calls — "confirm, contextualise, or
-     discard"; raw tool findings are never posted. A missing tool is skipped
-     silently. CLI `--static-analysis/--no-static-analysis`, Action input
-     `static_analysis`.
-   - **Two-stage triage (default off):** with `triage_model` set, that cheap
-     model runs first (`engine/triage.py`) to skip plainly-non-substantive
-     files and rank the rest by risk; the strong `model` reviews only the
-     survivors, riskiest first. A deterministic security floor
-     (`triage.always_escalate`: security paths/tokens, static-analysis hits,
-     large hunks) always escalates past triage, any triage failure reviews
-     everything, skips are named in the summary, and `/review full` bypasses
-     both triage and incremental scoping. All model slots (`triage_model`,
-     `model`, `reflect_model`) share one provider/credentials. CLI
-     `--triage-model`, Action input `triage_model`.
-   - **Truncation ladder (escalation is LAST):** a truncated lens is first given
-     the remedy its token counts named, on the model the user chose (a prompt the
-     model's context window refuses — litellm's `ContextWindowExceededError`,
-     surfaced as `ProviderInputTooLarge` — takes the same split, with nothing to
-     salvage). **Two detectors, one ladder** (`engine._remedy_oversized`): the
-     adapter raises `ProviderTruncated` on a `length` finish reason or a response
-     that spent a ceiling we set, and the PARSER catches the rest — litellm
-     rewrites an unrecognised finish reason to `stop`, so a model that stops
-     mid-JSON short of the cap arrives looking like a clean success and only the
-     unterminated body gives it away. The second used to lose the lens outright,
-     which made an identical cut cost a whole lens on one model and merely a
-     slower review on another (measured: a gateway model at 43.2% completeness on
-     100k-token inputs). Do not re-split them — which detector fires is a fact
-     about what the route reports, not about the failure. The parse-path notice
-     names no `max_tokens` ceiling, because nothing measured one. The rungs are —
-     `_review_split` (smaller pieces) when the answer outgrew the ceiling,
-     `_retry_lower_effort` when the *thinking* did — one graded step down, and
-     if that cut is reasoning-bound too, one more call with reasoning switched
-     off (`LiteLLMProvider.disable_reasoning`, feature-detected like the
-     step-down). Measured on GLM 5.3 through OpenRouter (three rounds on one
-     large PR): `low` and `minimal` both spent a 12,288 ceiling on thought in 10
-     retries of 11, so the model treats effort as a switch and the graded step
-     landed nowhere; the fallback model then cut identically at ten times the
-     price. Only if off fails too does
-     `engine._escalate_model` re-run the lens once on `fallback_model`. Switching
-     model says nothing about the failure — it re-sends the same request at the
-     same ceiling — so it is the last rung, spent by the whole batch and never by
-     each split piece. Lens calls carry `defer_truncation` so the adapter hands a
-     truncation back instead of falling back beneath the engine (every other
-     failure it still rescues itself, unchanged). `fallback_model` is now a
-     `ReviewConfig` field too — `--fallback-model` / the Action input still win.
-     Which model answered rides home on `ProviderResult.model`, which is what
-     makes both paths disclosable: `engine._note_answering_model` compares it
-     against the provider's own model and the summary names the lens and the
-     rescuer, and `--profile` prints a `models:` line whenever a run used more
-     than one. **Do not route on diff size instead**: truncation does not track
-     size (measured — a fifteen-line diff truncates at the same ceiling as a
-     large multi-file one, because the ceiling goes on reasoning), so a size
-     threshold spends the strong model on the diffs that were already fine.
-   - **Error surfacing:** any failure posts a short "review failed" comment and
-     the CLI exits non-zero (`ClickException`) — never fails silently.
-   - **Per-lens fan-out (preset-shaped):** the prompt is composed per lens
-     (`engine/prompt.py`) — each lens gets a **worked example** (with a real
-     hunk header, teaching the line-number arithmetic). `ReviewConfig.preset`
-     picks the lens set: **`fast` (default)** covers all ten everyday categories in
-     **five calls, one per concern** — dedicated security, dedicated
-     correctness (stated intent folds in, with per-finding `category`
-     attribution), merged code-health, merged artefacts (tests +
-     documentation), and dedicated architecture; the two merged lenses are
-     `prompt.FAST_GROUPS`. The same five run on **every** provider: worker count decides only whether they
-     overlap, never how many there are. **`full`** runs one call per category.
-     An explicit `categories` list overrides the grouping. Every (batch, lens) call runs through **one global
-     `ThreadPoolExecutor`** sized by `ReviewConfig.max_concurrency` (auto: 6
-     for every provider), then the findings are **merged and
-     de-duped** (`engine._dedupe`, keyed on path/line/side) before reflection.
-     A soft whole-review deadline (`max_review_seconds`, default 3600s, 0 = off)
-     skips still-queued calls once passed — partial results with a notice,
-     never a silent LGTM. A **termination signal** (SIGINT/SIGTERM from a
-     cancelled or timed-out CI job) sets that same state via
-     `engine.request_interrupt`, so an interrupted run posts what it has
-     instead of nothing; the handler is installed by the CLI entrypoint only
-     (`cli.graceful_interrupt` — never at library import), restores the
-     previous handler as it fires (a second signal still kills), and is a
-     no-op off the main thread. Every stage and call is timed
-     (`engine/profiling.py`); `--profile` / Action input `profile` prints the
-     breakdown.
-   - **Custom lenses (BYO):** beyond the built-in `ReviewCategory` set, users add
-     their own lenses via `ReviewConfig.extra_lenses` (a `CustomLens`: `id` +
-     `instructions`, optional `title` and a worked `example_diff`/`example_finding`)
-     — defined inline in `.lgtmaybe.yml` or in skill files loaded by the config
-     loader's `lens_paths` directive. The engine builds a uniform `_Lens` per
-     built-in category **and** per custom lens (`engine._build_lenses`,
-     `prompt.build_custom_lens_block`) and fans them all out identically through the same
-     merge/dedupe/reflect pipeline. Lens text enters the system prompt, so it is
-     **trusted config only** — never sourced from PR-author content (on
-     `pull_request_target` config comes from the base, not the PR head). Covered by
-     `tests/engine/test_prompt.py`, `tests/engine/test_engine.py`,
-     `tests/config/test_loader.py`, and `tests/test_models.py`.
-   - **Directory-scoped instructions + context (BYO, per path):**
-     `ReviewConfig.directory_rules` (a `DirectoryRule`: `paths` globs — empty =
-     everywhere — plus `instructions` and `context_files`) lets a monorepo say
-     "`payments/**` is strict, `tests/**` is lenient, read `ARCHITECTURE.md`
-     before `src/**`". `engine/directory.py` reuses `passes_path_filters` to
-     match a batch, `retrieve.resolve_needs` with a **local-filesystem** fetcher
-     to read the context files (inheriting redaction, the `max_input_tokens // 8`
-     budget, and `MAX_FETCH_FILES`), and renders one block. The block joins the
-     **same per-batch prefix string** as the hints + wrapped diff — not a fourth
-     message — so `build_shared_preamble` stays byte-identical, the existing
-     primer warms it once, and the adapter needs no change. Context comes from
-     the checked-out workspace (`Path.cwd()`), i.e. the **base** branch on
-     `pull_request_target` — never `github.get_file_contents`, which resolves at
-     the PR head. Instructions ride verbatim under a trusted-config lead-in;
-     context text is `injection.neutralise`d. YAML-only (list-of-objects, like
-     `finding_rules`): no CLI flag, no Action input. **No `BUGBOT.md` walk-up** —
-     it stays available later as a pure loader desugar needing no engine change.
-   - **Project profile (BYO, whole repo):** `ReviewConfig.project` (a
-     `ProjectProfile`: `stage` prototype / production / regulated, a short
-     `domain`, capped `notes`) calibrates the review to the workload. `stage`
-     moves **defaults only**, through `ReviewConfig._apply_project_stage`, so a
-     configured value always wins: `prototype` raises the `min_severity` default to
-     `medium`, and `regulated` adds a `medium` "regulated workload" risk reason
-     (`risk._assess`; a floor, never `high`, which would make every other high
-     reason `critical`). All three fields render one trusted paragraph
-     (`prompt.project_context`, notes neutralised) at the end of the shared
-     preamble, so it is cached once per run; unset is byte-identical. YAML-only.
-     **Deliberately not** read from AGENTS.md / CLAUDE.md / SOUL.md: those are
-     written for coding agents, mostly noise to a reviewer, and the big ones
-     overflow the `max_input_tokens // 8` context budget and get skipped
-     silently. Whether the stage guidance actually moves severities is
-     unmeasured until a paired eval fixture exists.
-   - **Intent lens:** "does the PR do what it says?" — `PRContext` carries the
-     stated intent (`title`, `description`, `commit_messages`): PR title/body +
-     commit names via the REST gateway, or `git log` commit names from the local
-     CLI (`local/_commit_subjects`), so it works without GitHub. The engine
-     redacts the intent text, wraps it via `injection.wrap_intent` (its own
-     neutralised `INTENT_START`/`INTENT_END` block), and sends it **only on the
-     intent call**; with no stated intent the lens is skipped (logged, no notice).
-   - **Not-shown manifest (every lens):** `engine.files_not_visible` derives — by
-     subtraction, so one call covers all seven ways a file goes missing — the PR's
-     changed files this batch's diff does not show. It rides the intent and spec
-     blocks with their own lens-specific lead-ins, **and** `injection.wrap_not_shown`
-     puts it on the **per-batch cacheable prefix that every lens reads** (its own
-     neutralised `HIDDEN_START`/`HIDDEN_END` family — paths are attacker-chosen on a
-     fork PR). Every other lens used to *infer* absence from the shared humility
-     rule's "code you rely on may live in files you CANNOT see", which asks the
-     model to reason about what it cannot observe; naming the files makes it a
-     stated fact instead. Nothing hidden ⇒ `None`, so the common case adds zero
-     prompt bytes and leaves the cached prefix byte-identical. The naming cap
-     (`_MAX_LISTED_NOT_VISIBLE`) is applied in **one** place for all three blocks.
-     File granularity only — it cannot say "this file is shown but that hunk is
-     not", which is the same-file shape the prompt's value rule covers instead.
-   - **Spec lens (default on, detection-gated):** "does the PR deliver the
-     specification it commits to?" — `engine/specs.py` detects a committed spec
-     (**OpenSpec** `openspec/changes|specs/*`, archives excluded; **Spec Kit**
-     `.specify/` or `specs/*/` with spec.md **and** plan.md; **Kiro**
-     `.kiro/specs/*`; plus `ReviewConfig.spec_paths` globs) with a pure
-     filesystem probe, then **ranks** the candidates against the PR (it edits the
-     spec / the branch names it / the stated intent names it; a lone spec dir
-     wins by default) and sends at most `MAX_SELECTED` = 2. Reports both
-     directions: the diff falling short of the spec, **and** behaviour the spec
-     never covers (the "what did the spec miss" half). `specs.ticked_tasks`
-     mines the diff for `- [ ]` → `- [x]` flips in a `tasks.md` — the author's
-     own delivery claims, extracted with no model call — and renders them as
-     claims to verify. Files the PR changes are read from `PRContext.file_contents`
-     (head text: a spec is usually committed in the PR that implements it), the
-     rest from the workspace (`LLMReviewEngine(workspace_root=...)`, default
-     `Path.cwd()` = the trusted base branch on `pull_request_target`), through
-     `retrieve.resolve_needs` for redaction + a `max_input_tokens // 8` budget.
-     Redacted once, wrapped per batch via `injection.wrap_spec` (its own
-     neutralised `SPEC_START`/`SPEC_END` family) carrying the batch's
-     `files_not_visible` list — a requirement delivered elsewhere is *not shown,
-     not undelivered*. Sent **only on the spec call**, which is its own lens in
-     both presets (a **sixth** `fast` call, paid only when a spec matched);
-     nothing detected or nothing matched skips it entirely (logged, zero prompt
-     bytes) — but a spec that **matched and did not fit** the budget is a lens
-     the round should have run, so the summary names it and the budget
-     (`engine._SpecContext.unfit`) rather than skipping silently. `reflect.py`'s gap-finding carve-out names spec mismatches, or the
-     auditor prunes them as cross-file absence claims. CLI `--spec/--no-spec`,
-     Action input `spec_review`; eval fixture `spec-delivery`.
-   - **Ponytail lens:** the "lazy senior dev" lens (`ReviewCategory.ponytail`),
-     following **Ponytail 5** — *the best code is the code you never wrote*.
-     Walks its ladder (needed at all → already in this codebase, only when shown
-     → stdlib/platform → installed dependency → one line) and flags code that
-     skipped a rung (YAGNI, re-implementing what exists, a new dependency for a
-     few lines, code that could be far shorter, premature configurability),
-     restrained at `info`/`medium`. It never collapses an existing port, layer
-     or interface boundary, and a `shortcut:` comment is a recorded decision
-     (that rule binds the advisory lenses only, never security/correctness).
-     We take Ponytail's leanness rules, **not** its v5 review scope (bugs,
-     security, load, tests are other lenses). Distinct from `complexity`
-     ("is this hard to follow?"): ponytail asks "should this exist at all?".
-     Asserted by `test_prompt.py::test_prompt_asks_for_ponytail_review` and the
-     ladder/boundary tests beside it; eval fixture `counter-advice`.
-   - **Architecture lens:** `ReviewCategory.architecture` asks "what will this
-     change make hard to change?" — only design decisions the diff introduces
-     that are **expensive to reverse** (Booch / Johnson). Checklist: coupling
-     across boundaries (calibrated by Khononov's strength × distance ×
-     volatility), dependency direction (Martin's Dependency Rule, Cockburn's
-     ports), broken substitutability (Liskov & Wing, Meyer; only against a
-     shown base contract), misplaced responsibility (Parnas, Fowler, Evans),
-     sharp edges (Bloch, Hyrum's Law), leaky ports. Every finding must OPEN
-     with a **change scenario** ("when X changes, Y and Z change with it"); a
-     principle's name is a label, never the justification. This is prompted
-     and audited by reflection, not mechanically enforced. Its evidence bar:
-     no new abstraction without a visible second variant/caller or an existing
-     boundary; layers inferred from the repo's own paths, never invented.
-     `failure_scenario` null (gap lens), ceiling `medium`
-     (`severity.CATEGORY_SEVERITY_CEILING`), and reflection protects it as a
-     gap type **only** when both ends of the relationship are shown. It is
-     its own focused call under `fast` (the fifth), not a code-health member
-     — that group already carries four concerns. Distinct from `complexity`
-     ("hard to follow?"), `ponytail` ("should this exist?") and `pack:design`
-     (finer Ousterhout-style taste). Eval fixture `architecture`; lineage in
-     `ATTRIBUTION.md`.
-   - **Opposing advice is arbitrated, never posted together:** lens prompts
-     never name each other (that would couple them, and custom/pack lenses
-     could never join), so cross-lens awareness lives in orchestration only.
-     Four layers: (1) a **never-cut rule** in the shared preamble — no lens,
-     custom and pack lenses included, recommends removing trust-boundary
-     validation, data-loss error handling, security controls or accessibility,
-     and a shorter replacement keeps every edge case (Ponytail 5's never-cut
-     list); (2) self-contained **evidence bars** per lens (ponytail never
-     collapses an existing boundary; architecture never proposes a new one
-     without a visible second variant; complexity extracts duplication only for
-     uniform callers; `pack:design`'s shallow-module spares port
-     implementations); (3) **reflection referees** — it sees every merged
-     finding, and keeps the higher-ranked of two opposite recommendations
-     (only when both lenses are on the ladder; otherwise it keeps both);
-     (4) `engine/conflicts.resolve_conflicts`, the **deterministic backstop**
-     after reflection (so it holds under `--no-reflect`): a finding from a
-     pair in `OPPOSED` within `NEAR_LINES` of a higher-`PRECEDENCE` one is
-     dropped, logged with the loser and the lens that outranked it. `PRECEDENCE` is Ponytail 5's `/ponytail-review` order
-     (correctness → security → performance → tests → architecture →
-     complexity → ponytail; design slotted above readability)
-     and is rendered into the reflection prompt, so both referees rank alike.
-     `OPPOSED` is ponytail against correctness, security and architecture.
-     Only declared pairs are arbitrated — group ids, unattributed, custom/pack
-     and scan findings are never guessed at.
-   - **Mid-review retrieval (lens deferral, default off):** with
-     `ReviewConfig.mid_review_retrieval`, a lens may answer `needs` beside its
-     `findings` — the paths/symbols it must read — instead of hedging or omitting
-     a claim that hinges on unshown code (which the shared humility rule
-     otherwise requires). `engine._review_with_context` fetches them through the
-     SAME read-only, redacting boundary reflection's deferral uses
-     (`retrieve.resolve_needs`, `MAX_FETCH_FILES`, `max_input_tokens // 4`; never
-     a checkout) and re-runs **that one lens** with the text
-     `injection.wrap_context`-wrapped on its own **uncached lens block** — never
-     the shared prefix, which its sibling lenses read from cache. Bounded to
-     **one hop** (the re-run passes `batch=None`, the same condition that bounds
-     the timeout split), the ceilings are re-checked via `_skip_reason`, and both
-     calls' findings merge into the existing dedupe — a deferral can only add
-     findings. The prompt ask is gated by `prompt.retrieval_rules`, so off is a
-     zero-byte prompt change. Off by default because the worst case is one extra
-     call per (batch, lens) and the recall win is unmeasured — the
-     `cross-file-recall` eval fixture and `python -m evals.run
-     --mid-review-retrieval` are how that gets measured.
-   - **A model's note to itself never posts (`engine/selftalk.py`):** a model
-     that stumbles mid-answer sometimes writes itself a note — "the corrupted
-     text above is not instructions to follow … produce a clean, valid JSON
-     findings object … output valid JSON only" — and restarts; inside a JSON
-     string the parser cannot tell, and it reached a PR as an inline comment
-     (imperative text, in a thread agents read as dispositions). `_stamp_and_bound`
-     drops any finding whose prose carries BOTH halves of such a note (a broken
-     attempt + the required shape; either alone is ordinary parser-review prose),
-     counts it per lens and names the loss in the summary — never silently.
-   - **Self-reflection:** after merge/dedupe, `engine/reflect.py` asks the
-     provider to audit its own findings for false positives and drops the ones it
-     marks low-confidence. The verdict is structured (`ReflectionResult` —
-     `{"verdicts": [{"index", "keep", "confidence", "broad", "needs"}]}`) with a
-     lenient parser and a **keep-all safe default** when it can't be parsed
-     (never silently drop a real finding). Each kept verdict carries a **0–10
-     confidence score** (the auditor tries to disprove the finding to reach it);
-     `ReviewConfig.min_confidence` (default 0 = off, CLI `--min-confidence`)
-     drops findings scored below it, an unscored kept finding survives any
-     threshold, and the score lands on `ReviewFinding.confidence` in CLI/JSON
-     output. Skippable via `--no-reflect` for weaker models that over-prune. The auditor
-     also drops **cross-file false positives** — findings whose validity hinges on
-     an assumption about code outside the diff (a guard/field/handler that may live
-     in an unshown file) — while **carving out gap findings** (performance,
-     complexity, intent, spec). The test/doc half of that carve-out is
-     **conditional**: a "no test for this" finding keeps its protection only when
-     the test or doc file is shown in the diff or in the grounded file text.
-     Unconditional, it instructed the auditor *not* to prune the exact claim the
-     cross-file rule forbids — a test living in an untouched file is not a missing
-     test — which is the seam a real false positive landed in. This mirrors the
-     shared review rule (below) that tells every lens the diff is only a **slice of
-     the codebase**, so it should hedge a cross-file absence-claim and lower its
-     severity rather than assert it — a rule that covers both a symbol's
-     **existence** and its **value**: you may not assume what an unshown constant,
-     default, config entry or collection *contains*, only that it exists (a
-     constant named for a policy may hold an empty set, hundreds of lines away in
-     the same file).
-   - **Determinism & timeouts:** `temperature` defaults to `0.0` for reproducible
-     reviews; `timeout` is `None` → a provider-aware default (ollama gets a long
-     one, cloud a short one). Both are `ReviewConfig` fields and CLI/Action inputs.
-   - **Prompt caching (split prefix):** every review call is shaped as a shared
-     cacheable prefix — a lens-independent
-     system preamble (`prompt.build_shared_preamble`), then the wrapped diff
-     (+hints) as the first user block — with the lens checklist + example as
-     the final uncached user block. On routes with an explicit cache breakpoint
-     (anthropic `cache_control`; bedrock, where litellm emits a Converse
-     `cachePoint` for Claude/Nova) the adapter merges the user blocks into
-     content blocks with breakpoints on the system prompt and the last prefix
-     block (cumulative 1,024-token minimum), so lenses 2..N read the whole
-     preamble-plus-diff from cache; a per-batch **warm-up primer** (gated at
-     ~2k diff tokens) runs one lens alone so a concurrent first wave doesn't
-     pay N cache writes. Reflection splits the same way, so deferral re-judges
-     read the audit's system+diff prefix. Feature-detected per model (litellm
-     capability map); every other provider gets the user blocks joined back
-     into one plain user message. Cache read/creation token counts land on
-     `ProviderResult` and are logged. There is one prompt shape and no opt-out.
-   - **Summary line:** names the **model** used (no cost — lgtmaybe does not
-     compute or report cost). `ReviewConfig.summary_template` (default None)
-     lets teams restyle it with `{count}`/`{provider}`/`{model}` placeholders;
-     a bad template falls back to the built-in line.
-   - **Finding rules (F5b):** `ReviewConfig.finding_rules` — ordered
-     declarative match (path glob / lens `category` / `title_contains` /
-     `min_severity`, ANDed) → action (`drop` / `set_severity`), applied in
-     `engine/rules.py` just before posting. Deliberately NOT an arbitrary
-     hook: no user code ever runs. Findings carry an engine-stamped
-     `category` (the originating lens id) that rules and labels key on.
-   - **Risk of change (default on, no model call):** `engine/risk.py` sizes the
-     whole PR as `low`/`medium`/`high`/`critical` with ranked reasons — blast
-     radius (one sandboxed ast-grep scan of the workspace counting the files
-     that import each changed Python/TS/JS file, excluding test files and
-     importers the PR itself touches; a file the PR adds scores zero), `risk.core_paths` globs
-     (at least `high`), the High Impact `path_signals` on non-test, non-doc
-     files (infra/security/data-migration/backup `high`, the rest `medium`),
-     500+ changed lines and 50+ untested code lines (`medium`); two distinct
-     `high` reasons are `critical`, docs-and-tests-only is `low`. `run_review`
-     assesses the FULL context before incremental scoping and carries it on
-     `PRContext.risk`, so the summary segment (`risk high (reason, +N more)`,
-     `{risk}` in `summary_template`), the hidden `<!-- lgtmaybe-risk:<level> -->`
-     marker (just above the lenses marker), the overview section and the
-     `risk/<level>` label all agree. A file it cannot measure (unsupported
-     language, no checkout, scan timeout/error) is listed as unassessed and a
-     `low` verdict always carries that caveat; any other failure is `risk
-     unavailable` with no marker. `risk.enabled` / `--no-risk` / Action input
-     `risk`. Never approval state — the marker is for the user's own gate.
-   - **PR labels (F4):** `ReviewConfig.pr_labels` (default off; Action input
-     `pr_labels`) — `engine/labels.py` derives `review-effort/1-5`,
-     `possible-security-issue` (high/critical security-lens finding),
-     `consider-splitting` (sprawling diff), and `risk/<level>` (with risk on) from data already computed; the
-     gateway reconciles only lgtmaybe's own label families, best-effort.
-   - **Clean review:** zero findings on a fully-reviewed PR posts `👍 LGTM!`
-     (comment only — no GitHub approval state) — still naming the model.
-4. **Packaging (sequential, last) — DONE:** the four distribution variants over
-   one core. Delivered in this step:
-   - **`action` entrypoint** — the container command. Routes by
-     `GITHUB_EVENT_NAME` (`issue_comment` → slash command, else → full review with
-     the PR URL derived from the event), reads inputs from `INPUT_*`. The `review`
-     / `comment` / `action` commands share `execute_review` / `execute_comment`.
-     `--fallback-model` threads through to the provider.
-   - **`action.yml`** — composite action; keyless cloud auth built in (pass
-     `aws_role_arn` / `gcp_wif_provider` / `azure_client_id` and it runs the
-     OIDC/WIF exchange), then `docker run`s the GHCR image. Inputs: provider,
-     model, fallback_model, api_key, api_base, timeout, temperature,
-     aws_role_arn, aws_region, gcp_wif_provider, gcp_service_account,
-     azure_client_id, azure_tenant_id, config_path (+ token/image).
-   - **`Dockerfile`** — lean runtime: `uv sync --no-dev --frozen`, venv on PATH,
-     `python -m lgtmaybe` (no uv at run time).
-   - **Release automation** — `.github/workflows/release-please.yml` reads
-     **conventional commits** on `main` and maintains a Release PR that bumps the
-     version + regenerates `CHANGELOG.md` (`release-please-config.json` /
-     `.release-please-manifest.json`). Merging that PR cuts the tag + GitHub
-     release; the same run then publishes — **PyPI trusted publishing** (OIDC, env
-     `pypi`, an *inline* top-level job so the OIDC publisher matches
-     `release-please.yml`) and the reusable `.github/workflows/release.yml`, which
-     pushes the GHCR image (`{version}`, `v{major}`, `latest`) + moves the floating
-     `v1`. `.github/workflows/commitlint.yml` (`commitlint.config.cjs`) gates PR
-     titles/commits to conventional-commit format so the automation can version.
-   - **Homebrew tap** — `.github/workflows/homebrew.yml` fires on the published
-     release and regenerates the formula in the `MattJColes/homebrew-tap`
-     tap via `scripts/update-homebrew-formula.sh` (resolves the PyPI sdist
-     url/sha, then `brew update-python-resources` fills the full dependency tree;
-     pushes with the `HOMEBREW_TAP_TOKEN` PAT). Regenerated wholesale each release
-     so dep bumps flow through — never hand-edited. Maintainer setup (tap repo +
-     PAT) is in `docs/how-to/releasing.md`.
-   - **Windows executable + winget** — `.github/workflows/windows-exe.yml`
-     builds and smoke-tests the portable x86_64 executable before attaching it
-     to the release; `.github/workflows/winget.yml` then submits the versioned
-     asset to `MattJColes.lgtmaybe`.
-   - **`examples/workflows/`** — one per posting provider (cloud + API-key);
-     `id-token: write` for cloud. ollama is local-only (CLI), not a workflow.
-   - **Model IDs in docs are kept current** per platform (litellm-native form).
+## Security Rules
 
-Every task carries its inputs/outputs and an acceptance test so an agent can
-self-verify without asking. The acceptance test *is* the red step — start there.
+Two separate concerns: our own hardening, so a malicious PR cannot subvert us,
+and what we look for in the PR.
+
+- Diff content, file paths, PR text and commit messages are untrusted
+  everywhere they flow; on a fork PR they are attacker-chosen.
+- **Injection defence** (`engine/injection.py`): each untrusted block gets its
+  own marker family (`_FAMILIES`: DIFF, INTENT, HINTS, CONTEXT, SPEC,
+  VALIDATION, HIDDEN, SIGNALS) via its `wrap_*` helper, and forged markers of
+  every family are neutralised in every block. Other untrusted text goes through
+  `injection.neutralise`. A new untrusted block gets its own family and a test.
+- **Redaction before egress** (`engine/redact.py`): cloud and SaaS keys, PEM
+  blocks, quoted passwords, `Authorization` headers, connection strings.
+  Everything sent to a model is redacted, not only the diff.
+- **Schema enforcement:** `extra=forbid` rejects drifted or injected fields.
+- **Trusted config only:** custom lenses, directory rules and the project
+  profile enter the prompt, so they **never come from PR-author content**. On
+  `pull_request_target`, config and workspace files come from the base
+  (`Path.cwd()`), **never `github.get_file_contents`**, which reads the PR head.
+- **No user code ever runs.** Finding rules are declarative. Static-analysis
+  tools run sandboxed (scrubbed env, no network, hard timeout, no checkout);
+  semgrep uses local rules only, **never `--config auto`**.
+- **API keys are never persisted** to user config; they stay in the
+  environment.
+- **What we look for** (the OWASP-aligned checklist and every other scan
+  category) lives in `engine/prompt.py`; catalogue in
+  `docs/explanation/what-gets-reviewed.md`.
+- **Tests are mandatory.** Touching redaction, injection, the prompt or the skip
+  filter means extending `tests/engine/` (`test_redact.py`, `test_injection.py`,
+  `test_prompt.py`, `test_parse.py`, `test_engine.py`) and
+  `tests/core/test_diff.py`. Every scan category is asserted in
+  `tests/engine/test_prompt.py`; extend those tests when the checklist changes.
+  Guarded mechanics: one category-matched worked example per prompt with a real
+  hunk header, the `line`/`side` arithmetic in the contract, and the injection
+  wrapper's restatement matching `{"findings": []}`.
+
+## Engine Features (Pointers)
+
+One line per feature: where it lives, its switch and default, and the rule you
+must not break. Config fields are on `ReviewConfig` (full list:
+`docs/reference/config.md`); behaviour is in `docs/explanation/` and the module
+docstrings.
+
+**Input and batching**
+
+- **Guards:** `is_reviewable` skips generated/binary files (lockfiles, minified,
+  vendored); `engine.passes_path_filters` then applies `include_paths` /
+  `exclude_paths` (exclude wins; `**/` also matches at the root); the file cap
+  posts a "reviewed top N of M" notice.
+- **Context expansion** (`compress.expand_hunks`, `context_lines` default 20,
+  `0` off): head text comes via the API, never a checkout. Positions stay bound
+  to the **real** diff: a finding on a context-only line is dropped, never
+  mis-posted.
+- **Recursive walk** (`compress.split_patch_into_hunks`, `recursive` default
+  on): an over-budget file is reviewed hunk by hunk. A defaulted
+  `max_input_tokens` is fitted to the model (`engine._fit_input_budget`); a
+  configured one is left alone. One `cl100k_base` encoder serves every model; a
+  per-model lookup bought nothing.
+- **Incremental review** (`incremental` default None = auto: on for
+  `synchronize` and `gitlab-ci`): reviews only commits since the watermark.
+  `mark_reviewed` stamps it on success only: **a failure never moves it**. Falls
+  back to full on no watermark, force-push, same head or API failure.
+  Resolve-on-fix is scoped to the increment (`set_incremental_scope`), so an
+  un-re-reviewed finding is never resolved; LEFT-side findings are dropped
+  (their lines are relative to the last-reviewed head, not the base).
+  `/review full` forces a full review.
+- **Triage** (`engine/triage.py`, `triage_model`, default off):
+  `triage.always_escalate` is a deterministic security floor; any triage
+  failure reviews everything; skips are named in the summary; `/review full`
+  bypasses triage and incremental scoping. All model slots share one provider
+  and credentials.
+- **Static analysis** (`engine/static_analysis.py`, `static_analysis.enabled`,
+  default off, `lgtmaybe[static-analysis]` extra): output becomes an untrusted
+  hints block only. **Raw tool findings are never posted.** A missing tool is
+  skipped.
+
+**Lenses**
+
+- **Presets** (`preset`): `fast` (default) covers all ten everyday categories in
+  five calls (`prompt.FAST_GROUPS`) on **every** provider: worker count decides
+  overlap, never call count. `full` runs one per category; `categories`
+  overrides both.
+- **Concurrency:** one global `ThreadPoolExecutor` (`max_concurrency`, auto 6),
+  then `engine._dedupe`. `max_review_seconds` (default 3600, 0 off) and
+  SIGINT/SIGTERM (`engine.request_interrupt`) post partial results with a
+  notice, **never a silent LGTM**. Only the CLI entrypoint installs the signal
+  handler (`cli.graceful_interrupt`), **never library import**; it restores the
+  previous handler as it fires and is a no-op off the main thread. `--profile`
+  prints timings (`engine/profiling.py`).
+- **Custom lenses** (`extra_lenses`, `lens_paths`): built like built-in lenses
+  (`engine._build_lenses`). Trusted config only.
+- **Intent lens:** intent is sent **only on the intent call**; none stated skips
+  it.
+- **Spec lens** (`engine/specs.py`, default on, detection-gated; `--spec`):
+  at most `MAX_SELECTED` = 2 specs, only on the spec call. Spec files the PR
+  changes are read from head text, the rest from the base workspace. A
+  requirement delivered in a file the batch can't see is "not shown, not
+  undelivered". A matched spec that did not fit is named in the summary, never
+  skipped silently. Reflection's
+  gap carve-out must name spec mismatches, or the auditor prunes them as
+  cross-file absence claims.
+- **Not-shown manifest** (`engine.files_not_visible`): nothing hidden adds zero
+  bytes; the cap `_MAX_LISTED_NOT_VISIBLE` is applied in one place.
+- **Ponytail** (`info`/`medium`): "should this exist at all?". It **never
+  collapses an existing port, layer or interface boundary**. A `shortcut:`
+  comment is a recorded decision; that rule binds the advisory lenses only,
+  never security or correctness.
+- **Architecture** (ceiling `medium`, `severity.CATEGORY_SEVERITY_CEILING`):
+  each finding opens with a change scenario; a principle's name is never the
+  justification. No new abstraction without a visible second variant or an
+  existing boundary; layers come from the repo's own paths, never invented.
+  Reflection protects it as a gap finding only when both ends of the
+  relationship are shown. Its own `fast` call, not a code-health member.
+  Lineage: `ATTRIBUTION.md`.
+- **Opposing advice is arbitrated, never posted together.** Lens prompts **never
+  name each other** (it would couple them and lock out custom lenses). The
+  shared never-cut rule bars any lens from recommending removal of
+  trust-boundary validation, data-loss error handling, security controls or
+  accessibility, and a shorter replacement keeps every edge case. Each lens
+  keeps its own evidence bar (complexity extracts duplication only for uniform
+  callers; `pack:design` spares port implementations).
+  - `PRECEDENCE` (`engine/conflicts.py`): correctness → security → performance
+    → tests → architecture → complexity → ponytail (Ponytail 5's order, design
+    slotted above readability). It is rendered into the reflection prompt so
+    both referees rank alike.
+  - `OPPOSED`: ponytail against correctness, security and architecture.
+  - Reflection keeps the higher-ranked of two opposite recommendations only
+    when both lenses are on the ladder; otherwise it keeps both.
+  - `conflicts.resolve_conflicts`, the deterministic backstop after reflection
+    (holds under `--no-reflect`), drops a finding only for an `OPPOSED` pair
+    within `NEAR_LINES` of a higher-ranked one, and logs it.
+  - Only declared pairs are arbitrated: never guess at group ids, unattributed,
+    custom, pack or scan findings.
+- **Directory rules** (`engine/directory.py`, YAML-only): join the per-batch
+  prefix, not a new message, so `build_shared_preamble` stays byte-identical.
+  No `BUGBOT.md` walk-up.
+- **Project profile** (`project`, YAML-only): `stage` moves **defaults only**
+  (`ReviewConfig._apply_project_stage`), so configured values win. `prototype`
+  raises the `min_severity` default to `medium`. `regulated` adds a `medium`
+  risk floor, never `high` (that would turn any other high reason `critical`).
+  Unset is byte-identical. **Never read from AGENTS.md / CLAUDE.md / SOUL.md:**
+  agent instructions are noise to a reviewer and overflow the context budget.
+- **Mid-review retrieval** (`mid_review_retrieval`, default off): one hop; the
+  fetched text goes on the lens's uncached block, **never the shared prefix**;
+  it can only add findings; off is a zero-byte prompt change. Off by default
+  because the worst case is one extra call per (batch, lens) and the recall win
+  is unmeasured.
+
+**Calls and filtering**
+
+- **Prompt caching** (`prompt.build_shared_preamble`): one prompt shape, **no
+  opt-out**. Keep the shared prefix (preamble, wrapped diff, hints)
+  lens-independent and byte-identical; lens text goes in the final uncached
+  block.
+- **Truncation ladder** (`engine._remedy_oversized`): two detectors (adapter
+  `ProviderTruncated`, and the parser catching an unterminated body) feed one
+  ladder; `ProviderInputTooLarge` takes the same split. **Do not re-split
+  them:** which fires is a fact about the route, not the failure. The rung
+  depends on the cause, on the user's model: `_review_split` when the
+  **answer** outgrew the ceiling; `_retry_lower_effort` when the **thinking**
+  did (one graded step down, then one call with reasoning off). **Escalation
+  is last:** only after those fail does `engine._escalate_model` re-run once on
+  `fallback_model`, per batch never per split piece, because a new model
+  re-sends the same request at the same ceiling.
+  - Lens calls carry `defer_truncation`, so the adapter hands truncation back
+    instead of falling back beneath the engine; it still rescues every other
+    failure itself.
+  - The parse-path notice names no `max_tokens` ceiling, because nothing
+    measured one.
+  - `--fallback-model` / the Action input win over `ReviewConfig.fallback_model`.
+  - The answering model is disclosed (`engine._note_answering_model`).
+  - **Do not route on diff size:** truncation does not track size, so a size
+    threshold spends the strong model on diffs that were already fine.
+- **Self-talk** (`engine/selftalk.py`, `_stamp_and_bound`): a finding is
+  dropped only when its prose carries **both** halves of a self-note (a broken
+  attempt plus the required shape); either alone is ordinary prose, so do not
+  widen it. Drops are counted in the summary, never silent.
+- **Reflection** (`engine/reflect.py`, `--no-reflect`): an unparseable verdict
+  keeps everything (**never silently drop a real finding**). `min_confidence`
+  default 0 (off); unscored findings survive. It drops cross-file false
+  positives but carves out gap findings (performance, complexity, intent,
+  spec). The test/doc carve-out is conditional: a "no test/doc" finding is
+  protected only when that file is shown, because a test in an untouched file
+  is not a missing test.
+- **Codebase humility (prompt rule):** the diff is a slice. Hedge cross-file
+  absence claims and lower their severity; never assume what an unshown
+  constant or collection *contains*.
+- **Determinism:** `temperature` default `0.0`; `timeout` None is
+  provider-aware.
+- **Finding rules** (`engine/rules.py`): declarative `drop` / `set_severity`
+  keyed on the engine-stamped `category`. Never a code hook.
+- **Risk of change** (`engine/risk.py`, default on, no model call): assessed on
+  the **full** context before incremental scoping, so every surface agrees.
+  A file it cannot measure is listed as unassessed, and a `low` verdict always
+  carries that caveat; any other failure is "risk unavailable" with
+  no marker. **Never approval state.** Detail:
+  `docs/explanation/risk-of-change.md`.
+- **Labels** (`engine/labels.py`, `pr_labels`, default off): touch only
+  lgtmaybe's own label families.
+
+**Comments beyond the review**
+
+- **Slash commands** (`comment`): `/review`, `/improve`, `/ask`
+  (replies via `post_issue_comment`), `/describe`
+  (`engine/describe.py`, upsert), `/diagram`.
+- **Change overview** (`engine/overview.py`, `auto_diagram` default on): one
+  upserted comment with its own marker family. Description (`auto_describe`,
+  default on) and High Impact Areas (`engine/high_impact.py`, `high_impact`,
+  default on) are best-effort: a failure shows a visible "unavailable" line,
+  never a silent gap. The diagram call (`engine/diagram.py`) propagates failure:
+  it is a required completion step and must not stamp the head complete.
+  `auto_diagram` is the one switch for the whole comment. Path signals are
+  untrusted hints and a floor; High Impact drops model-chosen paths not in
+  `changed_files`. `describe.structured_call` / `structured_comment` is the
+  shared one-call scaffold; `describe.markdown_text` escapes every section's
+  model prose. Model-authored Mermaid never reaches a fence; sequence labels are
+  escaped with Mermaid entity codes. **No D2:** GitHub does not render it.
+  `should_auto_diagram` gates the automatic overview to
+  opened/reopened/synchronize; `existing_overview_note` stands it down when the
+  PR already diagrams the change, and the review summary then names the skip and
+  `/diagram`. Slash commands never consult it. With every section and risk off,
+  the body is byte-identical to `build_diagram`.
+
+## Local CLI
+
+- `lgtmaybe review` diffs the branch against the remote primary branch (base
+  resolution `origin/HEAD` → `origin/main` → `origin/master` → `main` →
+  `master`; `--base` overrides). `--working` adds uncommitted edits;
+  `--uncommitted` reviews only working-tree edits (exclusive with `--working`,
+  no stated intent). Output `--format human` (default) / `json` / `agent`.
+- `lgtmaybe config init|show|get|set|path` (`config/store.py`,
+  `~/.config/lgtmaybe/config.yml`) persists non-secret defaults only. API keys
+  are never persisted.
+- `lgtmaybe diagram` prints the overview body using its text renderings.
+
+## Distribution and Release
+
+Maintainer setup: `docs/how-to/releasing.md`.
+
+- **Release automation:** `release-please.yml` reads **conventional commits**
+  on `main` and keeps a Release PR. Merging it tags, releases and publishes in
+  the same run. `commitlint.yml` gates PR titles and commits so it can version.
+- **PyPI** (`pip install lgtmaybe`): trusted publishing (OIDC, env `pypi`) from
+  an *inline* top-level job in `release-please.yml`, so the OIDC publisher
+  matches.
+- **GitHub Action:** composite `action.yml` does the OIDC/WIF exchange, then
+  `docker run`s the GHCR image via the `action` entrypoint (routes on
+  `GITHUB_EVENT_NAME`, reads `INPUT_*`). `release.yml` pushes the image
+  (`{version}`, `v{major}`, `latest`) and moves `v1`. The `Dockerfile` uses
+  `uv sync --no-dev --frozen` and no uv at run time.
+- **Homebrew** (`MattJColes/tap`, repo `MattJColes/homebrew-tap`, deliberately
+  not `homebrew-lgtmaybe`; users must `brew tap` and `brew trust` it):
+  `scripts/update-homebrew-formula.sh` writes a venv formula installing **PyPI
+  wheels**, not `resource` stanzas, because litellm's Rust sdists cannot build
+  in Homebrew's sandbox. It must declare **`preserve_rpath`** or install fails
+  on the wheels' `@rpath` dylibs. `homebrew.yml` is **called** by release-please
+  (`workflow_call`: a `GITHUB_TOKEN` release sends no `release: published`),
+  also fires on `release: published` for hand-cut releases, and `brew trust`s
+  and `brew install`s the formula as a gate before committing, so a broken
+  formula is never published. Never bypass trust with
+  `HOMEBREW_NO_REQUIRE_TAP_TRUST`: upstream is removing it, and the gate must
+  cover the trust step users run. Never hand-edit the formula; it is regenerated
+  each release (push via `HOMEBREW_TAP_TOKEN`; a daily schedule and `force`
+  dispatch are the safety nets).
+- **Windows** (`winget install MattJColes.lgtmaybe`): `windows-exe.yml` builds
+  and smoke-tests a one-file Python 3.13 executable (bundles ast-grep, not the
+  cloud-auth SDKs, so keyless Bedrock, Vertex and Azure need the pip install);
+  `winget.yml` submits it.
+- **`examples/workflows/`:** one per posting provider; cloud ones need
+  `id-token: write`. ollama is local-only. Keep model IDs in docs current, in
+  litellm-native form.
 
 ## Conventions
 
-- **Docs:** the `docs/` tree is **Diátaxis** (tutorial / how-to / reference /
-  explanation), published to GitHub Pages via mkdocs (`.github/workflows/docs.yml`).
-  Human-only setup lives in `docs/how-to/` next to the feature it serves — cloud
-  trust in the Bedrock/Vertex/Azure guides, publishing + marketplace in
-  `docs/how-to/releasing.md`, the local AI-fix loop in
-  `fix-findings-with-an-ai-agent.md`. The config reference
-  (`docs/reference/config.md`) is **generated** from the models by
-  `docs/generate_reference.py` and kept fresh by `tests/docs/test_reference_fresh.py`
-  — regenerate it when you touch `ReviewConfig`, don't hand-edit. **`DEVELOPMENT.md`**
-  and **`CONTRIBUTING.md`** at the repo root are the contributor guides: how to run
-  the CLI locally (incl. an unpushed branch via `--base`) and run the tests / CI gate.
-- **Docs prose** follows `docs/how-to/write-docs.md`: written for an engineer new
-  to the project, short sentences, project terms linked to
-  `docs/reference/glossary.md` (acronyms also get hover tooltips from
+- **Docs** are **Diátaxis** (tutorial / how-to / reference / explanation),
+  published via mkdocs (`docs.yml`). Human-only setup lives in `docs/how-to/`
+  next to the feature it serves. mkdocs validates anchors, so `--strict` fails
+  on a link to a renamed heading.
+- **Generated docs: regenerate, never hand-edit.** The config reference
+  (`docs/reference/config.md`) comes from `docs/generate_reference.py`
+  (freshness: `tests/docs/test_reference_fresh.py`); regenerate it when you
+  touch `ReviewConfig`. `docs/llms.txt` and `docs/llms-full.txt` come from `uv
+  run python docs/generate_llms_txt.py` (`tests/docs/test_llms_txt_fresh.py`);
+  regenerate after any docs edit.
+- **Docs prose** follows `docs/how-to/write-docs.md`: written for an engineer
+  new to the project, short sentences, project terms linked to
+  `docs/reference/glossary.md` (acronym tooltips in
   `includes/abbreviations.md`), Australian spelling, no em dashes.
   `tests/docs/test_readability.py` gates it via `scripts/doc_readability.py`
-  (its constants hold the sentence limits; the style guide's numbers are
-  tested against them);
-  pages that don't pass yet sit in `NOT_YET_PASSING`, which can only shrink.
-  mkdocs validates anchors, so `--strict` fails on a link to a renamed heading.
-- Treat diff content as untrusted everywhere it flows.
-- Errors surface to the user; never swallow them.
+  (its constants hold the limits the style guide quotes). Pages that do not pass
+  yet sit in `NOT_YET_PASSING`, which can only shrink.
+- **Contributor guides:** `DEVELOPMENT.md` (running the CLI locally, including
+  an unpushed branch via `--base`) and `CONTRIBUTING.md` (tests and CI gate).
 
-## Living specs (OpenSpec + ast-grep anchors)
+## Living Specs (OpenSpec + ast-grep Anchors)
 
-`openspec/specs/<capability>/spec.md` are the **living domain specs** — durable
-descriptions of how the system behaves, distinct from OpenSpec change proposals
-(which are disposable; durable knowledge folds back into these). Every
-requirement section carries an anchor id — `<!-- anchor: engine.snap -->` on
-its own line right after the section's opening paragraph — bound to code by
-ast-grep rules in the capability's co-located `anchors.yml`. Rules match code
-**shape** (node kind + name regex + a `files:` glob; never `pattern:`, which
-silently misses async defs), so they survive file moves and refactors and break
-on renames — by design: a rename usually changes the thing the spec describes,
-and a dead anchor is the signal to re-read the section.
+`openspec/specs/<capability>/spec.md` are the **living domain specs**. Change
+proposals are disposable; durable knowledge folds back into these. Each
+requirement section carries an anchor id (`<!-- anchor: engine.snap -->` on its
+own line after the opening paragraph), bound to code by ast-grep rules in the
+capability's `anchors.yml`. Rules match code **shape** (node kind, name regex, a
+`files:` glob). **Never use `pattern:`**: it silently misses async defs. Rules
+survive moves and break on renames by design, because a rename usually changes
+what the spec describes.
 
-The workflow rules:
-
-- **Before changing code**, resolve the anchors for the files you expect to
-  touch (grep the `anchors.yml` sidecars, or run
-  `uv run ast-grep scan --inline-rules … --json src/` from the repo root — the
-  `files:` globs resolve against the scan cwd) and read only the matching spec
-  sections, not the whole spec tree.
-- **At the end of a task**, re-run `uv run pytest tests/specs -q` and update
-  the spec sections your change made stale — as targeted edits to those
-  sections only, never a free-rewrite of a spec. Most tasks need no spec
-  change; that's the correct outcome, not a failure.
-- **Anchor hygiene:** each rule resolves to exactly one place — 0 matches is
-  dangling, >1 is too loose (tighten with `files:` or `inside:`). Both are
-  drift and both fail `tests/specs/test_anchors.py` (bijection with the spec's
-  anchor ids, exactly-one-match, OpenSpec shape, 40-line section cap — split a
-  section rather than letting it grow into a changelog).
-- **The drift gate** (`scripts/check_spec_drift.py`,
-  `.github/workflows/spec-drift.yml`) is non-blocking by design: on each PR it
-  warns when anchored code changed while its spec section sat still, and when a
-  rule that matched at the merge-base matches nothing now (the rename case the
-  intersection check alone can't see). A warning names the anchor id — fix the
-  rule *and* re-read the section, don't just patch the regex.
+- **Before changing code**, resolve the anchors for the files you will touch
+  (grep the `anchors.yml` sidecars, or run `uv run ast-grep scan --inline-rules
+  … --json src/` from the repo root, where the `files:` globs resolve) and read
+  only the matching spec sections.
+- **At the end of a task**, run `uv run pytest tests/specs -q` and update the
+  sections your change made stale, as targeted edits only, never a free rewrite.
+  Most tasks need no spec change; that is the correct outcome.
+- **Anchor hygiene:** each rule resolves to exactly one place. 0 matches is
+  dangling, more than 1 is too loose (tighten with `files:` or `inside:`). Both
+  fail `tests/specs/test_anchors.py`, which also checks the bijection with the
+  spec's anchor ids, OpenSpec shape and a 40-line section cap (split a section
+  rather than let it grow into a changelog).
+- **Drift gate** (`scripts/check_spec_drift.py`, `spec-drift.yml`) is
+  non-blocking by design. It warns when anchored code changed but its section
+  did not, and when a rule that matched at the merge-base now matches nothing.
+  Fix the rule *and* re-read the section; do not just patch the regex.
 - `openspec validate --specs` must stay green (`npx -y
-  @fission-ai/openspec@latest validate --specs`); its parser reads only the
-  first line of a requirement's text for the SHALL/MUST check, so lead with it.
+  @fission-ai/openspec@latest validate --specs`). Its parser reads only the
+  first line of a requirement for the SHALL/MUST check, so lead with it.
 
-## Security-review coverage
+## Code Quality and Dependency Hygiene
 
-Two distinct concerns, kept separate:
+Where a check lives depends on whether it can be deterministic.
 
-- **The reviewer's own hardening** (so a malicious PR can't subvert *us*):
-  prompt-injection defense with delimiter break-out neutralisation, broad secret
-  redaction before egress, structured-output schema enforcement (`extra=forbid`
-  rejects drifted/injected fields), and fork safety via `pull_request_target`
-  with no checkout.
-- **What the reviewer looks for** (so it catches issues in *your* PR): the system
-  prompt (`engine/prompt.py`) carries an **OWASP-aligned security checklist** —
-  injection, XSS, CSRF/open redirect, hardcoded secrets, broken authn/authz
-  (incl. JWT/session pitfalls), path traversal, unrestricted file upload, SSRF,
-  insecure deserialization/XXE, mass assignment, weak crypto, sensitive-data
-  exposure (secrets/PII — passwords, tokens, SSNs, card data — leaking into
-  logs), CI/IaC misconfiguration (workflow script injection, unpinned actions,
-  broad IAM, public buckets, privileged containers, controls that only look
-  enforced — an `environment:` key with no required reviewers, a budget alert
-  sold as a spending cap — and checks that cannot fail: `continue-on-error`,
-  `|| true`), resource/DoS safety (incl.
-  ReDoS) — graded `high`/`critical`. Alongside security it also scans for
-  **correctness/logic bugs** (edge cases, null/None derefs, off-by-one and
-  boundary errors, mismatched/inverted ranges, unhandled error paths, races /
-  TOCTOU / async mistakes, numeric and date/time bugs, aliasing & mutation;
-  "Correctness & logic" section), **missing or weak tests** for changed code
-  paths (flagged `low`/`medium`, with a runnable test in the finding's
-  `suggestion` field; weak = assertion-free / over-mocked / sleep-based; "Test
-  coverage" section), **documentation gaps and stale docs** on public APIs
-  (`info`/`low`, up to `medium` for a docstring/comment the change made wrong;
-  "Documentation" section), **performance regressions** (N+1 queries,
-  accidentally quadratic work, redundant computation, hot-path
-  allocations/blocking I/O, unbounded queries, caches without eviction; graded by
-  impact up to `high`; "Performance" section), needless **complexity** (deep
-  nesting / high cyclomatic complexity, over-long low-cohesion functions,
-  duplicated logic, dead code; `info`/`medium`, restrained; "Complexity"
-  section), **intent mismatches** (out-of-scope hunks, contradictions,
-  unfulfilled claims vs the stated intent; `medium`/`high`; "Intent" section),
-  and **needless code** (YAGNI / speculative generality, reinventing the stdlib,
-  code that could be far shorter, premature configurability; `info`/`medium`,
-  restrained; the Ponytail "lazy senior dev" lens, "Ponytail" section), and
-  **hard-to-reverse design decisions** (coupling across boundaries, dependency
-  direction, broken substitutability, misplaced responsibility, sharp-edged
-  APIs, leaky ports; `info`/`medium`, each opening with a change scenario;
-  "Architecture" section).
-
-Both are covered by tests in `tests/engine/` (`test_redact.py`, `test_injection.py`,
-`test_prompt.py`, `test_parse.py`, `test_engine.py`) and `tests/github/test_diff.py`.
-When you touch redaction, injection, the prompt, or the skip filter, extend those
-suites — a security change without a test is exactly what CI rejects.
-
-The reviewer also flags **deprecated APIs and end-of-life / vulnerable
-dependencies** in the PRs it reviews (prompt section "Deprecation & dependency
-health"; covered by `test_prompt.py`). Every scan category is asserted in
-`test_prompt.py` (`test_prompt_asks_for_logic_and_edge_case_review`,
-`test_prompt_asks_for_test_coverage`, `test_prompt_asks_for_documentation_review`,
-`test_prompt_names_pii_and_secrets_in_logs`, `test_prompt_asks_for_performance_review`,
-`test_prompt_asks_for_complexity_review`, `test_prompt_asks_for_intent_review`,
-`test_prompt_asks_for_ponytail_review`, `test_prompt_asks_for_architecture_review`,
-plus the topic-coverage block: concurrency/races, numeric/datetime, CSRF /
-redirect / XXE / mass assignment, CI/IaC, weak tests, stale docs, leaks,
-typosquats) — extend those when you change the prompt's checklist. Prompt
-mechanics are guarded too: every focused prompt carries exactly one
-category-matched worked example with a real hunk header, the contract explains
-the `line`/`side` arithmetic, and the injection wrapper's task restatement must
-match the `{"findings": []}` object shape (`test_injection.py`).
-
-## Code-quality & dependency hygiene
-
-Split by whether it can be deterministic, because that decides where it lives:
-
-- **Deterministic → per-PR gate.** Deprecated-API use is a hard error
+- **Deterministic: per-PR gate.** Deprecated-API use is a hard error
   (`filterwarnings = error::DeprecationWarning` in `pyproject.toml`;
-  `tests/test_code_quality.py` also imports every module under that filter and
-  asserts the gate stays wired). Lockfile drift is caught by `uv lock --check`
-  in CI. Outdated *syntax* is caught by ruff's `UP` rules. Don't weaken the
-  deprecation gate to silence third-party noise — add a narrow per-library
-  `ignore` instead.
-- **Not deterministic → background/scheduled.** "Is a newer version available?"
-  and "does a dep have a known CVE?" depend on what's published upstream at
-  check-time, so they can't be a reproducible gate. They run on a schedule:
-  `.github/dependabot.yml` (weekly grouped update PRs for the `uv` + GitHub
-  Actions ecosystems, plus security-update PRs) and `.github/workflows/audit.yml`
-  (`pip-audit` on the locked runtime deps — weekly cron + on dependency-touching
-  pushes/PRs, never a blanket per-PR gate so an upstream CVE can't break an
-  unrelated build).
-- **Model quality → on-demand eval harness.** "Does this model/setting actually
-  produce usable reviews?" needs a live model, so it can't be in the pytest gate.
-  `evals/` (`run.py` + `scorer.py` over `evals/fixtures/`) reviews each fixture
-  with a real provider and reports **parse-rate + recall + a clean / false-positive
-  check**, exiting non-zero below `--min-recall` so it can gate a model/prompt
-  change when run deliberately
-  (`python -m evals.run --provider … --model …`; `--timeout` / `--num-ctx` /
-  `--max-input-tokens` tune it for a big diff on a slow local model;
-  `--temperature` / `--top-p` / `--top-k` set the model's sampling; `--categories`
-  cuts the per-category fan-out to a subset). Its plumbing
-  is unit-tested in `tests/evals/`. The **hosted** providers stay out of the pytest
-  gate, and so does the live ollama path — the full lens set
-  and the large multi-file `vibe-multifile` fixture stay in-repo for on-demand
-  `python -m evals.run` runs: the fixtures plant security + correctness bugs **and**
-  blatant performance (N+1 / quadratic) + complexity (deep nesting / duplication)
-  issues so a full run exercises those code lenses, with the per-lens coverage
-  guarded in `tests/evals/test_fixtures.py`. (The intent lens isn't scored
-  there: it needs a stated intent the fixtures don't carry. Ponytail's one
-  planted catch lives in **`counter-advice`**, beside the two cuts it must not
-  recommend — trust-boundary validation that looks redundant, and an adapter
-  that looks like a pass-through but implements a port. The architecture
-  lens's planted catches live in **`architecture`**: a domain module importing an adapter and
-  an override breaking its shown base contract, beside two restraint traps — a
-  seam proposed for a single-caller private helper, and a Liskov claim against
-  a base class only the unshown corpus holds.) Beyond recall, a
-  fixture can declare **`forbidden`** findings — claims that must *not* appear,
-  typically cross-file false positives where the relevant guard lives in an unshown
-  file; any produced finding matching one is a **false positive** that makes the
-  fixture un-**clean** and fails the run. `_gate` therefore has **three bars**:
-  parse, pooled recall, and clean. The **`cross-file-fp`** fixture is the worked
-  example — one genuine in-diff catch (a logged secret) plus three forbidden
-  cross-file traps (model_dump-vs-V2, idempotency re-run, tenant_id null) — and it
-  measures the codebase-humility behavior the review prompt + reflection enforce.
-  **`unshown-code-fp`** is its sibling for the two shapes cross-file-fp cannot
-  express (its changed file is new, so nothing of it is unshown): a short edit at
-  the bottom of a long existing module traps a claim about **what an unshown
-  constant in the SAME file contains** (an empty frozenset ~180 lines up, the
-  `_SINGLE_STREAM_PROVIDERS` shape) and a claim that the change is **untested**
-  when the test lives in a file the diff never touched — the shape reflection's
-  gap-finding carve-out currently protects. Real-spend hosted-provider e2e
-  remains label-gated in `action-e2e.yml`.
+  `tests/test_code_quality.py` imports every module under it and asserts the
+  gate stays wired). **Do not weaken the gate** to silence third-party noise;
+  add a narrow per-library `ignore`. `uv lock --check` catches lockfile drift;
+  ruff `UP` rules catch outdated syntax.
+- **Not deterministic: scheduled.** Newer versions and known CVEs depend on
+  upstream at check time, so they are never a per-PR gate (an upstream CVE must
+  not break an unrelated build): `dependabot.yml` (weekly) and `audit.yml`
+  (`pip-audit`, weekly and on dependency-touching changes).
+- **Model quality: on-demand eval harness.** It needs a live model, so it stays
+  out of pytest (hosted providers and live ollama alike). `python -m evals.run
+  --provider … --model …` reviews each fixture in `evals/fixtures/` and reports
+  parse rate, recall, clean status and an `anchored` rate. `_gate` has **three
+  bars**: parse, pooled recall (`--min-recall`) and clean (a fixture's
+  `forbidden` findings must not appear). Plumbing is unit-tested in
+  `tests/evals/`; per-lens coverage in `tests/evals/test_fixtures.py`.
+  Lens-specific fixtures: `counter-advice` (ponytail), `architecture`,
+  `spec-delivery`, `cross-file-fp` and `unshown-code-fp` (codebase humility),
+  `cross-file-recall` (`--mid-review-retrieval`). A/B sweeps: `python -m
+  evals.ab --sweep key=a,b`. Real-spend hosted e2e is label-gated in
+  `action-e2e.yml`.
 
 [litellm]: https://github.com/BerriAI/litellm
