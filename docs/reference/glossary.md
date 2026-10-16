@@ -239,7 +239,7 @@ it finds a spec that matches the pull request.
 A chain of small pull requests, each built on the one below it and merged
 bottom up. Each one shows only its own changes. lgtmaybe tells the model where a
 pull request sits in its stack. See
-[Review Stacked Pull Requests](../how-to/review-stacked-pull-requests.md).
+[Review Stacked Pull Requests](../how-to/use-as-github-action.md#review-stacked-pull-requests).
 
 ## Static-Analysis Fusion
 
