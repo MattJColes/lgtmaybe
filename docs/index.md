@@ -1,5 +1,5 @@
 ---
-description: Provider-agnostic AI code review for pull and merge requests on GitHub, GitLab, Gitea and Azure DevOps, using OpenAI, Claude, Bedrock, Vertex, Azure, ollama or any OpenAI-compatible endpoint. Inline review comments, keyless OIDC/WIF cloud auth, GitHub Action, GitLab CI and CLI.
+description: AI code review on GitHub, GitLab, Gitea and Azure DevOps, or locally, with OpenAI, Claude, Bedrock, Vertex, Azure or local models. Keyless cloud auth.
 ---
 
 <div class="hero" markdown>
@@ -41,8 +41,9 @@ and lands on its changed line. A clean change gets a 👍 **LGTM!**.
 Slash commands refresh a review (`/review`, `/improve`), answer a question
 (`/ask`), or post a description (`/describe`) or
 [change overview](how-to/generate-a-change-diagram.md) (`/diagram`). The
-overview rates the risk of change, lists high-impact areas, and diagrams what
-the change touches.
+overview rates the risk of change, lists high-impact areas, and draws a
+flowchart, plus a sequence diagram when the change alters a runtime flow.
+`lgtmaybe diagram` prints a text version locally.
 
 ```mermaid
 flowchart LR
