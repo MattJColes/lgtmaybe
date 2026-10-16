@@ -1,0 +1,68 @@
+# Contract test: the Gitea adapter's real calls against a live Forgejo.
+#
+# Forgejo is served through the Gitea adapter because it speaks Gitea's API.
+# Unit tests pin that API with mocks; this runs the same calls against the real
+# thing, so a divergence in the fork shows up here before a user finds it. It
+# needs Docker and a network, so it is not a per-PR gate: it runs weekly, on
+# dispatch, and on PRs that touch the adapter or these tests. No model call.
+name: forgejo-contract
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/lgtmaybe/gitea/**"
+      - "tests/forgejo/**"
+      - ".github/workflows/forgejo-contract.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forgejo-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported major (an LTS) and the current one.
+        forgejo: ["11", "17"]
+    env:
+      FORGEJO_CONTRACT_URL: http://localhost:3000
+      FORGEJO_CONTRACT_ADMIN: contract-admin
+      FORGEJO_CONTRACT_PASSWORD: contract-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Start Forgejo ${{ matrix.forgejo }}
+        run: |
+          docker run -d --name forgejo -p 3000:3000 \
+            -e FORGEJO__security__INSTALL_LOCK=true \
+            -e FORGEJO__database__DB_TYPE=sqlite3 \
+            -e FORGEJO__server__ROOT_URL=http://localhost:3000/ \
+            "codeberg.org/forgejo/forgejo:${{ matrix.forgejo }}"
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/v1/version && break
+            sleep 2
+          done
+          docker exec -u git forgejo forgejo admin user create --admin \
+            --username "$FORGEJO_CONTRACT_ADMIN" --password "$FORGEJO_CONTRACT_PASSWORD" \
+            --email admin@example.com --must-change-password=false
+
+      - name: Sync (with dev deps)
+        run: uv sync --dev
+
+      - name: Contract tests
+        run: uv run pytest -m forgejo_contract tests/forgejo/contract -v
