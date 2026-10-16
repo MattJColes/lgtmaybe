@@ -637,6 +637,7 @@ def test_resolve_fixed_resolves_outdated_disappeared_thread() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["THREAD1"]
@@ -666,6 +667,7 @@ def test_resolve_fixed_rewrites_fingerprint_to_resolved_marker() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["THREAD1"]
@@ -688,6 +690,7 @@ def test_resolve_fixed_marker_rewrite_failure_never_fails_review() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     # Must not raise, and resolution is never attempted without retired markers.
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -704,6 +707,7 @@ def test_resolve_fixed_skips_still_present_finding() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -720,6 +724,7 @@ def test_resolve_fixed_skips_non_outdated_thread() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -734,6 +739,7 @@ def test_resolve_fixed_skips_already_resolved_thread() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -753,6 +759,7 @@ def test_resolve_fixed_ignores_non_lgtmaybe_threads() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -793,6 +800,43 @@ def test_resolve_fixed_skipped_on_first_review() -> None:
 
 
 @respx.mock
+def test_resolve_fixed_skipped_on_failure_notice() -> None:
+    """A failure notice posts through post_review with no findings and no
+    completion watermark (the CLI clears it via mark_reviewed(None)): with
+    nothing reviewed this run, an absent finding is not evidence of a fix, so
+    nothing resolves (#747)."""
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed(None)
+    gw.post_review([], "⚠️ lgtmaybe review failed: boom")
+
+    assert graphql.queried is False
+    assert graphql.resolved == []
+
+
+@respx.mock
+def test_resolve_fixed_skipped_on_incomplete_run() -> None:
+    """A partial run (a lens failure, SIGTERM or max_review_seconds) stamps no
+    watermark: the findings its failed calls never produced are not fixes, so
+    their threads must stay open (#747)."""
+    _mark_existing_review()
+    gone_fp = finding_fingerprint("src/old.py", "Removed bug")
+    graphql = _GraphQL([_thread(gone_fp, outdated=True, tid="THREAD1")])
+    respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
+
+    gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed(None)
+    gw.post_review(FINDINGS, "partial summary", diff=SAMPLE_DIFF)
+
+    assert graphql.queried is False
+    assert graphql.resolved == []
+
+
+@respx.mock
 def test_resolve_fixed_swallows_graphql_error() -> None:
     """A GraphQL failure during the resolve pass never fails the review."""
     _mark_existing_review()
@@ -800,6 +844,7 @@ def test_resolve_fixed_swallows_graphql_error() -> None:
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
     # Must not raise.
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
 
@@ -1252,6 +1297,7 @@ def test_resolve_fixed_threads_are_resolved_concurrently() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert sorted(graphql.resolved) == [f"THREAD{i}" for i in range(4)]
@@ -1280,6 +1326,7 @@ def test_one_failing_thread_does_not_block_the_others() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert sorted(graphql.resolved) == ["THREAD0", "THREAD2"]
@@ -1320,6 +1367,7 @@ def test_failed_resolve_posts_no_reply() -> None:
     )
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.replies == [], "replied on a thread that was never resolved"
@@ -1337,6 +1385,7 @@ def test_missing_comment_id_never_attempts_resolution() -> None:
     respx.route(method="POST", url=GRAPHQL_URL).mock(side_effect=graphql)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -1360,6 +1409,7 @@ def test_failed_resolve_and_marker_restore_never_fail_the_review() -> None:
     respx.route(method="PATCH").mock(side_effect=lambda request: next(patches))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == []
@@ -1395,6 +1445,7 @@ def test_reply_failure_still_rewrites_the_fingerprint_marker() -> None:
     respx.route(method="PATCH").mock(side_effect=capture_patch)
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     assert graphql.resolved == ["THREAD1"]
@@ -1453,6 +1504,7 @@ def test_forbidden_resolve_is_attempted_once_per_run() -> None:
     respx.route(method="PATCH").mock(return_value=httpx.Response(200, json={}))
 
     gw = RestGitHubGateway(repo=REPO, pr_number=PR_NUMBER, token=TOKEN, client=httpx.Client())
+    gw.mark_reviewed("deadbee")
     gw.post_review(FINDINGS, "New summary", diff=SAMPLE_DIFF)
 
     # Deterministic: the barrier forces the whole first wave through the check,

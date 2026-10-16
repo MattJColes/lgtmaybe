@@ -1352,6 +1352,11 @@ class RestGitHubGateway:
         fails is logged and the rest still resolve rather than being abandoned
         wherever the loop happened to stop.
         """
+        # No completion watermark, no resolving: an incomplete run (or a failure
+        # notice) is missing findings its failed calls never produced, and those
+        # absences are not evidence of fixes (#747). Azure DevOps gates alike.
+        if self._reviewed_sha is None:
+            return
         try:
             current = current_finding_keys(findings)
             fixed = self._fixed_threads(current)
