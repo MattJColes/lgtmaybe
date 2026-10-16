@@ -774,8 +774,9 @@ def _incremental_context(
         return (
             ctx,
             None,
-            f"Head {ctx.head_sha[:7]} only moved {last_sha[:7]} onto a new base: "
-            "the pull request's diff is unchanged, so there is nothing new to review.",
+            f"Head {ctx.head_sha[:7]} has the same diff as the completed {last_sha[:7]} "
+            "(for example a rebase that only moved the pull request onto a new base): "
+            "the diff is unchanged, so there is nothing new to review.",
         )
     increment = compare_diff(last_sha, ctx.head_sha)
     if not increment or not increment.strip():

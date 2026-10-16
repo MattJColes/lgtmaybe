@@ -2917,6 +2917,8 @@ def _summary_line(
     a review. ``{risk}`` renders the risk-of-change segment (empty when off);
     ``{temperature}`` likewise renders ``temperature not sent`` when the
     configured temperature never reached the model, and nothing otherwise.
+    ``{stack}`` renders the PR's layer in a stack of pull requests ("layer 2 of
+    3 in a stack"), and nothing outside a stack.
     """
     version = package_version()
     segment = risk_segment(risk) if risk is not None else ""
@@ -2973,7 +2975,13 @@ def _redacted_stack(stack: PRStack | None) -> PRStack | None:
             for layer in layers
         ]
 
-    return stack.model_copy(update={"below": clean(stack.below), "above": clean(stack.above)})
+    return stack.model_copy(
+        update={
+            "base_ref": redact(stack.base_ref),
+            "below": clean(stack.below),
+            "above": clean(stack.above),
+        }
+    )
 
 
 def passes_path_filters(path: str, *, include: list[str], exclude: list[str]) -> bool:

@@ -133,6 +133,9 @@ _RESOLVE_WORKERS = 4
 # lookup or two, and a model reading ten layer summaries is past the point where
 # they help; a chain walk also stops here, so a cycle cannot run away.
 _MAX_STACK_LAYERS = 8
+# Layers fetched at once. Each layer is one or two independent GETs, so a deep
+# stack must not pay them one after another on the context fetch.
+_STACK_FETCH_WORKERS = 4
 
 
 def _head_ref(meta: dict[str, Any]) -> str:
@@ -407,14 +410,15 @@ class RestGitHubGateway:
         at = numbers.index(self._pr_number)
         below = numbers[:at][-_MAX_STACK_LAYERS:]
         above = numbers[at + 1 :][:_MAX_STACK_LAYERS]
+        layers = self._stack_layers([(number, None) for number in below + above])
         # Position and size from the listing, not the payload: the block names the
         # listing's layers, and the payload can still count ones no longer open.
         return PRStack(
             position=at + 1,
             size=len(numbers),
             base_ref=str(native["base"]["ref"]),
-            below=[self._stack_layer(number) for number in below],
-            above=[self._stack_layer(number) for number in above],
+            below=layers[: len(below)],
+            above=layers[len(below) :],
         )
 
     def _chained_stack(self, meta: dict[str, Any]) -> PRStack | None:
@@ -435,7 +439,9 @@ class RestGitHubGateway:
         ref, head_ref = str(base["ref"]), str(head["ref"])
         owner = quote(self._repo.split("/", 1)[0], safe="")
         seen = {head_ref}
-        below: list[StackLayer] = []
+        # (number, title) per layer while walking: each step depends on the one
+        # before, but the layers' file lists do not, so they are fetched after.
+        below: list[tuple[int, str | None]] = []
         complete = True
         while ref != default:
             if ref in seen or len(below) == _MAX_STACK_LAYERS:
@@ -448,9 +454,9 @@ class RestGitHubGateway:
                 complete = complete and not parents
                 break
             seen.add(ref)
-            below.insert(0, self._stack_layer(int(parents[0]["number"]), parents[0].get("title")))
+            below.insert(0, (int(parents[0]["number"]), parents[0].get("title")))
             ref = str(parents[0]["base"]["ref"])
-        above: list[StackLayer] = []
+        above: list[tuple[int, str | None]] = []
         tip = head_ref
         while True:
             children = self._get_json(
@@ -467,17 +473,25 @@ class RestGitHubGateway:
                 complete = False
                 break
             seen.add(tip)
-            above.append(self._stack_layer(int(children[0]["number"]), children[0].get("title")))
+            above.append((int(children[0]["number"]), children[0].get("title")))
         if not below and not above:
             return None
+        layers = self._stack_layers(below + above)
         return PRStack(
             position=len(below) + 1,
             size=len(below) + 1 + len(above),
             base_ref=ref,
-            below=below,
-            above=above,
+            below=layers[: len(below)],
+            above=layers[len(below) :],
             complete=complete,
         )
+
+    def _stack_layers(self, layers: list[tuple[int, str | None]]) -> list[StackLayer]:
+        """Fetch several layers at once, keeping their bottom-to-top order."""
+        if not layers:
+            return []
+        with ThreadPoolExecutor(max_workers=min(len(layers), _STACK_FETCH_WORKERS)) as pool:
+            return list(pool.map(lambda layer: self._stack_layer(*layer), layers))
 
     def _stack_layer(self, number: int, title: str | None = None) -> StackLayer:
         """Another layer's number, title and changed files (the first page)."""

@@ -3823,6 +3823,17 @@ def test_the_other_layers_titles_are_redacted() -> None:
         assert path_key not in prefix
 
 
+def test_the_stack_base_branch_is_redacted() -> None:
+    provider = _provider_for([], reflection_keeps_all=True)
+    cfg = ReviewConfig(provider=Provider.ollama, model="llama3")
+    leaky = _STACK.model_copy(update={"base_ref": "release/AKIAIOSFODNN7EXAMPLE"})
+
+    LLMReviewEngine(provider).review(_TWO_FILE_CTX.model_copy(update={"stack": leaky}), cfg)
+
+    for prefix in _review_prefixes(provider):
+        assert "AKIAIOSFODNN7EXAMPLE" not in prefix
+
+
 def test_a_summary_template_can_name_the_stack_layer() -> None:
     provider = _provider_for([], reflection_keeps_all=True)
     cfg = ReviewConfig(

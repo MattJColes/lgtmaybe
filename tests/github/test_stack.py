@@ -301,3 +301,37 @@ def test_a_native_stack_counts_position_from_the_layers_it_lists() -> None:
 
     assert ctx.stack is not None
     assert (ctx.stack.position, ctx.stack.size) == (2, 3)
+
+
+def test_layers_are_fetched_concurrently() -> None:
+    """Each layer costs a lookup or two, independent of the others: a stack of
+    several layers must not pay them one after another on the context fetch."""
+    import threading
+
+    meta = _meta(
+        base={"sha": "b" * 40, "ref": "feature-a", "repo": {"default_branch": "main"}},
+        stack={"id": 9, "number": 7, "size": 3, "position": 2, "base": {"ref": "main"}},
+    )
+    stacks = {
+        7: {
+            "number": 7,
+            "base": {"ref": "main"},
+            "pull_requests": [
+                {"number": 41, "state": "open", "head": {"ref": "feature-a"}},
+                {"number": 42, "state": "open", "head": {"ref": "feature-b"}},
+                {"number": 43, "state": "open", "head": {"ref": "feature-c"}},
+            ],
+        }
+    }
+    both_in_flight = threading.Barrier(2, timeout=5)
+
+    class _Concurrent(_GitHub):
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path in (f"/repos/{REPO}/pulls/41", f"/repos/{REPO}/pulls/43"):
+                both_in_flight.wait()  # a serial fetch never gets the second one here
+            return super().__call__(request)
+
+    ctx = _context(_Concurrent(meta, stacks=stacks))
+
+    assert ctx.stack is not None
+    assert [layer.number for layer in ctx.stack.below + ctx.stack.above] == [41, 43]
